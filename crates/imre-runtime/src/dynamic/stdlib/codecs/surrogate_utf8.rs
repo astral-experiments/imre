@@ -53,7 +53,7 @@ impl Context {
             } else if surrogateescape && (0xdc80..=0xdcff).contains(&point) {
                 bytes.push(point as u8);
             } else {
-                let end = if matches!(codec, Codec::ShiftJis) {
+                let end = if matches!(codec, Codec::DoubleByte(_)) {
                     start + 1
                 } else {
                     start

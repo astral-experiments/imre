@@ -1,6 +1,7 @@
 //! Native text codecs shared by the registry and text files.
+mod double_byte;
 pub(crate) mod idna;
-pub(crate) mod shift_jis;
+pub(crate) use double_byte::DoubleByte;
 mod wide;
 pub(super) mod writer;
 
@@ -45,7 +46,7 @@ static CP1252: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(9, "cp1252"))
 static ISO8859_15: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(10, "iso8859_15"));
 static ISO8859_2: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(12, "iso8859_2"));
 
-const CODEC_NAMES: [&str; 17] = [
+const CODEC_NAMES: [&str; 18] = [
     "ascii",
     "iso8859-1",
     "utf-8",
@@ -63,6 +64,7 @@ const CODEC_NAMES: [&str; 17] = [
     "utf-16-be",
     "utf-32-le",
     "utf-32-be",
+    "big5",
 ];
 
 thread_local! {
@@ -561,7 +563,7 @@ pub(crate) enum Codec {
     Ascii,
     CodePage(&'static CodePage),
     Wide(FixedUnicode),
-    ShiftJis,
+    DoubleByte(DoubleByte),
     Idna,
 }
 
@@ -573,7 +575,8 @@ impl Codec {
             Self::Utf8 { signature: false } => 2,
             Self::Utf8 { signature: true } => 3,
             Self::CodePage(page) => page.index,
-            Self::ShiftJis => 7,
+            Self::DoubleByte(DoubleByte::ShiftJis) => 7,
+            Self::DoubleByte(DoubleByte::Big5) => 17,
             Self::Idna => 11,
             Self::Wide(FixedUnicode::Utf16(Utf16Order::Little)) => 13,
             Self::Wide(FixedUnicode::Utf16(Utf16Order::Big)) => 14,
@@ -613,7 +616,10 @@ impl Codec {
             }
             "utf_8_sig" => Ok(Self::Utf8 { signature: true }),
             "shift_jis" | "shiftjis" | "s_jis" | "sjis" | "csshiftjis" | "x_mac_japanese" => {
-                Ok(Self::ShiftJis)
+                Ok(Self::DoubleByte(DoubleByte::ShiftJis))
+            }
+            "big5" | "big5_tw" | "csbig5" | "x_mac_trad_chinese" => {
+                Ok(Self::DoubleByte(DoubleByte::Big5))
             }
             "idna" => Ok(Self::Idna),
             "cp1251" | "1251" | "windows_1251" => Ok(Self::CodePage(&CP1251)),
@@ -694,8 +700,8 @@ impl Codec {
             points.extend(super::interpreter_stdlib::fsdecode(data));
             return Ok(points);
         }
-        if matches!(self, Self::ShiftJis) {
-            shift_jis::decode_filesystem(data, &mut points);
+        if let Self::DoubleByte(format) = self {
+            format.decode_filesystem(data, &mut points);
             return Ok(points);
         }
         for (index, &byte) in data.iter().enumerate() {
@@ -703,7 +709,9 @@ impl Codec {
                 Self::Ascii => byte.is_ascii().then(|| char::from(byte)),
                 Self::Latin1 => Some(char::from(byte)),
                 Self::CodePage(page) => page.decode.decode(byte),
-                Self::Utf8 { .. } | Self::ShiftJis | Self::Idna | Self::Wide(_) => unreachable!(),
+                Self::Utf8 { .. } | Self::DoubleByte(_) | Self::Idna | Self::Wide(_) => {
+                    unreachable!()
+                }
             };
             points.push(match ch {
                 Some(ch) => u32::from(ch),
@@ -764,8 +772,8 @@ impl Codec {
                 Ok(text)
             }
             Self::Idna => idna::decode(data, errors),
-            Self::ShiftJis => {
-                shift_jis::decode_chunk(&mut text, data, errors, true)?;
+            Self::DoubleByte(format) => {
+                format.decode_chunk(&mut text, data, errors, true)?;
                 Ok(text)
             }
             Self::Utf8 { signature } => {
@@ -788,8 +796,8 @@ impl Codec {
 
     /// Encodings other than UTF-8 write one or two bytes for a representable scalar.
     pub(crate) fn encode_unit(self, ch: char) -> Option<([u8; 2], usize)> {
-        if matches!(self, Self::ShiftJis) {
-            return shift_jis::encode_char(ch);
+        if let Self::DoubleByte(format) = self {
+            return format.encode_char(ch);
         }
         self.encode_byte(ch).map(|byte| ([byte, 0], 1))
     }
@@ -799,7 +807,7 @@ impl Codec {
             Self::Ascii => ch.is_ascii().then_some(ch as u8),
             Self::Latin1 => u8::try_from(u32::from(ch)).ok(),
             Self::CodePage(page) => page.encode.get(&ch).copied(),
-            Self::Utf8 { .. } | Self::ShiftJis | Self::Idna | Self::Wide(_) => {
+            Self::Utf8 { .. } | Self::DoubleByte(_) | Self::Idna | Self::Wide(_) => {
                 unreachable!("expected a single-byte encoding")
             }
         }
@@ -827,7 +835,7 @@ impl Codec {
             Self::Ascii => ("ascii", "ordinal not in range(128)"),
             Self::Latin1 => ("latin-1", "ordinal not in range(256)"),
             Self::CodePage(_) => ("charmap", "character maps to <undefined>"),
-            Self::ShiftJis => ("shift_jis", "illegal multibyte sequence"),
+            Self::DoubleByte(_) => (self.name(), "illegal multibyte sequence"),
             Self::Idna => unreachable!("IDNA encodes whole labels"),
             Self::Utf8 { .. } => unreachable!("UTF-8 encodes every Unicode scalar"),
         }
@@ -877,7 +885,7 @@ impl Codec {
                 }
                 "strict" | "surrogatepass" | "surrogateescape" => {
                     let mut end = start;
-                    if !matches!(self, Self::ShiftJis) {
+                    if !matches!(self, Self::DoubleByte(_)) {
                         while let Some((i, _)) =
                             chars.next_if(|(_, c)| self.encode_byte(*c).is_none())
                         {

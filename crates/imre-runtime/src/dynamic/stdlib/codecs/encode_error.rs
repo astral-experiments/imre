@@ -1,5 +1,5 @@
 //! Resume a boxed native writer's encoder after a registered Python error handler.
-use super::{Codec, Context, Error, Id, NONE, Result, Value, handler_builtin, type_error};
+use super::{Codec, Context, Id, NONE, Result, Value, handler_builtin, type_error};
 use crate::dynamic::value::DecodeState;
 
 mod multibyte;
@@ -14,9 +14,10 @@ pub(super) fn registered(ctx: &Context, codec: Codec, name: &str) -> Option<Hand
     // The C encoders implement these named policies inline, bypassing the registry.
     if !matches!(codec, Codec::Wide(_))
         && (matches!(name, "replace" | "ignore")
-            || name == "xmlcharrefreplace" && !matches!(codec, Codec::ShiftJis)
+            || name == "xmlcharrefreplace" && !matches!(codec, Codec::DoubleByte(_))
             || name == "strict" && !matches!(codec, Codec::Utf8 { .. })
-            || name == "backslashreplace" && !matches!(codec, Codec::CodePage(_) | Codec::ShiftJis)
+            || name == "backslashreplace"
+                && !matches!(codec, Codec::CodePage(_) | Codec::DoubleByte(_))
             || name == "surrogatepass" && matches!(codec, Codec::Utf8 { .. }))
     {
         return None;
@@ -93,7 +94,7 @@ pub(super) fn encode(
     };
     let mark = ctx.heap.temporary_mark();
     ctx.heap.reserve_temporaries(3)?;
-    if !matches!(codec, Codec::ShiftJis) {
+    if !matches!(codec, Codec::DoubleByte(_)) {
         ctx.heap.keep(callback);
     }
     // Multibyte encoders retain only the reusable exception between errors.
@@ -107,14 +108,17 @@ pub(super) fn encode(
                 continue;
             }
             let mut end = pos + 1;
-            while !matches!(codec, Codec::ShiftJis | Codec::Wide(_))
+            while !matches!(codec, Codec::DoubleByte(_) | Codec::Wide(_))
                 && end < source.len()
                 && !point(codec, source[end], None)?
             {
                 end += 1;
             }
             if name == "surrogateescape"
-                && !matches!(codec, Codec::CodePage(_) | Codec::ShiftJis | Codec::Wide(_))
+                && !matches!(
+                    codec,
+                    Codec::CodePage(_) | Codec::DoubleByte(_) | Codec::Wide(_)
+                )
             {
                 while pos < end && (0xdc80..=0xdcff).contains(&source[pos]) {
                     append(&mut output, &[source[pos] as u8])?;
@@ -152,7 +156,7 @@ pub(super) fn encode(
                 exception = Some(exc);
                 exc
             };
-            let response = if matches!(codec, Codec::ShiftJis) {
+            let response = if matches!(codec, Codec::DoubleByte(_)) {
                 // Multibyte codecs look up the name separately for each error.
                 match registered(ctx, codec, name) {
                     Some(Handler::Builtin(policy)) => {
@@ -171,18 +175,19 @@ pub(super) fn encode(
                 ctx.call(callback, vec![exc], Vec::new())?
             };
             ctx.heap.keep(response);
-            let invalid =
-                || type_error("encoding error handler must return (str/bytes, int) tuple");
+            let multibyte = matches!(codec, Codec::DoubleByte(_));
+            let invalid = || {
+                if multibyte {
+                    type_error("encoding error handler must return (str, int) tuple")
+                } else {
+                    type_error("encoding error handler must return (str/bytes, int) tuple")
+                }
+            };
             let items = ctx.tuple_items(response)?.ok_or_else(invalid)?;
             let [replacement, resume] = items.as_slice() else {
                 return Err(invalid());
             };
-            let resume = ctx.index_integer(*resume)?.to_i64().ok_or_else(|| {
-                Error::new(
-                    "OverflowError",
-                    "Python int too large to convert to C ssize_t",
-                )
-            })?;
+            let index = super::callback_index(ctx, *resume, multibyte, invalid)?;
             let value = ctx.scalar_value(*replacement);
             if !matches!(
                 ctx.heap.get(value),
@@ -191,24 +196,15 @@ pub(super) fn encode(
                 return Err(invalid());
             }
             // Multibyte codecs strictly encode a text replacement before resuming the input.
-            let encoded =
-                if matches!(codec, Codec::ShiftJis) && ctx.string_storage(*replacement).is_some() {
-                    Some(ctx.encode_legacy_codepoints(*replacement, codec, false)?)
-                } else {
-                    None
-                };
-            // Encoding resumes in the original string even when the handler rebinds exc.object.
-            let resume = if resume < 0 {
-                source.len() as i64 + resume
+            let encoded = if matches!(codec, Codec::DoubleByte(_))
+                && ctx.string_storage(*replacement).is_some()
+            {
+                Some(ctx.encode_legacy_codepoints(*replacement, codec, false)?)
             } else {
-                resume
+                None
             };
-            if !(0..=source.len() as i64).contains(&resume) {
-                return Err(Error::new(
-                    "IndexError",
-                    format!("position {resume} from error handler out of bounds"),
-                ));
-            }
+            // Encoding resumes in the original string even when the handler rebinds exc.object.
+            let resume = super::callback_position(index, source.len())?;
             if let Some(bytes) = encoded {
                 append(&mut output, &bytes)?;
             } else if let Value::Bytes(bytes) = ctx.heap.get(value) {
@@ -231,7 +227,7 @@ pub(super) fn encode(
             }
             ctx.heap.release_temporaries_since(iteration_mark);
             ctx.heap.keep(exc);
-            pos = resume as usize;
+            pos = resume;
         }
         Ok(output)
     })();

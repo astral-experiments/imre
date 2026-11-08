@@ -25,6 +25,41 @@ def check_text_encoding_flag():
         raise AssertionError("deleted the inherited flag")
 
 
+def check_big5():
+    import io
+    entry = codecs.lookup("csbig5")
+    assert entry.name == "big5"
+    wire = bytes.fromhex("a2cc a2ce a1fe a240")
+    text = "十卅／＼"
+    assert entry.decode(wire) == (text, 8)
+    assert entry.encode(text) == (bytes.fromhex("a451 a4ca a241 a242"), 4)
+    reader = entry.streamreader(io.BytesIO(bytes.fromhex("a578 a55f 0a")))
+    assert list(reader) == ["台北\n"]
+    decoder = entry.incrementaldecoder()
+    assert decoder.decode(b"\x80") == ""
+    try:
+        decoder.decode(b"", True)
+    except UnicodeDecodeError as error:
+        assert (error.start, error.end, error.reason) == (0, 1, "incomplete multibyte sequence")
+    else:
+        raise AssertionError("accepted a truncated Big5 lead")
+    assert decoder.getstate() == (b"\x80", 0)
+    decoder.errors = "replace"
+    assert decoder.decode(b" ", True) == "� "
+
+    def bad_position(error):
+        return "?", 2**100
+
+    codecs.register_error("big5.badposition", bad_position)
+    for function, value in ((entry.encode, "😀"), (entry.decode, b"\xff")):
+        try:
+            function(value, "big5.badposition")
+        except IndexError as error:
+            assert str(error) == "position -1 from error handler out of bounds"
+        else:
+            raise AssertionError("accepted an overflowing multibyte callback position")
+
+
 def check_shift_jis():
     entry = codecs.lookup("sjis")
     assert entry.name == "shift_jis"
@@ -388,6 +423,7 @@ def current():
     fixed_endian_streams()
     utf16_extended_decoder()
     check_shift_jis()
+    check_big5()
     check_raw_unicode_escape()
     check_boms()
     decoder = codecs.IncrementalDecoder(errors="replace")

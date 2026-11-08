@@ -731,6 +731,38 @@ fn decode_chunk(
     let errors = ctx.scalar_value(decoder.errors);
     // Registered error handlers can reenter the stream; no reader borrow spans decoding.
     let decoded = match codec {
+        StreamCodec::Registered(Codec::DoubleByte(format)) => {
+            let previous = std::mem::take(&mut input.borrow_mut().tail);
+            let mut truncated = false;
+            let result =
+                codecs::decode_double_byte_chunk(ctx, format, raw, errors, end, &mut truncated);
+            if truncated && !previous.is_empty() {
+                input.borrow_mut().tail = previous;
+            }
+            let (text, consumed) = result?;
+            let data = ctx.bytes_like(raw)?;
+            let mut reader = input.borrow_mut();
+            let suffix = &data[consumed..];
+            if !suffix.is_empty() {
+                // Reentrant reads may have left new pending input during a callback.
+                if reader.tail.len() + suffix.len() > 8 {
+                    let issue = DecodeIssue {
+                        encoding: Codec::DoubleByte(format).name(),
+                        start: 0,
+                        end: data.len(),
+                        reason: "pending buffer overflow",
+                    };
+                    let error = issue.error(data);
+                    return Err(ctx.decode_error(error));
+                }
+                reader
+                    .tail
+                    .try_reserve(suffix.len())
+                    .map_err(|_| crate::Error::allocation())?;
+                reader.tail.extend_from_slice(suffix);
+            }
+            text
+        }
         StreamCodec::Registered(c) => codecs::decode_bytes(ctx, c, raw, Some(errors))?,
         StreamCodec::Wide { format, bom } => {
             let errors = ctx.str_value(errors)?.to_owned();
