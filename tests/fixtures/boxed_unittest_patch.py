@@ -25,6 +25,10 @@ with patch.object(Owner, 'value', None):
     assert state == {'mode': 'original'} and Owner.value is None
 assert Owner.value is original_exit
 
+with patch('__main__:Owner.value', None):
+    assert Owner.value is None
+assert Owner.value is original_exit
+
 
 owner = Owner()
 first = owner

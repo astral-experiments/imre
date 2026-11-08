@@ -4,7 +4,6 @@ import builtins
 import sys
 from contextlib import ContextDecorator, ExitStack
 from functools import wraps
-from importlib import import_module
 from types import ModuleType
 
 
@@ -46,21 +45,8 @@ _deleted = sentinel.DELETED
 
 
 def _patch_owner(name):
-    # Import the longest module prefix, then look up the remaining attributes.
-    parts = name.split('.')
-    prefix = parts.pop(0)
-    owner = import_module(prefix)
-    while parts:
-        candidate = prefix + '.' + parts[0]
-        try:
-            owner = import_module(candidate)
-        except ImportError:
-            break
-        prefix = candidate
-        parts.pop(0)
-    for part in parts:
-        owner = getattr(owner, part)
-    return owner
+    from pkgutil import resolve_name
+    return resolve_name(name)
 
 
 def _get_target(target):
@@ -82,19 +68,33 @@ def _enter_patchings(stack, patchings, kwargs):
     return extra
 
 
+def _decorate_patch_class(patcher, cls, *, inspect_all=False):
+    for name in dir(cls):
+        # patch.dict fetches every member before applying the test prefix.
+        if not inspect_all and not name.startswith(patch.TEST_PREFIX):
+            continue
+        method = getattr(cls, name)
+        if inspect_all and not name.startswith(patch.TEST_PREFIX):
+            continue
+        # Some boxed builtins are callable without exposing __call__.
+        if hasattr(method, '__call__') or isinstance(method, type(len)):
+            setattr(cls, name, patcher.copy()(method))
+    return cls
+
+
 class _patch:
     attribute_name = None
     _active_patches = _active_patches
 
     def __init__(self, getter, attribute, new, create, *, spec=None, spec_set=None,
-                 autospec=None, new_callable=None, **kwargs):
+                 autospec=None, new_callable=None, unsafe=False, **kwargs):
         if new_callable is not None:
             if new is not DEFAULT:
                 raise ValueError("Cannot use 'new' and 'new_callable' together")
             if autospec is not None:
                 raise ValueError("Cannot use 'autospec' and 'new_callable' together")
-        if 'unsafe' in kwargs:
-            raise TypeError("unsupported patch option: 'unsafe'")
+        if not unsafe:
+            _check_spec_arg_typos(kwargs)
         self.getter = getter
         self.attribute = attribute
         self.new = new
@@ -260,13 +260,7 @@ class _patch:
 
     def __call__(self, func):
         if isinstance(func, type):
-            for name in dir(func):
-                if name.startswith(patch.TEST_PREFIX):
-                    method = getattr(func, name)
-                    # Some boxed builtins are callable without exposing __call__.
-                    if hasattr(method, '__call__') or isinstance(method, type(len)):
-                        setattr(func, name, self.copy()(method))
-            return func
+            return _decorate_patch_class(self, func)
         if hasattr(func, 'patchings'):
             func.patchings.append(self)
             return func
@@ -289,18 +283,18 @@ class _patch:
 
 
 def _patch_attribute(self, target, new=DEFAULT, spec=None, create=False, spec_set=None,
-                     autospec=None, new_callable=None, **kwargs):
+                     autospec=None, new_callable=None, *, unsafe=False, **kwargs):
     getter, attribute = _get_target(target)
     return _patch(getter, attribute, new, create, spec=spec, spec_set=spec_set,
-                  autospec=autospec, new_callable=new_callable, **kwargs)
+                  autospec=autospec, new_callable=new_callable, unsafe=unsafe, **kwargs)
 
 
 def _patch_object(target, attribute, new=DEFAULT, spec=None, create=False, spec_set=None,
-                  autospec=None, new_callable=None, **kwargs):
+                  autospec=None, new_callable=None, *, unsafe=False, **kwargs):
     if type(target) is str:
         raise TypeError(f"{target!r} must be the actual object to be patched, not a str")
     return _patch(lambda: target, attribute, new, create, spec=spec, spec_set=spec_set,
-                  autospec=autospec, new_callable=new_callable, **kwargs)
+                  autospec=autospec, new_callable=new_callable, unsafe=unsafe, **kwargs)
 
 
 def _patch_multiple(target, spec=None, create=False, spec_set=None,
@@ -328,6 +322,21 @@ class _BoxedDictionaryPatch(_DictionaryPatch, ContextDecorator):
         updates = dict(values)
         updates.update(kwargs)
         super().__init__(in_dict, updates, clear)
+
+    def copy(self):
+        return _BoxedDictionaryPatch(self.in_dict, self.values, self.clear)
+
+    def __call__(self, func):
+        if isinstance(func, type):
+            return _decorate_patch_class(self, func, inspect_all=True)
+        from inspect import iscoroutinefunction
+        if iscoroutinefunction(func):
+            @wraps(func)
+            async def patched(*args, **kwargs):
+                with self:
+                    return await func(*args, **kwargs)
+            return patched
+        return ContextDecorator.__call__(self, func)
 
     def _enter(self):
         if isinstance(self.in_dict, str):
