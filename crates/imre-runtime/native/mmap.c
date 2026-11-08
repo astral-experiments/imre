@@ -1,4 +1,3 @@
-#ifdef __linux__
 #define _GNU_SOURCE
 #include <stdbool.h>
 #include <stddef.h>
@@ -73,4 +72,3 @@ ptrdiff_t imre_mmap_find(const unsigned char *data, size_t len, const unsigned c
     }
     return last ? last - data : -1;
 }
-#endif

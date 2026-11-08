@@ -159,7 +159,10 @@ fn main() {
         // Darwin exposes this action modifier through its termios header.
         c.push_str("#include <termios.h>\nint imre_platform_tcsasoft(void) { return TCSASOFT; }\n");
     }
+    let mut native = cc::Build::new();
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        native.file("native/mmap.c");
+        println!("cargo:rerun-if-changed=native/mmap.c");
         println!("cargo:rerun-if-changed=native/confstr-names.txt");
         println!("cargo:rerun-if-changed=native/sysconf-names.txt");
         println!("cargo:rerun-if-changed=native/pathconf-names.txt");
@@ -173,13 +176,11 @@ fn main() {
     std::fs::write(&path, c).unwrap();
     println!("cargo:rerun-if-changed=native/ssl_capabilities.c");
     println!("cargo:rerun-if-changed=native/locale_decode.c");
-    println!("cargo:rerun-if-changed=native/mmap.c");
     println!("cargo:rerun-if-changed=native/faulthandler.c");
-    cc::Build::new()
+    native
         .file("native/faulthandler.c")
         .file("native/ssl_capabilities.c")
         .file(path)
         .file("native/locale_decode.c")
-        .file("native/mmap.c")
         .compile("imre_errno_headers");
 }
