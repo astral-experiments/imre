@@ -1,6 +1,8 @@
 //! Hosts ty's real semantic analysis and Ruff's cached parser over one source snapshot.
 
 #[cfg(test)]
+mod closed_program_tests;
+#[cfg(test)]
 mod incremental_tests;
 mod inferred_shapes;
 mod tuple_displays;
@@ -10,7 +12,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use ruff_db::diagnostic::{Diagnostic, DisplayDiagnosticConfig, Severity};
+use ruff_db::diagnostic::{Diagnostic, DiagnosticId, DisplayDiagnosticConfig, Severity};
 use ruff_db::files::{File, Files, system_path_to_file};
 use ruff_db::parsed::ParsedModuleRef;
 use ruff_db::system::{InMemorySystem, System, SystemPathBuf};
@@ -68,6 +70,153 @@ pub(crate) struct Session {
     pub(crate) explicit_check: bool,
 }
 
+/// Source ownership used by the same diagnostics for checked graphs and object registrations.
+pub(crate) trait ClosedSource {
+    fn project_path(&self) -> Option<&Path>;
+    fn supplies_declarations(&self) -> bool {
+        true
+    }
+}
+
+impl ClosedSource for crate::modules::SourceModule {
+    fn project_path(&self) -> Option<&Path> {
+        self.is_program_source().then_some(&self.path)
+    }
+    fn supplies_declarations(&self) -> bool {
+        !self.bundled && !self.is_namespace()
+    }
+}
+
+impl ClosedSource for (PathBuf, bool) {
+    fn project_path(&self) -> Option<&Path> {
+        self.1.then_some(&self.0)
+    }
+}
+
+/// Check the winning runtime registrations together so that imports see the same definitions.
+pub(crate) fn check_registered_project<'a>(
+    root: &Path,
+    extension_roots: &[PathBuf],
+    sources: impl IntoIterator<
+        Item = crate::dynamic::RegisteredSource<'a>,
+        IntoIter: ExactSizeIterator + Clone,
+    >,
+    inputs: &crate::SourceInputs,
+    checked: Option<&crate::modules::SourceGraph>,
+) -> Result<(), String> {
+    let sources = sources.into_iter();
+    if sources.len() == 0 {
+        return Ok(());
+    }
+    if let Some(graph) = checked {
+        // Native lowering or the source check has validated these declarations.
+        // Reuse this result only for the same bindings, bytes, and program roles.
+        let mut remaining: HashMap<_, _> = graph
+            .modules
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| {
+                !m.bundled
+                    && !m.is_namespace()
+                    && !m.path.extension().is_some_and(|ext| ext == "pyi")
+            })
+            .map(|(id, module)| (module.name.as_str(), id))
+            .collect();
+        let identities: HashMap<_, _> = inputs
+            .files
+            .iter()
+            .map(|(path, identity, digest)| {
+                // Only the entry spelling can be relative; imported paths are already absolute.
+                let path = if path.is_absolute() {
+                    std::borrow::Cow::Borrowed(path.as_path())
+                } else {
+                    std::borrow::Cow::Owned(
+                        std::path::absolute(path).map_err(|error| error.to_string())?,
+                    )
+                };
+                Ok((path, (identity, digest)))
+            })
+            .collect::<Result<_, String>>()?;
+        let admitted = sources.clone().all(|winner| {
+            let crate::dynamic::RegisteredSource { name, path, source, is_program } = winner;
+            let key = if name == "__main__" { &graph.modules[graph.entry].name } else { name };
+            let Some(id) = remaining.remove(key) else { return false };
+            let module = &graph.modules[id];
+            if is_program != module.is_program_source() {
+                return false;
+            }
+            if name != "__main__" {
+                // A checked bundled declaration can intentionally mask its source.
+                // It cannot supply the type of a different, first-party registration.
+                let session = &graph.session;
+                let file = session.files[id];
+                let model = SemanticModel::new(&session.db, session.db.program_file(file));
+                if model
+                    .resolve_module(Some(name), 0)
+                    .and_then(|m| m.file(&session.db))
+                    != Some(file)
+                {
+                    return false;
+                }
+            }
+            if path == Path::new("<string>") {
+                return graph.virtual_command && module.source == source;
+            }
+            graph
+                .inputs
+                .files
+                .get(id)
+                .is_some_and(|(_, identity, digest)| {
+                    identities.get(path) == Some(&(identity, digest))
+                        && (module.path == path || graph.module_filename(id) == path)
+                        // The graph stores normalized text. Usually we can compare the
+                        // actual bytes directly; physical CR/CRLF inputs retain their raw digest.
+                        && (module.source == source || source.contains('\r') && blake3::hash(source.as_bytes()).to_hex().as_str() == digest)
+                })
+        });
+        if admitted && remaining.is_empty() {
+            return Ok(());
+        }
+    }
+
+    let mut session =
+        Session::with_storage(root, extension_roots, salsa::Storage::default(), true)?;
+    let mut paths = Vec::with_capacity(sources.len());
+    // Static SDK declarations can type an import even though there is no Python
+    // body to register. An actual same-name registration supplies its own types.
+    if let Some(graph) = checked {
+        let replaced: std::collections::HashSet<_> =
+            sources.clone().map(|winner| winner.name).collect();
+        for module in &graph.modules {
+            if !module.bundled
+                && module.path.extension().is_some_and(|ext| ext == "pyi")
+                && !replaced.contains(module.name.as_str())
+            {
+                session.add(&module.path, &module.source, crate::SourceKind::File)?;
+                paths.push((module.path.clone(), false));
+            }
+        }
+    }
+    for winner in sources {
+        let crate::dynamic::RegisteredSource {
+            path,
+            source,
+            is_program,
+            ..
+        } = winner;
+        let (path, kind) = if path == Path::new("<string>") {
+            (root.join("<string>.py"), crate::SourceKind::Command)
+        } else {
+            (path.to_owned(), crate::SourceKind::File)
+        };
+        let source = crate::normalize_source(source, kind)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        session.add(&path, &source, kind)?;
+        paths.push((path, is_program));
+    }
+    session.check_closed_program(&paths, None, &[], None)
+}
+
 impl Session {
     pub(crate) fn has_extension_roots(&self) -> bool {
         !self.extension_roots.is_empty()
@@ -86,7 +235,7 @@ impl Session {
                 std::panic::resume_unwind(Box::new(LayoutHintLimit));
             }
         })));
-        Self::with_storage(root, extension_roots, storage)
+        Self::with_storage(root, extension_roots, storage, false)
     }
 
     /// Initialize the project inputs and rule set over independent Salsa storage.
@@ -94,6 +243,7 @@ impl Session {
         root: &Path,
         extension_roots: &[PathBuf],
         storage: salsa::Storage<Database>,
+        registered_project: bool,
     ) -> Result<Self, String> {
         let root = root.to_str().ok_or("module paths must be valid UTF-8")?;
         let system = InMemorySystem::default();
@@ -104,38 +254,68 @@ impl Session {
         // The loader reserves this namespace for sealed compiler intrinsics.
         // Give ty its exact public signature without loading the dynamic CPython
         // compatibility implementation or weakening unresolved-import checks.
-        let intrinsic = SystemPathBuf::from(root).join("imre");
-        for (name, stub) in [
+        let project = SystemPathBuf::from(root);
+        let intrinsic = project.join("imre");
+        let stdlib_stubs = intrinsic.join(".stdlib-stubs");
+        // Resolved graphs pair compiler-bundled bodies with their declarations.
+        // A manifest of winning project sources uses those declarations as fallbacks.
+        let provider_stubs = if registered_project {
+            &stdlib_stubs
+        } else {
+            &project
+        };
+        for (directory, name, stub) in [
             (
+                &project,
                 "imre/_zipimport",
                 "from zipfile import ZipFile as _ZipFile\ndef open_index(path: str) -> _ZipFile: ...\n",
             ),
             (
+                &project,
                 "_imre_mock",
                 "def mark_call_list(values: list, /) -> bool: ...\ndef is_call_list(values: list, /) -> bool: ...\n",
             ),
             (
+                &project,
                 "_imre_doctest",
                 "def capture_start() -> None: ...\ndef capture_take() -> str: ...\ndef display(value: object, /) -> None: ...\ndef ascii_output(text: str, /) -> str: ...\ndef exception_name(exc: BaseException, /) -> str: ...\ndef execute(test: object, debug: bool, /) -> None: ...\n",
             ),
-            ("hashlib", include_str!("analysis/hashlib.pyi")),
+            (
+                provider_stubs,
+                "hashlib",
+                include_str!("analysis/hashlib.pyi"),
+            ),
             // The pinned typeshed stub admits integer shell flags and the check_output
             // keywords whose conflicts are reported at runtime (see licenses/typeshed.txt).
-            ("subprocess", include_str!("stubs/subprocess.pyi")),
             (
+                provider_stubs,
+                "subprocess",
+                include_str!("stubs/subprocess.pyi"),
+            ),
+            (
+                provider_stubs,
                 "tomli",
                 "from tomllib import load as load, loads as loads\n",
             ),
-            ("unittest/mock", include_str!("../stdlib/unittest/mock.pyi")),
-            ("unidiff", include_str!("analysis/unidiff.pyi")),
             (
+                provider_stubs,
+                "unittest/mock",
+                include_str!("../stdlib/unittest/mock.pyi"),
+            ),
+            (
+                provider_stubs,
+                "unidiff",
+                include_str!("analysis/unidiff.pyi"),
+            ),
+            (
+                provider_stubs,
                 "tomli_w",
                 "from typing import Any, BinaryIO\ndef dumps(obj: dict[str, Any]) -> str: ...\ndef dump(obj: dict[str, Any], fp: BinaryIO) -> None: ...\n",
             ),
         ] {
             system
                 .fs()
-                .write_file_all(SystemPathBuf::from(root).join(format!("{name}.pyi")), stub)
+                .write_file_all(directory.join(format!("{name}.pyi")), stub)
                 .map_err(|error| error.to_string())?;
         }
         system
@@ -167,7 +347,6 @@ impl Session {
             )
             .map_err(|error| error.to_string())?;
         let vendored = ty_vendored::file_system().clone();
-        let stdlib_stubs = intrinsic.join(".stdlib-stubs");
         // Based on ty_vendored 0.0.15 (licenses/typeshed.txt). Retain the cache
         // helpers' object parameters when importing updated typeshed declarations.
         system
@@ -184,7 +363,7 @@ impl Session {
             .map_err(|e| e.to_string())?;
         system
             .fs()
-            .write_file_all(SystemPathBuf::from(root).join("http/__init__.pyi"), http)
+            .write_file_all(provider_stubs.join("http/__init__.pyi"), http)
             .map_err(|e| e.to_string())?;
         // Refresh from the locked ty_vendored's vendor/typeshed/stdlib/inspect.pyi,
         // retaining the private _sentinel: object declaration for inspect.getattr_static.
@@ -200,7 +379,7 @@ impl Session {
         system
             .fs()
             .write_file_all(
-                SystemPathBuf::from(root).join("shutil.pyi"),
+                provider_stubs.join("shutil.pyi"),
                 include_str!("stubs/shutil.pyi"),
             )
             .map_err(|error| error.to_string())?;
@@ -377,8 +556,12 @@ impl Session {
     /// Start diagnostics with independent rules and Salsa storage. Every file has already
     /// passed the loader's preflight in this snapshot.
     pub(crate) fn diagnostic_copy(&self) -> Result<Self, String> {
-        let mut copy =
-            Self::with_storage(&self.root, &self.extension_roots, salsa::Storage::default())?;
+        let mut copy = Self::with_storage(
+            &self.root,
+            &self.extension_roots,
+            salsa::Storage::default(),
+            false,
+        )?;
         copy.explicit_check = self.explicit_check;
         for &file in &self.files {
             let path = file
@@ -823,10 +1006,15 @@ impl Session {
                 provider,
                 checked_modules.is_some_and(|modules| !modules[entry].bundled),
                 self.explicit_check,
+                None,
             );
             let errors = file_errors(&self.db, checked);
             if !errors.is_empty() {
-                return Err(errors.join("\n"));
+                return Err(errors
+                    .iter()
+                    .map(|error| error.rendered.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n"));
             }
         }
         Ok(())
@@ -880,6 +1068,104 @@ impl Session {
         self.errors(skipped, overloads, FileChecks::Full, None, None)
     }
 
+    /// Check calls to explicit source parameters before choosing a representation.
+    /// Keep an existing native diagnostic when it describes the same argument.
+    pub(crate) fn check_closed_program(
+        &mut self,
+        modules: &[impl ClosedSource],
+        skipped: Option<&[Vec<TextRange>]>,
+        overloads: &[Vec<CheckedDiagnostic>],
+        native: Option<&crate::frontend::phase::Diagnostic>,
+    ) -> Result<(), String> {
+        // Native lowering and the ordinary fallback checker own the rest of the type
+        // contract. Check the same declared calls even when lowering stops at a
+        // representation choice, or registration selects a different source graph.
+        let mut rules = RuleSelection::default();
+        rules.enable(
+            default_lint_registry()
+                .get("invalid-argument-type")
+                .expect("registered ty lint"),
+            Severity::Error,
+            ty_python_semantic::lint::LintSource::Default,
+        );
+        DiagnosticRules::get(&self.db)
+            .set_rules(&mut self.db)
+            .to(Arc::new(rules));
+        self.closed_program_errors(modules, skipped, overloads, native)
+    }
+
+    fn closed_program_errors(
+        &self,
+        modules: &[impl ClosedSource],
+        skipped: Option<&[Vec<TextRange>]>,
+        overloads: &[Vec<CheckedDiagnostic>],
+        native: Option<&crate::frontend::phase::Diagnostic>,
+    ) -> Result<(), String> {
+        assert_eq!(modules.len(), self.files.len());
+        if !modules.iter().any(|module| module.project_path().is_some()) {
+            return Ok(());
+        }
+        let mut parameters = Vec::new();
+        for (module, &file) in modules.iter().zip(&self.files) {
+            if !module.supplies_declarations() {
+                continue;
+            }
+            let source = self.db.program_file(file);
+            let index = ty_python_core::semantic_index(&self.db, source);
+            let parsed = ruff_db::parsed::parsed_module(&self.db, source.python_file(&self.db))
+                .load(&self.db);
+            for scope in index.scope_ids() {
+                if let ty_python_core::scope::NodeWithScopeKind::Function(function) =
+                    scope.node(&self.db)
+                {
+                    parameters.extend(
+                        function
+                            .node(&parsed)
+                            .parameters
+                            .iter()
+                            .filter(|p| p.annotation().is_some())
+                            .map(|p| (file, p.range())),
+                    );
+                }
+            }
+        }
+        if parameters.is_empty() {
+            return Ok(());
+        }
+        let declarations = DeclaredParameters::new(&self.db, parameters);
+        let mut errors = Vec::new();
+        for (index, (module, &file)) in modules.iter().zip(&self.files).enumerate() {
+            let Some(path) = module.project_path() else {
+                continue;
+            };
+            if path.extension().is_some_and(|ext| ext == "pyi") {
+                continue;
+            }
+            let checked = CheckedFile::new(
+                &self.db,
+                file,
+                skipped.map_or(&[][..], |ranges| ranges[index].as_slice()),
+                overloads.get(index).map_or(&[][..], Vec::as_slice),
+                FileChecks::DeclaredArguments,
+                None,
+                true,
+                self.explicit_check,
+                Some(declarations),
+            );
+            for error in file_errors(&self.db, checked) {
+                let original = error
+                    .range
+                    .and_then(|range| native?.matching_contract(path, range, error.rule.as_str()));
+                errors.push(original.map_or_else(|| error.rendered.clone(), ToString::to_string));
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("\n"))
+        }
+    }
+
     fn errors(
         &self,
         skipped: Option<&[Vec<TextRange>]>,
@@ -902,10 +1188,11 @@ impl Session {
                     runtime_provider,
                     checked_modules.is_some_and(|modules| !modules[index].bundled),
                     self.explicit_check,
+                    None,
                 );
                 file_errors(&self.db, checked)
             })
-            .map(String::as_str)
+            .map(|error| error.rendered.as_str())
             .collect();
         if errors.is_empty() {
             Ok(())
@@ -930,11 +1217,20 @@ struct CheckedFile<'db> {
     first_party: bool,
     #[returns(copy)]
     explicit_check: bool,
+    #[returns(copy)]
+    declarations: Option<DeclaredParameters<'db>>,
+}
+
+/// Explicit parameters from the selected Python sources and SDK declarations.
+#[salsa::interned]
+struct DeclaredParameters<'db> {
+    ranges: Vec<(File, TextRange)>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum FileChecks {
     Full,
+    DeclaredArguments,
     FallbackReturns,
     FunctionBodyCalls,
     NamedFunctionCalls,
@@ -1116,13 +1412,21 @@ fn fallback_data_module(parsed: &ParsedModuleRef) -> bool {
             .any(|token| token.kind() == TokenKind::Comment)
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct CheckedError {
+    rule: DiagnosticId,
+    range: Option<TextRange>,
+    rendered: String,
+}
+
 /// A per-file result depends on the ty queries it actually read, including any other source
 /// consulted to render a diagnostic. Every revision still requests the result for every file.
 #[salsa::tracked(returns(ref))]
-fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
+fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedError> {
     let file = checked.file(db);
     let checks = checked.checks(db);
-    if checks != FileChecks::Full {
+    let full = matches!(checks, FileChecks::Full | FileChecks::DeclaredArguments);
+    if !full {
         let parsed =
             ruff_db::parsed::parsed_module(db, db.program_file(file).python_file(db)).load(db);
         if fallback_data_module(&parsed) {
@@ -1141,7 +1445,10 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
         .iter()
         .filter(|diagnostic| {
             diagnostic.severity() >= Severity::Error
-                && (checks == FileChecks::Full
+                && checked
+                    .declarations(db)
+                    .is_none_or(|sources| declared_parameter(diagnostic, sources.ranges(db)))
+                && (full
                     || diagnostic.id().as_str() != "invalid-assignment"
                     || checked.first_party(db)
                         && diagnostic
@@ -1153,7 +1460,7 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                     .and_then(|span| span.range())
                     .is_some_and(|range| {
                         skipped.iter().any(|scope| scope.contains_range(range))
-                            || (checks != FileChecks::Full
+                            || (!full
                                 && CALL_ARGUMENT_RULES.contains(&diagnostic.id().as_str())
                                 && runtime_argument(
                                     db,
@@ -1175,13 +1482,19 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<String> {
                                 .any(|scope| scope.covers(diagnostic.id().as_str(), range))
                     })
         })
-        .map(|diagnostic| {
-            diagnostic
+        .map(|diagnostic| CheckedError {
+            rule: diagnostic.id(),
+            range: diagnostic.primary_span().and_then(|span| {
+                (span.file() == &ruff_db::diagnostic::UnifiedFile::Ty(file))
+                    .then(|| span.range())
+                    .flatten()
+            }),
+            rendered: diagnostic
                 .display(
                     &(db as &dyn ruff_db::Db),
                     &DisplayDiagnosticConfig::new("imre"),
                 )
-                .to_string()
+                .to_string(),
         })
         .collect()
 }
@@ -1264,6 +1577,18 @@ fn scalar_initializer(db: &dyn Db, file: File, range: TextRange) -> bool {
         .into_iter().any(|class| declared == scalar(class))
         // ty widens a float annotation to float | int.
         || declared == UnionType::from_two_elements(db, &env, scalar(KnownClass::Float), scalar(KnownClass::Int))
+}
+
+/// ty identifies the matched source parameter in an argument diagnostic. Use that
+/// resolution for plain functions, constructors and methods, including inherited
+/// and imported declarations. A runtime builtin has no project or SDK parameter.
+fn declared_parameter(diagnostic: &Diagnostic, parameters: &[(File, TextRange)]) -> bool {
+    diagnostic.sub_diagnostics().iter().flat_map(|sub| sub.annotations()).any(|label| {
+        let span = label.get_span();
+        !label.is_primary() && matches!((span.file(), span.range()),
+            (ruff_db::diagnostic::UnifiedFile::Ty(owner), Some(range))
+            if parameters.iter().any(|(file, parameter)| file == owner && parameter.contains_range(range)))
+    })
 }
 
 /// Leave argument conversion to Python for vendored code and its compiler-supplied adapter.
@@ -1586,6 +1911,7 @@ impl CachedSession {
 
 #[derive(Default)]
 pub(crate) struct AnalysisCache {
+    closed_diagnostics: Option<CachedSession>,
     diagnostics: Option<CachedSession>,
     hints: Option<CachedSession>,
 }
@@ -1622,6 +1948,30 @@ impl AnalysisCache {
             // An error can stop lowering before the program reaches its first hint.
             self.hints = None;
         }
+    }
+
+    pub(crate) fn check_closed_program(
+        &mut self,
+        fresh: &mut Session,
+        inputs: &crate::SourceInputs,
+        modules: &[crate::modules::SourceModule],
+        skipped: Option<&[Vec<TextRange>]>,
+        overloads: &[Vec<CheckedDiagnostic>],
+        native: Option<&crate::frontend::phase::Diagnostic>,
+    ) -> Result<(), String> {
+        if let Some(cached) = &mut self.closed_diagnostics
+            && cached.same_files(fresh, inputs)
+        {
+            cached.update(fresh, inputs)?;
+            return cached
+                .session
+                .closed_program_errors(modules, skipped, overloads, native);
+        }
+        // The optional layout cache may retain a quiet handle to fresh's Salsa storage.
+        let mut session = fresh.diagnostic_copy()?;
+        let result = session.check_closed_program(modules, skipped, overloads, native);
+        self.closed_diagnostics = Some(CachedSession::new(session, inputs));
+        result
     }
 
     pub(crate) fn check_scopes(
