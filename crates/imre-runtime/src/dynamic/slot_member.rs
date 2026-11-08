@@ -72,19 +72,29 @@ impl Context {
             .collect())
     }
 
+    /// Read the declared object slots from the immutable layout, even if Python rebinds __slots__.
+    pub(super) fn declares_named_slots(&self, owner: Id) -> bool {
+        let Value::Class { scope, .. } = self.heap.get(owner) else {
+            return false;
+        };
+        self.scope_data(*scope)
+            .class_namespace
+            .as_deref()
+            .and_then(|layout| layout.slot_names.as_deref())
+            .is_some_and(|names| {
+                names
+                    .iter()
+                    .any(|name| !matches!(name.as_str(), "__dict__" | "__weakref__"))
+            })
+    }
+
     fn check_inherited_member_storage(&self, bases: &[Id]) -> Result<()> {
         for &base in bases {
             let Value::Class { scope, .. } = self.heap.get(base) else {
                 unreachable!()
             };
             let layout = self.scope_data(*scope).class_namespace.as_deref().unwrap();
-            if !layout.member_slots
-                && layout.slot_names.as_deref().is_some_and(|slots| {
-                    slots
-                        .iter()
-                        .any(|s| !matches!(s.as_str(), "__dict__" | "__weakref__"))
-                })
-            {
+            if !layout.member_slots && self.declares_named_slots(base) {
                 return Err(Error::new(
                     "NotImplementedError",
                     "inherited named slots require owner-bound member descriptors",
@@ -779,7 +789,10 @@ impl Context {
         };
         let finalizing = self.heap.get(owner).io_kind() == Some("TextIOWrapper")
             && self.str_value(name)? == "_finalizing";
-        if matches!(self.heap.get(receiver), Value::Instance { class, .. } if self.direct_subclass(*class, owner))
+        if matches!(storage, SlotStorage::Exception(_, _))
+            && matches!(self.heap.get(receiver), Value::Raised(error) if self.raised_error_matches(error, owner))
+            || !matches!(storage, SlotStorage::Exception(_, _))
+                && matches!(self.heap.get(receiver), Value::Instance { class, .. } if self.direct_subclass(*class, owner))
             || matches!(storage, SlotStorage::Module(_))
                 && matches!(self.heap.get(receiver), Value::Module { constructor: Some(class), .. } if self.direct_subclass(*class, owner))
         {
@@ -812,6 +825,10 @@ impl Context {
 
     pub(super) fn read_slot_member(&mut self, member: Id, receiver: Id) -> Result<Id> {
         let (name, finalizing, storage) = self.check_slot_receiver(member, receiver)?;
+        if let SlotStorage::Exception(kind, index) = storage {
+            let field = super::exception_members::names(kind)[index];
+            return super::exception_members::read(self, kind, field, receiver);
+        }
         if let SlotStorage::ReadOnlyText(text) = storage {
             return Ok(self.text(self.str_value(text)?.to_owned()));
         }
@@ -862,6 +879,10 @@ impl Context {
         value: Option<Id>,
     ) -> Result<()> {
         let (name, finalizing, storage) = self.check_slot_receiver(member, receiver)?;
+        if let SlotStorage::Exception(kind, index) = storage {
+            let field = super::exception_members::names(kind)[index];
+            return super::exception_members::write(self, kind, field, receiver, value);
+        }
         if matches!(storage, SlotStorage::ReadOnlyText(_)) {
             return Err(Error::new("AttributeError", "readonly attribute"));
         }

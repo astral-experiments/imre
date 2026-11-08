@@ -159,6 +159,7 @@ pub(super) struct Trace {
     pub(super) source_position: Option<(u32, TracebackSpan)>,
     pub instance: Option<Id>,
     pub cause: Option<Id>,
+    pub suppress_context: Option<bool>,
     pub import_message: Option<Id>,
     /// Location of a compiler error before its Python exception can be built.
     pub pending_syntax: Option<super::source_code::SyntaxSpan>,
@@ -275,6 +276,13 @@ impl Error {
         };
         self.import = Some(fields);
         self
+    }
+
+    /// Explicitly assigning a cause suppresses the context until Python changes the flag.
+    pub(super) fn suppresses_context(&self) -> bool {
+        self.trace
+            .as_ref()
+            .is_some_and(|t| t.suppress_context.unwrap_or(t.cause.is_some()))
     }
 
     /// Read an exception group's retained message and immutable children.
@@ -797,7 +805,9 @@ impl Context {
         let Value::Raised(error) = self.heap.get_mut(exception) else {
             unreachable!("cause assignment requires an exception instance")
         };
-        if let Some(old) = error.tracing().cause.replace(cause)
+        let trace = error.tracing();
+        trace.suppress_context = None;
+        if let Some(old) = trace.cause.replace(cause)
             && old != NONE
             && old != cause
         {
@@ -1313,6 +1323,7 @@ pub(super) struct IoOpenTypes {
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum SlotStorage {
+    Exception(imre_ast::exceptions::Kind, usize),
     Instance,
     Module(usize),
     ReadOnlyText(Id),

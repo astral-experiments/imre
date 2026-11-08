@@ -667,6 +667,7 @@ impl Context {
                             ));
                         }
                         trace.cause = Some(cause);
+                        trace.suppress_context = None;
                     }
                     if exception != a && !self.instance_of(exception, a) {
                         // A class may allocate a different exception. CPython normalizes

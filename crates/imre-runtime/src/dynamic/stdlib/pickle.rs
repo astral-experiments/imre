@@ -162,7 +162,7 @@ fn global_module(ctx: &mut Context, obj: Id, name: &str, error: Id) -> Result<Id
     Ok(module)
 }
 
-fn unsupported_reducer(ctx: &Context, obj: Id) -> Error {
+pub(in crate::dynamic) fn unsupported_reducer(ctx: &Context, obj: Id) -> Error {
     Error::new(
         "NotImplementedError",
         format!("native pickle has no reducer for {}", ctx.type_name(obj)),

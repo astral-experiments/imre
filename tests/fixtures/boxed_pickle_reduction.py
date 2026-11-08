@@ -741,6 +741,7 @@ def produce():
         check_global_names(protocol)
         check_registered_reducer(protocol)
         check_reduction_state(protocol)
+        check_exception_state(protocol)
         check_list_items(protocol)
         check_floats(protocol)
         for result in (11, (int,), (11, ()), (int, 11)):
@@ -788,3 +789,22 @@ def check_reduction_state(protocol):
     assert restored.state is state and restored.restorations == 1
     assert state["owner"] is restored and state["links"] is restored.links
     assert restored.links["owner"] is restored
+
+
+class JobError(Exception):
+    @property
+    def payload(self):
+        return self._payload
+
+    @payload.setter
+    def payload(self, value):
+        self._payload = value
+
+
+def check_exception_state(protocol):
+    error = JobError("retry")
+    assert error.__reduce__() == (JobError, error.args)
+    error.__dict__["payload"] = [error]
+    restored = pickle.loads(pickle.dumps(error, protocol))
+    assert type(restored) is JobError and restored.args == ("retry",)
+    assert restored.payload[0] is restored

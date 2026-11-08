@@ -351,16 +351,15 @@ fn call_with_active_exception<const N: usize>(
 /// Find the exception that precedes this one in its displayed traceback.
 pub(in crate::dynamic) fn chain_link(error: &Error) -> Option<(Id, &'static str)> {
     match error.trace.as_ref().and_then(|trace| trace.cause) {
-        Some(NONE) => None,
-        Some(cause) => Some((
+        Some(cause) if cause != NONE => Some((
             cause,
             "\nThe above exception was the direct cause of the following exception:\n\n",
         )),
-        None if error.context != NONE => Some((
+        _ if error.context != NONE && !error.suppresses_context() => Some((
             error.context,
             "\nDuring handling of the above exception, another exception occurred:\n\n",
         )),
-        None => None,
+        _ => None,
     }
 }
 

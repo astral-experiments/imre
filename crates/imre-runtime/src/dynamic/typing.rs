@@ -3341,12 +3341,10 @@ impl Context {
     ) -> Result<Id> {
         let mut mro = Vec::with_capacity(ancestors.len() + 1);
         mro.push(NONE);
-        // Keep allocation and special-slot dispatch on their existing native layout.
-        // The published MRO includes the declaring classes of inherited exception methods.
-        if ancestors.iter().any(|&base| {
-            matches!(self.heap.get(base), Value::Native(name) if super::builtins::is_exception(name))
-        }) {
-            mro.extend(self.linearized_bases(&bases, true)?);
+        if let Some(public) =
+            self.exception_mro(&bases, &ancestors, |ctx, base| ctx.base_lineage(base, true))?
+        {
+            mro.extend(public);
         } else {
             mro.extend_from_slice(&ancestors);
         }
