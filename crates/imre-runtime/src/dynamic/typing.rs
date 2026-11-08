@@ -1240,10 +1240,24 @@ fn generic_init_subclass(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
         "__init_subclass__",
         cls,
     )?;
-    let typing = ctx.module("typing")?;
-    ctx.heap.keep(typing);
-    let helper = ctx.lookup_attr(typing, "_generic_init_subclass")?;
-    ctx.call(helper, args.to_vec(), kwargs.to_vec())
+    call_generic_helper(
+        ctx,
+        "_generic_init_subclass",
+        args.to_vec(),
+        kwargs.to_vec(),
+    )
+}
+
+fn call_generic_helper(
+    ctx: &mut Context,
+    name: &str,
+    args: Vec<Id>,
+    kwargs: Vec<(String, Id)>,
+) -> Result<Id> {
+    let typing = ctx.import_with_builtins("typing")?;
+    let helper = ctx.lookup_attr(typing, name)?;
+    ctx.heap.keep(helper);
+    ctx.call(helper, args, kwargs)
 }
 
 /// Members physically stored on a TypeVar and returned unbound by class lookup.
@@ -1896,6 +1910,23 @@ pub(super) fn parameter_scope(ctx: &mut Context, outer: Id, names: Id, class: bo
     };
     let module = enclosing.module.clone();
     let scope = ctx.scope(&module, Some(parent));
+    initialize_parameters(ctx, scope, names, class)
+}
+
+/// Bind the declared parameters directly in the compiled generic class header's activation.
+pub(super) fn class_parameter_frame(ctx: &mut Context, scope: Id, names: Id) -> Result<Id> {
+    let outer = ctx.scope_data(scope).parent.expect("generic class header");
+    if ctx.scope_data(outer).class_body.is_some() {
+        let parent = ctx.scope_data(outer).parent;
+        let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.parent = parent;
+    }
+    initialize_parameters(ctx, scope, names, true)
+}
+
+fn initialize_parameters(ctx: &mut Context, scope: Id, names: Id, class: bool) -> Result<Id> {
     let typing = ctx.text("typing");
     let mut params = Vec::new();
     for (binding, declaration) in ctx
@@ -1932,7 +1963,8 @@ pub(super) fn parameter_scope(ctx: &mut Context, outer: Id, names: Id, class: bo
         // __type_params__ retains the pack itself; the implicit base is Generic[*Ts].
         unpack_typevar_tuples(ctx, &mut params)?;
         let generic = named_class(ctx, "typing", "Generic");
-        let base = alias(ctx, AliasKind::Generic, generic, params)?;
+        let params = ctx.alloc(Value::Tuple(params));
+        let base = call_generic_helper(ctx, "_GenericAlias", vec![generic, params], Vec::new())?;
         ctx.bind(scope, ".generic_base", base);
     }
     Ok(scope)

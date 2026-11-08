@@ -379,6 +379,12 @@ impl Output {
                 .map_or_else(|| stmt.start(), Ranged::start)
             })
             .unwrap_or_default();
+        let class_keywords = parsed
+            .tokens()
+            .iter()
+            .filter(|token| token.kind() == ast::token::TokenKind::Class)
+            .map(Ranged::start)
+            .collect();
         let mut body = parsed.into_syntax().body;
         let method_imports = imre_ast::module_imports(&body);
         let private_names = lower_source(path, source, &mut body)?;
@@ -397,6 +403,7 @@ impl Output {
             python_annotations: bundled
                 && matches!(name, "_py_warnings" | "tomllib._parser" | "typing"),
             module_start,
+            class_keywords,
             docs,
             unit,
             has_templates,
@@ -434,6 +441,7 @@ enum DefinitionName<'a> {
 
 enum Body<'a> {
     Namespace(&'a [ast::Stmt], bool),
+    ClassParameters(&'a ast::StmtClassDef),
     Statements(&'a [ast::Stmt]),
     /// A suspended suite and its generator, coroutine, or async generator code flag.
     GeneratorFunction(&'a [ast::Stmt], u32),
@@ -477,6 +485,7 @@ struct SourceMap<'a> {
     path: &'a Path,
     python_annotations: bool,
     module_start: ruff_text_size::TextSize,
+    class_keywords: Vec<ruff_text_size::TextSize>,
     docs: Option<crate::modules::doctest::SealedDocs>,
     unit: usize,
     has_templates: bool,
@@ -527,6 +536,7 @@ enum StringConstant {
 struct Declarations {
     declared_suspension: bool,
     declared_statement_line: bool,
+    declared_definition_position: bool,
     emitted_named_op: bool,
     emitted_guarded_lit: bool,
     emitted_guarded_named_op: bool,
@@ -722,6 +732,7 @@ impl Output {
                     f.jump("module_body");
                 }
             }
+            Body::ClassParameters(class) => f.parameterized_class(class),
             Body::Statements(stmts) | Body::GeneratorFunction(stmts, _) => {
                 f.declare_globals(stmts);
                 f.statements(stmts);

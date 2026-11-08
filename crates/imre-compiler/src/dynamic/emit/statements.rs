@@ -450,7 +450,7 @@ impl Function<'_, '_> {
                         type_params,
                         body,
                     );
-                    self.decorated(&v.name, &decorators, function);
+                    self.decorated(&v.name, &decorators, &[], function);
                 }
                 ast::Stmt::ClassDef(v) => {
                     let decorators = v
@@ -458,47 +458,29 @@ impl Function<'_, '_> {
                         .iter()
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
-                    let outer = self.scope.clone();
-                    let mut outer_class_locals = None;
-                    let parameter_scope = v.type_params.as_deref().map(|params| {
-                        let scope = self.parameter_scope(&outer, params, true);
-                        self.scope = self.op("class_base_scope", &[&scope, &outer]);
-                        outer_class_locals = self.class_locals.take();
-                        scope
-                    });
-                    let bases = self.op("list", &[]);
-                    let kwargs = if let Some(args) = v.arguments.as_deref() {
-                        if args.keywords.iter().any(|kw| kw.arg.is_none()) {
-                            self.unsupported("expanded class keyword arguments");
-                        }
-                        self.arguments(&bases, args, "0")
+                    let class = if v.type_params.is_some() {
+                        let name = format!("<generic parameters of {}>", v.name);
+                        let header = self.define(
+                            v.start(),
+                            DefinitionName::Plain(&name),
+                            None,
+                            None,
+                            None,
+                            Body::ClassParameters(v),
+                        );
+                        self.class_position(Some(v));
+                        let class = self.invoke(&header, &[]);
+                        self.class_position(None);
+                        class
                     } else {
-                        "0".into()
+                        self.create_class(v, None)
                     };
-                    if let Some(scope) = parameter_scope.as_ref() {
-                        self.scope = scope.clone();
-                        let generic = self.lookup(".generic_base");
-                        self.op("append", &[&bases, &generic]);
-                    }
-                    let init = self.define(
-                        v.decorator_list.first().map_or(v.start(), Ranged::start),
-                        DefinitionName::Binding(&v.name),
-                        None,
-                        None,
-                        None,
-                        Body::Namespace(&v.body, v.type_params.is_some()),
-                    );
-                    if parameter_scope.is_some() {
-                        self.scope = outer;
-                        self.class_locals = outer_class_locals;
-                    }
-                    let operation = if v.type_params.is_some() {
-                        "parameterized_class"
+                    let positions = if v.type_params.is_some() {
+                        v.decorator_list.as_slice()
                     } else {
-                        "class"
+                        &[]
                     };
-                    let class = self.op(operation, &[&kwargs, &bases, &init]);
-                    self.decorated(&v.name, &decorators, class);
+                    self.decorated(&v.name, &decorators, positions, class);
                 }
                 ast::Stmt::Return(v) => {
                     let value = v
@@ -666,6 +648,82 @@ impl Function<'_, '_> {
         ))
     }
 
+    fn class_position(&mut self, class: Option<&ast::StmtClassDef>) {
+        if !self.output.declarations.declared_definition_position {
+            self.output
+                .functions
+                .push_str("declare void @imre_dyn_definition_position(ptr, ptr)\n");
+            self.output.declarations.declared_definition_position = true;
+        }
+        let position = class.map_or_else(
+            || "null".to_owned(),
+            |class| {
+                let index = self
+                    .source
+                    .class_keywords
+                    .partition_point(|&p| p < class.name.start());
+                let (line, start) = self
+                    .source
+                    .line_and_column(self.source.class_keywords[index - 1]);
+                let (end_line, end) = self.source.line_and_column(class.end());
+                self.expression_line = line;
+                self.output.position([line, end_line, start, end])
+            },
+        );
+        self.line(&format!(
+            "call void @imre_dyn_definition_position(ptr %ctx, ptr {position})"
+        ));
+    }
+
+    pub(super) fn parameterized_class(&mut self, class: &ast::StmtClassDef) {
+        self.checkpoint(&class.name);
+        self.class_position(Some(class));
+        let frame = self.scope.clone();
+        let outer = self.op("annotation_scope", &[&frame]);
+        let params = class.type_params.as_deref().expect("generic class");
+        let scope = self.parameter_scope(&frame, params, true);
+        self.scope = self.op("class_base_scope", &[&scope, &outer]);
+        self.class_position(None);
+        let class = self.create_class(class, Some(scope));
+        self.end(&format!("ret i64 {class}"));
+    }
+
+    fn create_class(&mut self, class: &ast::StmtClassDef, parameters: Option<String>) -> String {
+        let bases = self.op("list", &[]);
+        let kwargs = if let Some(args) = class.arguments.as_deref() {
+            if args.keywords.iter().any(|kw| kw.arg.is_none()) {
+                self.unsupported("expanded class keyword arguments");
+            }
+            self.arguments(&bases, args, "0")
+        } else {
+            "0".into()
+        };
+        let generic = parameters.is_some();
+        if let Some(scope) = parameters {
+            self.scope = scope;
+            let base = self.lookup(".generic_base");
+            self.op("append", &[&bases, &base]);
+        }
+        let init = self.define(
+            class
+                .decorator_list
+                .first()
+                .map_or(class.start(), Ranged::start),
+            DefinitionName::Binding(&class.name),
+            None,
+            None,
+            None,
+            Body::Namespace(&class.body, generic),
+        );
+        let operation = if generic {
+            self.class_position(Some(class));
+            "parameterized_class"
+        } else {
+            "class"
+        };
+        self.op(operation, &[&kwargs, &bases, &init])
+    }
+
     fn parameter_scope(&mut self, outer: &str, params: &ast::TypeParams, class: bool) -> String {
         let names = self.op("dict", &[]);
         for param in params {
@@ -684,7 +742,7 @@ impl Function<'_, '_> {
             self.op("put", &[&names, &binding, &declaration]);
         }
         let op = if class {
-            "class_parameter_scope"
+            "class_parameter_frame"
         } else {
             "function_parameter_scope"
         };
@@ -712,7 +770,14 @@ impl Function<'_, '_> {
         } else {
             format!("{}{name}", self.prefix)
         };
-        let prefix = if matches!(body, Body::Namespace(..)) {
+        let header = matches!(body, Body::ClassParameters(_));
+        let prefix = if let Body::ClassParameters(class) = &body {
+            if self.declared_globals.contains(class.name.as_str()) {
+                String::new()
+            } else {
+                self.prefix.clone()
+            }
+        } else if matches!(body, Body::Namespace(..)) {
             format!("{qualname}.")
         } else {
             format!("{qualname}.<locals>.")
@@ -731,7 +796,8 @@ impl Function<'_, '_> {
                 let mut flags = function_flags(
                     params,
                     type_params.is_some() || self.in_function,
-                    type_params.is_none()
+                    !header
+                        && type_params.is_none()
                         && !self.prefix.is_empty()
                         && !self.prefix.ends_with(".<locals>."),
                 );
@@ -1102,7 +1168,7 @@ impl Function<'_, '_> {
         signature["scope_locals_complete"] = json!(!closure_names.locals_incomplete);
         let sig = self.text(&signature.to_string());
         let name = self.code_name(name);
-        let function = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 false)", scope));
+        let function = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 {header})", scope));
         if type_params.is_some() {
             let key = self.code_name(".type_params");
             let params = self.op("lookup", &[&scope, &key]);
@@ -1203,8 +1269,17 @@ impl Function<'_, '_> {
         self.end(&format!("ret i64 {values}"));
     }
 
-    fn decorated(&mut self, name: &ast::Identifier, decorators: &[String], mut value: String) {
-        for decorator in decorators.iter().rev() {
+    fn decorated(
+        &mut self,
+        name: &ast::Identifier,
+        decorators: &[String],
+        positions: &[ast::Decorator],
+        mut value: String,
+    ) {
+        for (index, decorator) in decorators.iter().enumerate().rev() {
+            if let Some(syntax) = positions.get(index) {
+                self.set_statement_line(self.source.line(syntax.expression.start()));
+            }
             value = self.invoke(decorator, &[&value]);
         }
         self.bind(name.as_str(), &value);

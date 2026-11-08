@@ -348,6 +348,10 @@ impl<'a> Visitor<'a> for Imports {
                         })
                     }) =>
             {
+                if class.type_params.is_some() {
+                    // The implicit Generic base calls typing._generic_init_subclass.
+                    self.add(0, "typing");
+                }
                 self.runtime_imports = true;
             }
             Stmt::Assign(a) if a.targets.iter().any(|t| self.sys_path(t)) => {

@@ -6064,6 +6064,27 @@ impl Heap {
         self.set_statement_line(line);
     }
 
+    pub(super) fn set_definition_position(&mut self, range: Option<[u32; 4]>) {
+        self.set_call_position(range);
+        let span = range.map(|[line, end_line, start, end]| {
+            self.set_statement_line(line);
+            self.replace_expression(ExpressionPosition::Statement);
+            TracebackSpan {
+                end_line,
+                start,
+                end,
+                anchor: TracebackAnchor::Hidden,
+            }
+        });
+        self.frames
+            .last_mut()
+            .unwrap()
+            .location
+            .as_mut()
+            .expect("active statement")
+            .span = span;
+    }
+
     /// Update the current source line without crossing a statement boundary.
     pub(super) fn set_statement_line(&mut self, line: u32) {
         let frame = self.frames.last_mut().unwrap();

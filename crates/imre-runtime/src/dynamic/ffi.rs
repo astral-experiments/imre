@@ -471,6 +471,7 @@ impl Context {
             "class_parameter_scope" | "function_parameter_scope" => {
                 super::typing::parameter_scope(self, a, b, op == "class_parameter_scope")
             }
+            "class_parameter_frame" => super::typing::class_parameter_frame(self, a, b),
             "class_annotation_environment" => self.class_annotation_environment(a, b),
             "class_annotation_locals" => {
                 let parent = self.scope_data(a).parent.expect("annotation globals");
@@ -2417,6 +2418,17 @@ pub(super) unsafe extern "C" fn imre_dyn_assignment_target(
     {
         ctx.collect_unreachable();
     }
+}
+
+/// Expose a compound statement's full instruction position during its implicit calls.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_definition_position(
+    ctx: *mut Context,
+    position: *const [u32; 4],
+) {
+    // SAFETY: linked code supplies its active context and an optional static range.
+    let (ctx, position) = unsafe { (&mut *ctx, position.as_ref()) };
+    ctx.heap.set_definition_position(position.copied());
 }
 
 /// Move the executing frame to an implicit call site without releasing statement temporaries.
