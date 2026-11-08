@@ -359,7 +359,14 @@ def check_user_site(imre, root, run):
     (packages / "extras.pth").write_text(str(extras) + "\n")
     extra = {"PYTHONUSERBASE": str(base)}
     code = (
-        "import importlib.util, site, sys\n"
+        "import sys\n"
+        "assert 'site' in sys.modules\n"
+        "prefix = sys.prefix\n"
+        "sys.prefix = 'after startup'\n"
+        "import site\n"
+        "assert site.PREFIXES[:2] == [prefix, sys.exec_prefix]\n"
+        "sys.prefix = prefix\n"
+        "import importlib.util\n"
         "print(site.USER_BASE == site.getuserbase() == sys.argv[1], "
         "site.USER_SITE == site.getusersitepackages() == sys.argv[2])\n"
         "print(site.ENABLE_USER_SITE, sys.flags.no_user_site, "
@@ -375,7 +382,13 @@ def check_user_site(imre, root, run):
     assert (imported.returncode, imported.stdout, imported.stderr) == (0, b"73\n", b""), imported
     lazy = run(
         imre, "-SB", "-c",
-        "import site, sys; print(site.USER_BASE, site.USER_SITE, site.ENABLE_USER_SITE); "
+        "import sys\n"
+        "assert 'site' not in sys.modules\n"
+        "sys.prefix = 'before import'\n"
+        "import site\n"
+        "sys.prefix = 'after import'\n"
+        "assert site.PREFIXES == ['before import', sys.exec_prefix]\n"
+        "print(site.USER_BASE, site.USER_SITE, site.ENABLE_USER_SITE)\n"
         "print(site.getuserbase() == sys.argv[1], site.getusersitepackages() == sys.argv[2], sys.argv[2] in sys.path)",
         str(base), str(packages), extra=extra, timeout=300,
     )
