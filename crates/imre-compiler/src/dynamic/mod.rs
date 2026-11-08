@@ -618,6 +618,7 @@ pub(crate) struct RegisteredSources<'a> {
     pub(crate) root: &'a Path,
     pub(crate) roots: &'a [PathBuf],
     pub(crate) winners: &'a [RegisteredSource<'a>],
+    pub(crate) file_alternatives: &'a [RegisteredSource<'a>],
 }
 
 pub(crate) fn compile(
@@ -905,11 +906,15 @@ pub(crate) fn compile(
         source_initializers.insert(sources[0].1.clone());
     }
     let mut seen = HashSet::new();
+    let mut imp_in_file_graph = false;
     // Keep source hints on the winning regular package's path. The runtime finder
     // can still load a different child if a parent changes its __path__.
     let mut entry_sources: HashMap<String, (PathBuf, bool)> = HashMap::new();
     let mut before_site = HashSet::new();
-    let mut frozen_imports = Imports::default();
+    let mut ordinary_registrations = None;
+    let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
+    let mut frozen_files: Vec<String> = Vec::new();
+    let mut searched_frozen_files = HashSet::new();
     let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
     let mut uses_import_builtin = false;
     let mut uses_exec = false;
@@ -960,11 +965,25 @@ pub(crate) fn compile(
                 options.user_site_pth.is_some(),
             );
             if imports.names.is_empty() {
-                break;
+                // A file loader or a runtime change of finder can still select physical
+                // alternatives. Collect their closures after all ordinary import winners.
+                if frozen_files.is_empty() || ordinary_registrations.is_some() {
+                    break;
+                }
+                ordinary_registrations = Some(selected_sources.len());
+                bundled_only = false;
+                for name in frozen_files.drain(..) {
+                    let top = name.split('.').next().unwrap_or(&name);
+                    if !imre_ast::providers::is_optional_frozen(top) || imp_in_file_graph {
+                        imports.names.push((0, name));
+                    }
+                }
+            } else {
+                bundled_only = true;
             }
-            bundled_only = true;
             (String::new(), false, imports)
         };
+        let file_alternatives = ordinary_registrations.is_some();
         if imports
             .names
             .iter()
@@ -1047,16 +1066,19 @@ pub(crate) fn compile(
             let Some(name) = crate::modules::resolve_import(package_name, level, &requested) else {
                 continue;
             };
-            // A frozen import never visits sys.path unless the program can disable
-            // the frozen importer. Defer collecting its filesystem alternatives.
-            if frozen_modules
-                && !seen.contains("_imp")
-                && let Some(top @ ("stat" | "__hello__")) = name.split('.').next()
-                && crate::modules::bundled_runtime_source(top).is_some()
-            {
-                frozen_imports.names.push((0, name));
-                continue;
-            }
+            // Frozen modules are selected before path finders. Names from a from-import
+            // can refer to their attributes without making a same-named package reachable.
+            let top = name.split('.').next().unwrap_or(&name);
+            let frozen = imre_ast::providers::is_frozen(top, || frozen_modules);
+            let name = if frozen && !file_alternatives {
+                // Bundled-only dependencies cannot make application files reachable.
+                if !bundled_only {
+                    frozen_files.push(name.clone());
+                }
+                top
+            } else {
+                &name
+            };
             let mut prefix = String::new();
             let mut project_parent = false;
             for part in name.split('.').filter(|s| !s.is_empty()) {
@@ -1067,11 +1089,14 @@ pub(crate) fn compile(
                     prefix.push('.');
                 }
                 prefix.push_str(part);
-                if !seen.insert(prefix.clone()) {
-                    continue;
+                if prefix == "_imp" && !bundled_only {
+                    imp_in_file_graph = true;
                 }
-                if prefix == "_imp" && !frozen_imports.names.is_empty() {
-                    work.push_back((String::new(), false, std::mem::take(&mut frozen_imports)));
+                let new_module = seen.insert(prefix.clone());
+                let new_file =
+                    file_alternatives && frozen && searched_frozen_files.insert(prefix.clone());
+                if !new_module && !new_file {
+                    continue;
                 }
                 let mut bundled = bundled_module_source(&prefix, startup.is_none());
                 // Standalone programs can run without the launcher's stdlib ZIP.
@@ -1096,7 +1121,9 @@ pub(crate) fn compile(
                 {
                     before_site.insert(prefix.clone());
                 }
-                if let Some((filename, source)) = bundled {
+                if let Some((filename, source)) = bundled
+                    && new_module
+                {
                     let path = Path::new(bundled_root).join(filename);
                     let package = path.ends_with("__init__.py");
                     let mut getter = Imports::default();
@@ -1126,8 +1153,8 @@ pub(crate) fn compile(
                     }
                     sources.push((prefix.clone(), path, source.into_owned()));
                 }
-                // When frozen imports are disabled, -m can load its runpy from sys.path.
-                if frozen_modules && prefix == "runpy" {
+                // Frozen runpy drives -m before a project runpy on sys.path.
+                if frozen && (!file_alternatives || prefix == "runpy") {
                     continue;
                 }
                 let graph_file = ordinary_graph.and_then(|graph| {
@@ -1225,6 +1252,27 @@ pub(crate) fn compile(
                     let src = if let Some((_, module, input)) = checked {
                         inputs.files.push(input.clone());
                         module.original_source().to_owned()
+                    } else if file_alternatives {
+                        // Only a usable snapshot can supply linked file code. Otherwise the
+                        // ordinary filesystem loader reports the error if Python selects it.
+                        let (Ok(identity), Ok(bytes)) =
+                            (filesystem.canonicalize(&path), filesystem.read(&path))
+                        else {
+                            inputs.missing.push(path);
+                            continue;
+                        };
+                        inputs.files.push((
+                            path.clone(),
+                            identity,
+                            blake3::hash(&bytes).to_hex().to_string(),
+                        ));
+                        let Ok(src) = String::from_utf8(bytes) else {
+                            continue;
+                        };
+                        if emit::check_source(&path, &src, keep_docstrings).is_err() {
+                            continue;
+                        }
+                        src
                     } else {
                         let identity = filesystem.canonicalize(&path);
                         let src = filesystem
@@ -1237,7 +1285,11 @@ pub(crate) fn compile(
                         ));
                         src
                     };
-                    let imports = imports_for_module(&path, &src)?;
+                    let imports = match imports_for_module(&path, &src) {
+                        Ok(imports) => imports,
+                        Err(_) if file_alternatives => continue,
+                        Err(error) => return Err(error),
+                    };
                     // Later alternatives remain available to the runtime finder. Only the
                     // winning provider supplies the initial module binding.
                     let on_package_path = prefix
@@ -1330,7 +1382,6 @@ pub(crate) fn compile(
     }
     let paths = serde_json::to_value(initial)
         .map_err(|e| format!("cannot represent startup search path: {e}"))?;
-    let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
     let stdlib_fallback =
         serde_json::to_value(&options.stdlib_fallback).map_err(|e| e.to_string())?;
     let config = serde_json::json!({
@@ -1367,12 +1418,15 @@ pub(crate) fn compile(
         .into_iter()
         .map(|(id, program, module)| RegisteredSource::new(&sources[id], program, module))
         .collect();
+    let (winners, file_alternatives) =
+        selected_sources.split_at(ordinary_registrations.unwrap_or(selected_sources.len()));
     check(
         entry_requests_objects || startup_provider,
         Some(RegisteredSources {
             root: &root,
             roots: &roots,
-            winners: &selected_sources,
+            winners,
+            file_alternatives,
         }),
     )?;
     let modules = (sources.as_slice(), builtins.as_slice());

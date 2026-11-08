@@ -307,10 +307,15 @@ pub(super) fn check(
 ) -> Result<(), String> {
     for (_, path, source) in files.iter().chain(builtins) {
         if !source_initializers.contains(path) {
-            let source_tree = parse_source(path, source, keep_docstrings)?;
-            lower_source(path, source, &mut source_tree.parsed.into_syntax().body)?;
+            check_source(path, source, keep_docstrings)?;
         }
     }
+    Ok(())
+}
+
+pub(super) fn check_source(path: &Path, source: &str, keep_docstrings: bool) -> Result<(), String> {
+    let source_tree = parse_source(path, source, keep_docstrings)?;
+    lower_source(path, source, &mut source_tree.parsed.into_syntax().body)?;
     Ok(())
 }
 

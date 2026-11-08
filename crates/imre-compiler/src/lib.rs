@@ -573,6 +573,29 @@ fn object_fallback<T>(
                 registered.winners.iter().copied(),
                 checked_graph.as_ref(),
             )?;
+            if registered
+                .file_alternatives
+                .iter()
+                .any(|source| source.is_program)
+            {
+                // Check a linked file provider with its own bindings. The ordinary program
+                // still imports the frozen definitions in the check above.
+                let mut files: Vec<_> = registered
+                    .winners
+                    .iter()
+                    .map(|source| dynamic::RegisteredSource {
+                        is_program: false,
+                        ..*source
+                    })
+                    .collect();
+                files.extend_from_slice(registered.file_alternatives);
+                analysis::check_registered_project(
+                    registered.root,
+                    registered.roots,
+                    files,
+                    checked_graph.as_ref(),
+                )?;
+            }
         }
         Ok(())
     };
