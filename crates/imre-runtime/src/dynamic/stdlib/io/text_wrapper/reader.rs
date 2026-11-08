@@ -380,8 +380,18 @@ impl Reader {
         match decoded {
             Value::Str(s) if !universal => self.text.push_str(s),
             Value::Str(s) => {
-                for c in s.chars() {
-                    self.push_translated(c, translate);
+                let mut rest: &str = s;
+                while !rest.is_empty() {
+                    if self.cr || matches!(rest.as_bytes()[0], b'\r' | b'\n') {
+                        let c = rest.chars().next().expect("nonempty decoded text");
+                        self.push_translated(c, translate);
+                        rest = &rest[c.len_utf8()..];
+                    } else {
+                        let n =
+                            memchr::memchr2(b'\r', b'\n', rest.as_bytes()).unwrap_or(rest.len());
+                        self.text.push_str(&rest[..n]);
+                        rest = &rest[n..];
+                    }
                 }
             }
             Value::SurrogateStr(points) => {
