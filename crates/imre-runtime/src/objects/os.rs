@@ -18,6 +18,7 @@ use crate::StrOwner;
 use num_traits::ToPrimitive;
 use std::ffi::{CStr, CString};
 use std::io;
+use std::os::fd::{FromRawFd, IntoRawFd, OwnedFd};
 
 pub(super) mod links;
 pub(crate) mod scandir;
@@ -241,25 +242,38 @@ pub unsafe extern "C" fn imre_os_open(
             let mode = c_int(mode)?;
             // SAFETY: dir_fd is a rooted optional integer according to the ABI.
             let dir_fd = unsafe { directory_fd(dir_fd) }?;
-            open_at(&name, flags, mode, dir_fd)
-                .map(|fd| Int::from_usize(fd as usize).into_raw())
+            open_at(&name, flags, mode, dir_fd, super::stdlib::check_interrupt)?
+                .map(|fd| Int::from_usize(fd.into_raw_fd() as usize).into_raw())
                 .map_err(|error| errno_with_filenames(error, Some(path), None))
         })(),
         0,
     )
 }
 
-/// Open relative to a directory descriptor and atomically mark the new descriptor close-on-exec.
-pub(crate) fn open_at(path: &CStr, flags: i32, mode: i32, dir_fd: i32) -> io::Result<i32> {
+/// Open relative to a directory descriptor in a single syscall with atomic close-on-exec.
+pub(crate) fn open_at_once(path: &CStr, flags: i32, mode: i32, dir_fd: i32) -> io::Result<OwnedFd> {
+    // SAFETY: path is terminated and the variadic mode is promoted to int.
+    let fd = unsafe { libc::openat(dir_fd, path.as_ptr(), flags | libc::O_CLOEXEC, mode) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: a successful openat returns a new owned descriptor.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+/// Let an interrupted caller run its signal handlers before retrying.
+/// Handler exceptions bypass the caller's filename decoration for syscall errors.
+pub(crate) fn open_at<E>(
+    path: &CStr,
+    flags: i32,
+    mode: i32,
+    dir_fd: i32,
+    mut dispatch: impl FnMut() -> std::result::Result<(), E>,
+) -> std::result::Result<io::Result<OwnedFd>, E> {
     loop {
-        // SAFETY: path is terminated and the variadic mode is promoted to int.
-        let fd = unsafe { libc::openat(dir_fd, path.as_ptr(), flags | libc::O_CLOEXEC, mode) };
-        if fd >= 0 {
-            return Ok(fd);
-        }
-        let error = io::Error::last_os_error();
-        if error.kind() != io::ErrorKind::Interrupted {
-            return Err(error);
+        match open_at_once(path, flags, mode, dir_fd) {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => dispatch()?,
+            result => return Ok(result),
         }
     }
 }

@@ -22,6 +22,7 @@ pub(in crate::dynamic) mod stat;
 pub(super) mod statvfs;
 
 use std::ffi::CString;
+use std::os::fd::IntoRawFd;
 
 use super::{Context, Error, Id, NONE, Result, Value, builtins, posixpath};
 use crate::dynamic::builtins::bind_two_positional;
@@ -1044,8 +1045,8 @@ fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
         let audit_flags = ctx.int(i64::from(flags | libc::O_CLOEXEC));
         super::audit::event(ctx, "open", &[path, NONE, audit_flags])?;
     }
-    match native::open_at(&pathname, flags, mode, dir_fd) {
-        Ok(fd) => Ok(ctx.int(i64::from(fd))),
+    match native::open_at(&pathname, flags, mode, dir_fd, || ctx.dispatch_signals())? {
+        Ok(fd) => Ok(ctx.int(i64::from(fd.into_raw_fd()))),
         Err(error) => {
             Err(ctx.with_errno_filename(crate::objects::errno_error(error).into(), path)?)
         }
