@@ -78,6 +78,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `marshal` | Yes | Decode integer, bytes, boolean, and None records with `loads`. [Evidence](../tests/fixtures/boxed_bytecache.py) | — | — | — |
 | `math` | Yes | `prod` multiplies integer factors from iterables with an optional integer start. [Evidence](../tests/fixtures/iterables/math_product.py) | — | — | — |
 | `mimetypes` | Yes | Guess the MIME type and encoding of a filename or URL with POSIX host tables or a custom database. [Evidence](../benchmarks/cpython_stdlib/full/mimetypes/README.md) | [0 / 29](../benchmarks/cpython_stdlib/full/mimetypes/) | 15 | 6 |
+| `mmap` | Rejected | Runtime-loaded Linux file mappings, live memoryviews, bounded searches and overlapping moves. [Evidence](../tests/fixtures/boxed_mmap.py) | — | — | — |
 | `ntpath` | Yes | No API example recorded. | — | — | — |
 | `numbers` | Yes | Check typed numeric values and builtin classes against `Number` with `isinstance` and `issubclass`. [Evidence](../tests/fixtures/unions/numeric_membership.py) | — | — | — |
 | `opcode` | Yes | No API example recorded. | — | — | — |
@@ -166,7 +167,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `graphlib` |
 | `imaplib` |
 | `mailbox` |
-| `mmap` |
 | `modulefinder` |
 | `msvcrt` |
 | `multiprocessing` |

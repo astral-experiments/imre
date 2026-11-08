@@ -1678,7 +1678,8 @@ impl Context {
                     return Some("typing._CallableType");
                 }
                 if HashState::is_provider_class(name)
-                    || (cfg!(target_os = "linux") && name == "select.epoll")
+                    || (cfg!(target_os = "linux")
+                        && matches!(name.as_str(), "select.epoll" | "mmap.mmap"))
                     || builtins::is_builtin_type(name)
                     || builtins::is_iterator_type(name)
                     || builtins::CORE_RUNTIME_TYPES.contains(&name.as_str())
@@ -1887,6 +1888,8 @@ impl Context {
             }
             #[cfg(target_os = "linux")]
             ("select.epoll", Value::Epoll(_)) => true,
+            #[cfg(target_os = "linux")]
+            ("mmap.mmap", Value::Mmap { .. }) => true,
             (name, Value::Selector(handle)) if name == handle.borrow().class_name() => true,
             ("array.array", Value::Array(_))
             | ("bytearray", Value::ByteArray(_))
@@ -4714,6 +4717,18 @@ impl Context {
             {
                 return Ok(self.heap.code_name("partial"));
             }
+            #[cfg(target_os = "linux")]
+            Value::Mmap { ref region, .. } if name == "closed" => {
+                return Ok(if region.is_none() { TRUE } else { FALSE });
+            }
+            #[cfg(target_os = "linux")]
+            Value::Native(ref class) if class == "mmap.mmap" => match name {
+                "__name__" | "__qualname__" | "__module__" => return Ok(self.text("mmap")),
+                method if stdlib::mmap::METHODS.contains(&method) => {
+                    return Ok(self.builtin(&format!("mmap.mmap.{method}")));
+                }
+                _ => {}
+            },
             #[cfg(target_os = "linux")]
             Value::Native(ref class) if class == "select.epoll" => match name {
                 "__name__" | "__qualname__" => return Ok(self.text("epoll")),

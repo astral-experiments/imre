@@ -263,5 +263,6 @@ pub fn builtin_finder_provider(
 /// Native providers that are searched after the application path.
 pub fn is_native_fallback(name: &str) -> bool {
     matches!(name, "_bz2" | "_zstd" | "inspect" | "typing")
+        || cfg!(target_os = "linux") && name == "mmap"
         || cfg!(any(target_os = "linux", target_os = "macos")) && name == "termios"
 }

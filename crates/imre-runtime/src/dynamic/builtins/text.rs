@@ -600,6 +600,26 @@ pub(super) fn bytearray_method(
         }
         return Ok(NONE);
     }
+    #[cfg(target_os = "linux")]
+    if method == "extend"
+        && matches!(
+            ctx.heap.get(argument),
+            Value::Mmap { .. } | Value::MemoryView { .. }
+        )
+        && let Ok(Some((owner, range))) = super::super::stdlib::mmap::mapped_span(ctx, argument)
+    {
+        if !range.is_empty() {
+            let map = std::rc::Rc::clone(super::super::stdlib::mmap::region(ctx.heap.get(owner))?);
+            ctx.check_bytearray_resize(storage)?;
+            let Value::ByteArray(target) = ctx.heap.get_mut(storage) else {
+                unreachable!()
+            };
+            let len = range.len();
+            super::super::memoryview::Storage::Mapped(&map, range)
+                .append_buffered(target, 0, len)?;
+        }
+        return Ok(NONE);
+    }
     let byte;
     let extra = if method == "append" {
         byte = [ctx.byte_value(argument)?];
@@ -676,6 +696,10 @@ fn bytes_count(ctx: &mut Context, source: Id) -> Result<Option<Vec<u8>>> {
 }
 
 fn bytes_from_source(ctx: &mut Context, obj: Id, bytes_constructor: bool) -> Result<Vec<u8>> {
+    #[cfg(target_os = "linux")]
+    if matches!(ctx.heap.get(obj), Value::Mmap { .. }) {
+        return Ok(ctx.read_buffer_bytes(obj)?.into_owned());
+    }
     if bytes_constructor && let Value::Array(array) = ctx.heap.get(ctx.scalar_value(obj)) {
         return super::super::copy_ids(array.as_bytes());
     }

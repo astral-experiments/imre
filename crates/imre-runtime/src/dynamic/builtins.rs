@@ -1065,6 +1065,8 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Dict(_) | Value::DefaultDict { .. } if DICT_METHODS.contains(&attr) => "dict",
         #[cfg(target_os = "linux")]
         Value::Epoll(_) if super::stdlib::epoll::METHODS.contains(&attr) => "select.epoll",
+        #[cfg(target_os = "linux")]
+        Value::Mmap { .. } if super::stdlib::mmap::METHODS.contains(&attr) => "mmap.mmap",
         Value::Poll(_) if matches!(attr, "register" | "modify" | "unregister" | "poll") => {
             "select.poll"
         }
@@ -3005,6 +3007,8 @@ pub(super) fn call(
                 }
                 Value::Deque(ring) => ring.items.len(),
                 Value::Array(array) => array.len(),
+                #[cfg(target_os = "linux")]
+                obj @ Value::Mmap { .. } => super::stdlib::mmap::region(obj)?.len(),
                 Value::Str(v) if ctx.heap.is_ascii_str(args[0]) => v.len(),
                 Value::Str(v) => v.chars().count(),
                 Value::SurrogateStr(points) => points.len(),
