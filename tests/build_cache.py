@@ -66,7 +66,7 @@ def main():
         records = set(cache.glob("*.json"))
         alternate = project / "alternate.py"
         alternate.write_text('print("alternate")\n')
-        ok(cli("run", "--runtime-imports", source=alternate), MISS, "alternate\n")
+        ok(cli("run", source=alternate), MISS, "alternate\n")
         other_record, = set(cache.glob("*.json")) - records
         record.write_bytes(other_record.read_bytes())
         ok(cli("run"), MISS, expected("alpha"))

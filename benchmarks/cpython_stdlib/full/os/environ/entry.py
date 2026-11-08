@@ -2,7 +2,9 @@ import os
 import subprocess
 import sys
 import unittest
-from test import test_os
+from importlib import import_module
+
+test_os = import_module("test.test_os")
 
 
 def process_environment(label):

@@ -15,6 +15,8 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+from fixture_entry import imported_fixture
+
 
 def check_command_stdin(imre, run):
     source = (
@@ -324,7 +326,7 @@ def check_sysconfig_build(imre, root, run):
         "assert mod.get_config_var('EXT_SUFFIX') in _imp.extension_suffixes()\n"
         "assert mod.get_config_vars() is mod.get_config_vars()\n"
     )
-    flags = "\x1f".join(["--runtime-imports", "--no-cache", "--opt-level", "0"])
+    flags = "\x1f".join(["--no-cache", "--opt-level", "0"])
     for executable in (sys.executable, imre):
         result = run(executable, "-B", "-c", by_name, "sysconfig",
                      extra={"IMRE_ENCODED_FLAGS": flags}, timeout=180)
@@ -606,7 +608,7 @@ def check_select_result_allocation(imre, root, run):
     source = fixtures / "boxed_select_result_allocation.py"
     for optimization in (0, 3):
         executable = root / f"select-result-O{optimization}"
-        built = run(imre, "build", source, "--runtime-imports", "--no-cache", "--opt-level", str(optimization), "-o", executable,
+        built = run(imre, "build", imported_fixture(root, source), "--no-cache", "--opt-level", str(optimization), "-o", executable,
                     extra={"IMRE_ENCODED_FLAGS": flags})
         assert built.returncode == 0, built
         for shape in range(4):
@@ -633,7 +635,7 @@ def check_poll_result_allocation(imre, root, run):
     source = fixtures / "boxed_poll_result_allocation.py"
     for optimization in (0, 3):
         executable = root / f"poll-result-O{optimization}"
-        built = run(imre, "build", source, "--runtime-imports", "--no-cache", "--opt-level", str(optimization), "-o", executable,
+        built = run(imre, "build", source, "--no-cache", "--opt-level", str(optimization), "-o", executable,
                     extra={"IMRE_ENCODED_FLAGS": flags})
         assert built.returncode == 0, built
         for count in (1, 2, 7):
@@ -659,7 +661,7 @@ def check_select_input_root_allocation(imre, root, run):
     source = fixtures / "boxed_select_input_root_allocation.py"
     for optimization in (0, 3):
         executable = root / f"select-input-roots-O{optimization}"
-        built = run(imre, "build", source, "--runtime-imports", "--no-cache", "--opt-level", str(optimization), "-o", executable,
+        built = run(imre, "build", imported_fixture(root, source), "--no-cache", "--opt-level", str(optimization), "-o", executable,
                     extra={"IMRE_ENCODED_FLAGS": flags})
         assert built.returncode == 0, built
         for shape in (1, 2):
@@ -705,7 +707,7 @@ def check_boxed_json_callback_allocation(imre, root, run):
     source = root / "json_callback_probe.py"
     source.write_text(imports + "fixture.current(int(sys.argv[1]))\n")
     executable = root / "json_callback_probe"
-    built = run(imre, "build", source, "--runtime-imports", "--no-cache", "-o", executable, extra={
+    built = run(imre, "build", source, "--no-cache", "-o", executable, extra={
         "IMRE_ENCODED_FLAGS": flags,
     })
     assert built.returncode == 0, built.stderr
@@ -1497,7 +1499,7 @@ def check_pending_signals(imre, root, env):
 
     fixture = Path(__file__).resolve().with_name("fixtures") / "boxed_signal_pending.py"
     native = root / "signal-pending"
-    subprocess.run([imre, "build", fixture, "--runtime-imports", "-o", native], check=True, env=env)
+    subprocess.run([imre, "build", fixture, "-o", native], check=True, env=env)
     for delivered, expected in (
         (0, 0),
         (signal.SIGUSR1, signal.SIGUSR1),
@@ -1560,7 +1562,7 @@ def check_pickle_reductions(imre, root, run):
         )
         for optimization in (0, 3):
             executable = work / f"pickle-O{optimization}"
-            build = run(imre, "build", entry, "--module-root", work, "--runtime-imports",
+            build = run(imre, "build", entry, "--module-root", work,
                         "--no-cache", "--opt-level", str(optimization), "-o", executable)
             assert build.returncode == 0, build
             result = run(executable)
@@ -1611,13 +1613,10 @@ def check_boxed_unittest_main_reporting(imre, root, run):
         "        with self.subTest(item=1): self.fail('intentional failure')\n"
         "unittest.main()\n"
     )
-    executable = root / "reporting_tests"
-    built = run(imre, "build", source, "--runtime-imports", "--no-cache", "-o", executable)
-    assert built.returncode == 0, built
-    passed = run(executable, "-v", "Cases.test_pass")
+    passed = run(imre, "-B", "-m", source.stem, "-v", "Cases.test_pass")
     assert passed.returncode == 0, passed
     assert b"test_pass (__main__.Cases.test_pass) ... ok" in passed.stderr.splitlines(), passed
-    failed = run(executable, "-v", "Cases.test_failure")
+    failed = run(imre, "-B", "-m", source.stem, "-v", "Cases.test_failure")
     assert failed.returncode == 1 and b"(item=1) ... FAIL" in failed.stderr, failed
     assert failed.stderr.rstrip().endswith(b"FAILED (failures=1)"), failed
 
@@ -1634,7 +1633,7 @@ def check_unittest_main_names(imre, root, run):
         "unittest.main()\n"
     )
     executable = root / "selected_tests"
-    built = run(imre, "build", source, "--module-root", root, "--runtime-imports", "--no-cache", "-o", executable)
+    built = run(imre, "build", source, "--module-root", root, "--no-cache", "-o", executable)
     assert built.returncode == 0, built
     for args, output in [((), b"a\nb\n"), (("Cases.test_b", "Cases.test_a"), b"b\na\n"),
                          (("-vk", "test_b", "Cases"), b"b\n"),
@@ -1715,7 +1714,7 @@ def check_unittest_file_discovery(imre, root, run):
         directory = root / ("late_tests_" + optimization)
         directory.mkdir()
         executable = root / ("discover_" + optimization)
-        built = run(imre, "build", entry, "--runtime-imports", "--no-cache",
+        built = run(imre, "build", imported_fixture(root, entry), "--no-cache",
                     "--opt-level", optimization, "-o", executable)
         assert built.returncode == 0, built
         # The compiler has already linked the binary when this module first appears.
@@ -1818,6 +1817,16 @@ def main():
         check_boxed_json_callback_allocation(imre, root, run)
         check_pickle_reductions(imre, root, run)
 
+        marker = root / "retired-flag-ran"
+        valid = root / "retired_flag.py"
+        valid.write_text(f"open({str(marker)!r}, 'w').close()\n")
+        image = root / "retired-flag-image"
+        for command, extra in (("check", []), ("build", ["-o", image]), ("run", [])):
+            refused = run(imre, command, valid, "--runtime-imports", *extra)
+            assert refused.returncode != 0 and refused.stdout == b"", refused
+            assert b"Usage: imre check" in refused.stderr, refused.stderr
+            assert not marker.exists() and not image.exists()
+
         entry = root / "serve.py"
         entry.write_text("from application import make_endpoint\nprint(__name__, make_endpoint('ready')())\n")
         (root / "application.py").write_text(
@@ -1827,9 +1836,9 @@ def main():
         )
         reference = run(sys.executable, "-B", entry)
         assert (reference.returncode, reference.stdout) == (0, b"__main__ ready\n"), reference.stderr
-        opted_in = run(imre, "run", entry, "--runtime-imports", "--quiet")
-        assert (opted_in.returncode, opted_in.stdout) == (0, reference.stdout), opted_in.stderr
-        # A cached object-runtime executable cannot satisfy a subsequent static build.
+        # The module launcher executes this closed local package with its Python closure.
+        launched = run(imre, "-B", "-m", entry.stem)
+        assert (launched.returncode, launched.stdout) == (0, reference.stdout), launched.stderr
         ordinary = run(imre, "run", entry, "--quiet")
         assert ordinary.returncode != 0 and b"local functions require" in ordinary.stderr, ordinary.stderr
 
@@ -1841,8 +1850,8 @@ def main():
             "    spec = ModuleSpec('pkg', None, origin='memory', is_package=True)\n"
             "    print(spec.name, spec.origin, spec.submodule_search_locations)\n"
         )
-        opted_in = run(imre, "run", spec_entry, "--runtime-imports", "--quiet")
-        assert (opted_in.returncode, opted_in.stdout) == (0, b"pkg memory []\n"), opted_in.stderr
+        launched = run(imre, "-B", "-m", spec_entry.stem)
+        assert (launched.returncode, launched.stdout) == (0, b"pkg memory []\n"), launched.stderr
 
         (root / "reader.py").write_text(
             "for _ in range(3):\n    print(repr(input()))\n"
@@ -1903,7 +1912,7 @@ def main():
         streams = root / "streams.py"
         streams.write_bytes((Path(__file__).with_name("fixtures") / "boxed_sys_output.py").read_bytes())
         expected = run(sys.executable, "-B", streams)
-        actual = run(imre, "run", streams, "--runtime-imports", "--quiet")
+        actual = run(imre, "-B", "-m", streams.stem)
         assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
         assert actual.stdout == expected.stdout == "stdout π\nraw:then:text\nAoldB\\xe9C".encode()
         assert actual.stderr == expected.stderr == "stderr 🌍\nrestored\nbinary stderr\n".encode()
@@ -1911,7 +1920,7 @@ def main():
         shutdown = Path(__file__).with_name("fixtures") / "boxed_stdio_shutdown.py"
         for mode, code in (("broken-pipe", 120), ("detached", 120), ("rewrapped", 0)):
             reference = run(sys.executable, "-B", shutdown, mode)
-            result = run(imre, "run", shutdown, "--runtime-imports", "--quiet", "--", mode)
+            result = run(imre, "-B", "-m", shutdown.stem, mode, extra={"PYTHONPATH": str(shutdown.parent)})
             assert result.returncode == reference.returncode == code, result.stderr
             assert (result.stdout, result.stderr) == (reference.stdout, reference.stderr)
 
@@ -1951,21 +1960,21 @@ def main():
             "    raise OSError(28, 'outer') from exc\n"
         )
         expected = run(sys.executable, "-B", chained)
-        actual = run(imre, "run", chained, "--runtime-imports", "--quiet")
+        actual = run(imre, "-B", "-m", chained.stem)
         assert expected.returncode == actual.returncode == 1
         assert actual.stderr == expected.stderr, (actual.stderr, expected.stderr)
 
         string_io = root / "string_io.py"
         string_io.write_bytes((Path(__file__).with_name("fixtures") / "boxed_string_io.py").read_bytes())
         expected = run(sys.executable, "-B", string_io)
-        actual = run(imre, "run", string_io, "--runtime-imports", "--quiet")
+        actual = run(imre, "run", string_io, "--quiet")
         assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
         assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
 
         for fixture in ("boxed_exit_stack.py", "boxed_async_exit_stack.py", "boxed_pydoc.py", "io_dict_descriptor.py"):
             script = Path(__file__).with_name("fixtures") / fixture
             expected = run(sys.executable, "-B", script)
-            actual = run(imre, "run", script, "--runtime-imports", "--quiet")
+            actual = run(imre, "-B", "-m", script.stem, extra={"PYTHONPATH": str(script.parent)})
             assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
             assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
 
@@ -2039,6 +2048,9 @@ def main():
                 actual.stderr,
                 expected.stderr,
             )
+
+        def compare_module(source):
+            compare("-B", "-m", source.stem, extra={"PYTHONPATH": str(source.parent)})
 
         late_future = root / "late_future.py"
         for prefix, line in (("import __future__\n", 2),
@@ -2669,7 +2681,7 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
             array_import.write_text(
                 statement + '\nvalues = cls("i", [7])\nprint(type(values) is cls, list(values))\n'
             )
-            compare("-B", array_import, native_args=("run", array_import, "--runtime-imports", "--quiet"))
+            compare("-B", "-m", array_import.stem)
 
         zoneinfo_entry = root / "zoneinfo_entry.py"
         (root / "zoneinfo_helper.py").write_text("import zoneinfo as provider\n")
@@ -2796,12 +2808,12 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         finally:
             local_inspect.unlink()
         static_fixture = Path(__file__).with_name("fixtures") / "boxed_getattr_static.py"
-        compare("-IB", static_fixture, native_args=("run", static_fixture, "--runtime-imports", "--quiet"))
+        compare_module(static_fixture)
         inspect_fixture = Path(__file__).with_name("fixtures") / "boxed_inspect_coroutine.py"
         (root / "view_inspection.py").write_bytes(inspect_fixture.read_bytes())
         inspect_entry = root / "inspect_views.py"
         inspect_entry.write_text("import view_inspection\n")
-        compare("-B", inspect_entry, native_args=("run", inspect_entry, "--runtime-imports", "--quiet"))
+        compare_module(inspect_entry)
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_proxy_operators.py")
         compare("-IB", "-c", "from operator import __getitem__; print(__getitem__((11,), 0))")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_update_wrapper.py")
@@ -2951,10 +2963,9 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         )
         if os.name == "posix":
             immediate_exit = Path(__file__).resolve().parent / "fixtures/os_immediate_exit.py"
-            for flags in ((), ("--runtime-imports",)):
-                compare("-IB", immediate_exit, status=37,
-                        native_args=("run", immediate_exit, "--quiet", "--opt-level", "0", *flags),
-                        native_timeout=300)
+            compare("-IB", immediate_exit, status=37,
+                    native_args=("run", immediate_exit, "--quiet", "--opt-level", "0"),
+                    native_timeout=300)
         compare("-IB", "-c", "raise SystemExit")
         compare("-IB", "-c", "from sys import exit\nexit(None)")
         for source in ('import sys\nsys.exit("7")', 'raise SystemExit("7")'):
@@ -3198,7 +3209,7 @@ assert namespace["found"] is import_members.found is sys.modules["import_members
             "    assert (child.stdout, child.stderr, child.returncode) == (b'child\\n', b'', 47)\n"
         )
         image = root / "boxed-executable"
-        built = run(imre, "build", "--runtime-imports", source, "-o", image)
+        built = run(imre, "build", source, "-o", image)
         assert built.returncode == 0, built.stderr
         helper_dir = root / "python-helpers"
         helper_dir.mkdir()
@@ -3319,7 +3330,7 @@ def report(text):
         for limit in ("640", "0"):
             digit_env = {"PYTHONINTMAXSTRDIGITS": limit}
             compare("-B", token_limit, extra=digit_env)
-            compare("-B", token_limit, extra=digit_env, native_args=("run", token_limit, "--runtime-imports", "--quiet"))
+            compare("-B", token_limit, extra=digit_env, native_args=("run", token_limit, "--quiet"))
 
         compare(
             "-B", "-c",
@@ -3509,7 +3520,7 @@ def report(text):
             "    return P._is_protocol\nprint(build())",
         )
         final_fixture = fixtures / "boxed_typing_final.py"
-        compare("-IB", final_fixture, native_args=("run", final_fixture, "--runtime-imports", "--quiet"))
+        compare("-IB", final_fixture, native_args=("run", final_fixture, "--quiet"))
         # Check each call in its own module so one object input cannot mask another.
         ini = "[formatters]\nkeys=\n[handlers]\nkeys=\n[loggers]\nkeys=root\n[logger_root]\nlevel=INFO\nhandlers=\n"
         config_path = root / "logging.ini"
@@ -3556,7 +3567,7 @@ def report(text):
         io_registration = fixtures / "io_abc_registration.py"
         compare("-IB", io_registration, native_args=("run", io_registration, "--quiet"))
         override_fixture = fixtures / "boxed_typing_override.py"
-        compare("-IB", override_fixture, native_args=("run", override_fixture, "--runtime-imports", "--quiet"))
+        compare("-IB", override_fixture, native_args=("run", override_fixture, "--quiet"))
         reader_fixture = fixtures / "io_buffered_reader_type.py"
         compare("-IB", reader_fixture, native_args=("run", reader_fixture, "--quiet"))
         compare(
@@ -3738,12 +3749,12 @@ def report(text):
         bad_alias = run(imre, "check", socket_alias)
         assert bad_alias.returncode != 0 and b"expected int" in bad_alias.stderr, bad_alias.stderr
         io_fixture = fixtures / "boxed_io_indirect_import.py"
-        compare("-IB", io_fixture, native_args=("run", io_fixture, "--runtime-imports", "--quiet"))
+        compare_module(io_fixture)
         for name in ("boxed_prelinked_coroutine.py", "boxed_coroutine_origin.py"):
             coroutine_fixture = fixtures / name
-            compare("-IB", coroutine_fixture, native_args=("run", coroutine_fixture, "--runtime-imports", "--quiet"))
+            compare_module(coroutine_fixture)
         builtins_fixture = fixtures / "boxed_builtins_module.py"
-        compare("-IB", builtins_fixture, native_args=("run", builtins_fixture, "--runtime-imports", "--quiet"))
+        compare_module(builtins_fixture)
         compare(
             "-I", "-c",
             "import atexit, threading\n"
@@ -3772,11 +3783,11 @@ def report(text):
             "boxed_thread_hash_update.py",
         ):
             thread_fixture = fixtures / name
-            compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
+            compare_module(thread_fixture)
         metaclass_new = fixtures / "ordinary_metaclass_new.py"
-        compare("-IB", metaclass_new, native_args=("run", metaclass_new, "--runtime-imports", "--quiet"))
+        compare("-IB", metaclass_new, native_args=("run", metaclass_new, "--quiet"))
         class_locals = fixtures / "boxed_class_locals.py"
-        compare("-IB", class_locals, native_args=("run", class_locals, "--runtime-imports", "--quiet"))
+        compare_module(class_locals)
         # An unused generic in the entry must preserve first-party argument diagnostics.
         generic_scope = root / "generic-scope-contract"
         generic_scope.mkdir()
@@ -3795,25 +3806,22 @@ def report(text):
         for name in ("module_generic_function.py", "postponed_generic_method.py"):
             generic = fixtures / name
             compare("-IB", generic, native_args=("run", generic, "--quiet"))
-            compare("-IB", generic, native_args=("run", generic, "--runtime-imports", "--quiet"))
         compare("-IB", "-c", "import typing; from typing import Text; print(Text is typing.Text is str)")
         reveal = fixtures / "typing_reveal_type.py"
         for command in ((sys.executable, "-IB", reveal),
-                        (imre, "run", reveal, "--quiet"),
-                        (imre, "run", reveal, "--runtime-imports", "--quiet")):
+                        (imre, "run", reveal, "--quiet")):
             result = run(*command)
             assert (result.returncode, result.stdout, result.stderr) == (
                 0, b"", b"Runtime type is 'Marker'\nRuntime type is 'type'\n",
             ), result
         introspection = fixtures / "typing_introspection_functions.py"
         compare("-IB", introspection, native_args=("run", introspection, "--quiet"))
-        compare("-IB", introspection, native_args=("run", introspection, "--runtime-imports", "--quiet"))
         hints_fixture = fixtures / "boxed_typing_get_type_hints.py"
-        compare("-IB", hints_fixture, native_args=("run", hints_fixture, "--runtime-imports", "--quiet"))
+        compare("-IB", hints_fixture, native_args=("run", hints_fixture, "--quiet"))
         if sys.platform == "linux":
             exe = root / "marshal-allocation"
-            built = run(imre, "build", fixtures / "boxed_marshal_allocation.py",
-                        "--quiet", "--no-cache", "--runtime-imports", "-o", exe)
+            built = run(imre, "build", imported_fixture(root, fixtures / "boxed_marshal_allocation.py"),
+                        "--quiet", "--no-cache", "-o", exe)
             assert built.returncode == 0, built.stderr
             check_marshal_allocation(exe)
         if sys.platform == "linux":
@@ -3822,7 +3830,7 @@ def report(text):
             source = root / "nested.py"
             source.write_text("".join(" " * i + "if True:\n" for i in range(96)) + " " * 96 + "result = 7\n")
             executable = root / "source-branches"
-            built = run(imre, "build", fixtures / "boxed_source_lower_stack.py", "--runtime-imports", "-o", executable)
+            built = run(imre, "build", imported_fixture(root, fixtures / "boxed_source_lower_stack.py"), "-o", executable)
             assert built.returncode == 0, built.stderr
 
             def small_stack():
@@ -3914,7 +3922,7 @@ def report(text):
         local_hmac = shadow / "hmac.py"
         compare(
             "-IB", shadow_entry, local_hmac,
-            native_args=("run", shadow_entry, "--module-root", shadow, "--runtime-imports", "--quiet", "--", local_hmac),
+            native_args=("run", shadow_entry, "--module-root", shadow, "--quiet", "--", local_hmac),
         )
 
         # Only exercise legacy-provider policy when the host OpenSSL can load it.
@@ -3948,7 +3956,7 @@ for name in ("md4", "ripemd160"):
                 hmac_entry = fixtures / "bytes/hmac_digest.py"
                 compare(
                     "-IB", hmac_entry, "legacy-policy", extra=policy_env,
-                    native_args=("run", hmac_entry, "--runtime-imports", "--quiet", "--", "legacy-policy"),
+                    native_args=("run", hmac_entry, "--quiet", "--", "legacy-policy"),
                 )
 
         compare("-B", fixtures / "boxed_unittest_result_registry.py", native_timeout=300)
@@ -3960,7 +3968,7 @@ for name in ("md4", "ripemd160"):
         call_args = fixtures / "unittest_mock_call_args.py"
         compare("-IB", call_args, native_args=("run", call_args, "--quiet"))
         boxed_call_args = fixtures / "boxed_unittest_call_args.py"
-        compare("-IB", boxed_call_args, native_args=("run", boxed_call_args, "--runtime-imports", "--quiet"))
+        compare_module(boxed_call_args)
         mock_compile_flags = {"IMREFLAGS": "--opt-level 0"}
         patch_multiple = root / "patch_multiple.py"
         for call in ("with patch.multiple", "replace = patch.multiple\nwith replace"):
@@ -3989,12 +3997,11 @@ for name in ("md4", "ripemd160"):
             "boxed_unittest_autospec.py", "unittest_mock_callable_spec.py",
         ):
             fixture = fixtures / name
-            for import_flags in ((), ("--runtime-imports",)):
-                compare(
-                    "-IB", fixture, extra=mock_compile_flags,
-                    native_args=("run", fixture, *import_flags, "--quiet"),
-                    native_timeout=300,
-                )
+            compare(
+                "-IB", fixture, extra=mock_compile_flags,
+                native_args=("run", fixture, "--quiet"),
+                native_timeout=300,
+            )
         compare(
             "-B", "-c",
             "from ast import BinOp, ClassDef\nimport ast\n"
@@ -4004,7 +4011,6 @@ for name in ("md4", "ripemd160"):
         for name in ("boxed_unittest_mock_any.py", "boxed_unittest_mock_side_effect.py", "boxed_unittest_mock_call.py"):
             fixture = fixtures / name
             compare("-IB", fixture, native_args=("run", fixture, "--quiet"))
-            compare("-IB", fixture, native_args=("run", fixture, "--runtime-imports", "--quiet"))
         method_entry = root / "scalar_method.py"
         for body in (
             "assert b'xy'.rjust(3, b'.') == b'.xy'",
@@ -4574,7 +4580,7 @@ for name in ("md4", "ripemd160"):
             if fixture == "boxed_generator_delegation.py":
                 named = root / fixture
                 named.write_text(plugin.read_text() + "\ncurrent()")
-                compare("-IB", named, native_args=("run", named, "--runtime-imports", "--quiet"))
+                compare("-IB", named, native_args=("run", named, "--quiet"))
             if fixture == "boxed_json_module_doc.py":
                 compare("-IOOB", "-c", imports + "arithmetic.current()")
             if fixture == "boxed_interactive.py":
@@ -4800,7 +4806,7 @@ else:
             assert oracle.returncode == 0 and oracle.stdout.startswith(b"OSError (5,") and not oracle.stderr, oracle
             for opt in ("0", "3"):
                 binary = root / f"entropy-O{opt}"
-                build = run(imre, "build", probe, "--runtime-imports", "--opt-level", opt, "-o", binary)
+                build = run(imre, "build", imported_fixture(root, probe), "--opt-level", opt, "-o", binary)
                 assert build.returncode == 0, build.stderr
                 fault = run(binary, extra=injected)
                 assert (fault.returncode, fault.stdout, fault.stderr) == (0, oracle.stdout, b""), fault
@@ -4809,7 +4815,7 @@ else:
         # A nested declaration is invalid even if the surrounding function is never called.
         source = root / "generic-nonlocal.py"
         source.write_text("def factory():\n    class Box[T]:\n        def f(self):\n            nonlocal T\n")
-        invalid = run(imre, "build", source, "--runtime-imports", "-o", root / "invalid-nonlocal")
+        invalid = run(imre, "build", source, "-o", root / "invalid-nonlocal")
         assert invalid.returncode and b"SyntaxError: nonlocal binding not allowed for type parameter 'T'" in invalid.stderr, invalid
 
         for fixture in ("boxed_typing_generics.py", "boxed_typing_list.py",
@@ -4823,7 +4829,7 @@ else:
             source.write_text("".join(" " * i + "def f():\n" for i in range(64)) + " " * 64 + "pass\n")
             executable = root / "walk-statements"
             fixture = fixtures / "boxed_ast_statement_stack.py"
-            built = run(imre, "build", fixture, "--runtime-imports", "-o", executable)
+            built = run(imre, "build", fixture, "-o", executable)
             assert built.returncode == 0, built.stderr
 
             def small_stack():
@@ -4912,7 +4918,7 @@ except ImportError:
         for limit in ("640", "0"):
             digit_env = {"PYTHONINTMAXSTRDIGITS": limit}
             compare("-B", digits, extra=digit_env)
-            compare("-B", digits, extra=digit_env, native_args=("run", digits, "--runtime-imports", "--quiet"))
+            compare("-B", digits, extra=digit_env, native_args=("run", digits, "--quiet"))
 
         checked = run(
             imre,

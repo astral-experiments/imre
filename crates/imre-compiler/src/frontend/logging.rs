@@ -209,7 +209,7 @@ impl Checker<'_> {
             return Err(error(
                 self.source,
                 call,
-                "logging.shutdown arguments require --runtime-imports",
+                "native lowering of logging.shutdown supports only the no-argument form",
             ));
         }
         let error = self.scoped_builtin_error("logging.shutdown", call);

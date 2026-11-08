@@ -109,7 +109,7 @@ jobs:
               grep -Fx "imre cache hit" cache.log
               test "$("$bindir/imre" run hello.py --allocator jemalloc)" = 42
               echo "from json.decoder import JSONDecoder; from json.encoder import JSONEncoder; print(JSONDecoder().decode(JSONEncoder().encode([42]))[0])" > boxed.py
-              "$bindir/imre" build boxed.py --runtime-imports --opt-level 3 --no-cache --verbose-link -o boxed 2>boxed-link.log
+              "$bindir/imre" build boxed.py --opt-level 3 --no-cache --verbose-link -o boxed 2>boxed-link.log
               grep -F -- "\"$bindir/imre-toolchain/lib/imre-stdlib/O3/providers.a\"" boxed-link.log
               test "$(./boxed)" = 42
             ' < "imre-$TARGET.tar.gz"

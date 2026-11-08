@@ -96,7 +96,7 @@ At baseline, both full-module native builds succeeded and their class commands e
 
 The raw snapshot `imre-typing-annotated-named-fbfad397.tar.gz` (956854 bytes, SHA-256 `b8ae9fa110e79237c70cc313590b5448249e8eb3defe4cef92d62f57982fcc80`) contains `SHA256SUMS`, the runners and fixtures, the full phase history and the process logs. After extraction, `annotated-work/` paths resolve relative to its top directory. For the `literal-archive/` anchors, extract `literal-archive/imre-typing-LiteralTests-coordinator-e3ff3e59.tar.gz` into `literal-archive/`. The suffix `#L` identifies the one-based line in the named output file. Run `sha256sum -c SHA256SUMS` from the snapshot root to verify the archive members and the nested Literal archive.
 
-### Reproduce the Annotated runs
+### Reproduce the historical Annotated runs
 
 From the repository root, choose a staging route. `isolated` runs the complete `AnnotatedTests` class, and `clients` runs the four methods selected from the complete `GetTypeHintsTests` class. `intact` and `clients-intact` use the same respective drivers with the full upstream module. The `intact-both` route stages both tested drivers beside a single dispatcher. The staging helper reads the vendored CPython fixtures and copies the original class, base and helper bodies byte for byte.
 

@@ -89,33 +89,30 @@ def run_suite(args, reference_skips):
             proof["mutant_suite_sha256"] = digest(source)
         _, proof["cpython"] = check([sys.executable, "-E", "-B", entry], work, expected, args.negative_control, args.timeout)
 
-        def measure(job):
-            level, mode = job
-            directory = work / f"{mode}-O{level}"
+        def measure(level):
+            directory = work / f"ordinary-O{level}"
             directory.mkdir()
             binary = directory / "suite"
             command = [imre, "build", entry, "--module-root", lib, "--no-cache", "--runtime", runtime,
                        "--clang", clang, "--opt-level", str(level), "-o", binary]
-            if mode == "boxed":
-                command.append("--runtime-imports")
-            print(f"Building CSV {mode} -O{level}", flush=True)
+            print(f"Building CSV -O{level}", flush=True)
             subprocess.run(command, cwd=directory, env=env, check=True, timeout=args.timeout)
             records, receipt = check([binary], directory, native, args.negative_control, args.timeout)
             receipt["executable_sha256"] = digest(binary)
-            print(f"CSV {mode} -O{level}: {len(records)} tests, {receipt['summary']}", flush=True)
+            print(f"CSV -O{level}: {len(records)} tests, {receipt['summary']}", flush=True)
             return records, receipt
 
-        jobs = [(0, "ordinary")] if args.negative_control else [(n, m) for n in (0, 3) for m in ("ordinary", "boxed")]
+        levels = [0] if args.negative_control else [0, 3]
         with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            runs = dict(zip(jobs, pool.map(measure, jobs), strict=True))
+            runs = dict(zip(levels, pool.map(measure, levels), strict=True))
     if args.negative_control:
         proof["target"] = FAULT
-        proof["ordinary_O0"] = runs[0, "ordinary"][1]
+        proof["ordinary_O0"] = runs[0][1]
         args.result.write_text(json.dumps(proof, indent=2) + "\n")
         return 0
     reports = []
     for level in (0, 3):
-        records, ordinary = runs[level, "ordinary"]
+        records, ordinary = runs[level]
         discovered = [(name, name.rsplit(".", 1)[0]) for name, _ in records]
         observations = {}
         for key, (_, status) in zip(occurrence_keys(name for name, _ in records), records, strict=True):
@@ -128,7 +125,7 @@ def run_suite(args, reference_skips):
                        "roles": roles(body="unobserved", assertions="unobserved", operation="unobserved", fixture="imre")}
             observations[key] = obs
         report = build_report(reference, level, discovered, observations, exceptions=reference_skips(level))
-        report["intact_suite"] = {**proof, "ordinary": ordinary, "boxed": runs[level, "boxed"][1]}
+        report["intact_suite"] = {**proof, "ordinary": ordinary}
         reports.append(report)
     write_reports(args.result, reports, reference)
     return 0

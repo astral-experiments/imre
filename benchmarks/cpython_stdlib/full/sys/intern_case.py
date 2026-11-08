@@ -116,10 +116,10 @@ def observation(module, toolchain, directory, source):
         (path / "intern_argument.py").write_text(code, encoding="utf-8")
         # Import the original class through the same boxed module loader as Jinja.
         entry = path / "case.py"
-        entry.write_text('import sys\nif sys.argv[1] == "check":\n    import intern_argument\n')
+        entry.write_text('from importlib import import_module\nimport sys\nif sys.argv[1] == "check":\n    import_module("intern_argument")\n')
         program = path / "case"
         build = subprocess.run(
-            [toolchain.imre, "build", entry, "--runtime-imports", "--module-root", path,
+            [toolchain.imre, "build", entry, "--module-root", path,
              "--runtime", toolchain.runtime, "--clang", toolchain.clang,
              "--opt-level", str(toolchain.level), "--no-cache", "-o", program],
             capture_output=True, text=True, timeout=180,

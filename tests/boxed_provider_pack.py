@@ -85,7 +85,7 @@ def main():
         entry = create_project(root)
         env = {'PATH': os.environ['PATH'], 'HOME': temp, 'LC_ALL': 'C.UTF-8'}
         binary = root / 'program'
-        subprocess.run([compiler, 'build', entry, '--runtime-imports', '--opt-level', args.opt_level,
+        subprocess.run([compiler, 'build', entry, '--opt-level', args.opt_level,
                         '--no-cache', '-o', binary], cwd=root, env=env, check=True)
         archives = compiler.parent / 'imre-toolchain' / 'lib' / 'imre-stdlib'
         assert provider_symbols(binary) & provider_symbols(archives / f'O{args.opt_level}/providers.a'), (
