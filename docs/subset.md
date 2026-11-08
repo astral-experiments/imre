@@ -1533,8 +1533,8 @@ preserving the selected code generation mode. These options also work in
 `IMREFLAGS` and `IMRE_ENCODED_FLAGS`.
 
 Custom Clang drivers and raw `-C link-arg` arguments, explicit targets, emitted
-LLVM, sanitizers, ThinLTO, and unsupported toolchains use the whole-program
-backend without caching. By default, cache data lives under
+LLVM, sanitizers, ThinLTO, and unsupported toolchains bypass the native object
+and executable cache. By default, cache data lives under
 `$XDG_CACHE_HOME/imre/v1` or `~/.cache/imre/v1`. An absolute `IMRE_CACHE_DIR`
 overrides the parent directory. Older objects stay available for reverts until
 that cache directory is cleared.
@@ -1552,7 +1552,7 @@ target/release/imre build tests/programs/ownership.py -o /tmp/ownership --emit-l
 
 Build the compiler and runtime archive from the same revision. Imre finds the archive beside the compiler executable, or accepts an explicit path with `--runtime`. `--clang` selects the Clang driver. An empty argument (`--clang ''`) restores the default toolchain, including after a driver was set in `IMREFLAGS`. `--opt-level` selects 0 through 3 (default 3). Every input module, executable, runtime, explicit ThinLTO linker, and saved LLVM output must have a distinct file identity; symlinks and hard links cannot bypass the input overwrite check.
 
-`--lto-linker PATH` enables optional cross-language ThinLTO and requires explicit `--runtime` and `--target TRIPLE`. Build that runtime with `RUSTFLAGS=-Clinker-plugin-lto` in a separate target directory, and select an LLVM linker that can read both the Rust and Clang bitcode. On Linux, use Clang 18 with the pinned Rust toolchain's bundled LLD. At optimization level 3, Imre raises LLVM's import and inlining budgets to 1,000 so runtime accessors can inline across the language boundary; this trades additional code size and link work for fewer runtime calls. Other optimization levels retain LLVM's normal budgets. `--target` also works without ThinLTO; it does not expand the supported runtime platforms.
+`--lto-linker PATH` enables optional cross-language ThinLTO and requires explicit `--runtime` and `--target TRIPLE`. Build that runtime with `RUSTFLAGS=-Clinker-plugin-lto` in a separate target directory, and select an LLVM linker that can read both the Rust and Clang bitcode. On Linux, use Clang 18 with the pinned Rust toolchain's bundled LLD. In boxed programs, Imre passes independent module initializers to the selected Clang as separate LLVM inputs. LLD can reuse their backends across programs through its ThinLTO cache. Typed programs, `--whole-program`, `--emit-llvm`, and sanitizer builds retain their existing ThinLTO input layout. At optimization level 3, Imre raises LLVM's import and inlining budgets to 1,000 so runtime accessors can inline across the language boundary; this trades additional code size and link work for fewer runtime calls. Other optimization levels retain LLVM's normal budgets. `--target` also works without ThinLTO; it does not expand the supported runtime platforms.
 
 On Apple Silicon, build the bitcode runtime with `--target aarch64-apple-darwin` so Cargo builds host tools normally. Pass the resulting `target/lto/aarch64-apple-darwin/release/libimre_runtime.a` to `--runtime`. Use the Mach-O linker `ld64.lld` from an LLVM release that reads both the Rust bitcode and your macOS SDK.
 

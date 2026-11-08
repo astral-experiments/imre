@@ -621,6 +621,7 @@ pub fn compile_file(
     options: &CompileOptions,
 ) -> Result<Compilation, String> {
     compile_file_with_layout(path, module_root, options, BoxedLayout::Whole)
+        .map(UnitCompilation::into_whole)
 }
 
 /// Preserves the whole-program IR and returns independent boxed initializers for native codegen.
@@ -636,7 +637,16 @@ pub fn compile_file_with_boxed_units(
         options,
         BoxedLayout::WholeWithUnits(&mut units),
     )?;
-    Ok((compilation, units))
+    Ok((compilation.into_whole(), units))
+}
+
+/// Keeps typed programs whole and emits independent boxed initializers for ThinLTO.
+pub fn compile_file_for_thin_lto(
+    path: &Path,
+    module_root: Option<&Path>,
+    options: &CompileOptions,
+) -> Result<UnitCompilation, String> {
+    compile_file_with_layout(path, module_root, options, BoxedLayout::Split)
 }
 
 /// Resolves and checks the source graph once for the requested boxed outputs.
@@ -645,14 +655,17 @@ fn compile_file_with_layout(
     module_root: Option<&Path>,
     options: &CompileOptions,
     layout: BoxedLayout<'_>,
-) -> Result<Compilation, String> {
+) -> Result<UnitCompilation, String> {
     let typed = |graph: &mut modules::SourceGraph, (module, _): CheckedIr| {
         let ranges = ranges::analyze(&module);
         let (llvm_ir, prefer_objects) =
             llvm::emit_file(&module, &ranges, options.address_sanitizer)?;
         let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
-        let compilation = Compilation {
-            llvm_ir,
+        let compilation = UnitCompilation {
+            units: vec![CodegenUnit {
+                name: "__main__".into(),
+                llvm_ir,
+            }],
             extension_archives: graph
                 .modules
                 .iter()
@@ -670,16 +683,7 @@ fn compile_file_with_layout(
         Default::default(),
         checked_lower,
         typed,
-        |mut c| Compilation {
-            llvm_ir: c
-                .units
-                .pop()
-                .expect("whole boxed program has one unit")
-                .llvm_ir,
-            input_paths: c.input_paths,
-            source_inputs: c.source_inputs,
-            extension_archives: c.extension_archives,
-        },
+        |c| c,
     )
 }
 
@@ -694,6 +698,21 @@ pub struct UnitCompilation {
     pub source_inputs: SourceInputs,
     /// Native archives reached by the static import graph, in link order.
     pub extension_archives: Vec<PathBuf>,
+}
+
+impl UnitCompilation {
+    fn into_whole(mut self) -> Compilation {
+        Compilation {
+            llvm_ir: self
+                .units
+                .pop()
+                .expect("whole program has one unit")
+                .llvm_ir,
+            input_paths: self.input_paths,
+            source_inputs: self.source_inputs,
+            extension_archives: self.extension_archives,
+        }
+    }
 }
 
 /// Reuses ty's semantic queries across revisions of a first-party program in this process.
