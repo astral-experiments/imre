@@ -395,14 +395,20 @@ fn run() -> Result<ExitCode, String> {
         Units(Vec<CodegenUnit>),
     }
     let mut boxed_ir_dump = None;
-    let (code, input_paths, mut sources, extension_archives) = if split {
-        let c = imre_compiler::compile_file_units(&source_path, module_root.as_deref(), &options)?;
-        (
-            Code::Units(c.units),
-            c.input_paths,
-            c.source_inputs,
-            c.extension_archives,
-        )
+    let thin_units =
+        lto_linker.is_some() && !whole_program && llvm_path.is_none() && !options.address_sanitizer;
+    let (code, input_paths, mut sources, extension_archives) = if split || thin_units {
+        let mut c = if thin_units {
+            imre_compiler::compile_file_for_thin_lto(&source_path, module_root.as_deref(), &options)
+        } else {
+            imre_compiler::compile_file_units(&source_path, module_root.as_deref(), &options)
+        }?;
+        let code = if thin_units && c.units.len() == 1 {
+            Code::Whole(c.units.pop().unwrap().llvm_ir)
+        } else {
+            Code::Units(c.units)
+        };
+        (code, c.input_paths, c.source_inputs, c.extension_archives)
     } else {
         let (c, units) =
             if native_link && !whole_program && options.address_sanitizer && llvm_path.is_some() {
@@ -481,6 +487,22 @@ fn run() -> Result<ExitCode, String> {
             let input = file.path().to_owned();
             temporary = Some(file);
             vec![input]
+        }
+        Code::Units(units) if thin_units => {
+            let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+            let mut inputs = Vec::with_capacity(units.len());
+            for (i, unit) in units.into_iter().enumerate() {
+                let path = dir.path().join(format!("unit-{i}.ll"));
+                let mut file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+                // LLVM uses source_filename in its internal symbol identities and module hash.
+                let id = blake3::hash(unit.llvm_ir.as_bytes());
+                writeln!(file, "source_filename = \"imre-{id}\"")
+                    .and_then(|()| file.write_all(unit.llvm_ir.as_bytes()))
+                    .map_err(|e| e.to_string())?;
+                inputs.push(path);
+            }
+            scratch = Some(dir);
+            inputs
         }
         Code::Units(units) => {
             if stage.is_none() {
