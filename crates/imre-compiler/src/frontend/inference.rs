@@ -525,9 +525,10 @@ impl Inference {
         } = request
         {
             if params.len() + skip != signature.params.len() {
-                return Err(Failure::Diagnostic(Diagnostic::plain(
+                return Err(Diagnostic::plain(
                     "function value does not match its Callable parameter count",
-                )));
+                )
+                .into());
             }
             for (index, ty) in params.into_iter().enumerate() {
                 self.learn_parameter(signature.id, index + skip, ty);

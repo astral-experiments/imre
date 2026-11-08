@@ -1787,7 +1787,7 @@ fn recursive_call_root(graph: &[HashSet<usize>]) -> Option<usize> {
 }
 
 fn error(source: &str, node: &impl Ranged, message: &str) -> Failure {
-    Failure::Diagnostic(Diagnostic::at(source, node, message.to_owned()))
+    Diagnostic::at(source, node, message.to_owned()).into()
 }
 
 pub(crate) fn diagnostic_message(source: &str, node: &impl Ranged, message: &str) -> String {
