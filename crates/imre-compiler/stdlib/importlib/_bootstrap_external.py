@@ -177,9 +177,9 @@ class FileLoader:
         return self.path
 
     def get_data(self, path):
-        if isinstance(self, SourceFileLoader):
+        if isinstance(self, (SourceLoader, SourcelessFileLoader)):
             return _read_source_file(self, str(path))
-        with open(path, "rb") as file:
+        with _io.FileIO(path, "r") as file:
             return file.read()
 
     @_check_name
@@ -261,14 +261,12 @@ class SourceFileLoader(FileLoader, SourceLoader):
         return _path_stats(path)
 
 
-def _file_loader_defaults(location=None):
-    """Choose a default loader when a FileFinder factory returns None."""
-    if location is not None and location.endswith(tuple(_imp.extension_suffixes())):
-        raise NotImplementedError("default extension file loaders are unsupported")
-    return (SourceFileLoader, SOURCE_SUFFIXES), (SourcelessFileLoader, BYTECODE_SUFFIXES)
+def _get_supported_file_loaders():
+    """Return the file loaders and suffixes used by path hooks and file specs."""
+    return [(SourceFileLoader, SOURCE_SUFFIXES), (SourcelessFileLoader, BYTECODE_SUFFIXES)]
 
 
-_code_type = type(_file_loader_defaults.__code__)
+_code_type = type(_get_supported_file_loaders.__code__)
 
 _CASE_INSENSITIVE_PLATFORMS_STR_KEY = 'win',
 _CASE_INSENSITIVE_PLATFORMS_BYTES_KEY = 'cygwin', 'darwin', 'ios', 'tvos', 'watchos'
@@ -543,7 +541,9 @@ def spec_from_file_location(name, location=None, *, loader=None,
 
     # Pick a loader if one wasn't provided.
     if loader is None:
-        for loader_class, suffixes in _file_loader_defaults(location):
+        if location.endswith(tuple(_imp.extension_suffixes())):
+            raise NotImplementedError("default extension file loaders are unsupported")
+        for loader_class, suffixes in _get_supported_file_loaders():
             if location.endswith(tuple(suffixes)):
                 loader = loader_class(name, location)
                 spec.loader = loader

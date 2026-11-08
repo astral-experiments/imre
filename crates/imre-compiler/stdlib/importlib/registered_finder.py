@@ -30,7 +30,7 @@ def _installed_source_spec(fullname, registry_path, target):
 
 class _RegisteredFileFinder(FileFinder):
     def __init__(self, path, registry_path):
-        super().__init__(path, *_file_loader_defaults())
+        super().__init__(path, *_get_supported_file_loaders())
         # The compiler also registers virtual paths, such as '<imre stdlib>/unittest'.
         self._registry_path = registry_path
 
@@ -54,7 +54,7 @@ class _RegisteredFileFinder(FileFinder):
         return registered if registered is not None else on_disk
 
 
-_file_path_hook = FileFinder.path_hook(*_file_loader_defaults())
+_file_path_hook = FileFinder.path_hook(*_get_supported_file_loaders())
 
 
 def _registered_path_hook(path):
