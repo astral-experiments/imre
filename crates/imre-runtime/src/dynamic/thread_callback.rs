@@ -417,7 +417,7 @@ impl Callback {
         };
         let defaults = ctx.dict(Vec::new());
         let function =
-            ctx.define_function(code, scope, name, defaults, qualname, NONE, NONE, false);
+            ctx.define_function(code, scope, name, defaults, qualname, NONE, NONE, false)?;
         // Preserve object identity when multiple parameters alias the same lock.
         let mut aliases = HashMap::new();
         aliases

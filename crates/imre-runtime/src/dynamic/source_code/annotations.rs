@@ -364,7 +364,7 @@ impl Context {
             code
         };
         let defaults = self.dict(Vec::new());
-        Ok(self.source_function(code, scope, defaults))
+        self.source_function(code, scope, defaults)
     }
 
     /// Look up a name in the current locals mapping, then in globals and builtins.

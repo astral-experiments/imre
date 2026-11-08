@@ -2032,7 +2032,7 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
         parent.nested.push((key, code));
         code
     };
-    ctx.define_function(
+    let result = ctx.define_function(
         code,
         scope,
         name,
@@ -2041,7 +2041,8 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
         doc,
         annotate,
         annotation_scope,
-    )
+    );
+    finish(ctx, result)
 }
 
 impl Context {
@@ -2220,7 +2221,7 @@ impl Context {
         doc: Id,
         annotate: Id,
         annotation_scope: bool,
-    ) -> Id {
+    ) -> Result<Id> {
         let owner = self.scope_data(scope);
         // A borrowed method only owns its defining class if its code captures __class__.
         let code_data = self.code_object(code);
@@ -2317,7 +2318,10 @@ impl Context {
             while let Some(parent) = self.scope_data(globals).parent {
                 globals = parent;
             }
+            let globals = self.new_function_globals(globals)?;
             self.closure_environment(globals, names, &cells)
+        } else if self.scope_data(scope).parent.is_none() {
+            self.new_function_globals(scope)?
         } else {
             scope
         };
@@ -2326,7 +2330,7 @@ impl Context {
             [only] => *only,
             _ => self.alloc(Value::Tuple(cells)),
         };
-        self.alloc(Value::Function {
+        Ok(self.alloc(Value::Function {
             fields,
             closure,
             code,
@@ -2334,7 +2338,7 @@ impl Context {
             class_cell,
             defaults,
             kwdefaults,
-        })
+        }))
     }
 }
 
@@ -2905,6 +2909,43 @@ mod tests {
     use super::*;
     use std::rc::{Rc, Weak};
 
+    #[test]
+    fn newly_created_functions_capture_rebound_builtins_in_the_same_globals() {
+        let mut ctx = new_context(
+            serde_json::json!({"paths": [], "python_version": "3.14"}),
+            ["imre"],
+        );
+        let old = ctx.dict(Vec::new());
+        let updated = ctx.dict(Vec::new());
+        let key = ctx.text("__builtins__");
+        let globals = ctx.dict(vec![(key, old)]);
+        let first = ctx.function_environment("invoice", globals, old);
+        assert_eq!(ctx.new_function_globals(first).unwrap(), first);
+        ctx.set_dictionary_key(globals, key, updated, None, true)
+            .unwrap();
+        let second = ctx.new_function_globals(first).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(ctx.module_globals(second).unwrap(), globals);
+        assert_eq!(ctx.function_builtins(first).unwrap(), old);
+        assert_eq!(ctx.function_builtins(second).unwrap(), updated);
+        assert_eq!(ctx.new_function_globals(second).unwrap(), second);
+
+        // sys.modules is mutable and cannot identify a function's original builtins.
+        let original = ctx.module("builtins").unwrap();
+        let alternate = ctx.module("sys").unwrap();
+        let builtins_name = ctx.text("builtins");
+        ctx.set_dictionary_key(ctx.modules, builtins_name, alternate, None, true)
+            .unwrap();
+        let ordinary = ctx.scope("app", None);
+        ctx.bind(ordinary, "__builtins__", alternate);
+        let captured = ctx.new_function_globals(ordinary).unwrap();
+        assert_ne!(captured, ordinary);
+        let expected = ctx.definition_builtins(alternate).unwrap();
+        assert_eq!(ctx.function_builtins(captured).unwrap(), expected);
+        ctx.set_dictionary_key(ctx.modules, builtins_name, original, None, true)
+            .unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn native_filename_labels_belong_to_the_interpreter() {
@@ -3083,7 +3124,9 @@ mod tests {
             (filename, location.line),
         );
         let defaults = ctx.dict(Vec::new());
-        let function = ctx.define_function(code, outer, name, defaults, name, NONE, NONE, false);
+        let function = ctx
+            .define_function(code, outer, name, defaults, name, NONE, NONE, false)
+            .unwrap();
         let closure = ctx.lookup_attr(function, "__closure__").unwrap();
         let Value::Tuple(cells) = ctx.heap.get(closure) else {
             unreachable!()
