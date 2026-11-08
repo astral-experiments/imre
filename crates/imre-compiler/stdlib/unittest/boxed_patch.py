@@ -82,6 +82,20 @@ def _enter_patchings(stack, patchings, kwargs):
     return extra
 
 
+def _decorate_patch_class(patcher, cls, *, inspect_all=False):
+    for name in dir(cls):
+        # patch.dict fetches every member before applying the test prefix.
+        if not inspect_all and not name.startswith(patch.TEST_PREFIX):
+            continue
+        method = getattr(cls, name)
+        if inspect_all and not name.startswith(patch.TEST_PREFIX):
+            continue
+        # Some boxed builtins are callable without exposing __call__.
+        if hasattr(method, '__call__') or isinstance(method, type(len)):
+            setattr(cls, name, patcher.copy()(method))
+    return cls
+
+
 class _patch:
     attribute_name = None
     _active_patches = _active_patches
@@ -260,13 +274,7 @@ class _patch:
 
     def __call__(self, func):
         if isinstance(func, type):
-            for name in dir(func):
-                if name.startswith(patch.TEST_PREFIX):
-                    method = getattr(func, name)
-                    # Some boxed builtins are callable without exposing __call__.
-                    if hasattr(method, '__call__') or isinstance(method, type(len)):
-                        setattr(func, name, self.copy()(method))
-            return func
+            return _decorate_patch_class(self, func)
         if hasattr(func, 'patchings'):
             func.patchings.append(self)
             return func
@@ -328,6 +336,21 @@ class _BoxedDictionaryPatch(_DictionaryPatch, ContextDecorator):
         updates = dict(values)
         updates.update(kwargs)
         super().__init__(in_dict, updates, clear)
+
+    def copy(self):
+        return _BoxedDictionaryPatch(self.in_dict, self.values, self.clear)
+
+    def __call__(self, func):
+        if isinstance(func, type):
+            return _decorate_patch_class(self, func, inspect_all=True)
+        from inspect import iscoroutinefunction
+        if iscoroutinefunction(func):
+            @wraps(func)
+            async def patched(*args, **kwargs):
+                with self:
+                    return await func(*args, **kwargs)
+            return patched
+        return ContextDecorator.__call__(self, func)
 
     def _enter(self):
         if isinstance(self.in_dict, str):
