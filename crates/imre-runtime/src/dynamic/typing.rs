@@ -2185,7 +2185,7 @@ fn validate_forward_ref(source: &str) -> Result<()> {
 /// a user callback or inside a previously constructed typing alias.
 fn finish_field_ref(ctx: &mut Context, value: Id) -> Result<Id> {
     let invalid = || Error::new("TypeError", "expected a TypedDict annotation symbol");
-    let Some(source) = ctx.module_value("typing", "_TypedDictSymbol") else {
+    let Some(source) = ctx.module_value("annotationlib", "_TypedDictSymbol") else {
         return Err(invalid());
     };
     let target = ctx
