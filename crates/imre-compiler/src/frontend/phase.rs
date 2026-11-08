@@ -40,7 +40,7 @@ pub(crate) struct Diagnostic<M = String> {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Failure<M = String> {
-    Diagnostic(Diagnostic<M>),
+    Diagnostic(Box<Diagnostic<M>>),
     PendingSignature {
         signature: usize,
         module: ModuleId,
@@ -152,9 +152,15 @@ impl From<String> for Diagnostic {
     }
 }
 
+impl<M> From<Diagnostic<M>> for Failure<M> {
+    fn from(report: Diagnostic<M>) -> Self {
+        Self::Diagnostic(Box::new(report))
+    }
+}
+
 impl From<String> for Failure {
     fn from(message: String) -> Self {
-        Self::Diagnostic(message.into())
+        Diagnostic::plain(message).into()
     }
 }
 
@@ -177,7 +183,7 @@ impl Failure<&'static str> {
                 range,
             },
             Self::Diagnostic(report) => {
-                Failure::Diagnostic(Diagnostic::at(source, site, report.message.to_owned()))
+                Diagnostic::at(source, site, report.message.to_owned()).into()
             }
         }
     }
