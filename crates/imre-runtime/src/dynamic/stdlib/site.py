@@ -4,6 +4,51 @@ import os
 import _io as io
 import stat
 
+PREFIXES = [sys.prefix, sys.exec_prefix]
+if _include_system_site:
+    PREFIXES += [sys.base_prefix, sys.base_exec_prefix]
+
+
+def getsitepackages(prefixes=None):
+    """Returns a list containing all global site-packages directories.
+
+    For each directory present in ``prefixes`` (or the global ``PREFIXES``),
+    this function will find its `site-packages` subdirectory depending on the
+    system environment, and will return a list of full paths.
+    """
+    sitepackages = []
+    seen = set()
+
+    if prefixes is None:
+        prefixes = PREFIXES
+
+    for prefix in prefixes:
+        if not prefix or prefix in seen:
+            continue
+        seen.add(prefix)
+
+        # Imre's installation scheme uses imreX.Y for the global library.
+        implementation = "imre"
+        ver = sys.version_info
+        if hasattr(sys, 'abiflags') and 't' in sys.abiflags:
+            abi_thread = 't'
+        else:
+            abi_thread = ''
+        if os.sep == '/':
+            libdirs = [sys.platlibdir]
+            if sys.platlibdir != "lib":
+                libdirs.append("lib")
+
+            for libdir in libdirs:
+                path = os.path.join(prefix, libdir,
+                                    f"{implementation}{ver[0]}.{ver[1]}{abi_thread}",
+                                    "site-packages")
+                sitepackages.append(path)
+        else:
+            sitepackages.append(prefix)
+            sitepackages.append(os.path.join(prefix, "Lib", "site-packages"))
+    return sitepackages
+
 
 def _get_implementation():
     return 'Python'

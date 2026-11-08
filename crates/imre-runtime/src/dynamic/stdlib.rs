@@ -389,6 +389,11 @@ pub(super) fn initialize_site(ctx: &mut Context, scope: Id) -> Result<()> {
     let get_path = ctx.builtin("site._get_path");
     ctx.bind(scope, "_get_path", get_path);
     let layout = layout(ctx)?;
+    ctx.bind(
+        scope,
+        "_include_system_site",
+        builtins::boolean(ctx.config["no_site"] != true && layout.venv_system_site == Some(true)),
+    );
     let mut enabled = NONE;
     let mut base = NONE;
     let mut directory = NONE;
@@ -809,6 +814,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ) => ctx.builtin(&format!("binascii.{name}")),
         ("sys", "base_prefix" | "base_exec_prefix") => path_text(ctx, &layout(ctx)?.base_prefix)?,
         ("sys", "prefix" | "exec_prefix") => path_text(ctx, &layout(ctx)?.prefix)?,
+        ("sys", "platlibdir") => ctx.text("lib"),
         ("sys", "_base_executable") if ctx.config["executable"].is_string() => {
             path_text(ctx, &layout(ctx)?.base_executable)?
         }
@@ -922,7 +928,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         #[cfg(not(target_os = "linux"))]
         ("os", "uname") => ctx.builtin("os.uname"),
         ("sysconfig", "_getuserbase" | "get_path_names" | "get_platform")
-        | ("site", "getsitepackages")
         | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
         | ("_imre_base32", "encode" | "decode")
         | ("_imre_base85", "encode")
@@ -3445,13 +3450,6 @@ pub(super) fn call(
             let base = ctx.str_value(argument(args, 0)?)?;
             let path = layout(ctx)?.user_site(Path::new(base));
             path_text(ctx, &path)?
-        }
-        "site.getsitepackages" => {
-            let sites = layout(ctx)?
-                .site_packages(ctx.config["no_site"] != true)
-                .map(|p| path_text(ctx, &p))
-                .collect::<Result<Vec<_>>>()?;
-            ctx.alloc(Value::List(sites))
         }
         "os.confstr" => {
             let value = system::confstr(ctx.str_value(argument(args, 0)?)?).map_err(|err| {
