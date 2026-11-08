@@ -827,7 +827,6 @@ REJECTED = {
     "opcode_unknown_operation": ({"main.py": "from _opcode import not_an_opcode_operation\n"}, "not_an_opcode_operation"),
     "opcode_typed_argument": ({"main.py": "import _opcode as op\ndef text(x: str) -> None:\n    print(x)\ntext(op.ENABLE_SPECIALIZATION)\n"}, "expected str, got int"),
     "unstubbed_builtin_shadow": ({"main.py": "import _types\n", "_types.py": HELPER}, "standard-library"),
-    "frozen_shadow": ({"main.py": "import __hello__\n", "__hello__.py": HELPER}, "standard-library"),
     "imported_surrogate": ({"main.py": IMPORT, "helper.py": '"\\ud800"\n' + HELPER}, "surrogate"),
     "imported_encoding": ({"main.py": IMPORT, "helper.py": "# coding: latin1\n" + HELPER}, "encoding"),
 }
@@ -1468,6 +1467,7 @@ ACCEPTED = {
             "TestCase().assertTrue(True)\n"
         ),
     },
+    "frozen_shadow": {"main.py": "import __hello__\n", "__hello__.py": HELPER},
     "frozen_import_override": {
         "main.py": (
             "import _imp\nfrom _imp import _override_frozen_modules_for_tests as override\n"

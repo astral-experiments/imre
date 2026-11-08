@@ -5794,7 +5794,10 @@ impl<'a> Loader<'a> {
     }
 
     fn reject_stdlib_shadow(&mut self, name: &str) -> Result<(), String> {
-        if self.allow_imports && !self.skip_current_root {
+        if self.allow_imports
+            && !self.skip_current_root
+            && !imre_ast::providers::is_frozen(name, || self.frozen_modules)
+        {
             for base in [
                 self.root.join(name.split('.').next().unwrap()),
                 self.root.join(name.replace('.', "/")),
