@@ -174,6 +174,8 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "allocate",
             "allocate_lock",
             "error",
+            "exit",
+            "exit_thread",
             "start_new_thread"
         ),
         M::TracemallocNative => exports!(
