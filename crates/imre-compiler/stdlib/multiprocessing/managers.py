@@ -967,7 +967,6 @@ def _proxy_method(name, attribute):
         return self._callmethod(name, args, kwds)
 
     method.__name__ = method.__qualname__ = attribute
-    method.__module__ = None
     return method
 
 

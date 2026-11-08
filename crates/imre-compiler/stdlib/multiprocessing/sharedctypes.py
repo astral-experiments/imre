@@ -181,7 +181,6 @@ def make_property(name):
         get, set_ = make_accessors(attribute, getattr, setattr)
         get.__name__ = get.__qualname__ = 'get' + attribute
         set_.__name__ = set_.__qualname__ = 'set' + attribute
-        get.__module__ = set_.__module__ = None
         prop = property(get, set_)
         namespace[get.__name__] = get
         namespace[set_.__name__] = set_
