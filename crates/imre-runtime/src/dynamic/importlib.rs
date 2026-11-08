@@ -555,14 +555,10 @@ impl Context {
         path: Id,
         registration: Option<(Id, Id, Id)>,
     ) -> Result<Id> {
-        if let Some(source) = self.loader_source(loader, path) {
-            let (entry, origin) = (source.code, source.path.clone());
-            return self.module_code(entry, &origin);
-        }
-        // A Python-constructed file loader has no issued-loader binding.
-        if let Some((name, read, convert)) = registration
-            && matches!(self.heap.get(path), Value::Str(_) | Value::SurrogateStr(_))
-        {
+        if let Some((_, read, convert)) = registration {
+            if !matches!(self.heap.get(path), Value::Str(_) | Value::SurrogateStr(_)) {
+                return Ok(NONE);
+            }
             let Value::Instance { class, .. } = *self.heap.get(loader) else {
                 return Ok(NONE);
             };
@@ -574,6 +570,13 @@ impl Context {
             }) {
                 return Ok(NONE);
             }
+        }
+        if let Some(source) = self.loader_source(loader, path) {
+            let (entry, origin) = (source.code, source.path.clone());
+            return self.module_code(entry, &origin);
+        }
+        // A Python-constructed file loader has no issued-loader binding.
+        if let Some((name, _, _)) = registration {
             let path = self.import_path(path)?;
             // Nested code retains the exact filename supplied at build time.
             if let Ok(name) = self.str_value(name)
