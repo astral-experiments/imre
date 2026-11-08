@@ -681,13 +681,11 @@ impl Function<'_, '_> {
     }
 
     fn extend_operand(&mut self, target: &str, expr: &ast::Expr) {
-        let mark = self.native_suspension.then(|| self.temporary_mark());
+        let mark = self.temporary_mark();
         let value = self.expr(expr);
         self.pack_operand("extend", &[target, &value]);
-        if let Some(mark) = mark {
-            // The target owns the expanded items. Drop the iterable before the next operand.
-            self.discard_truth(&mark);
-        }
+        // The target owns the expanded items. Drop the iterable before the next operand.
+        self.discard_truth(&mark);
     }
 
     pub(super) fn arguments(

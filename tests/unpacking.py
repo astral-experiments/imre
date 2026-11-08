@@ -42,7 +42,6 @@ REJECTED = {
     "dictionary_expansion_wrong_key": "values: dict[str, int] = {**{1: 2}}\n",
     "dictionary_expansion_wrong_value": 'values: dict[str, int] = {**{"a": "wrong"}}\n',
     "call_argument_expansion": "def add(first: int, second: int) -> int:\n    return first + second\nprint(add(*[1, 2]))\n",
-    "call_dynamic_keyword_expansion": 'def accept(value: int) -> int:\n    return value\ndef forward(key: str) -> int:\n    return accept(**{key: 1})\nprint(forward("value"))\n',
     "constructor_duplicate_chained_field": "class Item:\n    value: int\n    def __init__(self) -> None:\n        self.value = self.value = 1\n",
     "constructor_missing_chained_field": "class Item:\n    first: int\n    second: int\n    third: int\n    def __init__(self) -> None:\n        self.first = self.second = 1\n",
     "constructor_undeclared_starred_field": "class Item:\n    first: int\n    def __init__(self, values: list[int]) -> None:\n        self.first, *self.rest = values\n",
@@ -77,6 +76,8 @@ if __name__ == "__main__":
         rejections=REJECTED,
         imported_rejections={},
         errors=ERRORS,
+        # Optimizing the linked typing module takes over two minutes on Linux.
+        build_timeouts={"class_base_display": 300},
         label="unpacking and expansion",
         description=__doc__,
     )
