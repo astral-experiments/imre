@@ -638,7 +638,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | (
             "_imre_dataclasses",
-            "is_defaultdict"
+            "bind_initializer"
+            | "is_defaultdict"
             | "loaded_module"
             | "members"
             | "native_iterator"
@@ -2466,7 +2467,7 @@ pub(super) fn call(
                 "_mark_generator expects a code object",
             ));
         };
-        if matches!(original.body, super::value::Body::Native(_)) {
+        if matches!(original.body, super::value::Body::Native(..)) {
             return Err(Error::new(
                 "NotImplementedError",
                 "cannot mark this native generator function",
@@ -2691,6 +2692,9 @@ pub(super) fn call(
     }
     if let Some(method) = name.strip_prefix("_imre_dataclasses.") {
         match (method, args, kwargs) {
+            ("bind_initializer", args, []) => {
+                return super::dataclass_init::bind_initializer(ctx, args);
+            }
             ("is_defaultdict", [obj], []) => {
                 // Boxed defaultdict exposes its factory on instances, including derived instances.
                 return Ok(if ctx.defaultdict_factory(*obj).is_some() {

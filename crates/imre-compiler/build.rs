@@ -15,7 +15,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unix_permissions(0o644);
     println!("cargo:rerun-if-changed=stdlib/installed-sources.txt");
     println!("cargo:rerun-if-changed=stdlib/runtime-only-sources.txt");
-    // Only installed-sources.txt participates in checked file-entry admission.
     // The standalone marker affects source registration, not the path in the ZIP.
     let runtime_only = include_str!("stdlib/runtime-only-sources.txt")
         .lines()

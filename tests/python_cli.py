@@ -2258,6 +2258,42 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
                 compare("-B", *args, extra={"PYTHONPATH": os.pathsep.join(map(str, roots))},
                         native_timeout=300)
 
+        # The same module has a native body at both ZIP origins. The active finder
+        # selects it after sys.path changes, without initializing the dormant module.
+        archives = [root / "first.whl", root / "second.whl"]
+        for index, wheel in enumerate(archives):
+            with zipfile.ZipFile(wheel, "w") as app:
+                app.writestr("choices/__init__.py", "")
+                app.writestr("choices/pick.py", f"def pick(data: bytes): return {index}, bytes(data)\n")
+                app.writestr("choices/dormant.py", "raise AssertionError('initialized')\n")
+                app.writestr("docs/sample.py", b"print('documentation example')\n")
+        selector = root / "choose.py"
+        selector.write_text(
+            "import sys\nfrom importlib import import_module\n"
+            "first, second, module = sys.argv[1:]\n"
+            "a, b = sys.path.index(first), sys.path.index(second)\n"
+            "sys.path[a], sys.path[b] = sys.path[b], sys.path[a]\n"
+            "chosen = import_module(module)\n"
+            "print(chosen.pick(bytearray(b'zip')), chosen.__spec__.origin, chosen.__loader__.get_data(chosen.__file__))\n"
+            "print(chosen.__loader__.get_data(chosen.__loader__.archive + '/docs/sample.py'))\n"
+            "assert 'choices.dormant' not in sys.modules\n"
+        )
+        compare("-B", selector, *archives, "choices.pick",
+                extra={"PYTHONPATH": os.pathsep.join(map(str, archives))}, native_timeout=300)
+        ir = root / "choose.ll"
+        built = run(imre, "build", selector, "--extension-path", archives[0],
+                    "--extension-path", archives[1], "--emit-llvm", ir, "-o", root / "choose", timeout=300)
+        assert built.returncode == 0, built.stderr
+        with ir.open() as stream:
+            llvm = [line for line in stream if ".whl/" in line or "call void @imre_dyn_register_zip_source(" in line]
+        registrations = [line for line in llvm if "call void @imre_dyn_register_zip_source(" in line]
+        for wheel in archives:
+            assert all(str(wheel / "docs/sample.py") not in line for line in llvm)
+            for name in ("choices/pick.py", "choices/dormant.py"):
+                path = str(wheel / name)
+                origin = next(line.split()[0] for line in llvm if f'c"{path}\\00"' in line)
+                assert any(f", ptr {origin}, ptr @" in line for line in registrations), path
+
         helper = root / "request_support.py"
         helper.write_text("from importlib.machinery import ModuleSpec\nspec = ModuleSpec('sample', None)\n")
         request_script = root / "request_entry.py"
@@ -4277,6 +4313,7 @@ for name in ("md4", "ripemd160"):
             "boxed_make_dataclass.py",
             "boxed_dataclass_slots.py",
             "boxed_dataclass_init_annotations.py",
+            "boxed_dataclass_direct_initializer.py",
             "boxed_dataclass_classvars.py",
             "boxed_email_dates.py",
             "boxed_email_addresses.py",

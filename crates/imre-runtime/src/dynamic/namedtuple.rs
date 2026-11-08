@@ -628,7 +628,7 @@ pub(super) fn bind_new(
     let (parameters, varnames) = constructor_parameters(ctx, names, field_ids, filename)?;
     let lambda = ctx.text("<lambda>");
     let code = ctx.prelinked_code(
-        super::value::Body::Native(super::ffi::namedtuple_constructor),
+        super::value::Body::Native(super::ffi::namedtuple_constructor, NONE),
         ctx.root_scope(scope),
         lambda,
         parameters,

@@ -1028,6 +1028,56 @@ impl CharacterFilter {
     }
 }
 
+/// Every write to a proven local produces stdin text or copies another proven local.
+fn stdin_locals(function: &Function) -> Vec<bool> {
+    let mut input = vec![false; function.locals.len()];
+    let mut unknown = function.params.clone();
+    let mut copies = Vec::new();
+    walk_writes(&function.body, |target, value| {
+        match value.map(|value| &value.kind) {
+            Some(ExprKind::Builtin(Builtin::Input | Builtin::InputFinish, _)) => {
+                input[target] = true
+            }
+            Some(ExprKind::Local(source)) => {
+                input[target] |= input[*source];
+                copies.push((*source, target));
+            }
+            _ => unknown.push(target),
+        }
+    });
+    for slot in unknown {
+        input[slot] = false;
+    }
+    propagate_copy_facts(&mut input, &copies);
+    input
+}
+
+/// Unknown executable text can change the active namespace. Keep its ordinary object dispatch.
+pub(crate) fn text_execution(module: &Module) -> Option<(usize, ruff_text_size::TextRange, bool)> {
+    let mut first = None;
+    let mut only_input = true;
+    for function in module.functions.iter().chain([&module.entry]) {
+        let mut locals = None;
+        walk_expressions(&function.body, &mut |expr| {
+            if let ExprKind::Builtin(Builtin::ExecText(module, span), args) = &expr.kind {
+                only_input &= match args[0].kind {
+                    ExprKind::Builtin(Builtin::Input | Builtin::InputFinish, _) => true,
+                    ExprKind::Local(slot) => {
+                        locals.get_or_insert_with(|| stdin_locals(function))[slot]
+                    }
+                    _ => false,
+                };
+                if first.is_none_or(|(id, range): (usize, ruff_text_size::TextRange)| {
+                    (*module, span.start()) < (id, range.start())
+                }) {
+                    first = Some((*module, *span));
+                }
+            }
+        });
+    }
+    first.map(|(id, span)| (id, span, only_input))
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
     ByteArrayNew,
@@ -1220,6 +1270,8 @@ pub(crate) enum Builtin {
     LogRecord(LogRecordOperation),
     Formatter(FormatterOperation),
     Input,
+    /// The selected builtin exec on a checked string operand.
+    ExecText(usize, ruff_text_size::TextRange),
     InputSelectStdout,
     InputFinish,
     Chr,

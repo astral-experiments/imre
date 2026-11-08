@@ -674,7 +674,7 @@ impl Builtin {
             | Self::SortByKeys => {
                 Contract::new(true, PreservesOwners)
             }
-            Self::SortByComparator => Contract::new(true, Unknown),
+            Self::ExecText(_, _) | Self::SortByComparator => Contract::new(true, Unknown),
             Self::ListReserveRange | Self::StructCyclePrefix => Contract::new(false, PreservesOwners),
             Self::AnnotationRef
             | Self::BinaryOpen(_)

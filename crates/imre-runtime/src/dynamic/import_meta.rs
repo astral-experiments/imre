@@ -82,7 +82,7 @@ impl Context {
             .get(name)
             .into_iter()
             .flatten()
-            .filter(|source| !matches!(source.code, ModuleInitializer::Builtin(_)))
+            .filter(|source| source.in_file_finder())
     }
 
     pub(super) fn builtin_initializer(&self, name: &str) -> Option<&SourceModule> {

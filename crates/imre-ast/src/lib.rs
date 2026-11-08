@@ -50,6 +50,7 @@ pub mod lzma;
 pub mod numbers;
 pub mod providers;
 pub mod python_nodes;
+pub mod source_encoding;
 pub mod startup;
 pub mod strings;
 mod type_aliases;

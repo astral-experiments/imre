@@ -40,7 +40,7 @@ impl Context {
         let registered = self.sources.iter().any(|(name, entries)| {
             let leaf = OsStr::new(name.rsplit('.').next().unwrap());
             entries.iter().any(|entry| {
-                if matches!(entry.code, super::ModuleInitializer::Builtin(_)) {
+                if !entry.in_file_finder() {
                     return false;
                 }
                 let parent = entry.path.parent();

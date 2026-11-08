@@ -3909,21 +3909,24 @@ impl SourceGraph {
         Self::load_with(
             entry,
             module_root,
-            extension_paths,
+            &crate::CompileOptions {
+                extension_paths: extension_paths.to_vec(),
+                ..Default::default()
+            },
             FileSystem::default(),
-            false,
-            None,
+            &mut None,
         )
     }
 
     pub(crate) fn load_with(
         entry: &Path,
         module_root: Option<&Path>,
-        extension_paths: &[PathBuf],
+        options: &crate::CompileOptions,
         mut fs: FileSystem<'_>,
-        reachable_only: bool,
-        profile: Option<&Path>,
+        import_failure: &mut Option<EntryImportFailure>,
     ) -> Result<Self, String> {
+        let profile = options.entry_profile.as_deref();
+        let reachable_only = options.reachable_only || profile.is_some();
         // __file__ preserves the invoked spelling, including symlinks and '..'.
         // Use the canonical path below for import resolution and containment.
         let filename = std::env::current_dir()
@@ -3974,7 +3977,13 @@ impl SourceGraph {
         let source = fs
             .read_source_string(&entry)
             .map_err(|error| format!("{}: {error}", entry.display()))?;
-        let mut loader = Loader::new(root, extension_paths, &[], None, fs)?;
+        let mut loader = Loader::new(
+            root,
+            &options.extension_paths,
+            &options.python_archive_indices,
+            None,
+            fs,
+        )?;
         loader.reachable_only = reachable_only;
         if inferred {
             loader.inputs.missing.push(loader.root.join("__init__.py"));
@@ -3990,7 +3999,11 @@ impl SourceGraph {
                 );
             }
         }
-        loader.scan(id)?;
+        if options.python_archive_indices.is_empty() {
+            loader.scan(id)?;
+        } else {
+            loader.scan_python_entry(id, import_failure)?;
+        }
         loader.finish(id, filename, reachable_only, profile)
     }
 

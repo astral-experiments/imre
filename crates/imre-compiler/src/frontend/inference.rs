@@ -328,6 +328,7 @@ enum ReturnDiscovery {
 }
 
 struct Pending {
+    used_as_value: bool,
     inferred_params: Vec<bool>,
     params: Vec<Option<Type>>,
     none_defaults: Vec<usize>,
@@ -360,6 +361,7 @@ impl Inference {
         let mut pending = self.pending.borrow_mut();
         let id = pending.len();
         pending.push(Pending {
+            used_as_value: false,
             inferred_params: params.iter().map(Option::is_none).collect(),
             params,
             none_defaults,
@@ -539,8 +541,9 @@ impl Inference {
                 self.revision.set(self.revision.get() + 1);
             }
         }
-        let pending = self.pending.borrow();
-        let candidate = &pending[signature.id];
+        let mut pending = self.pending.borrow_mut();
+        let candidate = &mut pending[signature.id];
+        candidate.used_as_value |= needs_parameters;
         candidate
             .returns
             .filter(|_| !needs_parameters || candidate.params.iter().all(Option::is_some))
@@ -805,6 +808,21 @@ impl Inference {
                 let pending = self.pending.borrow();
                 for (module, function, signature) in definitions.iter() {
                     let inferred = &pending[signature.id];
+                    // A first-class function can bind Python values when its callers could
+                    // not establish a scalar signature. Its definition is already known.
+                    if inferred.used_as_value
+                        && (inferred.returns.is_none()
+                            || inferred.params.iter().any(Option::is_none))
+                    {
+                        return Err(Diagnostic::at(
+                            &graph.modules[*module].source,
+                            function,
+                            "using this function as a value requires Python argument binding"
+                                .to_owned(),
+                        )
+                        .classified(Kind::ScopedObject)
+                        .in_module(graph, *module));
+                    }
                     if let Some(index) = inferred.params.iter().position(Option::is_none) {
                         let name = &signature.params[index].name;
                         return Err(Diagnostic::at(&graph.modules[*module].source,

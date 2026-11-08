@@ -200,6 +200,57 @@ fn resolved_bundled_source_keeps_its_declaration() {
 }
 
 #[test]
+fn functions_selected_from_a_mapping_keep_python_argument_binding() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    fs::write(
+        &entry,
+        r#"import sys
+
+def plus(value):
+    return value + 1
+
+def twice(value):
+    return value * 2
+
+operations = {"a": plus, "b": twice}
+class Hooks:
+    pass
+setattr(Hooks, sys.argv[1], staticmethod(operations[sys.argv[2]]))
+print(getattr(Hooks, sys.argv[1])(7))
+"#,
+    )
+    .unwrap();
+    crate::check_file(&entry, None).unwrap();
+}
+
+#[test]
+fn computed_factory_preserves_dormant_declared_calls() {
+    let tmp = tempdir().unwrap();
+    let source = tmp.path().join("main.py");
+    let scores = tmp.path().join("scores.py");
+    fs::write(&source, "import scores\nfrom dataclasses import dataclass, field\ndef one(): return 1\nf = {0: one}[0]\n@dataclass\nclass Result:\n    n: int = field(default_factory=f)\nprint(Result().n)\n").unwrap();
+    fs::write(
+        &scores,
+        "def take(n: int) -> int: return n\nif False:\n    take('x')\n",
+    )
+    .unwrap();
+    let error = crate::check_file(&source, None).unwrap_err();
+    assert!(
+        error.contains("scores.py:3:10") && error.contains("expected int, got str"),
+        "{error}"
+    );
+    fs::write(
+        &scores,
+        "def take(n: int) -> int: return n\nif False:\n    take(1)\n",
+    )
+    .unwrap();
+    crate::check_file(&source, None).unwrap();
+    fs::write(&scores, "from typing import TypeVar\nT = TypeVar('T')\ndef take(n: T) -> T: return n\nif False:\n    take('x')\n").unwrap();
+    crate::check_file(&source, None).unwrap();
+}
+
+#[test]
 fn declared_import_checks_lexical_syntax() {
     let project = tempdir().unwrap();
     let entry = project.path().join("main.py");

@@ -946,33 +946,7 @@ fn encoding_error(
     )
 }
 
-/// CR and CRLF shrink to a single ASCII byte, so conversion can reuse the decoded buffer.
-pub(super) fn universal_newlines(mut text: String) -> String {
-    // SAFETY: newline translation only replaces ASCII CR and CRLF with ASCII LF.
-    normalize_newlines(unsafe { text.as_mut_vec() });
-    text
-}
-
-/// Compact physical CR and CRLF endings in place, even before the encoding is known.
-pub(super) fn normalize_newlines(bytes: &mut Vec<u8>) {
-    let Some(first) = memchr::memchr(b'\r', bytes) else {
-        return;
-    };
-    let mut read = first;
-    let mut written = first;
-    while read < bytes.len() {
-        let byte = bytes[read];
-        read += 1;
-        bytes[written] = if byte == b'\r' {
-            read += usize::from(bytes.get(read) == Some(&b'\n'));
-            b'\n'
-        } else {
-            byte
-        };
-        written += 1;
-    }
-    bytes.truncate(written);
-}
+pub(super) use imre_ast::source_encoding::universal_newlines;
 
 fn escaped(code: u32) -> Str {
     match code {

@@ -491,12 +491,7 @@ fn iterator_paths_recheck_the_suspended_operands() {
     let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
     let scope = ctx.scope("suspended", None);
     let heap = &mut ctx.heap;
-    let target = heap.alloc(Value::List(Vec::new()));
-    let cursor = heap.alloc(Value::LoopIterator {
-        source: NONE,
-        peeked: Some(target),
-    });
-    let generator = heap.alloc(Value::Generator {
+    let generator_value = |scope| Value::Generator {
         owner: FrameOwner::Module(NONE),
         frame: None,
         name: NONE,
@@ -504,12 +499,19 @@ fn iterator_paths_recheck_the_suspended_operands() {
         lineno: 0,
         code: NONE,
         scope,
-        iterators: vec![cursor],
-        protected: Vec::new(),
         native: None,
         offset: Some(0),
         running: false,
+    };
+    let target = heap.alloc(generator_value(NONE));
+    let generator = heap.alloc(generator_value(scope));
+    let cursor = heap.alloc(Value::LoopIterator {
+        source: NONE,
+        peeked: Some(target),
     });
+    let source = ctx.dict(vec![(NONE, cursor)]);
+    ctx.bind(scope, ".0", source);
+    let heap = &mut ctx.heap;
     let coroutine = heap.alloc(Value::Coroutine {
         frame: generator,
         origin: NONE,
@@ -553,41 +555,76 @@ fn iterator_paths_recheck_the_suspended_operands() {
     *current = scope;
     assert!(paths.valid(heap, globals));
 
-    let Value::Generator { iterators, .. } = heap.get_mut(generator) else {
-        unreachable!()
-    };
-    iterators.clear();
-    assert!(!paths.valid(heap, globals));
+    assert!(heap.short_path_keeps_owner(generator, target));
+    ctx.delete_item(source, NONE).unwrap();
+    assert!(!paths.valid(&ctx.heap, globals));
+    assert!(!ctx.heap.short_path_keeps_owner(generator, target));
 }
 
 #[test]
 fn suspended_cleanup_keeps_exit_methods_and_a_pending_return() {
-    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
-    let namespace = ctx.dict(Vec::new());
-    let source = ctx.text(
-        r#"
-class Guard:
-    def __enter__(self): pass
-    def __exit__(self, *exc): pass
-
-def hold():
-    with Guard(), Guard():
-        try:
-            return object()
-        finally:
-            yield
-
-g = hold()
-next(g)
-"#,
-    );
-    ctx.exec_source(source, namespace, None, None).unwrap();
-    let generator = ctx.dict_named_item(namespace, "g").unwrap();
-    let Value::Generator { protected, .. } = ctx.heap.get(generator) else {
-        unreachable!()
+    use crate::dynamic::native_suspension::{
+        Activation, imre_dyn_coro_open, imre_dyn_suspend_operands, imre_dyn_suspend_return,
     };
-    let targets: Vec<_> = protected.iter().flat_map(|block| block.roots()).collect();
+    use crate::dynamic::{Context, Id, value::Body};
+    use std::ffi::c_void;
+
+    unsafe extern "C" fn finish(frame: *mut c_void, destroy: bool) {
+        if !destroy {
+            // SAFETY: the entry below uses the live activation as this frame's handle.
+            unsafe { imre_dyn_suspend_return(frame.cast(), NONE) };
+        }
+    }
+
+    unsafe extern "C" fn hold(activation: *mut Activation, _scope: Id) -> *mut c_void {
+        // SAFETY: the native entry's first word is its current Context (the generated ABI).
+        let ctx = unsafe { &mut **activation.cast::<*mut Context>() };
+        let class = ctx.builtin("object");
+        let callback = ctx.builtin("repr");
+        let exits = [0; 2].map(|_| {
+            let receiver = ctx.instance(class, None);
+            ctx.alloc(Value::Method {
+                callable: callback,
+                receiver,
+                explicit: false,
+            })
+        });
+        let returned = ctx.instance(class, None);
+        let targets = ctx.alloc(Value::Tuple(vec![exits[0], exits[1], returned]));
+        // The yield operand is for the test to identify the three values. Only the
+        // pending return and exit callables remain in the suspended frame.
+        ctx.heap.release_temporaries_since(0);
+        for value in [exits[0], exits[1], returned] {
+            ctx.heap.keep(value);
+        }
+        // SAFETY: both helpers are called during this activation's running entry.
+        unsafe {
+            imre_dyn_coro_open(activation, activation.cast(), finish);
+            imre_dyn_suspend_operands(activation, targets, ctx.heap.temporary_mark(), 0);
+        }
+        activation.cast()
+    }
+
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let scope = ctx.scope("sample", None);
+    let name = ctx.text("hold");
+    let code = ctx.prelinked_code(
+        Body::Suspended(hold),
+        scope,
+        name,
+        NONE,
+        (name, NONE),
+        (name, 1),
+    );
+    let defaults = ctx.dict(Vec::new());
+    let function = ctx
+        .define_function(code, scope, name, defaults, name, NONE, NONE, false)
+        .unwrap();
+    let generator = ctx.new_generator(code, scope, FrameOwner::Function(function));
+    let yielded = ctx.next_item(generator).unwrap().unwrap();
+    let targets = ctx.items(yielded).unwrap();
     assert_eq!(targets.len(), 3);
+    ctx.heap.release_temporaries_since(0);
     let roots = [generator, NONE];
     let paths =
         super::RootPaths::discover(&ctx.heap, roots, targets.into_iter(), false, false).unwrap();

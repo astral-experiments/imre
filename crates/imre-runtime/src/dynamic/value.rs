@@ -56,9 +56,13 @@ impl CodeObject {
 
 #[derive(Clone)]
 pub(super) enum Body {
-    Native(Code),
+    /// The immutable operand tuple is owned by this interpreter's code object.
+    Native(Code, Id),
     Suspended(ResumeCode),
-    Source(std::rc::Rc<super::source_code::Program>),
+    /// Constants retained by a parsed code object with no executable entry.
+    Parsed {
+        constants: Id,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -113,18 +117,7 @@ pub(super) const INTERPOLATION_TYPE: &str = "string.templatelib.Interpolation";
 pub(super) enum TracebackAnchor {
     Uniform,
     Column(u32),
-    DelimiterAfter(u32, u8),
     Hidden,
-}
-
-impl TracebackAnchor {
-    pub(super) fn delimiter(
-        range: ruff_text_size::TextRange,
-        prefix: ruff_text_size::TextSize,
-        opener: u8,
-    ) -> Self {
-        Self::DelimiterAfter(u32::from(prefix - range.start()), opener)
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -452,7 +445,7 @@ impl Context {
                 continue;
             }
             let code = self.code_object(frame.code);
-            let line = frame.line(&self.heap, location);
+            let line = frame.line(location);
             let (file, name) = (code.filename, code.name);
             let line = self.int(i64::from(line));
             frames.push(self.alloc(Value::Tuple(vec![file, line, name])));
@@ -471,67 +464,9 @@ impl Context {
             .iter()
             .rev()
             .find(|frame| frame.object == Some(object))?;
-        if let Some(position) = frame.call_position {
-            return Some(position);
-        }
-        frame.source_range(&self.heap, frame.expression)
+        frame.call_position
     }
 
-    /// Preserve the innermost operation before restoring its caller's live expression.
-    pub(super) fn at_source_position<T>(
-        &mut self,
-        position: ExpressionPosition,
-        anchor: TracebackAnchor,
-        operation: impl FnOnce(&mut Self) -> Result<T>,
-    ) -> Result<T> {
-        let previous = self.heap.replace_expression(position);
-        let result = operation(self);
-        let result = self.source_result(result, anchor);
-        self.heap.replace_expression(previous);
-        result
-    }
-
-    pub(super) fn source_result<T>(&self, result: Result<T>, anchor: TracebackAnchor) -> Result<T> {
-        result.map_err(|error| {
-            let position = self
-                .heap
-                .frames
-                .last()
-                .expect("active source frame")
-                .expression;
-            self.source_failure(error, position, anchor)
-        })
-    }
-
-    pub(super) fn source_failure(
-        &self,
-        mut error: Error,
-        position: ExpressionPosition,
-        anchor: TracebackAnchor,
-    ) -> Error {
-        if error
-            .trace
-            .as_ref()
-            .is_some_and(|trace| trace.source_position.is_some())
-        {
-            return error;
-        }
-        let frame = self.heap.frames.last().expect("active source frame");
-        if let Some([line, end_line, start, end]) = frame.source_range(&self.heap, position) {
-            error.tracing().source_position = Some((
-                line,
-                TracebackSpan {
-                    end_line,
-                    start,
-                    anchor,
-                    end,
-                },
-            ));
-        }
-        error
-    }
-
-    /// Return the same Python frame to introspection and traceback construction.
     pub(super) fn active_frame(&mut self, depth: usize) -> Result<Option<(Location, Id)>> {
         let Some((index, _)) = self
             .heap
@@ -1557,8 +1492,7 @@ pub(super) enum Value {
         lineno: u32,
         code: Id,
         scope: Id,
-        iterators: Vec<Id>,
-        protected: Vec<super::source_code::FinallyBlock>,
+
         native: Option<super::native_suspension::Saved>,
         offset: Option<usize>,
         running: bool,
@@ -2471,8 +2405,10 @@ impl Value {
                 visit.push(code.varnames);
                 visit.push(code.cellvars);
                 visit.extend(code.nested.iter().map(|&(_, id)| id));
-                if let Body::Source(program) = &code.body {
-                    visit.push(program.string_roots);
+                match code.body {
+                    Body::Native(_, operands) if operands != NONE => visit.push(operands),
+                    Body::Parsed { constants } => visit.push(constants),
+                    _ => {}
                 }
             }
             Self::Generator {
@@ -2481,8 +2417,7 @@ impl Value {
                 name,
                 qualname,
                 code,
-                iterators,
-                protected,
+
                 native,
                 ..
             } => {
@@ -2493,12 +2428,6 @@ impl Value {
                 visit.extend(self.suspended_owner());
                 visit.extend([*name, *qualname, owner.root()]);
                 visit.extend(*frame);
-                visit.extend(iterators);
-                visit.extend(
-                    protected
-                        .iter()
-                        .flat_map(super::source_code::FinallyBlock::roots),
-                );
             }
             Self::Class {
                 scope,
@@ -3734,19 +3663,6 @@ pub(super) enum ExpressionPosition {
     #[default]
     Statement,
     Line(u32),
-    Source {
-        offset: ruff_text_size::TextSize,
-        range: ruff_text_size::TextRange,
-    },
-}
-
-impl ExpressionPosition {
-    pub(super) fn at(range: ruff_text_size::TextRange) -> Self {
-        Self::Source {
-            offset: range.start(),
-            range,
-        }
-    }
 }
 
 pub(super) struct Frame {
@@ -3779,30 +3695,9 @@ impl Frame {
         visit.extend(self.roots());
     }
 
-    fn source_range(&self, heap: &Heap, position: ExpressionPosition) -> Option<[u32; 4]> {
-        let ExpressionPosition::Source { range, .. } = position else {
-            return None;
-        };
-        let Value::Code(code) = heap.get(self.code) else {
-            return None;
-        };
-        let Body::Source(program) = &code.body else {
-            return None;
-        };
-        program.expression_range(range)
-    }
-
-    fn line(&self, heap: &Heap, location: &Location) -> u32 {
+    fn line(&self, location: &Location) -> u32 {
         match self.expression {
             ExpressionPosition::Line(line) => line,
-            ExpressionPosition::Source { offset, .. } => {
-                if let Value::Code(code) = heap.get(self.code)
-                    && let Body::Source(program) = &code.body
-                {
-                    return program.expression_line(offset).unwrap_or(location.line);
-                }
-                location.line
-            }
             ExpressionPosition::Statement => location.line,
         }
     }
@@ -4406,7 +4301,7 @@ impl Heap {
                     id,
                     self.frames.iter().rev().filter_map(|frame| {
                         let location = frame.location.as_ref()?;
-                        Some((location.file.as_ref(), frame.line(self, location)))
+                        Some((location.file.as_ref(), frame.line(location)))
                     }),
                 );
             }
@@ -5056,7 +4951,7 @@ impl Heap {
             owner,
             frame,
             scope,
-            iterators,
+
             native,
             ..
         } = self.get_mut(id)
@@ -5068,7 +4963,6 @@ impl Heap {
         *owner = FrameOwner::Module(NONE);
         *frame = None;
         *scope = NONE;
-        iterators.clear();
         *native = None;
         self.disarm_finalizer(id);
     }
@@ -5339,7 +5233,7 @@ impl Heap {
         self.frames.iter().rev().filter_map(|frame| {
             let mut location = frame.location.clone()?;
             // The executing expression can be on a later line than the start of its call span.
-            location.line = frame.line(self, &location);
+            location.line = frame.line(&location);
             Some((location, frame.scope))
         })
     }
@@ -5731,24 +5625,14 @@ impl Heap {
                             .take(*budget)
                             .any(|&value| keeps(heap, value, owner, budget))
                 }
-                Value::Generator {
-                    scope,
-                    iterators,
-                    protected,
-                    native,
-                    ..
-                } if matches!(heap.get(owner), Value::Generator { .. }) => {
+                Value::Generator { scope, native, .. }
+                    if matches!(heap.get(owner), Value::Generator { .. }) =>
+                {
                     // The generator owns its scope. A still-bound local is a strong
                     // edge only after the caller has proved a path to this generator.
                     matches!(heap.get(*scope), Value::Scope(locals)
-                        if locals.names.values().take(*budget).any(|&id| id == owner))
-                        || protected
-                            .iter()
-                            .take(*budget)
-                            .flat_map(super::source_code::FinallyBlock::roots)
-                            .chain(iterators.iter().copied())
-                            .take(*budget)
-                            .any(|value| keeps(heap, value, owner, budget))
+                        if (locals.names.values().take(*budget).any(|&id| id == owner)
+                            || locals.names.get(".0").is_some_and(|&iter| keeps(heap, iter, owner, budget))))
                         || native.as_ref().is_some_and(|saved| {
                             saved.any_root(*budget, |value| keeps(heap, value, owner, budget))
                         })
@@ -6282,6 +6166,7 @@ impl Heap {
     }
 
     /// A discarded owner or the allocation threshold has requested a sweep.
+    #[cfg(test)]
     pub(super) fn collection_requested(&self) -> bool {
         self.collect_next_statement
             || self.check_finalizers_next_statement
@@ -7080,8 +6965,7 @@ mod tests {
                 lineno: 0,
                 code: NONE,
                 scope: NONE,
-                iterators: Vec::new(),
-                protected: Vec::new(),
+
                 native: None,
                 offset: Some(0),
                 running: false,

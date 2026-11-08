@@ -91,8 +91,6 @@ impl Context {
             lineno: definition.first_line,
             code,
             scope,
-            iterators: Vec::new(),
-            protected: Vec::new(),
             native: None,
             offset: Some(0),
             running: false,
@@ -170,11 +168,11 @@ impl Context {
                 format!("can't send non-None value to a just-started {kind}"),
             ));
         }
-        let next = if matches!(self.code_object(code).body, Body::Native(_)) {
+        let next = if matches!(self.code_object(code).body, Body::Native(..)) {
             self.next_result(generator)?
         } else {
             stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
-                self.resume_generator_input(generator, finalizer, GeneratorInput::Send(sent))
+                self.resume_native(generator, finalizer, GeneratorInput::Send(sent))
             })?
         };
         next.ok_or_else(|| self.exception("StopIteration", &[]))
@@ -549,7 +547,7 @@ impl Context {
             };
         }
         let fresh = offset == Some(0);
-        if fresh || matches!(self.code_object(code).body, Body::Native(_)) {
+        if fresh || matches!(self.code_object(code).body, Body::Native(..)) {
             // A fresh frame unwinds at its definition, a suspended native frame at its yield.
             let definition = self.code_object(code);
             let location = Location {
@@ -576,7 +574,7 @@ impl Context {
             self.heap.discard_generator_frame(id);
             return Err(error);
         }
-        self.resume_generator_input(
+        self.resume_native(
             id,
             finalizer,
             GeneratorInput::Throw {
@@ -616,13 +614,13 @@ impl Context {
         if offset.is_none() {
             return Ok(NONE);
         }
-        if offset == Some(0) || matches!(self.code_object(code).body, Body::Native(_)) {
+        if offset == Some(0) || matches!(self.code_object(code).body, Body::Native(..)) {
             self.heap.disarm_finalizer(finalizer);
             self.heap.discard_generator_frame(id);
             return Ok(NONE);
         }
         let exit = self.exception("GeneratorExit", &[]);
-        match self.resume_generator_input(
+        match self.resume_native(
             id,
             finalizer,
             GeneratorInput::Throw {

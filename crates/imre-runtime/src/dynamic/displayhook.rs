@@ -1,18 +1,6 @@
 //! Display an interactive expression through the interpreter's current Python hook.
 use super::{Context, Error, Id, NONE, Result, Value, builtins, stdlib::codecs};
 
-impl Context {
-    pub(super) fn display_expression(&mut self, value: Id) -> Result<()> {
-        self.heap.keep(value);
-        let hook = self
-            .sys_binding("displayhook")?
-            .ok_or_else(|| Error::new("RuntimeError", "lost sys.displayhook"))?;
-        self.heap.keep(hook);
-        self.call(hook, vec![value], Vec::new())?;
-        Ok(())
-    }
-}
-
 fn write(ctx: &mut Context, stream: Id, text: Id) -> Result<()> {
     ctx.heap.keep(text);
     ctx.heap.keep(stream);

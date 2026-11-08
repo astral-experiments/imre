@@ -15,7 +15,7 @@ if sys.version_info[:3] != (3, 14, 5) or sys.platform != "linux":
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--check", action="store_true")
 args = parser.parse_args()
-out = Path(__file__).resolve().parents[4] / "crates/imre-runtime/src/objects/linecache"
+out = Path(__file__).resolve().parents[4] / "crates/imre-ast/src/source_encoding"
 modules = {item.name for item in pkgutil.iter_modules(encodings.__path__)}
 names = sorted(modules | encodings.aliases.aliases.keys())
 tables, aliases = [], {}

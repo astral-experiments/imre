@@ -101,6 +101,24 @@ load:
 
 type ModuleSource = (String, PathBuf, String);
 
+/// Snapshots and admission facts for the bodies selected by import resolution.
+#[derive(Default)]
+pub(super) struct RegisteredBodies {
+    // Decoded installed files retain the fingerprint of their original loader bytes.
+    pub(super) physical_files: HashMap<PathBuf, Option<[u8; 32]>>,
+    pub(super) archive_members: HashMap<PathBuf, ([u8; 32], u32)>,
+    // These provide declarations to the checked program. Their Python bodies
+    // retain Python argument binding, including annotations available to reflection.
+    pub(super) python_providers: HashSet<PathBuf>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum ModuleOrigin {
+    Program,
+    Provider,
+    Bundled,
+}
+
 /// All module source has already been resolved. Import execution remains conditional.
 pub(crate) fn emit(
     (files, builtins): (&[ModuleSource], &[ModuleSource]),
@@ -109,8 +127,16 @@ pub(crate) fn emit(
     bundled_root: &Path,
     providers: &HashSet<String>,
     split: bool,
-    (source_initializers, physical_files): (&HashSet<PathBuf>, &HashSet<PathBuf>),
+    (module_errors, registrations): (
+        &HashMap<PathBuf, Box<super::ModuleSyntaxError>>,
+        &RegisteredBodies,
+    ),
 ) -> Result<(Vec<CodegenUnit>, bool), String> {
+    let RegisteredBodies {
+        physical_files,
+        archive_members,
+        python_providers,
+    } = registrations;
     let mut units = Vec::new();
     let mut used_archive = false;
     let mut output = Output {
@@ -125,37 +151,59 @@ pub(crate) fn emit(
     output
         .functions
         .push_str("declare void @imre_dyn_register_file_source(ptr, ptr, ptr, ptr, i64, ptr)\n");
+    if !archive_members.is_empty() {
+        output
+            .functions
+            .push_str("declare void @imre_dyn_register_zip_source(ptr, ptr, ptr, ptr, i32, ptr)\n");
+    }
     if !builtins.is_empty() {
         output.functions.push_str(
             "declare void @imre_dyn_register_builtin_source(ptr, ptr, ptr, ptr, i64, ptr)\n",
         );
     }
-    if !source_initializers.is_empty() {
-        output
-            .functions
-            .push_str("declare void @imre_dyn_register_bundled_source(ptr, ptr, ptr, ptr, i64)\n");
+    if !module_errors.is_empty() {
+        output.functions.push_str(
+            "declare void @imre_dyn_register_module_error(ptr, ptr, ptr, ptr, i64, ptr, ptr, i8, ptr)\n",
+        );
     }
     let mut declarations = HashSet::new();
     let files = files.iter().map(|module| (module, false));
     let builtins = builtins.iter().map(|module| (module, true));
     for (unit, ((name, path, source), builtin)) in files.chain(builtins).enumerate() {
         let bundled = path.starts_with(bundled_root);
+        let origin = if bundled {
+            ModuleOrigin::Bundled
+        } else if python_providers.contains(path) {
+            ModuleOrigin::Provider
+        } else {
+            ModuleOrigin::Program
+        };
         let module_name = output.data(name.as_bytes());
         let file = output.data(path.as_os_str().as_encoded_bytes());
-        if !builtin && source_initializers.contains(path) {
+        if !builtin && let Some(error) = module_errors.get(path) {
+            let message = output.data(error.message.as_bytes());
+            let position = error
+                .position
+                .map_or_else(|| "null".into(), |span| output.position(span));
             let text = output.data(source.as_bytes());
+            let hash = archive_members
+                .get(path)
+                .map_or_else(|| "null".into(), |(digest, _)| output.data(digest));
             writeln!(
                 main,
-                "  call void @imre_dyn_register_bundled_source(ptr %ctx, ptr {module_name}, ptr {file}, ptr {text}, i64 {})",
-                source.len()
+                "  call void @imre_dyn_register_module_error(ptr %ctx, ptr {module_name}, ptr {file}, ptr {text}, i64 {}, ptr {message}, ptr {position}, i8 {}, ptr {hash})",
+                source.len(), if error.parse_error { 2 } else { u8::from(error.in_args) }
             ).unwrap();
             continue;
         }
         // Python source files use universal newlines, including inside literals.
         // Keep the original physical bytes for registration.
-        let physical = !builtin && physical_files.contains(path);
-        let code_source = if physical {
+        let physical = !builtin && physical_files.contains_key(path);
+        let file_digest = physical_files.get(path).copied().flatten();
+        let code_source = if physical && file_digest.is_none() {
             crate::normalize_source(source, crate::SourceKind::File)?
+        } else if file_digest.is_some() || archive_members.contains_key(path) {
+            crate::normalize_source(source, crate::SourceKind::DecodedFile)?
         } else {
             std::borrow::Cow::Borrowed(source.as_str())
         };
@@ -165,7 +213,7 @@ pub(crate) fn emit(
         let mut external = None;
         if (check_archive || separate)
             && let Some((symbol, ir)) =
-                initializer(name, path, &code_source, keep_docstrings, bundled)?
+                initializer(name, path, &code_source, keep_docstrings, origin)?
         {
             let archived = check_archive && providers.contains(&symbol);
             if archived || separate {
@@ -190,14 +238,19 @@ pub(crate) fn emit(
                 path,
                 &code_source,
                 &file,
-                SourceBody::Module { bundled },
+                SourceBody::Module(origin),
             )?,
         };
+        if let Some((digest, flags)) = archive_members.get(path) {
+            let hash = output.data(digest);
+            writeln!(main, "  call void @imre_dyn_register_zip_source(ptr %ctx, ptr {module_name}, ptr {file}, ptr {hash}, i32 {flags}, ptr {code})").unwrap();
+            continue;
+        }
         // Physical code reads keep using the file. Identify its compiled snapshot without
         // embedding the source or exposing stale bytes through SourceFileLoader.get_data().
         let (register, text, len) = if physical {
             use sha2::{Digest, Sha256};
-            let digest = Sha256::digest(source.as_bytes());
+            let digest = file_digest.unwrap_or_else(|| Sha256::digest(source.as_bytes()).into());
             (
                 "imre_dyn_register_file_source",
                 output.data(&digest),
@@ -239,7 +292,7 @@ pub(super) fn initializer(
     path: &Path,
     source: &str,
     keep_docstrings: bool,
-    bundled: bool,
+    origin: ModuleOrigin,
 ) -> Result<Option<(String, String)>, String> {
     let mut output = Output {
         keep_docstrings,
@@ -247,7 +300,7 @@ pub(super) fn initializer(
     };
     let filename = path.as_os_str().as_encoded_bytes();
     let file = output.data(filename);
-    let entry = output.source_body(0, name, path, source, &file, SourceBody::Module { bundled })?;
+    let entry = output.source_body(0, name, path, source, &file, SourceBody::Module(origin))?;
     // These slots are numbered across the whole program and must stay in its codegen unit.
     if !output.string_constant_slots.is_empty() {
         return Ok(None);
@@ -336,15 +389,14 @@ pub(super) fn lower_source(
     Ok(private_names)
 }
 
-/// Validate the modules that will have native initializers. Source-only registrations
-/// stay unparsed here, just as they do when emitting a runnable program.
+/// Validate the executable bodies. Discovery already recorded the malformed modules.
 pub(super) fn check(
     (files, builtins): (&[ModuleSource], &[ModuleSource]),
     keep_docstrings: bool,
-    source_initializers: &HashSet<PathBuf>,
+    module_errors: &HashMap<PathBuf, Box<super::ModuleSyntaxError>>,
 ) -> Result<(), String> {
     for (_, path, source) in files.iter().chain(builtins) {
-        if !source_initializers.contains(path) {
+        if !module_errors.contains_key(path) {
             check_source(path, source, keep_docstrings)?;
         }
     }
@@ -367,7 +419,8 @@ impl Output {
         file: &str,
         kind: SourceBody<'_>,
     ) -> Result<String, String> {
-        let bundled = matches!(&kind, SourceBody::Module { bundled: true });
+        let bundled = matches!(kind, SourceBody::Module(ModuleOrigin::Bundled));
+        let provider = matches!(kind, SourceBody::Module(ModuleOrigin::Provider));
         let expression = matches!(&kind, SourceBody::Expression(_));
         // The expression grammar supplies its own checked syntax and tokens.
         // Both inputs below then use the same name lowering and native code entry.
@@ -376,7 +429,7 @@ impl Output {
             Expression(ast::ModModule, &'a ast::token::Tokens),
         }
         let input = match kind {
-            SourceBody::Module { .. } => {
+            SourceBody::Module(_) => {
                 Input::Module(parse_source(path, source, self.keep_docstrings)?)
             }
             SourceBody::Expression(parsed) => {
@@ -456,8 +509,8 @@ impl Output {
             bundled,
             path,
             // These CPython providers implement their own call semantics in Python.
-            python_annotations: bundled
-                && matches!(name, "_py_warnings" | "tomllib._parser" | "typing"),
+            python_annotations: provider
+                || bundled && matches!(name, "_py_warnings" | "tomllib._parser" | "typing"),
             module_start,
             class_keywords,
             docs,
@@ -493,7 +546,7 @@ impl Output {
 }
 
 enum SourceBody<'a> {
-    Module { bundled: bool },
+    Module(ModuleOrigin),
     Expression(&'a ruff_python_parser::Parsed<ast::ModExpression>),
 }
 
@@ -1381,9 +1434,15 @@ mod tests {
     #[test]
     fn exception_group_handlers_in_nested_generators_have_native_entries() {
         let source = "def supported():\n    yield 1\ndef handled():\n    def nested():\n        yield 2\n    try:\n        yield 3\n    except* ValueError:\n        pass\ndef outer():\n    def inner():\n        try:\n            yield 4\n        except* ValueError:\n            pass\n    yield 5\n";
-        let (_, ir) = initializer("sample", Path::new("sample.py"), source, true, false)
-            .unwrap()
-            .unwrap();
+        let (_, ir) = initializer(
+            "sample",
+            Path::new("sample.py"),
+            source,
+            true,
+            ModuleOrigin::Program,
+        )
+        .unwrap()
+        .unwrap();
         let tag = format!(", i32 {} }}", permanent::NATIVE_SUSPENDED_BODY);
         assert_eq!(ir.lines().filter(|line| line.ends_with(&tag)).count(), 5);
         assert_eq!(
@@ -1397,9 +1456,19 @@ mod tests {
     fn suspended_definitions_use_native_entries_in_each_module_origin() {
         let source = "def items(xs):\n    yield 1\n    yield from xs\npark = lambda: (yield 2)\nresume = lambda: 1 + (yield 3)\nasync def more(xs):\n    async for x in xs:\n        yield x\nasync def consume(f):\n    return await f()\n";
         for bundled in [false, true] {
-            let (_, ir) = initializer("example", Path::new("example.py"), source, true, bundled)
-                .unwrap()
-                .unwrap();
+            let (_, ir) = initializer(
+                "example",
+                Path::new("example.py"),
+                source,
+                true,
+                if bundled {
+                    ModuleOrigin::Bundled
+                } else {
+                    ModuleOrigin::Program
+                },
+            )
+            .unwrap()
+            .unwrap();
             let tag = format!(", i32 {} }}", permanent::NATIVE_SUSPENDED_BODY);
             assert_eq!(ir.lines().filter(|line| line.ends_with(&tag)).count(), 5);
             let operations: Vec<_> = ir
@@ -1414,9 +1483,15 @@ mod tests {
     #[test]
     fn pass_fixed_keywords_directly_and_keep_expanded_calls_packed() {
         let source = "target(1, name=2)\ntarget(1, **options)\n";
-        let (_, ir) = initializer("example", Path::new("example.py"), source, true, true)
-            .unwrap()
-            .unwrap();
+        let (_, ir) = initializer(
+            "example",
+            Path::new("example.py"),
+            source,
+            true,
+            ModuleOrigin::Bundled,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(ir.matches("call i64 @imre_dyn_keyword_call_at(").count(), 1);
         assert_eq!(ir.matches("call i64 @imre_dyn_scoped_call_at(").count(), 1);
     }
@@ -1426,7 +1501,7 @@ mod tests {
         let path = Path::new("<imre stdlib>/example.py");
         let declare = "declare void @imre_dyn_set_statement_line";
         for (source, expected) in [("value = 1", 0), ("with a, b:\n    pass", 1)] {
-            let (_, ir) = initializer("example", path, source, true, true)
+            let (_, ir) = initializer("example", path, source, true, ModuleOrigin::Bundled)
                 .unwrap()
                 .unwrap();
             assert_eq!(ir.matches(declare).count(), expected);
@@ -1439,7 +1514,10 @@ mod tests {
         let path = root.join("example.py");
         let source = "value = 1";
         let compiled = |name, path: &Path, src, docs| {
-            initializer(name, path, src, docs, true).unwrap().unwrap().0
+            initializer(name, path, src, docs, ModuleOrigin::Bundled)
+                .unwrap()
+                .unwrap()
+                .0
         };
         let symbol = compiled("example", &path, source, true);
         assert_ne!(symbol, compiled("other", &path, source, true));
@@ -1450,9 +1528,15 @@ mod tests {
         assert_ne!(symbol, compiled("example", &path, "value = 2", true));
         assert_ne!(symbol, compiled("example", &path, source, false));
         assert!(
-            initializer("example", &path, "value = t'{123}'", true, true)
-                .unwrap()
-                .is_none()
+            initializer(
+                "example",
+                &path,
+                "value = t'{123}'",
+                true,
+                ModuleOrigin::Bundled
+            )
+            .unwrap()
+            .is_none()
         );
 
         let bundled = ("example".into(), path, source.into());
@@ -1462,8 +1546,11 @@ mod tests {
             source.into(),
         );
         let symbols = HashSet::from([symbol.clone()]);
-        let physical_files = HashSet::from([project.1.clone()]);
-        let initializers = (&HashSet::new(), &physical_files);
+        let registrations = RegisteredBodies {
+            physical_files: HashMap::from([(project.1.clone(), None)]),
+            ..Default::default()
+        };
+        let initializers = (&HashMap::new(), &registrations);
         let refs = |modules: &[_]| {
             let (units, used) = emit(
                 (modules, &[]),
@@ -1513,13 +1600,24 @@ mod tests {
             root,
             &symbols,
             false,
-            (&HashSet::from([bundled.1.clone()]), &physical_files),
+            (
+                &HashMap::from([(
+                    bundled.1.clone(),
+                    Box::new(super::super::ModuleSyntaxError::new(
+                        source,
+                        ruff_text_size::TextRange::default(),
+                        "invalid".into(),
+                        false,
+                    )),
+                )]),
+                &registrations,
+            ),
         )
         .unwrap();
         assert!(!used);
         let ir = &units[0].llvm_ir;
         assert_eq!(
-            ir.matches("call void @imre_dyn_register_bundled_source(")
+            ir.matches("call void @imre_dyn_register_module_error(")
                 .count(),
             1
         );
@@ -1535,7 +1633,10 @@ mod tests {
             PathBuf::from("/other/example.py"),
             project.2.clone(),
         );
-        let physical_files = HashSet::from([project.1.clone(), shadow.1.clone()]);
+        let registrations = RegisteredBodies {
+            physical_files: HashMap::from([(project.1.clone(), None), (shadow.1.clone(), None)]),
+            ..Default::default()
+        };
         let (units, used) = emit(
             (&[bundled, project.clone(), shadow, project], &[]),
             "{}",
@@ -1543,7 +1644,7 @@ mod tests {
             root,
             &symbols,
             true,
-            (&HashSet::new(), &physical_files),
+            (&HashMap::new(), &registrations),
         )
         .unwrap();
         assert!(used);

@@ -32,17 +32,67 @@ impl ImportOrigin {
     }
 }
 
+/// A module rejected during discovery can still be found by a lazy import.
+/// Keep its Python error at the import point without compiling the text again.
+pub(crate) struct ModuleSyntaxError {
+    pub(crate) range: ruff_text_size::TextRange,
+    pub(crate) message: String,
+    position: Option<[usize; 4]>,
+    pub(crate) validate_at_origin: bool,
+    in_args: bool,
+    pub(crate) parse_error: bool,
+}
+
+impl ModuleSyntaxError {
+    pub(crate) fn new(
+        source: &str,
+        range: ruff_text_size::TextRange,
+        message: String,
+        in_args: bool,
+    ) -> Self {
+        let location = |offset: ruff_text_size::TextSize| {
+            let prefix = &source[..offset.to_usize()];
+            let line = prefix.bytes().filter(|&b| b == b'\n').count() + 1;
+            let column = prefix.rsplit('\n').next().unwrap().len() + 1;
+            (line, column)
+        };
+        let (line, column) = location(range.start());
+        let (end_line, end_column) = location(range.end());
+        Self {
+            range,
+            message,
+            position: Some([line, end_line, column, end_column]),
+            validate_at_origin: false,
+            in_args,
+            parse_error: false,
+        }
+    }
+
+    /// Parser diagnostics use character columns and include the offending line in SyntaxError.args.
+    fn from_parser(source: &str, error: ruff_python_parser::ParseError) -> Self {
+        let range = error.location;
+        let mut diagnostic = Self::new(source, range, error.to_string(), true);
+        for (position, offset) in [(2, range.start()), (3, range.end())] {
+            let before = &source[..offset.to_usize()];
+            diagnostic.position.as_mut().unwrap()[position] =
+                before.rsplit('\n').next().unwrap().chars().count() + 1;
+        }
+        diagnostic.parse_error = true;
+        diagnostic
+    }
+}
+
 /// Finds literal directories made available to imports by a startup script.
 /// The generated program still evaluates the assignment and consults its actual
 /// `sys.path` in order when each import executes.
 #[derive(Default)]
 struct Imports {
     names: Vec<(u32, String)>,
+    module_flags: u32,
     explicit_roots: Vec<PathBuf>,
     runtime_imports: bool,
     private_names: imre_ast::Names,
-    invalid_executable: Option<Box<crate::frontend::phase::Diagnostic>>,
-    validate_at_origin: bool,
+    invalid_executable: Option<Box<ModuleSyntaxError>>,
     uses_import_builtin: bool,
     uses_exec: bool,
     computed_import: bool,
@@ -565,7 +615,23 @@ fn scan_imports(
     let normalized = crate::normalize_source(source, kind)?;
     let input = imre_ast::indentation::prepare(&normalized);
     crate::analysis::check_source_complexity(&input.text).map_err(str::to_owned)?;
-    let parsed = input.parse_module()?;
+    let parsed = ruff_python_parser::parse_module(&input.text);
+    if let Some(issue) = input.first_issue(parsed.as_ref().err()) {
+        return Err(issue.to_string());
+    }
+    let parsed = match parsed {
+        Ok(parsed) => parsed,
+        Err(error) if kind == SourceKind::DecodedFile => {
+            return Ok(Imports {
+                invalid_executable: Some(Box::new(ModuleSyntaxError::from_parser(
+                    &normalized,
+                    error,
+                ))),
+                ..Imports::default()
+            });
+        }
+        Err(error) => return Err(error.to_string()),
+    };
     crate::analysis::check_form_feeds(&normalized, parsed.tokens())?;
     if let Some((path, keep_docstrings)) = file_alternative {
         emit::check_parsed_source(path, &normalized, &parsed, keep_docstrings)?;
@@ -573,43 +639,51 @@ fn scan_imports(
     let mut body = parsed.into_syntax().body;
     let bindings = imre_ast::executable::BindingErrors::check(&body, &normalized);
     let future = imre_ast::future_import_error(&body);
-    // A body already retained for a directive, declaration or pattern error keeps
-    // that route. An otherwise linkable initializer goes through physical validation.
     let validate_at_origin =
         future.is_none() && bindings.symbol.is_none() && bindings.pattern.is_none();
     let error = bindings
         .first_symbol(future)
-        .map(|(range, reason)| (range, reason.to_owned()))
+        .map(|(range, reason)| ModuleSyntaxError::new(&normalized, range, reason.to_owned(), false))
         .or_else(|| {
-            bindings
-                .handler
-                .map(|issue| (issue.range, issue.message.to_owned()))
+            let issue = bindings.handler?;
+            let mut error = ModuleSyntaxError::new(
+                &normalized,
+                issue.location.unwrap_or(issue.range),
+                issue.message.to_owned(),
+                true,
+            );
+            if issue.location.is_none() {
+                error.position = None;
+            }
+            error.range = issue.range;
+            Some(error)
         })
         .or_else(|| {
-            bindings
-                .pattern
-                .map(|(range, reason)| (range, reason.checked().into_owned()))
+            bindings.pattern.map(|(range, reason)| {
+                ModuleSyntaxError::new(&normalized, range, reason.checked().into_owned(), true)
+            })
         });
     // The optional file must satisfy the emitter's checks before registration.
     // Use its discovery tree for both checking and collecting the lowered imports.
     let checked_names = file_alternative
         .map(|(path, _)| emit::lower_source(path, &normalized, &mut body))
         .transpose()?;
-    if let Some((range, message)) = error {
+    if let Some(mut diagnostic) = error {
         // Discovery records the error. Only selection as the checked entry diagnoses it here.
-        let diagnostic = crate::frontend::phase::Diagnostic::at(
-            &normalized,
-            &range,
-            format!("SyntaxError: {message}"),
-        );
+        diagnostic.validate_at_origin = validate_at_origin;
         return Ok(Imports {
             invalid_executable: Some(Box::new(diagnostic)),
-            validate_at_origin,
             ..Imports::default()
         });
     }
     let mut imports = Imports::default();
+    if imre_ast::future_import(&body, "barry_as_FLUFL") {
+        imports.module_flags |= imre_ast::code_flags::FUTURE_BARRY_AS_BDFL;
+    }
     imports.private_names = checked_names.unwrap_or_else(|| imre_ast::lower(&mut body));
+    if imports.private_names.string_annotations {
+        imports.module_flags |= imre_ast::code_flags::FUTURE_ANNOTATIONS;
+    }
     imports.runtime_imports = body.iter().any(|stmt| {
         matches!(stmt, Stmt::FunctionDef(function) if function_type_params(function, imports.private_names.string_annotations, false, Some(&imports.private_names)).is_some())
     });
@@ -651,6 +725,7 @@ pub(crate) struct RegisteredSource<'a> {
     pub(crate) name: &'a str,
     pub(crate) path: &'a Path,
     pub(crate) source: &'a str,
+    pub(crate) kind: SourceKind,
     pub(crate) is_program: bool,
     pub(crate) checked_module: Option<crate::modules::ModuleId>,
 }
@@ -665,6 +740,11 @@ impl<'a> RegisteredSource<'a> {
             name,
             path,
             source,
+            kind: if path == Path::new("<string>") {
+                SourceKind::Command
+            } else {
+                SourceKind::File
+            },
             is_program,
             checked_module,
         }
@@ -793,7 +873,13 @@ pub(crate) fn compile(
         // Preserve diagnostics owned by the original first-party graph before
         // reporting why this entry cannot supply an executable Python body.
         check(false, None)?;
-        return Err(error.with_path(path).to_string());
+        let source = crate::normalize_source(&src, SourceKind::File)?;
+        let diagnostic = crate::frontend::phase::Diagnostic::at(
+            &source,
+            &error.range,
+            format!("SyntaxError: {}", error.message),
+        );
+        return Err(diagnostic.with_path(path).to_string());
     }
     // Python entries can import these bundled sources when static lowering cannot handle the entry.
     let imports_provider = |provider: &str| {
@@ -829,7 +915,7 @@ pub(crate) fn compile(
         && first
             .names
             .iter()
-            .any(|(level, name)| *level == 0 && crate::zip_entry::installed_member(name).is_some());
+            .any(|(level, name)| *level == 0 && crate::zip_entry::packaged_member(name).is_some());
     let startup_provider =
         logging_script || tokenize_script || configparser_script || pyio_script || installed_script;
     let fallback_script = !object_entry && startup_provider;
@@ -916,7 +1002,12 @@ pub(crate) fn compile(
         .cloned()
         .collect();
     let mut roots = initial.clone();
-    roots.extend(first.explicit_roots.iter().map(|p| cwd.join(p)));
+    let explicit_roots: Vec<_> = first
+        .explicit_roots
+        .iter()
+        .map(|path| cwd.join(path))
+        .collect();
+    roots.extend(explicit_roots.iter().cloned());
     let implicit_dirs: Vec<_> = installed_dirs
         .iter()
         .filter(|p| !roots.contains(p))
@@ -929,7 +1020,7 @@ pub(crate) fn compile(
     let bundled_root = BUNDLED_SOURCE_ROOT;
     let mut inputs = SourceInputs::default();
     let mut archives = HashMap::new();
-    let mut physical_files = HashSet::new();
+    let mut registrations = emit::RegisteredBodies::default();
     for path in options
         .extension_paths
         .iter()
@@ -944,6 +1035,33 @@ pub(crate) fn compile(
             entry.insert(archive);
         }
     }
+    for path in explicit_roots.iter().cloned() {
+        if let std::collections::hash_map::Entry::Vacant(entry) = archives.entry(path)
+            && let Some(archive) =
+                crate::zip_entry::ZipSources::discover(entry.key(), &mut inputs, &mut filesystem)?
+        {
+            entry.insert(archive);
+        }
+    }
+    let has_archive_roots = !archives.is_empty();
+    let mut archive_modules = has_archive_roots.then(|| {
+        roots
+            .iter()
+            .filter_map(|root| archives.get(root))
+            .flat_map(|archive| archive.modules())
+            .collect::<std::collections::BTreeSet<_>>()
+    });
+    let mut installed_wheels = Vec::new();
+    let mut wheel_files = HashMap::new();
+    let mut wheel_roots: Vec<_> = roots
+        .iter()
+        .filter(|root| {
+            !archives.contains_key(*root)
+                && (startup_paths.contains(root)
+                    || implicit_dirs.contains(root)
+                    || explicit_roots.contains(root))
+        })
+        .collect();
     let mut sources = vec![(
         "__main__".to_owned(),
         if in_memory {
@@ -964,11 +1082,10 @@ pub(crate) fn compile(
     if module_entry.is_none() {
         selected_sources.push((0, true, checked_graph.map(|graph| graph.entry)));
     }
-    let mut source_initializers = HashSet::new();
-    let mut contextual_errors = HashMap::new();
     let mut unavailable_sources = HashMap::new();
-    if first.invalid_executable.is_some() {
-        source_initializers.insert(sources[0].1.clone());
+    let mut module_errors = HashMap::new();
+    if let Some(error) = first.invalid_executable.take() {
+        module_errors.insert(sources[0].1.clone(), error);
     }
     let mut seen = HashSet::new();
     let mut imp_in_file_graph = false;
@@ -1015,6 +1132,40 @@ pub(crate) fn compile(
             through_getter = lazy;
             bundled_only = true;
             ((next, ImportOrigin::Provider), false)
+        } else if let Some(modules) = archive_modules.take().or_else(|| {
+            wheel_roots.retain(|root| {
+                let selected = sources.iter().any(|(_, path, _)| path.starts_with(root));
+                if selected {
+                    installed_wheels.extend(crate::installed_wheels::InstalledWheel::discover(
+                        root,
+                        &mut inputs,
+                        &mut filesystem,
+                    ));
+                }
+                !selected
+            });
+            crate::installed_wheels::InstalledWheel::take_active(
+                &mut installed_wheels,
+                &sources,
+                &mut wheel_files,
+            )
+        }) {
+            // A computed import can select another member of a supplied archive or an active installed wheel.
+            // Register those origins without importing them or selecting additional project winners.
+            let mut imports = Imports::default();
+            imports
+                .names
+                .extend(modules.into_iter().map(|name| (0, name)));
+            through_getter = false;
+            following_sdk = false;
+            bundled_only = false;
+            (
+                (
+                    ("__main__".to_owned(), false, imports),
+                    ImportOrigin::Alternative,
+                ),
+                false,
+            )
         } else {
             through_getter = false;
             // Collect late imports and their bundled dependencies after the explicit
@@ -1181,22 +1332,17 @@ pub(crate) fn compile(
                     imp_in_file_graph = true;
                 }
                 let new_module = seen.insert(prefix.clone());
+                let wheel_origins = wheel_files.remove(&prefix);
                 let new_file =
                     file_alternatives && frozen && searched_frozen_files.insert(prefix.clone());
-                let selected_member = if select_member && on_sdk_path {
+                let selected_member = if selected && !frozen && literal && on_sdk_path {
                     crate::zip_entry::packaged_member(&prefix)
-                } else if options.installed_stdlib_archive.is_some()
-                    && selected
-                    && !frozen
-                    && literal
-                    && on_sdk_path
-                {
-                    crate::zip_entry::installed_member(&prefix)
                 } else {
                     None
                 };
                 // A provider hint may have visited this name without registering a source.
                 if !new_module
+                    && wheel_origins.is_none()
                     && !new_file
                     && (selected_member.is_none()
                         || entry_sources.contains_key(&prefix)
@@ -1214,10 +1360,10 @@ pub(crate) fn compile(
                 {
                     bundled = Some((member, crate::zip_entry::installed_source(member)?.into()));
                 }
-                let mut installed = if bundled.is_some() {
+                let installed = if bundled.is_some() {
                     None
                 } else {
-                    selected_member.or_else(|| crate::zip_entry::installed_member(&prefix))
+                    selected_member.or_else(|| crate::zip_entry::packaged_member(&prefix))
                 };
                 if !implicit_dirs.is_empty()
                     && (bundled.is_some()
@@ -1295,45 +1441,68 @@ pub(crate) fn compile(
                     if implicit_dirs.contains(root) && before_site.contains(&prefix) {
                         continue;
                     }
-                    if let Some((parent, _)) = prefix.rsplit_once('.')
-                        && let Some((selected, package)) = entry_sources.get(parent)
-                        && (module_entry.is_some()
-                            || selected == Path::new(bundled_root)
-                            || archives.contains_key(selected)
-                            || archives.contains_key(root))
-                        && (!package || selected != root)
-                    {
-                        continue;
+                    let parent = prefix.rsplit_once('.').map(|(parent, _)| parent);
+                    let selected_parent = parent.and_then(|name| entry_sources.get(name));
+                    let on_package_path = selected_parent
+                        .is_none_or(|(selected, package)| *package && selected == root);
+                    let winner = on_package_path && !entry_sources.contains_key(&prefix);
+                    if !on_package_path && let Some(parent) = parent {
+                        // A different known package may become the live parent after sys.path changes.
+                        let available = if let Some(archive) = archives.get(root) {
+                            archive.package(parent) == Some(true)
+                                || archive.contains_namespace(parent)
+                        } else {
+                            filesystem.is_dir(&root.join(parent.replace('.', "/")))
+                        };
+                        if !available {
+                            continue;
+                        }
                     }
                     if let Some(archive) = archives.get_mut(root) {
-                        // A regular source already won. Ordinary files still register later
-                        // directory alternatives for programs that change sys.path at runtime.
-                        if entry_sources.contains_key(&prefix) {
+                        if !new_module && wheel_origins.is_some() {
                             continue;
                         }
                         if let Some(package) = archive.package(&prefix) {
-                            installed = None;
-                            if let Some((member, source, _)) = archive.module(&prefix)
-                                && let Ok(imports) = imports_for_module(
-                                    &member,
-                                    source.trim_start_matches('\u{feff}'),
+                            if let Some(member) = archive.module(&prefix)
+                                && let Ok(imports) = scan_imports(
+                                    &member.source,
+                                    SourceKind::DecodedFile,
+                                    None,
+                                    None,
                                 )
                             {
-                                let queue = if select_member && filesystem_import {
-                                    &mut selected_work
+                                if !initial[..path0_len].contains(root) {
+                                    registrations.python_providers.insert(member.path.clone());
+                                }
+                                registrations.archive_members.insert(
+                                    member.path.clone(),
+                                    (member.digest, imports.module_flags),
+                                );
+                                if let Some(error) = imports.invalid_executable {
+                                    module_errors.insert(member.path.clone(), error);
                                 } else {
-                                    &mut work
-                                };
-                                queue.push_back((
-                                    (prefix.clone(), package, imports),
-                                    ImportOrigin::file(filesystem_import),
-                                ));
+                                    let queue = if winner && select_member && filesystem_import {
+                                        &mut selected_work
+                                    } else {
+                                        &mut work
+                                    };
+                                    queue.push_back((
+                                        (prefix.clone(), package, imports),
+                                        ImportOrigin::file(winner && filesystem_import),
+                                    ));
+                                    if winner {
+                                        let program = initial[..path0_len].contains(root);
+                                        selected_sources.push((sources.len(), program, None));
+                                    }
+                                }
+                                sources.push((prefix.clone(), member.path, member.source));
                             }
                             if !implicit_dirs.is_empty() {
                                 before_site.insert(prefix.clone());
                             }
-                            entry_sources.insert(prefix.clone(), (root.clone(), package));
-                            break;
+                            if winner {
+                                entry_sources.insert(prefix.clone(), (root.clone(), package));
+                            }
                         }
                         continue;
                     }
@@ -1396,7 +1565,14 @@ pub(crate) fn compile(
                     {
                         return Ok(None);
                     }
-                    installed = None;
+                    if !new_module
+                        && wheel_origins
+                            .as_ref()
+                            .is_some_and(|origins| !origins.contains(&path))
+                    {
+                        continue;
+                    }
+                    let file_alternatives = file_alternatives || wheel_origins.is_some();
                     let identity = if let Some((identity, _)) = checked_slot {
                         identity.clone()
                     } else {
@@ -1436,10 +1612,24 @@ pub(crate) fn compile(
                             identity,
                             blake3::hash(&bytes).to_hex().to_string(),
                         ));
-                        let Ok(src) = String::from_utf8(bytes) else {
-                            continue;
-                        };
-                        src
+                        if wheel_origins.is_some() {
+                            use sha2::{Digest, Sha256};
+                            let Ok(text) = imre_ast::source_encoding::decode_compile_source(
+                                &bytes,
+                                |_, error| error.to_string(),
+                            ) else {
+                                continue;
+                            };
+                            registrations
+                                .physical_files
+                                .insert(path.clone(), Some(Sha256::digest(&bytes).into()));
+                            text
+                        } else {
+                            let Ok(text) = String::from_utf8(bytes) else {
+                                continue;
+                            };
+                            text
+                        }
                     } else {
                         let src = filesystem
                             .read_source_string(&identity)
@@ -1453,36 +1643,44 @@ pub(crate) fn compile(
                     };
                     let alternative = (file_alternatives && checked.is_none())
                         .then_some((path.as_path(), keep_docstrings));
-                    let imports = match scan_imports(&src, SourceKind::File, None, alternative) {
+                    let kind = if registrations
+                        .physical_files
+                        .get(&path)
+                        .is_some_and(Option::is_some)
+                    {
+                        SourceKind::DecodedFile
+                    } else {
+                        SourceKind::File
+                    };
+                    let imports = match scan_imports(&src, kind, None, alternative) {
                         Ok(imports) => imports,
                         Err(_) if file_alternatives => continue,
                         Err(error) => return Err(format!("{}: {error}", path.display())),
                     };
                     // Later alternatives remain available to the runtime finder. Only the
                     // winning provider supplies the initial module binding.
-                    let on_package_path = prefix
-                        .rsplit_once('.')
-                        .and_then(|(parent, _)| entry_sources.get(parent))
-                        .is_none_or(|(selected, is_package)| *is_package && selected == root);
-                    let winner = on_package_path && !entry_sources.contains_key(&prefix);
                     if winner {
                         entry_sources.insert(prefix.clone(), (root.clone(), package));
                         if let Some(error) = &imports.invalid_executable {
-                            unavailable_sources
-                                .insert(prefix.clone(), error.clone().with_path(&path));
+                            unavailable_sources.insert(
+                                prefix.clone(),
+                                crate::frontend::phase::Diagnostic::at(
+                                    &src,
+                                    &error.range,
+                                    format!("SyntaxError: {}", error.message),
+                                )
+                                .with_path(&path),
+                            );
                         }
                     }
-                    if imports.invalid_executable.is_none()
-                        || imports.validate_at_origin
+                    if imports
+                        .invalid_executable
+                        .as_ref()
+                        .is_none_or(|error| error.validate_at_origin)
                         || startup.is_none()
                     {
-                        if let Some(error) = &imports.invalid_executable {
-                            if imports.validate_at_origin {
-                                contextual_errors
-                                    .insert(path.clone(), error.clone().with_path(&path));
-                            } else {
-                                source_initializers.insert(path.clone());
-                            }
+                        if let Some(error) = imports.invalid_executable {
+                            module_errors.insert(path.clone(), error);
                         } else {
                             let queue = if winner && select_member && filesystem_import {
                                 &mut selected_work
@@ -1493,6 +1691,9 @@ pub(crate) fn compile(
                                 (prefix.clone(), package, imports),
                                 ImportOrigin::file(winner && filesystem_import),
                             ));
+                        }
+                        if !initial[..path0_len].contains(root) {
+                            registrations.python_providers.insert(path.clone());
                         }
                         let registration = (prefix.clone(), path, src);
                         if winner {
@@ -1509,53 +1710,63 @@ pub(crate) fn compile(
                         }
                         sources.push(registration);
                     }
-                    if module_entry.is_some() {
+                    if module_entry.is_some() && !has_archive_roots && wheel_origins.is_none() {
                         break;
                     }
                 }
                 if let Some(member) = installed {
-                    let shipped = crate::zip_entry::installed_source(member)?;
-                    let (path, source, package) = if let Some(root) =
-                        &options.installed_stdlib_archive
-                        && selected_member.is_some()
-                    {
-                        let archive = match archives.entry(root.clone()) {
-                            std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
-                            std::collections::hash_map::Entry::Vacant(e) => {
-                                e.insert(crate::zip_entry::ZipSources::open(
-                                    root,
-                                    &mut inputs,
-                                    &mut filesystem,
-                                )?)
-                            }
+                    // Removing an earlier path can expose this SDK member to its ordinary ZIP loader.
+                    let winner = selected_member.is_some() && !entry_sources.contains_key(&prefix);
+                    let (path, source, package, digest) =
+                        if let Some(root) = &options.installed_stdlib_archive {
+                            let archive = match archives.entry(root.clone()) {
+                                std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+                                std::collections::hash_map::Entry::Vacant(e) => {
+                                    e.insert(crate::zip_entry::ZipSources::open(
+                                        root,
+                                        &mut inputs,
+                                        &mut filesystem,
+                                    )?)
+                                }
+                            };
+                            let Some(entry) = archive.module(&prefix) else {
+                                continue;
+                            };
+                            (entry.path, entry.source, entry.package, Some(entry.digest))
+                        } else {
+                            use sha2::{Digest, Sha256};
+                            let shipped = crate::zip_entry::installed_source(member)?;
+                            let root = options.stdlib_fallback.as_deref();
+                            let digest = root.map(|_| Sha256::digest(shipped.as_bytes()).into());
+                            (
+                                root.unwrap_or(Path::new(bundled_root)).join(member),
+                                shipped,
+                                member.ends_with("/__init__.py"),
+                                digest,
+                            )
                         };
-                        let Some((path, source, package)) = archive.module(&prefix) else {
-                            continue;
-                        };
-                        // Other SDK sources retain their ordinary loader and syntax checks.
-                        if source != shipped {
-                            continue;
-                        }
-                        let path = root.join(path);
-                        physical_files.insert(path.clone());
-                        (path, source, package)
-                    } else {
-                        (
-                            Path::new(bundled_root).join(member),
-                            shipped,
-                            member.ends_with("/__init__.py"),
-                        )
+                    let Ok(imports) = scan_imports(&source, SourceKind::DecodedFile, None, None)
+                    else {
+                        continue;
                     };
-                    let imports = imports_for_module(&path, &source)?;
-                    let next = (prefix.clone(), package, imports);
-                    if selected_member.is_some() {
-                        entry_sources.insert(prefix.clone(), (bundled_root.into(), package));
-                        sdk_work.push_back(next);
-                        selected_sources.push((sources.len(), false, None));
-                        sources.push((prefix.clone(), path, source));
-                    } else {
-                        bundled_imports.push_back((next, false));
+                    if let Some(digest) = digest {
+                        registrations.python_providers.insert(path.clone());
+                        registrations
+                            .archive_members
+                            .insert(path.clone(), (digest, imports.module_flags));
                     }
+                    if winner {
+                        entry_sources.insert(prefix.clone(), (bundled_root.into(), package));
+                    }
+                    if let Some(error) = imports.invalid_executable {
+                        module_errors.insert(path.clone(), error);
+                    } else if winner {
+                        sdk_work.push_back((prefix.clone(), package, imports));
+                        selected_sources.push((sources.len(), false, None));
+                    } else {
+                        bundled_imports.push_back(((prefix.clone(), package, imports), false));
+                    }
+                    sources.push((prefix.clone(), path, source));
                 }
             }
         }
@@ -1642,8 +1853,27 @@ pub(crate) fn compile(
     // Borrow the winners once discovery has finished growing the emitter's source table.
     let selected_sources: Vec<_> = selected_sources
         .into_iter()
-        .map(|(id, program, module)| RegisteredSource::new(&sources[id], program, module))
+        .map(|(id, program, module)| {
+            let mut registration = RegisteredSource::new(&sources[id], program, module);
+            if registrations
+                .archive_members
+                .contains_key(registration.path)
+                || registrations
+                    .physical_files
+                    .get(registration.path)
+                    .is_some_and(Option::is_some)
+            {
+                registration.kind = SourceKind::DecodedFile;
+            }
+            registration
+        })
         .collect();
+    registrations.python_providers.extend(
+        selected_sources
+            .iter()
+            .filter(|source| !source.is_program)
+            .map(|source| source.path.to_owned()),
+    );
     let (winners, file_alternatives) =
         selected_sources.split_at(ordinary_registrations.unwrap_or(selected_sources.len()));
     check(
@@ -1656,12 +1886,13 @@ pub(crate) fn compile(
         }),
     )?;
     // SDK members retain their loader-visible filenames while the ZIP is the build input.
-    physical_files.extend(
-        inputs
-            .files
-            .iter()
-            .flat_map(|(path, identity, _)| [cwd.join(path), identity.clone()]),
-    );
+    for path in inputs
+        .files
+        .iter()
+        .flat_map(|(path, identity, _)| [cwd.join(path), identity.clone()])
+    {
+        registrations.physical_files.entry(path).or_default();
+    }
     // A namespace portion has no initializer. Its registered origin is a directory
     // that must remain available for the scratch session to add its child modules.
     let namespace_portions: HashSet<_> = inputs.directories.iter().map(|(path, _)| path).collect();
@@ -1672,15 +1903,18 @@ pub(crate) fn compile(
             .iter()
             .chain(&builtins)
             .filter(|(_, path, _)| !namespace_portions.contains(path)),
-        |path| physical_files.contains(path) && !winners.iter().any(|source| source.path == path),
-        &contextual_errors,
-        &mut source_initializers,
+        |path| {
+            registrations.archive_members.contains_key(path)
+                || registrations.physical_files.contains_key(path)
+                    && !winners.iter().any(|source| source.path == path)
+        },
+        &mut module_errors,
     )?;
     for name in &options.include_modules {
         // A finder can resolve a namespace or ZIP member without emitting a body.
         let file = winners
             .iter()
-            .any(|source| source.name == name && !source_initializers.contains(source.path));
+            .any(|source| source.name == name && !module_errors.contains_key(source.path));
         let bundled = bundled_includes
             .get(name)
             .is_some_and(|&frozen| frozen || !entry_sources.contains_key(name));
@@ -1695,7 +1929,7 @@ pub(crate) fn compile(
     }
     let modules = (sources.as_slice(), builtins.as_slice());
     let (units, used_archive) = if matches!(layout, crate::BoxedLayout::Check) {
-        emit::check(modules, keep_docstrings, &source_initializers)?;
+        emit::check(modules, keep_docstrings, &module_errors)?;
         (Vec::new(), false)
     } else {
         let providers = options
@@ -1713,7 +1947,7 @@ pub(crate) fn compile(
                 Path::new(bundled_root),
                 &providers,
                 split,
-                (&source_initializers, &physical_files),
+                (&module_errors, &registrations),
             )
         };
         let (mut units, mut used_archive) = emit(!matches!(layout, crate::BoxedLayout::Whole))?;

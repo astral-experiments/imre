@@ -474,15 +474,43 @@ impl Context {
 
     pub(super) fn module_code(&mut self, entry: ModuleInitializer, path: &Path) -> Result<Id> {
         let filename = self.import_path_text(path)?;
+        let flags = if let ModuleInitializer::Zip(_, _, flags) = entry {
+            Some(flags)
+        } else {
+            None
+        };
         let entry = match entry {
             ModuleInitializer::Native(entry)
             | ModuleInitializer::File(entry, _)
+            | ModuleInitializer::Zip(entry, _, _)
             | ModuleInitializer::Builtin(entry) => entry,
-            ModuleInitializer::Source(text) => {
-                let source = self.text(text);
-                let mode = self.text("exec");
-                // An imported module has its own future flags, independent of its caller.
-                return self.compile_source_with_flags(source, filename, mode, false, 0);
+            ModuleInitializer::Invalid {
+                message,
+                position,
+                in_args,
+                parser_line,
+                ..
+            } => {
+                if let Some(line) = parser_line {
+                    let mut line = line.to_owned();
+                    if !line.ends_with('\n') {
+                        line.push('\n');
+                    }
+                    return Err(self.parser_syntax_error(
+                        filename,
+                        &path.to_string_lossy(),
+                        &format!(": {message}"),
+                        true,
+                        position.expect("parser error position").map(i64::from),
+                        line,
+                    )?);
+                }
+                return Err(self.syntax_error_at(
+                    message,
+                    filename,
+                    position.map_or([-1, -1, 0, 0], |span| span.map(i64::from)),
+                    in_args,
+                )?);
             }
         };
         let name_id = self.text("<module>");
@@ -490,7 +518,7 @@ impl Context {
             parsed_parameters: Default::default(),
             varnames: NONE,
             cellvars: NONE,
-            body: value::Body::Native(entry),
+            body: value::Body::Native(entry, NONE),
             parameters: NONE,
             nested: Vec::new(),
             freevars: Vec::new(),
@@ -501,8 +529,8 @@ impl Context {
             filename,
             first_line: 1,
             module_definition: true,
-            flags: 0,
-            flags_complete: false,
+            flags: flags.unwrap_or(0),
+            flags_complete: flags.is_some(),
             generator_lambda: false,
         })))
     }
@@ -513,18 +541,30 @@ impl Context {
         use sha2::{Digest, Sha256};
         let path = self.import_path(filename)?;
         let mut entries = self.sources.values().flatten().filter_map(|source| {
-            if source.path.as_os_str() == path.as_os_str()
-                && let ModuleInitializer::File(entry, Some(digest)) = source.code
-            {
-                Some((entry, digest))
-            } else {
-                None
+            if source.path.as_os_str() != path.as_os_str() {
+                return None;
+            }
+            match source.code {
+                code @ (ModuleInitializer::File(entry, Some(digest))
+                | ModuleInitializer::Zip(entry, digest, _)) => Some((code, Some(entry), digest)),
+                code @ ModuleInitializer::Invalid {
+                    archive_digest: Some(digest),
+                    ..
+                } => Some((code, None, digest)),
+                _ => None,
             }
         });
-        let Some((entry, digest)) = entries.next() else {
+        let Some((code, entry, digest)) = entries.next() else {
             return Ok(None);
         };
-        if entries.any(|(other, hash)| !std::ptr::fn_addr_eq(entry, other) || hash != digest) {
+        if entries.any(|(_, other, hash)| {
+            hash != digest
+                || match (entry, other) {
+                    (Some(a), Some(b)) => !std::ptr::fn_addr_eq(a, b),
+                    (None, None) => false,
+                    _ => true,
+                }
+        }) {
             return Ok(None);
         }
         let Value::Bytes(bytes) = self.heap.get(data) else {
@@ -533,8 +573,7 @@ impl Context {
         if Sha256::digest(bytes).as_slice() != digest {
             return Ok(None);
         }
-        self.module_code(ModuleInitializer::File(entry, Some(digest)), &path)
-            .map(Some)
+        self.module_code(code, &path).map(Some)
     }
 
     fn registered_file(&self, name: &str, filename: &Path) -> Option<&super::SourceModule> {
@@ -544,7 +583,7 @@ impl Context {
         // Standalone programs carry first-party source for relocation. While the actual
         // file is present, let SourceFileLoader read it, including after a failed import.
         // Bundled stdlib origins are virtual, and compiled initializers keep their code.
-        if matches!(source.code, ModuleInitializer::Source(_))
+        if matches!(source.code, ModuleInitializer::Invalid { .. })
             && filename.is_absolute()
             && filename.is_file()
         {
