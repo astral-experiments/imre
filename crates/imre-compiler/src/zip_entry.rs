@@ -30,6 +30,14 @@ pub(crate) fn installed_member(name: &str) -> Option<&'static str> {
     )
 }
 
+/// Find an imported module in the SDK archive's existing build-time member index.
+pub(crate) fn packaged_member(name: &str) -> Option<&'static str> {
+    module_member(
+        name,
+        include_str!(concat!(env!("OUT_DIR"), "/imre-stdlib-members.txt")).lines(),
+    )
+}
+
 /// Archive members that also travel with a standalone executable when imported.
 pub(crate) fn standalone_member(name: &str) -> Option<&'static str> {
     let members = include_str!("../stdlib/runtime-only-sources.txt")

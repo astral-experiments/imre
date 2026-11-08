@@ -14,6 +14,24 @@ use ruff_python_ast::{self as ast, Expr, Stmt};
 
 use crate::{CompileOptions, SourceInputs, SourceKind, UnitCompilation};
 
+/// Only a winning file can add a first-party frozen override while walking SDK dependencies.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ImportOrigin {
+    File,
+    Provider,
+    Alternative,
+}
+
+impl ImportOrigin {
+    fn file(winner: bool) -> Self {
+        if winner {
+            Self::File
+        } else {
+            Self::Alternative
+        }
+    }
+}
+
 /// Finds literal directories made available to imports by a startup script.
 /// The generated program still evaluates the assignment and consults its actual
 /// `sys.path` in order when each import executes.
@@ -915,7 +933,11 @@ pub(crate) fn compile(
     let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
     let mut frozen_files: Vec<String> = Vec::new();
     let mut searched_frozen_files = HashSet::new();
-    let mut work = VecDeque::from([("__main__".to_owned(), false, first)]);
+    let mut selected_work =
+        VecDeque::from([(("__main__".to_owned(), false, first), ImportOrigin::File)]);
+    let mut sdk_work = VecDeque::new();
+    let mut following_sdk = false;
+    let mut work = VecDeque::new();
     let mut uses_import_builtin = false;
     let mut uses_exec = false;
     let mut computed_import = registered_imports.computed;
@@ -924,19 +946,27 @@ pub(crate) fn compile(
     let mut bundled_imports = VecDeque::new();
     let mut through_getter = false;
     loop {
-        let (owner, package, imports) = if let Some(next) = work.pop_front() {
-            next
+        let (item, selected) = if let Some(next) = selected_work.pop_front() {
+            (next, true)
+        } else if let Some(next) = work.pop_front() {
+            (next, false)
         } else if let Some(next) = getters.pop_front() {
             // Keep project shadows for a bundled module's lazy attributes. The
             // ordinary graph has already checked any modules the user imported.
             through_getter = true;
-            next
+            ((next, ImportOrigin::Provider), false)
+        } else if let Some(next) = sdk_work.pop_front() {
+            // Finish the ordinary file graph first. Linking an SDK dependency does
+            // not by itself make the application's optional frozen shadows reachable.
+            following_sdk = true;
+            through_getter = false;
+            ((next, ImportOrigin::Provider), true)
         } else if let Some((next, lazy)) = bundled_imports.pop_front() {
             // The program can reach these providers through a ZIP or an extended package
             // path. Their hints must not force unrequested application files to compile.
             through_getter = lazy;
             bundled_only = true;
-            next
+            ((next, ImportOrigin::Provider), false)
         } else {
             through_getter = false;
             // Collect late imports and their bundled dependencies after the explicit
@@ -981,8 +1011,12 @@ pub(crate) fn compile(
             } else {
                 bundled_only = true;
             }
-            (String::new(), false, imports)
+            (
+                ((String::new(), false, imports), ImportOrigin::Provider),
+                false,
+            )
         };
+        let ((owner, package, imports), origin) = item;
         let file_alternatives = ordinary_registrations.is_some();
         if imports
             .names
@@ -1024,6 +1058,8 @@ pub(crate) fn compile(
             graph.require_fallback_calls();
         }
         let mut names = imports.names;
+        // Provider hints appended below do not select additional standalone modules.
+        let literal_imports = names.len();
         if owner == "importlib" {
             // Filesystem modules can import the loader protocols through either public module.
             names.push((0, "importlib.abc".to_owned()));
@@ -1062,7 +1098,7 @@ pub(crate) fn compile(
             names.push((0, "json.decoder".to_owned()));
         }
         let package_name = crate::modules::import_package(&owner, package);
-        for (level, requested) in names {
+        for (index, (level, requested)) in names.into_iter().enumerate() {
             let Some(name) = crate::modules::resolve_import(package_name, level, &requested) else {
                 continue;
             };
@@ -1070,32 +1106,52 @@ pub(crate) fn compile(
             // can refer to their attributes without making a same-named package reachable.
             let top = name.split('.').next().unwrap_or(&name);
             let frozen = imre_ast::providers::is_frozen(top, || frozen_modules);
+            let literal = index < literal_imports;
+            let file_graph =
+                !bundled_only && (!following_sdk || (origin == ImportOrigin::File && literal));
             let name = if frozen && !file_alternatives {
-                // Bundled-only dependencies cannot make application files reachable.
-                if !bundled_only {
+                // A switchable name can still need its physical file if a real file imports
+                // _imp later. Ordinary SDK implementation imports do not select file loaders.
+                if file_graph || (!bundled_only && imre_ast::providers::is_optional_frozen(top)) {
                     frozen_files.push(name.clone());
                 }
                 top
             } else {
                 &name
             };
+            let select_member = selected && startup.is_none() && !frozen && literal;
             let mut prefix = String::new();
             let mut project_parent = false;
+            let mut on_sdk_path = true;
             for part in name.split('.').filter(|s| !s.is_empty()) {
                 if !prefix.is_empty() {
-                    project_parent |= entry_sources
-                        .get(&prefix)
-                        .is_some_and(|(root, _)| initial.contains(root));
+                    if let Some((root, package)) = entry_sources.get(&prefix) {
+                        project_parent |= initial.contains(root);
+                        on_sdk_path &= *package && root == Path::new(bundled_root);
+                    }
                     prefix.push('.');
                 }
                 prefix.push_str(part);
-                if prefix == "_imp" && !bundled_only {
+                if prefix == "_imp" && file_graph {
                     imp_in_file_graph = true;
                 }
                 let new_module = seen.insert(prefix.clone());
                 let new_file =
                     file_alternatives && frozen && searched_frozen_files.insert(prefix.clone());
-                if !new_module && !new_file {
+                let selected_member = if select_member && on_sdk_path {
+                    crate::zip_entry::packaged_member(&prefix)
+                } else {
+                    None
+                };
+                // A provider hint may have visited this name without registering a source.
+                if !new_module
+                    && !new_file
+                    && (selected_member.is_none()
+                        || entry_sources.contains_key(&prefix)
+                        || sources.iter().any(|(name, path, _)| {
+                            name == &prefix && path.starts_with(bundled_root)
+                        }))
+                {
                     continue;
                 }
                 let mut bundled = bundled_module_source(&prefix, startup.is_none());
@@ -1106,10 +1162,10 @@ pub(crate) fn compile(
                 {
                     bundled = Some((member, crate::zip_entry::installed_source(member)?.into()));
                 }
-                let mut installed = if bundled.is_none() {
-                    crate::zip_entry::installed_member(&prefix)
-                } else {
+                let mut installed = if bundled.is_some() {
                     None
+                } else {
+                    selected_member.or_else(|| crate::zip_entry::installed_member(&prefix))
                 };
                 if !implicit_dirs.is_empty()
                     && (bundled.is_some()
@@ -1121,6 +1177,21 @@ pub(crate) fn compile(
                 {
                     before_site.insert(prefix.clone());
                 }
+                let inspect_file = select_member
+                    || (following_sdk
+                        && !bundled_only
+                        && !frozen
+                        && literal
+                        && origin != ImportOrigin::Alternative);
+                let filesystem_import = inspect_file
+                    && !matches!(
+                        imre_ast::providers::builtin_finder_provider(
+                            &prefix,
+                            || false,
+                            || bundled.is_some()
+                        ),
+                        Some(imre_ast::providers::Provider::Builtin)
+                    );
                 if let Some((filename, source)) = bundled
                     && new_module
                 {
@@ -1144,7 +1215,12 @@ pub(crate) fn compile(
                         } else if lazy {
                             getters.push_back(next);
                         } else {
-                            work.push_back(next);
+                            let origin = if origin == ImportOrigin::Alternative {
+                                origin
+                            } else {
+                                ImportOrigin::Provider
+                            };
+                            work.push_back((next, origin));
                         }
                     };
                     enqueue(imports, false);
@@ -1168,6 +1244,7 @@ pub(crate) fn compile(
                     if let Some((parent, _)) = prefix.rsplit_once('.')
                         && let Some((selected, package)) = entry_sources.get(parent)
                         && (module_entry.is_some()
+                            || selected == Path::new(bundled_root)
                             || archives.contains_key(selected)
                             || archives.contains_key(root))
                         && (!package || selected != root)
@@ -1188,7 +1265,15 @@ pub(crate) fn compile(
                                     source.trim_start_matches('\u{feff}'),
                                 )
                             {
-                                work.push_back((prefix.clone(), package, imports));
+                                let queue = if select_member && filesystem_import {
+                                    &mut selected_work
+                                } else {
+                                    &mut work
+                                };
+                                queue.push_back((
+                                    (prefix.clone(), package, imports),
+                                    ImportOrigin::file(filesystem_import),
+                                ));
                             }
                             if !implicit_dirs.is_empty() {
                                 before_site.insert(prefix.clone());
@@ -1304,7 +1389,15 @@ pub(crate) fn compile(
                         if imports.misplaced_future {
                             source_initializers.insert(path.clone());
                         } else {
-                            work.push_back((prefix.clone(), package, imports));
+                            let queue = if winner && select_member && filesystem_import {
+                                &mut selected_work
+                            } else {
+                                &mut work
+                            };
+                            queue.push_back((
+                                (prefix.clone(), package, imports),
+                                ImportOrigin::file(winner && filesystem_import),
+                            ));
                         }
                         let registration = (prefix.clone(), path, src);
                         if winner {
@@ -1325,11 +1418,18 @@ pub(crate) fn compile(
                 }
                 if let Some(member) = installed {
                     let source = crate::zip_entry::installed_source(member)?;
-                    let imports = imports_for_module(Path::new(member), &source)?;
-                    bundled_imports.push_back((
-                        (prefix.clone(), member.ends_with("/__init__.py"), imports),
-                        false,
-                    ));
+                    let path = Path::new(bundled_root).join(member);
+                    let package = member.ends_with("/__init__.py");
+                    let imports = imports_for_module(&path, &source)?;
+                    let next = (prefix.clone(), package, imports);
+                    if selected_member.is_some() {
+                        entry_sources.insert(prefix.clone(), (bundled_root.into(), package));
+                        sdk_work.push_back(next);
+                        selected_sources.push((sources.len(), false, None));
+                        sources.push((prefix.clone(), path, source));
+                    } else {
+                        bundled_imports.push_back((next, false));
+                    }
                 }
             }
         }

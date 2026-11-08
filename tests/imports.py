@@ -832,6 +832,28 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "sdk_dependency_keeps_unused_frozen_shadow_dormant": {
+        "main.py": (
+            "import sys\n"
+            "def archive_type():\n"
+            "    import tarfile\n"
+            "    return tarfile.TarFile\n"
+            "print('tarfile' in sys.modules)\n"
+        ),
+        **dict.fromkeys(
+            ("stat.py", "zipimport.py"),
+            "def amount(value: int) -> int: return value\ndef dormant(): return amount('x')\n",
+        ),
+    },
+    "sdk_import_after_provider_hint": {
+        "main.py": (
+            "import sys\n"
+            "import shutil\n"
+            "import reader\n"
+            "print(reader.archive is sys.modules['tarfile'])\n"
+        ),
+        "reader.py": "import tarfile as archive\n",
+    },
     "function_type_for_selected_callback": {
         "handlers.py": (
             "import sys\n\n"
@@ -2034,7 +2056,8 @@ def main() -> None:
                     "email_address_parsers", "filesystem_resources", "fractions_indirect",
                     "function_type_for_selected_callback", "lzma_formats_and_error",
                     "optional_stdlib_probe_in_dependency", "platform_iot_indirect", "record_warnings",
-                    "source_loader_external_code", "source_loader_namespace_directory", "warn_named_helper",
+                    "sdk_import_after_provider_hint", "source_loader_external_code", "source_loader_namespace_directory",
+                    "warn_named_helper",
                     "zip_source_spec",
                 }
                 timeout = 300 if slow_optimized and level > 0 else build_timeout
