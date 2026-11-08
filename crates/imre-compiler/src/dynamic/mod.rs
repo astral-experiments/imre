@@ -1579,6 +1579,11 @@ fn builtin_sources(
             "random.py",
             include_str!("../../../imre-runtime/src/dynamic/stdlib/random/random.py"),
         ),
+        (
+            "site",
+            "site.py",
+            include_str!("../../../imre-runtime/src/dynamic/stdlib/site.py"),
+        ),
     ]
 }
 

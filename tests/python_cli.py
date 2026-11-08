@@ -234,6 +234,13 @@ def check_installed_site(imre, root, run):
         assert (result.returncode, result.stdout, result.stderr) == (0, b"6\n", b""), result
     check_symlinked_venv(launcher, site, root.resolve(), run)
     check_copied_venv(launcher, root.resolve(), run)
+    # Discovering a filesystem library must not switch a checked program's backend.
+    (site.parent / "sitecustomize.py").write_text("print('stdlib hook')\n")
+    checked = run(launcher, "-EB", "-c", static, timeout=300)
+    assert (checked.returncode, checked.stdout, checked.stderr) == (0, b"6\n", b""), checked
+    # An object program already starts the shared interpreter, so its hook runs once.
+    boxed = run(launcher, "-EB", "-c", runtime, tariff.stem, timeout=300)
+    assert (boxed.returncode, boxed.stdout, boxed.stderr) == (0, b"stdlib hook\n6\n", b""), boxed
 
 
 def check_copied_venv(launcher, root, run):
@@ -263,15 +270,6 @@ def check_copied_venv(launcher, root, run):
     create(copied / "bin" / "python", nested)
     copied.rename(root / "moved-outer-venv")
     check(nested)
-
-    # Discovering a filesystem library must not switch a checked program's backend.
-    (site.parent / "sitecustomize.py").write_text("print('stdlib hook')\n")
-    checked = run(launcher, "-EB", "-c", static, timeout=300)
-    assert (checked.returncode, checked.stdout, checked.stderr) == (0, b"6\n", b""), checked
-    # An object program already starts the shared interpreter, so its hook runs once.
-    boxed = run(launcher, "-EB", "-c", runtime, tariff.stem, timeout=300)
-    assert (boxed.returncode, boxed.stdout, boxed.stderr) == (0, b"stdlib hook\n6\n", b""), boxed
-
 
 
 def check_symlinked_venv(launcher, base_site, root, run):
@@ -359,7 +357,14 @@ def check_user_site(imre, root, run):
     (packages / "extras.pth").write_text(str(extras) + "\n")
     extra = {"PYTHONUSERBASE": str(base)}
     code = (
-        "import importlib.util, site, sys\n"
+        "import sys\n"
+        "assert 'site' in sys.modules\n"
+        "prefix = sys.prefix\n"
+        "sys.prefix = 'after startup'\n"
+        "import site\n"
+        "assert site.PREFIXES[:2] == [prefix, sys.exec_prefix]\n"
+        "sys.prefix = prefix\n"
+        "import importlib.util\n"
         "print(site.USER_BASE == site.getuserbase() == sys.argv[1], "
         "site.USER_SITE == site.getusersitepackages() == sys.argv[2])\n"
         "print(site.ENABLE_USER_SITE, sys.flags.no_user_site, "
@@ -375,7 +380,13 @@ def check_user_site(imre, root, run):
     assert (imported.returncode, imported.stdout, imported.stderr) == (0, b"73\n", b""), imported
     lazy = run(
         imre, "-SB", "-c",
-        "import site, sys; print(site.USER_BASE, site.USER_SITE, site.ENABLE_USER_SITE); "
+        "import sys\n"
+        "assert 'site' not in sys.modules\n"
+        "sys.prefix = 'before import'\n"
+        "import site\n"
+        "sys.prefix = 'after import'\n"
+        "assert site.PREFIXES == ['before import', sys.exec_prefix]\n"
+        "print(site.USER_BASE, site.USER_SITE, site.ENABLE_USER_SITE)\n"
         "print(site.getuserbase() == sys.argv[1], site.getusersitepackages() == sys.argv[2], sys.argv[2] in sys.path)",
         str(base), str(packages), extra=extra, timeout=300,
     )
@@ -411,6 +422,17 @@ def check_script_sitecustomize(imre, root, run):
             imre, flag, script, app, hooks, "startup_plugin", extra=env, timeout=300,
         )
         assert (result.returncode, result.stdout, result.stderr) == (0, stdout, b""), result
+
+    unfrozen = root / "unfrozen-providers"
+    unfrozen.mkdir()
+    (unfrozen / "stat.py").write_text("raise AssertionError('unexpected startup import')\n")
+    invoice = app / "invoice.py"
+    invoice.write_text("import sys\nprint('site' in sys.modules, 'stat' in sys.modules)\n")
+    result = run(
+        imre, "-B", "-X", "frozen_modules=off", invoice,
+        extra={"PYTHONPATH": str(unfrozen)}, timeout=300,
+    )
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"False False\n", b""), result
 
     literal = app / "literal_import.py"
     literal.write_text("from startup_plugin import value\nprint(value)\n")
