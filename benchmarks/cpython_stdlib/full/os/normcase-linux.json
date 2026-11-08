@@ -73,19 +73,18 @@
                 "operation": "imre"
               },
               {
-                "blocker": "<fixture>/common-9/case.py:2:9: Imre: unknown function or unsupported builtin arguments",
                 "input": "bytearray",
-                "operation": "cpython"
+                "operation": "imre"
               },
               {
                 "input": "set",
                 "operation": "imre"
               }
             ],
-            "classification": "mixed",
+            "classification": "host-driven-native-operation",
             "fixture": "cpython",
             "method_sha256": "644f7d805c43d925589aefd92004dedfeb6d061ee011efc54cc62dbfae43bfd4",
-            "operation": "mixed",
+            "operation": "imre",
             "whole_compile_blocker": "<fixture>/common-whole/case.py:14:32: Imre: expected str, got bytes; annotations are enforced contracts"
           }
         ]
@@ -170,19 +169,18 @@
                 "operation": "imre"
               },
               {
-                "blocker": "<fixture>/common-9/case.py:2:9: Imre: unknown function or unsupported builtin arguments",
                 "input": "bytearray",
-                "operation": "cpython"
+                "operation": "imre"
               },
               {
                 "input": "set",
                 "operation": "imre"
               }
             ],
-            "classification": "mixed",
+            "classification": "host-driven-native-operation",
             "fixture": "cpython",
             "method_sha256": "644f7d805c43d925589aefd92004dedfeb6d061ee011efc54cc62dbfae43bfd4",
-            "operation": "mixed",
+            "operation": "imre",
             "whole_compile_blocker": "<fixture>/common-whole/case.py:14:32: Imre: expected str, got bytes; annotations are enforced contracts"
           }
         ]

@@ -85,7 +85,11 @@ def sha(data):
 
 
 def diagnostic(exc, work):
-    return str(exc).replace(str(work), "<fixture>").strip().splitlines()[-1]
+    line = str(exc).strip().splitlines()[-1]
+    prefix = f"{work.resolve()}/"
+    if line.startswith(prefix):
+        return "<fixture>/" + line[len(prefix):]
+    return line
 
 
 def fnmatch_policy(tools, work, test_lib):
@@ -164,8 +168,7 @@ def common_adapter(tools, work, test_lib):
                     cache[key] = diagnostic(exc, work)
             native = cache[key]
             if isinstance(native, str):
-                # Preserve the unchanged method, recording the sole host call
-                # explicitly while Imre has no native bytearray construction.
+                # Record the host call if the native bytearray probe fails to compile.
                 operations.append({"input": type(value).__name__, "operation": "cpython", "blocker": native})
                 return os.path.normcase(value)
             output = run(native).rstrip("\n")
