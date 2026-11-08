@@ -1160,7 +1160,7 @@ pub(super) struct ClosureScope {
     pub declared: DeclaredLocals,
     pub declared_complete: bool,
     pub nonlocals: HashSet<String>,
-    pub cells: HashMap<String, Id>,
+    pub cells: indexmap::IndexMap<String, Id>,
     /// Keys added by frame introspection that are not lexical variables.
     pub extra_locals: Option<Id>,
     pub cleared: bool,
@@ -5044,7 +5044,7 @@ impl Heap {
                 let closure = &mut data.closure;
                 closure
                     .declared
-                    .extend(closure.cells.drain().map(|(name, _)| name));
+                    .extend(closure.cells.drain(..).map(|(name, _)| name));
                 closure.cleared = true;
             }
         }
