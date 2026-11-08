@@ -14,6 +14,13 @@ fn resolve(path: &Path, name: &str, options: &CompileOptions) -> Option<SourceGr
     .unwrap()
 }
 
+fn assert_entry_file(graph: &SourceGraph, expected: &Path) {
+    assert_eq!(
+        graph.module_filename(graph.entry).canonicalize().unwrap(),
+        expected.canonicalize().unwrap()
+    );
+}
+
 #[test]
 fn named_module_retains_its_import_name_and_actual_source() {
     let dir = tempfile::tempdir().unwrap();
@@ -25,7 +32,7 @@ fn named_module_retains_its_import_name_and_actual_source() {
     };
     let mut graph = resolve(Path::new("-m"), "selected_module", &options).unwrap();
     assert_eq!(graph.modules[graph.entry].name, "selected_module");
-    assert_eq!(graph.module_filename(graph.entry), module);
+    assert_entry_file(&graph, &module);
     let (inputs, _) = graph.disk_inputs(None);
     assert!(inputs.fresh());
     fs::write(&module, "print(4)\n").unwrap();
@@ -53,17 +60,29 @@ fn regular_package_selects_its_own_main_and_initializers() {
         ..CompileOptions::default()
     };
     let mut graph = resolve(Path::new("-m"), "selected_pkg.child", &options).unwrap();
-    assert_eq!(graph.module_filename(graph.entry), main);
+    assert_entry_file(&graph, &main);
     assert_eq!(
         graph.modules[graph.entry].name,
         "selected_pkg.child.__main__"
     );
     let (inputs, _) = graph.disk_inputs(None);
-    let files: Vec<_> = inputs.files.iter().map(|(path, _, _)| path).collect();
-    assert!(files.contains(&&package.join("__init__.py")));
-    assert!(files.contains(&&package.join("child/__init__.py")));
-    assert!(files.contains(&&main));
-    assert!(!files.iter().any(|path| path.starts_with(late.path())));
+    let files: Vec<_> = inputs
+        .files
+        .iter()
+        .map(|(_, identity, _)| identity)
+        .collect();
+    for expected in [
+        package.join("__init__.py"),
+        package.join("child/__init__.py"),
+        main,
+    ] {
+        assert!(
+            files.contains(&&expected.canonicalize().unwrap()),
+            "{expected:?}"
+        );
+    }
+    let late_root = late.path().canonicalize().unwrap();
+    assert!(!files.iter().any(|path| path.starts_with(&late_root)));
     assert!(inputs.fresh());
     fs::write(package.join("__init__.py"), "outer = 4\n").unwrap();
     assert!(!inputs.fresh());
@@ -81,10 +100,7 @@ fn a_new_earlier_namespace_portion_invalidates_the_selected_entry() {
         ..CompileOptions::default()
     };
     let mut graph = resolve(Path::new("-m"), "selected_ns", &options).unwrap();
-    assert_eq!(
-        graph.module_filename(graph.entry),
-        late_package.join("__main__.py")
-    );
+    assert_entry_file(&graph, &late_package.join("__main__.py"));
     let (inputs, _) = graph.disk_inputs(None);
     assert!(inputs.fresh());
     let early_package = early.path().join("selected_ns");
@@ -92,10 +108,7 @@ fn a_new_earlier_namespace_portion_invalidates_the_selected_entry() {
     fs::write(early_package.join("__main__.py"), "print(1)\n").unwrap();
     assert!(!inputs.fresh());
     let graph = resolve(Path::new("-m"), "selected_ns", &options).unwrap();
-    assert_eq!(
-        graph.module_filename(graph.entry),
-        early_package.join("__main__.py")
-    );
+    assert_entry_file(&graph, &early_package.join("__main__.py"));
 }
 
 #[test]
@@ -107,10 +120,7 @@ fn directory_operand_and_open_module_loader_are_distinct() {
         ..Default::default()
     };
     let graph = resolve(dir.path(), "__main__", &options).unwrap();
-    assert_eq!(
-        graph.module_filename(graph.entry),
-        dir.path().join("__main__.py")
-    );
+    assert_entry_file(&graph, &dir.path().join("__main__.py"));
     fs::write(
         dir.path().join("runpy.py"),
         "def _run_module_as_main(*args): pass\n",
