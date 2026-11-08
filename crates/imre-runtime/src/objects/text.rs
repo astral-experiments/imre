@@ -295,7 +295,7 @@ pub(crate) fn ord_byte(bytes: &[u8]) -> Result<u32> {
 /// Returns the scalar value of one character or the unsigned value of one byte.
 ///
 /// # Safety
-/// The caller roots a concrete string, bytes, or their checked nullable union.
+/// The caller roots a string, bytes, bytearray, or a checked nullable union of them.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_ord(mut word: usize, mut kind: u32) -> usize {
     let result = (|| {
@@ -315,6 +315,15 @@ pub unsafe extern "C" fn imre_ord(mut word: usize, mut kind: u32) -> usize {
             3 => {
                 // SAFETY: the representation identifies a rooted UTF-8 string.
                 ord_char(unsafe { &*(word as *const Str) })?
+            }
+            5 => {
+                // SAFETY: the checked object is a rooted bytearray. Reading its
+                // length and byte cannot reenter Python or return a storage borrow.
+                unsafe {
+                    super::object(word as *const Object)
+                        .0
+                        .with(|storage| ord_byte(storage.bytearray()))
+                }?
             }
             8 => {
                 // SAFETY: the representation identifies an immutable rooted bytes value.
