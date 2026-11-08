@@ -3573,6 +3573,8 @@ impl Context {
                                 | "_signal.valid_signals"
                                 | "_thread.allocate"
                                 | "_thread.allocate_lock"
+                                | "_thread.exit"
+                                | "_thread.exit_thread"
                                 | "_thread._count"
                                 | "_thread._shutdown"
                                 | "sys._get_cpu_count_config"

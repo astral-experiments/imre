@@ -4783,7 +4783,14 @@ impl Context {
                 let interrupt = self.builtin("_thread.interrupt_main");
                 self.bind(scope, "interrupt_main", interrupt);
             }
-            for function in ["start_new_thread", "_count", "_shutdown", "get_ident"] {
+            for function in [
+                "start_new_thread",
+                "_count",
+                "_shutdown",
+                "get_ident",
+                "exit",
+                "exit_thread",
+            ] {
                 let value = self.builtin(&format!("_thread.{function}"));
                 self.bind(scope, function, value);
             }

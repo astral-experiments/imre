@@ -326,6 +326,8 @@ impl Callback {
                         "_signal.pause",
                         "_signal.set_wakeup_fd",
                         "_thread._count",
+                        "_thread.exit",
+                        "_thread.exit_thread",
                         "sys.exit",
                         "sys.get_coroutine_origin_tracking_depth",
                         "sys.set_coroutine_origin_tracking_depth",
