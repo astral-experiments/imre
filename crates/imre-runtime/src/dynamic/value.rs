@@ -5651,16 +5651,23 @@ impl Heap {
                             .any(|&value| keeps(heap, value, owner, budget))
                 }
                 Value::Generator {
+                    scope,
                     iterators,
                     protected,
                     ..
-                } if matches!(heap.get(owner), Value::Generator { .. }) => protected
-                    .iter()
-                    .take(*budget)
-                    .flat_map(super::source_code::FinallyBlock::roots)
-                    .chain(iterators.iter().copied())
-                    .take(*budget)
-                    .any(|value| keeps(heap, value, owner, budget)),
+                } if matches!(heap.get(owner), Value::Generator { .. }) => {
+                    // The generator owns its scope. A still-bound local is a strong
+                    // edge only after the caller has proved a path to this generator.
+                    matches!(heap.get(*scope), Value::Scope(locals)
+                        if locals.names.values().take(*budget).any(|&id| id == owner))
+                        || protected
+                            .iter()
+                            .take(*budget)
+                            .flat_map(super::source_code::FinallyBlock::roots)
+                            .chain(iterators.iter().copied())
+                            .take(*budget)
+                            .any(|value| keeps(heap, value, owner, budget))
+                }
                 _ => false,
             }
         }
