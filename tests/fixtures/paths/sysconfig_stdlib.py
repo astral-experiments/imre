@@ -19,7 +19,7 @@ stdlib = sysconfig.get_path("stdlib")
 assert stdlib == sysconfig.get_paths()["stdlib"]
 if sys.implementation.name == "imre":
     version = sysconfig.get_config_var("py_version_short")
-    assert stdlib == sys.base_prefix + "/lib/imre" + version
+    assert stdlib == "/base/lib/imre" + version
 overrides = {"base": "/tmp/install/../staging", "platbase": "/tmp/platform"}
 paths = sysconfig.get_paths(vars=overrides)
 assert paths["scripts"] == sysconfig.get_path("scripts", vars=overrides)
