@@ -47,7 +47,8 @@ class zipimporter(_ZipResourceLoader):
         return None
 
     def exec_module(self, module):
-        exec(self.get_code(module.__name__), module.__dict__)
+        from _frozen_importlib_external import _LoaderBasics
+        return _LoaderBasics.exec_module(self, module)
 
     def _origin(self, fullname):
         entry = self._member(fullname)
