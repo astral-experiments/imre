@@ -3180,6 +3180,7 @@ impl RootTrace {
     // Two bits count completed collection intervals without a write.
     const QUIET_INTERVAL: u8 = 16;
     const QUIET_MASK: u8 = 3 * Self::QUIET_INTERVAL;
+    const MIN_CONTAINER: usize = 256;
     const MIN_RUN_MARKS: usize = 64 * 1024;
 
     /// Revisit a mutated value through the ordinary marker on later collections.
@@ -3265,18 +3266,34 @@ impl RootTrace {
                 }
             }
         }
+        let mut largest = (NONE, &[][..]);
+        let mut consider = |id| {
+            if let Value::List(items) = heap.get(id)
+                && items.len() > largest.1.len()
+            {
+                largest = (id, items.as_slice());
+            }
+        };
         for frame in &heap.frames {
             let Value::Scope(scope) = heap.get(frame.scope) else {
                 continue;
             };
             for &id in scope.names.values() {
-                let len = match heap.get(id) {
-                    Value::List(items) | Value::Tuple(items) => items.len(),
+                let value = heap.get(id);
+                let len = match value {
+                    Value::List(items) => {
+                        consider(id);
+                        items.len()
+                    }
+                    Value::Tuple(items) => items.len(),
                     Value::Dict(entries) => entries.len(),
-                    _ => continue,
+                    _ => {
+                        weak_roots::indexed_children(value).for_each(&mut consider);
+                        continue;
+                    }
                 };
                 // Small containers are cheaper to walk as ordinary frame roots.
-                if len >= 256 {
+                if len >= Self::MIN_CONTAINER {
                     if let Some(flags) = self.flags.get_mut(id as usize)
                         && *flags & Self::VOLATILE != 0
                     {
@@ -3296,6 +3313,16 @@ impl RootTrace {
                     self.next_roots.push(id);
                 }
             }
+        }
+        // A growing list changes on every append, but its earlier items can still
+        // own the same graph. Root comparison checks the actual handles on every
+        // sweep, including after replacement, deletion or reordering. Leave the
+        // incomplete block to the ordinary marker so appends can reuse the trace.
+        let (owner, items) = largest;
+        let len = items.len() / Self::MIN_CONTAINER * Self::MIN_CONTAINER;
+        if len != 0 && !self.next_roots.contains(&owner) && self.next_roots.try_reserve(len).is_ok()
+        {
+            self.next_roots.extend_from_slice(&items[..len]);
         }
     }
 
@@ -3390,6 +3417,10 @@ impl VisitReferences for RootTraceBuilder<'_> {
         let value = self.heap.get(id);
         let direct = self.heap.slot_shapes[index].is_scalar_leaf()
             || value.directly_stores_children()
+            // Shared SyntaxError cells and lazy OSError fields can change through
+            // another handle without a mutable borrow of this exception slot.
+            || matches!(value, Value::Raised(error) if error.os_args.is_none()
+                && error.trace.as_ref().is_none_or(|trace| trace.source_syntax.is_none()))
             || matches!(
                 value,
                 Value::Module {
@@ -7408,6 +7439,36 @@ mod tests {
         heap.collect(std::iter::empty());
         assert!(heap.slots[replacement as usize].value.is_none());
         assert!(heap.slots[final_child as usize].value.is_none());
+    }
+
+    #[test]
+    fn growing_frame_list_rechecks_the_retained_prefix() {
+        let mut heap = Heap::new();
+        let child = heap.alloc(Value::List(Vec::new()));
+        let owner = heap.alloc(Value::List(vec![child; RootTrace::MIN_CONTAINER]));
+        let mut frame = Scope::new(String::new(), None);
+        frame.names.insert(crate::Str::new("items"), owner);
+        heap.frames[0].scope = heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(frame)));
+        heap.release_temporaries_since(0);
+        heap.collect(std::iter::empty());
+
+        let tail = heap.alloc(Value::List(Vec::new()));
+        let Value::List(items) = heap.get_mut(owner) else {
+            unreachable!()
+        };
+        items.push(tail);
+        heap.release_temporaries_since(0);
+        heap.collect(std::iter::empty());
+        assert!(heap.root_trace.roots.contains(&child));
+        assert!(heap.slots[tail as usize].value.is_some());
+
+        let Value::List(items) = heap.get_mut(owner) else {
+            unreachable!()
+        };
+        items[..RootTrace::MIN_CONTAINER].fill(NONE);
+        heap.collect(std::iter::empty());
+        assert!(heap.slots[child as usize].value.is_none());
+        assert!(heap.slots[tail as usize].value.is_some());
     }
 
     #[test]

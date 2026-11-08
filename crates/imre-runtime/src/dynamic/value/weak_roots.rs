@@ -56,6 +56,12 @@ enum Members<'a> {
     Entries(&'a [(Id, Id)]),
 }
 
+/// Inspect a bounded set of strong edges without traversing a frame holder's entire payload.
+pub(super) fn indexed_children(value: &Value) -> impl Iterator<Item = Id> + '_ {
+    let links = Links::from(value, false);
+    (0..links.len().min(CHILDREN_PER_VISIT)).filter_map(move |index| links.get(index))
+}
+
 impl<'a> Links<'a> {
     #[inline(always)]
     fn from(value: &'a Value, dict_keys: bool) -> Self {
@@ -86,6 +92,7 @@ impl<'a> Links<'a> {
             Value::Method {
                 receiver, callable, ..
             } => ([Some(*receiver), Some(*callable)], Members::None),
+            Value::Iterator { sequence, .. } => ([*sequence, None], Members::None),
             Value::LoopIterator { source, peeked } => ([Some(*source), *peeked], Members::None),
             Value::Instance {
                 fields,
