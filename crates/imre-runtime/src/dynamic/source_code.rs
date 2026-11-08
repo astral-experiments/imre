@@ -699,15 +699,22 @@ pub(super) struct FinallyBlock {
 }
 
 impl FinallyBlock {
+    pub(super) const ROOT_SLOTS: usize = 2;
+
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> {
+        self.root_slots().into_iter().flatten()
+    }
+
+    pub(super) fn root_slots(&self) -> [Option<Id>; Self::ROOT_SLOTS] {
         let exit = match self.kind {
             HandlerKind::With(root) | HandlerKind::Comprehension(root) => Some(root),
             _ => None,
         };
-        exit.into_iter().chain(match self.pending {
+        let transfer = match self.pending {
             Some(Transfer::Raise(id) | Transfer::Return(id)) => Some(id),
             _ => None,
-        })
+        };
+        [exit, transfer]
     }
 }
 

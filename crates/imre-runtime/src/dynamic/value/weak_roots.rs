@@ -1,4 +1,5 @@
 use super::{Heap, Id, Value};
+use crate::dynamic::source_code::FinallyBlock;
 use crate::dynamic::stdlib::{BinaryFile, io::MemoryStream};
 use indexmap::IndexMap;
 use std::collections::{HashSet, VecDeque};
@@ -47,6 +48,7 @@ struct Links<'a> {
 enum Members<'a> {
     None,
     Sequence(&'a [Id]),
+    Generator(&'a [Id], &'a [FinallyBlock]),
     Names(&'a IndexMap<String, Id>, Option<Id>),
     Scope(&'a IndexMap<crate::Str, Id>),
     Keys(&'a [(Id, Id)]),
@@ -73,9 +75,13 @@ impl<'a> Links<'a> {
             Value::Coroutine { .. } | Value::CoroutineWrapper(_) => {
                 ([value.suspended_owner(), None], Members::None)
             }
-            Value::Generator { iterators, .. } => (
+            Value::Generator {
+                iterators,
+                protected,
+                ..
+            } => (
                 [value.suspended_owner(), None],
-                Members::Sequence(iterators),
+                Members::Generator(iterators, protected),
             ),
             Value::Method {
                 receiver, callable, ..
@@ -128,6 +134,9 @@ impl<'a> Links<'a> {
             + match self.members {
                 Members::None => 0,
                 Members::Sequence(items) => items.len(),
+                Members::Generator(iterators, protected) => {
+                    iterators.len() + protected.len() * FinallyBlock::ROOT_SLOTS
+                }
                 Members::Scope(names) => names.len(),
                 Members::Names(names, extra) => names.len() + usize::from(extra.is_some()),
                 Members::Keys(entries) | Members::Values(entries) => entries.len(),
@@ -150,6 +159,15 @@ impl<'a> Links<'a> {
         match self.members {
             Members::None => None,
             Members::Sequence(items) => items.get(index).copied(),
+            Members::Generator(iterators, protected) => {
+                if let Some(&id) = iterators.get(index) {
+                    return Some(id);
+                }
+                let index = index - iterators.len();
+                protected
+                    .get(index / FinallyBlock::ROOT_SLOTS)?
+                    .root_slots()[index % FinallyBlock::ROOT_SLOTS]
+            }
             Members::Scope(names) => names.get_index(index).map(|(_, id)| *id),
             Members::Names(names, extra) if index == names.len() => extra,
             Members::Names(names, _) => names.get_index(index).map(|(_, id)| *id),
