@@ -8,10 +8,11 @@
 #
 
 import ctypes
+from types import FunctionType
 import weakref
 
 from . import heap
-from . import get_context
+from . import get_context, util
 
 from .context import reduction, assert_spawning
 _ForkingPickler = reduction.ForkingPickler
@@ -145,30 +146,48 @@ def rebuild_ctype(type_, wrapper, length):
 # Function to create properties
 #
 
+def _property_accessors(attribute, read, write):
+    def get(self):
+        self.acquire()
+        try:
+            return read(self._obj, attribute)
+        finally:
+            self.release()
+
+    def set_(self, value):
+        self.acquire()
+        try:
+            write(self._obj, attribute, value)
+        finally:
+            self.release()
+
+    return get, set_
+
+
 def make_property(name):
     try:
         return prop_cache[name]
     except KeyError:
-        d = {}
-        exec(template % ((name,)*7), d)
-        prop_cache[name] = d[name]
-        return d[name]
+        if not isinstance(name, str):
+            raise SyntaxError('invalid syntax')
+        # Leading whitespace separates get/set from the suffix in an accessor name.
+        spelling = str.rstrip(str(name), ' \t\f')
+        attribute = util._factory_identifier(spelling)
+        if attribute != str.__str__(name):
+            raise KeyError(name)
 
-template = '''
-def get%s(self):
-    self.acquire()
-    try:
-        return self._obj.%s
-    finally:
-        self.release()
-def set%s(self, value):
-    self.acquire()
-    try:
-        self._obj.%s = value
-    finally:
-        self.release()
-%s = property(get%s, set%s)
-'''
+        namespace = {'__builtins__': __builtins__}
+        make_accessors = FunctionType(_property_accessors.__code__, namespace)
+        get, set_ = make_accessors(attribute, getattr, setattr)
+        get.__name__ = get.__qualname__ = 'get' + attribute
+        set_.__name__ = set_.__qualname__ = 'set' + attribute
+        prop = property(get, set_)
+        namespace[get.__name__] = get
+        namespace[set_.__name__] = set_
+        namespace[attribute] = prop
+        prop_cache[name] = prop
+        return prop
+
 
 prop_cache = {}
 class_cache = weakref.WeakKeyDictionary()
