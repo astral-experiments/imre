@@ -4208,7 +4208,7 @@ impl Context {
     }
 
     /// Define a function whose parameters and executable belong to the generated code object.
-    fn source_function(&mut self, code: Id, scope: Id, defaults: Id) -> Id {
+    fn source_function(&mut self, code: Id, scope: Id, defaults: Id) -> Result<Id> {
         let name = self.code_object(code).name;
         let doc = self.code_object(code).doc;
         let qualname = self.code_object(code).qualname;
@@ -4359,24 +4359,11 @@ impl Context {
             }
         }
         let cells = cells.to_vec();
-        let builtins = if let Some(v) = self.dict_named_item(globals, "__builtins__") {
-            if let Value::Module { scope, .. } = *self.heap.get(v) {
-                self.module_globals(scope)?
-            } else {
-                v
-            }
-        } else {
-            self.default_source_builtins()?
+        let builtins = match self.dict_named_item(globals, "__builtins__") {
+            Some(value) => self.definition_builtins(value)?,
+            None => self.function_builtins(self.heap.current_scope())?,
         };
-        let scope = self.scope("", None);
-        let Value::Scope(environment) = self.heap.get_mut(scope) else {
-            unreachable!()
-        };
-        environment.namespace = Some(globals);
-        environment.exec_globals = Some(ExecGlobals {
-            dict: globals,
-            builtins,
-        });
+        let scope = self.function_environment("", globals, builtins);
         let class_cell = freevars
             .iter()
             .position(|name| name == "__class__")
@@ -4784,7 +4771,7 @@ impl Context {
                 ));
             }
             let defaults = self.dict(Vec::new());
-            let function = self.source_function(code_id, scope, defaults);
+            let function = self.source_function(code_id, scope, defaults)?;
             self.call(function, Vec::new(), Vec::new())
         } else {
             // Definitions retain the global frame. The module alone sees the separate mapping.
@@ -6592,7 +6579,7 @@ impl Context {
             parent.nested.push((site, id));
             id
         };
-        let mut value = self.source_function(code, defining_scope, defaults);
+        let mut value = self.source_function(code, defining_scope, defaults)?;
         if matches!(definition.kind, DefinitionKind::TypeAlias(_)) {
             let name = self.code_object(code).name;
             return self.op("type_alias", name, value, type_params);

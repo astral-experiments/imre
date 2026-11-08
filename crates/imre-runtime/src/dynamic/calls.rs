@@ -2185,6 +2185,46 @@ impl Context {
         }
     }
 
+    /// Normalize the globals' __builtins__ at function creation, keeping its mapping live.
+    pub(super) fn definition_builtins(&mut self, value: Id) -> Result<Id> {
+        match *self.heap.get(value) {
+            Value::Module { scope, .. } => self.module_globals(scope),
+            _ => Ok(value),
+        }
+    }
+
+    pub(super) fn function_environment(&mut self, module: &str, globals: Id, builtins: Id) -> Id {
+        let scope = self.scope(module, None);
+        let Value::Scope(environment) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        environment.namespace = Some(globals);
+        environment.exec_globals = Some(value::ExecGlobals {
+            dict: globals,
+            builtins,
+        });
+        scope
+    }
+
+    /// Reuse the defining root when the new function would capture the same builtins.
+    pub(super) fn new_function_globals(&mut self, root: Id) -> Result<Id> {
+        let Some(value) = self.scope_name(root, "__builtins__") else {
+            return Ok(root);
+        };
+        let chosen = self.definition_builtins(value)?;
+        let previous = self
+            .scope_data(root)
+            .exec_globals
+            .map(|globals| globals.builtins)
+            .or(self.source_builtins);
+        if previous == Some(chosen) {
+            return Ok(root);
+        }
+        let globals = self.module_globals(root)?;
+        let module = self.scope_data(root).module.clone();
+        Ok(self.function_environment(&module, globals, chosen))
+    }
+
     /// Return the builtins captured by a function's defining environment.
     pub(super) fn function_builtins(&mut self, scope: Id) -> Result<Id> {
         match self.scope_data(self.root_scope(scope)).exec_globals {
