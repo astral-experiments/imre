@@ -41,6 +41,12 @@ pub(super) enum ObjectAttribute {
     Edit(Option<Id>),
 }
 
+enum ScalarAnnotation {
+    Value(Id),
+    Missing,
+    Unresolved,
+}
+
 #[derive(PartialEq, Eq)]
 enum AttributeLookup<'a> {
     Value,
@@ -8955,7 +8961,7 @@ impl Context {
         function: Id,
         slot: &str,
         integer_argument: bool,
-    ) -> Result<Option<Id>> {
+    ) -> Result<ScalarAnnotation> {
         let Value::Function {
             fields,
             scope: owner,
@@ -8965,22 +8971,24 @@ impl Context {
             unreachable!()
         };
         let published = if let Some(dict) = fields.annotations {
-            let Some(value) = self.scalar_dict_name(dict, slot).flatten() else {
-                return Ok(None);
+            let value = match self.scalar_dict_name(dict, slot) {
+                Some(Some(value)) => value,
+                Some(None) => return Ok(ScalarAnnotation::Missing),
+                None => return Ok(ScalarAnnotation::Unresolved),
             };
             match self.heap.get(value) {
                 Value::Str(text) => Some(text.as_str()),
-                _ => return Ok(Some(value)),
+                _ => return Ok(ScalarAnnotation::Value(value)),
             }
         } else {
             None
         };
         let Value::Function { scope, code, .. } = *self.heap.get(fields.annotate) else {
-            return Ok(None);
+            return Ok(ScalarAnnotation::Unresolved);
         };
         let provider = self.code_object(code);
         if !provider.closure_supported || provider.parameters == NONE {
-            return Ok(None);
+            return Ok(ScalarAnnotation::Unresolved);
         }
         let sig = self.parsed_parameters(code)?;
         let Some(name) = sig
@@ -8988,27 +8996,27 @@ impl Context {
             .as_ref()
             .and_then(|slots| slots[slot].as_str())
         else {
-            return Ok(None);
+            return Ok(ScalarAnnotation::Unresolved);
         };
         let postponed = provider.flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0;
         if published.is_some_and(|text| !postponed || text != name) {
-            return Ok(None);
+            return Ok(ScalarAnnotation::Unresolved);
         }
         // A postponed string belongs to the receiving function's type-hint namespace.
         let scope = if postponed {
             if !matches!(self.heap.get(fields.type_params), Value::Tuple(params) if params.is_empty())
             {
-                return Ok(None);
+                return Ok(ScalarAnnotation::Unresolved);
             }
             self.root_scope(owner)
         } else {
             scope
         };
-        let target = self.module_type_reference(scope, name);
+        let mut target = self.module_type_reference(scope, name);
         if target.is_none() && integer_argument && !postponed {
-            return Ok(self.captured_float_reference(scope, name));
+            target = self.captured_float_reference(scope, name);
         }
-        Ok(target)
+        Ok(target.map_or(ScalarAnnotation::Unresolved, ScalarAnnotation::Value))
     }
 
     fn require_scalar(
@@ -9031,18 +9039,19 @@ impl Context {
         };
         let boxed = self.heap.get(value);
         let integer_argument = slot != "return" && matches!(boxed, Value::Int(_));
-        let bound = self
-            .checked_annotation(function, slot, integer_argument)?
-            .and_then(|target| {
-                let family = match self.heap.get(target) {
-                    Value::Class { ancestors, .. } => {
-                        ancestors.iter().find_map(|&base| scalar(base))
-                    }
-                    Value::None => Some("None"),
-                    _ => scalar(target),
-                }?;
-                Some((target, family))
-            });
+        let target = match self.checked_annotation(function, slot, integer_argument)? {
+            ScalarAnnotation::Value(target) => Some(target),
+            ScalarAnnotation::Missing => return Ok(()),
+            ScalarAnnotation::Unresolved => None,
+        };
+        let bound = target.and_then(|target| {
+            let family = match self.heap.get(target) {
+                Value::Class { ancestors, .. } => ancestors.iter().find_map(|&base| scalar(base)),
+                Value::None => Some("None"),
+                _ => scalar(target),
+            }?;
+            Some((target, family))
+        });
         let expected = if let Some((target, family)) = bound {
             if let Value::Instance { class, .. } = boxed
                 && (*class == target
