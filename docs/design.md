@@ -16,11 +16,13 @@ The boxed emitter compiles branches, loops and function bodies to LLVM and calls
 
 ## What an ordinary build compiles
 
-The goal is to compile every Python body the program can execute. Runtime data can select among compiled handlers or declared module implementations. If `rules` maps two names to the functions `double` and `increment`, then `rules[rule](value)` has two possible callees even when the key comes from input.
+We want one implementation of Python execution, with every executable Python body compiled ahead of time. Runtime data can still drive object and method dispatch. A caller can select a handler from a dictionary with `rules[key](value)`, or rebind an attribute to a compiled function with `setattr(obj, name, double)` even when `name` comes from input.
 
-`exec(input())` asks the running program to execute newly supplied Python source. The compiler should diagnose that operation at build time, along with namespace writes that can rebind a declared function, class or code object to an unbounded set of implementations. It should suggest a rewrite when one preserves the program’s behavior.
+Modules still initialize on first import, as `selectors` does with its compiled Python initializer. When `json` imports its helpers, the loader passes their linked native code objects to `exec`. [Built-in initializers](../crates/imre-compiler/src/dynamic/mod.rs#L1541-L1554) · [Import loader](../crates/imre-compiler/stdlib/importlib/_bootstrap_external.py#L126-L130)
 
-Today ordinary builds check arguments against explicitly annotated parameters of first-party functions even when an unrelated operation selects boxed compilation. The typed path rejects the callable dictionary above. An ordinary build can still execute `exec(input())`. Checks for general late imports and executable namespace writes are under development, and some bundled modules use the runtime evaluator. [Argument-checking tests](../crates/imre-compiler/src/analysis/closed_program_tests.rs) · [Callable types](subset.md#callable-values-and-callbacks)
+A reachable `exec(input())` or an import of a `.py` plug-in supplied only after the build needs a new Python body. The compiler should diagnose the operation at its source before linking and, where applicable, suggest declaring the handlers or plug-ins at build time for selection at runtime.
+
+Today ordinary builds check arguments against explicitly annotated parameters of first-party functions even when an unrelated operation selects boxed compilation. The typed path rejects the callable dictionary above. Ordinary builds can still evaluate source with `exec(input())`, and the CLI offers `--runtime-imports`. We intend to retire the source evaluator and that fallback as known-source imports move to compiled bodies. [Argument-checking tests](../crates/imre-compiler/src/analysis/closed_program_tests.rs) · [Callable types](subset.md#callable-values-and-callbacks)
 
 ## Runtime
 
