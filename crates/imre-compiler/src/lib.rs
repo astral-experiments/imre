@@ -323,9 +323,9 @@ fn check_file_with(
             graph.session.explicit_check = true;
             checked_lower_with(graph, cache.as_deref_mut())
         },
-        |_, _| Ok(((), false)),
-        |_| (),
+        |_, _| Ok((Vec::new(), false)),
     )
+    .map(drop)
 }
 
 fn named_bytecode(path: &Path) -> bool {
@@ -378,15 +378,17 @@ enum BoxedLayout<'a> {
 }
 
 /// Uses the boxed backend when the checked graph requires Python object operations.
-fn object_fallback<T>(
+fn object_fallback(
     layout: BoxedLayout<'_>,
     (path, module_root): (&Path, Option<&Path>),
     options: &CompileOptions,
     mut filesystem: watch::FileSystem<'_>,
     mut lower: impl FnMut(&mut modules::SourceGraph) -> Result<CheckedProgram, String>,
-    native: impl Fn(&mut modules::SourceGraph, CheckedIr) -> Result<(T, bool), llvm::Unsupported>,
-    boxed: impl FnOnce(UnitCompilation) -> T,
-) -> Result<T, String> {
+    native: impl Fn(
+        &modules::SourceGraph,
+        CheckedIr,
+    ) -> Result<(Vec<CodegenUnit>, bool), llvm::Unsupported>,
+) -> Result<UnitCompilation, String> {
     for name in &options.include_modules {
         if !modules::valid_module_operand(name) {
             return Err(format!(
@@ -394,11 +396,22 @@ fn object_fallback<T>(
             ));
         }
     }
-    let native_result = |result| match result {
-        Ok(_) if !options.include_modules.is_empty() => Err(
-            "--include-module requires a runtime module loader; this entry is fully typed".into(),
-        ),
-        result => result,
+    let checking = matches!(layout, BoxedLayout::Check);
+    let native_result = |graph, units| {
+        if !options.include_modules.is_empty() {
+            Err(
+                "--include-module requires a runtime module loader; this entry is fully typed"
+                    .into(),
+            )
+        } else if checking {
+            Ok(UnitCompilation::default())
+        } else {
+            Ok(UnitCompilation::native(
+                graph,
+                units,
+                options.entry_profile.as_deref(),
+            ))
+        }
     };
     let boxed_startup = options.module_entry.is_some()
         || options.sitecustomize
@@ -443,21 +456,21 @@ fn object_fallback<T>(
             }
             CheckedProgram::Native(ir) if !boxed_startup => {
                 let (mut module, mut owners) = *ir;
-                if matches!(layout, BoxedLayout::Check) {
+                if checking {
                     verify_after(&module, "lowering")?;
                 } else {
                     for original in specialize(&mut module)? {
                         owners.push(owners[original]);
                     }
                 }
-                let reason = match native(&mut graph, (module, owners)) {
+                let reason = match native(&graph, (module, owners)) {
                     Ok((value, true)) if options.entry_profile.is_none() => {
                         // Keep the Python entry's full exception locations when it supports this
                         // module. Otherwise the retained native callable layout can run it.
                         native_candidate = Some(value);
                         "Imre: native bound wrapper links use checked exception locations"
                     }
-                    Ok((value, _)) => return native_result(Ok(value)),
+                    Ok((value, _)) => return native_result(graph, value),
                     Err(refusal) => refusal.0,
                 };
                 LoweringDiagnostic::plain(reason.to_owned()).classified(LoweringKind::Object)
@@ -484,6 +497,10 @@ fn object_fallback<T>(
     };
     // A newly found checked provider can lower normally. If lowering fails, its
     // dependencies alone do not admit the caller to the object importer.
+    let fallback = |graph| match (graph, native_candidate) {
+        (Some(graph), Some(value)) => native_result(graph, value),
+        _ => Err(error.to_string()),
+    };
     let checked_graph = graph;
     let graph = checked_graph
         .as_ref()
@@ -498,7 +515,7 @@ fn object_fallback<T>(
                 ) || g.imports_struct_decorator()
             }))
     {
-        return native_result(native_candidate.ok_or_else(|| error.to_string()));
+        return fallback(checked_graph);
     }
     let operation = graph.as_ref().and_then(|g| {
         if checked_entry {
@@ -622,15 +639,15 @@ fn object_fallback<T>(
         object_imports,
         operation
             .or(ordered_command_import.then_some(dynamic::ObjectOperation::OrderedCommandImport)),
-        graph,
+        checked_graph.as_ref(),
         layout,
         check,
     )? {
         Some(mut compilation) => {
             site_probes.record(&mut compilation.source_inputs);
-            Ok(boxed(compilation))
+            Ok(compilation)
         }
-        None => native_result(native_candidate.ok_or_else(|| error.to_string())),
+        None => fallback(checked_graph),
     }
 }
 
@@ -676,25 +693,15 @@ fn compile_file_with_layout(
     options: &CompileOptions,
     layout: BoxedLayout<'_>,
 ) -> Result<UnitCompilation, String> {
-    let typed = |graph: &mut modules::SourceGraph, (module, _): CheckedIr| {
+    let typed = |_: &modules::SourceGraph, (module, _): CheckedIr| {
         let ranges = ranges::analyze(&module);
         let (llvm_ir, prefer_objects) =
             llvm::emit_file(&module, &ranges, options.address_sanitizer)?;
-        let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
-        let compilation = UnitCompilation {
-            units: vec![CodegenUnit {
-                name: "__main__".into(),
-                llvm_ir,
-            }],
-            extension_archives: graph
-                .modules
-                .iter()
-                .filter_map(|m| m.archive.as_ref().map(|archive| archive.identity.clone()))
-                .collect(),
-            source_inputs,
-            input_paths,
-        };
-        Ok((compilation, prefer_objects))
+        let units = vec![CodegenUnit {
+            name: "__main__".into(),
+            llvm_ir,
+        }];
+        Ok((units, prefer_objects))
     };
     object_fallback(
         layout,
@@ -703,7 +710,6 @@ fn compile_file_with_layout(
         Default::default(),
         checked_lower,
         typed,
-        |c| c,
     )
 }
 
@@ -712,6 +718,7 @@ pub struct CodegenUnit {
     pub llvm_ir: String,
 }
 
+#[derive(Default)]
 pub struct UnitCompilation {
     pub units: Vec<CodegenUnit>,
     pub input_paths: Vec<PathBuf>,
@@ -721,6 +728,24 @@ pub struct UnitCompilation {
 }
 
 impl UnitCompilation {
+    fn native(
+        mut graph: modules::SourceGraph,
+        units: Vec<CodegenUnit>,
+        profile: Option<&Path>,
+    ) -> Self {
+        let (source_inputs, input_paths) = graph.disk_inputs(profile);
+        Self {
+            units,
+            input_paths,
+            source_inputs,
+            extension_archives: graph
+                .modules
+                .into_iter()
+                .filter_map(|module| Some(module.archive?.identity))
+                .collect(),
+        }
+    }
+
     fn into_whole(mut self) -> Compilation {
         Compilation {
             llvm_ir: self
@@ -825,33 +850,21 @@ fn compile_file_units_with(
     options: &CompileOptions,
     mut cache: Option<&mut IncrementalCompiler>,
 ) -> Result<UnitCompilation, String> {
-    let typed = |graph: &mut modules::SourceGraph, (module, owners): CheckedIr| {
+    let typed = |graph: &modules::SourceGraph, (module, owners): CheckedIr| {
         let ranges = ranges::analyze(&module);
         let names = graph
             .modules
             .iter()
             .map(|m| m.name.clone())
             .collect::<Vec<_>>();
-        let (units, prefer_objects) = llvm::emit_units(
+        llvm::emit_units(
             &module,
             &ranges,
             options.address_sanitizer,
             &owners,
             &names,
             graph.entry,
-        )?;
-        let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
-        let compilation = UnitCompilation {
-            units,
-            extension_archives: graph
-                .modules
-                .iter()
-                .filter_map(|m| m.archive.as_ref().map(|archive| archive.identity.clone()))
-                .collect(),
-            input_paths,
-            source_inputs,
-        };
-        Ok((compilation, prefer_objects))
+        )
     };
     object_fallback(
         BoxedLayout::Split,
@@ -860,7 +873,6 @@ fn compile_file_units_with(
         Default::default(),
         |graph| checked_lower_with(graph, cache.as_deref_mut()),
         typed,
-        |c| c,
     )
 }
 
@@ -1277,9 +1289,9 @@ mod tests {
                         .set(super::modules::SetLayoutHint::Disabled);
                     super::checked_lower(graph)
                 },
-                |_, _| Ok(((), false)),
-                |_| (),
-            );
+                |_, _| Ok((Vec::new(), false)),
+            )
+            .map(drop);
             assert_eq!(
                 super::check_file_with_options(&path, None, &options),
                 ordinary
