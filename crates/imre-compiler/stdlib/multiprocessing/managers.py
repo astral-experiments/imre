@@ -981,14 +981,18 @@ def MakeProxyType(name, exposed, _cache={}):
     except KeyError:
         pass
 
-    dic = {'__builtins__': __builtins__} if exposed else {}
-    for meth in exposed:
-        if not isinstance(meth, str):
-            raise SyntaxError('invalid syntax')
-        # The definition used %s for its binding and a string literal for the call.
-        spelling = str.strip(str(meth), ' \t\f')
-        attribute = util._factory_identifier(spelling)
-        dic[attribute] = _proxy_method(str.__str__(meth), attribute)
+    dic = {}
+    if exposed:
+        dic['__builtins__'] = __builtins__
+        make_method = types.FunctionType(_proxy_method.__code__, dic)
+
+        for meth in exposed:
+            if not isinstance(meth, str):
+                raise SyntaxError('invalid syntax')
+            # The definition used %s for its binding and a string literal for the call.
+            spelling = str.strip(str(meth), ' \t\f')
+            attribute = util._factory_identifier(spelling)
+            dic[attribute] = make_method(str.__str__(meth), attribute)
 
     ProxyType = type(name, (BaseProxy,), dic)
     ProxyType._exposed_ = exposed

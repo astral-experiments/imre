@@ -8,6 +8,7 @@
 #
 
 import ctypes
+from types import FunctionType
 import weakref
 
 from . import heap
@@ -145,6 +146,24 @@ def rebuild_ctype(type_, wrapper, length):
 # Function to create properties
 #
 
+def _property_accessors(attribute, read, write):
+    def get(self):
+        self.acquire()
+        try:
+            return read(self._obj, attribute)
+        finally:
+            self.release()
+
+    def set_(self, value):
+        self.acquire()
+        try:
+            write(self._obj, attribute, value)
+        finally:
+            self.release()
+
+    return get, set_
+
+
 def make_property(name):
     try:
         return prop_cache[name]
@@ -157,24 +176,16 @@ def make_property(name):
         if attribute != str.__str__(name):
             raise KeyError(name)
 
-        def get(self):
-            self.acquire()
-            try:
-                return getattr(self._obj, attribute)
-            finally:
-                self.release()
-
-        def set_(self, value):
-            self.acquire()
-            try:
-                setattr(self._obj, attribute, value)
-            finally:
-                self.release()
-
+        namespace = {'__builtins__': __builtins__}
+        make_accessors = FunctionType(_property_accessors.__code__, namespace)
+        get, set_ = make_accessors(attribute, getattr, setattr)
         get.__name__ = get.__qualname__ = 'get' + attribute
         set_.__name__ = set_.__qualname__ = 'set' + attribute
         get.__module__ = set_.__module__ = None
         prop = property(get, set_)
+        namespace[get.__name__] = get
+        namespace[set_.__name__] = set_
+        namespace[attribute] = prop
         prop_cache[name] = prop
         return prop
 
