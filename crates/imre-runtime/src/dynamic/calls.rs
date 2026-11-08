@@ -406,6 +406,9 @@ impl Context {
             Value::Native(kind) if kind == "type" && name == "__text_signature__" => {
                 self.builtins.get("type.__text_signature__").copied()
             }
+            Value::Native(kind) if kind == "type" && name == "__call__" => {
+                self.builtins.get("type.__call__").copied()
+            }
             Value::Native(kind) if kind == "type" && name == "__prepare__" => {
                 self.builtins.get("type.__prepare__").copied()
             }
@@ -5681,6 +5684,16 @@ impl Context {
             let prepare = self.builtin("type.__prepare__");
             return Ok(self.bind_native_classmethod(prepare, owner));
         }
+        if name == "__call__" && self.is_type_object(obj) {
+            let owner = self.builtin("type");
+            let slot = self.builtin("type.__call__");
+            let receiver = if self.direct_subclass(obj, owner) {
+                NONE
+            } else {
+                obj
+            };
+            return self.bind_attribute(slot, receiver, owner);
+        }
         if matches!(name, "mro" | "__subclasses__") && self.is_type_object(obj) {
             let owner = self.builtin("type");
             let descriptor = self.builtin(if name == "mro" {
@@ -7830,10 +7843,36 @@ impl Context {
     fn call_bound_keywords(
         &mut self,
         callable: Id,
-        args: Vec<Id>,
+        mut args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
         variadic: Option<Id>,
     ) -> Result<Id> {
+        // An explicit type.__call__ invokes the ordinary constructor without
+        // dispatching back to an override on the receiver's metaclass.
+        let default_type_call =
+            matches!(self.heap.get(callable), Value::Native(name) if name == "type.__call__");
+        let callable = if default_type_call {
+            if args.is_empty() {
+                return Err(Error::new(
+                    "TypeError",
+                    "descriptor '__call__' of 'type' object needs an argument",
+                ));
+            }
+            let receiver = args.remove(0);
+            if !self.is_type_object(receiver) {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "descriptor '__call__' requires a 'type' object but received a '{}'",
+                        self.builtin_type_name(receiver)
+                            .unwrap_or_else(|| self.type_name(receiver))
+                    ),
+                ));
+            }
+            receiver
+        } else {
+            callable
+        };
         if let Value::FractionHash(function) = *self.heap.get(callable) {
             return stdlib::fraction_hash(self, function, args, kwargs);
         }
@@ -8471,8 +8510,10 @@ impl Context {
                 metaclass,
                 ..
             } => {
-                if let Some(meta) = metaclass
+                if !default_type_call
+                    && let Some(meta) = metaclass
                     && let Some(slot) = self.class_attr(meta, "__call__")
+                    && self.builtins.get("type.__call__") != Some(&slot)
                 {
                     return self.with_slot_depth(
                         "maximum recursion depth exceeded while calling a Python object",
