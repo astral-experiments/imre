@@ -3730,7 +3730,10 @@ impl Context {
                 if receiver == obj && count == len {
                     return Ok(obj);
                 }
-                let bytes = sliced_values(data, positions, count)?;
+                let start = start as usize;
+                let mut bytes = Vec::new();
+                bytes.try_reserve_exact(count).map_err(slice_memory_error)?;
+                bytes.extend_from_slice(&data[start..start + count]);
                 return Ok(self.heap.bytes_from_data(bytes));
             }
             Value::Bytes(data) => Value::Bytes(sliced_values(data, positions, count)?),
