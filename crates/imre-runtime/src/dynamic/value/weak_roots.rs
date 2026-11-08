@@ -1,4 +1,5 @@
 use super::{Heap, Id, Value};
+use crate::dynamic::source_code::FinallyBlock;
 use crate::dynamic::stdlib::{BinaryFile, io::MemoryStream};
 use indexmap::IndexMap;
 use std::collections::{HashSet, VecDeque};
@@ -47,6 +48,7 @@ struct Links<'a> {
 enum Members<'a> {
     None,
     Sequence(&'a [Id]),
+    Generator(&'a [Id], &'a [FinallyBlock]),
     Names(&'a IndexMap<String, Id>, Option<Id>),
     Scope(&'a IndexMap<crate::Str, Id>),
     Keys(&'a [(Id, Id)]),
@@ -73,9 +75,13 @@ impl<'a> Links<'a> {
             Value::Coroutine { .. } | Value::CoroutineWrapper(_) => {
                 ([value.suspended_owner(), None], Members::None)
             }
-            Value::Generator { iterators, .. } => (
+            Value::Generator {
+                iterators,
+                protected,
+                ..
+            } => (
                 [value.suspended_owner(), None],
-                Members::Sequence(iterators),
+                Members::Generator(iterators, protected),
             ),
             Value::Method {
                 receiver, callable, ..
@@ -128,6 +134,9 @@ impl<'a> Links<'a> {
             + match self.members {
                 Members::None => 0,
                 Members::Sequence(items) => items.len(),
+                Members::Generator(iterators, protected) => {
+                    iterators.len() + protected.len() * FinallyBlock::ROOT_SLOTS
+                }
                 Members::Scope(names) => names.len(),
                 Members::Names(names, extra) => names.len() + usize::from(extra.is_some()),
                 Members::Keys(entries) | Members::Values(entries) => entries.len(),
@@ -150,6 +159,15 @@ impl<'a> Links<'a> {
         match self.members {
             Members::None => None,
             Members::Sequence(items) => items.get(index).copied(),
+            Members::Generator(iterators, protected) => {
+                if let Some(&id) = iterators.get(index) {
+                    return Some(id);
+                }
+                let index = index - iterators.len();
+                protected
+                    .get(index / FinallyBlock::ROOT_SLOTS)?
+                    .root_slots()[index % FinallyBlock::ROOT_SLOTS]
+            }
             Members::Scope(names) => names.get_index(index).map(|(_, id)| *id),
             Members::Names(names, extra) if index == names.len() => extra,
             Members::Names(names, _) => names.get_index(index).map(|(_, id)| *id),
@@ -468,22 +486,31 @@ impl Heap {
         !self.finalizer_roots.nodes.is_empty()
     }
 
-    /// Check published operands in the caller frames and the surviving prefix of the active frame.
+    /// Check the previously observed operand against the current frame and the edges it holds now.
+    fn cached_operand_keeps_finalizer(&self, owner: Id, retained_current: usize) -> bool {
+        let cached = &self.finalizer_operands[owner as usize % self.finalizer_operands.len()];
+        let Some((last_owner, frame, operand)) = cached.get() else {
+            return false;
+        };
+        last_owner == owner
+            && (frame + 1 < self.frames.len() || operand < retained_current)
+            && self
+                .frames
+                .get(frame)
+                .and_then(|f| f.live.get(operand))
+                .is_some_and(|&root| self.short_path_keeps_owner(root, owner))
+    }
+
     fn operand_keeps_finalizer(&self, owner: Id, retained_current: usize) -> bool {
+        self.cached_operand_keeps_finalizer(owner, retained_current)
+            || self.find_finalizer_operand(owner, retained_current)
+    }
+
+    /// Search published caller operands and the surviving prefix of the active frame.
+    fn find_finalizer_operand(&self, owner: Id, retained_current: usize) -> bool {
         let Some(active) = self.frames.len().checked_sub(1) else {
             return false;
         };
-        // The operand and its children can change between releases.
-        let cached = &self.finalizer_operands[owner as usize % self.finalizer_operands.len()];
-        if let Some((last_owner, frame, operand)) = cached.get()
-            && last_owner == owner
-            && (frame < active || operand < retained_current)
-            && let Some(&root) = self.frames.get(frame).and_then(|f| f.live.get(operand))
-            && self.short_path_keeps_owner(root, owner)
-        {
-            return true;
-        }
-
         const MAX_CALLER_OPERANDS: usize = 192;
         let active_limit = self.frames[active].live.len().min(retained_current).min(8);
         let mut operands = self
@@ -511,7 +538,8 @@ impl Heap {
             })
             .or_else(|| operands.find(|&(_, _, root)| self.short_path_keeps_owner(root, owner)));
         if let Some((frame, slot, _)) = found {
-            cached.set(Some((owner, frame, slot)));
+            self.finalizer_operands[owner as usize % self.finalizer_operands.len()]
+                .set(Some((owner, frame, slot)));
             return true;
         }
         false
@@ -547,8 +575,9 @@ impl Heap {
     ) -> bool {
         (paths_valid && self.finalizer_roots.contains(owner))
             || streams.is_some_and(|roots| roots.contains(&owner))
-            || self.operand_keeps_finalizer(owner, retained_current)
+            || self.cached_operand_keeps_finalizer(owner, retained_current)
             || self.bound_in_active_frame(owner)
+            || self.find_finalizer_operand(owner, retained_current)
     }
 
     /// A pending discard preserves the active frame's operands below its mark. It must also

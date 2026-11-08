@@ -533,6 +533,45 @@ fn iterator_paths_recheck_the_suspended_operands() {
 }
 
 #[test]
+fn suspended_cleanup_keeps_exit_methods_and_a_pending_return() {
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let namespace = ctx.dict(Vec::new());
+    let source = ctx.text(
+        r#"
+class Guard:
+    def __enter__(self): pass
+    def __exit__(self, *exc): pass
+
+def hold():
+    with Guard(), Guard():
+        try:
+            return object()
+        finally:
+            yield
+
+g = hold()
+next(g)
+"#,
+    );
+    ctx.exec_source(source, namespace, None, None).unwrap();
+    let generator = ctx.dict_named_item(namespace, "g").unwrap();
+    let Value::Generator { protected, .. } = ctx.heap.get(generator) else {
+        unreachable!()
+    };
+    let targets: Vec<_> = protected.iter().flat_map(|block| block.roots()).collect();
+    assert_eq!(targets.len(), 3);
+    let roots = [generator, NONE];
+    let paths =
+        super::RootPaths::discover(&ctx.heap, roots, targets.into_iter(), false, false).unwrap();
+    assert!(paths.covers_endpoints);
+    assert!(paths.valid(&ctx.heap, roots));
+    assert_traced_edges(&ctx.heap, &paths);
+
+    assert!(ctx.next_item(generator).unwrap().is_none());
+    assert!(!paths.valid(&ctx.heap, roots));
+}
+
+#[test]
 fn standard_output_roots_follow_rebinding_and_deletion() {
     let mut ctx = ffi::new_context(
         serde_json::json!({"paths": [], "python_version": "3.14"}),
