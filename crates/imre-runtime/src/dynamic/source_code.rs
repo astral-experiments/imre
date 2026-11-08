@@ -4359,7 +4359,7 @@ impl Context {
         }
         let builtins = match self.dict_named_item(globals, "__builtins__") {
             Some(value) => self.definition_builtins(value)?,
-            None => self.function_builtins(self.heap.current_scope())?,
+            None => self.caller_builtins()?,
         };
         let scope = self.function_environment("", globals, builtins);
         Ok(
@@ -4434,6 +4434,15 @@ impl Context {
         // Reimporting an evicted module leaves existing frames' builtins intact.
         self.source_builtins.get_or_insert(dict);
         Ok(())
+    }
+
+    /// Native entry has no Python frame whose builtins the new namespace can inherit.
+    fn caller_builtins(&mut self) -> Result<Id> {
+        if self.heap.python_depth() == 0 {
+            self.default_source_builtins()
+        } else {
+            self.function_builtins(self.heap.current_scope())
+        }
     }
 
     pub(super) fn default_source_builtins(&mut self) -> Result<Id> {
@@ -4715,7 +4724,7 @@ impl Context {
         } else if let Some(builtins) = self.dict_named_item(globals, "__builtins__") {
             self.definition_builtins(builtins)?
         } else {
-            let builtins = self.function_builtins(self.heap.current_scope())?;
+            let builtins = self.caller_builtins()?;
             let key = self.text("__builtins__");
             self.put_item(
                 self.dict_storage(globals).expect("exec dictionary"),
