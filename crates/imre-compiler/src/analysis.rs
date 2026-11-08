@@ -1,5 +1,6 @@
 //! Hosts ty's real semantic analysis and Ruff's cached parser over one source snapshot.
 
+mod class_cell;
 #[cfg(test)]
 mod closed_program_tests;
 #[cfg(test)]
@@ -179,6 +180,66 @@ pub(crate) fn check_registered_project<'a>(
         paths.push((path, is_program));
     }
     session.check_closed_program(&paths, None, &[], None)
+}
+
+/// Validate each native initializer at its own origin. Text retained for a
+/// later file import has no executable body at this stage.
+pub(crate) fn check_native_syntax<'a>(
+    root: &Path,
+    checked: Option<&crate::modules::SourceGraph>,
+    modules: impl Iterator<Item = &'a (String, PathBuf, String)>,
+    is_alternative: impl Fn(&Path) -> bool,
+    source_only: &mut std::collections::HashSet<PathBuf>,
+) -> Result<(), String> {
+    let mut scratch = None;
+    for (name, path, source) in modules {
+        if source_only.contains(path) {
+            continue;
+        }
+        let input = imre_ast::indentation::prepare(source);
+        let cached = checked.and_then(|graph| {
+            let id = if name == "__main__" {
+                graph.entry
+            } else {
+                graph.python_file(name)?
+            };
+            let session = &graph.session;
+            let file = session.files[id];
+            (graph.modules[id].path == *path
+                && ruff_db::source::source_text(&session.db, file).as_str() == input.text.as_ref())
+            .then_some((session, file))
+        });
+        let (session, file) = if let Some(cached) = cached {
+            cached
+        } else {
+            let session = match &mut scratch {
+                Some(session) => session,
+                slot @ None => slot.insert(Session::with_storage(
+                    root,
+                    &[],
+                    salsa::Storage::default(),
+                    true,
+                )?),
+            };
+            let origin = path.to_str().ok_or("module paths must be valid UTF-8")?;
+            let file = session.write_file(origin, &input.text)?;
+            file.sync(&mut session.db);
+            (&*session, file)
+        };
+        if let Some(error) = session.semantic_syntax_error(file) {
+            if is_alternative(path) {
+                source_only.insert(path.clone());
+            } else {
+                return Err(Diagnostic::invalid_syntax(file, &error, &error)
+                    .display(
+                        &(&session.db as &dyn ruff_db::Db),
+                        &DisplayDiagnosticConfig::new("imre"),
+                    )
+                    .to_string());
+            }
+        }
+    }
+    Ok(())
 }
 
 impl Session {
@@ -461,10 +522,19 @@ impl Session {
         Ok(parsed)
     }
 
-    pub(crate) fn has_valid_semantic_syntax(&self, module: usize) -> bool {
-        ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]))
+    fn semantic_syntax_error(
+        &self,
+        file: File,
+    ) -> Option<ruff_python_parser::semantic_errors::SemanticSyntaxError> {
+        ty_python_core::semantic_index(&self.db, self.db.program_file(file))
             .semantic_syntax_errors()
-            .is_empty()
+            .iter()
+            .find(|error| !class_cell::binds_nonlocal(&self.db, file, error))
+            .cloned()
+    }
+
+    pub(crate) fn has_valid_semantic_syntax(&self, module: usize) -> bool {
+        self.semantic_syntax_error(self.files[module]).is_none()
     }
 
     /// Width proved before ty expands the display's field types.

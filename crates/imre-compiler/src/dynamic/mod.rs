@@ -821,6 +821,9 @@ pub(crate) fn compile(
             first.add(0, &format!("{name}.__main__"));
         }
     }
+    for name in &options.include_modules {
+        first.add(0, name);
+    }
     let registered_imports = typed_graph
         .filter(|_| object_imports && first.invalid_executable.is_none())
         .map(import_module::registered_imports)
@@ -937,6 +940,7 @@ pub(crate) fn compile(
         selected_sources.push((0, true, ordinary_graph.map(|graph| graph.entry)));
     }
     let mut source_initializers = HashSet::new();
+    let mut unavailable_sources = HashMap::new();
     if first.invalid_executable.is_some() {
         source_initializers.insert(sources[0].1.clone());
     }
@@ -945,6 +949,7 @@ pub(crate) fn compile(
     // Keep source hints on the winning regular package's path. The runtime finder
     // can still load a different child if a parent changes its __path__.
     let mut entry_sources: HashMap<String, (PathBuf, bool)> = HashMap::new();
+    let mut bundled_includes = HashMap::new();
     let mut before_site = HashSet::new();
     let mut ordinary_registrations = None;
     let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
@@ -1248,6 +1253,9 @@ pub(crate) fn compile(
                     if !getter.names.is_empty() || getter.uses_exec {
                         enqueue(getter, true);
                     }
+                    if on_sdk_path && let Some(name) = options.include_modules.get(&prefix) {
+                        bundled_includes.insert(name, frozen);
+                    }
                     sources.push((prefix.clone(), path, source.into_owned()));
                 }
                 // Frozen runpy drives -m before a project runpy on sys.path.
@@ -1405,6 +1413,10 @@ pub(crate) fn compile(
                     let winner = on_package_path && !entry_sources.contains_key(&prefix);
                     if winner {
                         entry_sources.insert(prefix.clone(), (root.clone(), package));
+                        if let Some(error) = &imports.invalid_executable {
+                            unavailable_sources
+                                .insert(prefix.clone(), error.clone().with_path(&path));
+                        }
                     }
                     if imports.invalid_executable.is_none() || startup.is_none() {
                         if imports.invalid_executable.is_some() {
@@ -1579,6 +1591,37 @@ pub(crate) fn compile(
             file_alternatives,
         }),
     )?;
+    // SDK members retain their loader-visible filenames while the ZIP is the build input.
+    physical_files.extend(
+        inputs
+            .files
+            .iter()
+            .flat_map(|(path, identity, _)| [cwd.join(path), identity.clone()]),
+    );
+    crate::analysis::check_native_syntax(
+        &root,
+        ordinary_graph,
+        sources.iter().chain(&builtins),
+        |path| physical_files.contains(path) && !winners.iter().any(|source| source.path == path),
+        &mut source_initializers,
+    )?;
+    for name in &options.include_modules {
+        // A finder can resolve a namespace or ZIP member without emitting a body.
+        let file = winners
+            .iter()
+            .any(|source| source.name == name && !source_initializers.contains(source.path));
+        let bundled = bundled_includes
+            .get(name)
+            .is_some_and(|&frozen| frozen || !entry_sources.contains_key(name));
+        if !file && !bundled {
+            if let Some(error) = unavailable_sources.get(name) {
+                return Err(error.to_string());
+            }
+            return Err(format!(
+                "--include-module: no linkable Python source module found for {name:?}"
+            ));
+        }
+    }
     let modules = (sources.as_slice(), builtins.as_slice());
     let (units, used_archive) = if matches!(layout, crate::BoxedLayout::Check) {
         emit::check(modules, keep_docstrings, &source_initializers)?;
@@ -1591,13 +1634,6 @@ pub(crate) fn compile(
             .and_then(provider_archive::symbols)
             .unwrap_or_default();
         let config = config.to_string();
-        // SDK members retain their loader-visible filenames while the ZIP is the build input.
-        physical_files.extend(
-            inputs
-                .files
-                .iter()
-                .flat_map(|(path, identity, _)| [cwd.join(path), identity.clone()]),
-        );
         let emit = |split| {
             emit::emit(
                 modules,

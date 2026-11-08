@@ -130,6 +130,8 @@ pub struct CompileOptions {
     pub stdlib_sitecustomize: bool,
     /// Explicit installation roots containing rebuilt native modules and their type stubs.
     pub extension_paths: Vec<PathBuf>,
+    /// Additional source modules to link for imports whose names are chosen at runtime.
+    pub include_modules: std::collections::BTreeSet<String>,
     /// Indices in extension_paths admitted as ZIPs from PYTHONPATH during Python startup.
     pub python_archive_indices: Vec<usize>,
 }
@@ -385,6 +387,19 @@ fn object_fallback<T>(
     native: impl Fn(&mut modules::SourceGraph, CheckedIr) -> Result<(T, bool), llvm::Unsupported>,
     boxed: impl FnOnce(UnitCompilation) -> T,
 ) -> Result<T, String> {
+    for name in &options.include_modules {
+        if !modules::valid_module_operand(name) {
+            return Err(format!(
+                "--include-module requires an absolute module name, got {name:?}"
+            ));
+        }
+    }
+    let native_result = |result| match result {
+        Ok(_) if !options.include_modules.is_empty() => Err(
+            "--include-module requires a runtime module loader; this entry is fully typed".into(),
+        ),
+        result => result,
+    };
     let boxed_startup = options.module_entry.is_some()
         || options.sitecustomize
         || options
@@ -442,7 +457,7 @@ fn object_fallback<T>(
                         native_candidate = Some(value);
                         "Imre: native bound wrapper links use checked exception locations"
                     }
-                    Ok((value, _)) => return Ok(value),
+                    Ok((value, _)) => return native_result(Ok(value)),
                     Err(refusal) => refusal.0,
                 };
                 LoweringDiagnostic::plain(reason.to_owned()).classified(LoweringKind::Object)
@@ -483,7 +498,7 @@ fn object_fallback<T>(
                 ) || g.imports_struct_decorator()
             }))
     {
-        return native_candidate.ok_or_else(|| error.to_string());
+        return native_result(native_candidate.ok_or_else(|| error.to_string()));
     }
     let operation = graph.as_ref().and_then(|g| {
         if checked_entry {
@@ -615,7 +630,7 @@ fn object_fallback<T>(
             site_probes.record(&mut compilation.source_inputs);
             Ok(boxed(compilation))
         }
-        None => native_candidate.ok_or_else(|| error.to_string()),
+        None => native_result(native_candidate.ok_or_else(|| error.to_string())),
     }
 }
 

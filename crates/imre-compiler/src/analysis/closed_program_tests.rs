@@ -198,3 +198,59 @@ fn resolved_bundled_source_keeps_its_declaration() {
     fs::write(&main, "from http import HTTPStatus\n\ndef label(value: HTTPStatus) -> str:\n    return 'ok'\n\nprint(label(HTTPStatus.OK))\n").unwrap();
     crate::check_file(&main, None).unwrap();
 }
+
+#[test]
+fn declared_import_checks_lexical_syntax() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    fs::write(
+        &entry,
+        "import importlib, sys\nimportlib.import_module(sys.argv[1])\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("plugin.py"),
+        "def f():\n    nonlocal missing\n",
+    )
+    .unwrap();
+    let options = crate::CompileOptions {
+        include_modules: ["plugin".to_owned()].into(),
+        ..Default::default()
+    };
+    let error = crate::check_file_with_options(&entry, None, &options).unwrap_err();
+    assert!(
+        error.contains("invalid-syntax") && error.contains("plugin.py:2:5"),
+        "{error}"
+    );
+}
+
+#[test]
+fn literal_import_checks_native_body_with_or_without_other_declarations() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    fs::write(
+        &entry,
+        "import importlib, sys\nimport badsymbol\nimportlib.import_module(sys.argv[1])\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("badsymbol.py"),
+        "def f():\n    nonlocal missing\n",
+    )
+    .unwrap();
+    fs::write(project.path().join("innocent.py"), "value = 1\n").unwrap();
+    for declared in [None, Some("innocent"), Some("badsymbol")] {
+        let options = crate::CompileOptions {
+            module_entry: Some("main".into()),
+            include_modules: declared.into_iter().map(str::to_owned).collect(),
+            ..Default::default()
+        };
+        let error = crate::compile_file_with_boxed_units(&entry, Some(project.path()), &options)
+            .err()
+            .unwrap();
+        assert!(
+            error.contains("badsymbol.py:2:5") && error.contains("invalid-syntax"),
+            "{error}"
+        );
+    }
+}
