@@ -943,6 +943,7 @@ impl Function<'_, '_> {
             Body::Generator(expr, plan, _) if !self.source.bundled && plan.outer_async => {
                 Some(Body::Generator(expr, plan, Default::default()))
             }
+            Body::YieldingLambda(expr) if !self.source.bundled => Some(Body::YieldingLambda(expr)),
             _ => None,
         };
         let native_generator = trial.and_then(|suite| {
