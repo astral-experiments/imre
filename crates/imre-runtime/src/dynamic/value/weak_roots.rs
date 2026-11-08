@@ -207,6 +207,8 @@ impl<'a> Links<'a> {
                 Members::Scope(scope),
             ),
             Value::Cell(contents) => ([*contents, None], Members::None),
+            Value::Traceback { frame, next, .. } => ([Some(*frame), Some(*next)], Members::None),
+            Value::PythonFrame { scope, back, .. } => ([Some(*scope), *back], Members::None),
             Value::Dict(entries) if dict_keys => ([None; 2], Members::Entries(entries)),
             Value::Dict(entries) => ([None; 2], Members::Values(entries)),
             Value::Set { entries, .. } => ([None; 2], Members::Keys(entries)),
