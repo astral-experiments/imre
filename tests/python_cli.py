@@ -234,6 +234,13 @@ def check_installed_site(imre, root, run):
         assert (result.returncode, result.stdout, result.stderr) == (0, b"6\n", b""), result
     check_symlinked_venv(launcher, site, root.resolve(), run)
     check_copied_venv(launcher, root.resolve(), run)
+    # Discovering a filesystem library must not switch a checked program's backend.
+    (site.parent / "sitecustomize.py").write_text("print('stdlib hook')\n")
+    checked = run(launcher, "-EB", "-c", static, timeout=300)
+    assert (checked.returncode, checked.stdout, checked.stderr) == (0, b"6\n", b""), checked
+    # An object program already starts the shared interpreter, so its hook runs once.
+    boxed = run(launcher, "-EB", "-c", runtime, tariff.stem, timeout=300)
+    assert (boxed.returncode, boxed.stdout, boxed.stderr) == (0, b"stdlib hook\n6\n", b""), boxed
 
 
 def check_copied_venv(launcher, root, run):
@@ -263,15 +270,6 @@ def check_copied_venv(launcher, root, run):
     create(copied / "bin" / "python", nested)
     copied.rename(root / "moved-outer-venv")
     check(nested)
-
-    # Discovering a filesystem library must not switch a checked program's backend.
-    (site.parent / "sitecustomize.py").write_text("print('stdlib hook')\n")
-    checked = run(launcher, "-EB", "-c", static, timeout=300)
-    assert (checked.returncode, checked.stdout, checked.stderr) == (0, b"6\n", b""), checked
-    # An object program already starts the shared interpreter, so its hook runs once.
-    boxed = run(launcher, "-EB", "-c", runtime, tariff.stem, timeout=300)
-    assert (boxed.returncode, boxed.stdout, boxed.stderr) == (0, b"stdlib hook\n6\n", b""), boxed
-
 
 
 def check_symlinked_venv(launcher, base_site, root, run):
