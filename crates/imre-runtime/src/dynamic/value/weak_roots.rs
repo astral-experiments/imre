@@ -1,4 +1,4 @@
-use super::{Heap, Id, Scope, Value};
+use super::{CycleSet, END, FindReferences, Heap, Id, MarkMode, Scope, UNMARKED, Value};
 use crate::dynamic::source_code::FinallyBlock;
 use crate::dynamic::stdlib::{BinaryFile, io::MemoryStream};
 use indexmap::IndexMap;
@@ -37,6 +37,141 @@ pub(super) struct RootPaths {
     // Dictionary slots must be interpreted the same way during discovery and validation.
     dict_keys: bool,
     retry_with_keys: bool,
+}
+
+/// Strong incoming edges that keep pending owners alive under ordinary reference decrements.
+#[derive(Default)]
+pub(super) struct CycleRetention {
+    pub(super) owners: Vec<Id>,
+    edges: Vec<CycleEdge>,
+    retry: u8,
+}
+
+struct CycleEdge {
+    parent: Id,
+    child: Id,
+    slot: Option<usize>,
+}
+
+impl CycleRetention {
+    /// A declined proof still uses the ordinary classifier on every release.
+    pub(super) fn from_residual(heap: &Heap, cycles: &mut CycleSet) -> Self {
+        let retry = heap.cyclic_finalizers.retry;
+        if retry != 0 {
+            return Self {
+                retry: retry - 1,
+                ..Self::default()
+            };
+        }
+        Self::build(heap, cycles).unwrap_or_else(|| Self {
+            retry: SEARCH_BACKOFF,
+            ..Self::default()
+        })
+    }
+
+    fn build(heap: &Heap, cycles: &mut CycleSet) -> Option<Self> {
+        // The peeled graph has a predecessor inside the residual set for every survivor.
+        // Its queue already has capacity for one position per slot.
+        let parents = &mut cycles.work;
+        parents.resize(cycles.incoming.len(), END);
+        for (parent, &incoming) in cycles.incoming.iter().enumerate() {
+            if incoming != 0 {
+                heap.unreachable_children(heap.get(parent as Id), MarkMode::CycleEdges, |child| {
+                    if cycles.incoming[child] != 0 && parents[child] == END {
+                        parents[child] = parent;
+                    }
+                });
+            }
+        }
+
+        let mut proof = Self::default();
+        for &owner in &heap.ordinary_finalizers {
+            let mut child = owner as usize;
+            if cycles.incoming[child] == 0 {
+                continue;
+            }
+            proof.owners.try_reserve(1).ok()?;
+            proof.owners.push(owner);
+            // Follow predecessors until the path closes a cycle or joins an earlier path.
+            while parents[child] != UNMARKED {
+                let parent = std::mem::replace(&mut parents[child], UNMARKED);
+                // Keep optional edge checks small enough to run at operand releases.
+                if parent == END || proof.edges.len() == 256 {
+                    return None;
+                }
+                proof.edges.try_reserve(1).ok()?;
+                proof.edges.push(CycleEdge {
+                    parent: parent as Id,
+                    child: child as Id,
+                    slot: None,
+                });
+                child = parent;
+            }
+        }
+        // The predecessor table is no longer needed. Index each parent's wanted children
+        // in that same space so a wide container spends its position budget only once.
+        proof.edges.sort_unstable_by_key(|edge| edge.parent);
+        let mut budget = MAX_EDGES;
+        for edges in proof.edges.chunk_by_mut(|a, b| a.parent == b.parent) {
+            let links = Links::from(heap.get(edges[0].parent), true);
+            for (index, edge) in edges.iter().enumerate() {
+                parents[edge.child as usize] = index;
+            }
+            let mut missing = edges.len();
+            let limit = links.len().min(budget);
+            for slot in 0..limit {
+                budget -= 1;
+                if let Some(child) = links.get(slot)
+                    && let Some(edge) = edges.get_mut(parents[child as usize])
+                    && edge.child == child
+                    && edge.slot.is_none()
+                {
+                    edge.slot = Some(slot);
+                    missing -= 1;
+                    if missing == 0 {
+                        break;
+                    }
+                }
+            }
+            // One opaque edge may use the full strong-child visitor at validation.
+            if missing > 1 || (missing != 0 && limit < links.len()) {
+                return None;
+            }
+        }
+        proof.owners.sort_unstable();
+        Some(proof)
+    }
+
+    pub(super) fn verified_owners(&self, heap: &Heap) -> &[Id] {
+        for &CycleEdge {
+            parent,
+            child,
+            slot,
+        } in &self.edges
+        {
+            let Some(value) = heap
+                .slots
+                .get(parent as usize)
+                .and_then(|slot| slot.value.as_ref())
+            else {
+                return &[];
+            };
+            if let Some(slot) = slot {
+                if Links::from(value, true).get(slot) != Some(child) {
+                    return &[];
+                }
+                continue;
+            }
+            let mut edge = FindReferences {
+                targets: [child; 2],
+                found: false,
+            };
+            if value.try_children(&mut edge).is_err() || !edge.found {
+                return &[];
+            }
+        }
+        &self.owners
+    }
 }
 
 /// Strong edges in ordinary containers and namespaces. A missing edge merely loses the proof.
@@ -627,7 +762,21 @@ impl Heap {
                     discard_from.unwrap_or(usize::MAX),
                 )
         };
-        self.ordinary_finalizers.iter().all(&kept)
+        // Truncating the operand stack cannot break an edge within a heap cycle.
+        // Descriptor and weak-reference checks below still require their original proofs.
+        let ordinary_kept = if self.cyclic_finalizers.owners.is_empty() {
+            self.ordinary_finalizers.iter().all(&kept)
+        } else {
+            let mut cycle_valid = None;
+            self.ordinary_finalizers.iter().all(|owner| {
+                (self.cyclic_finalizers.owners.binary_search(owner).is_ok()
+                    && *cycle_valid.get_or_insert_with(|| {
+                        !self.cyclic_finalizers.verified_owners(self).is_empty()
+                    }))
+                    || kept(owner)
+            })
+        };
+        ordinary_kept
             && (discard_from.is_none()
                 || (self.descriptor_owners.iter().all(kept)
                     && (!self.has_weak_values || self.weak_values_kept_by(globals[0], globals[1]))))
