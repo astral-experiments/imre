@@ -101,6 +101,13 @@ impl Context {
                 format!("{argument} must be read-write bytes-like object, not {kind}"),
             )
         };
+        let storage = self.scalar_value(object);
+        if let Value::ByteArray(bytes) = self.heap.get(storage)
+            && self.buffer_slot(object, "__buffer__") == Some(None)
+        {
+            let range = 0..bytes.len();
+            return self.with_native_bytes_export(object, |ctx, _| consume(ctx, storage, range));
+        }
         let method = self
             .python_buffer_method(object, true)
             .map_err(|_| invalid(self))?;
