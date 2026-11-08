@@ -861,6 +861,7 @@ impl Checker<'_> {
             receiver,
             skip,
             (calls::starred(call)
+                || calls::named_mapping(call, &signature.params[skip..]).is_some()
                 || signature.params.iter().any(|p| {
                     matches!(p.kind, ParameterKind::Variadic | ParameterKind::KeywordRest)
                 }))

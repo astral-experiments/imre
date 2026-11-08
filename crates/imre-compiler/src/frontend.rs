@@ -9803,7 +9803,7 @@ impl<'a> Checker<'a> {
         }
         if calls::has_unpacking(call)
             && !matches!(self.resolve(&call.func), Some(Binding::Definition(id))
-                if self.functions.get(&id).is_some_and(|s| calls::rest_keywords(call, &s.params).1.is_some()))
+                if self.functions.get(&id).is_some_and(|s| calls::rest_keywords(call, &s.params).1.is_some() || calls::named_mapping(call, &s.params).is_some()))
         {
             calls::reject_unpacking(call, self.source)?;
         }

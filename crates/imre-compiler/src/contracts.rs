@@ -482,6 +482,7 @@ impl Builtin {
             | Self::SetDiscard
             | Self::CounterUpdate
             | Self::DictUpdate
+            | Self::BindSourceKeywords
             | Self::KeySet
             | Self::KeyUnion
             | Self::KeyIntersection
@@ -1424,6 +1425,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_repeat"
                 | "imre_counter_update"
                 | "imre_dict_update"
+                | "imre_bind_source_keywords"
                 | "imre_key_union"
                 | "imre_key_intersection"
                 | "imre_key_difference"

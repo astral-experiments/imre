@@ -7844,6 +7844,13 @@ impl Emitter<'_, '_> {
                 }
                 record
             }
+            Builtin::BindSourceKeywords => {
+                self.void_call(
+                    "imre_bind_source_keywords",
+                    &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
+                );
+                none()
+            }
             Builtin::ExceptionKeywordSuggestion => self.call(
                 "imre_exception_keyword_message",
                 returns,
@@ -11345,6 +11352,7 @@ declare ptr @imre_exception_field_repr(ptr)
 declare i64 @imre_exception_field_len(ptr)
 declare ptr @imre_exception_field_index(ptr, i64)
 declare ptr @imre_exception_keyword_message(ptr, ptr, ptr)
+declare void @imre_bind_source_keywords(ptr, ptr, ptr, ptr, ptr, ptr, i64)
 declare ptr @imre_exception_argument(i32, ptr, i64, i32)
 declare ptr @imre_exception_repr(ptr)
 declare ptr @imre_named_exception_record(ptr)

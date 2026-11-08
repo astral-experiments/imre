@@ -1289,6 +1289,7 @@ pub(crate) enum Builtin {
     MappingObjectGet,
     ExceptionTupleView,
     ExceptionKeywordSuggestion,
+    BindSourceKeywords,
     /// A new nominal record whose arguments initialize its complete checked layout.
     RecordFromFields,
     /// Check the return type of __str__ or __repr__ before crossing the formatter ABI.
