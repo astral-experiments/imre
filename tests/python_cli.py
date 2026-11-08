@@ -423,6 +423,17 @@ def check_script_sitecustomize(imre, root, run):
         )
         assert (result.returncode, result.stdout, result.stderr) == (0, stdout, b""), result
 
+    unfrozen = root / "unfrozen-providers"
+    unfrozen.mkdir()
+    (unfrozen / "stat.py").write_text("raise AssertionError('unexpected startup import')\n")
+    invoice = app / "invoice.py"
+    invoice.write_text("import sys\nprint('site' in sys.modules, 'stat' in sys.modules)\n")
+    result = run(
+        imre, "-B", "-X", "frozen_modules=off", invoice,
+        extra={"PYTHONPATH": str(unfrozen)}, timeout=300,
+    )
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"False False\n", b""), result
+
     literal = app / "literal_import.py"
     literal.write_text("from startup_plugin import value\nprint(value)\n")
     result = run(imre, "-B", literal, extra=env, timeout=300)

@@ -995,7 +995,11 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     let mut ctx = unsafe { Box::from_raw(ctx) };
     let mark = ctx.heap.temporary_mark();
     let mut failed_site = false;
-    let startup_site = ctx.config["executable"].is_string() && ctx.config["no_site"] != true;
+    // With unfrozen modules, importing site can execute a filesystem replacement for stat.
+    // Preserve the existing hook-triggered startup in that mode.
+    let startup_site = ctx.config["executable"].is_string()
+        && ctx.config["no_site"] != true
+        && (ctx.config["frozen_modules"] != false || ctx.config["sitecustomize"] == true);
     let result = ctx.startup_sys().and_then(|_| {
         if ctx.config["path0"] == true && !startup_site {
             ctx.insert_startup_path0()?;
