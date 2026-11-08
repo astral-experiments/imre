@@ -870,21 +870,27 @@ impl Function<'_, '_> {
         }
         // Keep the existing staged generator when its suite cannot be lowered. Its
         // surrounding caller and any neighboring supported suites remain compiled.
-        let native_generator = match &body {
+        let trial = match &body {
             Body::GeneratorFunction(stmts, code_flags::GENERATOR) if !self.source.bundled => {
-                self.output.try_suspended(|output| {
-                    output.definition(
-                        self.source,
-                        prefix.clone(),
-                        Body::GeneratorFunction(stmts, code_flags::GENERATOR),
-                        start,
-                        true,
-                        Entry::Suspended,
-                    )
-                })
+                Some(Body::GeneratorFunction(stmts, code_flags::GENERATOR))
+            }
+            Body::Generator(expr, plan, _) if !self.source.bundled && plan.outer_async => {
+                Some(Body::Generator(expr, plan, Default::default()))
             }
             _ => None,
         };
+        let native_generator = trial.and_then(|suite| {
+            self.output.try_suspended(|output| {
+                output.definition(
+                    self.source,
+                    prefix.clone(),
+                    suite,
+                    start,
+                    true,
+                    Entry::Suspended,
+                )
+            })
+        });
         // Synchronous genexprs already have a compiled comprehension step.
         let entry = if native_generator.is_some()
             || (flags.is_some_and(|flags| {

@@ -69,6 +69,7 @@ parked:
 #[repr(i32)]
 pub(super) enum Suspension {
     Yield = 0,
+    AsyncYield = 1,
     Await = 2,
     Delegate = 3,
 }
