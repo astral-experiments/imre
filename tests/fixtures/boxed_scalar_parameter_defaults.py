@@ -35,3 +35,13 @@ def current():
         return function(remove_contract(function))
 
     assert invoke(consume) == "after deletion"
+
+
+    def reset_contract(function):
+        function.__annotations__ = None
+        return "after reset"
+
+    def invoke_reset(function):
+        return function(reset_contract(function))
+
+    assert invoke_reset(consume) == "after reset"
