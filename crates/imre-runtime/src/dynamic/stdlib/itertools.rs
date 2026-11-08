@@ -166,6 +166,14 @@ pub(in crate::dynamic) struct Cycle {
 /// ordinary Python fields alongside the same traced cursor.
 #[derive(Clone)]
 pub(in crate::dynamic) enum Cursor {
+    Tee {
+        base: Id,
+        position: crate::tee::Position<Id>,
+    },
+    TeeBlock {
+        source: Id,
+        data: crate::tee::Block<Id, Id>,
+    },
     Cycle(Cycle),
     Accumulate(Accumulator),
     Pairwise {
@@ -191,6 +199,12 @@ impl Cursor {
         visit: &mut impl crate::dynamic::value::VisitReferences,
     ) {
         match self {
+            Self::Tee { base, position } => visit.extend([*base, position.block]),
+            Self::TeeBlock { source, data } => {
+                visit.push(*source);
+                visit.extend(data.following);
+                visit.extend(&data.items);
+            }
             Self::Cycle(state) => {
                 visit.extend(state.source);
                 visit.extend(&state.saved);
@@ -234,6 +248,130 @@ fn cursor_instance(ctx: &mut Context, class: Id, state: Cursor) -> Id {
     };
     *itertools = Some(Box::new(state));
     result
+}
+
+struct BoxedBlocks<'a> {
+    ctx: &'a mut Context,
+    block_class: Id,
+    source: Id,
+}
+
+impl crate::tee::Store for BoxedBlocks<'_> {
+    type Link = Id;
+    type Item = Id;
+
+    fn allocate(&mut self) -> std::result::Result<Id, crate::Error> {
+        Ok(cursor_instance(
+            self.ctx,
+            self.block_class,
+            Cursor::TeeBlock {
+                source: self.source,
+                data: crate::tee::Block::new(),
+            },
+        ))
+    }
+
+    fn with_block<R>(
+        &mut self,
+        link: &Id,
+        f: impl FnOnce(&mut crate::tee::Block<Id, Id>) -> R,
+    ) -> R {
+        let Some(Cursor::TeeBlock { data, .. }) = cursor(self.ctx, *link) else {
+            unreachable!("tee cursor holds a live buffer block")
+        };
+        f(data)
+    }
+}
+
+pub(super) fn tee_allocate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [class, block_class, iterable] = args else {
+        return Err(Error::new("TypeError", "invalid tee constructor arguments"));
+    };
+    if !kwargs.is_empty()
+        || ctx.itertools_layout(*class) != Some("itertools._tee")
+        || ctx.itertools_layout(*block_class) != Some("itertools._TeeBlock")
+    {
+        return Err(Error::new("TypeError", "invalid tee constructor arguments"));
+    }
+    let source = ctx.iterator(*iterable)?;
+    ctx.heap.keep(source);
+    let position = if ctx.heap.get(source).instance_class() == Some(*class)
+        && let Some(Cursor::Tee { position, .. }) = cursor(ctx, source)
+    {
+        position.clone()
+    } else {
+        let block = cursor_instance(
+            ctx,
+            *block_class,
+            Cursor::TeeBlock {
+                source,
+                data: crate::tee::Block::new(),
+            },
+        );
+        crate::tee::Position::new(block)
+    };
+    Ok(cursor_instance(
+        ctx,
+        *class,
+        Cursor::Tee {
+            base: *class,
+            position,
+        },
+    ))
+}
+
+pub(in crate::dynamic) fn next_tee(ctx: &mut Context, receiver: Id) -> Result<Option<Id>> {
+    let Some(Cursor::Tee { base, position }) = cursor(ctx, receiver) else {
+        return Err(Error::new("TypeError", "expected a tee iterator"));
+    };
+    let base = *base;
+    let mut position = position.clone();
+    let Value::Instance {
+        class,
+        itertools: Some(state),
+        ..
+    } = ctx.heap.get(position.block)
+    else {
+        unreachable!("tee cursor holds a live buffer block")
+    };
+    let Cursor::TeeBlock { source, .. } = state.as_ref() else {
+        unreachable!("tee data")
+    };
+    let source = *source;
+    let mut blocks = BoxedBlocks {
+        block_class: *class,
+        source,
+        ctx,
+    };
+    let previous = position.block;
+    let prepared = position.prepare(&mut blocks);
+    // A fork crosses the block boundary even when the frontier is already running.
+    // Publish before returning that error or calling a source that can reenter us.
+    *cursor(blocks.ctx, receiver).expect("live tee") = Cursor::Tee {
+        base,
+        position: position.clone(),
+    };
+    if previous != position.block {
+        blocks.ctx.heap.weak_edge_removed(previous);
+    }
+    let item = prepared?;
+    if item.is_some() {
+        return Ok(item);
+    }
+    let result = blocks.ctx.next_item(source);
+    position.finish(&mut blocks, result.as_ref().ok().and_then(Option::as_ref));
+    *cursor(blocks.ctx, receiver).expect("live tee") = Cursor::Tee { base, position };
+    result
+}
+
+pub(super) fn tee_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [receiver] = args else {
+        return Err(Error::new("TypeError", "expected a tee iterator"));
+    };
+    if !kwargs.is_empty() {
+        return Err(Error::new("TypeError", "expected a tee iterator"));
+    }
+    next_tee(ctx, *receiver)?.ok_or_else(|| Error::new("StopIteration", ""))
 }
 
 pub(super) fn cycle_allocate(
