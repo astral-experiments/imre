@@ -3253,8 +3253,14 @@ impl SourceGraph {
     pub(crate) fn disk_inputs(
         &mut self,
         profile: Option<&Path>,
+        prefer_objects: bool,
     ) -> (crate::SourceInputs, Vec<PathBuf>) {
         let mut inputs = std::mem::take(&mut self.inputs);
+        // Object registration may still borrow the checked files after producing the
+        // native candidate. Keep the canonical identities paired with its source bytes.
+        if prefer_objects && profile.is_none() {
+            self.inputs.files.clone_from(&inputs.files);
+        }
         let mut modules = self.modules.iter().enumerate();
         inputs.files.retain(|_| {
             let (id, module) = modules.next().expect("one input per module");
@@ -6907,7 +6913,7 @@ mod native_tests {
             || SourceGraph::load(&entry, Some(&root), std::slice::from_ref(&extension)).unwrap();
 
         let mut graph = load();
-        let (inputs, _) = graph.disk_inputs(None);
+        let (inputs, _) = graph.disk_inputs(None, false);
         assert!(inputs.fresh());
         fs::remove_dir(&other_portion).unwrap();
         assert!(!inputs.fresh());
@@ -6924,7 +6930,7 @@ mod native_tests {
         fs::write(&module, "value = 42\n").unwrap();
         assert!(!inputs.fresh());
         let mut graph = load();
-        let (_, paths) = graph.disk_inputs(None);
+        let (_, paths) = graph.disk_inputs(None, false);
         assert!(paths.contains(&module));
         assert!(!paths.contains(&namespace.join("__init__.py")));
     }

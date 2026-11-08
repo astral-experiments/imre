@@ -33,7 +33,7 @@ fn named_module_retains_its_import_name_and_actual_source() {
     let mut graph = resolve(Path::new("-m"), "selected_module", &options).unwrap();
     assert_eq!(graph.modules[graph.entry].name, "selected_module");
     assert_entry_file(&graph, &module);
-    let (inputs, _) = graph.disk_inputs(None);
+    let (inputs, _) = graph.disk_inputs(None, false);
     assert!(inputs.fresh());
     fs::write(&module, "print(4)\n").unwrap();
     assert!(!inputs.fresh());
@@ -65,7 +65,7 @@ fn regular_package_selects_its_own_main_and_initializers() {
         graph.modules[graph.entry].name,
         "selected_pkg.child.__main__"
     );
-    let (inputs, _) = graph.disk_inputs(None);
+    let (inputs, _) = graph.disk_inputs(None, false);
     let files: Vec<_> = inputs
         .files
         .iter()
@@ -101,7 +101,7 @@ fn a_new_earlier_namespace_portion_invalidates_the_selected_entry() {
     };
     let mut graph = resolve(Path::new("-m"), "selected_ns", &options).unwrap();
     assert_entry_file(&graph, &late_package.join("__main__.py"));
-    let (inputs, _) = graph.disk_inputs(None);
+    let (inputs, _) = graph.disk_inputs(None, false);
     assert!(inputs.fresh());
     let early_package = early.path().join("selected_ns");
     fs::create_dir(&early_package).unwrap();

@@ -680,7 +680,8 @@ fn compile_file_with_layout(
         let ranges = ranges::analyze(&module);
         let (llvm_ir, prefer_objects) =
             llvm::emit_file(&module, &ranges, options.address_sanitizer)?;
-        let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
+        let (source_inputs, input_paths) =
+            graph.disk_inputs(options.entry_profile.as_deref(), prefer_objects);
         let compilation = UnitCompilation {
             units: vec![CodegenUnit {
                 name: "__main__".into(),
@@ -840,7 +841,8 @@ fn compile_file_units_with(
             &names,
             graph.entry,
         )?;
-        let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
+        let (source_inputs, input_paths) =
+            graph.disk_inputs(options.entry_profile.as_deref(), prefer_objects);
         let compilation = UnitCompilation {
             units,
             extension_archives: graph

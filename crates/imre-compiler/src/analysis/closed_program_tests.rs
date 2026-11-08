@@ -280,3 +280,51 @@ fn contextual_errors_do_not_hide_the_winning_files_semantic_error() {
         );
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn retained_native_candidate_registers_its_original_source_owner() {
+    use std::os::unix::fs::symlink;
+    let project = tempdir().unwrap();
+    let root = project.path();
+    let entry = root.join("main.py");
+    let helper = root.join("helper.py");
+    let before = root.join("before.py");
+    let after = root.join("after.py");
+    let original = "def value() -> int: return 1\n";
+    let replacement = "def value() -> str: return 'other'\n";
+    fs::write(&entry, "import helper\nprint(helper.value())\n").unwrap();
+    fs::write(&before, original).unwrap();
+    fs::write(&after, replacement).unwrap();
+    symlink(&before, &helper).unwrap();
+    let mut graph = crate::modules::SourceGraph::load(&entry, None, &[]).unwrap();
+    let id = graph.python_file("helper").unwrap();
+    let (inputs, _) = graph.disk_inputs(None, true);
+    fs::remove_file(&helper).unwrap();
+    symlink(&after, &helper).unwrap();
+    assert!(!inputs.fresh());
+    let mut seen = false;
+    crate::dynamic::compile(
+        (&entry, None, Default::default()),
+        &crate::CompileOptions::default(),
+        true,
+        Some(crate::dynamic::ObjectOperation::CheckedEntry),
+        Some(&graph),
+        crate::BoxedLayout::Check,
+        |_, sources| {
+            let sources = sources.unwrap();
+            let donor = sources.winners.iter().find(|s| s.name == "helper").unwrap();
+            assert_eq!(donor.checked_module, Some(id));
+            assert_eq!(donor.source, original);
+            assert_eq!(graph.inputs.files[id].1, before);
+            seen = true;
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert!(seen);
+    let next = crate::modules::SourceGraph::load(&entry, None, &[]).unwrap();
+    let id = next.python_file("helper").unwrap();
+    assert_eq!(next.inputs.files[id].1, after);
+    assert_eq!(next.modules[id].original_source(), replacement);
+}
