@@ -2218,6 +2218,14 @@ impl Context {
         }
     }
 
+    /// Return the builtins captured by a function's defining environment.
+    pub(super) fn function_builtins(&mut self, scope: Id) -> Result<Id> {
+        match self.scope_data(self.root_scope(scope)).exec_globals {
+            Some(globals) => Ok(globals.builtins),
+            None => self.default_source_builtins(),
+        }
+    }
+
     pub(super) fn lookup_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
         self.lookup_named_attr(obj, name, None)
     }
@@ -3871,10 +3879,7 @@ impl Context {
                     return self.module_globals(scope);
                 }
                 if name == "__builtins__" {
-                    return match self.scope_data(self.root_scope(scope)).exec_globals {
-                        Some(globals) => Ok(globals.builtins),
-                        None => self.default_source_builtins(),
-                    };
+                    return self.function_builtins(scope);
                 }
                 if let Some(value) = self.function_attr(obj, fields, name)? {
                     return Ok(value);
