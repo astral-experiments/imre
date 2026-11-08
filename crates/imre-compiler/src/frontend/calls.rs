@@ -284,6 +284,26 @@ impl ArgumentScope {
         }
     }
 }
+/// Split off a single mapping only if every keyword belongs to the typed rest parameter.
+pub(super) fn rest_keywords<'a>(
+    call: &'a ast::ExprCall,
+    params: &[Parameter],
+) -> (&'a [ast::Keyword], Option<&'a ast::Expr>) {
+    let keywords = call.arguments.keywords.as_ref();
+    if let [spread] = keywords
+        && spread.arg.is_none()
+        && !starred(call)
+        && let Some((rest, positional)) = params.split_last()
+        && rest.kind == ParameterKind::KeywordRest
+        && positional
+            .iter()
+            .all(|p| p.kind == ParameterKind::PositionalOnly)
+    {
+        return (&[], Some(&spread.value));
+    }
+    (keywords, None)
+}
+
 pub(super) fn has_unpacking(call: &ast::ExprCall) -> bool {
     starred(call)
         || call
@@ -627,7 +647,8 @@ impl Checker<'_> {
             };
             values.push(value);
         }
-        for keyword in &call.arguments.keywords {
+        let (keywords, rest_mapping) = rest_keywords(call, params);
+        for keyword in keywords {
             let name = keyword
                 .arg
                 .as_ref()
@@ -701,14 +722,23 @@ impl Checker<'_> {
                 .mapping(params[index].ty)
                 .expect("typed keyword rest");
             order[index + offset] = values.len();
-            values.push(Expr {
-                ty: params[index].ty,
-                kind: ExprKind::Dict {
-                    key,
-                    value,
-                    entries: extra,
-                },
-            });
+            let dictionary = if let Some(mapping) = rest_mapping {
+                let input = self.expr(mapping)?;
+                self.expect(params[index].ty, input.ty, mapping)?;
+                let mut copy = ArgumentScope::default();
+                let input = copy.hold(self, input);
+                self.plain_dictionary(copy, (key, value), vec![input])
+            } else {
+                Expr {
+                    ty: params[index].ty,
+                    kind: ExprKind::Dict {
+                        key,
+                        value,
+                        entries: extra,
+                    },
+                }
+            };
+            values.push(dictionary);
         }
         for (index, parameter) in params.iter().enumerate() {
             if order[index + offset] == usize::MAX {

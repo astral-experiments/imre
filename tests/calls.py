@@ -67,6 +67,10 @@ REJECTED = {
     "expanded_duplicate": FUNCTION + 'print(add(1, **{"first": 2}))\n',
     "uninitialized_empty_pack": FUNCTION + "def run(flag: bool) -> int:\n    if flag:\n        keywords = {}\n    return add(1, **keywords)\nrun(False)\n",
     "untyped_keyword_rest": "def take(**values) -> None:\n    pass\ntake(first=1)\n",
+    "wrong_keyword_rest_mapping": (
+        'def take(**values: int) -> None:\n    pass\n'
+        'options: dict[str, str] = {"x": "bad"}\noptions["y"] = "other"\ntake(**options)\n'
+    ),
     "wrong_keyword_rest_type": 'def take(**values: int) -> None:\n    pass\ntake(first="bad")\n',
     "list_default": "def take(values: list[int] = []) -> None:\n    pass\n",
     "dictionary_default": "def take(values: dict[str, int] = {}) -> None:\n    pass\n",
