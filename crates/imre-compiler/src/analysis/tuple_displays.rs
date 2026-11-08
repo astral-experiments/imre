@@ -313,6 +313,13 @@ impl<'a> Visitor<'a> for Displays<'a> {
         (self.executable_body, self.scope_body) = previous;
     }
 
+    fn visit_annotation(&mut self, annotation: &'a Expr) {
+        // A deferred annotation executes in its own function, including its tuple displays.
+        let previous = std::mem::replace(&mut self.executable_body, true);
+        self.visit_expr(annotation);
+        self.executable_body = previous;
+    }
+
     fn visit_body(&mut self, body: &'a [Stmt]) {
         if let Some((start, executable)) = self.scope_body
             && body.first().is_some_and(|stmt| stmt.start() == start)
@@ -398,6 +405,8 @@ mod tests {
         }
 
         check("def make(parts):\n    class Child(Base[*parts, int]): pass\n").unwrap();
+        check("def f(*args: *tuple[int, *Ts]): pass\n").unwrap();
+        assert!(check("def f(x=(*Ts,)): pass\n").is_err());
         let fixed = "0,".repeat(150);
         let oversized = format!("parts = ({fixed})\nclass Child(Base[*parts, *parts]): pass\n");
         assert!(check(&oversized).unwrap_err().contains("inferred fields"));
