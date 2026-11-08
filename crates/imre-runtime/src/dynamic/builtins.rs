@@ -2758,7 +2758,8 @@ pub(super) fn call(
             positional(name, kwargs)?;
             arity(name, args, 2, if name == "getattr" { 3 } else { 2 })?;
             let attr = attribute_name(ctx, args[1])?;
-            match ctx.lookup_named_attr(args[0], &attr, Some(args[1])) {
+            let report_missing = name == "getattr" && args.len() == 2;
+            match ctx.lookup_attribute(args[0], &attr, Some(args[1]), report_missing) {
                 Ok(_) if name == "hasattr" => Ok(TRUE),
                 Err(e) if name == "hasattr" && ctx.is_attribute_error(&e) => Ok(FALSE),
                 Err(e) if args.len() == 3 && ctx.is_attribute_error(&e) => Ok(args[2]),

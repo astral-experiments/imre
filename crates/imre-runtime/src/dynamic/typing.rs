@@ -280,7 +280,7 @@ pub(super) fn no_default(ctx: &mut Context) -> Id {
 
 /// A pack iterates over one Unpack alias, exactly as an explicit Unpack[Ts] subscription.
 pub(super) fn unpack_parameter(ctx: &mut Context, pack: Id) -> Result<Id> {
-    let module = ctx.module("typing")?;
+    let module = ctx.import_with_builtins("typing")?;
     let unpack = ctx.lookup_attr(module, "Unpack")?;
     ctx.get_item(unpack, pack)
 }
@@ -338,7 +338,7 @@ fn unpack_typevar_tuples(ctx: &mut Context, params: &mut [Id]) -> Result<bool> {
 }
 
 /// Return the declared tuple itself unless a pack requires an unpacked copy.
-fn type_alias_parameters(ctx: &mut Context, parameters: Id) -> Result<Id> {
+fn unpacked_parameters(ctx: &mut Context, parameters: Id) -> Result<Id> {
     if let Value::Tuple(items) | Value::NamedTuple { values: items, .. } =
         ctx.heap.get(ctx.scalar_value(parameters))
         && !items
@@ -1240,10 +1240,24 @@ fn generic_init_subclass(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
         "__init_subclass__",
         cls,
     )?;
-    let typing = ctx.module("typing")?;
-    ctx.heap.keep(typing);
-    let helper = ctx.lookup_attr(typing, "_generic_init_subclass")?;
-    ctx.call(helper, args.to_vec(), kwargs.to_vec())
+    call_generic_helper(
+        ctx,
+        "_generic_init_subclass",
+        args.to_vec(),
+        kwargs.to_vec(),
+    )
+}
+
+fn call_generic_helper(
+    ctx: &mut Context,
+    name: &str,
+    args: Vec<Id>,
+    kwargs: Vec<(String, Id)>,
+) -> Result<Id> {
+    let typing = ctx.import_with_builtins("typing")?;
+    let helper = ctx.lookup_attr(typing, name)?;
+    ctx.heap.keep(helper);
+    ctx.call(helper, args, kwargs)
 }
 
 /// Members physically stored on a TypeVar and returned unbound by class lookup.
@@ -1672,7 +1686,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         } => match (name, *definition) {
             ("__name__", _) => *label,
             ("__type_params__", _) => *parameters,
-            ("__parameters__", _) => return Some(type_alias_parameters(ctx, *parameters)),
+            ("__parameters__", _) => return Some(unpacked_parameters(ctx, *parameters)),
             ("__module__", AliasDefinition::Eager { module, .. }) => module,
             ("__module__", AliasDefinition::Lazy { evaluator, .. }) => {
                 return Some(ctx.lookup_attr(evaluator, "__module__"));
@@ -1896,6 +1910,23 @@ pub(super) fn parameter_scope(ctx: &mut Context, outer: Id, names: Id, class: bo
     };
     let module = enclosing.module.clone();
     let scope = ctx.scope(&module, Some(parent));
+    initialize_parameters(ctx, scope, names, class)
+}
+
+/// Bind the declared parameters directly in the compiled generic class header's activation.
+pub(super) fn class_parameter_frame(ctx: &mut Context, scope: Id, names: Id) -> Result<Id> {
+    let outer = ctx.scope_data(scope).parent.expect("generic class header");
+    if ctx.scope_data(outer).class_body.is_some() {
+        let parent = ctx.scope_data(outer).parent;
+        let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.parent = parent;
+    }
+    initialize_parameters(ctx, scope, names, true)
+}
+
+fn initialize_parameters(ctx: &mut Context, scope: Id, names: Id, class: bool) -> Result<Id> {
     let typing = ctx.text("typing");
     let mut params = Vec::new();
     for (binding, declaration) in ctx
@@ -1926,13 +1957,13 @@ pub(super) fn parameter_scope(ctx: &mut Context, outer: Id, names: Id, class: bo
         .declared
         .extend(frame.names.keys().map(|name| name.as_str().to_owned()));
     frame.closure.declared_complete = true;
-    let declared = ctx.alloc(Value::Tuple(params.clone()));
+    let declared = ctx.alloc(Value::Tuple(params));
     ctx.bind(scope, ".type_params", declared);
     if class {
         // __type_params__ retains the pack itself; the implicit base is Generic[*Ts].
-        unpack_typevar_tuples(ctx, &mut params)?;
+        let params = unpacked_parameters(ctx, declared)?;
         let generic = named_class(ctx, "typing", "Generic");
-        let base = alias(ctx, AliasKind::Generic, generic, params)?;
+        let base = call_generic_helper(ctx, "_GenericAlias", vec![generic, params], Vec::new())?;
         ctx.bind(scope, ".generic_base", base);
     }
     Ok(scope)
@@ -2154,7 +2185,7 @@ fn validate_forward_ref(source: &str) -> Result<()> {
 /// a user callback or inside a previously constructed typing alias.
 fn finish_field_ref(ctx: &mut Context, value: Id) -> Result<Id> {
     let invalid = || Error::new("TypeError", "expected a TypedDict annotation symbol");
-    let Some(source) = ctx.module_value("typing", "_TypedDictSymbol") else {
+    let Some(source) = ctx.module_value("annotationlib", "_TypedDictSymbol") else {
         return Err(invalid());
     };
     let target = ctx
