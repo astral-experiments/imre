@@ -97,10 +97,11 @@ load:
 }
 ";
 
+type ModuleSource = (String, PathBuf, String);
+
 /// All module source has already been resolved. Import execution remains conditional.
 pub(crate) fn emit(
-    modules: &[(String, PathBuf, String)],
-    file_modules: usize,
+    (files, builtins): (&[ModuleSource], &[ModuleSource]),
     config: &str,
     keep_docstrings: bool,
     bundled_root: &Path,
@@ -119,7 +120,7 @@ pub(crate) fn emit(
     let mut main = format!(
         "declare void @imre_dyn_register_source(ptr, ptr, ptr, ptr, i64, ptr)\n\ndefine i32 @main(i32 %argc, ptr %argv) {{\nentry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
     );
-    if file_modules < modules.len() {
+    if !builtins.is_empty() {
         output.functions.push_str(
             "declare void @imre_dyn_register_builtin_source(ptr, ptr, ptr, ptr, i64, ptr)\n",
         );
@@ -130,11 +131,13 @@ pub(crate) fn emit(
             .push_str("declare void @imre_dyn_register_bundled_source(ptr, ptr, ptr, ptr, i64)\n");
     }
     let mut declarations = HashSet::new();
-    for (unit, (name, path, source)) in modules.iter().enumerate() {
+    let files = files.iter().map(|module| (module, false));
+    let builtins = builtins.iter().map(|module| (module, true));
+    for (unit, ((name, path, source), builtin)) in files.chain(builtins).enumerate() {
         let bundled = path.starts_with(bundled_root);
         let module_name = output.data(name.as_bytes());
         let file = output.data(path.as_os_str().as_encoded_bytes());
-        if unit < file_modules && source_initializers.contains(path) {
+        if !builtin && source_initializers.contains(path) {
             let text = output.data(source.as_bytes());
             writeln!(
                 main,
@@ -175,10 +178,10 @@ pub(crate) fn emit(
         } else {
             ("null".to_owned(), 0)
         };
-        let register = if unit < file_modules {
-            "imre_dyn_register_source"
-        } else {
+        let register = if builtin {
             "imre_dyn_register_builtin_source"
+        } else {
+            "imre_dyn_register_source"
         };
         writeln!(
             main,
@@ -293,11 +296,11 @@ fn lower_source(
 /// Validate the modules that will have native initializers. Source-only registrations
 /// stay unparsed here, just as they do when emitting a runnable program.
 pub(super) fn check(
-    modules: &[(String, PathBuf, String)],
+    (files, builtins): (&[ModuleSource], &[ModuleSource]),
     keep_docstrings: bool,
     source_initializers: &HashSet<PathBuf>,
 ) -> Result<(), String> {
-    for (_, path, source) in modules {
+    for (_, path, source) in files.iter().chain(builtins) {
         if !source_initializers.contains(path) {
             let source_tree = parse_source(path, source, keep_docstrings)?;
             lower_source(path, source, &mut source_tree.parsed.into_syntax().body)?;
@@ -1170,8 +1173,7 @@ mod tests {
         let symbols = HashSet::from([symbol.clone()]);
         let refs = |modules: &[_]| {
             let (units, used) = emit(
-                modules,
-                modules.len(),
+                (modules, &[]),
                 "{}",
                 true,
                 root,
@@ -1195,8 +1197,7 @@ mod tests {
         );
         assert!(
             !emit(
-                std::slice::from_ref(&project),
-                1,
+                (std::slice::from_ref(&project), &[]),
                 "{}",
                 true,
                 root,
@@ -1210,8 +1211,7 @@ mod tests {
         assert_eq!(refs(&[project.clone(), bundled.clone()]), [false, true]);
 
         let (units, used) = emit(
-            &[bundled.clone(), project.clone()],
-            2,
+            (&[bundled.clone(), project.clone()], &[]),
             "{}",
             true,
             root,
@@ -1239,8 +1239,7 @@ mod tests {
             project.2.clone(),
         );
         let (units, used) = emit(
-            &[bundled, project.clone(), shadow, project],
-            4,
+            (&[bundled, project.clone(), shadow, project], &[]),
             "{}",
             true,
             root,
