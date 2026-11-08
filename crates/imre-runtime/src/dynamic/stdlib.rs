@@ -2608,7 +2608,10 @@ pub(super) fn call(
                 let data = ctx.registered_source_data(*loader, *filename);
                 return Ok(data.map_or(NONE, |bytes| ctx.alloc(Value::Bytes(bytes.to_vec()))));
             }
-            ("get_code", [loader, path], []) => return ctx.registered_code(*loader, *path),
+            ("get_code", [loader, path], []) => return ctx.registered_code(*loader, *path, None),
+            ("get_code", [loader, path, name, read, convert], []) => {
+                return ctx.registered_code(*loader, *path, Some((*name, *read, *convert)));
+            }
             ("path_stats", [path], []) => return os::source_path_stats(ctx, *path),
             ("loader_fields", [object], []) => {
                 if let Value::Instance { fields, .. } = ctx.heap.get(*object) {

@@ -33,5 +33,12 @@ except FileNotFoundError:
         pass
     else:
         raise AssertionError("external loader returned another loader's source")
+    try:
+        external.get_code(loader.name)
+    except FileNotFoundError:
+        pass
+    else:
+        raise AssertionError("external loader returned another loader's code")
 else:
     assert external.get_data(origin) == expected
+    assert external.get_code(loader.name).co_filename == origin

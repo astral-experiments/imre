@@ -107,7 +107,7 @@ pub(crate) fn emit(
     bundled_root: &Path,
     providers: &HashSet<String>,
     split: bool,
-    source_initializers: &HashSet<PathBuf>,
+    (source_initializers, physical_files): (&HashSet<PathBuf>, &HashSet<PathBuf>),
 ) -> Result<(Vec<CodegenUnit>, bool), String> {
     let mut units = Vec::new();
     let mut used_archive = false;
@@ -120,6 +120,9 @@ pub(crate) fn emit(
     let mut main = format!(
         "declare void @imre_dyn_register_source(ptr, ptr, ptr, ptr, i64, ptr)\n\ndefine i32 @main(i32 %argc, ptr %argv) {{\nentry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
     );
+    output
+        .functions
+        .push_str("declare void @imre_dyn_register_file_source(ptr, ptr, ptr, ptr, i64, ptr)\n");
     if !builtins.is_empty() {
         output.functions.push_str(
             "declare void @imre_dyn_register_builtin_source(ptr, ptr, ptr, ptr, i64, ptr)\n",
@@ -180,6 +183,8 @@ pub(crate) fn emit(
         };
         let register = if builtin {
             "imre_dyn_register_builtin_source"
+        } else if physical_files.contains(path) {
+            "imre_dyn_register_file_source"
         } else {
             "imre_dyn_register_source"
         };
@@ -1171,6 +1176,8 @@ mod tests {
             source.into(),
         );
         let symbols = HashSet::from([symbol.clone()]);
+        let physical_files = HashSet::from([project.1.clone()]);
+        let initializers = (&HashSet::new(), &physical_files);
         let refs = |modules: &[_]| {
             let (units, used) = emit(
                 (modules, &[]),
@@ -1179,7 +1186,7 @@ mod tests {
                 root,
                 &symbols,
                 false,
-                &HashSet::new(),
+                initializers,
             )
             .unwrap();
             let ir = &units[0].llvm_ir;
@@ -1187,7 +1194,10 @@ mod tests {
             let declared = format!("declare i64 @{symbol}(ptr, i64)");
             assert_eq!(ir.lines().filter(|line| *line == declared).count(), 1);
             ir.lines()
-                .filter(|line| line.contains("call void @imre_dyn_register_source("))
+                .filter(|line| {
+                    line.contains("call void @imre_dyn_register_source(")
+                        || line.contains("call void @imre_dyn_register_file_source(")
+                })
                 .map(|line| line.ends_with(&format!("@{symbol})")))
                 .collect::<Vec<_>>()
         };
@@ -1203,7 +1213,7 @@ mod tests {
                 root,
                 &symbols,
                 false,
-                &HashSet::new()
+                initializers
             )
             .unwrap()
             .1
@@ -1217,7 +1227,7 @@ mod tests {
             root,
             &symbols,
             false,
-            &HashSet::from([bundled.1.clone()]),
+            (&HashSet::from([bundled.1.clone()]), &physical_files),
         )
         .unwrap();
         assert!(!used);
@@ -1228,7 +1238,8 @@ mod tests {
             1
         );
         assert_eq!(
-            ir.matches("call void @imre_dyn_register_source(").count(),
+            ir.matches("call void @imre_dyn_register_file_source(")
+                .count(),
             1
         );
         assert!(!ir.contains(&symbol));
@@ -1238,6 +1249,7 @@ mod tests {
             PathBuf::from("/other/example.py"),
             project.2.clone(),
         );
+        let physical_files = HashSet::from([project.1.clone(), shadow.1.clone()]);
         let (units, used) = emit(
             (&[bundled, project.clone(), shadow, project], &[]),
             "{}",
@@ -1245,7 +1257,7 @@ mod tests {
             root,
             &symbols,
             true,
-            &HashSet::new(),
+            (&HashSet::new(), &physical_files),
         )
         .unwrap();
         assert!(used);

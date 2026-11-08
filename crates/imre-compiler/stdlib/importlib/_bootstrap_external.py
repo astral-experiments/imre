@@ -149,6 +149,14 @@ def _check_name(method):
     return checked
 
 
+def _read_source_file(loader, filename):
+    data = _registered_source_data(loader, filename)
+    if data is not None:
+        return data
+    with _io.open_code(filename) as file:
+        return file.read()
+
+
 class FileLoader:
     def __init__(self, fullname, path):
         self.name = fullname
@@ -170,14 +178,8 @@ class FileLoader:
 
     def get_data(self, path):
         if isinstance(self, SourceFileLoader):
-            filename = str(path)
-            data = _registered_source_data(self, filename)
-            if data is not None:
-                return data
-            file = _io.open_code(filename)
-        else:
-            file = open(path, "rb")
-        with file:
+            return _read_source_file(self, str(path))
+        with open(path, "rb") as file:
             return file.read()
 
     @_check_name
@@ -186,12 +188,32 @@ class FileLoader:
         return FileReader(self)
 
 
-def _code_from_source(loader, path):
-    if not isinstance(path, str):
-        # Validate the source path but keep the original object for loader hooks.
-        _cache_path(path)
-    source = loader.get_data(path)
-    return loader.source_to_code(source, path)
+def _compile_source(data, path, _optimize, registration=None):
+    filename = _fspath(path)
+    if isinstance(filename, bytes):
+        filename = filename.decode(sys.getfilesystemencoding(), sys.getfilesystemencodeerrors())
+    if "\0" in filename:
+        raise ValueError("embedded null character")
+    level = _index(_optimize)
+    if level < -2147483648 or level > 2147483647:
+        raise OverflowError("Python int too large to convert to C int")
+    if level < -1 or level > 2:
+        raise ValueError("compile(): invalid optimize value")
+    if level == -1:
+        level = sys.flags.optimize
+    if level:
+        raise NotImplementedError("native source compilation supports optimization level 0")
+    if registration is not None:
+        loader, fullname, read_name = registration
+        if type(read_name) is str and type(filename) is str and read_name == filename:
+            code = _registered_code(loader, filename, fullname, _file_data, _source_compiler)
+            if code is not None:
+                return code
+    return compile(data, filename, "exec")
+
+
+def _is_bound(method, instance, function):
+    return type(method) is _method_type and method.__self__ is instance and method.__func__ is function
 
 
 class SourceLoader(_LoaderBasics):
@@ -204,37 +226,39 @@ class SourceLoader(_LoaderBasics):
         return decode_source(data)
 
     def source_to_code(self, data, path, *, _optimize=-1):
-        filename = _fspath(path)
-        if isinstance(filename, bytes):
-            filename = filename.decode(sys.getfilesystemencoding(), sys.getfilesystemencodeerrors())
-        if "\0" in filename:
-            raise ValueError("embedded null character")
-        level = _index(_optimize)
-        if level < -2147483648 or level > 2147483647:
-            raise OverflowError("Python int too large to convert to C int")
-        if level < -1 or level > 2:
-            raise ValueError("compile(): invalid optimize value")
-        if level == -1:
-            level = sys.flags.optimize
-        if level:
-            raise NotImplementedError("native source compilation supports optimization level 0")
-        return compile(data, filename, "exec")
+        return _compile_source(data, path, _optimize)
 
     def get_code(self, fullname):
-        return _code_from_source(self, self.get_filename(fullname))
+        path = self.get_filename(fullname)
+        if not isinstance(path, str):
+            _cache_path(path)
+            read = self.get_data
+            if issubclass(type(self), SourceFileLoader) and _is_bound(read, self, _file_data):
+                # Preserve the read before selecting the converter or asking for its filename.
+                read_name = str(path)
+                data = _read_source_file(self, read_name)
+                convert = self.source_to_code
+                if _is_bound(convert, self, _source_compiler):
+                    return _compile_source(data, path, -1, (self, fullname, read_name))
+                return convert(data, path)
+            data = read(path)
+            return self.source_to_code(data, path)
+        if issubclass(type(self), SourceFileLoader):
+            code = _registered_code(self, path, fullname, _file_data, _source_compiler)
+            if code is not None:
+                return code
+        data = self.get_data(path)
+        return self.source_to_code(data, path)
+
+
+_file_data = FileLoader.get_data
+_method_type = type(_file_data.__get__(FileLoader))
+_source_compiler = SourceLoader.source_to_code
 
 
 class SourceFileLoader(FileLoader, SourceLoader):
     def path_stats(self, path):
         return _path_stats(path)
-
-    def get_code(self, fullname):
-        path = self.get_filename(fullname)
-        if isinstance(path, str):
-            code = _registered_code(self, path)
-            if code is not None:
-                return code
-        return _code_from_source(self, path)
 
 
 def _file_loader_defaults(location=None):

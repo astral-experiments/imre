@@ -1446,6 +1446,12 @@ pub(crate) fn compile(
             .and_then(provider_archive::symbols)
             .unwrap_or_default();
         let config = config.to_string();
+        // Namespace portions and ZIP members have import filenames but no individual file input.
+        let physical_files = inputs
+            .files
+            .iter()
+            .flat_map(|(path, identity, _)| [cwd.join(path), identity.clone()])
+            .collect();
         let emit = |split| {
             emit::emit(
                 modules,
@@ -1454,7 +1460,7 @@ pub(crate) fn compile(
                 Path::new(bundled_root),
                 &providers,
                 split,
-                &source_initializers,
+                (&source_initializers, &physical_files),
             )
         };
         let (mut units, mut used_archive) = emit(!matches!(layout, crate::BoxedLayout::Whole))?;

@@ -900,6 +900,20 @@ pub(super) unsafe extern "C" fn imre_dyn_register_source(
     unsafe { register_compiled(ctx, name, file, text, len, ModuleInitializer::Native(code)) }
 }
 
+/// Register an initializer compiled from a filesystem source input.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_file_source(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    text: *const u8,
+    len: u64,
+    code: Code,
+) {
+    // SAFETY: the compiler supplies the same static storage as for other compiled sources.
+    unsafe { register_compiled(ctx, name, file, text, len, ModuleInitializer::File(code)) }
+}
+
 /// Register compiled Python that runs after a built-in module installs its native bindings.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_register_builtin_source(
