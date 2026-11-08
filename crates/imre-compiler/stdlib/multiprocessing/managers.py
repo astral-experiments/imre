@@ -19,8 +19,6 @@ import threading
 import signal
 import array
 import collections.abc
-from keyword import iskeyword
-from unicodedata import normalize
 import queue
 import time
 import types
@@ -985,12 +983,12 @@ def MakeProxyType(name, exposed, _cache={}):
 
     dic = {'__builtins__': __builtins__} if exposed else {}
     for meth in exposed:
-        if not isinstance(meth, str) or not meth.isidentifier() or iskeyword(meth):
+        if not isinstance(meth, str):
             raise SyntaxError('invalid syntax')
-        attribute = normalize('NFKC', meth) if not meth.isascii() else meth
-        if attribute == '__debug__':
-            raise SyntaxError('cannot assign to __debug__')
-        dic[attribute] = _proxy_method(meth, attribute)
+        # The definition used %s for its binding and a string literal for the call.
+        spelling = str.strip(str(meth), ' \t\f')
+        attribute = util._factory_identifier(spelling)
+        dic[attribute] = _proxy_method(str.__str__(meth), attribute)
 
     ProxyType = type(name, (BaseProxy,), dic)
     ProxyType._exposed_ = exposed

@@ -8,12 +8,10 @@
 #
 
 import ctypes
-from keyword import iskeyword
-from unicodedata import normalize
 import weakref
 
 from . import heap
-from . import get_context
+from . import get_context, util
 
 from .context import reduction, assert_spawning
 _ForkingPickler = reduction.ForkingPickler
@@ -151,35 +149,35 @@ def make_property(name):
     try:
         return prop_cache[name]
     except KeyError:
-        pass
+        if not isinstance(name, str):
+            raise SyntaxError('invalid syntax')
+        # Leading whitespace separates get/set from the suffix in an accessor name.
+        spelling = str.rstrip(str(name), ' \t\f')
+        attribute = util._factory_identifier(spelling)
+        if attribute != str.__str__(name):
+            raise KeyError(name)
 
-    if not isinstance(name, str) or not name.isidentifier() or iskeyword(name):
-        raise SyntaxError('invalid syntax')
-    if name == '__debug__':
-        raise SyntaxError('cannot assign to __debug__')
-    if not name.isascii() and normalize('NFKC', name) != name:
-        raise KeyError(name)
+        def get(self):
+            self.acquire()
+            try:
+                return getattr(self._obj, attribute)
+            finally:
+                self.release()
 
-    def get(self):
-        self.acquire()
-        try:
-            return getattr(self._obj, name)
-        finally:
-            self.release()
+        def set_(self, value):
+            self.acquire()
+            try:
+                setattr(self._obj, attribute, value)
+            finally:
+                self.release()
 
-    def set_(self, value):
-        self.acquire()
-        try:
-            setattr(self._obj, name, value)
-        finally:
-            self.release()
+        get.__name__ = get.__qualname__ = 'get' + attribute
+        set_.__name__ = set_.__qualname__ = 'set' + attribute
+        get.__module__ = set_.__module__ = None
+        prop = property(get, set_)
+        prop_cache[name] = prop
+        return prop
 
-    get.__name__ = get.__qualname__ = 'get' + name
-    set_.__name__ = set_.__qualname__ = 'set' + name
-    get.__module__ = set_.__module__ = None
-    prop = property(get, set_)
-    prop_cache[name] = prop
-    return prop
 
 prop_cache = {}
 class_cache = weakref.WeakKeyDictionary()

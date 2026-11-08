@@ -558,3 +558,18 @@ def _cleanup_tests():
     support.gc_collect()
 
     support.reap_children()
+
+
+def _factory_identifier(spelling):
+    """Return the Python binding for a single identifier used by a factory."""
+    from keyword import iskeyword
+    if not spelling.isidentifier() or iskeyword(spelling):
+        raise SyntaxError('invalid syntax')
+    if not spelling.isascii():
+        from unicodedata import normalize
+        spelling = normalize('NFKC', spelling)
+    if spelling == '__debug__':
+        raise SyntaxError('cannot assign to __debug__')
+    if spelling in ('True', 'False', 'None'):
+        raise ValueError(f"identifier field can't represent {spelling!r} constant")
+    return spelling
