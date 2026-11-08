@@ -2579,7 +2579,7 @@ impl Value {
                 visit.extend([*function, *dictionary, *table, *marker]);
                 visit.extend(entries.iter().map(|call| call.key));
             }
-            Self::Raised(error) => visit.extend(error.roots()),
+            Self::Raised(error) => error.roots().for_each(visit.visitor()),
             Self::Traceback { frame, next, .. } => visit.extend([*frame, *next]),
             Self::PythonFrame {
                 unoptimized_locals,
