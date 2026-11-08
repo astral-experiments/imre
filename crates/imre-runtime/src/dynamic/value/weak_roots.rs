@@ -1,4 +1,4 @@
-use super::{Heap, Id, Value};
+use super::{Heap, Id, Scope, Value};
 use crate::dynamic::source_code::FinallyBlock;
 use crate::dynamic::stdlib::{BinaryFile, io::MemoryStream};
 use indexmap::IndexMap;
@@ -50,7 +50,7 @@ enum Members<'a> {
     Sequence(&'a [Id]),
     Generator(&'a [Id], &'a [FinallyBlock]),
     Names(&'a IndexMap<String, Id>, Option<Id>),
-    Scope(&'a IndexMap<crate::Str, Id>),
+    Scope(&'a Scope),
     Keys(&'a [(Id, Id)]),
     Values(&'a [(Id, Id)]),
     Entries(&'a [(Id, Id)]),
@@ -63,8 +63,9 @@ impl<'a> Links<'a> {
             Value::Module { scope, .. } => ([Some(*scope), None], Members::None),
             Value::Scope(scope) => (
                 [scope.namespace, scope.exec_globals.map(|g| g.dict)],
-                Members::Scope(&scope.names),
+                Members::Scope(scope),
             ),
+            Value::Cell(contents) => ([*contents, None], Members::None),
             Value::Dict(entries) if dict_keys => ([None; 2], Members::Entries(entries)),
             Value::Dict(entries) => ([None; 2], Members::Values(entries)),
             Value::Set { entries, .. } => ([None; 2], Members::Keys(entries)),
@@ -137,7 +138,7 @@ impl<'a> Links<'a> {
                 Members::Generator(iterators, protected) => {
                     iterators.len() + protected.len() * FinallyBlock::ROOT_SLOTS
                 }
-                Members::Scope(names) => names.len(),
+                Members::Scope(scope) => scope.names.len() + scope.closure.cells.len(),
                 Members::Names(names, extra) => names.len() + usize::from(extra.is_some()),
                 Members::Keys(entries) | Members::Values(entries) => entries.len(),
                 Members::Entries(entries) => entries.len() * 2,
@@ -168,7 +169,17 @@ impl<'a> Links<'a> {
                     .get(index / FinallyBlock::ROOT_SLOTS)?
                     .root_slots()[index % FinallyBlock::ROOT_SLOTS]
             }
-            Members::Scope(names) => names.get_index(index).map(|(_, id)| *id),
+            Members::Scope(scope) => {
+                if index < scope.names.len() {
+                    scope.names.get_index(index).map(|(_, id)| *id)
+                } else {
+                    scope
+                        .closure
+                        .cells
+                        .get_index(index - scope.names.len())
+                        .map(|(_, id)| *id)
+                }
+            }
             Members::Names(names, extra) if index == names.len() => extra,
             Members::Names(names, _) => names.get_index(index).map(|(_, id)| *id),
             Members::Keys(entries) => entries.get(index).map(|(key, _)| *key),

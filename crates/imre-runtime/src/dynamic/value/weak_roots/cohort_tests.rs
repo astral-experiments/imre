@@ -2,6 +2,33 @@ use super::super::{FrameOwner, NONE, Value};
 use crate::dynamic::{ffi, stdlib, weakref};
 
 #[test]
+fn retained_closure_owner_rechecks_the_cell_and_its_contents() {
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let scope = ctx.scope("sample", None);
+    let owner = ctx.alloc(Value::List(Vec::new()));
+    let cell = ctx.alloc(Value::Cell(Some(owner)));
+    let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
+        unreachable!()
+    };
+    frame.closure.cells.insert("held".into(), cell);
+
+    let roots = [scope, NONE];
+    let paths =
+        super::RootPaths::discover(&ctx.heap, roots, [owner].into_iter(), true, false).unwrap();
+    assert!(paths.contains(owner) && paths.valid(&ctx.heap, roots));
+
+    *ctx.heap.get_mut(cell) = Value::Cell(None);
+    assert!(!paths.valid(&ctx.heap, roots));
+    *ctx.heap.get_mut(cell) = Value::Cell(Some(owner));
+    let replacement = ctx.alloc(Value::Cell(Some(owner)));
+    let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
+        unreachable!()
+    };
+    frame.closure.cells.insert("held".into(), replacement);
+    assert!(!paths.valid(&ctx.heap, roots));
+}
+
+#[test]
 fn cached_operand_rechecks_the_frame_and_its_current_edge() {
     let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
     let class = ctx.builtin("object");
