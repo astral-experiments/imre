@@ -778,6 +778,9 @@ REJECTED = {
         "main.py": "import feature\nfeature.require(True)\ndef typed(value: int) -> int: return value\ntyped('bad')\n",
     }, "expected int, got str"),
     "definition_after_execution": ({"main.py": "print(1)\n" + HELPER}, "definitions must precede"),
+    "missing_installed_root": ({
+        "main.py": "from invoice_rates.lookup import rate\nprint(rate(7))\n",
+    }, "--extension-path DIRECTORY"),
     "missing_namespace_child": ({"main.py": "import package.missing\n", "package/child.py": HELPER}, "cannot resolve first-party module"),
     "namespace_preserves_annotation": ({
         "main.py": "import helper\n",

@@ -598,7 +598,13 @@ String loops, comprehensions, and loop-head `enumerate` capture the original imm
 
 A file entry runs as `__main__`. When its object code imports a missing runtime module, the import raises `ModuleNotFoundError`. Ordinary and reachable file builds preserve return contracts from a resolved static graph when an imported operation requires the object runtime. An explicit `--entry-profile` requires a statically compiled graph.
 
-For native code, `--extension-path DIRECTORY` adds an installed [Imre extension wheel](extensions.md) to the compile-time search path. Its typed declarations and compiled archive supply the module.
+Use `--extension-path DIRECTORY` to add an import root to `imre check` or `imre build`. For example, if `build/site` contains `packaging/__init__.py` and `packaging/version.py`, build a caller of `packaging.version` with:
+
+```sh
+imre build main.py --extension-path build/site -o app
+```
+
+The build follows the imported Python modules and links their code into the executable. In this example, the executable can import `packaging.version` after `build/site` is removed. Supply the option again for another root. A filename launch also searches `PYTHONPATH` during Python startup unless `-E` or `-I` disables it. Standalone builds take additional installed roots from their build options. For native modules, install the typed declarations and compiled archive from an [Imre extension wheel](extensions.md) in a declared directory.
 
 An imported Python module may check its identity before other imports, for example
 `if __name__ != "pkg.helper": raise ValueError("unexpected module name")`.

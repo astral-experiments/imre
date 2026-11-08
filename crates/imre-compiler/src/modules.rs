@@ -6239,8 +6239,13 @@ impl<'a> Loader<'a> {
             }
             if portions.is_empty() {
                 self.import_failure = Some(EntryImportFailure::MissingModule);
+                let hint = if name == first {
+                    "\n  help: for an installed dependency, pass --extension-path DIRECTORY where DIRECTORY contains the package or module"
+                } else {
+                    ""
+                };
                 return Err(format!(
-                    "cannot resolve first-party module {name:?} under {}",
+                    "cannot resolve first-party module {name:?} under {}{hint}",
                     self.root.display()
                 ));
             }
