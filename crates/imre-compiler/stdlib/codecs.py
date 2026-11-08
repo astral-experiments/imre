@@ -691,6 +691,26 @@ def open(filename, mode='r', encoding=None, errors='strict', buffering=-1):
         raise
 
 
+def getencoder(encoding):
+
+    """ Lookup up the codec for the given encoding and return
+        its encoder function.
+
+        Raises a LookupError in case the encoding cannot be found.
+
+    """
+    return lookup(encoding).encode
+
+def getdecoder(encoding):
+
+    """ Lookup up the codec for the given encoding and return
+        its decoder function.
+
+        Raises a LookupError in case the encoding cannot be found.
+
+    """
+    return lookup(encoding).decode
+
 def getreader(encoding):
 
     """ Lookup up the codec for the given encoding and return
