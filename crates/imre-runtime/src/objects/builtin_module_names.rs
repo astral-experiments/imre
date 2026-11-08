@@ -4,12 +4,7 @@ use std::cell::OnceCell;
 use super::{Error, Kind, OwnedWord, records::tuples::tuple_from_words, words::WordKind};
 use crate::{Str, StrOwner};
 
-pub(crate) fn is_native_package(name: &str) -> bool {
-    matches!(
-        name,
-        "collections" | "email" | "importlib" | "json" | "re" | "urllib"
-    )
-}
+pub(crate) use imre_ast::providers::is_native_package;
 
 /// Apply the finder's ownership rules before optional providers open a host library.
 pub(crate) fn owns(
@@ -17,14 +12,8 @@ pub(crate) fn owns(
     is_frozen: impl FnOnce() -> bool,
     has_source: impl FnOnce() -> bool,
 ) -> bool {
-    let Some(provider) = imre_ast::providers::provider(name) else {
-        return false;
-    };
-    !imre_ast::providers::is_native_fallback(name)
-        && !is_frozen()
-        && !is_native_package(name)
-        && !has_source()
-        && crate::dynamic::provider_available(provider)
+    imre_ast::providers::builtin_finder_provider(name, is_frozen, has_source)
+        .is_some_and(crate::dynamic::provider_available)
 }
 
 pub(crate) fn names(mut included: impl FnMut(&str) -> bool) -> Result<Vec<&'static str>, Error> {

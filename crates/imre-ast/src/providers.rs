@@ -241,6 +241,25 @@ pub fn provider(name: &str) -> Option<Provider> {
         .then_some(Provider::Builtin)
 }
 
+/// Native packages have a package path and are resolved outside the built-in finder.
+pub fn is_native_package(name: &str) -> bool {
+    matches!(
+        name,
+        "collections" | "email" | "importlib" | "json" | "re" | "urllib"
+    )
+}
+
+/// Identify the built-in provider before probing optional libraries on the execution host.
+pub fn builtin_finder_provider(
+    name: &str,
+    is_frozen: impl FnOnce() -> bool,
+    has_source: impl FnOnce() -> bool,
+) -> Option<Provider> {
+    let provider = provider(name)?;
+    (!is_native_fallback(name) && !is_frozen() && !is_native_package(name) && !has_source())
+        .then_some(provider)
+}
+
 /// Native providers that are searched after the application path.
 pub fn is_native_fallback(name: &str) -> bool {
     matches!(name, "_bz2" | "_zstd" | "inspect")
