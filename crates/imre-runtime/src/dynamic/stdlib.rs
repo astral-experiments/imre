@@ -624,6 +624,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "import_module"
             | "namespace_locations"
             | "get_source_data"
+            | "uses_builtin_compile"
+            | "compile_filename"
             | "compile_file"
             | "get_code"
             | "loader_fields"
@@ -1169,6 +1171,49 @@ pub(super) fn index_c_int(ctx: &mut Context, value: Id) -> Result<i32> {
         .to_i64()
         .and_then(|n| i32::try_from(n).ok())
         .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
+}
+
+/// Convert the real builtin's path and options in argument order. A Python compiler owns its operands.
+pub(super) fn compile_operands(
+    ctx: &mut Context,
+    path: Id,
+    dont_inherit: Option<Id>,
+    optimize: Option<Id>,
+) -> Result<(Id, bool)> {
+    let spelling = posixpath::fspath(ctx, path)?;
+    let filename = match ctx.heap.get(ctx.scalar_value(spelling)) {
+        Value::Str(text) if !text.contains('\0') => spelling,
+        Value::SurrogateStr(points) if !points.contains(&0) => spelling,
+        Value::Bytes(bytes) if !bytes.contains(&0) => {
+            ctx.text_codepoints(Context::import_path_points(bytes)?)
+        }
+        _ => return Err(Error::new("ValueError", "embedded null character")),
+    };
+    let dont_inherit = dont_inherit
+        .map(|value| ctx.truth(value))
+        .transpose()?
+        .unwrap_or(false);
+    if let Some(optimize) = optimize {
+        let level = index_c_int(ctx, optimize)?;
+        if !(-1..=2).contains(&level) {
+            return Err(Error::new(
+                "ValueError",
+                "compile(): invalid optimize value",
+            ));
+        }
+        let level = if level == -1 {
+            ctx.config["optimize"].as_i64().unwrap_or(0)
+        } else {
+            i64::from(level)
+        };
+        if level != 0 {
+            return Err(Error::new(
+                "NotImplementedError",
+                "native source compilation supports optimization level 0",
+            ));
+        }
+    }
+    Ok((filename, dont_inherit))
 }
 
 enum CacheFilename {
@@ -2605,20 +2650,23 @@ pub(super) fn call(
                 let data = ctx.registered_source_data(*loader, *filename);
                 return Ok(data.map_or(NONE, |bytes| ctx.alloc(Value::Bytes(bytes.to_vec()))));
             }
-            ("compile_file", [compiler, data, filename], []) => {
+            ("compile_filename", [path, optimize], []) => {
+                return Ok(compile_operands(ctx, *path, None, Some(*optimize))?.0);
+            }
+            ("uses_builtin_compile", [converter], []) => {
+                return Ok(builtins::boolean(ctx.uses_builtin_compile(*converter)));
+            }
+            ("compile_file", [compiler, data, filename], options) => {
                 if *compiler == ctx.builtin("compile")
                     && let Some(code) = ctx.file_code_from_bytes(*filename, *data)?
                 {
                     return Ok(code);
                 }
                 let mode = ctx.text("exec");
-                return ctx.call(*compiler, vec![*data, *filename, mode], Vec::new());
+                return ctx.call(*compiler, vec![*data, *filename, mode], options.to_vec());
             }
             ("get_code", [loader, path], []) => return ctx.registered_code(*loader, *path, None),
-            ("get_code", [loader, path, name, read, convert, compiler], []) => {
-                if *compiler != ctx.builtin("compile") {
-                    return Ok(NONE);
-                }
+            ("get_code", [loader, path, name, read, convert], []) => {
                 return ctx.registered_code(*loader, *path, Some((*name, *read, *convert)));
             }
             ("path_stats", [path], []) => return os::source_path_stats(ctx, *path),

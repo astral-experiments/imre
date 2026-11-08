@@ -2687,9 +2687,21 @@ pub(super) fn call(
             ctx.make_super(args)
         }
         "compile" => {
-            positional(name, kwargs)?;
             arity(name, args, 3, 3)?;
-            ctx.compile_source(args[0], args[1], args[2], false)
+            let [_, _, _, dont_inherit, optimize] = bind_method_arguments(
+                name,
+                args,
+                kwargs,
+                ["source", "filename", "mode", "dont_inherit", "optimize"],
+                3,
+            )?;
+            let (filename, dont_inherit) =
+                super::stdlib::compile_operands(ctx, args[1], dont_inherit, optimize)?;
+            if dont_inherit {
+                ctx.compile_source_with_flags(args[0], filename, args[2], false, 0)
+            } else {
+                ctx.compile_source(args[0], filename, args[2], false)
+            }
         }
         "eval" | "exec" => ctx.call_eval_exec(ctx.heap.current_scope(), name, args, kwargs),
         "bin" | "hex" | "oct" => {

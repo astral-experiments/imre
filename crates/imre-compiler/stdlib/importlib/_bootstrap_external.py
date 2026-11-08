@@ -6,14 +6,16 @@ import marshal
 import sys
 
 from _imre_importlib import (
+    builtin_compile as _builtin_compile,
     cache_name as _cache_name,
     compile_file as _compile_file,
+    compile_filename as _compile_filename,
     get_code as _registered_code,
     get_source_data as _registered_source_data,
-    index as _index,
     loader_fields as _loader_fields,
     path_stats as _path_stats,
     source_name as _source_name,
+    uses_builtin_compile as _uses_builtin_compile,
     warn_debug_override as _warn_debug_override,
     warn_loader_deprecation as _warn_loader_deprecation,
     warn_import as _warn_import,
@@ -189,38 +191,17 @@ class FileLoader:
         return FileReader(self)
 
 
-def _registered_file_code(loader, path, fullname):
-    try:
-        compiler = compile
-    except NameError:
-        # The reader or converter may install the compiler before it is needed.
-        return None
-    return _registered_code(loader, path, fullname, _file_data, _source_compiler, compiler)
-
-
-def _compile_source(data, path, _optimize, registration=None, *, compiler=None):
-    filename = _fspath(path)
-    if isinstance(filename, bytes):
-        filename = filename.decode(sys.getfilesystemencoding(), sys.getfilesystemencodeerrors())
-    if "\0" in filename:
-        raise ValueError("embedded null character")
-    level = _index(_optimize)
-    if level < -2147483648 or level > 2147483647:
-        raise OverflowError("Python int too large to convert to C int")
-    if level < -1 or level > 2:
-        raise ValueError("compile(): invalid optimize value")
-    if level == -1:
-        level = sys.flags.optimize
-    if level:
-        raise NotImplementedError("native source compilation supports optimization level 0")
+def _compile_source(compiler, data, path, _optimize, registration=None):
+    if compiler is not _builtin_compile:
+        return compiler(data, path, "exec", dont_inherit=True, optimize=_optimize)
+    filename = _compile_filename(path, _optimize)
     if registration is not None:
         loader, fullname, read_name = registration
         if type(read_name) is str and type(filename) is str and read_name == filename:
-            code = _registered_file_code(loader, filename, fullname)
+            code = _registered_code(loader, filename, fullname, _file_data, _source_compiler)
             if code is not None:
                 return code
-        compiler = compile
-    return _compile_file(compiler, data, filename)
+    return _compile_file(compiler, data, filename, dont_inherit=True)
 
 
 def _is_bound(method, instance, function):
@@ -237,7 +218,7 @@ class SourceLoader(_LoaderBasics):
         return decode_source(data)
 
     def source_to_code(self, data, path, *, _optimize=-1):
-        return _compile_source(data, path, _optimize, compiler=compile)
+        return _compile_source(compile, data, path, _optimize)
 
     def get_code(self, fullname):
         path = self.get_filename(fullname)
@@ -249,13 +230,13 @@ class SourceLoader(_LoaderBasics):
                 read_name = str(path)
                 data = _read_source_file(self, read_name)
                 convert = self.source_to_code
-                if _is_bound(convert, self, _source_compiler):
-                    return _compile_source(data, path, -1, (self, fullname, read_name))
+                if _is_bound(convert, self, _source_compiler) and _uses_builtin_compile(_source_compiler):
+                    return _compile_source(_builtin_compile, data, path, -1, (self, fullname, read_name))
                 return convert(data, path)
             data = read(path)
             return self.source_to_code(data, path)
-        if issubclass(type(self), SourceFileLoader):
-            code = _registered_file_code(self, path, fullname)
+        if issubclass(type(self), SourceFileLoader) and _uses_builtin_compile(_source_compiler):
+            code = _registered_code(self, path, fullname, _file_data, _source_compiler)
             if code is not None:
                 return code
         data = self.get_data(path)
