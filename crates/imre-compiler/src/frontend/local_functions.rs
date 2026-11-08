@@ -696,8 +696,7 @@ impl Checker<'_> {
         for (parameter, ty) in closed_calls::parameters(&definition.parameters)
             .zip(signature.params.iter().map(|p| p.ty))
         {
-            let slot = helper.declare(parameter.name().as_str(), ty, parameter)?;
-            helper.assigned.insert(slot);
+            let slot = helper.bind_parameter(parameter, ty)?;
             params.push(slot);
         }
 

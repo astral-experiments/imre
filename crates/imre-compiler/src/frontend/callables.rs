@@ -428,8 +428,7 @@ impl Checker<'_> {
             .filter(|name| !bound.contains(name));
         let mut params = Vec::new();
         for (parameter, &ty) in names.iter().zip(&parameters) {
-            let slot = helper.declare(parameter.name().as_str(), ty, *parameter)?;
-            helper.assigned.insert(slot);
+            let slot = helper.bind_parameter(&parameter.parameter, ty)?;
             params.push(slot);
         }
         let mut args = Vec::with_capacity(captures.len());
@@ -444,7 +443,7 @@ impl Checker<'_> {
             }
             // A later pull may see a different optional or union arm.
             let value = self.local(source);
-            let slot = helper.declare(&name, value.ty, lambda)?;
+            let slot = helper.declare_binding(&name, value.ty, lambda, true)?;
             helper.assigned.insert(slot);
             params.push(slot);
             args.push(value);

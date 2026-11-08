@@ -1334,15 +1334,11 @@ fn lower_body(
     for (parameter, signature) in
         closed_calls::parameters(&definition.parameters).zip(&signature.params)
     {
-        let slot = checker.declare(parameter.name().as_str(), signature.ty, parameter)?;
-        checker.assigned.insert(slot);
-        params.push(slot);
+        params.push(checker.bind_parameter(parameter, signature.ty)?);
     }
     if let Some(keyword) = &definition.parameters.kwarg {
         let parameter = signature.params.last().expect("keyword-rest signature");
-        let slot = checker.declare(keyword.name.as_str(), parameter.ty, &**keyword)?;
-        checker.assigned.insert(slot);
-        params.push(slot);
+        params.push(checker.bind_parameter(keyword, parameter.ty)?);
     }
     checker.consuming_lists = consuming_lists::find(&definition.body, |func| {
         checker.unshadowed_builtin(func, "sorted")
@@ -2624,19 +2620,39 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn parameter_shadows_binding(&self, name: &str, ty: Type) -> bool {
+    fn parameter_shadows_binding(&self, name: &str, ty: Type, bound: bool) -> bool {
         self.mapping_class_import(name)
-            || matches!(ty, Type::Callable(_))
-                && matches!(self.graph.modules[self.module].bindings.get(name),
-                    Some(Binding::Definition(definition)) if self.functions.contains_key(definition))
+            || match self.graph.modules[self.module].bindings.get(name) {
+                Some(Binding::Value(_)) => bound && !self.module_scope,
+                Some(Binding::Definition(id)) => {
+                    matches!(ty, Type::Callable(_)) && self.functions.contains_key(id)
+                }
+                _ => false,
+            }
+    }
+
+    fn bind_parameter(&mut self, parameter: &ast::Parameter, ty: Type) -> Result<usize, String> {
+        let slot = self.declare_binding(parameter.name().as_str(), ty, parameter, true)?;
+        self.assigned.insert(slot);
+        Ok(slot)
     }
 
     /// Reuses a slot only at its original type and prevents rebinding fixed call targets.
     fn declare(&mut self, name: &str, ty: Type, node: &impl Ranged) -> Result<usize, String> {
+        self.declare_binding(name, ty, node, self.names.contains_key(name))
+    }
+
+    fn declare_binding(
+        &mut self,
+        name: &str,
+        ty: Type,
+        node: &impl Ranged,
+        bound: bool,
+    ) -> Result<usize, String> {
         if (name != "__doc__" && reserved(name))
             || (self.graph.modules[self.module].bindings.contains_key(name)
                 && (self.module_scope
-                    || !self.parameter_shadows_binding(name, ty)
+                    || !self.parameter_shadows_binding(name, ty, bound)
                     || (self.block_depth != 0 && !self.names.contains_key(name))))
             || self.local_functions.contains_key(name)
             || self.local_classes.contains_key(name)
