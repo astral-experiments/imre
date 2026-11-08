@@ -1187,19 +1187,8 @@ impl Function<'_, '_> {
     }
 
     fn check_annotation_format(&mut self) {
-        // CPython's compiled annotation callable accepts VALUE and VALUE_WITH_FAKE_GLOBALS.
         let format = self.lookup("format");
-        let two = self.integer(2);
-        let unsupported = self.op(">", &[&format, &two]);
-        let bad = self.name("b");
-        let good = self.name("b");
-        let condition = self.truth(&unsupported);
-        self.branch(&condition, &bad, &good);
-        self.label(&bad);
-        let name = self.code_name("NotImplementedError");
-        let error = self.op("builtin", &[&name]);
-        self.raise(&error, None, false);
-        self.label(&good);
+        self.op("annotation_format", &[&format]);
     }
 
     /// Publish a module's provider before its first statement. Every simple
