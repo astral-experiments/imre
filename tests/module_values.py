@@ -140,11 +140,8 @@ def main() -> None:
             expected_dir.mkdir(parents=True)
             expected = reference(args.python, source, expected_dir, error)
             expected_files = snapshot(expected_dir)
-            modes = [(level, ()) for level in args.opt_levels]
-            if case.name == "distribution_version":
-                modes.extend((level, ("--runtime-imports",)) for level in args.opt_levels)
-            for level, import_flags in modes:
-                actual_dir = temporary / case.name / (f"O{level}-boxed" if import_flags else f"O{level}")
+            for level in args.opt_levels:
+                actual_dir = temporary / case.name / f"O{level}"
                 actual_dir.mkdir()
                 binary = actual_dir / "program"
                 require_success(
@@ -163,7 +160,6 @@ def main() -> None:
                             level,
                             "-o",
                             str(binary),
-                            *import_flags,
                             *flags,
                         ],
                         temporary,

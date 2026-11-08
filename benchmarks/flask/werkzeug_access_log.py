@@ -44,11 +44,14 @@ def main():
         reference = capture([sys.executable, "-ESB", entry], site, env)
         if reference != EXPECTED:
             raise RuntimeError(f"unexpected CPython reference {reference!r}")
+        # Import the unchanged fixture through a build-known module entry.
+        native_entry = site / "run_access_log.py"
+        native_entry.write_text('import importlib\nimportlib.import_module("access_log")\n')
         for opt in (0, 3):
             binary = work / f"access-O{opt}"
             llvm = binary.with_suffix(".ll")
             build = capture(
-                [compiler, "build", entry, "--runtime-imports", "--module-root", site,
+                [compiler, "build", native_entry, "--module-root", site,
                  "--runtime", runtime, "--opt-level", str(opt), "--no-cache",
                  "--emit-llvm", llvm, "-o", binary],
                 site, env,

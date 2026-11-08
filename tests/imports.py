@@ -459,7 +459,7 @@ REJECTED = {
             "import logging, weakref\nhandler = logging.NullHandler()\n"
             "logging.shutdown(handlerList=[weakref.ref(handler)])\n"
         ),
-    }, "logging.shutdown arguments require --runtime-imports"),
+    }, "native lowering of logging.shutdown supports only the no-argument form"),
     "saved_deque_repr_keeps_checked_calls": ({
         "main.py": (
             "from collections import deque\ndef identity(n: int) -> int:\n    return n\n"
@@ -2017,7 +2017,7 @@ def main() -> None:
             baseline = run([args.python, "-E", "-m", "main"], case)
             require_success(baseline)
             if name in {"codeop_module", "codeop_named_helper"}:
-                # Run these checked modules with the late-import executable below.
+                # Run these modules through the registered imports below.
                 require_success(run([compiler, "check", str(case / "main.py")], temporary))
                 checks += 1
                 continue
@@ -2053,30 +2053,32 @@ def main() -> None:
                 checks += 1
 
         (temporary / "members.gz").write_bytes(gzip.compress(b"first", mtime=0) + gzip.compress(b"second", mtime=0))
-        late_import = temporary / "late_import.py"
-        late_import.write_text("import importlib, sys\nimportlib.import_module(sys.argv[1]).run()\n")
         for level in args.opt_levels:
-            executable = temporary / f"late-import-{level}"
-            command = [compiler, "build", str(late_import), "-o", str(executable),
-                       "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
-                       *build_flags, "--runtime-imports", "--no-cache"]
-            if args.sanitize:
-                command.append("--sanitize")
-            require_success(run(command, temporary, timeout=build_timeout))
-            # Load the probe from disk so the executable cannot resolve its imports at build time.
-            probe = temporary / f"late_import_probe_{level}.py"
-            probe.write_text(
-                "import builtins, sys\n"
+            project = temporary / f"provider-imports-O{level}"
+            project.mkdir()
+            for name in ("codeop_module", "codeop_named_helper"):
+                (project / f"{name}.py").write_bytes((temporary / name / "main.py").read_bytes())
+            (project / "helper.py").write_bytes((temporary / "codeop_named_helper" / "helper.py").read_bytes())
+            interactive = "boxed_interactive_interpreter"
+            (project / f"{interactive}.py").write_bytes((FIXTURES.parent / f"{interactive}.py").read_bytes())
+            entry = project / "main.py"
+            # Select a known provider at execution time. All Python sources exist before the build.
+            providers = ("opcode", "_opcode_metadata", "code", "codeop", "codeop_module",
+                         "codeop_named_helper", interactive, "gzip")
+            entry.write_text(
+                "import importlib, sys\n"
                 "def run():\n"
-                "    sys.path.insert(0, sys.argv[4])\n"
-                "    module = builtins.__import__(sys.argv[2])\n"
-                "    if sys.argv[3] == 'flags':\n"
+                + "".join(f"    {'if' if i == 0 else 'elif'} sys.argv[1] == {name!r}:\n"
+                          f"        module = importlib.import_module({name!r})\n"
+                          for i, name in enumerate(providers))
+                + "    else:\n        importlib.import_module('no_such_console_guard_module')\n"
+                "    if sys.argv[2] == 'flags':\n"
                 "        print(module.CommandCompiler().compiler.flags)\n"
-                "    elif sys.argv[3] == 'lookup':\n"
+                "    elif sys.argv[2] == 'lookup':\n"
                 "        print(module.opmap['POP_TOP'])\n"
-                "    elif sys.argv[3] == 'current':\n"
+                "    elif sys.argv[2] == 'current':\n"
                 "        module.current()\n"
-                "    elif sys.argv[3] == 'write':\n"
+                "    elif sys.argv[2] == 'write':\n"
                 "        import zlib\n"
                 "        member = module.compress(memoryview(b'payload'), compresslevel=1, mtime=42)\n"
                 "        assert member[4:10] == bytes((42, 0, 0, 0, 4, 255))\n"
@@ -2085,7 +2087,7 @@ def main() -> None:
                 "            print(stream.write(b'payload'))\n"
                 "            assert stream.seekable() and stream.tell() == 7\n"
                 "            stream.flush()\n"
-                "    elif sys.argv[3] == 'read':\n"
+                "    elif sys.argv[2] == 'read':\n"
                 "        with module.open('members.gz', 'rb') as stream:\n"
                 "            print(stream.read1(65536), stream.read(1), stream.tell(), stream.read())\n"
                 "        print(stream.closed)\n"
@@ -2129,17 +2131,28 @@ def main() -> None:
                 "                pass\n"
                 "            else:\n"
                 "                raise AssertionError('unrepresentable line size accepted')\n"
+                "\nrun()\n"
             )
-            for module, operation, path, expected in [
-                ("opcode", "lookup", temporary, "31\n"), ("_opcode_metadata", "lookup", temporary, "31\n"),
-                ("code", "flags", temporary, "16896\n"), ("codeop", "flags", temporary, "16896\n"),
-                ("main", "import", temporary / "codeop_module", ""),
-                ("main", "import", temporary / "codeop_named_helper", "16896\n"),
-                ("boxed_interactive_interpreter", "current", FIXTURES.parent, ""),
-                ("gzip", "write", temporary, "7\n"),
-                ("gzip", "read", temporary, "b'first' b's' 6 b'econd'\nTrue\nb'' b'fir' b'stsecond' b''\n"),
+            executable = temporary / f"provider-imports-{level}"
+            command = [compiler, "build", str(entry), "-o", str(executable),
+                       "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
+                       *build_flags, "--no-cache"]
+            if args.sanitize:
+                command.append("--sanitize")
+            require_success(run(command, temporary, timeout=build_timeout))
+            # The saved image must initialize the three application modules from its registrations.
+            for source in project.glob("*.py"):
+                source.unlink()
+            for module, operation, expected in [
+                ("opcode", "lookup", "31\n"), ("_opcode_metadata", "lookup", "31\n"),
+                ("code", "flags", "16896\n"), ("codeop", "flags", "16896\n"),
+                ("codeop_module", "import", ""),
+                ("codeop_named_helper", "import", "16896\n"),
+                (interactive, "current", ""),
+                ("gzip", "write", "7\n"),
+                ("gzip", "read", "b'first' b's' 6 b'econd'\nTrue\nb'' b'fir' b'stsecond' b''\n"),
             ]:
-                result = run([str(executable), probe.stem, module, operation, str(path)], temporary)
+                result = run([str(executable), module, operation], temporary)
                 require_success(result)
                 assert result.stdout == expected, (module, level, result.stdout)
                 checks += 1
@@ -2147,23 +2160,22 @@ def main() -> None:
             assert gzip.decompress((temporary / "written.gz").read_bytes()) == b"payload"
 
             absent = "no_such_console_guard_module"
-            result = run([str(executable), probe.stem, absent, "flags", str(temporary)], temporary)
+            result = run([str(executable), absent, "flags"], temporary)
             assert result.returncode == 1 and f"ModuleNotFoundError: No module named '{absent}'" in result.stderr, result
             checks += 1
 
         # These are build capabilities: CPython's flags depend on its build; Imre emits native code.
         for level in args.opt_levels:
-            for fixture, route, output in [
-                ("opcode_flags", [], "0\n0\nno bytecode specialization\n"),
-                ("opcode_stack_effect", [], "-1\n"),
-                ("opcode_module", [], "opcode module OK\n"),
-                ("opcode_operations", [], "opcode operations OK\n"),
-                ("opcode_operations", ["--runtime-imports"], "opcode operations OK\n"),
+            for fixture, output in [
+                ("opcode_flags", "0\n0\nno bytecode specialization\n"),
+                ("opcode_stack_effect", "-1\n"),
+                ("opcode_module", "opcode module OK\n"),
+                ("opcode_operations", "opcode operations OK\n"),
             ]:
                 executable = temporary / f"{fixture}-{level}"
                 command = [compiler, "build", str(root / f"{fixture}.py"), "-o", str(executable),
                            "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
-                           *build_flags, *route]
+                           *build_flags]
                 if args.sanitize:
                     command.append("--sanitize")
                 require_success(run(command, temporary))
@@ -2267,7 +2279,10 @@ def main() -> None:
             for flags in ([], ["--reachable-only"]):
                 result = run(command + flags, temporary)
                 assert result.returncode == 1 and diagnostic in result.stderr, (name, result)
-            require_success(run(command + ["--runtime-imports"], temporary))
+            # A consistent return type still admits the imported AST operation.
+            corrected = function.replace("return flag\n", "return int(flag)\n").replace("return 'one'\n", "return 0\n")
+            (case / "helper.py").write_text("import ast\ntree = ast.parse('1')\n" + corrected + "choose(True)\n")
+            require_success(run(command, temporary))
             checks += 3
 
         caller = "def gzip_caller() -> bytes: return compress(b'payload')\n"

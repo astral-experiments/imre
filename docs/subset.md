@@ -484,7 +484,7 @@ A true optional local is narrowed to its payload. A false optional number or con
 
 A module can declare an immutable tuple class with `collections.namedtuple("Name", fields)`. Supply a literal field-name string, list, or tuple. Constructors accept positional and named fields and starred fixed tuples; field reads, indexing, unpacking, `_fields`, `__match_args__`, tuple equality for compatible immutable layouts, and named `repr` preserve tuple behavior. An annotated parameter or return must infer the corresponding class and a single concrete field layout. Typed lowering accepts this declaration without factory options. When it needs a concrete layout, it must diagnose an unresolved field list such as `Row = namedtuple("Row", sys.argv[1:])` at build time. Subclasses and generated methods such as `_replace` use boxed objects.
 
-In boxed code, the factory installs a Python function with the validated field names and defaults as its signature. Its precompiled body calls the tuple allocator with the bound values. This supports `rename`, keyword arguments and the named tuples created when `inspect` initializes. A legacy `--runtime-imports` caller can also supply field names at execution time and bind them through the same constructor.
+In boxed code, the factory installs a Python function with the validated field names and defaults as its signature. Its precompiled body calls the tuple allocator with the bound values. This supports `rename`, keyword arguments and the named tuples created when `inspect` initializes.
 
 A loop can search a fixed tuple of up to eight differently typed fields. The tuple evaluates once before the first test. Imre checks the fresh loop variable at the corresponding field type each time.
 
@@ -596,7 +596,7 @@ String loops, comprehensions, and loop-head `enumerate` capture the original imm
 
 ## First-party module graphs
 
-For a script that imports source packages, `--runtime-imports` lets `imre build`, `run`, or `check` try the native object runtime when static compilation fails. The entry stays `__main__`; the executable evaluates imports using its startup search paths and the compiled Python module bodies. A missing runtime module raises `ModuleNotFoundError` when its import executes. Ordinary and reachable file builds preserve return contracts from a resolved static graph when an imported operation requires the object runtime. Explicit runtime imports and Python command invocations can raise `TypeError` when a function violates a supported annotation. An explicit `--entry-profile` requires a statically compiled graph.
+A file entry runs as `__main__`. When its object code imports a missing runtime module, the import raises `ModuleNotFoundError`. Ordinary and reachable file builds preserve return contracts from a resolved static graph when an imported operation requires the object runtime. An explicit `--entry-profile` requires a statically compiled graph.
 
 For native code, `--extension-path DIRECTORY` adds an installed [Imre extension wheel](extensions.md) to the compile-time search path. Its typed declarations and compiled archive supply the module.
 
@@ -895,7 +895,7 @@ An unshadowed builtin class such as `object` or `int` can be a `store_const` val
 
 `logging.basicConfig` accepts `level`, `format`, `datefmt`, and `force`. A configured handler keeps its settings unless forced. Both configuration and `setLevel` resolve string levels in the native registry. `addLevelName` updates the integer label and the reverse name lookup; `getLevelNamesMapping()` returns a fresh dictionary. `getLevelName(number)` returns a string. For a string argument, use `isinstance(result, int)` to distinguish a registered name from the fallback text. The percent-style format accepts `name`, `levelname`, `levelno`, `message`, and local-time `asctime`. Custom handlers and filters are outside this surface.
 
-A direct `logging.shutdown()` call uses the object runtime’s weak handler registry. It visits live handlers in reverse registration order and respects each handler’s `flushOnClose` setting. Supplying a handler list requires a program that already uses runtime imports, such as one built with `--runtime-imports`.
+A direct `logging.shutdown()` call uses the object runtime’s weak handler registry. It visits live handlers in reverse registration order and respects each handler’s `flushOnClose` setting. Native lowering supports the no-argument form.
 
 ## Synchronous subprocesses
 

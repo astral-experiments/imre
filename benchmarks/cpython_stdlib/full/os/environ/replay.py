@@ -139,7 +139,7 @@ def main():
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("--cpython-source", required=True, type=Path)
     cli.add_argument("--python", required=True, type=Path, help="pinned CPython 3.14.5 executable")
-    cli.add_argument("--engine", required=True, choices=("stock", "ordinary", "boxed"))
+    cli.add_argument("--engine", required=True, choices=("stock", "ordinary"))
     cli.add_argument("--layout", choices=("full", "retained-class"), default="full")
     cli.add_argument("--level", choices=("0", "3"))
     cli.add_argument("--imre", type=Path)
@@ -190,8 +190,6 @@ def main():
         results["toolchain_sha256"] = {str(p): sha256(p) for p in (launcher, archive, clang)}
         flags = ["--no-cache", "--runtime", str(archive), "--clang", str(clang), "--opt-level", args.level]
         binary = work / "environ-tests"
-        if args.engine == "boxed":
-            flags.append("--runtime-imports")
         command = [launcher, "build", entry, "--module-root", root, *flags, "-o", binary]
         buildenv = dict(os.environ)
         for key in ("PYTHONPATH", "IMREFLAGS", "IMRE_ENCODED_FLAGS"):
