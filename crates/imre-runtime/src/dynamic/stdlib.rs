@@ -2615,7 +2615,10 @@ pub(super) fn call(
                 return ctx.call(*compiler, vec![*data, *filename, mode], Vec::new());
             }
             ("get_code", [loader, path], []) => return ctx.registered_code(*loader, *path, None),
-            ("get_code", [loader, path, name, read, convert], []) => {
+            ("get_code", [loader, path, name, read, convert, compiler], []) => {
+                if *compiler != ctx.builtin("compile") {
+                    return Ok(NONE);
+                }
                 return ctx.registered_code(*loader, *path, Some((*name, *read, *convert)));
             }
             ("path_stats", [path], []) => return os::source_path_stats(ctx, *path),

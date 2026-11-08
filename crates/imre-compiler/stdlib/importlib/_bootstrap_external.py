@@ -7,6 +7,7 @@ import sys
 
 from _imre_importlib import (
     cache_name as _cache_name,
+    compile_file as _compile_file,
     get_code as _registered_code,
     get_source_data as _registered_source_data,
     index as _index,
@@ -188,7 +189,16 @@ class FileLoader:
         return FileReader(self)
 
 
-def _compile_source(data, path, _optimize, registration=None):
+def _registered_file_code(loader, path, fullname):
+    try:
+        compiler = compile
+    except NameError:
+        # The reader or converter may install the compiler before it is needed.
+        return None
+    return _registered_code(loader, path, fullname, _file_data, _source_compiler, compiler)
+
+
+def _compile_source(data, path, _optimize, registration=None, *, compiler=None):
     filename = _fspath(path)
     if isinstance(filename, bytes):
         filename = filename.decode(sys.getfilesystemencoding(), sys.getfilesystemencodeerrors())
@@ -206,10 +216,11 @@ def _compile_source(data, path, _optimize, registration=None):
     if registration is not None:
         loader, fullname, read_name = registration
         if type(read_name) is str and type(filename) is str and read_name == filename:
-            code = _registered_code(loader, filename, fullname, _file_data, _source_compiler)
+            code = _registered_file_code(loader, filename, fullname)
             if code is not None:
                 return code
-    return compile(data, filename, "exec")
+        compiler = compile
+    return _compile_file(compiler, data, filename)
 
 
 def _is_bound(method, instance, function):
@@ -226,7 +237,7 @@ class SourceLoader(_LoaderBasics):
         return decode_source(data)
 
     def source_to_code(self, data, path, *, _optimize=-1):
-        return _compile_source(data, path, _optimize)
+        return _compile_source(data, path, _optimize, compiler=compile)
 
     def get_code(self, fullname):
         path = self.get_filename(fullname)
@@ -244,7 +255,7 @@ class SourceLoader(_LoaderBasics):
             data = read(path)
             return self.source_to_code(data, path)
         if issubclass(type(self), SourceFileLoader):
-            code = _registered_code(self, path, fullname, _file_data, _source_compiler)
+            code = _registered_file_code(self, path, fullname)
             if code is not None:
                 return code
         data = self.get_data(path)
