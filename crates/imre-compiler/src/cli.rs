@@ -265,7 +265,14 @@ impl BuildOptions {
                 Some("-o") if command == "build" => self.output = Some(value()?.into()),
                 Some("--runtime") => self.runtime = Some(value()?.into()),
                 Some("--emit-llvm") => self.llvm_path = Some(value()?.into()),
-                Some("--clang") => self.clang = Some(value()?),
+                Some("--clang") => {
+                    let driver = value()?;
+                    self.clang = if driver.is_empty() {
+                        Self::initial().clang
+                    } else {
+                        Some(driver)
+                    };
+                }
                 Some("--lto-linker") => self.lto_linker = Some(value()?.into()),
                 Some("--target") => self.target = Some(value()?),
                 Some("--allocator") => {

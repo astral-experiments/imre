@@ -1059,8 +1059,7 @@ def main() -> None:
                         str(project),
                         "-o",
                         str(binary),
-                        "--emit-llvm",
-                        str(llvm),
+                        *(["--emit-llvm", str(llvm)] if name == "text_roundtrip" else []),
                         "--opt-level",
                         level,
                         *flags,
@@ -1092,6 +1091,7 @@ def main() -> None:
                     level,
                     "file bytes differ",
                 )
+                binary.unlink()
                 passed += 1
 
         # CPython surrogateescapes invalid Unix argv bytes; the native string domain
