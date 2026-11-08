@@ -2184,6 +2184,24 @@ impl Context {
                         ));
                     }
                     match ctx.heap.get(storage) {
+                        Value::Class { name, scope, .. } if ctx.has_base(storage, "enum.Enum") => {
+                            let prefix = if ctx.has_base(storage, "enum.Flag") {
+                                "<flag "
+                            } else {
+                                "<enum "
+                            };
+                            append_rendered_text(&mut output, prefix)?;
+                            push_frame(&mut work, Part::Text(">"))?;
+                            if let Some(name) = ctx.assigned_class_name(*scope) {
+                                push_frame(&mut work, Part::Value(name, true))?;
+                            } else {
+                                append_rendered_text(
+                                    &mut output,
+                                    &crate::objects::exceptions::string_repr(name),
+                                )?;
+                            }
+                            continue;
+                        }
                         Value::Struct { .. } => {
                             append_rendered_text(&mut output, &stdlib::structure::repr(&ctx, id)?)?;
                             continue;

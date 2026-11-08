@@ -184,6 +184,22 @@ def global_enum(cls, update_str=False):
     return cls
 
 
+def unique(enumeration):
+    """
+    Class decorator for enumerations ensuring unique member values.
+    """
+    duplicates = []
+    for name, member in enumeration.__members__.items():
+        if name != member.name:
+            duplicates.append((name, member.name))
+    if duplicates:
+        alias_details = ', '.join(
+                ["%s -> %s" % (alias, name) for (alias, name) in duplicates])
+        raise ValueError('duplicate values found in %r: %s' %
+                (enumeration, alias_details))
+    return enumeration
+
+
 _not_given = object()
 
 
