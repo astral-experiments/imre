@@ -3235,16 +3235,7 @@ impl Program {
                     let handler = self.instructions.len();
                     let before_handlers = self.deferred_annotations.len();
                     let mut handled = Vec::new();
-                    let count = s.handlers.len();
-                    for (i, ast::ExceptHandler::ExceptHandler(h)) in
-                        s.handlers.into_iter().enumerate()
-                    {
-                        if h.type_.is_none() && i + 1 < count {
-                            return Err(Error::new(
-                                "SyntaxError",
-                                "default 'except:' must be last",
-                            ));
-                        }
+                    for ast::ExceptHandler::ExceptHandler(h) in s.handlers {
                         let handler_line =
                             lines.partition_point(|n| *n <= h.start().to_usize()) as u32;
                         let check = h.type_.map(|class| {
