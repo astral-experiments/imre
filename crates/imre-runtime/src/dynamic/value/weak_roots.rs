@@ -468,22 +468,31 @@ impl Heap {
         !self.finalizer_roots.nodes.is_empty()
     }
 
-    /// Check published operands in the caller frames and the surviving prefix of the active frame.
+    /// Check the previously observed operand against the current frame and the edges it holds now.
+    fn cached_operand_keeps_finalizer(&self, owner: Id, retained_current: usize) -> bool {
+        let cached = &self.finalizer_operands[owner as usize % self.finalizer_operands.len()];
+        let Some((last_owner, frame, operand)) = cached.get() else {
+            return false;
+        };
+        last_owner == owner
+            && (frame + 1 < self.frames.len() || operand < retained_current)
+            && self
+                .frames
+                .get(frame)
+                .and_then(|f| f.live.get(operand))
+                .is_some_and(|&root| self.short_path_keeps_owner(root, owner))
+    }
+
     fn operand_keeps_finalizer(&self, owner: Id, retained_current: usize) -> bool {
+        self.cached_operand_keeps_finalizer(owner, retained_current)
+            || self.find_finalizer_operand(owner, retained_current)
+    }
+
+    /// Search published caller operands and the surviving prefix of the active frame.
+    fn find_finalizer_operand(&self, owner: Id, retained_current: usize) -> bool {
         let Some(active) = self.frames.len().checked_sub(1) else {
             return false;
         };
-        // The operand and its children can change between releases.
-        let cached = &self.finalizer_operands[owner as usize % self.finalizer_operands.len()];
-        if let Some((last_owner, frame, operand)) = cached.get()
-            && last_owner == owner
-            && (frame < active || operand < retained_current)
-            && let Some(&root) = self.frames.get(frame).and_then(|f| f.live.get(operand))
-            && self.short_path_keeps_owner(root, owner)
-        {
-            return true;
-        }
-
         const MAX_CALLER_OPERANDS: usize = 192;
         let active_limit = self.frames[active].live.len().min(retained_current).min(8);
         let mut operands = self
@@ -511,7 +520,8 @@ impl Heap {
             })
             .or_else(|| operands.find(|&(_, _, root)| self.short_path_keeps_owner(root, owner)));
         if let Some((frame, slot, _)) = found {
-            cached.set(Some((owner, frame, slot)));
+            self.finalizer_operands[owner as usize % self.finalizer_operands.len()]
+                .set(Some((owner, frame, slot)));
             return true;
         }
         false
@@ -547,8 +557,9 @@ impl Heap {
     ) -> bool {
         (paths_valid && self.finalizer_roots.contains(owner))
             || streams.is_some_and(|roots| roots.contains(&owner))
-            || self.operand_keeps_finalizer(owner, retained_current)
+            || self.cached_operand_keeps_finalizer(owner, retained_current)
             || self.bound_in_active_frame(owner)
+            || self.find_finalizer_operand(owner, retained_current)
     }
 
     /// A pending discard preserves the active frame's operands below its mark. It must also
