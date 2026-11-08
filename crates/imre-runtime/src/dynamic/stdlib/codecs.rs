@@ -562,11 +562,13 @@ fn box_native_entry(ctx: &mut Context, key: String, codec: Codec, spelling: Id) 
     };
     let module = ctx.module(&format!("encodings.{suffix}"))?;
     let id = match codec {
-        Codec::Ascii | Codec::Latin1 | Codec::DoubleByte(DoubleByte::Big5) => {
+        Codec::CodePage(_) | Codec::DoubleByte(DoubleByte::ShiftJis) => {
+            native_codec_info(ctx, codec, module)?
+        }
+        _ => {
             let getregentry = ctx.lookup_attr(module, "getregentry")?;
             ctx.call(getregentry, Vec::new(), Vec::new())?
         }
-        _ => native_codec_info(ctx, codec, module)?,
     };
     ctx.codec_entries
         .entries
@@ -585,23 +587,12 @@ fn native_codec_info(ctx: &mut Context, codec: Codec, module: Id) -> Result<Id> 
     ctx.heap.keep(class);
     let writer = ctx.lookup_attr(module, "StreamWriter")?;
     ctx.heap.keep(writer);
-    let (encode, decode) = match codec {
-        Codec::CodePage(_) | Codec::DoubleByte(_) => {
-            // getregentry creates fresh bound Codec methods for each alias entry.
-            let class = ctx.lookup_attr(module, "Codec")?;
-            let encoder = ctx.call(class, Vec::new(), Vec::new())?;
-            let decoder = ctx.call(class, Vec::new(), Vec::new())?;
-            (
-                ctx.lookup_attr(encoder, "encode")?,
-                ctx.lookup_attr(decoder, "decode")?,
-            )
-        }
-        Codec::Utf8 { signature: true } => {
-            let (_, decode) = native_functions(ctx, codec)?;
-            (ctx.lookup_attr(module, "encode")?, decode)
-        }
-        _ => native_functions(ctx, codec)?,
-    };
+    // Each alias entry exposes fresh bound Codec methods for these providers.
+    let codec_class = ctx.lookup_attr(module, "Codec")?;
+    let encoder = ctx.call(codec_class, Vec::new(), Vec::new())?;
+    let decoder = ctx.call(codec_class, Vec::new(), Vec::new())?;
+    let encode = ctx.lookup_attr(encoder, "encode")?;
+    let decode = ctx.lookup_attr(decoder, "decode")?;
     ctx.heap.keep(encode);
     ctx.heap.keep(decode);
     // getregentry resolves the factories as globals in the encoding module.
@@ -611,7 +602,7 @@ fn native_codec_info(ctx: &mut Context, codec: Codec, module: Id) -> Result<Id> 
     };
     let encoder = factory(ctx, "IncrementalEncoder")?;
     ctx.heap.keep(encoder);
-    let reader = if matches!(codec, Codec::CodePage(_) | Codec::Utf8 { .. }) {
+    let reader = if matches!(codec, Codec::CodePage(_)) {
         factory(ctx, "StreamReader")?
     } else {
         NONE
