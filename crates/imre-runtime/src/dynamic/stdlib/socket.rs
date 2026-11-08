@@ -1235,8 +1235,8 @@ fn setsockopt(
         native::set_option(native::fd(socket), level, name, SocketOption::Integer(flag))?;
     } else {
         let (level, name) = option(ctx)?;
-        ctx.with_read_buffer(value, |ctx, view| {
-            let bytes = ctx.native_buffer_bytes(view)?;
+        ctx.with_read_buffer(value, |ctx, buffer| {
+            let bytes = buffer.bytes(ctx)?;
             Ok(native::set_option(
                 native::fd(socket),
                 level,

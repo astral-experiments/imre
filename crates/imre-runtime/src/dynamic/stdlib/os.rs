@@ -766,18 +766,10 @@ fn file_offset(ctx: &mut Context, value: Id) -> Result<i64> {
 
 /// Hold the buffer export over offset conversion and interrupted write retries.
 fn write_fd(ctx: &mut Context, fd: i32, data: Id, offset: Option<Id>) -> Result<Id> {
-    ctx.with_buffer_export(data, |ctx| {
-        let offset = if let Some(offset) = offset {
-            // PyBUF_SIMPLE acquisition precedes the offset's __index__ call.
-            ctx.check_buffer_exporter(data)?;
-            ctx.contiguous_buffer(data)?;
-            Some(file_offset(ctx, offset)?)
-        } else {
-            None
-        };
+    ctx.with_read_buffer(data, |ctx, export| {
+        let offset = offset.map(|id| file_offset(ctx, id)).transpose()?;
         loop {
-            // Conversion or signal handlers can change bytes without resizing.
-            let buffer = ctx.contiguous_buffer(data)?;
+            let buffer = export.storage(ctx)?;
             let ptr = buffer.read_ptr()?;
             // SAFETY: the export holds this range live until the synchronous syscall returns.
             if let Some(count) = unsafe { native::try_write(fd, ptr, buffer.len(), offset) }? {

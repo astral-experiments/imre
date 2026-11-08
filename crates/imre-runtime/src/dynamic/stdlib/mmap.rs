@@ -78,15 +78,12 @@ pub(in crate::dynamic) fn mapped_span(
         };
         ctx.check_view_export(value)?;
         let layout = ctx.view_layout(value)?;
-        if !layout.is_contiguous() {
-            return Err(Error::new(
-                "BufferError",
-                "memoryview: underlying buffer is not C-contiguous",
-            ));
-        }
         let (_, width) = ctx.view_format_width(source, &layout);
-        let begin = range.start + layout.byte_start(width);
-        Ok(Some((storage, begin..begin + layout.len * width)))
+        let view = layout.contiguous_range(width)?;
+        Ok(Some((
+            storage,
+            range.start + view.start..range.start + view.end,
+        )))
     } else {
         owner(ctx, value)
     }
@@ -195,7 +192,7 @@ pub(in crate::dynamic) fn put_item(ctx: &mut Context, map: Id, key: Id, value: I
     if let Value::Slice(parts) = *ctx.heap.get(key) {
         let [start, stop, step] = bounds(ctx, len, parts)?;
         ctx.with_read_buffer(value, |ctx, input| {
-            let source = ctx.contiguous_buffer(input)?;
+            let source = input.storage(ctx)?;
             let count = slice_count(start, stop, step);
             if source.len() != count {
                 return Err(Error::new(
@@ -243,7 +240,7 @@ fn find(ctx: &mut Context, map: Id, args: &[Id], reverse: bool) -> Result<Id> {
             return Ok(-1);
         }
         let haystack = Storage::Mapped(mapping, start as usize..end as usize);
-        let needle = ctx.contiguous_buffer(view)?;
+        let needle = view.storage(ctx)?;
         Ok(haystack
             .find(&needle, reverse)?
             .map_or(-1, |i| start as i64 + i as i64))
@@ -414,7 +411,7 @@ pub(super) fn call(
             let input = builtins::one_positional_arg("mmap.write", args, kwargs)?;
             ctx.with_read_buffer(input, |ctx, input| {
                 let mapping = writable_region(ctx.heap.get(map))?;
-                let source = ctx.contiguous_buffer(input)?;
+                let source = input.storage(ctx)?;
                 let Value::Mmap { pos, .. } = *ctx.heap.get(map) else {
                     unreachable!()
                 };

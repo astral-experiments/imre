@@ -458,9 +458,7 @@ fn load_ca_data(ctx: &mut Context, handle: Id, input: Id) -> Result<Id> {
             {
                 return Err(invalid());
             }
-            ctx.with_read_buffer(input, |ctx, view| {
-                load(ctx, ctx.native_buffer_bytes(view)?, false)
-            })?
+            ctx.with_read_buffer(input, |ctx, buffer| load(ctx, buffer.bytes(ctx)?, false))?
         }
     };
     trust_result(ctx, result)

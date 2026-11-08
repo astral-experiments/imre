@@ -244,8 +244,8 @@ pub(in crate::dynamic) fn compressor(
                     ),
                 ));
             };
-            ctx.with_read_buffer(*data, |ctx, view| {
-                let input = ctx.native_buffer_bytes(view)?;
+            ctx.with_read_buffer(*data, |ctx, buffer| {
+                let input = buffer.bytes(ctx)?;
                 let mut writer = handle.borrow_mut();
                 let stream = writer
                     .0
@@ -422,12 +422,12 @@ pub(in crate::dynamic) fn decompressor(
     let [data, limit] =
         builtins::bind_builtin_arguments(name, args, kwargs, ["data", "max_length"], 1)?;
     let data = data.expect("data is required");
-    let output = ctx.with_read_buffer(data, |ctx, view| {
+    let output = ctx.with_read_buffer(data, |ctx, buffer| {
         let limit = limit
             .map(|id| os::ssize_t(ctx, id))
             .transpose()?
             .unwrap_or(-1);
-        let input = ctx.native_buffer_bytes(view)?;
+        let input = buffer.bytes(ctx)?;
         let mut state = handle.borrow_mut();
         let output = state.decode(input, usize::try_from(limit).unwrap_or(usize::MAX))?;
         if state.eof && !state.pending.is_empty() {

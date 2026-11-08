@@ -43,6 +43,26 @@ def exercise():
         else:
             raise AssertionError("accepted an invalid offset")
         buf.append(0)
+        events = []
+
+        class Exporter:
+            def __buffer__(self, flags):
+                events.append(("acquire", flags))
+                return memoryview(buf)[:2]
+
+            def __release_buffer__(self, view):
+                events.append(("release", view.tobytes()))
+
+        source = Exporter()
+        assert os.write(fd, source) == 2
+        assert pwrite(fd, source, Offset(buf)) == 2
+        try:
+            pwrite(fd, source, Offset(buf, True))
+        except ValueError as error:
+            assert str(error) == "offset refused"
+        else:
+            raise AssertionError("accepted an invalid offset")
+        assert events == [("acquire", 0), ("release", b"xz")] * 3
     try:
         pwrite(fd, buf, 0)
     except OSError as error:
@@ -54,4 +74,7 @@ def exercise():
     assert len(buf) == previous_length + 1
 
 
-exercise()
+current = exercise
+
+if __name__ == "__main__":
+    exercise()

@@ -208,13 +208,13 @@ pub(super) fn call(
         else {
             unreachable!()
         };
-        let bytes = ctx.with_read_buffer(data, |ctx, view| {
+        let bytes = ctx.with_read_buffer(data, |ctx, buffer| {
             let group = crate::dynamic::builtins::hex_group(ctx, group)?;
             let sep = sep
                 .map(|sep| crate::dynamic::builtins::hex_separator(ctx, sep, false))
                 .transpose()?;
             Ok(crate::objects::hex_with_separator(
-                ctx.native_buffer_bytes(view)?,
+                buffer.bytes(ctx)?,
                 sep,
                 group,
             )?)

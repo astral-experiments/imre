@@ -155,9 +155,9 @@ pub(super) fn call(
                         ["data", "mode"],
                         1,
                     )?;
-                    ctx.with_read_buffer(data.unwrap(), |ctx, view| {
+                    ctx.with_read_buffer(data.unwrap(), |ctx, buffer| {
                         let mode = mode.map(|id| os::c_int(ctx, id)).transpose()?.unwrap_or(0);
-                        let input = ctx.native_buffer_bytes(view)?;
+                        let input = buffer.bytes(ctx)?;
                         state
                             .lock()
                             .unwrap()
@@ -223,12 +223,12 @@ pub(super) fn call(
                 ["data", "max_length"],
                 1,
             )?;
-            let bytes = ctx.with_read_buffer(data.unwrap(), |ctx, view| {
+            let bytes = ctx.with_read_buffer(data.unwrap(), |ctx, buffer| {
                 let max_length = limit
                     .map(|id| os::ssize_t(ctx, id))
                     .transpose()?
                     .unwrap_or(-1);
-                let input = ctx.native_buffer_bytes(view)?;
+                let input = buffer.bytes(ctx)?;
                 let mut decoder = stream.lock().unwrap();
                 let out =
                     decoder.decompress(input, usize::try_from(max_length).unwrap_or(usize::MAX))?;

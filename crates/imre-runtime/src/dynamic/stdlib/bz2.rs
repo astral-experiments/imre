@@ -85,8 +85,8 @@ pub(super) fn call(
                 unreachable!()
             };
             let state = state.clone();
-            let bytes = ctx.with_read_buffer(data, |ctx, view| {
-                state.borrow_mut().compress(ctx.native_buffer_bytes(view)?)
+            let bytes = ctx.with_read_buffer(data, |ctx, buffer| {
+                state.borrow_mut().compress(buffer.bytes(ctx)?)
             })?;
             Ok(ctx.alloc(Value::Bytes(bytes)))
         }
@@ -123,12 +123,12 @@ pub(super) fn call(
                 ["data", "max_length"],
                 1,
             )?;
-            let bytes = ctx.with_read_buffer(data.expect("required argument"), |ctx, view| {
+            let bytes = ctx.with_read_buffer(data.expect("required argument"), |ctx, buffer| {
                 let limit = limit
                     .map(|id| os::ssize_t(ctx, id))
                     .transpose()?
                     .unwrap_or(-1);
-                let input = ctx.native_buffer_bytes(view)?;
+                let input = buffer.bytes(ctx)?;
                 let mut decoder = state.borrow_mut();
                 let output = decoder
                     .stream
