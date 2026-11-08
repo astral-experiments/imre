@@ -2808,7 +2808,7 @@ pub(crate) struct SourceModule {
     pub(crate) snapshots: HashMap<usize, Intrinsic>,
     /// Executable entry statements, or inactive main guards that still require checking.
     pub(crate) executable: Vec<usize>,
-    is_package: bool,
+    pub(crate) is_package: bool,
     search_roots: SearchRoots,
     /// A rebuilt module is declared by a .pyi beside its platform-specific archive.
     pub(crate) archive: Option<NativeArchive>,
@@ -3152,6 +3152,27 @@ impl SourceGraph {
             .then_some(id)
     }
 
+    /// Match a registered import against the file chosen under its checked search root.
+    pub(crate) fn registration_at(
+        &self,
+        id: ModuleId,
+        root: &Path,
+        file: &Path,
+        init: &Path,
+    ) -> Option<bool> {
+        let module = &self.modules[id];
+        let path = if module.is_package { init } else { file };
+        let matches = module.path == path
+            || self.inputs.directories.iter().any(|(spelling, identity)| {
+                spelling == root
+                    && module
+                        .path
+                        .strip_prefix(identity)
+                        .is_ok_and(|relative| path.strip_prefix(root).ok() == Some(relative))
+            });
+        matches.then_some(module.is_package)
+    }
+
     /// Request checked-file diagnostics without replacing checks requested by a Python entry.
     pub(crate) fn require_fallback_calls(&self) {
         if matches!(self.check_fallback_calls.get(), FallbackCalls::None) {
@@ -3253,14 +3274,8 @@ impl SourceGraph {
     pub(crate) fn disk_inputs(
         &mut self,
         profile: Option<&Path>,
-        prefer_objects: bool,
     ) -> (crate::SourceInputs, Vec<PathBuf>) {
         let mut inputs = std::mem::take(&mut self.inputs);
-        // Object registration may still borrow the checked files after producing the
-        // native candidate. Keep the canonical identities paired with its source bytes.
-        if prefer_objects && profile.is_none() {
-            self.inputs.files.clone_from(&inputs.files);
-        }
         let mut modules = self.modules.iter().enumerate();
         inputs.files.retain(|_| {
             let (id, module) = modules.next().expect("one input per module");
@@ -3849,7 +3864,7 @@ impl SourceGraph {
         let bytes = if crate::named_bytecode(path) {
             std::fs::File::open(&entry).and_then(crate::read_bytecode_prefix)
         } else {
-            fs.read(&entry)
+            fs.read_source(&entry)
         }
         .map_err(|err| format!("{}: {err}", path.display()))?;
         if let Some(error) = crate::bytecode_script_error(path, &bytes) {
@@ -3951,7 +3966,7 @@ impl SourceGraph {
             .collect::<Result<Vec<_>, _>>()?
             .join(".");
         let source = fs
-            .read_to_string(&entry)
+            .read_source_string(&entry)
             .map_err(|error| format!("{}: {error}", entry.display()))?;
         let mut loader = Loader::new(root, extension_paths, &[], None, fs)?;
         loader.reachable_only = reachable_only;
@@ -6293,7 +6308,7 @@ impl<'a> Loader<'a> {
         }
         let source = self
             .fs
-            .read_to_string(&path)
+            .read_source_string(&identity)
             .map_err(|error| format!("{}: {error}", path.display()))?;
         // ty resolves logical import paths; canonical identities enforce containment
         // and uniqueness without breaking a single internal symlink's import name.
@@ -6913,7 +6928,7 @@ mod native_tests {
             || SourceGraph::load(&entry, Some(&root), std::slice::from_ref(&extension)).unwrap();
 
         let mut graph = load();
-        let (inputs, _) = graph.disk_inputs(None, false);
+        let (inputs, _) = graph.disk_inputs(None);
         assert!(inputs.fresh());
         fs::remove_dir(&other_portion).unwrap();
         assert!(!inputs.fresh());
@@ -6930,7 +6945,7 @@ mod native_tests {
         fs::write(&module, "value = 42\n").unwrap();
         assert!(!inputs.fresh());
         let mut graph = load();
-        let (_, paths) = graph.disk_inputs(None, false);
+        let (_, paths) = graph.disk_inputs(None);
         assert!(paths.contains(&module));
         assert!(!paths.contains(&namespace.join("__init__.py")));
     }

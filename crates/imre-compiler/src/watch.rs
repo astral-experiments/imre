@@ -1,7 +1,8 @@
 //! Observe the filesystem answers used by the module loader, including failed lookups.
 //! A check can fail before it has a complete source graph.
 use std::collections::BTreeSet;
-use std::io;
+use std::fs::File;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -29,6 +30,39 @@ enum Fact {
 
 fn outcome<T, U>(result: &io::Result<T>, map: impl FnOnce(&T) -> U) -> Result<U, String> {
     result.as_ref().map(map).map_err(io::Error::to_string)
+}
+
+/// Read the selected canonical source through one handle. A symlink introduced
+/// after resolution must not substitute another file under the checked identity.
+fn with_source<T>(path: &Path, read: impl FnOnce(&mut File) -> io::Result<T>) -> io::Result<T> {
+    let changed = || {
+        io::Error::new(
+            io::ErrorKind::Interrupted,
+            "source identity changed during compilation",
+        )
+    };
+    #[cfg(target_os = "linux")]
+    {
+        use rustix::fs::{CWD, Mode, OFlags, ResolveFlags, openat2};
+        use rustix::io::Errno;
+        match openat2(
+            CWD,
+            path,
+            OFlags::RDONLY | OFlags::CLOEXEC,
+            Mode::empty(),
+            ResolveFlags::NO_SYMLINKS,
+        ) {
+            Ok(fd) => return read(&mut File::from(fd)),
+            Err(Errno::LOOP) => return Err(changed()),
+            Err(Errno::NOSYS | Errno::PERM) => {}
+            Err(err) => return Err(err.into()),
+        }
+    }
+    let mut source = same_file::Handle::from_file(File::open(path)?)?;
+    if path.canonicalize()? != path || source != same_file::Handle::from_path(path)? {
+        return Err(changed());
+    }
+    read(source.as_file_mut())
 }
 
 impl FileSystem<'_> {
@@ -67,11 +101,21 @@ impl FileSystem<'_> {
         value
     }
 
-    pub(crate) fn read_to_string(&mut self, path: &Path) -> io::Result<String> {
-        let value = std::fs::read_to_string(path);
+    pub(crate) fn read_source_string(&mut self, path: &Path) -> io::Result<String> {
+        let value = with_source(path, |file| io::read_to_string(file));
         self.record(path, || {
             Fact::Content(outcome(&value, |s| blake3::hash(s.as_bytes())))
         });
+        value
+    }
+
+    pub(crate) fn read_source(&mut self, path: &Path) -> io::Result<Vec<u8>> {
+        let value = with_source(path, |file| {
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes)?;
+            Ok(bytes)
+        });
+        self.record(path, || Fact::Bytes(outcome(&value, |b| blake3::hash(b))));
         value
     }
 
@@ -327,6 +371,34 @@ pub(crate) fn check(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn selected_source_follows_the_open_handle() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helper.py");
+        let other = dir.path().join("other.py");
+        std::fs::write(&path, "checked").unwrap();
+        std::fs::write(&other, "replacement").unwrap();
+        let identity = path.canonicalize().unwrap();
+        let saved = with_source(&identity, |file| {
+            std::fs::rename(&path, dir.path().join("previous.py"))?;
+            symlink(&other, &path)?;
+            io::read_to_string(file)
+        });
+        assert_eq!(saved.unwrap(), "checked");
+        let mut fs = FileSystem::default();
+        assert_eq!(
+            fs.read_source(&identity).unwrap_err().kind(),
+            io::ErrorKind::Interrupted
+        );
+        assert_eq!(
+            fs.read_source_string(&path.canonicalize().unwrap())
+                .unwrap(),
+            "replacement"
+        );
+    }
 
     #[test]
     fn creating_or_editing_an_entry_profile_invalidates_the_check() {

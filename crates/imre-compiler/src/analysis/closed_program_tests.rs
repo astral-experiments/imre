@@ -293,38 +293,82 @@ fn retained_native_candidate_registers_its_original_source_owner() {
     let after = root.join("after.py");
     let original = "def value() -> int: return 1\n";
     let replacement = "def value() -> str: return 'other'\n";
-    fs::write(&entry, "import helper\nprint(helper.value())\n").unwrap();
     fs::write(&before, original).unwrap();
     fs::write(&after, replacement).unwrap();
     symlink(&before, &helper).unwrap();
-    let mut graph = crate::modules::SourceGraph::load(&entry, None, &[]).unwrap();
-    let id = graph.python_file("helper").unwrap();
-    let (inputs, _) = graph.disk_inputs(None, true);
+    let vendor = root.join("vendor");
+    let physical = root.join("vendor-A");
+    fs::create_dir(&physical).unwrap();
+    symlink(&physical, &vendor).unwrap();
+    let external = physical.join("external.py");
+    fs::write(&external, original).unwrap();
+    fs::write(
+        &entry,
+        "import helper, external\nprint(helper.value(), external.value())\n",
+    )
+    .unwrap();
+    let options = crate::CompileOptions {
+        extension_paths: vec![vendor.clone()],
+        ..Default::default()
+    };
+    let load =
+        || crate::modules::SourceGraph::load(&entry, None, &options.extension_paths).unwrap();
+    let mut graph = load();
+    crate::checked_lower(&mut graph).unwrap();
+    let helper_id = graph.python_file("helper").unwrap();
+    let external_id = graph.python_file("external").unwrap();
     fs::remove_file(&helper).unwrap();
     symlink(&after, &helper).unwrap();
-    assert!(!inputs.fresh());
-    let mut seen = false;
-    crate::dynamic::compile(
+    fs::write(&external, replacement).unwrap();
+    assert!(!graph.inputs.fresh());
+    let compilation = crate::dynamic::compile(
         (&entry, None, Default::default()),
-        &crate::CompileOptions::default(),
+        &options,
         true,
         Some(crate::dynamic::ObjectOperation::CheckedEntry),
         Some(&graph),
         crate::BoxedLayout::Check,
         |_, sources| {
             let sources = sources.unwrap();
-            let donor = sources.winners.iter().find(|s| s.name == "helper").unwrap();
-            assert_eq!(donor.checked_module, Some(id));
-            assert_eq!(donor.source, original);
-            assert_eq!(graph.inputs.files[id].1, before);
-            seen = true;
+            for (name, id) in [("helper", helper_id), ("external", external_id)] {
+                let donor = sources.winners.iter().find(|s| s.name == name).unwrap();
+                assert_eq!(donor.checked_module, Some(id));
+                assert_eq!(donor.source, original);
+            }
             Ok(())
         },
     )
+    .unwrap()
     .unwrap();
-    assert!(seen);
-    let next = crate::modules::SourceGraph::load(&entry, None, &[]).unwrap();
+    assert!(compilation.source_inputs.files.contains(&(
+        vendor.join("external.py"),
+        external,
+        blake3::hash(original.as_bytes()).to_hex().to_string(),
+    )));
+    let next = load();
+    for name in ["helper", "external"] {
+        let id = next.python_file(name).unwrap();
+        assert_eq!(next.modules[id].original_source(), replacement);
+    }
     let id = next.python_file("helper").unwrap();
     assert_eq!(next.inputs.files[id].1, after);
-    assert_eq!(next.modules[id].original_source(), replacement);
+
+    let package = root.join("helper");
+    fs::create_dir(&package).unwrap();
+    fs::write(package.join("__init__.py"), replacement).unwrap();
+    let error = crate::dynamic::compile(
+        (&entry, None, Default::default()),
+        &options,
+        true,
+        Some(crate::dynamic::ObjectOperation::CheckedEntry),
+        Some(&graph),
+        crate::BoxedLayout::Check,
+        |_, _| panic!("a different import kind reached object admission"),
+    )
+    .err()
+    .unwrap();
+    assert!(
+        error.contains("package initializer appeared during compilation"),
+        "{error}"
+    );
 }

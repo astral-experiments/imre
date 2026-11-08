@@ -110,6 +110,7 @@ pub(crate) fn check_registered_project<'a>(
         return Ok(());
     }
     if let Some(graph) = checked
+        && !graph.has_checked_only_import
         && let Some(result) = &graph.source_contract
     {
         let mut matched = std::collections::HashSet::new();

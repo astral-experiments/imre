@@ -683,7 +683,7 @@ pub(crate) fn compile(
     options: &CompileOptions,
     object_imports: bool,
     operation: Option<ObjectOperation>,
-    typed_graph: Option<&crate::modules::SourceGraph>,
+    checked_graph: Option<&crate::modules::SourceGraph>,
     layout: crate::BoxedLayout<'_>,
     check: impl FnOnce(bool, Option<RegisteredSources<'_>>) -> Result<(), String>,
 ) -> Result<Option<UnitCompilation>, String> {
@@ -693,31 +693,38 @@ pub(crate) fn compile(
     let command = invocation.map(|i| &i.source);
     let module_entry = options.module_entry.as_deref();
     let in_memory = command.is_some() || module_entry.is_some();
-    // A retained native candidate may already own the graph's disk inputs. Only
-    // graphs with their original per-module snapshots can supply registrations.
-    let ordinary_graph =
-        typed_graph.filter(|graph| graph.inputs.files.len() == graph.modules.len());
-    let file_entry = ordinary_graph.filter(|_| !in_memory);
-    let src = if module_entry.is_some() {
-        String::new()
+    let typed_graph = checked_graph.filter(|graph| !graph.has_checked_only_import);
+    let file_entry = checked_graph.filter(|_| !in_memory);
+    let (src, entry_identity) = if module_entry.is_some() {
+        (String::new(), None)
     } else if let Some(command) = command {
-        command.to_owned()
+        (command.to_owned(), None)
     } else if let Some(graph) = file_entry {
-        graph.modules[graph.entry].original_source().to_owned()
+        (
+            graph.modules[graph.entry].original_source().to_owned(),
+            Some(graph.inputs.files[graph.entry].1.clone()),
+        )
     } else {
         // A direct .pyc operand already received its bytecode diagnostic from the script loader.
         if options.script_startup.is_some() && crate::named_bytecode(path) {
             return Ok(None);
         }
-        let Ok(source) = filesystem.read_to_string(path) else {
+        let Ok(identity) = filesystem.canonicalize(path) else {
             return Ok(None);
+        };
+        let source = match filesystem.read_source_string(&identity) {
+            Ok(source) => source,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
+                return Err(format!("{}: {error}", path.display()));
+            }
+            Err(_) => return Ok(None),
         };
         if options.script_startup.is_some()
             && crate::bytecode_script_error(path, source.as_bytes()).is_some()
         {
             return Ok(None);
         }
-        source
+        (source, Some(identity))
     };
     // An ordinary entry can import a package that uses the object runtime without
     // accessing sys.path or installation metadata in the entry itself.
@@ -860,14 +867,6 @@ pub(crate) fn compile(
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let isolated = startup.is_some_and(|(flags, _)| flags.isolated);
     let entry = cwd.join(path);
-    let entry_identity = if let Some(graph) = file_entry {
-        Some(graph.inputs.files[graph.entry].1.clone())
-    } else {
-        (!in_memory)
-            .then(|| filesystem.canonicalize(&entry))
-            .transpose()
-            .map_err(|e| e.to_string())?
-    };
     let root = if let Some(root) = module_root {
         cwd.join(root)
     } else if entry_identity.is_some() {
@@ -963,7 +962,7 @@ pub(crate) fn compile(
     }
     let mut selected_sources = Vec::new();
     if module_entry.is_none() {
-        selected_sources.push((0, true, ordinary_graph.map(|graph| graph.entry)));
+        selected_sources.push((0, true, checked_graph.map(|graph| graph.entry)));
     }
     let mut source_initializers = HashSet::new();
     let mut contextual_errors = HashMap::new();
@@ -1290,10 +1289,8 @@ pub(crate) fn compile(
                 if frozen && (!file_alternatives || prefix == "runpy") {
                     continue;
                 }
-                let graph_file = ordinary_graph.and_then(|graph| {
-                    let id = graph.python_file(&prefix)?;
-                    Some((id, &graph.modules[id], &graph.inputs.files[id]))
-                });
+                let graph_file =
+                    checked_graph.and_then(|graph| Some((graph, graph.python_file(&prefix)?)));
                 for root in roots.iter().filter(|_| !bundled_only) {
                     if implicit_dirs.contains(root) && before_site.contains(&prefix) {
                         continue;
@@ -1345,12 +1342,21 @@ pub(crate) fn compile(
                     let init = stem.join("__init__.py");
                     // The checked resolver already selected a concrete package or module at
                     // this root. Other roots still supply alternatives for a live sys.path.
-                    let checked = graph_file
-                        .filter(|(_, module, _)| module.path == init || module.path == file);
-                    let package = checked.map(|(_, module, _)| module.path == init);
-                    let (path, package) = if package.unwrap_or_else(|| filesystem.is_file(&init)) {
+                    let checked_slot = graph_file.and_then(|(graph, id)| {
+                        let package = graph.registration_at(id, root, &file, &init)?;
+                        Some((&graph.inputs.files[id].1, package))
+                    });
+                    let package = filesystem.is_file(&init);
+                    if checked_slot.is_some_and(|(_, was_package)| was_package != package) {
+                        return Err(format!(
+                            "{}: package initializer {} during compilation",
+                            init.display(),
+                            if package { "appeared" } else { "disappeared" },
+                        ));
+                    }
+                    let (path, package) = if package {
                         (init, true)
-                    } else if checked.is_some() || filesystem.is_file(&file) {
+                    } else if checked_slot.is_some() || filesystem.is_file(&file) {
                         inputs.missing.push(init);
                         (file, false)
                     } else {
@@ -1391,17 +1397,39 @@ pub(crate) fn compile(
                         return Ok(None);
                     }
                     installed = None;
-                    let src = if let Some((_, module, input)) = checked {
-                        inputs.files.push(input.clone());
-                        module.original_source().to_owned()
+                    let identity = if let Some((identity, _)) = checked_slot {
+                        identity.clone()
+                    } else {
+                        match filesystem.canonicalize(&path) {
+                            Ok(identity) => identity,
+                            Err(_) if file_alternatives => {
+                                inputs.missing.push(path);
+                                continue;
+                            }
+                            Err(error) => return Err(error.to_string()),
+                        }
+                    };
+                    let checked =
+                        graph_file.filter(|(graph, id)| graph.inputs.files[*id].1 == identity);
+                    let src = if let Some((graph, id)) = checked {
+                        inputs.files.push((
+                            path.clone(),
+                            identity,
+                            graph.inputs.files[id].2.clone(),
+                        ));
+                        graph.modules[id].original_source().to_owned()
                     } else if file_alternatives {
                         // Only a usable snapshot can supply linked file code. Otherwise the
                         // ordinary filesystem loader reports the error if Python selects it.
-                        let (Ok(identity), Ok(bytes)) =
-                            (filesystem.canonicalize(&path), filesystem.read(&path))
-                        else {
-                            inputs.missing.push(path);
-                            continue;
+                        let bytes = match filesystem.read_source(&identity) {
+                            Ok(bytes) => bytes,
+                            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
+                                return Err(format!("{}: {error}", path.display()));
+                            }
+                            Err(_) => {
+                                inputs.missing.push(path);
+                                continue;
+                            }
                         };
                         inputs.files.push((
                             path.clone(),
@@ -1413,13 +1441,12 @@ pub(crate) fn compile(
                         };
                         src
                     } else {
-                        let identity = filesystem.canonicalize(&path);
                         let src = filesystem
-                            .read_to_string(&path)
+                            .read_source_string(&identity)
                             .map_err(|e| format!("{}: {e}", path.display()))?;
                         inputs.files.push((
                             path.clone(),
-                            identity.map_err(|e| e.to_string())?,
+                            identity,
                             blake3::hash(src.as_bytes()).to_hex().to_string(),
                         ));
                         src
@@ -1475,7 +1502,9 @@ pub(crate) fn compile(
                             selected_sources.push((
                                 sources.len(),
                                 program,
-                                checked.map(|(id, _, _)| id),
+                                checked.and_then(|(graph, id)| {
+                                    (graph.modules[id].is_package == package).then_some(id)
+                                }),
                             ));
                         }
                         sources.push(registration);
@@ -1638,7 +1667,7 @@ pub(crate) fn compile(
     let namespace_portions: HashSet<_> = inputs.directories.iter().map(|(path, _)| path).collect();
     crate::analysis::check_native_syntax(
         &root,
-        ordinary_graph,
+        checked_graph,
         sources
             .iter()
             .chain(&builtins)
