@@ -1,7 +1,11 @@
+import _codecs
 import codecs
 
 
 def current():
+    assert codecs.utf_32_decode is _codecs.utf_32_decode
+    assert codecs.utf_32_decode(b"\x00\x00\xfe\xff\x00\x00\x00A!") == ("A", 8)
+    assert codecs.utf_32_decode(b"\xff\xfe\x00\x00!", "ignore", True) == ("", 5)
     for encoding, bom, data in (
         ("utf-16-le", b"\xff\xfe", b"A\x00=\xd8\r\xdc"),
         ("utf-16-be", b"\xfe\xff", b"\x00A\xd8=\xdc\r"),

@@ -35,6 +35,7 @@ fn order(ctx: &mut Context, arg: Option<&Id>) -> Result<i32> {
 pub(in crate::dynamic) enum WideFunction {
     FixedEncode(FixedUnicode),
     FixedDecode(FixedUnicode),
+    BomDecode(FixedUnicode),
     OrderedEncode(FixedUnicode),
     ExtendedDecode(FixedUnicode),
 }
@@ -45,6 +46,7 @@ impl WideFunction {
             "utf_16_encode" => Self::OrderedEncode(Utf16(Little)),
             "utf_16_ex_decode" => Self::ExtendedDecode(Utf16(Little)),
             "utf_32_encode" => Self::OrderedEncode(Utf32Le),
+            "utf_32_decode" => Self::BomDecode(Utf32Le),
             "utf_32_ex_decode" => Self::ExtendedDecode(Utf32Le),
             "utf_16_le_encode" => Self::FixedEncode(Utf16(Little)),
             "utf_16_le_decode" => Self::FixedDecode(Utf16(Little)),
@@ -83,7 +85,7 @@ impl WideFunction {
                 let consumed = ctx.alloc(Value::Int(crate::Int::from_usize(length)));
                 Ok(ctx.alloc(Value::Tuple(vec![data, consumed])))
             }
-            Self::FixedDecode(format) | Self::ExtendedDecode(format) => {
+            Self::FixedDecode(format) | Self::BomDecode(format) | Self::ExtendedDecode(format) => {
                 let extended = matches!(self, Self::ExtendedDecode(_));
                 let maximum = if extended { 4 } else { 3 };
                 arguments(function, args, kwargs, maximum)?;
@@ -93,10 +95,10 @@ impl WideFunction {
                 ctx.with_buffer_export(input, |ctx| {
                     let errors = policy(ctx, function, args.get(1).copied())?;
                     let errors = super::error_name(ctx, errors)?.to_owned();
-                    let byteorder = if extended {
-                        order(ctx, args.get(2))?
-                    } else {
-                        format.byte_order()
+                    let byteorder = match self {
+                        Self::BomDecode(_) => 0,
+                        Self::ExtendedDecode(_) => order(ctx, args.get(2))?,
+                        _ => format.byte_order(),
                     };
                     let final_chunk = args
                         .get(maximum - 1)
