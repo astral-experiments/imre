@@ -881,10 +881,12 @@ fn checked_lower_with(
             } else {
                 graph.session.check_scopes(skipped, &overloads)?;
             }
+            if !graph.runtime_imports {
+                graph.source_contract = Some(Ok(()));
+            }
             Ok(ir)
         })
     } else {
-        let native = lowered.as_ref().err();
         let checked = if let Some(compiler) = cache.as_deref_mut() {
             compiler.cache.check_closed_program(
                 &mut graph.session,
@@ -892,19 +894,16 @@ fn checked_lower_with(
                 &graph.modules,
                 skipped,
                 &overloads,
-                native,
+                None,
             )
         } else {
             graph
                 .session
-                .check_closed_program(&graph.modules, skipped, &overloads, native)
+                .check_closed_program(&graph.modules, skipped, &overloads, None)
         };
-        if let Err(error) = checked {
-            if let Some(compiler) = cache {
-                compiler.callers = frontend::CallerCache::default();
-            }
-            return Err(error);
-        }
+        // An inapplicable object representation cannot replace a native source or ABI
+        // diagnostic. A real registration checks this result before emitting its body.
+        graph.source_contract = Some(checked);
         lowered
     };
     match result {

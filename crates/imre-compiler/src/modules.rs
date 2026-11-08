@@ -3104,6 +3104,8 @@ pub(crate) struct SourceGraph {
     pub(crate) filesystem_roots: Box<[PathBuf]>,
     /// Whether the caller explicitly selected legacy runtime imports.
     pub(crate) runtime_imports: bool,
+    /// Declaration result for these exact selected files, prior to any object-path re-selection.
+    pub(crate) source_contract: Option<Result<(), String>>,
     pub(crate) set_layout_hint: std::cell::Cell<SetLayoutHint>,
     pub(crate) float_components: std::cell::Cell<FloatComponents>,
     pub(crate) missing_repr: std::cell::Cell<Option<DefinitionId>>,
@@ -4661,6 +4663,7 @@ impl<'a> Loader<'a> {
             ),
             has_object_constructor_fallback: Default::default(),
             runtime_imports: false,
+            source_contract: None,
             set_layout_hint: std::cell::Cell::new(SetLayoutHint::Available),
             check_fallback_calls: Default::default(),
             imports_runtime_class: self.imports_runtime_class,

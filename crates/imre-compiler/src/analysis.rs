@@ -174,8 +174,11 @@ pub(crate) fn check_registered_project<'a>(
                         && (module.source == source || source.contains('\r') && blake3::hash(source.as_bytes()).to_hex().as_str() == digest)
                 })
         });
-        if admitted && remaining.is_empty() {
-            return Ok(());
+        if admitted
+            && remaining.is_empty()
+            && let Some(result) = &graph.source_contract
+        {
+            return result.clone();
         }
     }
 
