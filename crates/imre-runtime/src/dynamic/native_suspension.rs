@@ -107,6 +107,14 @@ impl Drop for Continuation {
 pub(super) struct Saved(Rc<RefCell<Option<(Continuation, Frame)>>>);
 
 impl Saved {
+    /// Recheck at most the caller's remaining budget of strong roots while parked.
+    pub(super) fn any_root(&self, limit: usize, predicate: impl FnMut(Id) -> bool) -> bool {
+        self.0
+            .borrow()
+            .as_ref()
+            .is_some_and(|(_, frame)| frame.roots().take(limit).any(predicate))
+    }
+
     pub(super) fn visit(&self, visitor: &mut impl VisitReferences) {
         if let Some((_, activation)) = self.0.borrow().as_ref() {
             activation.visit(visitor);
