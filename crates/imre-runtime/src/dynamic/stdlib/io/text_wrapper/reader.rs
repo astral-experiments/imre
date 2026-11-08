@@ -246,7 +246,10 @@ impl Reader {
         codec: StreamCodec,
         end: bool,
     ) -> Result<(StreamCodec, Vec<u8>)> {
-        if let StreamCodec::Wide { format, bom } = codec {
+        if matches!(
+            codec,
+            StreamCodec::Wide { .. } | StreamCodec::Registered(Codec::DoubleByte(_))
+        ) {
             let mut raw = Vec::new();
             raw.try_reserve(
                 self.tail
@@ -257,7 +260,9 @@ impl Reader {
             .map_err(|_| crate::Error::allocation())?;
             raw.extend_from_slice(&self.tail);
             raw.extend_from_slice(bytes);
-            let codec = if bom && !self.beginning {
+            let codec = if let StreamCodec::Wide { format, bom: true } = codec
+                && !self.beginning
+            {
                 StreamCodec::Wide {
                     format: format.with_order(self.order),
                     bom: false,

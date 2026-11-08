@@ -1675,6 +1675,13 @@ fn runtime_sources(
     collections
         .into_iter()
         .chain([("io", "io.py", SEALED_IO)])
+        // Lookup can select this compiled codec in a checked caller. Its Python
+        // implementation is a runtime registration, with no checked class surface.
+        .chain((!seen("encodings.big5")).then_some((
+            "encodings.big5",
+            "encodings/big5.py",
+            include_str!("../../stdlib/encodings/big5.py"),
+        )))
         .chain(
             RUNTIME_PROVIDERS
                 .iter()

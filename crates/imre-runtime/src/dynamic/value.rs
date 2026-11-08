@@ -882,7 +882,7 @@ impl Context {
     pub(super) fn decode_error(&mut self, native: crate::Error) -> Error {
         let state = native.decode_args().map(|args| DecodeState {
             encoding: self.text(args.encoding),
-            object: self.alloc(Value::Bytes(args.object.to_vec())),
+            object: self.heap.bytes_from_data(args.object.to_vec()),
             start: args.start,
             end: args.end,
             reason: self.text(args.reason),

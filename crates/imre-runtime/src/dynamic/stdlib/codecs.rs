@@ -10,7 +10,7 @@ pub(in crate::dynamic) use wide_unicode::WideFunction;
 pub(super) use wide_unicode::decode_chunk as decode_wide_chunk;
 
 use super::{Context, Error, Id, NONE, Result, Value};
-use crate::objects::{Codec, DecodeIssue, FixedUnicode, StrEncoder};
+use crate::objects::{Codec, DecodeIssue, DoubleByte, FixedUnicode, StrEncoder};
 
 #[derive(Default)]
 pub(in crate::dynamic) struct Registry {
@@ -553,7 +553,7 @@ fn box_native_entry(ctx: &mut Context, key: String, codec: Codec, spelling: Id) 
         Codec::Utf8 { signature: false } => "utf_8",
         Codec::Utf8 { signature: true } => "utf_8_sig",
         Codec::CodePage(page) => page.module_name,
-        Codec::ShiftJis => codec.name(),
+        Codec::DoubleByte(_) => codec.name(),
         Codec::Idna => return module_entry(ctx, spelling, "encodings.idna"),
         Codec::Wide(format) => {
             let module = format!("encodings.{}", format.name().replace('-', "_"));
@@ -562,7 +562,7 @@ fn box_native_entry(ctx: &mut Context, key: String, codec: Codec, spelling: Id) 
     };
     let module = ctx.module(&format!("encodings.{suffix}"))?;
     let id = match codec {
-        Codec::Ascii | Codec::Latin1 => {
+        Codec::Ascii | Codec::Latin1 | Codec::DoubleByte(DoubleByte::Big5) => {
             let getregentry = ctx.lookup_attr(module, "getregentry")?;
             ctx.call(getregentry, Vec::new(), Vec::new())?
         }
@@ -586,7 +586,7 @@ fn native_codec_info(ctx: &mut Context, codec: Codec, module: Id) -> Result<Id> 
     let writer = ctx.lookup_attr(module, "StreamWriter")?;
     ctx.heap.keep(writer);
     let (encode, decode) = match codec {
-        Codec::CodePage(_) | Codec::ShiftJis => {
+        Codec::CodePage(_) | Codec::DoubleByte(_) => {
             // getregentry creates fresh bound Codec methods for each alias entry.
             let class = ctx.lookup_attr(module, "Codec")?;
             let encoder = ctx.call(class, Vec::new(), Vec::new())?;
@@ -847,10 +847,11 @@ pub(in crate::dynamic) fn decode_bytes(
             wide_unicode::decode(ctx, input, &name, format, false)
         });
     }
-    if matches!(codec, Codec::ShiftJis) {
+    if let Codec::DoubleByte(format) = codec {
         let name = name.to_owned();
         return ctx.with_buffer_export(input, |ctx| {
-            decode_shift_jis(ctx, input, &name, true).map(|(text, _)| text)
+            decode_double_byte(ctx, format, input, &name, ChunkEnd::Scalar, &mut false)
+                .map(|(text, _)| text)
         });
     }
     if matches!(codec, Codec::Ascii) && name == "surrogateescape" {
@@ -961,49 +962,125 @@ fn stateful_utf8(
     Ok((result, consumed))
 }
 
-/// Decode a Shift JIS chunk, retaining an unpaired lead byte until the final call.
-fn decode_shift_jis(
+#[derive(Clone, Copy)]
+enum ChunkEnd {
+    Scalar,
+    Partial,
+    Final,
+}
+
+/// Decode one TextIOWrapper chunk and report failed final truncation so the reader
+/// can restore its previous pending input, including after a Python error handler.
+pub(super) fn decode_double_byte_chunk(
     ctx: &mut Context,
+    format: DoubleByte,
+    input: Id,
+    errors: Id,
+    final_input: bool,
+    truncated: &mut bool,
+) -> Result<(Id, usize)> {
+    let name = error_name(ctx, Some(errors))?.to_owned();
+    let end = if final_input {
+        ChunkEnd::Final
+    } else {
+        ChunkEnd::Partial
+    };
+    decode_double_byte(ctx, format, input, &name, end, truncated)
+}
+
+/// Resume multibyte callbacks in the original, still-exported buffer. An incremental
+/// decoder handles a final truncated unit once and may keep the handler's remainder.
+fn decode_double_byte(
+    ctx: &mut Context,
+    format: DoubleByte,
     input: Id,
     name: &str,
-    final_input: bool,
+    end: ChunkEnd,
+    truncated_error: &mut bool,
 ) -> Result<(Id, usize)> {
     let data = ctx.native_buffer_bytes(input)?;
-    let size = data.len();
     let mut text = String::new();
-    let (mut consumed, issue) =
-        crate::objects::shift_jis::decode_prefix(&mut text, data, 0, final_input)?;
+    let final_input = !matches!(end, ChunkEnd::Partial);
+    let (mut consumed, issue) = format.decode_prefix(&mut text, data, 0, final_input)?;
     let Some(issue) = issue else {
         return Ok((ctx.text(text), consumed));
     };
     let error = issue.error(data);
-    if name == "strict" {
-        return Err(ctx.decode_error(error));
-    }
-    let points = text.chars().map(u32::from).collect();
-    let resolve = |ctx: &mut Context| match name {
-        "ignore" | "replace" => Ok(ctx.builtin(handler_builtin(name).unwrap())),
-        _ => handler(ctx, name),
+    let mut truncated = issue.reason == "incomplete multibyte sequence";
+    let result = if name == "strict" {
+        Err(ctx.decode_error(error))
+    } else {
+        let points = text.chars().map(u32::from).collect();
+        let resolve = |ctx: &mut Context| match name {
+            "ignore" | "replace" => Ok(ctx.builtin(handler_builtin(name).unwrap())),
+            _ => handler(ctx, name),
+        };
+        resume_decode_with(
+            ctx,
+            resolve,
+            points,
+            error,
+            Some(input),
+            |points, data, position| {
+                if truncated && matches!(end, ChunkEnd::Final) {
+                    consumed = position;
+                    return Ok(None);
+                }
+                text.clear();
+                let (offset, issue) =
+                    format.decode_prefix(&mut text, data, position, final_input)?;
+                consumed = offset;
+                truncated = issue
+                    .as_ref()
+                    .is_some_and(|e| e.reason == "incomplete multibyte sequence");
+                points
+                    .try_reserve(text.len())
+                    .map_err(|_| crate::Error::allocation())?;
+                points.extend(text.chars().map(u32::from));
+                Ok(issue)
+            },
+        )
     };
-    let result = resume_decode_with(
-        ctx,
-        resolve,
-        points,
-        error,
-        Some(input),
-        |points, data, position| {
-            text.clear();
-            let (offset, issue) =
-                crate::objects::shift_jis::decode_prefix(&mut text, data, position, final_input)?;
-            consumed = offset;
-            points
-                .try_reserve(text.len())
-                .map_err(|_| crate::Error::allocation())?;
-            points.extend(text.chars().map(u32::from));
-            Ok(issue)
-        },
-    )?;
-    Ok((result, if final_input { size } else { consumed }))
+    *truncated_error = result.is_err() && truncated && matches!(end, ChunkEnd::Final);
+    result.map(|text| (text, consumed))
+}
+
+/// CPython multibyte callbacks require an actual int. They report an overflowing
+/// Py_ssize_t as position -1, after encoding any text replacement.
+fn callback_index(
+    ctx: &mut Context,
+    value: Id,
+    multibyte: bool,
+    invalid: impl FnOnce() -> Error,
+) -> Result<Option<i64>> {
+    if multibyte {
+        return match ctx.heap.get(ctx.scalar_value(value)) {
+            Value::Int(number) => Ok(number.to_i64()),
+            Value::Bool(flag) => Ok(Some(i64::from(*flag))),
+            _ => Err(invalid()),
+        };
+    }
+    ctx.index_integer(value)?.to_i64().map(Some).ok_or_else(|| {
+        Error::new(
+            "OverflowError",
+            "Python int too large to convert to C ssize_t",
+        )
+    })
+}
+
+fn callback_position(index: Option<i64>, length: usize) -> Result<usize> {
+    let position = match index {
+        Some(n) if n < 0 => length as i64 + n,
+        Some(n) => n,
+        None => -1,
+    };
+    if !(0..=length as i64).contains(&position) {
+        return Err(Error::new(
+            "IndexError",
+            format!("position {position} from error handler out of bounds"),
+        ));
+    }
+    Ok(position as usize)
 }
 
 /// Resume from the position and possibly changed byte object supplied by the handler.
@@ -1019,7 +1096,7 @@ fn resume_decode(
 
 fn resume_decode_with(
     ctx: &mut Context,
-    resolve: impl FnOnce(&mut Context) -> Result<Id>,
+    mut resolve: impl FnMut(&mut Context) -> Result<Id>,
     mut points: Vec<u32>,
     error: crate::Error,
     original: Option<Id>,
@@ -1030,11 +1107,34 @@ fn resume_decode_with(
         return Err(raised);
     }
     let exception = ctx.alloc(Value::Raised(raised));
-    let callback = resolve(ctx)?;
-    // One decode retains its first handler even if a callback replaces the registry entry.
-    ctx.heap.keep(callback);
+    // Single-byte and UTF decoders cache the first handler. The multibyte
+    // decoder resolves the live name for each error, including re-registration.
+    let cached = if original.is_none() {
+        let callback = resolve(ctx)?;
+        ctx.heap.keep(callback);
+        Some(callback)
+    } else {
+        None
+    };
     loop {
-        let response = ctx.call(callback, vec![exception], Vec::new())?;
+        let response = if let Some(callback) = cached {
+            ctx.call(callback, vec![exception], Vec::new())?
+        } else {
+            let callback = resolve(ctx)?;
+            let mark = ctx.heap.temporary_mark();
+            ctx.heap.keep(callback);
+            let result = ctx.call(callback, vec![exception], Vec::new());
+            match result {
+                Ok(value) => {
+                    ctx.heap.keep_call_result(mark, value);
+                    value
+                }
+                Err(error) => {
+                    ctx.heap.release_temporaries_since(mark);
+                    return Err(error);
+                }
+            }
+        };
         let invalid = || type_error("decoding error handler must return (str, int) tuple");
         let values = ctx.tuple_items(response)?.ok_or_else(invalid)?;
         let [replacement, newpos] = values.as_slice() else {
@@ -1046,16 +1146,7 @@ fn resume_decode_with(
             .try_reserve(replacement.len())
             .map_err(|_| crate::Error::allocation())?;
         points.extend_from_slice(&replacement);
-        let position = ctx
-            .index_integer(newpos)?
-            .to_i64()
-            .and_then(|n| isize::try_from(n).ok())
-            .ok_or_else(|| {
-                Error::new(
-                    "OverflowError",
-                    "Python int too large to convert to C ssize_t",
-                )
-            })?;
+        let index = callback_index(ctx, newpos, original.is_some(), invalid)?;
         let data = if let Some(input) = original {
             // The multibyte codec resumes in its original buffer if a handler rebinds exc.object.
             ctx.native_buffer_bytes(input)?
@@ -1068,19 +1159,8 @@ fn resume_decode_with(
             };
             data
         };
-        let length = data.len() as isize;
-        let position = if position < 0 {
-            length + position
-        } else {
-            position
-        };
-        if !(0..=length).contains(&position) {
-            return Err(Error::new(
-                "IndexError",
-                format!("position {position} from error handler out of bounds"),
-            ));
-        }
-        let Some(issue) = prefix(&mut points, data, position as usize)? else {
+        let position = callback_position(index, data.len())?;
+        let Some(issue) = prefix(&mut points, data, position)? else {
             return Ok(ctx.text_codepoints(points));
         };
         ctx.advance_decode_error(exception, issue.start, issue.end, issue.reason);
@@ -1239,7 +1319,7 @@ pub(in crate::dynamic) fn entry_encode(
         Codec::Utf8 { .. } => "utf_8_encode",
         Codec::CodePage(_) => "charmap_encode",
         Codec::Wide(_) => unreachable!("fixed-order codecs use the named builtin"),
-        Codec::ShiftJis | Codec::Idna => "encode",
+        Codec::DoubleByte(_) | Codec::Idna => "encode",
     };
     let (input, errors) = if matches!(codec, Codec::Utf8 { signature: true } | Codec::CodePage(_)) {
         let wrapper = if matches!(codec, Codec::CodePage(_)) {
@@ -1248,13 +1328,13 @@ pub(in crate::dynamic) fn entry_encode(
             "encode"
         };
         python_codec_args(wrapper, matches!(codec, Codec::CodePage(_)), args, kwargs)?
-    } else if matches!(codec, Codec::ShiftJis | Codec::Idna) {
+    } else if matches!(codec, Codec::DoubleByte(_) | Codec::Idna) {
         python_codec_args("encode", false, args, kwargs)?
     } else {
         positional_codec_args(function, args, kwargs)?
     };
     // The multibyte codec converts non-string inputs with str(input).
-    let input = if matches!(codec, Codec::ShiftJis) && ctx.string_storage(input).is_none() {
+    let input = if matches!(codec, Codec::DoubleByte(_)) && ctx.string_storage(input).is_none() {
         crate::dynamic::builtins::call(ctx, "str", &[input], &[])?
     } else {
         input
@@ -1280,19 +1360,36 @@ pub(in crate::dynamic) fn decode(
         Codec::Utf8 { .. } => "utf_8_decode",
         Codec::CodePage(_) => "charmap_decode",
         Codec::Wide(_) => unreachable!("fixed-order codecs use the named builtin"),
-        Codec::ShiftJis | Codec::Idna => "decode",
+        Codec::DoubleByte(_) | Codec::Idna => "decode",
     };
-    if matches!(codec, Codec::ShiftJis) {
-        // The module's incremental decoder passes final as a third argument.
-        let (arguments, final_input) = match args {
-            [_, _, final_input] => (&args[..2], ctx.truth(*final_input)?),
-            _ => (args, true),
+    if let Codec::DoubleByte(format) = codec {
+        let (arguments, end) = match args {
+            [_, _, final_input, rest @ ..]
+                if rest.is_empty() || (rest.len() == 1 && matches!(format, DoubleByte::Big5)) =>
+            {
+                let end = if ctx.truth(*final_input)? {
+                    match format {
+                        DoubleByte::Big5 => ChunkEnd::Final,
+                        DoubleByte::ShiftJis => ChunkEnd::Scalar,
+                    }
+                } else {
+                    ChunkEnd::Partial
+                };
+                (&args[..2], end)
+            }
+            _ => (args, ChunkEnd::Scalar),
         };
         let (input, errors) = python_codec_args("decode", false, arguments, kwargs)?;
         let policy = entry_error_policy(ctx, function, errors)?;
         let name = error_name(ctx, policy)?.to_owned();
         return ctx.with_buffer_export(input, |ctx| {
-            let (text, size) = decode_shift_jis(ctx, input, &name, final_input)?;
+            let mut truncated = false;
+            let result = decode_double_byte(ctx, format, input, &name, end, &mut truncated);
+            if truncated && let Some(&flag) = args.get(3) {
+                let zero = ctx.int(0);
+                ctx.put_item(flag, zero, crate::dynamic::builtins::boolean(true))?;
+            }
+            let (text, size) = result?;
             let consumed = ctx.alloc(Value::Int(crate::Int::from_usize(size)));
             Ok(ctx.alloc(Value::Tuple(vec![text, consumed])))
         });

@@ -106,7 +106,33 @@ def check_surrogate_reads():
         assert text.read() == "\udcffB"
 
 
+def check_split_double_byte():
+    for encoding, char in (("big5", "台"), ("shift_jis", "表")):
+        prefix = "x" * 8191
+        raw = (prefix + char + "\r\n").encode(encoding)
+        with io.TextIOWrapper(io.BytesIO(raw), encoding=encoding, newline="") as text:
+            assert text.read(len(prefix)) == prefix
+            before = text.tell()
+            assert text.read(1) == char
+            after = text.tell()
+            assert (before, after) == (8191, 8193)
+            assert text.seek(before) == before and text.read(1) == char
+            assert text.readline() == "\r\n"
+            assert text.read() == text.read() == ""
+        with io.TextIOWrapper(io.BytesIO(raw[:8192]), encoding=encoding) as text:
+            assert text.read(len(prefix)) == prefix
+            for _ in range(2):
+                try:
+                    text.read(1)
+                except UnicodeDecodeError as exc:
+                    assert (exc.object, exc.start, exc.end) == (raw[8191:8192], 0, 1)
+                    assert exc.reason == "incomplete multibyte sequence"
+                else:
+                    raise AssertionError("lost pending input at EOF")
+
+
 def current():
+    check_split_double_byte()
     check_surrogate_reads()
     check_repr()
     assert original_type is type(sys.stdout) is io.TextIOWrapper is _io.TextIOWrapper
