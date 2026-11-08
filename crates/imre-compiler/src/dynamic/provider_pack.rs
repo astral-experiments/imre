@@ -49,6 +49,9 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
             }
         }
     }
+    for (name, file, source) in super::builtin_sources(std::env::consts::OS) {
+        write_module(name, file, source).map_err(|err| err.to_string())?;
+    }
     // These sealed variants need no source-level import. Full collections has separate code.
     write_module(
         "collections",
