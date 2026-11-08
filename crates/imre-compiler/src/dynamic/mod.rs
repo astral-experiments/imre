@@ -952,70 +952,14 @@ pub(crate) fn compile(
             if computed_import && !seen.contains("zoneinfo") {
                 imports.names.push((0, "zoneinfo".to_owned()));
             }
-            // A runtime-selected HTTP child needs its server and transitive providers.
-            if uses_import_builtin && seen.contains("http") && !seen.contains("http.server") {
-                imports.names.push((0, "http.server".to_owned()));
-            }
-            // Late imports can select children of a bundled package without naming them in source.
-            if uses_exec || uses_import_builtin || seen.contains("importlib") {
-                for name in ["lzma", "compression.zstd"] {
-                    if !seen.contains(name) {
-                        imports.add(0, name);
-                    }
-                }
-                for (parent, child) in [
-                    ("email", "email._header_value_parser"),
-                    ("logging", "logging.config"),
-                    ("urllib", "urllib.robotparser"),
-                ] {
-                    if seen.contains(parent) && !seen.contains(child) {
-                        imports.add(0, child);
-                    }
-                }
-            }
-            if computed_import && !seen.contains("xml.parsers.expat") {
-                imports.names.push((0, "xml.parsers.expat".to_owned()));
-            }
-            // Register the mock provider for imports from source-loaded modules.
-            if uses_import_builtin && seen.contains("unittest") && !seen.contains("unittest.mock") {
-                imports.add(0, "unittest.mock");
-            }
-            if uses_import_builtin || seen.contains("importlib") {
-                for name in [
-                    "_pyio",
-                    "colorsys",
-                    "configparser",
-                    "optparse",
-                    "py_compile",
-                    "sysconfig",
-                    "uuid",
-                ] {
-                    if !seen.contains(name) {
-                        imports.names.push((0, name.to_owned()));
-                    }
-                }
-            }
-            // The runtime's site module calls os.path even when the entry never imports it.
-            if (options.user_site_pth.is_some() || seen.contains("site"))
-                && !seen.contains("posixpath")
-            {
-                imports.add(0, "posixpath");
-            }
-            // Native time and datetime parsers import their Python helper on first use.
-            if (seen.contains("time") || seen.contains("_datetime") || computed_import)
-                && !seen.contains("_strptime")
-            {
-                imports.names.push((0, "_strptime".to_owned()));
-            }
-            // Python 3.13 path pickles name this module even when the reader never imports pathlib.
-            if (seen.contains("pickle") || seen.contains("pathlib"))
-                && !seen.contains("pathlib._local")
-            {
-                imports.names.push((0, "pathlib._local".to_owned()));
-            }
-            if seen.contains("pathlib") && !seen.contains("pathlib.types") {
-                imports.names.push((0, "pathlib.types".to_owned()));
-            }
+            add_late_bundled_imports(
+                &mut imports,
+                &seen,
+                uses_import_builtin,
+                uses_exec,
+                computed_import,
+                options.user_site_pth.is_some(),
+            );
             if imports.names.is_empty() {
                 break;
             }
@@ -1494,6 +1438,77 @@ fn source_threading(mut registered: impl FnMut(&str) -> bool) -> Option<&'static
         .into_iter()
         .all(&mut registered)
         .then_some("threading")
+}
+
+/// Add bundled imports that can be selected without a static import statement.
+fn add_late_bundled_imports(
+    imports: &mut Imports,
+    seen: &HashSet<String>,
+    uses_import_builtin: bool,
+    uses_exec: bool,
+    computed_import: bool,
+    user_site_pth: bool,
+) {
+    // A runtime-selected HTTP child needs its server and transitive providers.
+    if uses_import_builtin && seen.contains("http") && !seen.contains("http.server") {
+        imports.names.push((0, "http.server".to_owned()));
+    }
+    // Late imports can select children of a bundled package without naming them in source.
+    if uses_exec || uses_import_builtin || seen.contains("importlib") {
+        for name in ["lzma", "compression.zstd"] {
+            if !seen.contains(name) {
+                imports.add(0, name);
+            }
+        }
+        for (parent, child) in [
+            ("email", "email._header_value_parser"),
+            ("logging", "logging.config"),
+            ("urllib", "urllib.robotparser"),
+        ] {
+            if seen.contains(parent) && !seen.contains(child) {
+                imports.add(0, child);
+            }
+        }
+    }
+    if computed_import && !seen.contains("xml.parsers.expat") {
+        imports.names.push((0, "xml.parsers.expat".to_owned()));
+    }
+    // Register the mock provider for imports from source-loaded modules.
+    if uses_import_builtin && seen.contains("unittest") && !seen.contains("unittest.mock") {
+        imports.add(0, "unittest.mock");
+    }
+    if uses_import_builtin || seen.contains("importlib") {
+        for name in [
+            "_pyio",
+            "colorsys",
+            "configparser",
+            "optparse",
+            "py_compile",
+            "sysconfig",
+            "uuid",
+        ] {
+            if !seen.contains(name) {
+                imports.names.push((0, name.to_owned()));
+            }
+        }
+    }
+    // The runtime's site module calls os.path even when the entry never imports it.
+    if (user_site_pth || seen.contains("site")) && !seen.contains("posixpath") {
+        imports.add(0, "posixpath");
+    }
+    // Native time and datetime parsers import their Python helper on first use.
+    if (seen.contains("time") || seen.contains("_datetime") || computed_import)
+        && !seen.contains("_strptime")
+    {
+        imports.names.push((0, "_strptime".to_owned()));
+    }
+    // Python 3.13 path pickles name this module even when the reader never imports pathlib.
+    if (seen.contains("pickle") || seen.contains("pathlib")) && !seen.contains("pathlib._local") {
+        imports.names.push((0, "pathlib._local".to_owned()));
+    }
+    if seen.contains("pathlib") && !seen.contains("pathlib.types") {
+        imports.names.push((0, "pathlib.types".to_owned()));
+    }
 }
 
 /// Python registrations provided by the launcher even without a direct source import.

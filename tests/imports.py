@@ -2049,6 +2049,7 @@ def main() -> None:
                     assert denied.returncode == expected.returncode == 1
                     assert denied.stdout == expected.stdout == "feature loaded\n"
                     assert denied.stderr.splitlines()[-1] == expected.stderr.splitlines()[-1]
+                executable.unlink()
                 checks += 1
 
         (temporary / "members.gz").write_bytes(gzip.compress(b"first", mtime=0) + gzip.compress(b"second", mtime=0))

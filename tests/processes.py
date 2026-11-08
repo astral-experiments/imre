@@ -254,7 +254,7 @@ def main() -> None:
         with os.fdopen(fcntl.fcntl(original.fileno(), fcntl.F_DUPFD_CLOEXEC, 211), "rb") as inherited:
             descriptor = inherited.fileno()
             signal_child = temporary / "signal-child"
-            built = files.run([args.clang, str(FIXTURES / "signal.c"), "-o", str(signal_child)], temporary)
+            built = files.run([args.clang or "clang-18", str(FIXTURES / "signal.c"), "-o", str(signal_child)], temporary)
             files.check_result(built, None, "signal probe build")
             arguments = [python, str(FIXTURES / "child.py"), str(descriptor), str(signal_child)]
             sources = [source for source in sorted(FIXTURES.glob("*.py")) if source.name != "child.py"]

@@ -168,6 +168,7 @@ def main() -> None:
                 actual = run_fixture(source, [str(binary)], temporary)
                 require_result(actual, None)
                 assert actual.stdout == expected.stdout, (source.name, level, actual.stdout, expected.stdout)
+                binary.unlink()
                 checks += 1
         for name, source in REJECTED.items():
             path = temporary / f"{name}.py"

@@ -149,7 +149,7 @@ def main():
             assert actual == reset_output, (actual, reset_output)
             if sys.platform.startswith("linux"):
                 refusal = Path(directory) / "reader-refusal.o"
-                subprocess.run([args.clang, "-c", boxed.parent / "reader_refuse.c", "-o", refusal],
+                subprocess.run([args.clang or "clang-18", "-c", boxed.parent / "reader_refuse.c", "-o", refusal],
                                check=True, timeout=TIMEOUT)
                 subprocess.run([args.compiler.resolve(), "build", boxed.parent / "reader_allocation.py",
                                 "--runtime-imports", "--no-cache", "--runtime", args.runtime.resolve(),

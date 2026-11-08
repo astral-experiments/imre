@@ -153,7 +153,7 @@ def main():
             without_clang = {"PATH": str(root / "empty-path")}
             verbose = invoke("--verbose-link", events=["relink", "store"], objects="miss", **without_clang)
             assert any(str(private_clang) in line and str(tools / "bin/ld.lld") in line for line in verbose)
-            invoke(mode="run", events=["hit"], **without_clang)
+            invoke("--clang", "", mode="run", events=["hit"], IMREFLAGS="--clang missing-wrapper", **without_clang)
             stamp = library.stat()
             os.utime(library, ns=(stamp.st_atime_ns, stamp.st_mtime_ns + 1_000_000_000))
             invoke(events=miss, objects="miss", **without_clang)

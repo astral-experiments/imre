@@ -212,7 +212,7 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup show
       - name: Install LLVM 18 and the CRC32C build tools
-        run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18 cmake valgrind
+        run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18 libclang-rt-18-dev patchelf cmake valgrind
       - name: Verify and assemble the vendored CPython suite fixtures
         run: |
           python3 benchmarks/cpython_stdlib/full/test_stage_tests.py
@@ -566,8 +566,16 @@ jobs:
           cmp benchmarks/cpython_stdlib/full/warnings/native-linux.json "$RUNNER_TEMP/test-warnings.json"
       - name: Compare native suites with CPython
         run: |
-          python3 tests/run_suites.py --kill-failed-children --log-dir /tmp/imre-suites-ordinary --suites socket_tcp socketserver_tcp http_server errno differential imports classes text containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
-            -- --compiler target/release/imre --runtime target/release/libimre_runtime.a --clang clang-18
+          sdk=$(mktemp -d "$RUNNER_TEMP/imre-ordinary.XXXXXX")
+          cp target/release/{imre,libimre_runtime.a} "$sdk/"
+          "$sdk/imre" --emit-bundled-stdlib > "$sdk/imre-stdlib.zip"
+          python3 scripts/bundle-linux-toolchain.py "$sdk/imre-toolchain"
+          python3 scripts/build-bundled-providers.py "$sdk/imre"
+
+          # Each suite builds in a new temporary tree. Use the packaged providers
+          # without keeping a cached executable for every temporary entry point.
+          env -u LD_LIBRARY_PATH IMREFLAGS=--no-cache python3 tests/run_suites.py --kill-failed-children --log-dir /tmp/imre-suites-ordinary --suites socket_tcp socketserver_tcp http_server errno differential imports classes text containers tuple_keys comprehensions fstrings calls inference iterables iterator_pipelines callables json_records toml_records dataclass_records expressions floats bytes matching assignments truthiness loop_else unpacking primitives string_reuse decoder_optimizations unions module_values base45 luhn exceptions io files paths processes argparse_cli \
+            -- --compiler "$sdk/imre" --runtime "$sdk/libimre_runtime.a" --clang ''
           cat /tmp/imre-suites-ordinary/socket_tcp.log
       - name: Run original string core methods in native Imre
         run: |

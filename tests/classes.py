@@ -347,6 +347,7 @@ def main() -> None:
                     require_success(actual)
                     assert actual.stdout == reference.stdout, (relative, level, reachable, actual.stdout, reference.stdout)
                     checks += 1
+                executable.unlink()
 
         rejected = {name: {"main.py": source} for name, source in REJECTED.items()}
         rejected.update(IMPORTED_REJECTIONS)
