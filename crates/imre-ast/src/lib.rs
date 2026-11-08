@@ -355,16 +355,10 @@ pub struct Names {
     pub string_annotations: bool,
     pub duplicate_type_parameter: Option<Identifier>,
     original: HashMap<TextSize, Name>,
-    owners: HashMap<TextSize, Name>,
     import_roots: HashSet<TextSize>,
 }
 
 impl Names {
-    /// Return the class owning the lexical names in a deferred generator suite.
-    pub fn suite_owner(&self, start: TextSize) -> Option<&str> {
-        self.owners.get(&start).map(Name::as_str)
-    }
-
     /// A private definition keeps its source name for introspection.
     pub fn definition<'a>(&'a self, name: &'a Identifier) -> &'a str {
         self.original
@@ -558,14 +552,6 @@ impl Transformer for Mangler<'_> {
                 return;
             }
             ast::Stmt::FunctionDef(function) => {
-                if !self.owner.is_empty()
-                    && let Some(first) = function.body.first()
-                {
-                    self.names
-                        .borrow_mut()
-                        .owners
-                        .insert(first.start(), Name::new(self.owner));
-                }
                 self.definition(&mut function.name);
                 if let Some(params) = &mut function.type_params {
                     self.type_parameter_bindings(params);
@@ -594,20 +580,6 @@ impl Transformer for Mangler<'_> {
 
     fn visit_expr(&self, expr: &mut ast::Expr) {
         match expr {
-            ast::Expr::Lambda(lambda)
-                if !self.owner.is_empty() && matches!(*lambda.body, ast::Expr::Yield(_)) =>
-            {
-                self.names
-                    .borrow_mut()
-                    .owners
-                    .insert(lambda.body.start(), Name::new(self.owner));
-            }
-            ast::Expr::Generator(generator) if !self.owner.is_empty() => {
-                self.names
-                    .borrow_mut()
-                    .owners
-                    .insert(generator.start(), Name::new(self.owner));
-            }
             ast::Expr::Name(name) => self.remember(name.start(), &mut name.id),
             ast::Expr::Attribute(attr) => self.definition(&mut attr.attr),
             _ => {}

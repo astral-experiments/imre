@@ -63,3 +63,12 @@ else:
     raise AssertionError("did not consume the starred iterable")
 
 assert struct.Struct(">2B").pack(*(1, 2)) == bytes((1, 2))
+
+
+def class_with_keywords(settings):
+    class Packed(**settings):
+        pass
+    yield Packed.__name__
+
+
+assert next(class_with_keywords({"metaclass": type})) == "Packed"

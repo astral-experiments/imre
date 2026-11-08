@@ -241,29 +241,3 @@ pub fn parser_source(source: &str) -> Result<Cow<'_, str>, Error> {
         None => Ok(input.text),
     }
 }
-
-/// Recreate the first indentation of a sliced generator suite after a synthetic header.
-pub fn generator_prefix(source_before_body: &str) -> Cow<'_, str> {
-    let mut previous = source_before_body.rsplit('\n');
-    let last = previous.next().unwrap_or_default();
-    if !last.bytes().all(|b| matches!(b, b' ' | b'\t' | b'\x0c')) {
-        return Cow::Borrowed(" ");
-    }
-    let mut expanded = None;
-    for line in previous {
-        let Some(prefix) = line.strip_suffix('\\') else {
-            break;
-        };
-        if !prefix.bytes().all(|b| matches!(b, b' ' | b'\t' | b'\x0c')) {
-            break;
-        }
-        let (col, _) = columns(prefix);
-        if col != 0 {
-            expanded = Some(col);
-        }
-    }
-    match expanded {
-        Some(col) => Cow::Owned(" ".repeat(col)),
-        None => Cow::Borrowed(last),
-    }
-}

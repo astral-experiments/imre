@@ -440,9 +440,11 @@ impl Context {
                 Ok(a)
             }
             "update" => self.merge_mapping(a, b, super::calls::MappingOperation::Unpack),
-            "keywords" => {
-                self.merge_mapping(a, b, super::calls::MappingOperation::Keywords(Some(c)))
-            }
+            "keywords" | "class_keywords" => self.merge_mapping(
+                a,
+                b,
+                super::calls::MappingOperation::Keywords((op == "keywords").then_some(c)),
+            ),
             "unpack" | "unpack_read" => {
                 let count = usize::try_from(self.as_integer(b)?)
                     .map_err(|_| Error::new("ValueError", "invalid unpack length"))?;
@@ -528,6 +530,8 @@ impl Context {
             "generator" => self.generator(a, b, c),
             "yielded" => Ok(self.alloc(Value::Yielded(a))),
             "iter" => self.loop_iterator(a),
+            "get_iter" => self.iterator(a),
+            "loop_cursor" => Ok(self.loop_cursor(a)),
             "async_iter" => self.async_for_iter(a),
             "async_next_iter" => self.async_for_next(a),
             "break_iter" => {
@@ -1614,6 +1618,7 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
             | "spread_arguments"
             | "extend"
             | "keywords"
+            | "class_keywords"
             | "iter"
             | "await_iter"
             | "async_exit_context"
@@ -1955,13 +1960,11 @@ pub(super) unsafe extern "C" fn imre_dyn_mark_class_annotation(
     finish(ctx, result)
 }
 
-/// Zero tags an ordinary entry, NATIVE_SUSPENDED_BODY tags a native resumable entry,
-/// and a one-based line identifies a legacy embedded-source body.
+/// Definition sites carry either an ordinary entry or a coroutine resume entry.
 #[repr(C)]
 union PrelinkedEntry {
     native: Code,
     suspended: value::ResumeCode,
-    source: *const c_char,
 }
 
 #[repr(C)]
@@ -1969,7 +1972,7 @@ pub(super) struct PrelinkedSite {
     entry: PrelinkedEntry,
     filename: *const c_char,
     first_line: u32,
-    body_line: u32,
+    tag: u32,
 }
 
 /// Definition-time scope and flag fields from a compiled function's parameter metadata.
@@ -2016,17 +2019,16 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
             Ok(filename) => filename,
             Err(error) => return finish(ctx, Err(error)),
         };
-        // SAFETY: the compiler emits the corresponding function ABI or the static
-        // nul-terminated source selected by the definition's body_line tag.
+        // SAFETY: the emitter initializes the union with the function ABI selected by the tag.
         let body = unsafe {
-            if definition.body_line == 0 {
-                value::Body::Native(definition.entry.native)
-            } else if definition.body_line == value::NATIVE_SUSPENDED_BODY {
-                value::Body::Suspended(definition.entry.suspended)
-            } else {
-                value::Body::PendingGenerator {
-                    source: cstr(definition.entry.source),
-                    body_line: definition.body_line,
+            match definition.tag {
+                0 => value::Body::Native(definition.entry.native),
+                value::NATIVE_SUSPENDED_BODY => value::Body::Suspended(definition.entry.suspended),
+                _ => {
+                    return finish(
+                        ctx,
+                        Err(Error::new("SystemError", "invalid compiled definition tag")),
+                    );
                 }
             }
         };

@@ -1310,6 +1310,11 @@ impl Context {
     /// Compiled loops test for an item before consuming it. User code must advance only once.
     fn loop_iterator(&mut self, iterable: Id) -> Result<Id> {
         let source = self.iterator(iterable)?;
+        Ok(self.loop_cursor(source))
+    }
+
+    /// Keep lookahead separate from acquiring the Python iterator.
+    fn loop_cursor(&mut self, source: Id) -> Id {
         let value = self.heap.get(source);
         if matches!(
             value,
@@ -1336,12 +1341,12 @@ impl Context {
         ) || value.instance_class().is_some()
             || value.is_weak_proxy()
         {
-            return Ok(self.alloc(Value::LoopIterator {
+            return self.alloc(Value::LoopIterator {
                 source,
                 peeked: None,
-            }));
+            });
         }
-        Ok(source)
+        source
     }
 
     /// Borrows the unconsumed part of the iterator's current sequence.
@@ -1764,9 +1769,7 @@ impl Context {
                             id,
                             generator_protocol::GeneratorInput::Send(NONE),
                         ),
-                        value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
-                            self.resume_source(id, NONE)
-                        }
+                        value::Body::Source(_) => self.resume_source(id, NONE),
                     }
                 });
             }
@@ -3364,7 +3367,7 @@ impl Context {
         let entry = match &self.code_object(code).body {
             value::Body::Native(entry) => *entry,
             value::Body::Suspended(_) => return self.new_suspended(code, scope, owner),
-            value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
+            value::Body::Source(_) => {
                 return self.call_source(code, scope, owner);
             }
         };
