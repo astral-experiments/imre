@@ -5,7 +5,7 @@ use super::*;
 pub(super) struct BuiltinDescriptor {
     owner: &'static str,
     pub(super) name: &'static str,
-    pub(super) method: bool,
+    method: bool,
 }
 
 impl BuiltinDescriptor {
@@ -232,7 +232,7 @@ impl BuiltinDescriptor {
             Some(("anext_awaitable", attr)) => {
                 Some(("anext_awaitable", attr, generator_protocol::ANEXT_METHODS))
             }
-            Some(("mappingproxy", attr)) if attr != "__class_getitem__" => {
+            Some(("mappingproxy", attr)) => {
                 let members = if builtins::MAPPING_PROXY_METHODS.contains(&attr) {
                     builtins::MAPPING_PROXY_METHODS
                 } else {
@@ -262,10 +262,8 @@ impl BuiltinDescriptor {
                 Some(("member_descriptor", attr, super::namedtuple::MEMBER_SLOTS))
             }
             Some(("frame", attr)) => Some(("frame", attr, &["clear"][..])),
-            Some(("set", attr)) if attr != "__class_getitem__" => {
-                Some(("set", attr, builtins::set_methods("set")))
-            }
-            Some(("frozenset", attr)) if attr != "__class_getitem__" => {
+            Some(("set", attr)) => Some(("set", attr, builtins::set_methods("set"))),
+            Some(("frozenset", attr)) => {
                 Some(("frozenset", attr, builtins::set_methods("frozenset")))
             }
             Some(("list", attr)) if attr != "__new__" => {
@@ -361,6 +359,8 @@ impl BuiltinDescriptor {
             "int.__add__" => ("int", "__add__"),
             "int.__index__" => ("int", "__index__"),
             "float.fromhex" => ("float", "fromhex"),
+            "bytes.fromhex" => ("bytes", "fromhex"),
+            "bytearray.fromhex" => ("bytearray", "fromhex"),
             "int.from_bytes" => ("int", "from_bytes"),
             "bool.__repr__" => ("bool", "__repr__"),
             "int.__repr__" => ("int", "__repr__"),
@@ -492,7 +492,7 @@ impl BuiltinDescriptor {
             (self.owner, self.name),
             ("object", "__subclasshook__" | "__init_subclass__")
                 | ("int", "from_bytes")
-                | ("float", "fromhex")
+                | ("float" | "bytes" | "bytearray", "fromhex")
                 | ("dict", "fromkeys")
                 | (_, "__class_getitem__")
                 | ("typing.Generic", "__init_subclass__")
@@ -506,10 +506,10 @@ impl BuiltinDescriptor {
     }
 
     pub(super) fn repr(self) -> String {
-        let kind = if self.method {
-            "method"
-        } else {
+        let kind = if self.class() == "wrapper_descriptor" {
             "slot wrapper"
+        } else {
+            "method"
         };
         format!("<{kind} '{}' of '{}' objects>", self.name, self.owner)
     }
@@ -704,7 +704,7 @@ impl BuiltinDescriptor {
             "__text_signature__" if self.owner == "typing.Generic" => NONE,
             "__name__" => ctx.text(self.name),
             "__qualname__" => {
-                let owner = if self.method
+                let owner = if self.class() != "wrapper_descriptor"
                     && let Some(receiver) = receiver
                 {
                     match ctx.heap.get(receiver) {
@@ -728,8 +728,8 @@ impl BuiltinDescriptor {
             "__objclass__" if receiver.is_none() && self.owner == "typing.Generic" => {
                 typing::named_class(ctx, "typing", "Generic")
             }
-            "__objclass__" if receiver.is_none() || !self.method => ctx.builtin(self.owner),
-            "__module__" if receiver.is_some() && self.method => NONE,
+            "__objclass__" if receiver.is_none() || self.class() == "wrapper_descriptor" => ctx.builtin(self.owner),
+            "__module__" if receiver.is_some() && self.class() != "wrapper_descriptor" => NONE,
             "__text_signature__" if self.owner == value::ZLIB_DECOMPRESS_TYPE && self.name == "__deepcopy__" => {
                 ctx.text("($self, memo, /)")
             }
@@ -987,6 +987,8 @@ impl BuiltinDescriptor {
                     ("from_bytes", _) => "($type, /, bytes, byteorder='big', *, signed=False)",
                     ("hex", "__doc__") if self.owner == "float" => "Return a hexadecimal representation of a floating-point number.\n\n>>> (-0.1).hex()\n'-0x1.999999999999ap-4'\n>>> 3.14159.hex()\n'0x1.921f9f01b866ep+1'",
                     ("hex", _) if self.owner == "float" => "($self, /)",
+                    ("fromhex", "__doc__") if self.owner == "bytes" => "Create a bytes object from a string of hexadecimal numbers.\n\nSpaces between two numbers are accepted.\nExample: bytes.fromhex('B9 01EF') -> b'\\\\xb9\\\\x01\\\\xef'.",
+                    ("fromhex", "__doc__") if self.owner == "bytearray" => "Create a bytearray object from a string of hexadecimal numbers.\n\nSpaces between two numbers are accepted.\nExample: bytearray.fromhex('B9 01EF') -> bytearray(b'\\\\xb9\\\\x01\\\\xef')",
                     ("fromhex", "__doc__") => "Create a floating-point number from a hexadecimal string.\n\n>>> float.fromhex('0x1.ffffp10')\n2047.984375\n>>> float.fromhex('-0x1p-1074')\n-5e-324",
                     ("fromhex", _) => "($type, string, /)",
                     ("fromkeys", "__doc__") => "Create a new dictionary with keys from iterable and values set to value.",

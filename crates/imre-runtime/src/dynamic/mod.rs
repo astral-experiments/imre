@@ -3226,6 +3226,7 @@ impl Context {
         if let Some(symbol) = object_size::descriptor(name) {
             self.builtin(symbol);
         }
+        let mut additional: &[&str] = &[];
         let methods = match name {
             "type" => &[
                 "mro",
@@ -3267,7 +3268,7 @@ impl Context {
             ],
             "set" | "frozenset" => builtins::set_methods(name),
             "bytearray" => {
-                self.builtin("bytearray.fromhex");
+                additional = &["fromhex"];
                 builtins::BYTEARRAY_METHODS
             }
             "property" => property::METHODS,
@@ -3292,8 +3293,7 @@ impl Context {
             ],
             "complex" => complex::METHODS,
             "bytes" => {
-                self.builtin("bytes.__new__");
-                self.builtin("bytes.fromhex");
+                additional = &["__new__", "fromhex"];
                 builtins::BYTES_METHODS
             }
             "str" => {
@@ -3311,28 +3311,20 @@ impl Context {
             weakref::REFERENCE_TYPE => weakref::REFERENCE_METHODS,
             _ => &[],
         };
-        for method in methods
+        let mut entries = Vec::new();
+        for &method in methods
             .iter()
+            .chain(additional)
             .chain(builtins::set_operators(name))
             .chain(builtins::real_methods(name))
         {
-            self.builtin(&format!("{name}.{method}"));
+            let member = self.builtin(&format!("{name}.{method}"));
+            entries.push((self.heap.code_name(method), member));
         }
         match name {
-            "dict" | "list" | "type" => {
-                let mut entries = Vec::new();
-                for &member in methods {
-                    let key = self.heap.code_name(member);
-                    entries.push((key, self.builtin(&format!("{name}.{member}"))));
-                }
-                if name != "type" {
-                    let size = self.builtin(&format!("{name}.__sizeof__"));
-                    entries.push((self.heap.code_name("__sizeof__"), size));
-                    entries.push((self.heap.code_name("__hash__"), NONE));
-                }
-                let dictionary = self.dict(entries);
-                self.native_type_dicts.insert(value, dictionary);
-            }
+            // These types publish their dictionaries lazily, including static methods
+            // and other descriptors that need an initialized runtime.
+            "object" | "str" | defaultdict::CLASS => {}
             "getset_descriptor" => {
                 let doc = self.descriptor_doc_member("getset_descriptor");
                 let key = self.heap.code_name("__doc__");
@@ -3353,6 +3345,16 @@ impl Context {
                 self.install_numeric_dictionary(value, "int", methods, ["numerator", "denominator"])
             }
             "float" => self.install_numeric_dictionary(value, "float", methods, ["real", "imag"]),
+            _ if !entries.is_empty() && !self.native_type_dicts.contains_key(&value) => {
+                if let Some(symbol) = object_size::descriptor(name) {
+                    entries.push((self.heap.code_name("__sizeof__"), self.builtin(symbol)));
+                }
+                if self.own_class_attr(value, "__hash__") == Some(NONE) {
+                    entries.push((self.heap.code_name("__hash__"), NONE));
+                }
+                let dictionary = self.dict(entries);
+                self.native_type_dicts.insert(value, dictionary);
+            }
             _ => {}
         }
         value

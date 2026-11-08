@@ -854,6 +854,8 @@ pub(super) const MEMORYVIEW_METHODS: &[&str] = &[
 
 pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "__repr__",
+    "decode",
+    "translate",
     "append",
     "clear",
     "copy",
@@ -1015,11 +1017,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::MemoryView { .. } if MEMORYVIEW_METHODS.contains(&attr) => "memoryview",
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
         Value::Complex(_) if super::complex::METHODS.contains(&attr) => "complex",
-        Value::ByteArray(_)
-            if BYTEARRAY_METHODS.contains(&attr) || matches!(attr, "decode" | "translate") =>
-        {
-            "bytearray"
-        }
+        Value::ByteArray(_) if BYTEARRAY_METHODS.contains(&attr) => "bytearray",
         Value::StructUnpackIterator { .. } if UNPACK_ITERATOR_METHODS.contains(&attr) => {
             value::STRUCT_UNPACK_ITERATOR
         }

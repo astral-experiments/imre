@@ -4350,6 +4350,7 @@ for name in ("md4", "ripemd160"):
             "boxed_email_parser.py",
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
+            "boxed_attribute_name_keys.py",
             "boxed_exception_repr.py",
             "boxed_exception_notes.py",
             "boxed_exception_groups.py",

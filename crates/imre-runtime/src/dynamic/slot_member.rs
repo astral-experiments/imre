@@ -4,6 +4,9 @@ use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
 use crate::dynamic::value::SlotStorage;
 use ruff_python_stdlib::identifiers::is_identifier;
 
+/// These native bases keep a variable-sized payload before a subclass instance dictionary.
+pub(super) const VARIABLE_SIZE_BASES: [&str; 3] = ["int", "tuple", "bytes"];
+
 /// Python mangles private member names with the name of the declaring class.
 pub(super) fn slot_name(class_name: &str, original: &str) -> String {
     let owner = class_name.trim_start_matches('_');
@@ -690,8 +693,9 @@ impl Context {
         if slots.is_empty() {
             return Ok(Vec::new());
         }
-        if ["int", "tuple", "bytes", "type"]
-            .iter()
+        if VARIABLE_SIZE_BASES
+            .into_iter()
+            .chain(["type"])
             .any(|name| self.has_base(base, name))
         {
             return Err(Error::new(

@@ -212,7 +212,7 @@ impl Context {
             return self.native_owns_layout_descriptor(class, "__weakref__");
         };
         if ancestors.iter().any(|&base| {
-            matches!(self.heap.get(base), Value::Native(name) if matches!(name.as_str(), "int" | "tuple" | "bytes"))
+            matches!(self.heap.get(base), Value::Native(name) if super::slot_member::VARIABLE_SIZE_BASES.contains(&name.as_str()))
         }) {
             return false;
         }

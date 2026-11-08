@@ -309,13 +309,19 @@ impl Context {
         for base in bases {
             let dictionary = if let Value::Class { scope, .. } = *self.heap.get(base) {
                 self.class_namespace_dict(scope, false)
-            } else if base == object {
-                let proxy = self.object_dictionary();
-                self.mapping_proxy_target(proxy)
             } else if let Some(&dictionary) = self.native_type_dicts.get(&base) {
                 dictionary
+            } else if let Some(&scope) = self.enum_scopes.get(&base) {
+                self.class_namespace_dict(scope, false)
             } else {
-                continue;
+                // Some native classes construct their mapping proxy on first access.
+                let Ok(proxy) = self.default_get_attr(base, "__dict__") else {
+                    continue;
+                };
+                let Value::MappingProxy(dictionary) = *self.heap.get(proxy) else {
+                    continue;
+                };
+                dictionary
             };
             if let (_, Some(index)) = self.find_dictionary_key(dictionary, key, Some(hash)).ok()? {
                 return Some(self.stored_entries(dictionary)[index].1);
@@ -644,17 +650,8 @@ impl Context {
     }
 
     fn update_exception_field(&mut self, obj: Id, name: &str, value: Option<Id>) -> Result<()> {
-        let dictionary = if value.is_some() {
-            self.exception_dictionary(obj)
-        } else {
-            let Value::Raised(error) = self.heap.get(obj) else {
-                unreachable!()
-            };
-            let Some(dictionary) = error.trace.as_ref().and_then(|trace| trace.dictionary) else {
-                return Err(self.missing_attribute(obj, name));
-            };
-            dictionary
-        };
+        // Even a failed instance-dictionary deletion creates the dictionary seen by __reduce__.
+        let dictionary = self.exception_dictionary(obj);
         self.update_dictionary_field(obj, dictionary, name, value)
     }
 
@@ -666,8 +663,10 @@ impl Context {
                 namespace: Some(dict),
                 ..
             } => Some(*dict),
-            Value::Instance { .. } if self.class_instances_have_dict(class) => {
-                Some(self.instance_dictionary(obj, class))
+            Value::Instance { .. } => {
+                let layout = self.instance_layout(class, "");
+                (layout.dictionary && (writing || !layout.materialize_dictionary_on_write))
+                    .then(|| self.instance_dictionary(obj, class))
             }
             _ => None,
         }
@@ -1854,7 +1853,7 @@ impl Context {
     pub(super) fn wrapper_name(&self, descriptor: Id) -> Option<&'static str> {
         match self.heap.get(descriptor) {
             Value::Native(symbol) => BuiltinDescriptor::lookup(symbol)
-                .filter(|slot| !slot.method)
+                .filter(|slot| slot.class() == "wrapper_descriptor")
                 .map(|slot| slot.name),
             Value::IoMethod {
                 name: name @ ("__init__" | "__repr__" | "__iter__" | "__next__" | "__del__"),
@@ -6156,7 +6155,9 @@ impl Context {
                 };
                 Err(error)
             }
-            Value::Instance { class, .. } if self.builtins.get("object") != Some(&class) => {
+            Value::Instance {
+                class, namespace, ..
+            } if self.builtins.get("object") != Some(&class) => {
                 let layout = self.checked_instance_layout(obj, class, name)?;
                 if name == "__dict__" && member.is_none() && !self.layout_descriptors_cleared(class)
                 {
@@ -6167,10 +6168,11 @@ impl Context {
                     return Ok(());
                 }
                 if !layout.active_slot
-                    && let Value::Instance {
-                        namespace: Some(storage),
-                        ..
-                    } = *self.heap.get(obj)
+                    && let Some(storage) = namespace.or_else(|| {
+                        layout
+                            .materialize_dictionary_on_write
+                            .then(|| self.instance_dictionary(obj, class))
+                    })
                 {
                     return self.update_dictionary_field(obj, storage, name, None);
                 }
@@ -6239,6 +6241,10 @@ impl Context {
             else {
                 layout.dictionary =
                     layout.dictionary || self.native_owns_layout_descriptor(owner_id, "__dict__");
+                if matches!(base, Value::Native(kind) if super::slot_member::VARIABLE_SIZE_BASES.contains(&kind.as_str()))
+                {
+                    layout.materialize_dictionary_on_write = true;
+                }
                 if matches!(base, Value::Native(kind) if kind == stdlib::functools::PARTIAL_CLASS) {
                     // Nested partials can flatten only while the inner object's dict is absent.
                     layout.dictionary = true;
