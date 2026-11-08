@@ -2227,6 +2227,12 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         compare("application", "tail")
         compare("-I", "./application/sub", "-h")
 
+        namespace_package = root / "namespace_plugin"
+        namespace_package.mkdir()
+        (namespace_package / "helper.py").write_text("globals()['answer'] = 42\n")
+        (namespace_package / "entry.py").write_text("from .helper import answer\nprint(answer)\n")
+        compare("-B", "-m", "namespace_plugin.entry")
+
         # An ordinary module under the first root wins over a package in a later root.
         (root / "preferred.py").write_text("print('file wins')\n")
         (root / "preferred").mkdir()
