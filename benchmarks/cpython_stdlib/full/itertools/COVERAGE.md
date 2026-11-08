@@ -9,10 +9,15 @@ These are separate upstream suites, for **138 occurrences** in total. The JSON
 doctests are part of JSON's denominator. Imre's LLVM optimization level does
 not change CPython's discovery or remove docstrings.
 
-At O0 and O3, eleven complete primary methods pass under their original host
-fixtures. The 106 blocked occurrences, four reference skips and sixteen
-reviewed exclusions remain in the primary report. The companion is blocked
-at both levels.
+At O0 and O3, twelve complete primary methods pass under their original host
+fixtures. The primary report retains 105 blocked occurrences, four reference
+skips and sixteen reviewed exclusions. The companion is blocked at both levels.
+
+`SubclassWithKwargsTest.test_keywords_in_subclass` constructs subclasses of
+twelve iterator types. It checks their identity and output, rejects an
+unexpected keyword on plain subclasses and verifies the keyword stored by
+subclasses overriding `__init__` or `__new__`. Its body and unittest assertions
+run in Imre under the original host fixture.
 
 Re-running all 137 primary occurrences on the tuple-display compiler after
 StringIO #928 kept every classification at O0 and O3. Three first diagnostics

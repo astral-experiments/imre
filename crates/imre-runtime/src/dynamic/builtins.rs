@@ -443,6 +443,7 @@ pub(super) fn native_implementation(symbol: &str) -> &str {
     }
 }
 
+pub(super) const ITERATOR_SLOTS: &[&str] = &["__iter__", "__next__"];
 pub(super) const FILTER_METHODS: &[&str] = &["__iter__", "__next__", "__reduce__"];
 
 pub(super) const MAPPING_PROXY_METHODS: &[&str] = &[
@@ -486,6 +487,8 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
             | "module"
             | "float"
             | "filter"
+            | "map"
+            | "zip"
             | "function"
             | "cell"
             | "int"
@@ -1111,7 +1114,8 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "match"
         }
-        Value::Map { .. } if matches!(attr, "__iter__" | "__next__") => "map",
+        Value::Map { .. } if ITERATOR_SLOTS.contains(&attr) => "map",
+        Value::Zip { .. } if ITERATOR_SLOTS.contains(&attr) => "zip",
         Value::Filter { .. } if matches!(attr, "__iter__" | "__next__" | "__reduce__") => "filter",
         Value::Filter { .. } | Value::Range(_) | Value::RangeIterator(_)
             if attr == "__reduce_ex__" =>
@@ -2119,11 +2123,15 @@ pub(super) fn call(
         && !is_exception(name)
     {
         return match owner {
-            "filter" if method == "__new__" => {
+            "filter" | "map" | "zip" if method == "__new__" => {
                 let Some((&class, args)) = args.split_first() else {
-                    return Err(type_error("filter.__new__(): not enough arguments"));
+                    return Err(type_error(format!("{name}(): not enough arguments")));
                 };
-                new_filter(ctx, class, args, kwargs)
+                if owner == "filter" {
+                    new_filter(ctx, class, args, kwargs)
+                } else {
+                    ctx.zip_or_map(owner, class, args, kwargs)
+                }
             }
             "super" if method == "__new__" => ctx.super_new(args, kwargs),
             "super" if method == "__init__" => ctx.super_init(args, kwargs),
@@ -2580,7 +2588,7 @@ pub(super) fn call(
                 super::range::method(ctx, owner, method, args, kwargs)
             }
             "list_iterator" | "tuple_iterator" | "str_ascii_iterator" | "str_iterator" | "map"
-            | "filter" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
+            | "zip" | "filter" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
             "property" => super::property::method(ctx, method, args, kwargs),
             "function" | "cell" | "mappingproxy" if method == "__new__" => {
                 let Some((&class, args)) = args.split_first() else {
@@ -3019,7 +3027,10 @@ pub(super) fn call(
             })?;
             Ok(ctx.int(size))
         }
-        "map" | "zip" => ctx.zip_or_map(name, args, kwargs),
+        "map" | "zip" => {
+            let class = ctx.builtin(name);
+            ctx.zip_or_map(name, class, args, kwargs)
+        }
         "filter" => {
             let class = ctx.builtin("filter");
             new_filter(ctx, class, args, kwargs)

@@ -194,6 +194,8 @@ impl BuiltinDescriptor {
                 Some((defaultdict::CLASS, attr, defaultdict::METHODS))
             }
             Some(("filter", attr)) => Some(("filter", attr, builtins::FILTER_METHODS)),
+            Some(("map", attr)) => Some(("map", attr, builtins::ITERATOR_SLOTS)),
+            Some(("zip", attr)) => Some(("zip", attr, builtins::ITERATOR_SLOTS)),
             Some(("list_iterator", attr)) => {
                 Some(("list_iterator", attr, &["__iter__", "__next__"][..]))
             }
