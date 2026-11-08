@@ -623,7 +623,7 @@ pub(crate) struct RegisteredSources<'a> {
 pub(crate) fn compile(
     (path, module_root, mut filesystem): (&Path, Option<&Path>, crate::watch::FileSystem<'_>),
     options: &CompileOptions,
-    runtime_imports: bool,
+    object_imports: bool,
     operation: Option<ObjectOperation>,
     typed_graph: Option<&crate::modules::SourceGraph>,
     layout: crate::BoxedLayout<'_>,
@@ -637,9 +637,8 @@ pub(crate) fn compile(
     let in_memory = command.is_some() || module_entry.is_some();
     // A retained native candidate may already own the graph's disk inputs. Only
     // graphs with their original per-module snapshots can supply registrations.
-    let ordinary_graph = typed_graph.filter(|graph| {
-        !options.runtime_imports && graph.inputs.files.len() == graph.modules.len()
-    });
+    let ordinary_graph =
+        typed_graph.filter(|graph| graph.inputs.files.len() == graph.modules.len());
     let file_entry = ordinary_graph.filter(|_| !in_memory);
     let src = if module_entry.is_some() {
         String::new()
@@ -664,7 +663,7 @@ pub(crate) fn compile(
     };
     // An ordinary entry can import a package that uses the object runtime without
     // accessing sys.path or installation metadata in the entry itself.
-    let object_hint = runtime_imports
+    let object_hint = object_imports
         || startup.is_some()
             && (src.contains("urllib") || src.contains("ftplib") || src.contains("argparse"))
         || src.contains("class") && src.contains('=')
@@ -706,7 +705,7 @@ pub(crate) fn compile(
         ]
         .iter()
         .any(|name| src.contains(name));
-    let startup_fallback = startup.is_some() && !options.runtime_imports;
+    let startup_fallback = startup.is_some();
     let ordered_command = matches!(operation, Some(ObjectOperation::OrderedCommandImport));
     if !object_hint && !startup_fallback && !ordered_command {
         return Ok(None);
@@ -742,13 +741,13 @@ pub(crate) fn compile(
     let provider_script = request_script || ftp_script || argparse_script;
     let entry_requests_objects = module_entry.is_some()
         || first.runtime_imports
-        || (first.uses_import_builtin && (startup.is_some() || options.runtime_imports))
+        || (first.uses_import_builtin && startup.is_some())
         || provider_script;
     let object_entry = first.misplaced_future
         || object_hint
             && (entry_requests_objects
                 || (operation.is_some() && !ordered_command)
-                || (runtime_imports && !first.names.is_empty()));
+                || (object_imports && !first.names.is_empty()));
     // Existing object imports keep their normal project-module lookup. Only a new
     // startup fallback needs to verify that the imported provider is bundled.
     let consider_startup =
@@ -788,7 +787,7 @@ pub(crate) fn compile(
         }
     }
     let registered_imports = typed_graph
-        .filter(|_| runtime_imports && !first.misplaced_future)
+        .filter(|_| object_imports && !first.misplaced_future)
         .map(import_module::registered_imports)
         .unwrap_or_default();
     first
@@ -898,7 +897,7 @@ pub(crate) fn compile(
         inputs.files.push((path.to_owned(), identity, digest));
     }
     let mut selected_sources = Vec::new();
-    if module_entry.is_none() && !options.runtime_imports {
+    if module_entry.is_none() {
         selected_sources.push((0, true, ordinary_graph.map(|graph| graph.entry)));
     }
     let mut source_initializers = HashSet::new();
@@ -983,7 +982,6 @@ pub(crate) fn compile(
                 || computed_import
         });
         if module_entry.is_none()
-            && !options.runtime_imports
             && !registered_imports.called
             && (!provider_script || owner == "__main__")
             && !through_getter
@@ -998,8 +996,7 @@ pub(crate) fn compile(
         uses_exec |= imports.uses_exec;
         computed_import |= imports.computed_import;
         // A checked caller can request the loader before its other annotated calls are lowered.
-        if !options.runtime_imports
-            && options.python_startup().is_none()
+        if options.python_startup().is_none()
             && (imports.uses_machinery_export("BuiltinImporter")
                 || imports.uses_machinery_export("FrozenImporter"))
             && let Some(graph) = typed_graph
@@ -1258,7 +1255,7 @@ pub(crate) fn compile(
                             work.push_back((prefix.clone(), package, imports));
                         }
                         let registration = (prefix.clone(), path, src);
-                        if winner && !options.runtime_imports {
+                        if winner {
                             // Only path zero belongs to the program. With safe path
                             // the first remaining search entry may be an installation.
                             let program = initial[..path0_len].contains(root);

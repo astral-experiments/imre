@@ -110,8 +110,6 @@ pub struct CompileOptions {
     pub entry_profile: Option<PathBuf>,
     /// Limit native lowering to definitions a closed entry program can use.
     pub reachable_only: bool,
-    /// Allow file entries with ordinary imports to use the native object runtime after static lowering fails.
-    pub runtime_imports: bool,
     /// Marks generated functions for LLVM's AddressSanitizer pass.
     pub address_sanitizer: bool,
     /// Optional archive of bundled native provider bodies for this target and LLVM optimization.
@@ -385,19 +383,6 @@ fn object_fallback<T>(
     native: impl Fn(&mut modules::SourceGraph, CheckedIr) -> Result<(T, bool), llvm::Unsupported>,
     boxed: impl FnOnce(UnitCompilation) -> T,
 ) -> Result<T, String> {
-    if options.runtime_imports && options.module_entry.is_some() {
-        return dynamic::compile(
-            (path, module_root, filesystem),
-            options,
-            true,
-            None,
-            None,
-            layout,
-            |_, _| Ok(()),
-        )?
-        .map(boxed)
-        .ok_or_else(|| "could not compile the module entry".to_owned());
-    }
     let boxed_startup = options.module_entry.is_some()
         || options.sitecustomize
         || options
@@ -425,7 +410,6 @@ fn object_fallback<T>(
             }
             Err(error) => break (error.into(), None, false),
         };
-        graph.runtime_imports = options.runtime_imports;
         site_probes.record(&mut graph.inputs);
         if !infer_sets {
             graph.set_layout_hint.set(modules::SetLayoutHint::Disabled);
@@ -487,8 +471,7 @@ fn object_fallback<T>(
     let graph = checked_graph
         .as_ref()
         .filter(|graph| !graph.has_checked_only_import);
-    // Explicit legacy imports continue to bind annotated arguments at runtime.
-    let checked_file = options.python_startup().is_none() && !options.runtime_imports;
+    let checked_file = options.python_startup().is_none();
     if options.entry_profile.is_some()
         || (checked_file
             && graph.as_ref().is_some_and(|g| {
@@ -514,8 +497,7 @@ fn object_fallback<T>(
     });
     let ordered_command_import = options.command.is_some()
         && import_failure == Some(modules::EntryImportFailure::AfterStatement);
-    let runtime_imports = options.runtime_imports
-        || options.module_entry.is_some()
+    let object_imports = options.module_entry.is_some()
         || import_failure == Some(modules::EntryImportFailure::ZipImport)
         || (options.sitecustomize
             && import_failure == Some(modules::EntryImportFailure::MissingModule))
@@ -528,12 +510,10 @@ fn object_fallback<T>(
             let requested = graph.check_fallback_calls.get();
             // A runtime class export can admit a new import graph. Keep direct source-call
             // diagnostics unless this entry already requested Python object semantics.
-            let check_class_import =
-                graph.imports_runtime_class && !options.runtime_imports && !entry_requests_objects;
+            let check_class_import = graph.imports_runtime_class && !entry_requests_objects;
             if !checked_file
                 && !check_class_import
-                && (options.runtime_imports
-                    || !matches!(requested, analysis::FallbackCalls::FunctionBodies))
+                && !matches!(requested, analysis::FallbackCalls::FunctionBodies)
             {
                 return Ok(());
             }
@@ -599,7 +579,7 @@ fn object_fallback<T>(
     match dynamic::compile(
         (path, module_root, filesystem),
         options,
-        runtime_imports,
+        object_imports,
         operation
             .or(ordered_command_import.then_some(dynamic::ObjectOperation::OrderedCommandImport)),
         graph,
@@ -871,7 +851,7 @@ fn checked_lower_with(
     // A fully lowered graph has already checked the actual first-party definitions.
     // Keep its existing diagnostics and proof scopes. When a representation is
     // unavailable, the declared Python call contracts still apply to the graph.
-    let result = if lowered.is_ok() || graph.runtime_imports {
+    let result = if lowered.is_ok() {
         lowered.and_then(|ir| {
             if let Some(compiler) = cache.as_deref_mut() {
                 compiler.cache.check_scopes(
@@ -883,9 +863,7 @@ fn checked_lower_with(
             } else {
                 graph.session.check_scopes(skipped, &overloads)?;
             }
-            if !graph.runtime_imports {
-                graph.source_contract = Some(Ok(()));
-            }
+            graph.source_contract = Some(Ok(()));
             Ok(ir)
         })
     } else {
@@ -1206,17 +1184,13 @@ mod tests {
         .unwrap();
         assert!(super::check_file(&path, None).is_err());
 
-        // Explicit runtime imports must also preserve annotated return errors.
+        // The same object route must preserve annotated return errors.
         std::fs::write(
             &path,
             "def build() -> int:\n    buffer = bytearray()\n    return 'bad'\n\nprint(build())\n",
         )
         .unwrap();
-        let options = super::CompileOptions {
-            runtime_imports: true,
-            ..Default::default()
-        };
-        let error = super::check_file_with_options(&path, None, &options).unwrap_err();
+        let error = super::check_file(&path, None).unwrap_err();
         assert!(error.contains("expected int, got str"), "{error}");
     }
 
@@ -1232,33 +1206,26 @@ mod tests {
             "def wrong() -> int:\n    return 'x'\nprint(gather('a'), wrong())\n",
         ] {
             std::fs::write(&path, format!("{gather}{usage}")).unwrap();
-            for runtime_imports in [false, true] {
-                let options = CompileOptions {
-                    runtime_imports,
-                    ..Default::default()
-                };
-                let ordinary = super::object_fallback(
-                    super::BoxedLayout::Check,
-                    (&path, None),
-                    &options,
-                    Default::default(),
-                    |graph| {
-                        graph
-                            .set_layout_hint
-                            .set(super::modules::SetLayoutHint::Disabled);
-                        super::checked_lower(graph)
-                    },
-                    |_, _| Ok(((), false)),
-                    |_| (),
-                );
-                assert_eq!(
-                    super::check_file_with_options(&path, None, &options),
-                    ordinary
-                );
-                if !runtime_imports {
-                    assert_eq!(incremental.check_file(&path, None), ordinary);
-                }
-            }
+            let options = CompileOptions::default();
+            let ordinary = super::object_fallback(
+                super::BoxedLayout::Check,
+                (&path, None),
+                &options,
+                Default::default(),
+                |graph| {
+                    graph
+                        .set_layout_hint
+                        .set(super::modules::SetLayoutHint::Disabled);
+                    super::checked_lower(graph)
+                },
+                |_, _| Ok(((), false)),
+                |_| (),
+            );
+            assert_eq!(
+                super::check_file_with_options(&path, None, &options),
+                ordinary
+            );
+            assert_eq!(incremental.check_file(&path, None), ordinary);
         }
     }
 
