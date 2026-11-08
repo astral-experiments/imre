@@ -1279,6 +1279,27 @@ def source_eval():
 
 
 def exec_caller_namespaces():
+    def store():
+        global exec_probe
+        exec_probe = abs(-7)
+        return exec_probe
+
+    supplied = {"__builtins__": {"abs": lambda value: 2 * value}}
+    separate = {"exec_probe": "local"}
+    assert exec(store.__code__, supplied, separate) is None
+    assert eval(store.__code__, supplied, separate) == -14
+    assert (supplied["exec_probe"], separate["exec_probe"]) == (-14, "local")
+
+    def required(arg):
+        return arg
+
+    try:
+        exec(required.__code__, supplied)
+    except TypeError as exc:
+        assert str(exc) == "required() missing 1 required positional argument: 'arg'"
+    else:
+        raise AssertionError("exec supplied a missing argument")
+
     seen = []
     value = 7
     execute = exec
