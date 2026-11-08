@@ -42,6 +42,7 @@ struct Imports {
     runtime_imports: bool,
     private_names: imre_ast::Names,
     invalid_executable: Option<Box<crate::frontend::phase::Diagnostic>>,
+    validate_at_origin: bool,
     uses_import_builtin: bool,
     uses_exec: bool,
     computed_import: bool,
@@ -571,19 +572,29 @@ fn scan_imports(
     }
     let mut body = parsed.into_syntax().body;
     let bindings = imre_ast::executable::BindingErrors::check(&body, &normalized);
-    let symbol_error = bindings.first_symbol(imre_ast::future_import_error(&body));
+    let future = imre_ast::future_import_error(&body);
+    // A body already retained for a directive, declaration or pattern error keeps
+    // that route. An otherwise linkable initializer goes through physical validation.
+    let validate_at_origin =
+        future.is_none() && bindings.symbol.is_none() && bindings.pattern.is_none();
+    let error = bindings
+        .first_symbol(future)
+        .map(|(range, reason)| (range, reason.to_owned()))
+        .or_else(|| {
+            bindings
+                .handler
+                .map(|issue| (issue.range, issue.message.to_owned()))
+        })
+        .or_else(|| {
+            bindings
+                .pattern
+                .map(|(range, reason)| (range, reason.checked().into_owned()))
+        });
     // The optional file must satisfy the emitter's checks before registration.
     // Use its discovery tree for both checking and collecting the lowered imports.
     let checked_names = file_alternative
         .map(|(path, _)| emit::lower_source(path, &normalized, &mut body))
         .transpose()?;
-    let error = symbol_error
-        .map(|(range, reason)| (range, reason.to_owned()))
-        .or_else(|| {
-            bindings
-                .pattern
-                .map(|(range, message)| (range, message.checked().into_owned()))
-        });
     if let Some((range, message)) = error {
         // Discovery records the error. Only selection as the checked entry diagnoses it here.
         let diagnostic = crate::frontend::phase::Diagnostic::at(
@@ -593,6 +604,7 @@ fn scan_imports(
         );
         return Ok(Imports {
             invalid_executable: Some(Box::new(diagnostic)),
+            validate_at_origin,
             ..Imports::default()
         });
     }
@@ -954,6 +966,7 @@ pub(crate) fn compile(
         selected_sources.push((0, true, ordinary_graph.map(|graph| graph.entry)));
     }
     let mut source_initializers = HashSet::new();
+    let mut contextual_errors = HashMap::new();
     let mut unavailable_sources = HashMap::new();
     if first.invalid_executable.is_some() {
         source_initializers.insert(sources[0].1.clone());
@@ -1432,9 +1445,17 @@ pub(crate) fn compile(
                                 .insert(prefix.clone(), error.clone().with_path(&path));
                         }
                     }
-                    if imports.invalid_executable.is_none() || startup.is_none() {
-                        if imports.invalid_executable.is_some() {
-                            source_initializers.insert(path.clone());
+                    if imports.invalid_executable.is_none()
+                        || imports.validate_at_origin
+                        || startup.is_none()
+                    {
+                        if let Some(error) = &imports.invalid_executable {
+                            if imports.validate_at_origin {
+                                contextual_errors
+                                    .insert(path.clone(), error.clone().with_path(&path));
+                            } else {
+                                source_initializers.insert(path.clone());
+                            }
                         } else {
                             let queue = if winner && select_member && filesystem_import {
                                 &mut selected_work
@@ -1617,6 +1638,7 @@ pub(crate) fn compile(
         ordinary_graph,
         sources.iter().chain(&builtins),
         |path| physical_files.contains(path) && !winners.iter().any(|source| source.path == path),
+        &contextual_errors,
         &mut source_initializers,
     )?;
     for name in &options.include_modules {

@@ -15,7 +15,26 @@ use std::collections::HashMap;
 pub struct BindingErrors {
     /// Symbol-table errors precede pattern code generation.
     pub symbol: Option<(TextRange, &'static str)>,
+    /// Reserved stores and deletions are checked at the selected file origin.
+    pub target: Option<(TextRange, &'static str)>,
     pub pattern: Option<BindingError>,
+    /// First invalid handler transfer or default clause, if it precedes the first pattern error.
+    pub handler: Option<HandlerError>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct GroupHandler {
+    local_loop: bool,
+    cleanup: bool,
+}
+
+#[derive(Clone, Copy)]
+pub struct HandlerError {
+    /// The statement or clause used for build diagnostics.
+    pub range: TextRange,
+    /// Unwinding a context manager or finally suite emits an artificial instruction.
+    pub location: Option<TextRange>,
+    pub message: &'static str,
 }
 
 /// The identifier stored by this pattern after its children have matched.
@@ -260,11 +279,26 @@ impl<'a> CapturePlan<'a, '_> {
     }
 }
 
+pub fn debug_binding_error(expr: &ast::Expr) -> Option<&'static str> {
+    let context = match expr {
+        ast::Expr::Name(name) if name.id == "__debug__" => name.ctx,
+        ast::Expr::Attribute(attr) if attr.attr.as_str() == "__debug__" => attr.ctx,
+        _ => return None,
+    };
+    match context {
+        ast::ExprContext::Store => Some("cannot assign to __debug__"),
+        ast::ExprContext::Del => Some("cannot delete __debug__"),
+        _ => None,
+    }
+}
+
 impl BindingErrors {
     pub fn check(body: &[ast::Stmt], source: &str) -> Self {
         let mut check = Check {
             errors: Self::default(),
             source,
+            in_function: false,
+            group: None,
         };
         check.visit_body(body);
         check.errors
@@ -278,28 +312,153 @@ impl BindingErrors {
         future
             .into_iter()
             .chain(self.symbol)
+            .chain(self.target)
             .min_by_key(|(range, _)| range.start())
     }
 }
 
-struct Check<'a> {
+struct Check<'s> {
     errors: BindingErrors,
-    source: &'a str,
+    source: &'s str,
+    in_function: bool,
+    group: Option<GroupHandler>,
+}
+
+impl Check<'_> {
+    fn handler_issue(
+        &mut self,
+        range: TextRange,
+        message: &'static str,
+        literal: Option<TextRange>,
+        cleanup: bool,
+    ) {
+        // CPython code generation reports the first of these two kinds of error.
+        if self.errors.pattern.is_some() || self.errors.handler.is_some() {
+            return;
+        }
+        let location = literal
+            .filter(|value| {
+                !self.source[TextRange::new(range.start(), value.start())].contains(['\r', '\n'])
+            })
+            .unwrap_or(range);
+        self.errors.handler = Some(HandlerError {
+            range,
+            location: (!cleanup).then_some(location),
+            message,
+        });
+    }
+
+    fn body_in(&mut self, body: &[ast::Stmt], group: Option<GroupHandler>) {
+        let previous = std::mem::replace(&mut self.group, group);
+        self.visit_body(body);
+        self.group = previous;
+    }
+
+    fn loop_body(&mut self, body: &[ast::Stmt], otherwise: &[ast::Stmt]) {
+        self.body_in(
+            body,
+            self.group.map(|g| GroupHandler {
+                local_loop: true,
+                ..g
+            }),
+        );
+        // The current loop has been popped before its else suite.
+        self.visit_body(otherwise);
+    }
 }
 
 impl<'a> Visitor<'a> for Check<'_> {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-        if let ast::Stmt::Match(statement) = stmt {
-            for (index, case) in statement.cases.iter().enumerate() {
-                self.visit_pattern(&case.pattern);
-                if self.errors.pattern.is_none() {
-                    self.errors.pattern =
-                        case_bindings(case, self.source, index + 1 < statement.cases.len()).err();
-                }
-                self.visit_body(&case.body);
+        match stmt {
+            ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => {
+                let function =
+                    std::mem::replace(&mut self.in_function, stmt.is_function_def_stmt());
+                let group = self.group.take();
+                visitor::walk_stmt(self, stmt);
+                self.group = group;
+                self.in_function = function;
             }
-        } else {
-            visitor::walk_stmt(self, stmt);
+            ast::Stmt::Try(t) => {
+                let enclosing = self.group;
+                if !t.finalbody.is_empty()
+                    && let Some(group) = &mut self.group
+                {
+                    group.cleanup = true;
+                }
+                self.visit_body(&t.body);
+                for (i, ast::ExceptHandler::ExceptHandler(h)) in t.handlers.iter().enumerate() {
+                    if h.type_.is_none() && i + 1 < t.handlers.len() {
+                        self.handler_issue(
+                            h.range(),
+                            "default 'except:' must be last",
+                            None,
+                            false,
+                        );
+                    }
+                    self.body_in(
+                        &h.body,
+                        if t.is_star {
+                            Some(GroupHandler::default())
+                        } else {
+                            self.group
+                        },
+                    );
+                }
+                self.visit_body(&t.orelse);
+                self.group = enclosing;
+                self.visit_body(&t.finalbody);
+            }
+            ast::Stmt::With(w) if self.group.is_some() => {
+                for item in &w.items {
+                    if let Some(target) = &item.optional_vars {
+                        self.visit_expr(target);
+                    }
+                }
+                self.body_in(
+                    &w.body,
+                    self.group.map(|g| GroupHandler { cleanup: true, ..g }),
+                );
+            }
+            ast::Stmt::For(f) => {
+                self.visit_expr(&f.target);
+                self.loop_body(&f.body, &f.orelse);
+            }
+            ast::Stmt::While(w) => self.loop_body(&w.body, &w.orelse),
+            ast::Stmt::Return(_) | ast::Stmt::Break(_) | ast::Stmt::Continue(_) => {
+                let Some(group) = self.group else {
+                    return;
+                };
+                let ret = stmt.as_return_stmt();
+                if ret.is_some() && !self.in_function {
+                    self.handler_issue(stmt.range(), "'return' outside function", None, false);
+                } else if ret.is_some() || !group.local_loop {
+                    let value = ret
+                        .and_then(|r| r.value.as_deref())
+                        .filter(|v| {
+                            v.is_literal_expr()
+                                || matches!(v, ast::Expr::Name(n) if n.id == "__debug__")
+                        })
+                        .map(Ranged::range);
+                    self.handler_issue(
+                        stmt.range(),
+                        "'break', 'continue' and 'return' cannot appear in an except* block",
+                        value,
+                        group.cleanup,
+                    );
+                }
+            }
+            ast::Stmt::Match(statement) => {
+                for (index, case) in statement.cases.iter().enumerate() {
+                    self.visit_pattern(&case.pattern);
+                    if self.errors.pattern.is_none() {
+                        self.errors.pattern =
+                            case_bindings(case, self.source, index + 1 < statement.cases.len())
+                                .err();
+                    }
+                    self.visit_body(&case.body);
+                }
+            }
+            _ => visitor::walk_stmt(self, stmt),
         }
     }
 
@@ -325,12 +484,53 @@ impl<'a> Visitor<'a> for Check<'_> {
         }
     }
 
-    fn visit_expr(&mut self, _: &'a ast::Expr) {}
+    fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        if self.errors.target.is_some() {
+            return;
+        }
+        if let Some(message) = debug_binding_error(expr) {
+            self.errors.target = Some((expr.range(), message));
+        } else if matches!(expr,
+            ast::Expr::Tuple(ast::ExprTuple { ctx, .. })
+            | ast::Expr::List(ast::ExprList { ctx, .. })
+            | ast::Expr::Starred(ast::ExprStarred { ctx, .. })
+            if *ctx != ast::ExprContext::Load
+        ) {
+            visitor::walk_expr(self, expr);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn handler_transfers_follow_the_owning_loop_or_function_even_in_dead_code() {
+        let text = "def f():\n return\n try: pass\n except* E:\n  for i in xs: break\n  else:\n   def g(): return\n   continue\n";
+        let parsed = ruff_python_parser::parse_module(text).unwrap();
+        let issue = BindingErrors::check(&parsed.syntax().body, text)
+            .handler
+            .unwrap();
+        assert_eq!(&text[issue.location.unwrap()], "continue");
+        assert_eq!(
+            issue.message,
+            "'break', 'continue' and 'return' cannot appear in an except* block"
+        );
+    }
+
+    #[test]
+    fn earlier_pattern_survives_both_legal_and_illegal_handlers() {
+        for action in ["pass", "return"] {
+            let src = format!(
+                "def f():\n match 1:\n  case _ | 2: pass\n try: pass\n except* E: {action}\n"
+            );
+            let parsed = ruff_python_parser::parse_module(&src).unwrap();
+            let errors = BindingErrors::check(&parsed.syntax().body, &src);
+            assert!(errors.pattern.is_some());
+            assert!(errors.handler.is_none());
+        }
+    }
 
     #[test]
     fn unreachable_case_precedes_errors_inside_its_suite() {

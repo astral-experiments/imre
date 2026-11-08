@@ -10,21 +10,8 @@ pub(super) fn validate(source: &str, assertion: &ast::StmtAssert) -> Result<(), 
     }
     impl<'ast> Visitor<'ast> for Scan<'_> {
         fn visit_expr(&mut self, expr: &'ast ast::Expr) {
-            let forbidden = match expr {
-                ast::Expr::Name(name) => {
-                    name.ctx != ast::ExprContext::Load && name.id == "__debug__"
-                }
-                ast::Expr::Attribute(attr) => {
-                    attr.ctx != ast::ExprContext::Load && attr.attr.as_str() == "__debug__"
-                }
-                _ => false,
-            };
-            if forbidden {
-                self.error = Some(diagnostic_message(
-                    self.source,
-                    expr,
-                    "cannot assign to __debug__",
-                ));
+            if let Some(message) = imre_ast::executable::debug_binding_error(expr) {
+                self.error = Some(diagnostic_message(self.source, expr, message));
             } else if self.error.is_none() {
                 walk_expr(self, expr);
             }

@@ -3539,6 +3539,7 @@ impl Program {
 pub(super) enum SyntaxSpan {
     /// Code generation includes the location tuple in SyntaxError.args.
     InArgs(ruff_text_size::TextRange),
+    Artificial,
     /// Symbol analysis only sets the location attributes.
     InFields(ruff_text_size::TextRange),
 }
@@ -3614,17 +3615,21 @@ impl Context {
         filename: Id,
         lines: &[usize],
     ) -> Result<Error> {
-        let (SyntaxSpan::InArgs(range) | SyntaxSpan::InFields(range)) = span;
         let position = |offset: ruff_text_size::TextSize| {
             let offset = offset.to_usize();
             let line = lines.partition_point(|start| *start <= offset);
             (line as i64, (offset - lines[line - 1] + 1) as i64)
         };
-        let (line, column) = position(range.start());
-        let (end_line, end_column) = position(range.end());
-        let text = self
-            .syntax_program_line(filename, line as usize)
-            .unwrap_or(NONE);
+        let ((line, column), (end_line, end_column), text) = match span {
+            SyntaxSpan::InArgs(range) | SyntaxSpan::InFields(range) => {
+                let start = position(range.start());
+                let text = self
+                    .syntax_program_line(filename, start.0 as usize)
+                    .unwrap_or(NONE);
+                (start, position(range.end()), text)
+            }
+            SyntaxSpan::Artificial => ((-1, 0), (-1, 0), NONE),
+        };
         let msg = self.text(message);
         let line = self.int(line);
         let location = [
@@ -3636,7 +3641,7 @@ impl Context {
             self.int(end_column),
         ];
         let mut error = match span {
-            SyntaxSpan::InArgs(_) => {
+            SyntaxSpan::InArgs(_) | SyntaxSpan::Artificial => {
                 let details = self.alloc(Value::Tuple(location.to_vec()));
                 self.exception("SyntaxError", &[msg, details])
             }
@@ -3974,6 +3979,30 @@ impl Context {
         code.deferred_pattern = bindings
             .pattern
             .map(|issue| Rc::new(std::cell::RefCell::new(issue)));
+        let pending_syntax = |ctx: &mut Self, code: &Program| -> Result<Option<Error>> {
+            let locate = |ctx: &mut Self, message: &str, span| {
+                ctx.located_syntax_error(message, span, filename_id, &lines)
+                    .map(Some)
+            };
+            if let Some((range, message)) = symbol_error {
+                return locate(ctx, message, SyntaxSpan::InFields(range));
+            }
+            if let Some(issue) = bindings.handler {
+                let span = issue
+                    .location
+                    .map_or(SyntaxSpan::Artificial, SyntaxSpan::InArgs);
+                return locate(ctx, issue.message, span);
+            }
+            if let Some(deferred) = &code.deferred_pattern {
+                let (range, message) = &*deferred.borrow();
+                return locate(
+                    ctx,
+                    &message.render(crate::integer_text::check_decimal)?,
+                    SyntaxSpan::InArgs(*range),
+                );
+            }
+            Ok(None)
+        };
         code.scope_flags = inherited;
         code.source_lines = lines.clone();
         code.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
@@ -4026,14 +4055,9 @@ impl Context {
                 });
                 if let Err(error) = lowering {
                     if error.kind == "NotImplementedError"
-                        && let Some((range, message)) = symbol_error
+                        && let Some(issue) = pending_syntax(self, &code)?
                     {
-                        return Err(self.located_syntax_error(
-                            message,
-                            SyntaxSpan::InFields(range),
-                            filename_id,
-                            &lines,
-                        )?);
+                        return Err(issue);
                     }
                     if let Some(span) = error.trace.as_ref().and_then(|trace| trace.pending_syntax)
                     {
@@ -4054,22 +4078,8 @@ impl Context {
             &spellings,
             &|offset| lines.partition_point(|n| *n <= offset) as u32,
         )?;
-        if let Some((range, message)) = symbol_error {
-            return Err(self.located_syntax_error(
-                message,
-                SyntaxSpan::InFields(range),
-                filename_id,
-                &lines,
-            )?);
-        }
-        if let Some(deferred) = &code.deferred_pattern {
-            let (range, message) = &*deferred.borrow();
-            return Err(self.located_syntax_error(
-                &message.render(crate::integer_text::check_decimal)?,
-                SyntaxSpan::InArgs(*range),
-                filename_id,
-                &lines,
-            )?);
+        if let Some(issue) = pending_syntax(self, &code)? {
+            return Err(issue);
         }
         Ok(self.box_source_code(Rc::new(code), None))
     }
@@ -4839,13 +4849,16 @@ impl Context {
         let spellings = string_replacements(source, parsed.tokens());
         let template_expressions =
             imre_ast::strings::template_expressions(source, parsed.tokens(), parsed.syntax());
+        let bindings = imre_ast::executable::BindingErrors::check(&parsed.syntax().body, &input);
         let mut syntax = parsed.into_syntax();
         let [ast::Stmt::FunctionDef(def)] = syntax.body.as_mut_slice() else {
             return Err(Error::new("SystemError", "invalid generator body"));
         };
-        let bindings = imre_ast::executable::BindingErrors::check(&def.body, source);
-        if let Some((_, message)) = bindings.symbol {
+        if let Some((_, message)) = bindings.first_symbol(None) {
             return Err(Error::new("SyntaxError", message));
+        }
+        if let Some(issue) = bindings.handler {
+            return Err(Error::new("SyntaxError", issue.message));
         }
         if let Some((_, message)) = bindings.pattern {
             return Err(Error::new(
