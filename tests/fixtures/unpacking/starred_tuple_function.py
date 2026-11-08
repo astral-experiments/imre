@@ -1,3 +1,7 @@
+class Invoice:
+    fields = (0, *("net", "tax"), 7)
+
+
 def note(events: list[int], n: int) -> int:
     events.append(n)
     return n
@@ -61,3 +65,5 @@ try:
     print(bytes((1, 1 << 65)))
 except ValueError as error:
     print(str(error))
+
+print(Invoice.fields)
