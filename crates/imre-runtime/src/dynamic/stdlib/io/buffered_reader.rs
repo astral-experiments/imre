@@ -895,12 +895,12 @@ pub(super) fn call(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> 
                     _ => "read of closed file",
                 },
             )?;
-            if name == "read"
-                && size == 0
-                && reader
-                    .update
-                    .as_ref()
-                    .is_some_and(|u| u.terminal_raw_pos.is_some())
+            // Zero-length reads can finish before entering a read-only buffer lock.
+            if size == 0
+                && match &reader.update {
+                    None => name != "peek",
+                    Some(update) => name == "read" && update.terminal_raw_pos.is_some(),
+                }
             {
                 return Ok(ctx.alloc(Value::Bytes(Vec::new())));
             }
