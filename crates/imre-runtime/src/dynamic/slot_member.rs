@@ -779,7 +779,10 @@ impl Context {
         };
         let finalizing = self.heap.get(owner).io_kind() == Some("TextIOWrapper")
             && self.str_value(name)? == "_finalizing";
-        if matches!(self.heap.get(receiver), Value::Instance { class, .. } if self.direct_subclass(*class, owner))
+        if matches!(storage, SlotStorage::Exception(_, _))
+            && matches!(self.heap.get(receiver), Value::Raised(error) if self.raised_error_matches(error, owner))
+            || !matches!(storage, SlotStorage::Exception(_, _))
+                && matches!(self.heap.get(receiver), Value::Instance { class, .. } if self.direct_subclass(*class, owner))
             || matches!(storage, SlotStorage::Module(_))
                 && matches!(self.heap.get(receiver), Value::Module { constructor: Some(class), .. } if self.direct_subclass(*class, owner))
         {
@@ -812,6 +815,10 @@ impl Context {
 
     pub(super) fn read_slot_member(&mut self, member: Id, receiver: Id) -> Result<Id> {
         let (name, finalizing, storage) = self.check_slot_receiver(member, receiver)?;
+        if let SlotStorage::Exception(kind, index) = storage {
+            let field = super::exception_members::names(kind)[index];
+            return super::exception_members::read(self, kind, field, receiver);
+        }
         if let SlotStorage::ReadOnlyText(text) = storage {
             return Ok(self.text(self.str_value(text)?.to_owned()));
         }
@@ -862,6 +869,10 @@ impl Context {
         value: Option<Id>,
     ) -> Result<()> {
         let (name, finalizing, storage) = self.check_slot_receiver(member, receiver)?;
+        if let SlotStorage::Exception(kind, index) = storage {
+            let field = super::exception_members::names(kind)[index];
+            return super::exception_members::write(self, kind, field, receiver, value);
+        }
         if matches!(storage, SlotStorage::ReadOnlyText(_)) {
             return Err(Error::new("AttributeError", "readonly attribute"));
         }

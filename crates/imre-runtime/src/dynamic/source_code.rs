@@ -3573,20 +3573,20 @@ pub(super) enum SyntaxSpan {
     InFields(ruff_text_size::TextRange),
 }
 
+pub(super) const SYNTAX_MEMBERS: &[&str] = &[
+    "msg",
+    "filename",
+    "lineno",
+    "offset",
+    "text",
+    "end_lineno",
+    "end_offset",
+    "print_file_and_line",
+    "_metadata",
+];
+
 pub(super) fn syntax_member(name: &str) -> Option<usize> {
-    [
-        "msg",
-        "filename",
-        "lineno",
-        "offset",
-        "text",
-        "end_lineno",
-        "end_offset",
-        "print_file_and_line",
-        "_metadata",
-    ]
-    .iter()
-    .position(|field| *field == name)
+    SYNTAX_MEMBERS.iter().position(|field| *field == name)
 }
 
 impl Context {

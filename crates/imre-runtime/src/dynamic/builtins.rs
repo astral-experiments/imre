@@ -1,5 +1,6 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
+use super::{attribute_name::AttributeName, calls::ObjectAttribute};
 use imre_ast::providers::BUILTIN_FUNCTIONS;
 
 use super::Context;
@@ -1432,10 +1433,11 @@ fn set_attribute(
         )));
     }
     let attr_name = attribute_name(ctx, *attr)?;
+    let attr = AttributeName::from_lookup(&attr_name, Some(*attr));
     if owner.is_some() {
-        ctx.default_set_attr(*obj, &attr_name, *value)?;
+        ctx.default_object_attribute(*obj, attr, ObjectAttribute::Edit(Some(*value)))?;
     } else {
-        ctx.set_named_attr(*obj, &attr_name, Some(*attr), *value)?;
+        ctx.set_named_attr(*obj, attr, *value)?;
     }
     Ok(NONE)
 }
@@ -1470,10 +1472,11 @@ fn delete_attribute(
         return Err(type_error("can't apply this __delattr__ to type object"));
     }
     let name = attribute_name(ctx, *attr)?;
+    let attr = AttributeName::from_lookup(&name, Some(*attr));
     if base {
-        ctx.default_delete_attr(*obj, &name)?;
+        ctx.default_object_attribute(*obj, attr, ObjectAttribute::Edit(None))?;
     } else {
-        ctx.delete_named_attr(*obj, &name, Some(*attr))?;
+        ctx.delete_named_attr(*obj, attr)?;
     }
     Ok(NONE)
 }
@@ -1825,7 +1828,11 @@ pub(super) fn call(
         return if owner == "super" {
             ctx.super_getattribute(object, &attr)
         } else {
-            ctx.default_get_attr(object, &attr)
+            ctx.default_object_attribute(
+                object,
+                AttributeName::from_lookup(&attr, Some(*key)),
+                ObjectAttribute::Get,
+            )
         };
     }
     if matches!(name, "setattr" | "object.__setattr__" | "type.__setattr__") {
@@ -2761,7 +2768,11 @@ pub(super) fn call(
             arity(name, args, 2, if name == "getattr" { 3 } else { 2 })?;
             let attr = attribute_name(ctx, args[1])?;
             let report_missing = name == "getattr" && args.len() == 2;
-            match ctx.lookup_attribute(args[0], &attr, Some(args[1]), report_missing) {
+            match ctx.lookup_attribute(
+                args[0],
+                AttributeName::from_lookup(&attr, Some(args[1])),
+                report_missing,
+            ) {
                 Ok(_) if name == "hasattr" => Ok(TRUE),
                 Err(e) if name == "hasattr" && ctx.is_attribute_error(&e) => Ok(FALSE),
                 Err(e) if args.len() == 3 && ctx.is_attribute_error(&e) => Ok(args[2]),

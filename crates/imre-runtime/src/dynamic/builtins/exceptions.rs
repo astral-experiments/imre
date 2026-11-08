@@ -245,7 +245,11 @@ impl Context {
             Err(error) if self.is_attribute_error(&error) => {
                 let notes = self.alloc(Value::List(Vec::new()));
                 let mark = self.heap.temporary_mark();
-                let result = self.set_named_attr(exception, "__notes__", Some(key), notes);
+                let result = self.set_named_attr(
+                    exception,
+                    super::AttributeName::from_lookup("__notes__", Some(key)),
+                    notes,
+                );
                 self.heap.release_temporaries_since(mark);
                 result?;
                 notes

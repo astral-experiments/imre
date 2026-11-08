@@ -12,6 +12,7 @@ mod async_generator;
 #[cfg(target_os = "linux")]
 mod at_fork;
 mod atexit;
+mod attribute_name;
 mod builtins;
 mod calls;
 mod class_annotations;
@@ -25,6 +26,7 @@ mod displayhook;
 mod enums;
 mod excepthook;
 mod exception_group;
+mod exception_members;
 mod ffi;
 mod finalizers;
 mod frame_locals;
@@ -3170,6 +3172,19 @@ impl Context {
                 self.builtin(base);
             }
             let mut entries = Vec::new();
+            for (index, field) in exception_members::names(kind).iter().enumerate() {
+                let field = self.heap.code_name(field);
+                let member = self.alloc(Value::SlotMember {
+                    owner: value,
+                    name: field,
+                    storage: SlotStorage::Exception(kind, index),
+                });
+                entries.push((field, member));
+            }
+            if kind == imre_ast::exceptions::Kind::OSError {
+                let member = self.alloc(Value::LayoutDescriptor(value, "characters_written"));
+                entries.push((self.heap.code_name("characters_written"), member));
+            }
             for slot in ["__new__", "__init__"] {
                 if builtins::declares_exception_constructor(kind, slot) {
                     let method = self.builtin(&format!("{name}.{slot}"));
