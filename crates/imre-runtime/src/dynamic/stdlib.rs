@@ -653,11 +653,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_weakref", name) if let Some(value) = super::weakref::export(ctx, name) => value,
         ("_thread", "_local") => ctx.builtin(super::thread_local::CLASS),
         ("re", name) if regex::is_flag_attribute(name) => regex::flag_attribute(ctx, name)?,
-        (
-            "traceback",
-            "_frame_locals" | "_tb_position" | "clear_frames" | "format_exc" | "format_exception"
-            | "print_exc" | "print_exception",
-        ) => ctx.builtin(&format!("traceback.{name}")),
+        ("traceback", "_tb_position") => ctx.builtin("traceback._tb_position"),
         ("struct", "Struct") | ("functools", "partial") => ctx.builtin(&format!("{module}.{name}")),
         ("types", "MappingProxyType") => ctx.builtin("mappingproxy"),
         ("types", "ModuleType") => ctx.builtin("module"),
@@ -950,7 +946,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "encoder_call",
         )
         | ("_imre_linecache", "source_lines")
-        | ("_imre_unittest", "format_exception")
         | (
             "_imre_pyexpat",
             "version_info"
@@ -1386,27 +1381,11 @@ pub(super) fn call(
         ctx.heap.clear_frame(frame)?;
         return Ok(NONE);
     }
-    if name == "_imre_unittest.format_exception" {
-        let ([kind, value, tb, locals], []) = (args, kwargs) else {
-            return Err(Error::new(
-                "TypeError",
-                "_format_exception() expects four positional arguments",
-            ));
-        };
-        return traceback::format_result(ctx, *kind, *value, *tb, *locals);
-    }
-    if name == "traceback._frame_locals" {
-        let [frame] = required_arguments("_frame_locals", ["frame"], args, kwargs)?;
-        return traceback::frame_locals(ctx, frame);
-    }
     if name == "traceback._tb_position" {
         let [tb] = required_arguments("_tb_position", ["tb"], args, kwargs)?;
         return Ok(traceback::tb_position(ctx, tb));
     }
-    if name == "traceback.clear_frames" {
-        let [tb] = required_arguments("clear_frames", ["tb"], args, kwargs)?;
-        return traceback::clear_frames(ctx, tb);
-    }
+
     if let Some(method) = name.strip_prefix("collections.defaultdict.")
         && matches!(method, "__missing__" | "copy" | "__copy__" | "__reduce__")
     {
@@ -3338,10 +3317,6 @@ pub(super) fn call(
         "match.start" | "match.end" | "match.span" => (2, &[]),
         "scanner.match" | "scanner.search" => (1, &[]),
         "sys.exc_info" | "sys.exception" => (0, &[]),
-        "traceback.print_exc" => return traceback::print_active(ctx, args, kwargs),
-        "traceback.format_exc" => return traceback::format_active(ctx, args, kwargs),
-        "traceback.format_exception" => return traceback::format(ctx, args, kwargs),
-        "traceback.print_exception" => (6, &["value", "tb", "limit", "file", "chain", "colorize"]),
         "sys.exit"
         | "site._get_path"
         | "os.confstr"
@@ -3372,7 +3347,6 @@ pub(super) fn call(
                 name == "_string.formatter_field_name_split",
             );
         }
-        "traceback.print_exception" => return traceback::print(ctx, args, kwargs),
         _ if urlsafe => {
             let [id] = required_arguments(name.trim_start_matches("base64."), ["s"], args, kwargs)?;
             let decode = name == "base64.urlsafe_b64decode";

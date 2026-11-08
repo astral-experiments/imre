@@ -9,7 +9,7 @@ use icu_properties::{CodePointMapData, props::EastAsianWidth};
 
 use crate::dynamic::value::{TracebackAnchor, TracebackSpan};
 
-use super::{Context, Error, Id, NONE, Result, Value, argument, option};
+use super::{Context, Error, Id, NONE, Result, Value};
 
 /// Traceback text is converted to a Python object only at the public return or write boundary.
 #[derive(PartialEq, Eq, Hash)]
@@ -57,7 +57,6 @@ impl<'a> TraceText<'a> {
 }
 
 struct FrameLine<'a> {
-    locals: &'a str,
     file: TraceText<'a>,
     path: Option<&'a Path>,
     embedded_source: Option<&'a str>,
@@ -111,7 +110,6 @@ impl<'a> FrameLine<'a> {
         code: Id,
         line: i64,
         span: Option<TracebackSpan>,
-        locals: &'a str,
         path: Option<&'a Path>,
     ) -> Result<Self> {
         let code = ctx.code_object(code);
@@ -138,7 +136,6 @@ impl<'a> FrameLine<'a> {
             None
         };
         Ok(Self {
-            locals,
             file,
             path,
             embedded_source,
@@ -213,19 +210,6 @@ impl<'a> FrameLine<'a> {
     }
 }
 
-/// Capture the bindings that FrameSummary will immediately convert to representations.
-pub(super) fn frame_locals(ctx: &mut Context, frame: Id) -> Result<Id> {
-    match *ctx.heap.get(frame) {
-        Value::PythonFrame {
-            unoptimized_locals: Some(namespace),
-            ..
-        } => Ok(namespace),
-        Value::PythonFrame { scope: NONE, .. } => Ok(ctx.dict(Vec::new())),
-        Value::PythonFrame { scope, code, .. } => ctx.locals_for_code(scope, code),
-        _ => ctx.lookup_attr(frame, "f_locals"),
-    }
-}
-
 /// Return the recorded line and expression byte range of a native traceback node.
 pub(super) fn tb_position(ctx: &mut Context, tb: Id) -> Id {
     let Value::Traceback { lineno, span, .. } = *ctx.heap.get(tb) else {
@@ -247,105 +231,6 @@ pub(super) fn tb_position(ctx: &mut Context, tb: Id) -> Id {
         None => vec![line, NONE, NONE, NONE],
     };
     ctx.alloc(Value::Tuple(positions))
-}
-
-/// Visit the public traceback protocol, ignoring frames that cannot be cleared yet.
-pub(super) fn clear_frames(ctx: &mut Context, mut tb: Id) -> Result<Id> {
-    let runtime_error = ctx.builtin("RuntimeError");
-    while tb != NONE {
-        let attempt = (|| {
-            let frame = ctx.lookup_attr(tb, "tb_frame")?;
-            let clear = ctx.lookup_attr(frame, "clear")?;
-            ctx.call(clear, Vec::new(), Vec::new())
-        })();
-        if let Err(err) = attempt
-            && !ctx.raised_error_matches(&err, runtime_error)
-        {
-            return Err(err);
-        }
-        tb = ctx.lookup_attr(tb, "tb_next")?;
-    }
-    Ok(NONE)
-}
-
-pub(super) fn print_active(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    call_with_active_exception(
-        ctx,
-        args,
-        kwargs,
-        "print_exc",
-        "print_exception",
-        [
-            ("limit", NONE),
-            ("file", NONE),
-            ("chain", super::super::TRUE),
-        ],
-    )?;
-    Ok(NONE)
-}
-
-pub(super) fn format_active(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let parts = call_with_active_exception(
-        ctx,
-        args,
-        kwargs,
-        "format_exc",
-        "format_exception",
-        [("limit", NONE), ("chain", super::super::TRUE)],
-    )?;
-    ctx.heap.keep(parts);
-    let empty = ctx.text("");
-    let join = ctx.lookup_attr(empty, "join")?;
-    ctx.call(join, vec![parts], Vec::new())
-}
-
-fn call_with_active_exception<const N: usize>(
-    ctx: &mut Context,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-    name: &str,
-    target: &str,
-    mut parameters: [(&str, Id); N],
-) -> Result<Id> {
-    for ((_, value), arg) in parameters.iter_mut().zip(args) {
-        *value = *arg;
-    }
-    for (key, argument) in kwargs {
-        let Some(index) = parameters.iter().position(|(param, _)| param == key) else {
-            return Err(Error::new(
-                "TypeError",
-                format!("{name}() got an unexpected keyword argument '{key}'"),
-            ));
-        };
-        if index < args.len() {
-            return Err(Error::new(
-                "TypeError",
-                format!("{name}() got multiple values for argument '{key}'"),
-            ));
-        }
-        parameters[index].1 = *argument;
-    }
-    if args.len() > N {
-        return Err(Error::new(
-            "TypeError",
-            format!(
-                "{name}() takes from 0 to {N} positional arguments but {} were given",
-                args.len()
-            ),
-        ));
-    }
-    let traceback = ctx.module("traceback")?;
-    let function = ctx.lookup_attr(traceback, target)?;
-    // Looking up the current exception can replace the callable and trigger collection.
-    ctx.heap.keep(function);
-    let sys = ctx.module("sys")?;
-    let current = ctx.lookup_attr(sys, "exception")?;
-    let exception = ctx.call(current, Vec::new(), Vec::new())?;
-    let options = parameters
-        .into_iter()
-        .map(|(name, value)| (name.to_owned(), value))
-        .collect();
-    ctx.call(function, vec![exception], options)
 }
 
 /// Find the exception that precedes this one in its displayed traceback.
@@ -407,101 +292,30 @@ fn print_uncaught(ctx: &mut Context, exception: Id) -> Result<Id> {
                 }
             })
         });
-    let options = [
-        ("file".to_owned(), file),
-        ("limit".to_owned(), ctx.int(-limit.max(0))),
-    ];
-    print(ctx, &[exception], &options)
-}
-
-fn render(
-    ctx: &mut Context,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-    chain_index: usize,
-) -> Result<Vec<TraceText<'static>>> {
-    if let Some(colorize) = kwargs
-        .iter()
-        .find(|(key, _)| key == "colorize")
-        .map(|(_, value)| *value)
-        && ctx.truth(colorize)?
-    {
-        return Err(Error::new(
-            "NotImplementedError",
-            "colored tracebacks are not supported",
-        ));
-    }
-    let exc = argument(args, 0)?;
-    let value = option(args, 1, kwargs, "value")?;
-    let tb = option(args, 2, kwargs, "tb")?;
-    let (value, tb) = match (value, tb) {
-        (None, None) if exc == NONE => (NONE, NONE),
-        (None, None) if matches!(ctx.heap.get(exc), Value::Raised(_)) => {
-            (exc, ctx.exception_traceback(exc)?)
-        }
-        (None, None) => {
-            return Err(Error::new(
-                "TypeError",
-                format!("Exception expected for value, {} found", ctx.type_name(exc)),
-            ));
-        }
-        (Some(value), Some(tb)) => (value, tb),
-        _ => {
-            return Err(Error::new(
-                "ValueError",
-                "Both or neither of value and tb must be given",
-            ));
-        }
+    let tb = if exception == NONE {
+        NONE
+    } else {
+        ctx.exception_traceback(exception)?
     };
-    let limit = traceback_limit(ctx, option(args, 3, kwargs, "limit")?)?;
-    let chain = option(args, chain_index, kwargs, "chain")?
-        .map(|v| ctx.truth(v))
-        .transpose()?
-        .unwrap_or(true);
-    render_chain(ctx, value, tb, limit, chain, None)
-}
-
-fn traceback_limit(ctx: &mut Context, limit: Option<Id>) -> Result<Option<i64>> {
-    Ok(match limit.filter(|&l| l != NONE) {
-        Some(l) => Some(ctx.as_integer(l)?),
-        None => {
-            let sys = ctx.module("sys")?;
-            match ctx.lookup_attr(sys, "tracebacklimit") {
-                Ok(l) if l != NONE => Some(ctx.as_integer(l)?.max(0)),
-                Ok(_) => None,
-                Err(error) if error.kind == "AttributeError" => None,
-                Err(error) => return Err(error),
-            }
-        }
-    })
-}
-
-/// Render one boxed TestResult report from its supplied exception tuple.
-pub(super) fn format_result(
-    ctx: &mut Context,
-    kind: Id,
-    value: Id,
-    tb: Id,
-    locals: Id,
-) -> Result<Id> {
-    let limit = traceback_limit(ctx, None)?;
-    let lines = render_chain(ctx, value, tb, limit, true, Some((kind, locals)))?;
-    let values = lines
-        .into_iter()
-        .map(|line| line.into_python(ctx))
-        .collect();
-    Ok(ctx.alloc(Value::List(values)))
+    let lines = render_chain(ctx, exception, tb, -limit.max(0))?;
+    // A write callback can replace sys.stderr and trigger collection before the next line.
+    for line in lines {
+        let write = ctx.lookup_attr(file, "write")?;
+        let line = line.into_python(ctx);
+        ctx.call(write, vec![line], Vec::new())?;
+        let write = ctx.lookup_attr(file, "write")?;
+        let end = ctx.text("");
+        ctx.call(write, vec![end], Vec::new())?;
+    }
+    Ok(NONE)
 }
 
 fn render_chain(
     ctx: &mut Context,
     value: Id,
     tb: Id,
-    limit: Option<i64>,
-    chain: bool,
-    report: Option<(Id, Id)>,
+    limit: i64,
 ) -> Result<Vec<TraceText<'static>>> {
-    let mut kind = report.map(|(kind, _)| kind);
     let mut sections = Vec::new();
     let mut seen = std::collections::HashSet::from([value]);
     let (mut current, mut current_tb) = (value, tb);
@@ -511,14 +325,8 @@ fn render_chain(
         // change the cause, drop references, and run Python's garbage collector.
         ctx.heap.keep(current);
         let mut lines = Vec::new();
-        if let Some((_, locals)) = report
-            && locals != NONE
-        {
-            format_result_frames(ctx, current_tb, limit, locals, &mut lines)?;
-        } else {
-            format_frames(ctx, current_tb, limit, &mut lines)?;
-        }
-        format_exception_line(ctx, current, kind.take(), &mut lines)?;
+        format_frames(ctx, current_tb, Some(limit), &mut lines)?;
+        format_exception_line(ctx, current, &mut lines)?;
         if let Some(separator) = separator {
             lines.push(TraceText::Scalar(separator.to_owned().into()));
         }
@@ -536,68 +344,7 @@ fn render_chain(
         current_tb = ctx.exception_traceback(prior)?;
         separator = Some(message);
     }
-    if !chain {
-        sections.truncate(1);
-    }
     Ok(sections.into_iter().rev().flatten().collect())
-}
-
-pub(super) fn format(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    for (name, _) in kwargs {
-        if ["value", "tb", "limit", "chain"]
-            .iter()
-            .take(args.len().saturating_sub(1))
-            .any(|param| param == name)
-        {
-            return Err(Error::new(
-                "TypeError",
-                format!("format_exception() got multiple values for argument '{name}'"),
-            ));
-        }
-    }
-    if args.is_empty() {
-        return Err(Error::new(
-            "TypeError",
-            "format_exception() missing 1 required positional argument: 'exc'",
-        ));
-    }
-    if args.len() > 5 {
-        return Err(Error::new(
-            "TypeError",
-            format!(
-                "format_exception() takes from 1 to 5 positional arguments but {} were given",
-                args.len()
-            ),
-        ));
-    }
-    let lines = render(ctx, args, kwargs, 4)?;
-    let values = lines
-        .into_iter()
-        .map(|line| line.into_python(ctx))
-        .collect();
-    Ok(ctx.alloc(Value::List(values)))
-}
-
-pub(super) fn print(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let lines = render(ctx, args, kwargs, 5)?;
-    let file = match option(args, 4, kwargs, "file")?.filter(|&f| f != NONE) {
-        Some(file) => file,
-        None => {
-            let sys = ctx.module("sys")?;
-            ctx.lookup_attr(sys, "stderr")?
-        }
-    };
-    // A write callback can replace sys.stderr and trigger collection before the next line.
-    ctx.heap.keep(file);
-    for line in lines {
-        let write = ctx.lookup_attr(file, "write")?;
-        let line = line.into_python(ctx);
-        ctx.call(write, vec![line], Vec::new())?;
-        let write = ctx.lookup_attr(file, "write")?;
-        let end = ctx.text("");
-        ctx.call(write, vec![end], Vec::new())?;
-    }
-    Ok(NONE)
 }
 
 /// Append Python traceback frames without rendering the exception or its chain.
@@ -621,7 +368,7 @@ pub(in crate::dynamic) fn format_frames(
         let Value::PythonFrame { code, .. } = *ctx.heap.get(frame) else {
             unreachable!()
         };
-        stack.push((code, lineno, span, String::new()));
+        stack.push((code, lineno, span));
         tb = next;
     }
     if let Some(n) = limit {
@@ -637,50 +384,7 @@ pub(in crate::dynamic) fn format_frames(
     captured_frames(ctx, &stack, lines)
 }
 
-/// Capture each selected frame's locals before advancing its mutable traceback link.
-fn format_result_frames(
-    ctx: &mut Context,
-    mut tb: Id,
-    limit: Option<i64>,
-    locals: Id,
-    lines: &mut Vec<TraceText<'static>>,
-) -> Result<()> {
-    // TestResult uses sys.tracebacklimit, which traceback_limit clamps to zero or above.
-    debug_assert!(limit.is_none_or(|n| n >= 0));
-    let limit = limit
-        .and_then(|n| usize::try_from(n).ok())
-        .unwrap_or(usize::MAX);
-    let mut captured = Vec::new();
-    while tb != NONE && captured.len() < limit {
-        let Value::Traceback {
-            frame,
-            lineno,
-            span,
-            ..
-        } = *ctx.heap.get(tb)
-        else {
-            return Err(Error::new("TypeError", "expected a traceback"));
-        };
-        let Value::PythonFrame { code, .. } = *ctx.heap.get(frame) else {
-            unreachable!()
-        };
-        ctx.heap.reserve_temporaries(1)?;
-        let mark = ctx.heap.temporary_mark();
-        ctx.heap.keep(tb);
-        let text = ctx.call(locals, vec![frame], Vec::new())?;
-        let text = ctx.str_value(text)?.to_owned();
-        // A repr can detach the rest of the stack or replace it and run gc.collect().
-        let Value::Traceback { next, .. } = *ctx.heap.get(tb) else {
-            unreachable!()
-        };
-        tb = next;
-        ctx.heap.keep_call_result(mark, code);
-        captured.push((code, lineno, span, text));
-    }
-    captured_frames(ctx, &captured, lines)
-}
-
-type CapturedFrame = (Id, i64, Option<TracebackSpan>, String);
+type CapturedFrame = (Id, i64, Option<TracebackSpan>);
 
 fn captured_frames(
     ctx: &mut Context,
@@ -697,9 +401,9 @@ fn captured_frames(
     }
     let stack = captured
         .iter()
-        .map(|(code, line, span, locals)| {
+        .map(|(code, line, span)| {
             let path = paths[&ctx.code_object(*code).filename].as_deref();
-            FrameLine::new(ctx, *code, *line, *span, locals, path)
+            FrameLine::new(ctx, *code, *line, *span, path)
         })
         .collect::<Result<Vec<_>>>()?;
     render_frame_lines(&stack, lines);
@@ -727,8 +431,7 @@ fn render_frame_lines(stack: &[FrameLine<'_>], lines: &mut Vec<TraceText<'static
                         .or_insert_with(|| std::fs::read_to_string(frame.path?).ok())
                         .as_deref()
                 });
-                let mut suffix = frame.formatted_suffix(source);
-                suffix.push_str(frame.locals);
+                let suffix = frame.formatted_suffix(source);
                 lines.push(frame.file.surrounded("  File \"", &suffix));
             }
             if same > 3 {
@@ -749,7 +452,6 @@ fn render_frame_lines(stack: &[FrameLine<'_>], lines: &mut Vec<TraceText<'static
 fn format_exception_line(
     ctx: &mut Context,
     value: Id,
-    kind: Option<Id>,
     lines: &mut Vec<TraceText<'static>>,
 ) -> Result<()> {
     let convert = ctx.builtin("str");
@@ -757,16 +459,7 @@ fn format_exception_line(
         Ok(result) => TraceText::read(ctx, result)?.owned(),
         Err(_) => TraceText::Scalar("<exception str() failed>".into()),
     };
-    let (module, dot, name) = match kind {
-        Some(NONE) => ("", "", "None"),
-        Some(kind) => {
-            let name = ctx.lookup_attr(kind, "__qualname__")?;
-            ctx.heap.keep(name);
-            let module = ctx.lookup_attr(kind, "__module__")?;
-            label_parts(ctx, module, name)?
-        }
-        None => exception_label(ctx, value)?,
-    };
+    let (module, dot, name) = exception_label(ctx, value)?;
     let separator = if matches!(&text, TraceText::Scalar(s) if s.is_empty()) {
         ""
     } else {
