@@ -67,8 +67,16 @@ impl Context {
     pub(super) fn register_instance_finalizer(&mut self, id: Id, class: Option<Id>) {
         if let Some(class) = class
             && self.class_attr(class, "__del__").is_some()
+            && !self.heap.get(class).is_exact_memory_stream()
         {
             self.heap.register_finalizer(id);
+        }
+    }
+
+    /// A stream's Python-owned attributes can make its deallocation order observable.
+    pub(super) fn register_stream_with_attributes(&mut self, owner: Id, class: Id) {
+        if self.heap.get(class).is_exact_memory_stream() {
+            self.heap.register_finalizer(owner);
         }
     }
 

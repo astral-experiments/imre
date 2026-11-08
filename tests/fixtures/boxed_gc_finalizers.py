@@ -1,4 +1,5 @@
 import gc
+import io
 import sys
 from weakref import ref
 
@@ -238,7 +239,36 @@ def check_generator_frame_release():
     assert held.name == "held"
 
 
+class CloseMember:
+    def __call__(self):
+        pass
+
+    def __del__(self):
+        events.append("member")
+
+
+def check_memory_stream(cls):
+    stream = cls()
+    witness = ref(stream, weak_callback)
+    stream.close = CloseMember()
+    del stream
+    assert witness() is None and events == ["member", "weak"]
+    events.clear()
+
+    stream = cls()
+    witness = ref(stream, weak_callback)
+    cycle = [stream]
+    cycle.append(cycle)
+    del cycle, stream
+    assert witness() is not None
+    gc.collect()
+    assert witness() is None and events == ["weak"]
+    events.clear()
+
+
 def current():
+    for stream_class in (io.BytesIO, io.StringIO):
+        check_memory_stream(stream_class)
     check_generator_frame_release()
     check_star_import_replacement()
     with open(__file__, encoding="utf-8") as retained:

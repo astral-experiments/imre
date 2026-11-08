@@ -6530,6 +6530,7 @@ impl Context {
 
     /// Lazily expose the dictionary that subsequent ordinary attribute operations use.
     pub(super) fn instance_dictionary(&mut self, obj: Id, class: Id) -> Id {
+        self.register_stream_with_attributes(obj, class);
         if let Value::Instance {
             namespace: Some(dictionary),
             ..
@@ -6551,6 +6552,7 @@ impl Context {
     }
 
     pub(super) fn replace_instance_dictionary(&mut self, obj: Id, class: Id, new: Option<Id>) {
+        self.register_stream_with_attributes(obj, class);
         let removed = self.take_instance_fields(obj, class);
         let Value::Instance { namespace, .. } = self.heap.get_mut(obj) else {
             unreachable!()
@@ -7126,6 +7128,7 @@ impl Context {
                 if let Some(storage) = storage {
                     return self.update_dictionary_field(obj, storage, name, Some(value));
                 }
+                self.register_stream_with_attributes(obj, class);
             }
         }
         let object_class = self.builtins.get("object").copied();
