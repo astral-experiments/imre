@@ -275,7 +275,9 @@ impl Context {
         }
         if attr.is_none()
             && name == "__reduce_ex__"
-            && self.own_class_attr(class, "__reduce__").is_some()
+            && self
+                .find_in_mro(class, |base| self.own_class_attr(base, "__reduce__"))
+                .is_some()
         {
             // Exact native classes have no stored MRO but inherit object's delegating reducer.
             return self.builtins.get("object.__reduce_ex__").copied();
@@ -535,6 +537,72 @@ impl Context {
         };
         error.tracing().dictionary = Some(dictionary);
         dictionary
+    }
+
+    /// Read constructor arguments without consulting a subclass's Python attributes.
+    pub(super) fn exception_reduction_arguments(&mut self, object: Id) -> Result<Id> {
+        if let Value::Raised(error) = self.heap.get(object)
+            && let Some(args) = error.args
+        {
+            return Ok(args);
+        }
+        if let Some(args) = self.os_attribute(object, "args")? {
+            return Ok(args);
+        }
+        let Value::Raised(error) = self.heap.get(object) else {
+            unreachable!("validated BaseException receiver");
+        };
+        Ok(self.exception_argument_tuple(object, error.clone()))
+    }
+
+    /// The reducer includes an allocated dictionary even when it is empty.
+    pub(super) fn exception_reduction_state(&self, object: Id) -> Result<Option<Id>> {
+        let Value::Raised(error) = self.heap.get(object) else {
+            unreachable!("validated BaseException receiver");
+        };
+        // Raised instances currently store Python slot values in the same dictionary.
+        if error.class().is_some_and(|class| {
+            self.find_in_mro(class, |base| self.declares_named_slots(base).then_some(()))
+                .is_some()
+        }) {
+            return Err(Error::new(
+                "NotImplementedError",
+                "native pickle cannot separate exception slots from instance state",
+            ));
+        }
+        Ok(error.trace.as_ref().and_then(|trace| trace.dictionary))
+    }
+
+    fn reduce_exception(&mut self, object: Id) -> Result<Id> {
+        let state = self.exception_reduction_state(object)?;
+        let class = self.exact_type(object)?;
+        let args = self.exception_reduction_arguments(object)?;
+        let mut fields = vec![class, args];
+        fields.extend(state);
+        Ok(self.alloc(Value::Tuple(fields)))
+    }
+
+    /// Restore state in insertion order, allowing each attribute setter to mutate the dictionary.
+    fn set_exception_state(&mut self, object: Id, state: Id) -> Result<()> {
+        if state == NONE {
+            return Ok(());
+        }
+        let storage = self
+            .dict_storage(state)
+            .ok_or_else(|| Error::new("TypeError", "state is not a dictionary"))?;
+        let mut cursor = 0;
+        while let Some((pos, key, value)) = self.stored_entries(storage).at(cursor) {
+            cursor = pos + 1;
+            let name = builtins::attribute_name(self, key)?;
+            let mark = self.heap.temporary_mark();
+            self.heap.keep(key);
+            self.heap.keep(value);
+            let result =
+                self.set_named_attr(object, AttributeName::from_lookup(&name, Some(key)), value);
+            self.heap.release_temporaries_since(mark);
+            result?;
+        }
+        Ok(())
     }
 
     /// Keep the dictionary absent until first used, so wrapping an untouched partial can flatten it.
@@ -5540,7 +5608,10 @@ impl Context {
             if let Some(field) = self.dictionary_field(dictionary, name)? {
                 return Ok(field);
             }
-            if name == "add_note" {
+            if matches!(
+                name,
+                "add_note" | "__reduce__" | "__reduce_ex__" | "__setstate__"
+            ) {
                 let class = self.exact_type(obj)?;
                 return self.instance_attribute(obj, class, None, name);
             }
@@ -7946,6 +8017,31 @@ impl Context {
                     .is_some() =>
             {
                 self.native_sizeof(name.trim_end_matches(".__sizeof__"), &args, &kwargs)
+            }
+            Value::Native(ref name)
+                if let Some(owner) = name.strip_suffix(".__reduce__")
+                    && builtins::is_exception(owner) =>
+            {
+                let object =
+                    builtins::noargs_method_receiver(self, owner, "__reduce__", &args, &kwargs)?;
+                if owner == "BaseException" {
+                    self.reduce_exception(object)
+                } else {
+                    // These classes declare reducers for additional native fields.
+                    Err(stdlib::pickle::unsupported_reducer(self, object))
+                }
+            }
+            Value::Native(name) if name == "BaseException.__setstate__" => {
+                let (object, rest) = builtins::method_receiver_args(
+                    self,
+                    "BaseException",
+                    "__setstate__",
+                    &args,
+                    &kwargs,
+                )?;
+                let state = builtins::one_positional_arg(&name, rest, &kwargs)?;
+                self.set_exception_state(object, state)?;
+                Ok(NONE)
             }
             Value::Native(name) if name == "object.__getstate__" => {
                 self.object_getstate(&args, &kwargs)

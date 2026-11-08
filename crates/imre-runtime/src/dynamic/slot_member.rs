@@ -72,19 +72,29 @@ impl Context {
             .collect())
     }
 
+    /// Read the declared object slots from the immutable layout, even if Python rebinds __slots__.
+    pub(super) fn declares_named_slots(&self, owner: Id) -> bool {
+        let Value::Class { scope, .. } = self.heap.get(owner) else {
+            return false;
+        };
+        self.scope_data(*scope)
+            .class_namespace
+            .as_deref()
+            .and_then(|layout| layout.slot_names.as_deref())
+            .is_some_and(|names| {
+                names
+                    .iter()
+                    .any(|name| !matches!(name.as_str(), "__dict__" | "__weakref__"))
+            })
+    }
+
     fn check_inherited_member_storage(&self, bases: &[Id]) -> Result<()> {
         for &base in bases {
             let Value::Class { scope, .. } = self.heap.get(base) else {
                 unreachable!()
             };
             let layout = self.scope_data(*scope).class_namespace.as_deref().unwrap();
-            if !layout.member_slots
-                && layout.slot_names.as_deref().is_some_and(|slots| {
-                    slots
-                        .iter()
-                        .any(|s| !matches!(s.as_str(), "__dict__" | "__weakref__"))
-                })
-            {
+            if !layout.member_slots && self.declares_named_slots(base) {
                 return Err(Error::new(
                     "NotImplementedError",
                     "inherited named slots require owner-bound member descriptors",

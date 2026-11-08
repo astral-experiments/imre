@@ -255,8 +255,8 @@ impl BuiltinDescriptor {
             Some(("BaseExceptionGroup", attr)) => {
                 Some(("BaseExceptionGroup", attr, super::exception_group::METHODS))
             }
-            Some(("BaseException", attr)) => {
-                Some(("BaseException", attr, &["add_note", "with_traceback"][..]))
+            Some((owner, attr)) if let Some(kind) = builtins::exception_kind(owner) => {
+                Some((kind.name(), attr, builtins::exception_methods(kind)))
             }
             Some(("member_descriptor", attr)) => {
                 Some(("member_descriptor", attr, super::namedtuple::MEMBER_SLOTS))
@@ -323,6 +323,7 @@ impl BuiltinDescriptor {
                             | "__trunc__"
                             | "__getinitargs__"
                             | "__getnewargs__"
+                            | "__setstate__"
                             | "__reduce__"
                             | "__reduce_ex__"
                             | "__replace__"
@@ -584,7 +585,7 @@ impl BuiltinDescriptor {
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
             super::namespace::CLASS => namespace::instance_class(ctx, receiver).is_some(),
             "frame" => matches!(ctx.heap.get(receiver), Value::PythonFrame { .. }),
-            "BaseException" => matches!(ctx.heap.get(receiver), Value::Raised(_)),
+            owner if builtins::is_exception(owner) => ctx.builtin_slot_accepts(receiver, owner),
             class @ (stdlib::fixed_structseq::SCHED_PARAM
             | stdlib::os::stat::CLASS
             | stdlib::os::stat::VFS_CLASS) => matches!(

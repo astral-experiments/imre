@@ -463,6 +463,9 @@ impl Context {
             #[cfg(target_os = "linux")]
             ("mmap.mmap", Value::Mmap { .. }) => true,
             ("type", _) => self.is_type_object(object),
+            (_, Value::Raised(error)) if builtins::is_exception(owner) => {
+                self.is_builtin_error(error, owner)
+            }
             (weakref::PROXY_TYPE | weakref::CALLABLE_PROXY_TYPE, Value::Weak(wr)) => {
                 wr.kind.class() == owner
             }
@@ -3191,11 +3194,11 @@ impl Context {
                     entries.push((self.heap.code_name(slot), method));
                 }
             }
+            for &slot in builtins::exception_methods(kind) {
+                let method = self.builtin(&format!("{name}.{slot}"));
+                entries.push((self.heap.code_name(slot), method));
+            }
             if name == "BaseException" {
-                for slot in ["add_note", "with_traceback"] {
-                    let method = self.builtin(&format!("{name}.{slot}"));
-                    entries.push((self.heap.code_name(slot), method));
-                }
                 for field in
                     std::iter::once("__dict__").chain(builtins::EXCEPTION_GETSETS.iter().copied())
                 {

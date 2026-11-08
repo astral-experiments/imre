@@ -144,12 +144,13 @@ pub(super) fn exception_kind(name: &str) -> Option<crate::objects::exceptions::K
 pub(super) const EXCEPTION_GETSETS: &[&str] =
     &["args", "__traceback__", "__context__", "__cause__"];
 
-/// Methods declared on BaseException and inherited by every native exception type.
-pub(super) fn base_exception_method(name: &str) -> Option<&'static str> {
-    match name {
-        "add_note" => Some("BaseException.add_note"),
-        "with_traceback" => Some("BaseException.with_traceback"),
-        _ => None,
+/// Native methods declared by each exception class, before MRO lookup.
+pub(super) fn exception_methods(kind: imre_ast::exceptions::Kind) -> &'static [&'static str] {
+    use imre_ast::exceptions::Kind::*;
+    match kind {
+        BaseException => &["add_note", "with_traceback", "__reduce__", "__setstate__"],
+        OSError | AttributeError | ImportError => &["__reduce__"],
+        _ => &[],
     }
 }
 

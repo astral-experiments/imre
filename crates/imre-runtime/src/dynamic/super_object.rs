@@ -512,7 +512,8 @@ impl Context {
     ) -> Result<Option<Id>> {
         if owner != NONE {
             let exception_method = matches!(name, "__new__" | "__init__")
-                || builtins::base_exception_method(name).is_some()
+                || builtins::exception_methods(imre_ast::exceptions::Kind::BaseException)
+                    .contains(&name)
                 || super::exception_group::METHODS.contains(&name);
             let lineage = self.base_lineage(owner, true);
             let after = lineage.iter().skip_while(|&&class| class != start).skip(1);
