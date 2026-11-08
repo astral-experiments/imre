@@ -3747,10 +3747,16 @@ pub(super) struct Frame {
 }
 
 impl Frame {
+    /// The strong handles owned by this activation, in marking order.
+    pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
+        [self.scope, self.code, self.active, self.inherited]
+            .into_iter()
+            .chain(self.object)
+            .chain(self.live.iter().copied())
+    }
+
     pub(super) fn visit(&self, visit: &mut impl VisitReferences) {
-        visit.extend([self.scope, self.code, self.active, self.inherited]);
-        visit.extend(self.object);
-        visit.extend(&self.live);
+        visit.extend(self.roots());
     }
 
     fn source_range(&self, heap: &Heap, position: ExpressionPosition) -> Option<[u32; 4]> {
@@ -5708,6 +5714,7 @@ impl Heap {
                     scope,
                     iterators,
                     protected,
+                    native,
                     ..
                 } if matches!(heap.get(owner), Value::Generator { .. }) => {
                     // The generator owns its scope. A still-bound local is a strong
@@ -5721,6 +5728,9 @@ impl Heap {
                             .chain(iterators.iter().copied())
                             .take(*budget)
                             .any(|value| keeps(heap, value, owner, budget))
+                        || native.as_ref().is_some_and(|saved| {
+                            saved.any_root(*budget, |value| keeps(heap, value, owner, budget))
+                        })
                 }
                 _ => false,
             }
