@@ -1,4 +1,5 @@
 //! Execution state for lazily resumed generator expressions.
+use super::value::Body;
 use super::{Context, Error, FrameOwner, Id, NONE, Result, Value};
 
 impl Context {
@@ -82,10 +83,14 @@ impl Context {
         self.bind(scope, ".0", source);
         let generator = self.new_generator(code, scope, FrameOwner::Function(function));
         if self.code_object(code).flags & imre_ast::code_flags::ASYNC_GENERATOR != 0 {
-            let Value::Generator { iterators, .. } = self.heap.get_mut(generator) else {
-                unreachable!()
-            };
-            iterators.push(source);
+            // Source instructions resume with their explicit cursor stack.
+            // A native suspension acquires its frame-local cursor from .0.
+            if !matches!(self.code_object(code).body, Body::Suspended(_)) {
+                let Value::Generator { iterators, .. } = self.heap.get_mut(generator) else {
+                    unreachable!()
+                };
+                iterators.push(source);
+            }
             Ok(self.async_generator(generator))
         } else {
             self.bind(scope, ".iterator", iter);

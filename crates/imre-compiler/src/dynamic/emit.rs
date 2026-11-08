@@ -456,7 +456,7 @@ enum Body<'a> {
     TypeAlias(&'a ast::Expr),
     Generator(
         &'a ast::ExprGenerator,
-        imre_ast::comprehension::Plan<'a>,
+        &'a imre_ast::comprehension::Plan<'a>,
         indexmap::IndexSet<String>,
     ),
 }
@@ -740,7 +740,7 @@ impl Output {
             Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
             Body::Annotations(entries, class) => f.annotations(&entries, class, false),
             Body::ModuleAnnotations(entries) => f.annotations(&entries, None, true),
-            Body::Generator(_, plan, _) => f.generator_step(&plan),
+            Body::Generator(_, plan, _) => f.generator_step(plan),
             Body::Expression(expr) | Body::YieldingLambda(expr) | Body::TypeAlias(expr) => {
                 f.checkpoint(expr);
                 if matches!(body, Body::TypeAlias(_)) {

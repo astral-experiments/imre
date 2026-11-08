@@ -32,7 +32,7 @@ impl Function<'_, '_> {
                 None,
                 None,
                 None,
-                Body::Generator(generator, plan, names),
+                Body::Generator(generator, &plan, names),
             );
             return self.op("generator", &[&function, &iterator, &targets]);
         }
@@ -70,7 +70,16 @@ impl Function<'_, '_> {
     }
 
     pub(super) fn generator_step(&mut self, plan: &Plan<'_>) {
-        let outer = self.lookup(".iterator");
+        // An LLVM suspension resumes inside this same activation. Its first
+        // entry reads the already-acquired iterator from the implicit argument.
+        if self.native_suspension {
+            self.checkpoint(plan.output.value());
+        }
+        let outer = self.lookup(if self.native_suspension {
+            ".0"
+        } else {
+            ".iterator"
+        });
         self.comprehension_steps(plan, outer, None);
     }
 
@@ -79,7 +88,8 @@ impl Function<'_, '_> {
         let mut iterators = vec![String::new(); plan.depths];
         let mut marks = vec![String::new(); plan.depths];
         let slot = |depth| format!(".iterator.{depth}");
-        if collection.is_some() {
+        let local_cursors = collection.is_some() || self.native_suspension;
+        if local_cursors {
             marks[0] = self.temporary_mark();
         } else if plan.depths > 1 {
             // A yield preserves every active cursor in the frame. Only the
@@ -110,7 +120,7 @@ impl Function<'_, '_> {
                     is_async,
                 } => {
                     let iterator = self.iteration_cursor(iterable, is_async);
-                    if collection.is_some() {
+                    if local_cursors {
                         marks[depth] = self.temporary_mark();
                         iterators[depth] = iterator;
                     } else {
@@ -125,7 +135,7 @@ impl Function<'_, '_> {
                     is_async,
                 } => {
                     let body = self.name("b");
-                    if collection.is_some() {
+                    if local_cursors {
                         self.line(&format!(
                             "call void @imre_dyn_comprehension_step(ptr %ctx, i64 {})",
                             marks[depth]
@@ -170,6 +180,14 @@ impl Function<'_, '_> {
                             self.op("append", &[out, &value]);
                         }
                         self.jump(&labels[resume]);
+                    } else if self.native_suspension {
+                        self.suspend_at(
+                            &value,
+                            super::suspension::Suspension::AsyncYield,
+                            output.value().range(),
+                            &marks[plan.depths - 1],
+                        );
+                        self.jump(&labels[resume]);
                     } else {
                         debug_assert!(matches!(output, Output::Generator(_)));
                         let item = self.op("yielded", &[&value]);
@@ -177,7 +195,7 @@ impl Function<'_, '_> {
                     }
                 }
                 Step::Close { depth, next } => {
-                    if collection.is_none() && depth > 0 {
+                    if !local_cursors && depth > 0 {
                         self.bind(&slot(depth), "0");
                     }
                     self.jump(&labels[next]);

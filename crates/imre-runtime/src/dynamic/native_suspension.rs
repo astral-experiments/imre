@@ -267,14 +267,21 @@ impl Context {
         let frame = self.heap.suspend_native_frame();
         *saved.0.borrow_mut() = Some((state, frame));
         let Value::Generator {
-            running, offset, ..
+            code,
+            running,
+            offset,
+            ..
         } = self.heap.get_mut(generator)
         else {
             unreachable!()
         };
         *running = false;
         *offset = Some(1);
-        self.heap.register_finalizer(owner);
+        let code = *code;
+        // An async generator's public wrapper owns its first-iteration and finalization hooks.
+        if self.code_object(code).flags & imre_ast::code_flags::ASYNC_GENERATOR == 0 {
+            self.heap.register_finalizer(owner);
+        }
         result.map(Some)
     }
 }
@@ -328,6 +335,13 @@ pub(super) unsafe extern "C" fn imre_dyn_suspend_operands(
     let data = unsafe { &mut *activation };
     data.step = Some(match kind {
         0 => Step::Yield(value, mark),
+        1 => {
+            // The async generator operation unwraps an item, while a delegated
+            // await suspension returns its actual event to the event loop.
+            // SAFETY: the running activation borrows this context.
+            let item = unsafe { &mut *data.context }.wrap_async_generator_yield(value);
+            Step::Yield(item, mark)
+        }
         2 => Step::AwaitIterator(value, mark),
         3 => Step::YieldFrom(value, mark),
         _ => {
