@@ -4371,7 +4371,14 @@ impl Context {
                 let devnull = self.text("/dev/null");
                 self.bind(scope, "devnull", devnull);
             }
-            "random" if source.is_none() => stdlib::random::instance::install(self, scope)?,
+            "random" if source.is_none() => {
+                let choices = self.builtin("random._choices");
+                self.bind(scope, "_choices", choices);
+                if self.scope_name(scope, "__builtins__").is_none() {
+                    let builtins = self.default_source_builtins()?;
+                    self.bind(scope, "__builtins__", builtins);
+                }
+            }
             "secrets" if source.is_none() => {
                 let random = self.module("random")?;
                 let class = self.lookup_attr(random, "SystemRandom")?;
@@ -4790,6 +4797,11 @@ impl Context {
             })
         });
         if let Some((path, body, origin)) = source {
+            let native_random = name == "random"
+                && matches!(
+                    body,
+                    importlib::SourceBody::Registered(ModuleInitializer::Builtin(_))
+                );
             let result = match body {
                 importlib::SourceBody::Namespace if self.sources.contains_key("importlib") => {
                     self.lookup_attr(module, "__path__").and_then(|locations| {
@@ -4831,6 +4843,9 @@ impl Context {
             };
             *initializing = false;
             result?;
+            if native_random {
+                stdlib::random::instance::install(self, scope)?;
+            }
             if self.finder_external == NONE
                 && matches!(
                     name,
