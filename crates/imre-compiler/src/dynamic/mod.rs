@@ -1612,10 +1612,16 @@ pub(crate) fn compile(
             .iter()
             .flat_map(|(path, identity, _)| [cwd.join(path), identity.clone()]),
     );
+    // A namespace portion has no initializer. Its registered origin is a directory
+    // that must remain available for the scratch session to add its child modules.
+    let namespace_portions: HashSet<_> = inputs.directories.iter().map(|(path, _)| path).collect();
     crate::analysis::check_native_syntax(
         &root,
         ordinary_graph,
-        sources.iter().chain(&builtins),
+        sources
+            .iter()
+            .chain(&builtins)
+            .filter(|(_, path, _)| !namespace_portions.contains(path)),
         |path| physical_files.contains(path) && !winners.iter().any(|source| source.path == path),
         &mut source_initializers,
     )?;
