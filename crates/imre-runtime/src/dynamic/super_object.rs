@@ -151,6 +151,20 @@ impl Context {
         self.linearize_with(bases, |ctx, base| ctx.base_lineage(base, published))
     }
 
+    /// Exception types expose more native ancestors for method lookup than for allocation.
+    pub(super) fn exception_mro(
+        &mut self,
+        bases: &[Id],
+        ancestors: &[Id],
+        lineage: impl FnMut(&mut Self, Id) -> Vec<Id>,
+    ) -> Result<Option<Vec<Id>>> {
+        if ancestors.iter().any(|&base| matches!(self.heap.get(base), Value::Native(name) if builtins::is_exception(name))) {
+            self.linearize_with(bases, lineage).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Merge either the live base lineages or a proposed hierarchy before it is published.
     pub(super) fn linearize_with(
         &mut self,

@@ -2,12 +2,20 @@
 
 use super::{Context, Error, HashMap, Id, Result, Value};
 
+struct ProposedMro {
+    layout: Vec<Id>,
+    published: Option<Vec<Id>>,
+}
+
 impl Context {
-    /// Only slot-free Python classes over object or dict share the layouts modeled here.
+    /// Check the published layouts before replacing any bases or descendant MROs.
     fn supports_rebase(&self, class: Id) -> bool {
         self.find_in_mro(class, |owner| {
             let supported = match self.heap.get(owner) {
-                Value::Native(name) => matches!(name.as_str(), "object" | "dict"),
+                Value::Native(name) => {
+                    matches!(name.as_str(), "object" | "dict")
+                        || super::builtins::is_exception(name)
+                }
                 Value::Class {
                     scope,
                     metaclass,
@@ -82,7 +90,7 @@ impl Context {
         let unsupported = || {
             Error::new(
                 "NotImplementedError",
-                "__bases__ assignment requires ordinary slot-free classes over object or dict",
+                "__bases__ assignment requires supported slot-free Python classes",
             )
         };
         let old_bases = self.class_bases_tuple(class).ok_or_else(unsupported)?;
@@ -113,7 +121,7 @@ impl Context {
 
         // An inconsistent MRO in any descendant must leave every original tuple intact.
         let affected = self.heap.class_hierarchy(class);
-        let mut proposed: HashMap<Id, Vec<Id>> = HashMap::new();
+        let mut proposed: HashMap<Id, ProposedMro> = HashMap::new();
         for &owner in &affected {
             if !self.supports_rebase(owner) {
                 return Err(unsupported());
@@ -126,18 +134,46 @@ impl Context {
             let ancestors = self.linearize_with(bases, |ctx, base| {
                 proposed
                     .get(&base)
-                    .cloned()
+                    .map(|mro| mro.layout.clone())
                     .unwrap_or_else(|| ctx.lineage(base))
             })?;
-            let mut mro = vec![owner];
-            mro.extend(ancestors);
-            proposed.insert(owner, mro);
+            // Changing a mixin must not silently replace the native storage of any descendant.
+            if let Some(old) = self.allocation_base(owner)
+                && ancestors
+                    .iter()
+                    .copied()
+                    .find(|&base| self.owns_allocation(base))
+                    != Some(old)
+            {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "__bases__ assignment: '{}' object layout differs from '{}'",
+                        self.class_name(new_base),
+                        self.class_name(old_base)
+                    ),
+                ));
+            }
+            let public = self.exception_mro(bases, &ancestors, |ctx, base| {
+                proposed.get(&base).map_or_else(
+                    || ctx.base_lineage(base, true),
+                    |mro| mro.published.as_ref().unwrap_or(&mro.layout).clone(),
+                )
+            })?;
+            let with_owner = |bases: Vec<Id>| std::iter::once(owner).chain(bases).collect();
+            proposed.insert(
+                owner,
+                ProposedMro {
+                    layout: with_owner(ancestors),
+                    published: public.map(with_owner),
+                },
+            );
         }
         let mut finalizers = false;
         for owner in affected {
-            let mro = proposed.remove(&owner).unwrap();
-            let ancestors = mro[1..].to_vec();
-            let mro = self.alloc(Value::Tuple(mro));
+            let ProposedMro { layout, published } = proposed.remove(&owner).unwrap();
+            let ancestors = layout[1..].to_vec();
+            let mro = self.alloc(Value::Tuple(published.unwrap_or(layout)));
             let Value::Class {
                 scope,
                 ancestors: old,

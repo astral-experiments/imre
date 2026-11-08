@@ -6639,7 +6639,7 @@ impl Context {
     }
 
     /// Find the direct base where a slot-free Python hierarchy first acquired this layout.
-    fn dict_layout_base(&self, mut class: Id, object: Id, dict: bool, weak: bool) -> Option<Id> {
+    fn dict_layout_base(&self, mut class: Id, allocator: Id, dict: bool, weak: bool) -> Option<Id> {
         loop {
             let Value::Class { scope, .. } = self.heap.get(class) else {
                 return None;
@@ -6648,9 +6648,8 @@ impl Context {
             let Value::Tuple(bases) = self.heap.get(namespace.bases) else {
                 return None;
             };
-            // Without named slots or native storage, the first base is the layout base.
-            let base = bases.first().copied().unwrap_or(object);
-            if base == object
+            let base = bases.first().copied().unwrap_or(allocator);
+            if base == allocator
                 || self.class_instances_have_dict(base) != dict
                 || self.class_instances_support_weakref(base) != weak
             {
@@ -6670,6 +6669,9 @@ impl Context {
         }
         let source = match *self.heap.get(receiver) {
             Value::Instance { class, .. } => class,
+            Value::Raised(ref error) => error
+                .class()
+                .ok_or_else(|| self.immutable_class_assignment(value))?,
             Value::Module { constructor, .. } => {
                 constructor.unwrap_or_else(|| self.builtin("module"))
             }
@@ -6721,15 +6723,19 @@ impl Context {
             return Err(self.class_layout_mismatch(source, target));
         }
         let (allocator, dict, weak, member_slots) = old;
-        if allocator != Some(object) || member_slots {
+        let raised = matches!(self.heap.get(receiver), Value::Raised(_));
+        let Some(base) = allocator
+            .filter(|&base| base == object || raised)
+            .filter(|_| !member_slots)
+        else {
             return Err(Error::new(
                 "NotImplementedError",
                 "__class__ assignment between native-backed or slotted instance layouts",
             ));
-        }
+        };
         let (Some(source_base), Some(target_base)) = (
-            self.dict_layout_base(source, object, dict, weak),
-            self.dict_layout_base(target, object, dict, weak),
+            self.dict_layout_base(source, base, dict, weak),
+            self.dict_layout_base(target, base, dict, weak),
         ) else {
             return Err(Error::new(
                 "NotImplementedError",
@@ -6741,10 +6747,16 @@ impl Context {
         }
         // Inline ordinary fields are keyed by name. Both they and an exposed __dict__
         // keep their storage and identity when the source and target layouts agree.
-        let Value::Instance { class, .. } = self.heap.get_mut(receiver) else {
-            unreachable!()
-        };
-        *class = target;
+        if raised {
+            let name = self.class_name(target).to_owned();
+            let Value::Raised(error) = self.heap.get_mut(receiver) else {
+                unreachable!()
+            };
+            error.class = target;
+            error.kind = name.into();
+        } else if let Value::Instance { class, .. } = self.heap.get_mut(receiver) {
+            *class = target;
+        }
         self.finish_class_change(receiver, source, target);
         Ok(())
     }
@@ -7038,7 +7050,7 @@ impl Context {
             && self.exposes_object_class(obj, name)
             && matches!(
                 self.heap.get(obj),
-                Value::Instance { .. } | Value::Module { .. }
+                Value::Instance { .. } | Value::Module { .. } | Value::Raised(_)
             )
         {
             return self.assign_instance_class(obj, Some(value));
@@ -7205,7 +7217,7 @@ impl Context {
         self.find_in_mro(class, |base| self.owns_allocation(base).then_some(base))
     }
 
-    fn owns_allocation(&self, base: Id) -> bool {
+    pub(super) fn owns_allocation(&self, base: Id) -> bool {
         match self.heap.get(base) {
             // Any is a Python class with ordinary instance storage despite its native identity.
             Value::Native(name) => name != "typing.Any",
