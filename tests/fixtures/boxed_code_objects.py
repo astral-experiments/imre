@@ -115,6 +115,9 @@ def cleanup():
     saved = view.__code__
     method = Views().get
     assert mixed.__code__.co_argcount == 3 and variadic.__code__.co_argcount == 0
+    assert mixed.__code__.co_posonlyargcount == mixed.__code__.co_kwonlyargcount == 1
+    assert variadic.__code__.co_posonlyargcount == variadic.__code__.co_kwonlyargcount == 0
+    assert CodeType.co_kwonlyargcount.__get__(mixed.__code__, CodeType) == 1
     assert saved.co_argcount == 1
     assert method.__code__.co_argcount == Views.get.__code__.co_argcount == 1
     assert CodeType.co_argcount.__get__(mixed.__code__, CodeType) == 3
