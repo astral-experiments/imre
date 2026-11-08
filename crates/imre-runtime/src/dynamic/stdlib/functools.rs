@@ -6,6 +6,7 @@ use crate::dynamic::{
 pub(in crate::dynamic) const PARTIAL_CLASS: &str = "functools.partial";
 pub(in crate::dynamic) const LRU_CACHE_CLASS: &str = "functools._lru_cache_wrapper";
 pub(in crate::dynamic) const LRU_METHODS: &[&str] = &[
+    "__get__",
     "__reduce__",
     "__copy__",
     "__deepcopy__",

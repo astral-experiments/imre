@@ -1131,7 +1131,8 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Repeat(_) if matches!(attr, "__iter__" | "__next__" | "__length_hint__") => {
             "itertools.repeat"
         }
-        Value::Function { .. } | Value::Cached { .. } if attr == "__get__" => "function",
+        Value::Function { .. } if attr == "__get__" => "function",
+        Value::Cached { .. } if attr == "__get__" => super::stdlib::functools::LRU_CACHE_CLASS,
         Value::Partial { .. } if attr == "__get__" => "functools.partial",
         Value::ContextVar { .. } if matches!(attr, "get" | "set" | "reset") => {
             "_contextvars.ContextVar"
@@ -2321,8 +2322,10 @@ pub(super) fn call(
                 } else if let Value::IoMethod { owner: class, .. } = *ctx.heap.get(get) {
                     super::stdlib::io::receiver_class(ctx, values[0])
                         .is_some_and(|receiver| ctx.direct_subclass(receiver, class))
-                } else if matches!(owner, "int" | "float" | super::thread_handle::CLASS)
-                    || Context::dict_view_owner(owner).is_some()
+                } else if matches!(
+                    owner,
+                    "code" | "int" | "float" | super::thread_handle::CLASS
+                ) || Context::dict_view_owner(owner).is_some()
                 {
                     ctx.builtin_slot_accepts(values[0], owner)
                 } else if matches!(owner, "wrapper_descriptor" | "getset_descriptor") {
@@ -2349,6 +2352,10 @@ pub(super) fn call(
                     "AttributeError",
                     format!("attribute '{field}' of '{owner}' objects is not writable"),
                 ))
+            }
+            "_code_local" => {
+                let receiver = noargs_method_receiver(ctx, "code", method, args, kwargs)?;
+                ctx.code_local_field(receiver, method)
             }
             "_dictview_mapping" => {
                 let receiver = noargs_method_receiver(ctx, method, "mapping", args, kwargs)?;
@@ -2609,12 +2616,10 @@ pub(super) fn call(
                 }
                 call(ctx, owner, args, kwargs)
             }
-            "function" | "staticmethod" if method == "__get__" => {
+            "staticmethod" if method == "__get__" => {
                 positional(name, kwargs)?;
                 arity(name, args, 2, 3)?;
-                if owner == "staticmethod"
-                    && !matches!(ctx.heap.get(args[0]), Value::StaticMethod { .. })
-                {
+                if !matches!(ctx.heap.get(args[0]), Value::StaticMethod { .. }) {
                     return Err(type_error(format!(
                         "descriptor '__get__' requires a 'staticmethod' object but received a '{}'",
                         ctx.type_name(args[0])

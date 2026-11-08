@@ -17,6 +17,7 @@ mod builtins;
 mod calls;
 mod class_annotations;
 mod class_bases;
+mod code_locals;
 mod collection_pattern;
 mod complex;
 mod defaultdict;
@@ -281,7 +282,7 @@ struct CallParameters {
 
 impl CallParameters {
     /// Decode both compiled and runtime-created function metadata once per definition.
-    fn from_metadata(mut metadata: serde_json::Value, varnames: Vec<String>) -> Result<Self> {
+    fn from_metadata(mut metadata: serde_json::Value) -> Result<Self> {
         let names = |key: &str| -> Result<Vec<String>> {
             let mut result = Vec::new();
             for name in metadata[key]
@@ -307,10 +308,18 @@ impl CallParameters {
         let local_names = names("scope_locals")?;
         let mut locals = std::collections::HashSet::new();
         locals
-            .try_reserve(local_names.len().saturating_add(varnames.len()))
+            .try_reserve(local_names.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
         locals.extend(local_names);
-        locals.extend(varnames);
+        // Runtime-created functions can declare their parameters without a separate local list.
+        for arg in code_locals::argument_slots(&metadata) {
+            if !locals.contains(arg) {
+                locals
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                locals.insert(copy_label(arg)?);
+            }
+        }
         Ok(Self {
             positional,
             positional_only,
@@ -361,14 +370,7 @@ impl Context {
         }
         let parameters = serde_json::from_str(self.str_value(code.parameters)?)
             .map_err(|error| Error::new("SystemError", error.to_string()))?;
-        let varnames = match self.heap.get(code.varnames) {
-            Value::Tuple(names) => names
-                .iter()
-                .map(|&id| copy_label(self.str_value(id)?))
-                .collect::<Result<Vec<_>>>()?,
-            _ => Vec::new(),
-        };
-        let parameters = CallParameters::from_metadata(parameters, varnames)?;
+        let parameters = CallParameters::from_metadata(parameters)?;
         Ok(std::rc::Rc::clone(
             code.parsed_parameters
                 .get_or_init(|| std::rc::Rc::new(parameters)),
@@ -483,7 +485,8 @@ impl Context {
                 true
             }
             ("types.GenericAlias", Value::GenericAlias(alias)) => alias.is_builtin_alias(),
-            ("generic_alias_iterator", Value::GenericAliasIterator(_))
+            ("code", Value::Code(_))
+            | ("generic_alias_iterator", Value::GenericAliasIterator(_))
             | ("bool", Value::Bool(_))
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
@@ -2964,6 +2967,9 @@ impl Context {
             self.builtins
                 .insert("type.__text_signature__".into(), descriptor);
         }
+        if name == "code" {
+            self.install_code_members(value);
+        }
         if name == "socket.socket" {
             stdlib::install_socket_layout(self, value);
         }
@@ -3253,7 +3259,7 @@ impl Context {
                 self.install_module_namespace(value);
                 &[]
             }
-            "function" => &["__call__"],
+            "function" => &["__call__", "__get__"],
             "builtin_function_or_method" | "method" | "method-wrapper" => &["__reduce__"],
             defaultdict::CLASS => {
                 self.builtin("dict");
@@ -3350,6 +3356,10 @@ impl Context {
             }
             "float" => self.install_numeric_dictionary(value, "float", methods, ["real", "imag"]),
             _ if !entries.is_empty() && !self.native_type_dicts.contains_key(&value) => {
+                if name == "function" {
+                    let descriptor = self.alloc(Value::LayoutDescriptor(value, "__code__"));
+                    entries.push((self.heap.code_name("__code__"), descriptor));
+                }
                 if let Some(symbol) = object_size::descriptor(name) {
                     entries.push((self.heap.code_name("__sizeof__"), self.builtin(symbol)));
                 }

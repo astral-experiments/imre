@@ -489,6 +489,7 @@ impl Context {
         Ok(self.alloc(Value::Code(value::CodeObject {
             parsed_parameters: Default::default(),
             varnames: NONE,
+            cellvars: NONE,
             body: value::Body::Native(entry),
             parameters: NONE,
             nested: Vec::new(),

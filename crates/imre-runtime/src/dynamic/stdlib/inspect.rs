@@ -250,11 +250,6 @@ fn class_member(ctx: &mut Context, class: Id, name: &str) -> Option<Id> {
             continue;
         }
         if let Value::Native(owner) = ctx.heap.get(entry) {
-            if owner == "code"
-                && let Some(field) = crate::dynamic::calls::code_argument_field(name)
-            {
-                return Some(ctx.readonly_member("code", field));
-            }
             let symbol = format!("{owner}.{name}");
             if crate::dynamic::wrapper_descriptor::BuiltinDescriptor::lookup(&symbol).is_some() {
                 return Some(ctx.builtin(&symbol));

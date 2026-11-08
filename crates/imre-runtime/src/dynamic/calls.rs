@@ -7,13 +7,6 @@ use super::*;
 
 const KEY_WRAPPER: &str = "functools.KeyWrapper";
 
-/// Names of the read-only argument counts on a code object.
-pub(super) fn code_argument_field(name: &str) -> Option<&'static str> {
-    ["co_argcount", "co_posonlyargcount", "co_kwonlyargcount"]
-        .into_iter()
-        .find(|field| *field == name)
-}
-
 /// These native result types inherit object.__new__ but reject direct allocation.
 fn nonconstructible_result_type(name: &str) -> bool {
     matches!(
@@ -1826,6 +1819,7 @@ impl Context {
             Value::GetSetDescriptor {
                 owner, name, get, ..
             } => match (owner, name) {
+                ("code", "co_varnames" | "co_cellvars") => None,
                 ("int", "numerator") => Some("the numerator of a rational number in lowest terms"),
                 ("int", "denominator") => {
                     Some("the denominator of a rational number in lowest terms")
@@ -3920,11 +3914,10 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("property.{name}")));
             }
-            Value::Native(ref class)
-                if class == "code"
-                    && let Some(field) = code_argument_field(name) =>
-            {
-                return Ok(self.readonly_member("code", field));
+            Value::Native(ref class) if class == "code" => {
+                if let Some(descriptor) = self.own_class_attr(obj, name) {
+                    return Ok(descriptor);
+                }
             }
             Value::Code(ref code) => match name {
                 "co_argcount" => {
@@ -3953,15 +3946,8 @@ impl Context {
                     };
                     return Ok(self.int(count as i64));
                 }
-                "co_varnames" | "co_nlocals" if code.varnames != NONE => {
-                    let varnames = code.varnames;
-                    if name == "co_varnames" {
-                        return Ok(varnames);
-                    }
-                    let Value::Tuple(names) = self.heap.get(varnames) else {
-                        unreachable!("code varnames")
-                    };
-                    return Ok(self.int(names.len() as i64));
+                "co_varnames" | "co_cellvars" | "co_nlocals" => {
+                    return self.code_local_field(obj, name);
                 }
                 "co_flags" => {
                     if !code.flags_complete {
@@ -4081,6 +4067,13 @@ impl Context {
                     unreachable!("coroutine frame")
                 };
                 return Ok(code);
+            }
+            Value::Native(ref class)
+                if class == "function" && matches!(name, "__code__" | "__get__") =>
+            {
+                if let Some(descriptor) = self.own_class_attr(obj, name) {
+                    return Ok(descriptor);
+                }
             }
             Value::Function { code, .. } if name == "__code__" => return Ok(code),
             Value::Function {
@@ -4474,7 +4467,8 @@ impl Context {
                 ..
             } if matches!(
                 owner,
-                "int"
+                "code"
+                    | "int"
                     | "float"
                     | "wrapper_descriptor"
                     | "getset_descriptor"
@@ -4510,7 +4504,8 @@ impl Context {
                         if name == "__get__"
                             || matches!(
                                 owner,
-                                "int"
+                                "code"
+                                    | "int"
                                     | "float"
                                     | "wrapper_descriptor"
                                     | "getset_descriptor"
@@ -6107,14 +6102,18 @@ impl Context {
                 self.update_dictionary_field(obj, dictionary, name, None)
             }
             Value::Function { fields, .. } => self.delete_function_attr(obj, fields, name),
-            Value::Code(ref code) if code.varnames != NONE && name == "co_varnames" => {
+            Value::Code(_) if matches!(name, "co_varnames" | "co_cellvars") => {
                 Err(self.readonly_getset_error("code", name, obj))
             }
-            Value::Code(ref code)
+            Value::Code(_)
                 if matches!(
                     name,
-                    "co_qualname" | "co_argcount" | "co_posonlyargcount" | "co_kwonlyargcount"
-                ) || name == "co_nlocals" && code.varnames != NONE =>
+                    "co_qualname"
+                        | "co_argcount"
+                        | "co_posonlyargcount"
+                        | "co_kwonlyargcount"
+                        | "co_nlocals"
+                ) =>
             {
                 Err(Error::new("AttributeError", "readonly attribute"))
             }
@@ -6591,6 +6590,13 @@ impl Context {
         receiver: Id,
     ) -> Result<Id> {
         match name {
+            "__code__" => {
+                self.layout_receiver_class(owner, name, receiver)?;
+                let Value::Function { code, .. } = *self.heap.get(receiver) else {
+                    unreachable!("validated function receiver")
+                };
+                Ok(code)
+            }
             "characters_written" => {
                 self.layout_receiver_class(owner, name, receiver)?;
                 Ok(self.os_attribute(receiver, name)?.expect("OSError member"))
@@ -6653,6 +6659,10 @@ impl Context {
         value: Option<Id>,
     ) -> Result<()> {
         match name {
+            "__code__" => {
+                self.layout_receiver_class(owner, name, receiver)?;
+                self.set_function_attr(receiver, name, value.unwrap_or(NONE))
+            }
             "characters_written" => {
                 self.layout_receiver_class(owner, name, receiver)?;
                 self.update_os_field(receiver, name, value).map(|_| ())
@@ -7265,10 +7275,10 @@ impl Context {
         }
         let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
-            Value::Code(code) if code.varnames != NONE && name == "co_varnames" => {
+            Value::Code(_) if matches!(name, "co_varnames" | "co_cellvars") => {
                 return Err(self.readonly_getset_error("code", name, obj));
             }
-            Value::Code(code)
+            Value::Code(_)
                 if matches!(
                     name,
                     "co_name"
@@ -7279,7 +7289,8 @@ impl Context {
                         | "co_argcount"
                         | "co_posonlyargcount"
                         | "co_kwonlyargcount"
-                ) || name == "co_nlocals" && code.varnames != NONE =>
+                        | "co_nlocals"
+                ) =>
             {
                 return Err(Error::new("AttributeError", "readonly attribute"));
             }
@@ -8024,6 +8035,12 @@ impl Context {
             Value::Native(name) if name == "super.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "super", &args, &kwargs)
             }
+            Value::Native(name) if name == "function.__get__" => {
+                wrapper_descriptor::descriptor_get(self, "function", &args, &kwargs)
+            }
+            Value::Native(name) if name == "functools._lru_cache_wrapper.__get__" => {
+                wrapper_descriptor::descriptor_get(self, LRU_CACHE_CLASS, &args, &kwargs)
+            }
             Value::Native(name) if name == "functools.partial.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "functools.partial", &args, &kwargs)
             }
@@ -8242,6 +8259,7 @@ impl Context {
                                 | "int"
                                 | "_int_getset"
                                 | "_float_getset"
+                                | "_code_local"
                                 | "_dictview_mapping"
                                 | "frozenset"
                                 | "tuple"

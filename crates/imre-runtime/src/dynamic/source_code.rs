@@ -61,6 +61,7 @@ pub(super) struct Program {
     unlowered_yield: bool,
     interactive: bool,
     locals: indexmap::IndexSet<String>,
+    cellvars: Vec<String>,
     directives: HashMap<String, (ScopeDirective, ruff_text_size::TextRange)>,
     reads: BTreeSet<String>,
     method_imports: Rc<std::collections::BTreeSet<String>>,
@@ -1781,6 +1782,14 @@ impl Program {
                 strings.keep(roots)?;
             }
         }
+        // Inlined comprehensions read this frame's locals without capturing cells.
+        if self.scope_flags & code_flags::OPTIMIZED != 0 {
+            self.cellvars = nested_reads
+                .iter()
+                .filter(|name| self.locals.contains(name.as_str()))
+                .cloned()
+                .collect();
+        }
         nested_reads.append(&mut strings.comprehension_reads);
         self.string_roots = strings.finish();
         if class_parameters {
@@ -2034,6 +2043,7 @@ impl Program {
             unlowered_yield: false,
             interactive: false,
             locals: indexmap::IndexSet::new(),
+            cellvars: Vec::new(),
             directives: HashMap::new(),
             reads: BTreeSet::new(),
             method_imports: Rc::default(),
@@ -4128,6 +4138,7 @@ impl Context {
         self.alloc(Value::Code(value::CodeObject {
             parsed_parameters: Default::default(),
             varnames: NONE,
+            cellvars: NONE,
             name,
             qualname,
             doc,
@@ -4540,16 +4551,7 @@ impl Context {
             let signature: serde_json::Value = serde_json::from_str(parameters)
                 .map_err(|error| Error::new("SystemError", error.to_string()))?;
             // Argument slots come first, including arguments held in closure cells.
-            let arguments = ["posonly", "positional", "kwonly"]
-                .into_iter()
-                .flat_map(|group| signature[group].as_array().into_iter().flatten())
-                .filter_map(serde_json::Value::as_str)
-                .chain(
-                    ["varargs", "kwargs"]
-                        .into_iter()
-                        .filter_map(|key| signature[key].as_str()),
-                );
-            for name in arguments {
+            for name in super::code_locals::argument_slots(&signature) {
                 if frame.names.contains_key(name) || frame.closure.cells.contains_key(name) {
                     names.insert(name.to_owned());
                 }
@@ -6388,6 +6390,7 @@ impl Context {
                 }
                 sig["class_cell"] = child.method_class_cell.unwrap_or(child.class_cell).into();
                 sig["scope_locals"] = serde_json::json!(child.locals.iter().collect::<Vec<_>>());
+                sig["scope_cellvars"] = serde_json::json!(child.cellvars);
                 sig["scope_locals_complete"] = true.into();
                 sig
             }
