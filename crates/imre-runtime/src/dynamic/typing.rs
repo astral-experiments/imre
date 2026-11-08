@@ -280,7 +280,7 @@ pub(super) fn no_default(ctx: &mut Context) -> Id {
 
 /// A pack iterates over one Unpack alias, exactly as an explicit Unpack[Ts] subscription.
 pub(super) fn unpack_parameter(ctx: &mut Context, pack: Id) -> Result<Id> {
-    let module = ctx.module("typing")?;
+    let module = ctx.import_with_builtins("typing")?;
     let unpack = ctx.lookup_attr(module, "Unpack")?;
     ctx.get_item(unpack, pack)
 }
@@ -338,7 +338,7 @@ fn unpack_typevar_tuples(ctx: &mut Context, params: &mut [Id]) -> Result<bool> {
 }
 
 /// Return the declared tuple itself unless a pack requires an unpacked copy.
-fn type_alias_parameters(ctx: &mut Context, parameters: Id) -> Result<Id> {
+fn unpacked_parameters(ctx: &mut Context, parameters: Id) -> Result<Id> {
     if let Value::Tuple(items) | Value::NamedTuple { values: items, .. } =
         ctx.heap.get(ctx.scalar_value(parameters))
         && !items
@@ -1686,7 +1686,7 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         } => match (name, *definition) {
             ("__name__", _) => *label,
             ("__type_params__", _) => *parameters,
-            ("__parameters__", _) => return Some(type_alias_parameters(ctx, *parameters)),
+            ("__parameters__", _) => return Some(unpacked_parameters(ctx, *parameters)),
             ("__module__", AliasDefinition::Eager { module, .. }) => module,
             ("__module__", AliasDefinition::Lazy { evaluator, .. }) => {
                 return Some(ctx.lookup_attr(evaluator, "__module__"));
@@ -1957,13 +1957,12 @@ fn initialize_parameters(ctx: &mut Context, scope: Id, names: Id, class: bool) -
         .declared
         .extend(frame.names.keys().map(|name| name.as_str().to_owned()));
     frame.closure.declared_complete = true;
-    let declared = ctx.alloc(Value::Tuple(params.clone()));
+    let declared = ctx.alloc(Value::Tuple(params));
     ctx.bind(scope, ".type_params", declared);
     if class {
         // __type_params__ retains the pack itself; the implicit base is Generic[*Ts].
-        unpack_typevar_tuples(ctx, &mut params)?;
+        let params = unpacked_parameters(ctx, declared)?;
         let generic = named_class(ctx, "typing", "Generic");
-        let params = ctx.alloc(Value::Tuple(params));
         let base = call_generic_helper(ctx, "_GenericAlias", vec![generic, params], Vec::new())?;
         ctx.bind(scope, ".generic_base", base);
     }
