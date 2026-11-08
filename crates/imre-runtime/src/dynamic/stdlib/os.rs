@@ -1039,8 +1039,21 @@ fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
         let audit_flags = ctx.int(i64::from(flags | libc::O_CLOEXEC));
         super::audit::event(ctx, "open", &[path, NONE, audit_flags])?;
     }
-    match native::open_at(&pathname, flags, mode, dir_fd, || ctx.dispatch_signals())? {
-        Ok(fd) => Ok(ctx.int(i64::from(fd.into_raw_fd()))),
+    let fd = open_path(ctx, path, &pathname, flags, mode, dir_fd)?;
+    Ok(ctx.int(i64::from(fd.into_raw_fd())))
+}
+
+/// Decorate only the failed system call. Signal and audit exceptions keep their identity.
+pub(super) fn open_path(
+    ctx: &mut Context,
+    path: Id,
+    pathname: &std::ffi::CStr,
+    flags: i32,
+    mode: i32,
+    dir_fd: i32,
+) -> Result<std::os::fd::OwnedFd> {
+    match native::open_at(pathname, flags, mode, dir_fd, || ctx.dispatch_signals())? {
+        Ok(fd) => Ok(fd),
         Err(error) => {
             Err(ctx.with_errno_filename(crate::objects::errno_error(error).into(), path)?)
         }

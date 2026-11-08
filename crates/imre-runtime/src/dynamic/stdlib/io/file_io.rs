@@ -3,7 +3,6 @@
 use std::cell::{Cell, RefCell};
 use std::io::ErrorKind;
 use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
-use std::os::unix::fs::MetadataExt;
 use std::rc::Rc;
 
 use super::super::{builtins, files, os::stat::warn_bool_fd, os_error};
@@ -496,6 +495,7 @@ pub(in crate::dynamic) fn open(
     let fd = descriptor_from_argument(ctx, raw_arg);
     if fresh.is_some()
         || opener.is_some()
+        || numeric
         || fd.is_some()
         || text_output
         || text_input
@@ -576,17 +576,6 @@ pub(in crate::dynamic) fn open(
             .map_err(|error| close_on_error(ctx, stream, error))?;
         return Ok(stream);
     }
-    let filename = if numeric {
-        super::super::posixpath::fspath(ctx, raw_arg)?
-    } else {
-        raw_arg
-    };
-    if !owns {
-        return Err(Error::new(
-            "ValueError",
-            "Cannot use closefd=False with file name",
-        ));
-    }
     let mode = mode.map(|v| ctx.str_value(v)).transpose()?.unwrap_or("r");
     let writer_capacity = match (buffering, mode) {
         (2.., "wb" | "ab" | "xb" | "bw" | "ba" | "bx") => Some(buffering as usize),
@@ -598,7 +587,6 @@ pub(in crate::dynamic) fn open(
         }
         _ => None,
     };
-    let path = ctx.str_value(filename)?;
     if errors
         .map(|v| ctx.str_value(v))
         .transpose()?
@@ -620,7 +608,30 @@ pub(in crate::dynamic) fn open(
             "text files require UTF-8 encoding",
         ));
     }
-    let file = files::BinaryFile::open(path, filename, mode, writer_capacity)
+    let (access, mode) = match mode {
+        "rb" => (0, "rb"),
+        "wb" | "bw" => (1, "wb"),
+        "ab" | "ba" => (2, "ab"),
+        "xb" | "bx" => (3, "xb"),
+        _ => {
+            return Err(Error::new(
+                "ValueError",
+                "unsupported mode for dynamic files",
+            ));
+        }
+    };
+    let pathname = super::super::os::c_path(ctx, raw_arg, "embedded null byte")?;
+    let flags = crate::objects::file_flags(access, false);
+    audit_open(ctx, raw_arg, &mode[..1], flags)?;
+    if !owns {
+        return Err(Error::new(
+            "ValueError",
+            "Cannot use closefd=False with file name",
+        ));
+    }
+    let fd = super::super::os::open_path(ctx, raw_arg, &pathname, flags, 0o666, libc::AT_FDCWD)?;
+    let path = ctx.str_value(raw_arg)?;
+    let file = files::BinaryFile::from_open(path, raw_arg, access, mode, writer_capacity, fd)
         .and_then(files::BinaryFile::into_value);
     match file {
         Ok(file) => ctx.heap.alloc_descriptor_owner(file),
@@ -795,23 +806,13 @@ fn call_opener(ctx: &mut Context, callable: Id, path: Id, flags: Id) -> Result<R
     Ok(fd)
 }
 
-/// Translate the parsed FileIO mode into the flags passed to an opener.
-fn opener_flags(mode: u32, update: bool) -> i32 {
-    let access = if update {
-        libc::O_RDWR
-    } else if mode == 0 {
-        libc::O_RDONLY
-    } else {
-        libc::O_WRONLY
-    };
-    let create = match mode {
-        0 => 0,
-        1 => libc::O_CREAT | libc::O_TRUNC,
-        2 => libc::O_CREAT | libc::O_APPEND,
-        3 => libc::O_CREAT | libc::O_EXCL,
-        _ => unreachable!("parsed FileIO mode"),
-    };
-    access | create | libc::O_CLOEXEC
+fn audit_open(ctx: &mut Context, path: Id, mode: &str, flags: i32) -> Result<()> {
+    if !ctx.audit_hooks.is_empty() {
+        let spelling = ctx.text(mode);
+        let word = ctx.int(i64::from(flags));
+        super::super::audit::event(ctx, "open", &[path, spelling, word])?;
+    }
+    Ok(())
 }
 
 fn descriptor_block_size(ctx: &mut Context, path: Id, fd: RawFd) -> Result<i64> {
@@ -892,16 +893,8 @@ fn initialize_file(
         let mut access = raw.mode.get();
         let parsed = access.parse(mode_text);
         raw.mode.set(access);
-        let flags = parsed?;
-        let update = access.readable && access.writable;
-        let opener = if let Some(callable) = opener {
-            let spelling = ctx.text(mode_text);
-            let word = ctx.int(i64::from(opener_flags(flags, update)));
-            super::super::audit::event(ctx, "open", &[path, spelling, word])?;
-            Some((callable, word))
-        } else {
-            None
-        };
+        let flags = crate::objects::file_flags(parsed?, access.readable && access.writable);
+        audit_open(ctx, path, mode_text, flags)?;
         let blksize = if let Some(filename) = pathname {
             raw.closefd.set(true);
             if !owns {
@@ -910,22 +903,19 @@ fn initialize_file(
                     "Cannot use closefd=False with file name",
                 ));
             }
-            if let Some((callable, word)) = opener {
-                let fd = call_opener(ctx, callable, path, word)?;
-                raw.fd.set(Some(fd));
-                acquired = true;
-                os::INHERITABLE.update(fd, false)?;
-                descriptor_block_size(ctx, path, fd)?
+            let fd = if let Some(callable) = opener {
+                let word = ctx.int(i64::from(flags));
+                call_opener(ctx, callable, path, word)?
             } else {
-                let (file, metadata) =
-                    match crate::objects::open_raw_file(filename.as_bytes(), flags, update) {
-                        Ok(opened) => opened,
-                        Err(error) => return Err(ctx.with_errno_filename(error.into(), path)?),
-                    };
-                raw.fd.set(Some(file.into_raw_fd()));
-                acquired = true;
-                file_block_size(metadata.blksize())
+                super::super::os::open_path(ctx, path, &filename, flags, 0o666, libc::AT_FDCWD)?
+                    .into_raw_fd()
+            };
+            raw.fd.set(Some(fd));
+            acquired = true;
+            if opener.is_some() {
+                os::INHERITABLE.update(fd, false)?;
             }
+            descriptor_block_size(ctx, path, fd)?
         } else {
             let fd = descriptor.expect("numeric FileIO argument");
             raw.closefd.set(owns);
