@@ -559,18 +559,27 @@ fn scan_imports(
     source: &str,
     kind: SourceKind,
     getter: Option<&mut Imports>,
+    file_alternative: Option<(&Path, bool)>,
 ) -> Result<Imports, String> {
     let normalized = crate::normalize_source(source, kind)?;
     let input = imre_ast::indentation::prepare(&normalized);
     crate::analysis::check_source_complexity(&input.text).map_err(str::to_owned)?;
     let parsed = input.parse_module()?;
     crate::analysis::check_form_feeds(&normalized, parsed.tokens())?;
+    if let Some((path, keep_docstrings)) = file_alternative {
+        emit::check_parsed_source(path, &normalized, &parsed, keep_docstrings)?;
+    }
     let mut body = parsed.into_syntax().body;
     let bindings = imre_ast::executable::BindingErrors::check(&body);
     let error = bindings
         .first_symbol(imre_ast::future_import_error(&body))
         .map(|(range, reason)| (range, reason.to_owned()))
         .or(bindings.pattern);
+    // The optional file must satisfy the emitter's checks before registration.
+    // Use its discovery tree for both checking and collecting the lowered imports.
+    let checked_names = file_alternative
+        .map(|(path, _)| emit::lower_source(path, &normalized, &mut body))
+        .transpose()?;
     if let Some((range, message)) = error {
         // Discovery records the error. Only selection as the checked entry diagnoses it here.
         let diagnostic = crate::frontend::phase::Diagnostic::at(
@@ -584,7 +593,7 @@ fn scan_imports(
         });
     }
     let mut imports = Imports::default();
-    imports.private_names = imre_ast::lower(&mut body);
+    imports.private_names = checked_names.unwrap_or_else(|| imre_ast::lower(&mut body));
     imports.runtime_imports = body.iter().any(|stmt| {
         matches!(stmt, Stmt::FunctionDef(function) if function_type_params(function, imports.private_names.string_annotations, false, Some(&imports.private_names)).is_some())
     });
@@ -750,6 +759,7 @@ pub(crate) fn compile(
         } else {
             SourceKind::File
         },
+        None,
         None,
     ) else {
         return Ok(None);
@@ -1219,8 +1229,9 @@ pub(crate) fn compile(
                     let path = Path::new(bundled_root).join(filename);
                     let package = path.ends_with("__init__.py");
                     let mut getter = Imports::default();
-                    let mut imports = scan_imports(&source, SourceKind::File, Some(&mut getter))
-                        .map_err(|e| format!("{}: {e}", path.display()))?;
+                    let mut imports =
+                        scan_imports(&source, SourceKind::File, Some(&mut getter), None)
+                            .map_err(|e| format!("{}: {e}", path.display()))?;
                     // unittest's loader imports application modules by name, including during discovery.
                     // Other bundled imports are implementation details of a known provider.
                     if prefix != "unittest.loader" {
@@ -1375,9 +1386,6 @@ pub(crate) fn compile(
                         let Ok(src) = String::from_utf8(bytes) else {
                             continue;
                         };
-                        if emit::check_source(&path, &src, keep_docstrings).is_err() {
-                            continue;
-                        }
                         src
                     } else {
                         let identity = filesystem.canonicalize(&path);
@@ -1391,10 +1399,12 @@ pub(crate) fn compile(
                         ));
                         src
                     };
-                    let imports = match imports_for_module(&path, &src) {
+                    let alternative = (file_alternatives && checked.is_none())
+                        .then_some((path.as_path(), keep_docstrings));
+                    let imports = match scan_imports(&src, SourceKind::File, None, alternative) {
                         Ok(imports) => imports,
                         Err(_) if file_alternatives => continue,
-                        Err(error) => return Err(error),
+                        Err(error) => return Err(format!("{}: {error}", path.display())),
                     };
                     // Later alternatives remain available to the runtime finder. Only the
                     // winning provider supplies the initial module binding.
@@ -1897,5 +1907,5 @@ fn bundled_module_source(
 }
 
 fn imports_for_module(path: &Path, src: &str) -> Result<Imports, String> {
-    scan_imports(src, SourceKind::File, None).map_err(|e| format!("{}: {e}", path.display()))
+    scan_imports(src, SourceKind::File, None, None).map_err(|e| format!("{}: {e}", path.display()))
 }
