@@ -16,3 +16,6 @@ pub(crate) fn small_integer_id(value: i64) -> Option<u64> {
         .contains(&value)
         .then(|| FIRST_SMALL_INT + (value - SMALL_INT_MIN) as u64)
 }
+
+/// Prelinked code-site tag for a native resumable definition.
+pub(crate) const NATIVE_SUSPENDED_BODY: u32 = u32::MAX;

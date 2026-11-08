@@ -17,6 +17,9 @@ use super::Context;
 pub(super) type Id = u64;
 type MemberValues = hashbrown::HashMap<Id, Id, std::collections::hash_map::RandomState>;
 pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
+/// The entry reloads this slot before borrowing the interpreter on every activation.
+pub(super) type ResumeCode =
+    unsafe extern "C" fn(*mut super::native_suspension::Activation, Id) -> *mut std::ffi::c_void;
 
 /// Immutable executable and argument layout shared by functions from one Python definition.
 #[derive(Clone)]
@@ -37,6 +40,7 @@ pub(super) struct CodeObject {
     pub flags: u32,
     /// Runtime source retains execution flags even when its complete co_flags is unknown.
     pub flags_complete: bool,
+    pub generator_lambda: bool,
     pub nested: Vec<(usize, Id)>,
     pub freevars: Vec<String>,
     pub closure_supported: bool,
@@ -51,6 +55,7 @@ impl CodeObject {
 #[derive(Clone)]
 pub(super) enum Body {
     Native(Code),
+    Suspended(ResumeCode),
     Source(std::rc::Rc<super::source_code::Program>),
     PendingGenerator {
         source: &'static str,
@@ -68,7 +73,9 @@ pub(super) struct Hmac {
 mod permanent {
     include!("../../native/boxed-handles.rs");
 }
-pub(super) use permanent::{ELLIPSIS, EMPTY_TUPLE, FALSE, NONE, NOT_IMPLEMENTED, TRUE};
+pub(super) use permanent::{
+    ELLIPSIS, EMPTY_TUPLE, FALSE, NATIVE_SUSPENDED_BODY, NONE, NOT_IMPLEMENTED, TRUE,
+};
 use permanent::{FIRST_SMALL_INT, SMALL_INT_MAX, SMALL_INT_MIN};
 const FIRST_DYNAMIC_SLOT: usize =
     FIRST_SMALL_INT as usize + (SMALL_INT_MAX - SMALL_INT_MIN + 1) as usize;
@@ -1470,6 +1477,7 @@ pub(super) enum Value {
         scope: Id,
         iterators: Vec<Id>,
         protected: Vec<super::source_code::FinallyBlock>,
+        native: Option<super::native_suspension::Saved>,
         offset: Option<usize>,
         running: bool,
     },
@@ -2388,8 +2396,12 @@ impl Value {
                 code,
                 iterators,
                 protected,
+                native,
                 ..
             } => {
+                if let Some(saved) = native {
+                    saved.visit(visit);
+                }
                 visit.push(*code);
                 visit.extend(self.suspended_owner());
                 visit.extend([*name, *qualname, owner.root()]);
@@ -3609,7 +3621,7 @@ impl ExpressionPosition {
     }
 }
 
-struct Frame {
+pub(super) struct Frame {
     owner: FrameOwner,
     scope: Id,
     code: Id,
@@ -3620,11 +3632,19 @@ struct Frame {
     object: Option<Id>,
     inherited: Id,
     active: Id,
+    // A local handler can own the very same exception object as its resumer.
+    has_local_exception: bool,
     // This activation or one of its calls opened a buffered output file.
     created_finalizer: bool,
 }
 
 impl Frame {
+    pub(super) fn visit(&self, visit: &mut impl VisitReferences) {
+        visit.extend([self.scope, self.code, self.active, self.inherited]);
+        visit.extend(self.object);
+        visit.extend(&self.live);
+    }
+
     fn source_range(&self, heap: &Heap, position: ExpressionPosition) -> Option<[u32; 4]> {
         let ExpressionPosition::Source { range, .. } = position else {
             return None;
@@ -3665,6 +3685,7 @@ impl Frame {
             object: None,
             inherited,
             active: inherited,
+            has_local_exception: false,
             created_finalizer: false,
         }
     }
@@ -4457,9 +4478,8 @@ impl Heap {
             self.publish_fault_frame(self.python_depth() - 1);
         }
     }
-    /// Release the activation and report whether a returning function may have dropped a writer.
-    pub fn leave(&mut self, value: Id, returning: bool) -> bool {
-        let mut frame = self.frames.pop().expect("returning native activation");
+    fn pop_native_frame(&mut self) -> Frame {
+        let frame = self.frames.pop().expect("returning native activation");
         if let FrameOwner::Generator(id) = frame.owner
             && let Some(location) = &frame.location
             && let Value::Generator { lineno, .. } = self.get_mut(id)
@@ -4479,6 +4499,54 @@ impl Heap {
                 self.publish_fault_frame(index);
             }
         }
+        frame
+    }
+
+    /// Root a yielded value or a failed delegate lookup while the generator
+    /// releases its operands. The resumer reserved one slot before entering.
+    pub(super) fn publish_to_resumer(&mut self, result: Result<Id>) -> Result<Id> {
+        let caller = self.frames.len() - 2;
+        let live = &mut self.frames[caller].live;
+        match &result {
+            Ok(value) => live.push(*value),
+            Err(error) => {
+                live.try_reserve(error.roots().count())
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                live.extend(error.roots());
+            }
+        }
+        result
+    }
+
+    pub(super) fn suspend_native_frame(&mut self) -> Frame {
+        let mut frame = self.pop_native_frame();
+        if !frame.has_local_exception {
+            frame.active = NONE;
+        }
+        frame.inherited = NONE;
+        frame
+    }
+
+    pub(super) fn restore_native_frame(&mut self, mut frame: Frame) {
+        if let FrameOwner::Generator(id) = frame.owner
+            && let Value::Generator { frame: cached, .. } = self.get(id)
+        {
+            // gi_frame may have been materialized while this activation was parked.
+            frame.object = *cached;
+        }
+        frame.inherited = self.active_exception();
+        if !frame.has_local_exception {
+            frame.active = frame.inherited;
+        }
+        self.frames.push(frame);
+        if self.fault_frames_current() {
+            self.publish_fault_frame(self.python_depth() - 1);
+        }
+    }
+
+    /// Release the activation and report whether a returning function may have dropped a writer.
+    pub fn leave(&mut self, value: Id, returning: bool) -> bool {
+        let mut frame = self.pop_native_frame();
         let opened = frame.created_finalizer && self.tracks_finalizers();
         if opened {
             self.frames.last_mut().unwrap().created_finalizer = true;
@@ -4834,28 +4902,39 @@ impl Heap {
         }
     }
 
+    pub(super) fn restore_caught(&mut self, caught: Id) {
+        let active = self.caught_exception(caught);
+        let frame = self.frames.last_mut().unwrap();
+        frame.active = active;
+        frame.has_local_exception = caught != NONE;
+    }
+
     pub fn replace_active(&mut self, exception: Id) -> Id {
         std::mem::replace(&mut self.frames.last_mut().unwrap().active, exception)
     }
 
-    /// Discard a never-entered frame or a compiled comprehension with no exception handlers.
+    /// Release a cold or completed frame. Later close calls see it as exhausted.
     pub(super) fn discard_generator_frame(&mut self, id: Id) {
         let Value::Generator {
             offset,
+            running,
             owner,
             frame,
             scope,
             iterators,
+            native,
             ..
         } = self.get_mut(id)
         else {
             unreachable!("checked generator");
         };
+        *running = false;
         *offset = None;
         *owner = FrameOwner::Module(NONE);
         *frame = None;
         *scope = NONE;
         iterators.clear();
+        *native = None;
         self.disarm_finalizer(id);
     }
 
@@ -5135,6 +5214,10 @@ impl Heap {
         self.warning_frames().nth((level.max(1) - 1) as usize)
     }
 
+    pub(super) fn take_call_position(&mut self) -> Option<[u32; 4]> {
+        self.frames.last_mut().unwrap().call_position.take()
+    }
+
     pub(super) fn set_call_position(&mut self, position: Option<[u32; 4]>) {
         self.frames.last_mut().unwrap().call_position = position;
     }
@@ -5225,15 +5308,8 @@ impl Heap {
                 .map(|entry| entry.id),
         );
         for frame in &self.frames {
-            pending.extend([
-                frame.scope,
-                frame.code,
-                frame.owner.root(),
-                frame.active,
-                frame.inherited,
-            ]);
-            pending.extend(frame.object);
-            pending.extend(&frame.live);
+            pending.push(frame.owner.root());
+            frame.visit(pending);
         }
     }
 
@@ -5978,9 +6054,8 @@ impl Heap {
     }
 
     pub(super) fn publish_statement(&mut self, live: &[Id], location: Location, caught: Id) {
-        let active = self.caught_exception(caught);
+        self.restore_caught(caught);
         let frame = self.frames.last_mut().unwrap();
-        frame.active = active;
         let line = location.line;
         frame.location = Some(location);
         frame.expression = ExpressionPosition::Statement;
@@ -6799,6 +6874,7 @@ mod tests {
                 scope: NONE,
                 iterators: Vec::new(),
                 protected: Vec::new(),
+                native: None,
                 offset: Some(0),
                 running: false,
             });

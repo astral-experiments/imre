@@ -143,21 +143,4 @@ impl Context {
         }
         result.map_err(|error| self.frame_error(error, code))
     }
-
-    /// Preserve an escaping StopIteration as the cause and context of the frame's RuntimeError.
-    pub(super) fn frame_error(&mut self, error: Error, code: Id) -> Error {
-        if !self.is_stop_iteration(&error) {
-            return error;
-        }
-        let cause = self.raised_instance(error);
-        let message = if self.code_object(code).is_coroutine() {
-            "coroutine raised StopIteration"
-        } else {
-            "generator raised StopIteration"
-        };
-        let mut error = Error::new("RuntimeError", message);
-        error.tracing().cause = Some(cause);
-        error.context = cause;
-        error
-    }
 }

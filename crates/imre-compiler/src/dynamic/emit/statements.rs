@@ -9,7 +9,7 @@ use ruff_python_ast::visitor::{self, Visitor};
 use ruff_text_size::{Ranged, TextSize};
 use serde_json::json;
 
-use super::{Body, Cleanup, DefinitionName, Function, LoopTarget};
+use super::{Body, Cleanup, ContextExit, DefinitionName, Entry, Function, LoopTarget};
 
 #[derive(Default)]
 struct ClosureNames {
@@ -508,15 +508,18 @@ impl Function<'_, '_> {
                     self.live.push(value.clone());
                     self.run_cleanups(0, Some(&value));
                     self.live.pop();
-                    self.end(&format!("ret i64 {value}"));
+                    self.return_value(&value);
                 }
                 ast::Stmt::Match(v) => self.match_statement(v),
                 ast::Stmt::If(v) => {
                     let done = self.name("b");
-                    self.if_arm(&v.test, &v.body, &done);
+                    let mut next = self.if_arm(&v.test, &v.body, &done);
                     for clause in &v.elif_else_clauses {
+                        if !next {
+                            break;
+                        }
                         if let Some(test) = &clause.test {
-                            self.if_arm(test, &clause.body, &done);
+                            next = self.if_arm(test, &clause.body, &done);
                         } else {
                             self.statements(&clause.body);
                         }
@@ -525,26 +528,33 @@ impl Function<'_, '_> {
                     self.label(&done);
                 }
                 ast::Stmt::For(v) => {
-                    let source = self.expr(&v.iter);
-                    let iter = self.op("iter", &[&source]);
-                    self.loop_body(
-                        &v.body,
-                        &v.orelse,
-                        Some(&iter),
-                        |f, yes, no| {
-                            f.branch_iteration(&iter, &v.target, !v.orelse.is_empty(), yes, no)
-                        },
-                        |f| f.bind_iteration(&iter, &v.target),
-                    );
+                    let iter = self.iteration_cursor(&v.iter, v.is_async);
+                    self.loop_body(&v.body, &v.orelse, Some(&iter), |f, yes, no| {
+                        if f.native_suspension {
+                            // A retained frame exposes the header after its final pull.
+                            f.set_statement_line(f.source.line(v.start()));
+                        }
+                        f.enter_iteration(
+                            &iter,
+                            &v.target,
+                            v.is_async.then(|| v.iter.range()),
+                            !v.orelse.is_empty(),
+                            yes,
+                            no,
+                        );
+                    });
                 }
                 ast::Stmt::While(v) => {
-                    self.loop_body(
-                        &v.body,
-                        &v.orelse,
-                        None,
-                        |f, yes, no| f.branch_expr(&v.test, yes, no),
-                        |_| {},
-                    );
+                    if self.native_suspension
+                        && matches!(&*v.test, ast::Expr::BooleanLiteral(lit) if !lit.value)
+                    {
+                        self.statements(&v.orelse);
+                        continue;
+                    }
+                    self.loop_body(&v.body, &v.orelse, None, |f, yes, no| {
+                        f.branch_expr(&v.test, yes, no);
+                        f.label(yes);
+                    });
                 }
                 ast::Stmt::Break(_) | ast::Stmt::Continue(_) => {
                     if let Some(target) = self.loops.last() {
@@ -614,7 +624,9 @@ impl Function<'_, '_> {
                         self.try_finally(v);
                     }
                 }
-                ast::Stmt::With(v) if !v.is_async => self.with(&v.items, &v.body),
+                ast::Stmt::With(v) if !v.is_async || self.native_suspension => {
+                    self.with(&v.items, &v.body, v.is_async);
+                }
                 ast::Stmt::Raise(v) => {
                     let exc = if let Some(e) = &v.exc {
                         self.expr(e)
@@ -732,14 +744,7 @@ impl Function<'_, '_> {
                 if doc.is_some() {
                     flags |= HAS_DOCSTRING;
                 }
-                let kind = match &body {
-                    Body::GeneratorFunction(_, flag) => *flag,
-                    Body::Generator(_, plan, _) if plan.body_suspends() => ASYNC_GENERATOR,
-                    Body::Generator(..) | Body::YieldingLambda(_) => GENERATOR,
-                    Body::Expression(expr) if yields_in_expression(expr) => GENERATOR,
-                    _ => 0,
-                };
-                Some(flags | kind)
+                Some(flags | body.generator_flags())
             }
         };
         let doc = doc.map_or_else(|| "0".into(), |s| self.text(&s));
@@ -803,7 +808,7 @@ impl Function<'_, '_> {
                 Body::Annotations(entries, class),
                 params.map_or(start, Ranged::start),
                 false,
-                None,
+                Entry::Compiled,
             );
             let aname = self.text("__annotate__");
             let aqname = self.text(&format!("{qualname}.__annotate__"));
@@ -814,6 +819,11 @@ impl Function<'_, '_> {
             json!({"posonly":[],"positional":[],"kwonly":[],"varargs":null,"kwargs":null});
         if let Some(flags) = flags {
             signature["code_flags"] = json!(flags);
+        }
+        if matches!(body, Body::YieldingLambda(_) | Body::Expression(_))
+            && flags.is_some_and(|flags| flags & code_flags::GENERATOR != 0)
+        {
+            signature["generator_lambda"] = json!(true);
         }
         if matches!(body, Body::Generator(..)) {
             // generator() binds the implicit .0 argument without calling the step function.
@@ -858,55 +868,85 @@ impl Function<'_, '_> {
                 signature["method_class_cell"] = json!(captures_class);
             }
         }
-        let generator = match &body {
-            Body::GeneratorFunction(stmts, flag) => {
-                let first = stmts[0].start();
-                let start = first.to_usize();
-                let end = stmts.last().unwrap().end().to_usize();
-                let indent = imre_ast::indentation::generator_prefix(&self.source.text[..start]);
-                // Slice the suite as written so indentation inside multiline strings survives.
-                let header = if *flag == code_flags::GENERATOR {
-                    "def"
-                } else {
-                    "async def"
-                };
-                let text = format!("{header} _():\n{indent}{}", &self.source.text[start..end]);
-                Some((first, indent.len(), text))
-            }
-            Body::Generator(expr, plan, _) if plan.body_suspends() => {
-                // The same resumable interpreter that runs async def bodies
-                // consumes this expression's canonical plan, with .0 supplied
-                // by the caller when the generator is created.
-                signature["generator_expression"] = json!(true);
-                let text = &self.source.text[expr.start().to_usize()..expr.end().to_usize()];
-                Some((
-                    expr.start(),
-                    " return (".len(),
-                    format!("async def _():\n return ({text})"),
-                ))
-            }
-            Body::YieldingLambda(expr) => {
-                signature["generator_lambda"] = json!(true);
-                let text = &self.source.text[expr.start().to_usize()..expr.end().to_usize()];
-                Some((
-                    expr.start(),
-                    " return (".len(),
-                    format!("def _():\n return ({text})"),
-                ))
+        // Keep the existing staged generator when its suite cannot be lowered. Its
+        // surrounding caller and any neighboring supported suites remain compiled.
+        let native_generator = match &body {
+            Body::GeneratorFunction(stmts, code_flags::GENERATOR) if !self.source.bundled => {
+                self.output.try_suspended(|output| {
+                    output.definition(
+                        self.source,
+                        prefix.clone(),
+                        Body::GeneratorFunction(stmts, code_flags::GENERATOR),
+                        start,
+                        true,
+                        Entry::Suspended,
+                    )
+                })
             }
             _ => None,
-        }
-        .map(|(first, prefix, text)| {
-            let (line, column) = self.source.line_and_column(first);
-            signature["body_column_delta"] = json!(column as i64 - prefix as i64);
-            if !self.source.method_imports.is_empty() {
-                signature["method_imports"] = json!(self.source.method_imports);
+        };
+        // Synchronous genexprs already have a compiled comprehension step.
+        let entry = if native_generator.is_some()
+            || (flags.is_some_and(|flags| {
+                if self.source.bundled {
+                    flags & code_flags::GENERATOR != 0
+                } else {
+                    flags & code_flags::COROUTINE != 0
+                }
+            }) && !matches!(body, Body::Generator(..)))
+        {
+            Entry::Suspended
+        } else {
+            match &body {
+                Body::GeneratorFunction(stmts, flag) => {
+                    let first = stmts[0].start();
+                    let start = first.to_usize();
+                    let end = stmts.last().unwrap().end().to_usize();
+                    let indent =
+                        imre_ast::indentation::generator_prefix(&self.source.text[..start]);
+                    // Slice the suite as written so indentation inside multiline strings survives.
+                    let header = if *flag == code_flags::GENERATOR {
+                        "def"
+                    } else {
+                        "async def"
+                    };
+                    let text = format!("{header} _():\n{indent}{}", &self.source.text[start..end]);
+                    Some((first, indent.len(), text))
+                }
+                Body::Generator(expr, plan, _) if plan.body_suspends() => {
+                    // The same resumable interpreter that runs async def bodies
+                    // consumes this expression's canonical plan, with .0 supplied
+                    // by the caller when the generator is created.
+                    signature["generator_expression"] = json!(true);
+                    let text = &self.source.text[expr.start().to_usize()..expr.end().to_usize()];
+                    Some((
+                        expr.start(),
+                        " return (".len(),
+                        format!("async def _():\n return ({text})"),
+                    ))
+                }
+                Body::YieldingLambda(expr) => {
+                    let text = &self.source.text[expr.start().to_usize()..expr.end().to_usize()];
+                    Some((
+                        expr.start(),
+                        " return (".len(),
+                        format!("def _():\n return ({text})"),
+                    ))
+                }
+                _ => None,
             }
-            if let Some(owner) = self.source.private_names.suite_owner(first) {
-                signature["private_scope"] = json!([owner, self.source.string_annotations]);
-            }
-            (self.output.data(text.as_bytes()), line)
-        });
+            .map_or(Entry::Compiled, |(first, prefix, text)| {
+                let (line, column) = self.source.line_and_column(first);
+                signature["body_column_delta"] = json!(column as i64 - prefix as i64);
+                if !self.source.method_imports.is_empty() {
+                    signature["method_imports"] = json!(self.source.method_imports);
+                }
+                if let Some(owner) = self.source.private_names.suite_owner(first) {
+                    signature["private_scope"] = json!([owner, self.source.string_annotations]);
+                }
+                Entry::Source(self.output.data(text.as_bytes()), line)
+            })
+        };
         let mut closure_names = ClosureNames {
             string_annotations: self.source.string_annotations,
             include_nested_reads: matches!(
@@ -993,12 +1033,13 @@ impl Function<'_, '_> {
                 !type_params.is_some_and(|params| params.iter().any(|p| p.name().as_str() == name))
             })
         };
-        if generator.is_none() {
+        if matches!(entry, Entry::Compiled) {
             signature["return_type"] = json!(returns.and_then(scalar));
         }
-        let code = self
-            .output
-            .definition(self.source, prefix, body, start, in_function, generator);
+        let code = native_generator.unwrap_or_else(|| {
+            self.output
+                .definition(self.source, prefix, body, start, in_function, entry)
+        });
         if let Some(p) = params {
             self.output
                 .interned_identifiers
@@ -1108,7 +1149,7 @@ impl Function<'_, '_> {
                 Body::ModuleAnnotations(entries),
                 self.source.module_start,
                 false,
-                None,
+                Entry::Compiled,
             );
             let name = self.text("__annotate__");
             let provider = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {signature}, i64 0, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
@@ -1289,15 +1330,22 @@ impl Function<'_, '_> {
         }
     }
 
-    /// Branch after advancing the iterator and snapshotting a fixed pair into the scratch slots.
-    pub(super) fn branch_iteration(
+    /// Enter the loop body with its target bound, or branch to the exhaustion successor.
+    pub(super) fn enter_iteration(
         &mut self,
         iter: &str,
         target: &ast::Expr,
+        async_range: Option<ruff_text_size::TextRange>,
         has_else: bool,
-        yes: &str,
-        no: &str,
+        body: &str,
+        exhausted: &str,
     ) {
+        if let Some(range) = async_range {
+            let item = self.async_pull(iter, range, body, exhausted);
+            self.label(body);
+            self.assign(target, &item);
+            return;
+        }
         let more = if Self::pair_target(target).is_some() {
             self.max_live = self.max_live.max(2);
             self.checked(&format!(
@@ -1307,17 +1355,44 @@ impl Function<'_, '_> {
             self.op(if has_else { "more_else" } else { "more" }, &[iter])
         };
         let ready = self.value(&format!("icmp eq i64 {more}, 2"));
-        self.branch(&ready, yes, no);
-    }
-
-    /// Bind a loop target immediately after its successful advance.
-    pub(super) fn bind_iteration(&mut self, iter: &str, target: &ast::Expr) {
+        self.branch(&ready, body, exhausted);
+        self.label(body);
         if let Some([left, right]) = Self::pair_target(target) {
             self.assign_pair_slots(left, right);
         } else {
             let item = self.op("next", &[iter]);
             self.assign(target, &item);
         }
+    }
+
+    /// Only the implicit __anext__ call and its await can exhaust an async for.
+    fn async_pull(
+        &mut self,
+        iter: &str,
+        range: ruff_text_size::TextRange,
+        body: &str,
+        exhausted: &str,
+    ) -> String {
+        let handler = self.name("b");
+        let outer = std::mem::replace(&mut self.error, handler.clone());
+        let mark = self.temporary_mark();
+        let next = self.op("async_next_iter", &[iter]);
+        let item = self.suspend_at(&next, super::suspension::Suspension::Await, range, &mark);
+        self.flush_check();
+        self.error = outer;
+        self.jump(body);
+        self.label(&handler);
+        self.discard_truth(&mark);
+        let error = self.op("take_error", &[]);
+        let name = self.text("StopAsyncIteration");
+        let class = self.op("builtin", &[&name]);
+        let matches = self.op("matches", &[&error, &class]);
+        let stop = self.value(&format!("icmp eq i64 {matches}, 2"));
+        let propagate = self.name("b");
+        self.branch(&stop, exhausted, &propagate);
+        self.label(&propagate);
+        self.raise(&error, None, true);
+        item
     }
 
     fn pair_target(target: &ast::Expr) -> Option<[&ast::Expr; 2]> {
@@ -1341,7 +1416,17 @@ impl Function<'_, '_> {
         self.assign(right, &second);
     }
 
-    fn if_arm(&mut self, test: &ast::Expr, body: &[ast::Stmt], done: &str) {
+    /// Return whether control can reach a subsequent arm.
+    fn if_arm(&mut self, test: &ast::Expr, body: &[ast::Stmt], done: &str) -> bool {
+        if self.native_suspension
+            && let ast::Expr::BooleanLiteral(lit) = test
+        {
+            if lit.value {
+                self.statements(body);
+                self.jump(done);
+            }
+            return !lit.value;
+        }
         let body_label = self.name("b");
         let next = self.name("b");
         self.branch_expr(test, &body_label, &next);
@@ -1349,6 +1434,7 @@ impl Function<'_, '_> {
         self.statements(body);
         self.jump(done);
         self.label(&next);
+        true
     }
 
     fn loop_body(
@@ -1356,8 +1442,7 @@ impl Function<'_, '_> {
         body: &[ast::Stmt],
         otherwise: &[ast::Stmt],
         iterator: Option<&str>,
-        condition: impl FnOnce(&mut Self, &str, &str),
-        bind: impl FnOnce(&mut Self),
+        enter_body: impl FnOnce(&mut Self, &str, &str),
     ) {
         let step = self.name("b");
         let body_label = self.name("b");
@@ -1368,9 +1453,7 @@ impl Function<'_, '_> {
         }
         self.jump(&step);
         self.label(&step);
-        condition(self, &body_label, &exhausted);
-        self.label(&body_label);
-        bind(self);
+        enter_body(self, &body_label, &exhausted);
         self.loops.push(LoopTarget {
             step: step.clone(),
             done: done.clone(),
@@ -1526,8 +1609,16 @@ impl Function<'_, '_> {
             let (cleanup, outer) = &active[index];
             let previous = std::mem::replace(&mut self.error, outer.clone());
             match cleanup {
-                Cleanup::With { line, exit, caught } => {
-                    self.exit_context(*line, &[exit, "0", caught]);
+                Cleanup::With(context) => {
+                    if context.is_async {
+                        let slot = self
+                            .live
+                            .iter()
+                            .rposition(|v| v == &context.callable)
+                            .unwrap();
+                        discarded.push((slot, self.live.remove(slot)));
+                    }
+                    self.exit_context(context, None);
                 }
                 Cleanup::ExceptionName(name) => self.clear_exception_name(name),
                 Cleanup::PendingValue {
@@ -1571,57 +1662,126 @@ impl Function<'_, '_> {
         self.exits = active;
     }
 
-    fn exit_context(&mut self, line: usize, args: &[&str]) -> String {
-        // Providers without a compiled exit keep their existing IR and cache symbol.
-        if !self.output.declared_statement_line {
+    fn set_statement_line(&mut self, line: usize) {
+        if !self.output.declarations.declared_statement_line {
             self.output
                 .functions
                 .push_str("declare void @imre_dyn_set_statement_line(ptr, i32)\n");
-            self.output.declared_statement_line = true;
+            self.output.declarations.declared_statement_line = true;
         }
         self.line(&format!(
             "call void @imre_dyn_set_statement_line(ptr %ctx, i32 {line})"
         ));
-        self.op("exit_context", args)
     }
 
-    fn with(&mut self, items: &[ast::WithItem], body: &[ast::Stmt]) {
+    fn exit_context(&mut self, context: &ContextExit, exception: Option<&str>) -> String {
+        let args = [
+            context.callable.as_str(),
+            exception.unwrap_or("0"),
+            context.caught.as_str(),
+        ];
+        if !context.is_async {
+            self.set_statement_line(self.source.line(context.range.start()));
+            return self.op("exit_context", &args);
+        }
+
+        // A pending return, outer managers and the body exception survive this await.
+        // The exceptional exit also retains its callable through the truth test.
+        let outer_roots = self.live.len();
+        self.live.extend(exception.map(String::from));
+        self.live.push(context.callable.clone());
+        self.caught
+            .push(exception.unwrap_or(&context.caught).into());
+        self.checkpoint(&context.range);
+        self.caught.pop();
+        self.live.truncate(outer_roots);
+        self.suspension_position(context.range);
+        let awaitable = self.op("async_exit_context", &args);
+        let mark = if exception.is_some() {
+            outer_roots + 2
+        } else {
+            outer_roots
+        }
+        .to_string();
+        self.keep_operands(&mark, &awaitable, "0");
+        let result = self.await_at(&awaitable, "2", context.range, &mark);
+        if let Some(exc) = exception {
+            self.suspension_position(context.range);
+            let suppress = self.op("truth", &[&result]);
+            self.keep_operands(&outer_roots.to_string(), exc, &suppress);
+            self.op("restore_caught", &[&context.caught]);
+            suppress
+        } else {
+            self.discard_truth(&mark);
+            "0".into()
+        }
+    }
+
+    fn with(&mut self, items: &[ast::WithItem], body: &[ast::Stmt], is_async: bool) {
         let Some((item, rest)) = items.split_first() else {
             self.statements(body);
             return;
         };
-        let line = self.source.line(item.context_expr.start());
-        let manager = self.expr(&item.context_expr);
-        let exit = self.op("lookup_exit", &[&manager]);
-        let enter = self.op("lookup_enter", &[&manager]);
-        let value = self.invoke(&enter, &[]);
+        let range = item.context_expr.range();
+        let acquire = |f: &mut Self, mark: Option<&str>| {
+            let manager = f.expr(&item.context_expr);
+            let mode = if is_async { "2" } else { "0" };
+            let lookup = |f: &mut Self, name| {
+                if is_async {
+                    f.suspension_position(range);
+                }
+                f.op(name, &[&manager, mode])
+            };
+            let exit = lookup(f, "lookup_exit");
+            let enter = lookup(f, "lookup_enter");
+            let above_exit = mark.map(|mark| f.keep_operands(mark, &exit, &enter));
+            if is_async {
+                f.suspension_position(range);
+            }
+            let mut value = f.invoke(&enter, &[]);
+            if let Some(mark) = &above_exit {
+                f.keep_operands(mark, &value, "0");
+                value = f.await_at(&value, "1", range, mark);
+            }
+            (exit, value, above_exit)
+        };
+        let (exit, value, above_exit) = if is_async {
+            let mark = self.temporary_mark();
+            self.unwind_operands(&mark, |f| acquire(f, Some(&mark)))
+        } else {
+            acquire(self, None)
+        };
         let handler = self.name("b");
         let done = self.name("b");
         let outer = std::mem::replace(&mut self.error, handler.clone());
         let caught = self.caught.last().cloned().unwrap_or_else(|| "0".into());
-        self.exits.push((
-            Cleanup::With {
-                line,
-                exit: exit.clone(),
-                caught: caught.clone(),
-            },
-            outer.clone(),
-        ));
-        self.live.push(exit.clone());
+        let context = ContextExit {
+            range,
+            is_async,
+            callable: exit.clone(),
+            caught,
+        };
+        self.exits
+            .push((Cleanup::With(context.clone()), outer.clone()));
+        self.live.push(exit);
         if let Some(target) = &item.optional_vars {
             self.assign(target, &value);
         }
-        self.with(rest, body);
+        if let Some(mark) = above_exit {
+            // The assignment consumed the enter result before the next item is evaluated.
+            self.discard_truth(&mark);
+        }
+        self.with(rest, body, is_async);
         self.live.pop();
         self.exits.pop();
         self.error = outer;
         if !self.terminated {
-            self.exit_context(line, &[&exit, "0", &caught]);
+            self.exit_context(&context, None);
             self.jump(&done);
         }
         self.label(&handler);
         let exc = self.op("take_error", &[]);
-        let result = self.exit_context(line, &[&exit, &exc]);
+        let result = self.exit_context(&context, Some(&exc));
         let suppress = self.truth(&result);
         let propagate = self.name("b");
         self.branch(&suppress, &done, &propagate);

@@ -502,6 +502,7 @@ impl Context {
             module_definition: true,
             flags: 0,
             flags_complete: false,
+            generator_lambda: false,
         })))
     }
 

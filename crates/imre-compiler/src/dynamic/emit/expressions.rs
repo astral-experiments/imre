@@ -2,10 +2,27 @@ use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
 use super::boolean::{Context as BooleanContext, Flow, Target};
+use super::suspension::Suspension;
 use super::{Body, CallArguments, DefinitionName, Function, permanent};
 
 impl Function<'_, '_> {
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
+        let previous = std::mem::replace(&mut self.current_range, expr.range());
+        let value = self.located_expr(expr);
+        self.current_range = previous;
+        value
+    }
+
+    /// Evaluate the receiver before attributing a descriptor lookup to the attribute.
+    fn attribute_receiver(&mut self, field: &ast::ExprAttribute) -> String {
+        let receiver = self.expr(&field.value);
+        if self.native_suspension {
+            self.suspension_position(field.range());
+        }
+        receiver
+    }
+
+    fn located_expr(&mut self, expr: &ast::Expr) -> String {
         let position = imre_ast::expression_position(
             expr,
             &self.source.method_imports,
@@ -62,6 +79,30 @@ impl Function<'_, '_> {
 
     fn expr_inner(&mut self, expr: &ast::Expr, partition: Option<(u32, String)>) -> String {
         match expr {
+            ast::Expr::Await(expr) if self.native_suspension => {
+                let mark = self.temporary_mark();
+                self.unwind_operands(&mark, |f| {
+                    let value = f.expr(&expr.value);
+                    f.await_at(&value, "0", expr.range, &mark)
+                })
+            }
+            ast::Expr::Yield(yielded) if self.native_suspension => {
+                let mark = self.temporary_mark();
+                self.unwind_operands(&mark, |f| {
+                    let value = yielded
+                        .value
+                        .as_deref()
+                        .map_or_else(|| permanent::NONE.to_string(), |value| f.expr(value));
+                    f.suspend_at(&value, Suspension::Yield, yielded.range, &mark)
+                })
+            }
+            ast::Expr::YieldFrom(delegation) if self.native_suspension => {
+                let mark = self.temporary_mark();
+                self.unwind_operands(&mark, |f| {
+                    let iterable = f.expr(&delegation.value);
+                    f.suspend_at(&iterable, Suspension::Delegate, delegation.range, &mark)
+                })
+            }
             ast::Expr::NoneLiteral(_) => permanent::NONE.to_string(),
             ast::Expr::EllipsisLiteral(_) => permanent::ELLIPSIS.to_string(),
             ast::Expr::BooleanLiteral(v) => (if v.value {
@@ -84,7 +125,7 @@ impl Function<'_, '_> {
             ast::Expr::BytesLiteral(v) => self.lit(2, &v.value.bytes().collect::<Vec<_>>()),
             ast::Expr::Name(v) => self.lookup(v.id.as_str()),
             ast::Expr::Attribute(v) => {
-                let base = self.expr(&v.value);
+                let base = self.attribute_receiver(v);
                 self.attr(&base, v.attr.as_str())
             }
             ast::Expr::Subscript(v) => {
@@ -214,7 +255,7 @@ impl Function<'_, '_> {
                     &self.source.method_imports,
                     Some(&self.source.private_names),
                 ) {
-                    let receiver = self.expr(&field.value);
+                    let receiver = self.attribute_receiver(field);
                     let name = field.attr.as_str();
                     let lookup = if direct && name == "get" {
                         Some(format!(
@@ -247,12 +288,15 @@ impl Function<'_, '_> {
                         self.named_op("method", &receiver, field.attr.as_str(), "0")
                     }
                 } else {
+                    if self.native_suspension && matches!(&*v.func, ast::Expr::Name(_)) {
+                        self.suspension_position(v.func.range());
+                    }
                     self.expr(&v.func)
                 };
                 let operands = if let Some(star) = single_spread {
                     let source = self.expr(&star.value);
                     let kwargs = self.keyword_arguments(&v.arguments, &callable);
-                    let args = self.op("spread_arguments", &[&source]);
+                    let args = self.pack_operand("spread_arguments", &[&source, &callable]);
                     CallArguments::Packed { args, kwargs }
                 } else if let Some(args) = packed {
                     let kwargs = self.arguments(&args, &v.arguments, &callable);
@@ -426,14 +470,18 @@ impl Function<'_, '_> {
     }
 
     /// Keep just the live stack operands when Python may observe their release.
-    fn keep_operands(&mut self, mark: &str, first: &str, second: &str) -> String {
+    pub(super) fn keep_operands(&mut self, mark: &str, first: &str, second: &str) -> String {
         self.value(&format!(
             "call i64 @imre_dyn_keep_operands(ptr %ctx, i64 {mark}, i64 {first}, i64 {second})"
         ))
     }
 
     /// Unwind this operand window before propagating its pending exception.
-    fn unwind_operands<T>(&mut self, mark: &str, body: impl FnOnce(&mut Self) -> T) -> T {
+    pub(super) fn unwind_operands<T>(
+        &mut self,
+        mark: &str,
+        body: impl FnOnce(&mut Self) -> T,
+    ) -> T {
         let failed = self.name("b");
         let outer = std::mem::replace(&mut self.error, failed.clone());
         let result = body(self);
@@ -614,14 +662,30 @@ impl Function<'_, '_> {
         let target = self.op(kind, &[]);
         for element in elements {
             if let ast::Expr::Starred(v) = element {
-                let items = self.expr(&v.value);
-                self.op("extend", &[&target, &items]);
+                self.extend_operand(&target, &v.value);
             } else {
                 let value = self.expr(element);
                 self.op("append", &[&target, &value]);
             }
         }
         target
+    }
+
+    fn pack_operand(&mut self, operation: &str, args: &[&str]) -> String {
+        if self.native_suspension {
+            self.suspension_position(self.current_range);
+        }
+        self.op(operation, args)
+    }
+
+    fn extend_operand(&mut self, target: &str, expr: &ast::Expr) {
+        let mark = self.native_suspension.then(|| self.temporary_mark());
+        let value = self.expr(expr);
+        self.pack_operand("extend", &[target, &value]);
+        if let Some(mark) = mark {
+            // The target owns the expanded items. Drop the iterable before the next operand.
+            self.discard_truth(&mark);
+        }
     }
 
     pub(super) fn arguments(
@@ -633,8 +697,7 @@ impl Function<'_, '_> {
         // Python evaluates starred positional arguments before the keyword arguments.
         for arg in &syntax.args {
             if let ast::Expr::Starred(s) = arg {
-                let value = self.expr(&s.value);
-                self.op("extend", &[args, &value]);
+                self.extend_operand(args, &s.value);
             } else {
                 let value = self.expr(arg);
                 self.op("append", &[args, &value]);
@@ -674,7 +737,7 @@ impl Function<'_, '_> {
         while let Some(key) = keywords.peek() {
             if key.arg.is_none() {
                 let value = self.expr(&keywords.next().unwrap().value);
-                self.op("keywords", &[&kwargs, &value, callable]);
+                self.pack_operand("keywords", &[&kwargs, &value, callable]);
                 unpacked = true;
             } else {
                 // Python builds each group of named arguments before merging it
@@ -694,7 +757,7 @@ impl Function<'_, '_> {
                     );
                 }
                 if unpacked {
-                    self.op("keywords", &[&kwargs, &group, callable]);
+                    self.pack_operand("keywords", &[&kwargs, &group, callable]);
                 }
             }
         }

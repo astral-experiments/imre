@@ -15,6 +15,7 @@ mod expressions;
 mod patterns;
 mod statements;
 mod strings;
+mod suspension;
 
 mod permanent {
     include!("../../../imre-runtime/native/boxed-handles.rs");
@@ -390,6 +391,8 @@ impl Output {
             _ => file.to_owned(),
         };
         let location = SourceMap {
+            bundled,
+            path,
             // These CPython providers implement their own call semantics in Python.
             python_annotations: bundled
                 && matches!(name, "_py_warnings" | "tomllib._parser" | "typing"),
@@ -410,12 +413,17 @@ impl Output {
                 .map(|(offset, _)| offset)
                 .collect(),
         };
-        Ok(self.code(
+        let code = self.code(
             &location,
             String::new(),
             Body::Namespace(&body, false),
             false,
-        ))
+            false,
+        );
+        match self.diagnostic.take() {
+            Some(diagnostic) => Err(diagnostic),
+            None => Ok(code),
+        }
     }
 }
 
@@ -445,7 +453,28 @@ enum Body<'a> {
     ),
 }
 
+impl Body<'_> {
+    fn generator_flags(&self) -> u32 {
+        use imre_ast::code_flags::{ASYNC_GENERATOR, GENERATOR, yields_in_expression};
+        match self {
+            Self::GeneratorFunction(_, flags) => *flags,
+            Self::Generator(_, plan, _) if plan.body_suspends() => ASYNC_GENERATOR,
+            Self::Generator(..) | Self::YieldingLambda(_) => GENERATOR,
+            Self::Expression(expr) if yields_in_expression(expr) => GENERATOR,
+            _ => 0,
+        }
+    }
+}
+
+enum Entry {
+    Compiled,
+    Suspended,
+    Source(String, usize),
+}
+
 struct SourceMap<'a> {
+    bundled: bool,
+    path: &'a Path,
     python_annotations: bool,
     module_start: ruff_text_size::TextSize,
     docs: Option<crate::modules::doctest::SealedDocs>,
@@ -494,13 +523,20 @@ enum StringConstant {
     Tuple(Vec<Vec<u8>>),
 }
 
-#[derive(Default)]
-struct Output {
-    keep_docstrings: bool,
+#[derive(Clone, Copy, Default)]
+struct Declarations {
+    declared_suspension: bool,
     declared_statement_line: bool,
     emitted_named_op: bool,
     emitted_guarded_lit: bool,
     emitted_guarded_named_op: bool,
+}
+
+#[derive(Default)]
+struct Output {
+    declarations: Declarations,
+    diagnostic: Option<String>,
+    keep_docstrings: bool,
     string_constant_slots: HashMap<(usize, StringConstant), usize>,
     strings: HashMap<Vec<u8>, u32>,
     interned_identifiers: BTreeSet<String>,
@@ -511,6 +547,34 @@ struct Output {
 }
 
 impl Output {
+    /// Keep a supported native body exactly as emitted. An unsupported operation in
+    /// this body rolls back its private code sites before it gets a source entry.
+    fn try_suspended(&mut self, emit: impl FnOnce(&mut Self) -> String) -> Option<String> {
+        let code = self.count;
+        let functions = self.functions.len();
+        let constants = self.constants.len();
+        let strings = self.strings.len() as u32;
+        let positions = self.positions.len();
+        let slots = self.string_constant_slots.len();
+        let declarations = self.declarations;
+        let names = std::mem::take(&mut self.interned_identifiers);
+        let outer_diagnostic = self.diagnostic.take();
+        let site = emit(self);
+        let added_names = std::mem::replace(&mut self.interned_identifiers, names);
+        if std::mem::replace(&mut self.diagnostic, outer_diagnostic).is_none() {
+            self.interned_identifiers.extend(added_names);
+            return Some(site);
+        }
+        self.count = code;
+        self.functions.truncate(functions);
+        self.constants.truncate(constants);
+        self.strings.retain(|_, id| *id < strings);
+        self.positions.retain(|_, id| *id < positions);
+        self.string_constant_slots.retain(|_, id| *id < slots);
+        self.declarations = declarations;
+        None
+    }
+
     /// Distinct Python definitions keep distinct addresses even if LLVM merges their bodies.
     fn definition(
         &mut self,
@@ -519,14 +583,27 @@ impl Output {
         body: Body<'_>,
         start: ruff_text_size::TextSize,
         in_function: bool,
-        suspended: Option<(String, usize)>,
+        entry: Entry,
     ) -> String {
         let site = format!("@code_site{}", self.count);
-        let (entry, body_line) = if let Some(source) = suspended {
+        let (entry, body_line) = if let Entry::Source(text, line) = entry {
             self.count += 1;
-            source
+            (text, line)
         } else {
-            (self.code(source, prefix, body, in_function), 0)
+            let native_suspension = matches!(entry, Entry::Suspended);
+            let tag = if native_suspension {
+                if !self.declarations.declared_suspension {
+                    self.functions.push_str(suspension::ABI);
+                    self.declarations.declared_suspension = true;
+                }
+                permanent::NATIVE_SUSPENDED_BODY as usize
+            } else {
+                0
+            };
+            (
+                self.code(source, prefix, body, in_function, native_suspension),
+                tag,
+            )
         };
         writeln!(
             self.constants,
@@ -576,6 +653,7 @@ impl Output {
         prefix: String,
         body: Body<'_>,
         in_function: bool,
+        native_suspension: bool,
     ) -> String {
         let name = format!("@code{}", self.count);
         self.count += 1;
@@ -583,6 +661,8 @@ impl Output {
         let mut f = Function {
             output: self,
             source,
+            native_suspension,
+            current_range: ruff_text_size::TextRange::empty(source.module_start),
             class_sites: None,
             module_annotation_sites: None,
             in_function,
@@ -597,7 +677,7 @@ impl Output {
             },
             prefix,
             ir: String::new(),
-            block: "entry".into(),
+            block: if native_suspension { "start" } else { "entry" }.into(),
             error: "failed".into(),
             pending_check: None,
             scope: "%scope".into(),
@@ -642,29 +722,26 @@ impl Output {
                     f.jump("module_body");
                 }
             }
-            Body::Statements(stmts) => {
+            Body::Statements(stmts) | Body::GeneratorFunction(stmts, _) => {
                 f.declare_globals(stmts);
                 f.statements(stmts);
-            }
-            Body::GeneratorFunction(..) | Body::YieldingLambda(_) => {
-                unreachable!("suspended definitions store their source in the code site")
             }
             Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
             Body::Annotations(entries, class) => f.annotations(&entries, class, false),
             Body::ModuleAnnotations(entries) => f.annotations(&entries, None, true),
             Body::Generator(_, plan, _) => f.generator_step(&plan),
-            Body::Expression(expr) | Body::TypeAlias(expr) => {
+            Body::Expression(expr) | Body::YieldingLambda(expr) | Body::TypeAlias(expr) => {
                 f.checkpoint(expr);
                 if matches!(body, Body::TypeAlias(_)) {
                     let format = f.lookup(".format");
                     f.op("annotation_format", &[&format]);
                 }
                 let value = f.expr(expr);
-                f.end(&format!("ret i64 {value}"));
+                f.return_value(&value);
             }
         }
         if !f.terminated {
-            f.end("ret i64 0");
+            f.return_value("0");
         }
         let mut entry = if f.max_live == 0 {
             String::new()
@@ -685,8 +762,14 @@ impl Output {
             )
             .unwrap();
         }
-        writeln!(f.output.functions,
-            "define internal i64 {name}(ptr %ctx, i64 %scope) {{\nentry:\n{entry}{}failed:\n  ret i64 0\n}}", f.ir).unwrap();
+        if f.native_suspension {
+            writeln!(f.output.functions,
+                "define internal ptr {name}(ptr %context_slot, i64 %scope) presplitcoroutine {{\nentry:\n{entry}{}{}{} }}",
+                suspension::PROLOGUE, f.ir, suspension::EPILOGUE).unwrap();
+        } else {
+            writeln!(f.output.functions,
+                "define internal i64 {name}(ptr %ctx, i64 %scope) {{\nentry:\n{entry}{}failed:\n  ret i64 0\n}}", f.ir).unwrap();
+        }
         name
     }
 }
@@ -741,6 +824,8 @@ struct Function<'a, 'p> {
     caught: Vec<String>,
     simple_call: Option<ruff_text_size::TextRange>,
     expression_line: usize,
+    native_suspension: bool,
+    current_range: ruff_text_size::TextRange,
 }
 
 struct ErrorCheck {
@@ -750,12 +835,16 @@ struct ErrorCheck {
 }
 
 #[derive(Clone)]
+struct ContextExit {
+    range: ruff_text_size::TextRange,
+    is_async: bool,
+    callable: String,
+    caught: String,
+}
+
+#[derive(Clone)]
 enum Cleanup {
-    With {
-        line: usize,
-        exit: String,
-        caught: String,
-    },
+    With(ContextExit),
     ExceptionName(String),
     PendingValue {
         value: String,
@@ -784,7 +873,21 @@ impl Function<'_, '_> {
 
     fn line(&mut self, line: &str) {
         self.flush_check();
-        writeln!(self.ir, "  {line}").unwrap();
+        self.instruction(line);
+    }
+
+    fn instruction(&mut self, line: &str) {
+        // A suspended activation outlives the Context borrow of any one resume. Only
+        // the slot's address is stable. Each runtime call receives the current borrow.
+        if self.native_suspension
+            && let Some((before, after)) = line.split_once("ptr %ctx")
+        {
+            let ctx = self.name("%active_ctx");
+            writeln!(self.ir, "  {ctx} = load volatile ptr, ptr %context_slot").unwrap();
+            writeln!(self.ir, "  {before}ptr {ctx}{after}").unwrap();
+        } else {
+            writeln!(self.ir, "  {line}").unwrap();
+        }
     }
 
     fn value(&mut self, instruction: &str) -> String {
@@ -797,6 +900,19 @@ impl Function<'_, '_> {
         if !self.terminated {
             self.line(instruction);
             self.terminated = true;
+        }
+    }
+
+    fn return_value(&mut self, value: &str) {
+        if self.native_suspension {
+            if !self.terminated {
+                self.line(&format!(
+                    "call void @imre_dyn_suspend_return(ptr %context_slot, i64 {value})"
+                ));
+                self.jump("complete");
+            }
+        } else {
+            self.end(&format!("ret i64 {value}"));
         }
     }
 
@@ -836,7 +952,12 @@ impl Function<'_, '_> {
             next,
         }) = self.pending_check.take()
         {
-            writeln!(self.ir, "  {failed} = call i1 @imre_dyn_failed(ptr %ctx)\n  br i1 {failed}, label %{handler}, label %{next}\n{next}:").unwrap();
+            self.instruction(&format!("{failed} = call i1 @imre_dyn_failed(ptr %ctx)"));
+            writeln!(
+                self.ir,
+                "  br i1 {failed}, label %{handler}, label %{next}\n{next}:"
+            )
+            .unwrap();
             self.block = next;
         }
     }
@@ -875,9 +996,9 @@ impl Function<'_, '_> {
 
     fn lit(&mut self, kind: i32, bytes: &[u8]) -> String {
         let loader = if self.take_matching_check() {
-            if !self.output.emitted_guarded_lit {
+            if !self.output.declarations.emitted_guarded_lit {
                 self.output.functions.push_str(GUARDED_LIT);
-                self.output.emitted_guarded_lit = true;
+                self.output.declarations.emitted_guarded_lit = true;
             }
             "@imre_boxed_guarded_lit"
         } else {
@@ -927,14 +1048,14 @@ impl Function<'_, '_> {
                 name.len()
             ));
         }
-        if !self.output.emitted_named_op {
+        if !self.output.declarations.emitted_named_op {
             self.output.functions.push_str(NAMED_OP);
-            self.output.emitted_named_op = true;
+            self.output.declarations.emitted_named_op = true;
         }
         let operation = if self.take_matching_check() {
-            if !self.output.emitted_guarded_named_op {
+            if !self.output.declarations.emitted_guarded_named_op {
                 self.output.functions.push_str(GUARDED_NAMED_OP);
-                self.output.emitted_guarded_named_op = true;
+                self.output.declarations.emitted_guarded_named_op = true;
             }
             "@imre_boxed_guarded_named_op"
         } else {
@@ -1013,6 +1134,15 @@ impl Function<'_, '_> {
     }
 
     fn unsupported(&mut self, what: &str) -> String {
+        if self.native_suspension {
+            let (line, col) = self.source.line_and_column(self.current_range.start());
+            let (end_line, end_col) = self.source.line_and_column(self.current_range.end());
+            self.output.diagnostic.get_or_insert_with(|| format!(
+                "{}:{line}:{}: unsupported {what} in a compiled suspended function (through {end_line}:{})",
+                self.source.path.display(), col + 1, end_col + 1
+            ));
+            return "0".into();
+        }
         let what = self.text(what);
         self.op("unsupported", &[&what])
     }
@@ -1057,6 +1187,7 @@ impl Function<'_, '_> {
     }
 
     fn checkpoint(&mut self, node: &impl Ranged) {
+        self.current_range = node.range();
         let (ptr, count) = self.live_handles();
         let line = self.source.line(node.start());
         self.expression_line = line;
@@ -1134,6 +1265,46 @@ impl Function<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unsupported_generator_keeps_its_own_staged_body() {
+        let source = "def supported():\n    yield 1\ndef staged():\n    def nested():\n        yield 2\n    try:\n        yield 3\n    except* ValueError:\n        pass\ndef outer():\n    def inner():\n        try:\n            yield 4\n        except* ValueError:\n            pass\n    yield 5\n";
+        let (_, ir) = initializer("sample", Path::new("sample.py"), source, true, false)
+            .unwrap()
+            .unwrap();
+        let tag = format!(", i32 {} }}", permanent::NATIVE_SUSPENDED_BODY);
+        assert_eq!(ir.lines().filter(|line| line.ends_with(&tag)).count(), 2);
+        assert_eq!(
+            ir.matches("call void @imre_dyn_suspend_operands(").count(),
+            2
+        );
+        assert_eq!(ir.matches("except* ValueError").count(), 2);
+    }
+
+    #[test]
+    fn named_sync_generators_use_native_entries_in_each_module_origin() {
+        let source = "def items(xs):\n    yield 1\n    yield from xs\npark = lambda: (yield 2)\nresume = lambda: 1 + (yield 3)\nasync def more(xs):\n    async for x in xs:\n        yield x\nasync def consume(f):\n    return await f()\n";
+        for bundled in [false, true] {
+            let (_, ir) = initializer("example", Path::new("example.py"), source, true, bundled)
+                .unwrap()
+                .unwrap();
+            let tag = format!(", i32 {} }}", permanent::NATIVE_SUSPENDED_BODY);
+            assert_eq!(
+                ir.lines().filter(|line| line.ends_with(&tag)).count(),
+                if bundled { 3 } else { 2 }
+            );
+            let operations: Vec<_> = ir
+                .lines()
+                .filter(|line| line.contains("call void @imre_dyn_suspend_operands("))
+                .map(|line| line.rsplit_once(", i32 ").unwrap().1)
+                .collect();
+            if bundled {
+                assert_eq!(operations, ["0)", "3)", "0)", "0)"]);
+            } else {
+                assert_eq!(operations, ["0)", "3)", "2)"]);
+            }
+        }
+    }
 
     #[test]
     fn pass_fixed_keywords_directly_and_keep_expanded_calls_packed() {

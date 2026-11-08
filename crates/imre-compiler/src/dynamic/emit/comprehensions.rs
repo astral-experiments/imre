@@ -9,20 +9,19 @@ use super::{Body, DefinitionName, Function};
 
 impl Function<'_, '_> {
     pub(super) fn comprehension(&mut self, expr: &ast::Expr, plan: Plan<'_>) -> String {
+        self.iteration_result(|f| f.emit_comprehension(expr, plan))
+    }
+
+    fn emit_comprehension(&mut self, expr: &ast::Expr, plan: Plan<'_>) -> String {
         // Eager awaits require a containing coroutine. This emitter handles
         // ordinary frames and creates separately resumable generator expressions.
-        if !matches!(plan.output, Output::Generator(_)) && plan.body_suspends() {
+        if !self.native_suspension
+            && !matches!(plan.output, Output::Generator(_))
+            && plan.body_suspends()
+        {
             return self.unsupported("async comprehension");
         }
-        let iterable = self.expr(plan.outer);
-        let iterator = self.op(
-            if plan.outer_async {
-                "async_iter"
-            } else {
-                "iter"
-            },
-            &[&iterable],
-        );
+        let iterator = self.iteration_cursor(plan.outer, plan.outer_async);
         let names: indexmap::IndexSet<String> = plan.collect_target_names();
         let declaration: Vec<_> = names.iter().map(String::as_str).collect();
         let targets = self.text(&declaration.join(" "));
@@ -45,6 +44,29 @@ impl Function<'_, '_> {
         self.class_locals = class_locals;
         self.scope = enclosing;
         output
+    }
+
+    pub(super) fn iteration_cursor(&mut self, iterable: &ast::Expr, is_async: bool) -> String {
+        self.iteration_result(|f| {
+            let value = f.expr(iterable);
+            if f.native_suspension {
+                f.suspension_position(iterable.range());
+            }
+            f.op(if is_async { "async_iter" } else { "iter" }, &[&value])
+        })
+    }
+
+    /// The activation keeps its live handles until the next Python statement.
+    /// Release the iterable when its cursor exists, and the cursor and local scope
+    /// when the comprehension delivers its result to the enclosing expression.
+    fn iteration_result(&mut self, emit: impl FnOnce(&mut Self) -> String) -> String {
+        if !self.native_suspension {
+            return emit(self);
+        }
+        let mark = self.temporary_mark();
+        let result = self.unwind_operands(&mark, emit);
+        self.keep_operands(&mark, &result, "0");
+        result
     }
 
     pub(super) fn generator_step(&mut self, plan: &Plan<'_>) {
@@ -83,10 +105,11 @@ impl Function<'_, '_> {
             self.label(&labels[pc]);
             match step {
                 Step::Open {
-                    depth, iterable, ..
+                    depth,
+                    iterable,
+                    is_async,
                 } => {
-                    let source = self.expr(iterable);
-                    let iterator = self.op("iter", &[&source]);
+                    let iterator = self.iteration_cursor(iterable, is_async);
                     if collection.is_some() {
                         marks[depth] = self.temporary_mark();
                         iterators[depth] = iterator;
@@ -99,7 +122,7 @@ impl Function<'_, '_> {
                     depth,
                     target,
                     exhausted,
-                    ..
+                    is_async,
                 } => {
                     let body = self.name("b");
                     if collection.is_some() {
@@ -108,9 +131,14 @@ impl Function<'_, '_> {
                             marks[depth]
                         ));
                         let iter = &iterators[depth];
-                        self.branch_iteration(iter, target, false, &body, &labels[exhausted]);
-                        self.label(&body);
-                        self.bind_iteration(iter, target);
+                        self.enter_iteration(
+                            iter,
+                            target,
+                            is_async.then(|| target.range()),
+                            false,
+                            &body,
+                            &labels[exhausted],
+                        );
                     } else {
                         let iter = if plan.depths == 1 {
                             iterators[0].clone()
