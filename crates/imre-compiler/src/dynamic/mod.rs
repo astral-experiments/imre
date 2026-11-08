@@ -1551,7 +1551,14 @@ fn builtin_sources(
     } else {
         include_str!("../../../imre-runtime/src/dynamic/stdlib/selectors_base.py")
     };
-    [("selectors", "selectors.py", selectors)]
+    [
+        ("selectors", "selectors.py", selectors),
+        (
+            "random",
+            "random.py",
+            include_str!("../../../imre-runtime/src/dynamic/stdlib/random/random.py"),
+        ),
+    ]
 }
 
 const NAMEDTUPLE_COLLECTIONS: &str = include_str!("../../stdlib/collections/namedtuple_repr.py");

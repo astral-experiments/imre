@@ -14,17 +14,7 @@ pub(in crate::dynamic) enum RandomState {
 }
 
 pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
-    let choices = ctx.builtin("random._choices");
-    ctx.bind(scope, "_choices", choices);
-    let source = ctx.text(include_str!("random.py"));
-    let filename = ctx.text("<imre stdlib>/random.py");
-    let mode = ctx.text("exec");
-    let code = ctx.compile_source(source, filename, mode, false)?;
-    let globals = ctx.module_globals(scope)?;
-    ctx.exec_source(code, globals, None, None)?;
-    let class = ctx
-        .dict_named_item(globals, "Random")
-        .expect("Random class");
+    let class = ctx.scope_name(scope, "Random").expect("Random class");
     let Value::Class {
         heap_type,
         scope: fields,
