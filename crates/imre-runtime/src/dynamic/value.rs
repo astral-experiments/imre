@@ -3233,9 +3233,15 @@ impl RootTrace {
             }
             self.next_roots.push(id);
         }
-        self.add_frame_containers(heap);
-        if !self.valid || self.roots != self.next_roots {
+        let prefix = self.add_frame_containers(heap);
+        if self.roots.strip_prefix(self.next_roots.as_slice()) != Some(prefix) {
+            if self.next_roots.try_reserve(prefix.len()).is_ok() {
+                self.next_roots.extend_from_slice(prefix);
+            }
             std::mem::swap(&mut self.roots, &mut self.next_roots);
+            self.valid = false;
+        }
+        if !self.valid {
             self.covered_runs.clear();
             self.checked_runs = false;
             self.valid = self.rebuild(heap);
@@ -3264,8 +3270,8 @@ impl RootTrace {
         }
     }
 
-    /// Include large containers that the active scopes already keep alive.
-    fn add_frame_containers(&mut self, heap: &Heap) {
+    /// Include rooted containers and borrow the list prefix for comparison with the saved roots.
+    fn add_frame_containers<'h>(&mut self, heap: &'h Heap) -> &'h [Id] {
         for id in self.watched_containers.drain(..) {
             let flags = &mut self.flags[id as usize];
             if *flags & Self::WATCHED != 0 {
@@ -3319,7 +3325,7 @@ impl RootTrace {
                         continue;
                     }
                     if self.next_roots.try_reserve(1).is_err() {
-                        return;
+                        return &[];
                     }
                     self.next_roots.push(id);
                 }
@@ -3331,9 +3337,10 @@ impl RootTrace {
         // incomplete block to the ordinary marker so appends can reuse the trace.
         let (owner, items) = largest;
         let len = items.len() / Self::MIN_CONTAINER * Self::MIN_CONTAINER;
-        if len != 0 && !self.next_roots.contains(&owner) && self.next_roots.try_reserve(len).is_ok()
-        {
-            self.next_roots.extend_from_slice(&items[..len]);
+        if len != 0 && !self.next_roots.contains(&owner) {
+            &items[..len]
+        } else {
+            &[]
         }
     }
 
