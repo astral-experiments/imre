@@ -598,6 +598,8 @@ String loops, comprehensions, and loop-head `enumerate` capture the original imm
 
 A file entry runs as `__main__`. When its object code imports a missing runtime module, the import raises `ModuleNotFoundError`. Ordinary and reachable file builds preserve return contracts from a resolved static graph when an imported operation requires the object runtime. An explicit `--entry-profile` requires a statically compiled graph.
 
+Use `--include-module myproject.plugins.csv` to link a Python source module that the program may select by name at runtime. Repeat the option to declare other modules. The usual import paths determine which source is linked, and importing it runs its initializer. A fully typed entry has no runtime module loader and rejects this option.
+
 Use `--extension-path DIRECTORY` to add an import root to `imre check` or `imre build`. For example, if `build/site` contains `packaging/__init__.py` and `packaging/version.py`, build a caller of `packaging.version` with:
 
 ```sh
