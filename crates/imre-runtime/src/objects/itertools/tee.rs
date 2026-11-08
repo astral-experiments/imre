@@ -2,48 +2,56 @@
 //! lagging forks read the saved owners, including after the leader is dropped.
 
 use super::*;
-use std::cell::OnceCell;
-
-const BLOCK_SIZE: usize = 57;
+use crate::tee::{Block as Data, Position, Store};
 
 type BlockOwner = crate::shared::Shared<Block>;
 
-struct Block {
-    items: RefCell<Vec<OwnedWord>>,
-    next: OnceCell<BlockOwner>,
-}
+struct Block(RefCell<Data<OwnedWord, BlockOwner>>);
 
 impl Block {
     fn new() -> Self {
-        Self {
-            items: RefCell::default(),
-            next: OnceCell::new(),
-        }
+        Self(RefCell::new(Data::new()))
     }
 }
 
 impl Drop for Block {
     fn drop(&mut self) {
-        // A long lag can leave hundreds of thousands of uniquely owned blocks.
-        // Unlink them iteratively and stop at the first block another fork roots.
-        self.items.get_mut().clear();
-        let mut next = self.next.take();
-        while let Some(block) = next.and_then(|block| BlockOwner::try_unwrap(block).ok()) {
-            let mut block = block;
-            next = block.next.take();
+        // Unlink uniquely owned blocks iteratively when a long-lagging fork dies.
+        let block = self.0.get_mut();
+        block.items.clear();
+        let mut next = block.following.take();
+        while let Some(mut block) = next.and_then(|block| BlockOwner::try_unwrap(block).ok()) {
+            next = block.0.get_mut().following.take();
         }
+    }
+}
+
+struct CheckedBlocks;
+
+impl Store for CheckedBlocks {
+    type Link = BlockOwner;
+    type Item = OwnedWord;
+
+    fn allocate(&mut self) -> Result<BlockOwner, Error> {
+        BlockOwner::try_new(Block::new()).map_err(|_| Error::memory_error())
+    }
+
+    fn with_block<R>(
+        &mut self,
+        link: &BlockOwner,
+        f: impl FnOnce(&mut Data<OwnedWord, BlockOwner>) -> R,
+    ) -> R {
+        f(&mut link.0.borrow_mut())
     }
 }
 
 struct Shared {
     source: Option<crate::ObjectOwner>,
-    pulling: Cell<bool>,
 }
 
 pub(in crate::objects) struct Fork {
     shared: Rc<Shared>,
-    block: RefCell<BlockOwner>,
-    index: Cell<usize>,
+    position: RefCell<Position<BlockOwner>>,
 }
 
 impl Fork {
@@ -54,8 +62,7 @@ impl Fork {
     fn copy(&self) -> Self {
         Self {
             shared: self.shared.clone(),
-            block: RefCell::new(self.block.borrow().clone()),
-            index: Cell::new(self.index.get()),
+            position: RefCell::new(self.position.borrow().clone()),
         }
     }
 
@@ -75,64 +82,31 @@ impl Fork {
         fork.unwrap_or_else(|| Self {
             shared: Rc::new(Shared {
                 source: Some(source),
-                pulling: Cell::new(false),
             }),
-            block: RefCell::new(BlockOwner::new(Block::new())),
-            index: Cell::new(0),
+            position: RefCell::new(Position::new(BlockOwner::new(Block::new()))),
         })
     }
 
     pub(super) fn advance(&self, result: Option<ItemResult>) -> Advance {
-        let mut block = self.block.borrow().clone();
-        let mut index = self.index.get();
-        if index == BLOCK_SIZE {
-            let next = if let Some(next) = block.next.get() {
-                next.clone()
-            } else {
-                let Ok(next) = BlockOwner::try_new(Block::new()) else {
-                    return Advance::Return(Err(Error::memory_error()));
-                };
-                block.next.get_or_init(|| next).clone()
-            };
-            self.block.replace(next.clone());
-            block = next;
-            index = 0;
-            self.index.set(0);
+        if let Some(result) = result {
+            self.position.borrow_mut().finish(
+                &mut CheckedBlocks,
+                result.as_ref().ok().and_then(Option::as_ref),
+            );
+            return Advance::Return(result);
         }
-        let item = if let Some(result) = result {
-            self.shared.pulling.set(false);
-            match result {
-                Ok(Some(item)) => {
-                    block.items.borrow_mut().push(item.clone());
-                    item
-                }
-                other => return Advance::Return(other),
-            }
-        } else if let Some(item) = block.items.borrow().get(index).cloned() {
-            item
-        } else {
-            if self.shared.pulling.get() {
-                return Advance::Return(Err(Error::new(
-                    Kind::RuntimeError,
-                    "cannot re-enter the tee iterator",
-                )));
-            }
-            if index == 0
-                && block
-                    .items
-                    .borrow_mut()
-                    .try_reserve_exact(BLOCK_SIZE)
-                    .is_err()
-            {
-                return Advance::Return(Err(Error::memory_error()));
-            }
-            self.shared.pulling.set(true);
-            return Advance::Pull(crate::ObjectOwner::clone(
+        // Publishing a rollover may release a whole block of item owners. Let
+        // those owners drop after replace() has released the cursor borrow.
+        let mut position = self.position.borrow().clone();
+        let prepared = position.prepare(&mut CheckedBlocks);
+        self.position.replace(position);
+        match prepared {
+            Ok(Some(item)) => Advance::Return(Ok(Some(item))),
+            Ok(None) => Advance::Pull(crate::ObjectOwner::clone(
                 self.shared.source.as_ref().expect("live tee source"),
-            ));
-        };
-        self.index.set(index + 1);
-        Advance::Return(Ok(Some(item)))
+            )),
+            Err(error) => Advance::Return(Err(error)),
+        }
     }
 }
 

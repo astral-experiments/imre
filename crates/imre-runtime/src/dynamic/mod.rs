@@ -1667,6 +1667,14 @@ impl Context {
                 class,
                 itertools: Some(cursor),
                 ..
+            } if matches!(cursor.as_ref(), stdlib::itertools::Cursor::Tee { base, .. } if base == class) =>
+            {
+                return stdlib::itertools::next_tee(self, id);
+            }
+            Value::Instance {
+                class,
+                itertools: Some(cursor),
+                ..
             } if cursor.is_exact_accumulate(*class) => {
                 return stdlib::itertools::next_accumulated(self, id);
             }
@@ -4105,6 +4113,8 @@ impl Context {
                 for attr in [
                     "_accumulate_allocate",
                     "_accumulate_next",
+                    "_tee_allocate",
+                    "_tee_next",
                     "_cycle_allocate",
                     "_cycle_next",
                     "_pairwise_allocate",
@@ -4884,6 +4894,8 @@ impl Context {
             {
                 self.freeze_itertools_types(scope);
                 for (name, owner) in [
+                    ("_tee", "itertools._tee"),
+                    ("_TeeBlock", "itertools._TeeBlock"),
                     ("accumulate", "itertools.accumulate"),
                     ("cycle", "itertools.cycle"),
                     ("filterfalse", "itertools.filterfalse"),
