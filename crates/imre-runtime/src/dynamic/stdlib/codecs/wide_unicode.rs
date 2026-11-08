@@ -47,6 +47,7 @@ impl WideFunction {
             "utf_16_decode" => Self::BomDecode(Utf16(Little)),
             "utf_16_ex_decode" => Self::ExtendedDecode(Utf16(Little)),
             "utf_32_encode" => Self::OrderedEncode(Utf32Le),
+            "utf_32_decode" => Self::BomDecode(Utf32Le),
             "utf_32_ex_decode" => Self::ExtendedDecode(Utf32Le),
             "utf_16_le_encode" => Self::FixedEncode(Utf16(Little)),
             "utf_16_le_decode" => Self::FixedDecode(Utf16(Little)),
