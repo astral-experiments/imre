@@ -1378,7 +1378,7 @@ mod tests {
 
     #[test]
     fn unsupported_generator_keeps_its_own_staged_body() {
-        let source = "def supported():\n    yield 1\ndef staged():\n    def nested():\n        yield 2\n    try:\n        yield 3\n    except* ValueError:\n        pass\ndef outer():\n    def inner():\n        try:\n            yield 4\n        except* ValueError:\n            pass\n    yield 5\n";
+        let source = "def supported():\n    yield 1\ndef staged():\n    def nested():\n        yield 2\n    class Local(**{}):\n        pass\n    yield 3\ndef outer():\n    def inner():\n        class Local(**{}):\n            pass\n        yield 4\n    yield 5\n";
         let (_, ir) = initializer("sample", Path::new("sample.py"), source, true, false)
             .unwrap()
             .unwrap();
@@ -1388,7 +1388,7 @@ mod tests {
             ir.matches("call void @imre_dyn_suspend_operands(").count(),
             2
         );
-        assert_eq!(ir.matches("except* ValueError").count(), 2);
+        assert_eq!(ir.matches("class Local(**{})").count(), 2);
     }
 
     #[test]

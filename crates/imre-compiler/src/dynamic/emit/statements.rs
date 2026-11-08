@@ -600,7 +600,7 @@ impl Function<'_, '_> {
                         );
                     }
                 }
-                ast::Stmt::Try(v) if !v.is_star => {
+                ast::Stmt::Try(v) => {
                     if v.finalbody.is_empty() {
                         self.try_except(v);
                     } else {
@@ -1580,20 +1580,31 @@ impl Function<'_, '_> {
         let exc = self.op("take_error", &[]);
         self.live.push(exc.clone());
         self.caught.push(exc.clone());
-        for h in &stmt.handlers {
+        if stmt.is_star {
+            self.except_star_handlers(&stmt.handlers, &exc, &done);
+        } else {
+            self.except_handlers(&stmt.handlers, &exc, &done);
+        }
+        self.caught.pop();
+        self.live.pop();
+        self.label(&done);
+    }
+
+    fn except_handlers(&mut self, handlers: &[ast::ExceptHandler], exc: &str, done: &str) {
+        for h in handlers {
             let ast::ExceptHandler::ExceptHandler(h) = h;
             let next = self.name("b");
             if let Some(class) = &h.type_ {
                 self.checkpoint(class.as_ref());
                 let class = self.expr(class);
-                let matches = self.op("matches", &[&exc, &class]);
+                let matches = self.op("matches", &[exc, &class]);
                 let matches = self.value(&format!("icmp eq i64 {matches}, 2"));
                 let body = self.name("b");
                 self.branch(&matches, &body, &next);
                 self.label(&body);
             }
             if let Some(name) = &h.name {
-                self.bind(name.as_str(), &exc);
+                self.bind(name.as_str(), exc);
                 let failed = self.name("b");
                 let outer = std::mem::replace(&mut self.error, failed.clone());
                 self.exits
@@ -1604,21 +1615,98 @@ impl Function<'_, '_> {
                 if !self.terminated {
                     self.clear_exception_name(name.as_str());
                 }
-                self.jump(&done);
+                self.jump(done);
                 self.label(&failed);
                 let error = self.op("take_error", &[]);
                 self.clear_exception_name(name.as_str());
                 self.raise(&error, None, true);
             } else {
                 self.statements(&h.body);
-                self.jump(&done);
+                self.jump(done);
             }
             self.label(&next);
         }
-        self.raise(&exc, None, true);
-        self.caught.pop();
+        self.raise(exc, None, true);
+    }
+
+    fn except_star_handlers(&mut self, handlers: &[ast::ExceptHandler], exc: &str, done: &str) {
+        let raised = self.op("list", &[]);
+        self.live.push(raised.clone());
+        let roots = self.live.len();
+        let mut remainder = exc.to_owned();
+        let mut active = exc.to_owned();
+        for ast::ExceptHandler::ExceptHandler(handler) in handlers {
+            let matcher = handler.type_.as_deref().expect("except* requires a type");
+            self.live.extend([remainder.clone(), active.clone()]);
+            self.checkpoint(handler);
+            let matcher = self.expr(matcher);
+            let pair = self.op("except_star_split", &[&remainder, &matcher]);
+            let zero = self.integer(0);
+            let matched = self.op("get", &[&pair, &zero]);
+            let one = self.integer(1);
+            remainder = self.op("get", &[&pair, &one]);
+
+            let has_match = self.value(&format!("icmp ne i64 {matched}, 0"));
+            // Later match expressions see the last subgroup handled, even across an empty match.
+            active = self.value(&format!(
+                "select i1 {has_match}, i64 {matched}, i64 {active}"
+            ));
+            *self.caught.last_mut().unwrap() = active.clone();
+            self.live.truncate(roots);
+            self.live.extend([remainder.clone(), active.clone()]);
+
+            let body = self.name("b");
+            let failed = self.name("b");
+            let next = self.name("b");
+            self.branch(&has_match, &body, &next);
+            self.label(&body);
+            self.op("restore_caught", &[&matched]);
+            if let Some(name) = &handler.name {
+                self.bind(name.as_str(), &matched);
+            }
+            let outer = std::mem::replace(&mut self.error, failed.clone());
+            self.statements(&handler.body);
+            self.error = outer;
+            if !self.terminated
+                && let Some(name) = &handler.name
+            {
+                self.clear_star_target(name.as_str());
+            }
+            self.jump(&next);
+            self.label(&failed);
+            let error = self.op("take_error", &[]);
+            if let Some(name) = &handler.name {
+                self.clear_star_target(name.as_str());
+            }
+            self.op("append", &[&raised, &error]);
+            self.jump(&next);
+            self.label(&next);
+            self.live.truncate(roots);
+        }
+
+        self.op("append", &[&raised, &remainder]);
+        let merged = self.op("except_star_merge", &[exc, &raised]);
         self.live.pop();
-        self.label(&done);
+        let enclosing = self
+            .caught
+            .iter()
+            .rev()
+            .nth(1)
+            .cloned()
+            .unwrap_or_else(|| "0".into());
+        self.op("restore_caught", &[&enclosing]);
+        let propagate = self.name("b");
+        let handled = self.value(&format!("icmp eq i64 {merged}, 0"));
+        self.branch(&handled, done, &propagate);
+        self.label(&propagate);
+        self.raise(&merged, None, true);
+    }
+
+    /// A custom namespace observes both the None store and the deletion, outside the arm body.
+    fn clear_star_target(&mut self, name: &str) {
+        self.bind(name, "0");
+        let key = self.code_name(name);
+        self.op("delname", &[&self.scope.clone(), &key]);
     }
 
     /// Remove a handler's binding even if it was changed or deleted by its body.

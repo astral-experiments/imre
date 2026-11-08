@@ -94,5 +94,24 @@ for partition in (batch.subgroup, batch.split):
     else:
         raise AssertionError("discarded the exception from __len__")
 
+# Each arm sees its matching leaves. A bare reraise rejoins the untouched remainder.
+invoice = Batch("invoice", [ValueError(35), TypeError(7), OSError("open")])
+amounts = []
+try:
+    try:
+        raise invoice
+    except* ValueError as part:
+        amounts.append(part.exceptions[0].args[0])
+        raise
+    except* TypeError as part:
+        amounts.append(part.exceptions[0].args[0])
+except Batch as pending:
+    assert pending.exceptions == (invoice.exceptions[0], invoice.exceptions[2])
+    assert pending.__traceback__ is invoice.__traceback__
+else:
+    raise AssertionError("lost invoice errors")
+assert amounts == [35, 7]
+
+
 if __name__ == "__main__":
     current()

@@ -254,3 +254,29 @@ fn literal_import_checks_native_body_with_or_without_other_declarations() {
         );
     }
 }
+
+#[test]
+fn contextual_errors_do_not_hide_the_winning_files_semantic_error() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("billing.py");
+    fs::write(
+        &entry,
+        "import sys\nfrom importlib.machinery import SourceFileLoader\n\ndef declared():\n    import pricing\n    return pricing\n\nSourceFileLoader('pricing', sys.argv[1]).get_code('pricing')\n",
+    )
+    .unwrap();
+    let file = project.path().join("pricing.py");
+    for operand in ["__debug__", "(label, [__debug__])"] {
+        fs::write(&file, format!("print('invoice')\ndel {operand}\n")).unwrap();
+        let error = crate::compile_file_with_boxed_units(
+            &entry,
+            Some(project.path()),
+            &crate::CompileOptions::default(),
+        )
+        .err()
+        .unwrap();
+        assert!(
+            error.contains("invalid-syntax") && error.contains("pricing.py:2:"),
+            "{error}"
+        );
+    }
+}

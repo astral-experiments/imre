@@ -189,6 +189,7 @@ pub(crate) fn check_native_syntax<'a>(
     checked: Option<&crate::modules::SourceGraph>,
     modules: impl Iterator<Item = &'a (String, PathBuf, String)>,
     is_alternative: impl Fn(&Path) -> bool,
+    contextual: &HashMap<PathBuf, crate::frontend::phase::Diagnostic>,
     source_only: &mut std::collections::HashSet<PathBuf>,
 ) -> Result<(), String> {
     let mut scratch = None;
@@ -226,16 +227,22 @@ pub(crate) fn check_native_syntax<'a>(
             file.sync(&mut session.db);
             (&*session, file)
         };
-        if let Some(error) = session.semantic_syntax_error(file) {
-            if is_alternative(path) {
-                source_only.insert(path.clone());
-            } else {
-                return Err(Diagnostic::invalid_syntax(file, &error, &error)
+        let error = session
+            .semantic_syntax_error(file)
+            .map(|error| {
+                Diagnostic::invalid_syntax(file, &error, &error)
                     .display(
                         &(&session.db as &dyn ruff_db::Db),
                         &DisplayDiagnosticConfig::new("imre"),
                     )
-                    .to_string());
+                    .to_string()
+            })
+            .or_else(|| contextual.get(path).map(ToString::to_string));
+        if let Some(error) = error {
+            if is_alternative(path) {
+                source_only.insert(path.clone());
+            } else {
+                return Err(error);
             }
         }
     }

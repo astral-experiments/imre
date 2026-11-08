@@ -638,6 +638,17 @@ impl Context {
                 self.heap.replace_active(prior);
                 result
             }
+            "except_star_split" => {
+                let (matched, rest) = super::exception_group::split_star(self, a, b)?;
+                Ok(self.alloc(Value::Tuple(vec![matched, rest])))
+            }
+            "except_star_merge" => {
+                let Value::List(raised) = self.heap.get(b) else {
+                    return Err(Error::new("SystemError", "expected except* arm outcomes"));
+                };
+                let raised = super::copy_ids(raised)?;
+                super::exception_group::merge_star(self, a, &raised)
+            }
             "raise" | "reraise" => {
                 let a = if op == "reraise" && a == NONE {
                     self.heap.active_exception()
