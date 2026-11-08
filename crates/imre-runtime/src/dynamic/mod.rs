@@ -619,21 +619,25 @@ impl Context {
     fn with_read_buffer<T>(
         &mut self,
         data: Id,
-        consume: impl FnOnce(&mut Context, Id) -> Result<T>,
+        consume: impl FnOnce(&mut Self, memoryview::ReadBuffer) -> Result<T>,
     ) -> Result<T> {
-        if matches!(
-            self.heap.get(self.scalar_value(data)),
-            Value::Bytes(_) | Value::ByteArray(_)
-        ) && self.buffer_slot(data, "__buffer__") == Some(None)
-        {
-            return self.with_native_bytes_export(data, consume);
+        if matches!(self.heap.get(data), Value::Instance { .. }) {
+            if matches!(
+                self.heap.get(self.scalar_value(data)),
+                Value::Bytes(_) | Value::ByteArray(_)
+            ) && self.buffer_slot(data, "__buffer__") == Some(None)
+            {
+                let buffer = self.read_buffer_range(data)?;
+                return self.with_native_bytes_export(data, |ctx, _| consume(ctx, buffer));
+            }
+            if let Some(method) = self.python_buffer_method(data, true)? {
+                return self.with_python_read_buffer(data, method, 0, |ctx, _, buffer| {
+                    consume(ctx, buffer)
+                });
+            }
         }
-        if let Some(method) = self.python_buffer_method(data, true)? {
-            self.with_contiguous_python_buffer(data, method, 0, consume)
-        } else {
-            self.contiguous_buffer(data)?;
-            self.with_buffer_export(data, |ctx| consume(ctx, data))
-        }
+        let buffer = self.read_buffer_range(data)?;
+        self.with_buffer_export(data, |ctx| consume(ctx, buffer))
     }
 
     /// Consume a contiguous view returned by a Python buffer provider.
@@ -644,10 +648,20 @@ impl Context {
         flags: i64,
         consume: impl FnOnce(&mut Self, Id) -> Result<T>,
     ) -> Result<T> {
+        self.with_python_read_buffer(object, method, flags, |ctx, view, _| consume(ctx, view))
+    }
+
+    fn with_python_read_buffer<T>(
+        &mut self,
+        object: Id,
+        method: Id,
+        flags: i64,
+        consume: impl FnOnce(&mut Self, Id, memoryview::ReadBuffer) -> Result<T>,
+    ) -> Result<T> {
         let view = self.acquire_python_buffer(object, method, flags)?;
         // A failed export of the returned view does not call the provider's release hook.
-        self.contiguous_buffer(view)?;
-        self.with_python_buffer_export(object, view, |ctx| consume(ctx, view))
+        let buffer = self.read_buffer_range(view)?;
+        self.with_python_buffer_export(object, view, |ctx| consume(ctx, view, buffer))
     }
 
     /// Run the consumer of a successfully acquired Python export, then release it.
@@ -754,30 +768,41 @@ impl Context {
         }
     }
 
-    fn owner_bytes(&self, owner: Id) -> Result<&[u8]> {
-        match self.heap.get(self.view_storage_id(owner)) {
-            Value::Bytes(bytes) | Value::ByteArray(bytes) => Ok(bytes),
-            Value::Array(a) => Ok(a.as_bytes()),
-            Value::RawReadWindow(w) => self.window_bytes(*w),
+    fn owner_storage(&self, owner: Id) -> Result<memoryview::Storage<'_>> {
+        use memoryview::Storage;
+        let bytes = match self.heap.get(self.view_storage_id(owner)) {
+            Value::Bytes(bytes) | Value::ByteArray(bytes) => bytes.as_slice(),
+            Value::Array(a) => a.as_bytes(),
+            Value::RawReadWindow(w) => {
+                let storage = self.owner_storage(w.backing)?;
+                let range = w.checked_range(storage.len())?;
+                return storage.slice(range);
+            }
             #[cfg(target_os = "linux")]
-            Value::Mmap { .. } => Err(stdlib::mmap::unsupported_borrow()),
-            Value::BytesIoStorage(state) => Ok(state.file()?.storage()),
-            _ => Err(Error::new(
-                "TypeError",
-                format!(
-                    "a bytes-like object is required, not '{}'",
-                    self.type_name(owner)
-                ),
-            )),
-        }
+            value @ Value::Mmap { .. } => {
+                let region = stdlib::mmap::region(value)?;
+                return Ok(Storage::Mapped(region, 0..region.len()));
+            }
+            Value::BytesIoStorage(state) => state.file()?.storage(),
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "a bytes-like object is required, not '{}'",
+                        self.type_name(owner)
+                    ),
+                ));
+            }
+        };
+        Ok(Storage::Native(bytes))
+    }
+
+    fn owner_bytes(&self, owner: Id) -> Result<&[u8]> {
+        self.owner_storage(owner)?.borrowed()
     }
 
     fn owner_byte_len(&self, owner: Id) -> Result<usize> {
-        #[cfg(target_os = "linux")]
-        if let Some((_, range)) = stdlib::mmap::owner(self, owner)? {
-            return Ok(range.len());
-        }
-        Ok(self.owner_bytes(owner)?.len())
+        Ok(self.owner_storage(owner)?.len())
     }
 
     fn view_element_count(&self, owner: Id) -> Result<usize> {
@@ -844,22 +869,9 @@ impl Context {
         }
     }
 
-    /// Resolve a contiguous export without copying any mapped bytes before argument conversion.
-    fn contiguous_buffer(&self, id: Id) -> Result<memoryview::Storage<'_>> {
-        #[cfg(target_os = "linux")]
-        if let Some((map, range)) = stdlib::mmap::mapped_span(self, id)? {
-            return Ok(memoryview::Storage::Mapped(
-                stdlib::mmap::region(self.heap.get(map))?,
-                range,
-            ));
-        }
-        self.native_buffer_bytes(id)
-            .map(memoryview::Storage::Native)
-    }
-
     /// Obtain the current contents of a contiguous export at the point of consumption.
     fn read_buffer_bytes(&self, id: Id) -> Result<std::borrow::Cow<'_, [u8]>> {
-        let buffer = self.contiguous_buffer(id)?;
+        let buffer = self.read_buffer_range(id)?.storage(self)?;
         buffer.read(0..buffer.len())
     }
 

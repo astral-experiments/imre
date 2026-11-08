@@ -12,6 +12,23 @@ pub(super) enum Storage<'a> {
     Mapped(&'a super::stdlib::mmap::Region, Range<usize>),
 }
 
+/// Backing object and byte coordinates captured when a contiguous read export is acquired.
+/// Resolve its current allocation only while consuming it: Python callbacks may detach storage.
+pub(super) struct ReadBuffer {
+    owner: Id,
+    range: Range<usize>,
+}
+
+impl ReadBuffer {
+    pub(super) fn storage<'a>(&self, ctx: &'a Context) -> Result<Storage<'a>> {
+        ctx.owner_storage(self.owner)?.slice(self.range.clone())
+    }
+
+    pub(super) fn bytes<'a>(&self, ctx: &'a Context) -> Result<&'a [u8]> {
+        self.storage(ctx)?.borrowed()
+    }
+}
+
 struct Span<'a> {
     data: Storage<'a>,
     array: Option<&'a super::array::Array>,
@@ -21,6 +38,27 @@ struct Span<'a> {
 }
 
 impl<'a> Storage<'a> {
+    pub(super) fn slice(&self, range: Range<usize>) -> Result<Self> {
+        if range.end > self.len() || range.start > range.end {
+            return Err(Error::new("BufferError", "exported buffer changed size"));
+        }
+        Ok(match self {
+            Self::Native(bytes) => Self::Native(&bytes[range]),
+            #[cfg(target_os = "linux")]
+            Self::Mapped(map, span) => {
+                Self::Mapped(map, span.start + range.start..span.start + range.end)
+            }
+        })
+    }
+
+    pub(super) fn borrowed(self) -> Result<&'a [u8]> {
+        match self {
+            Self::Native(bytes) => Ok(bytes),
+            #[cfg(target_os = "linux")]
+            Self::Mapped(..) => Err(super::stdlib::mmap::unsupported_borrow()),
+        }
+    }
+
     /// Append exactly the requested bytes, reserving the destination before reading a live map.
     pub(super) fn append_buffered(
         &self,
@@ -58,16 +96,10 @@ impl<'a> Storage<'a> {
     }
 
     pub(super) fn read(&self, range: Range<usize>) -> Result<Cow<'a, [u8]>> {
-        if range.end > self.len() || range.start > range.end {
-            return Err(Error::new("BufferError", "exported buffer changed size"));
-        }
-        match self {
-            Self::Native(bytes) => Ok(Cow::Borrowed(&bytes[range])),
+        match self.slice(range)? {
+            Self::Native(bytes) => Ok(Cow::Borrowed(bytes)),
             #[cfg(target_os = "linux")]
-            Self::Mapped(map, span) => {
-                super::stdlib::mmap::read(map, span.start + range.start..span.start + range.end)
-                    .map(Cow::Owned)
-            }
+            Self::Mapped(map, span) => super::stdlib::mmap::read(map, span).map(Cow::Owned),
         }
     }
 }
@@ -113,28 +145,14 @@ impl<'a> Span<'a> {
         self.data.read(offset..offset + self.width)
     }
 
-    fn contiguous_range(&self) -> Result<Range<usize>> {
-        if !self.layout.is_contiguous() {
-            return Err(Error::new(
-                "BufferError",
-                "memoryview: underlying buffer is not C-contiguous",
-            ));
-        }
-        let begin = self.layout.byte_start(self.width);
-        Ok(begin..begin + self.layout.len * self.width)
-    }
-
     fn contiguous(&self) -> Result<Cow<'a, [u8]>> {
-        self.data.read(self.contiguous_range()?)
+        self.data.read(self.layout.contiguous_range(self.width)?)
     }
 
     fn borrowed_contiguous(&self) -> Result<&'a [u8]> {
-        let range = self.contiguous_range()?;
-        match &self.data {
-            Storage::Native(bytes) => Ok(&bytes[range]),
-            #[cfg(target_os = "linux")]
-            Storage::Mapped(..) => Err(super::stdlib::mmap::unsupported_borrow()),
-        }
+        self.data
+            .slice(self.layout.contiguous_range(self.width)?)?
+            .borrowed()
     }
 
     fn gather(&self, fortran: bool) -> Result<Vec<u8>> {
@@ -178,6 +196,19 @@ fn structure_error() -> Error {
         "ValueError",
         "memoryview assignment: lvalue and rvalue have different structures",
     )
+}
+
+impl ViewLayout {
+    pub(super) fn contiguous_range(&self, width: usize) -> Result<Range<usize>> {
+        if !self.is_contiguous() {
+            return Err(Error::new(
+                "BufferError",
+                "memoryview: underlying buffer is not C-contiguous",
+            ));
+        }
+        let begin = self.byte_start(width);
+        Ok(begin..begin + self.len * width)
+    }
 }
 
 impl Context {
@@ -238,6 +269,27 @@ impl Context {
         ("B", 1)
     }
 
+    pub(super) fn read_buffer_range(&self, id: Id) -> Result<ReadBuffer> {
+        let owner = self.scalar_value(id);
+        let range = match *self.heap.get(owner) {
+            Value::Bytes(ref bytes) | Value::ByteArray(ref bytes) => 0..bytes.len(),
+            Value::MemoryView { owner: source, .. } => {
+                self.check_view_export(owner)?;
+                let source = Self::memoryview_owner(source)?;
+                let layout = self.view_layout(owner)?;
+                let (_, width) = self.view_format_width(source, &layout);
+                return Ok(ReadBuffer {
+                    owner: source,
+                    range: layout.contiguous_range(width)?,
+                });
+            }
+            #[cfg(target_os = "linux")]
+            Value::Mmap { .. } => 0..super::stdlib::mmap::region(self.heap.get(owner))?.len(),
+            _ => 0..self.native_buffer_bytes(id)?.len(),
+        };
+        Ok(ReadBuffer { owner, range })
+    }
+
     fn buffer_span(&self, id: Id) -> Result<Span<'_>> {
         let (owner, layout) = if matches!(self.heap.get(id), Value::MemoryView { .. }) {
             (self.view_owner(id)?, self.view_layout(id)?)
@@ -245,16 +297,7 @@ impl Context {
             (id, ViewLayout::full(self.view_element_count(id)?))
         };
         let (format, width) = self.view_format_width(owner, &layout);
-        let native = || self.owner_bytes(owner).map(Storage::Native);
-        #[cfg(target_os = "linux")]
-        let data = match super::stdlib::mmap::owner(self, owner)? {
-            Some((map, range)) => {
-                Storage::Mapped(super::stdlib::mmap::region(self.heap.get(map))?, range)
-            }
-            None => native()?,
-        };
-        #[cfg(not(target_os = "linux"))]
-        let data = native()?;
+        let data = self.owner_storage(owner)?;
         Ok(Span {
             data,
             array: match self.heap.get(self.view_storage_id(owner)) {

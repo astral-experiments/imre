@@ -77,11 +77,6 @@ impl Context {
         }
     }
 
-    pub(super) fn window_bytes(&self, w: Window) -> Result<&[u8]> {
-        let data = self.owner_bytes(w.backing)?;
-        Ok(&data[w.checked_range(data.len())?])
-    }
-
     pub(super) fn writable_byte_span(&self, object: Id) -> Result<Option<(Id, Range<usize>)>> {
         self.contiguous_byte_span(object, true)
     }
