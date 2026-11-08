@@ -335,6 +335,7 @@ impl BuiltinDescriptor {
             });
         }
         let (owner, name) = match symbol {
+            "type.__call__" => ("type", "__call__"),
             "type.__init__" => ("type", "__init__"),
             "super.__getattribute__" => ("super", "__getattribute__"),
             "super.__init__" => ("super", "__init__"),
