@@ -8,6 +8,8 @@
 #
 
 import ctypes
+from keyword import iskeyword
+from unicodedata import normalize
 import weakref
 
 from . import heap
@@ -149,26 +151,35 @@ def make_property(name):
     try:
         return prop_cache[name]
     except KeyError:
-        d = {}
-        exec(template % ((name,)*7), d)
-        prop_cache[name] = d[name]
-        return d[name]
+        pass
 
-template = '''
-def get%s(self):
-    self.acquire()
-    try:
-        return self._obj.%s
-    finally:
-        self.release()
-def set%s(self, value):
-    self.acquire()
-    try:
-        self._obj.%s = value
-    finally:
-        self.release()
-%s = property(get%s, set%s)
-'''
+    if not isinstance(name, str) or not name.isidentifier() or iskeyword(name):
+        raise SyntaxError('invalid syntax')
+    if name == '__debug__':
+        raise SyntaxError('cannot assign to __debug__')
+    if not name.isascii() and normalize('NFKC', name) != name:
+        raise KeyError(name)
+
+    def get(self):
+        self.acquire()
+        try:
+            return getattr(self._obj, name)
+        finally:
+            self.release()
+
+    def set_(self, value):
+        self.acquire()
+        try:
+            setattr(self._obj, name, value)
+        finally:
+            self.release()
+
+    get.__name__ = get.__qualname__ = 'get' + name
+    set_.__name__ = set_.__qualname__ = 'set' + name
+    get.__module__ = set_.__module__ = None
+    prop = property(get, set_)
+    prop_cache[name] = prop
+    return prop
 
 prop_cache = {}
 class_cache = weakref.WeakKeyDictionary()

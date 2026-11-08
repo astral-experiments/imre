@@ -19,6 +19,8 @@ import threading
 import signal
 import array
 import collections.abc
+from keyword import iskeyword
+from unicodedata import normalize
 import queue
 import time
 import types
@@ -962,6 +964,15 @@ def RebuildProxy(func, token, serializer, kwds):
 # Functions to create proxies and proxy types
 #
 
+def _proxy_method(name, attribute):
+    def method(self, /, *args, **kwds):
+        return self._callmethod(name, args, kwds)
+
+    method.__name__ = method.__qualname__ = attribute
+    method.__module__ = None
+    return method
+
+
 def MakeProxyType(name, exposed, _cache={}):
     '''
     Return a proxy type whose methods are given by `exposed`
@@ -972,11 +983,14 @@ def MakeProxyType(name, exposed, _cache={}):
     except KeyError:
         pass
 
-    dic = {}
-
+    dic = {'__builtins__': __builtins__} if exposed else {}
     for meth in exposed:
-        exec('''def %s(self, /, *args, **kwds):
-        return self._callmethod(%r, args, kwds)''' % (meth, meth), dic)
+        if not isinstance(meth, str) or not meth.isidentifier() or iskeyword(meth):
+            raise SyntaxError('invalid syntax')
+        attribute = normalize('NFKC', meth) if not meth.isascii() else meth
+        if attribute == '__debug__':
+            raise SyntaxError('cannot assign to __debug__')
+        dic[attribute] = _proxy_method(meth, attribute)
 
     ProxyType = type(name, (BaseProxy,), dic)
     ProxyType._exposed_ = exposed
