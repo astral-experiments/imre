@@ -1389,10 +1389,7 @@ mod tests {
                 .unwrap()
                 .unwrap();
             let tag = format!(", i32 {} }}", permanent::NATIVE_SUSPENDED_BODY);
-            assert_eq!(
-                ir.lines().filter(|line| line.ends_with(&tag)).count(),
-                if bundled { 3 } else { 2 }
-            );
+            assert_eq!(ir.lines().filter(|line| line.ends_with(&tag)).count(), 3);
             let operations: Vec<_> = ir
                 .lines()
                 .filter(|line| line.contains("call void @imre_dyn_suspend_operands("))
@@ -1401,7 +1398,7 @@ mod tests {
             if bundled {
                 assert_eq!(operations, ["0)", "3)", "0)", "0)"]);
             } else {
-                assert_eq!(operations, ["0)", "3)", "2)"]);
+                assert_eq!(operations, ["0)", "3)", "0)", "2)"]);
             }
         }
     }
