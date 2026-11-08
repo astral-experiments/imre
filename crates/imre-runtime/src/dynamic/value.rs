@@ -3661,6 +3661,7 @@ pub(super) struct Heap {
     weak: HashMap<Id, Vec<Id>>,
     weak_roots: weak_roots::RootPaths,
     finalizer_roots: weak_roots::RootPaths,
+    cyclic_finalizers: weak_roots::CycleRetention,
     // Callback rollback can borrow a handle without extending the object's lifetime.
     pub(super) borrowed_hooks: Vec<Id>,
     // Shutdown and detached workers observe the original streams without keeping them alive.
@@ -3931,6 +3932,7 @@ impl Heap {
             weak: HashMap::new(),
             weak_roots: Default::default(),
             finalizer_roots: Default::default(),
+            cyclic_finalizers: Default::default(),
             borrowed_hooks: Vec::new(),
             standard_outputs: [None; 2],
             has_weak_values: false,
@@ -5974,12 +5976,25 @@ impl Heap {
         {
             return Ok(None);
         }
-        if remaining > 1
+        if (remaining > 1 || !self.cyclic_finalizers.owners.is_empty())
             && (self.cached_finalizers_kept(globals, streams, None)
                 || (self.learn_finalizer_paths(globals, streams)
                     && self.cached_finalizers_kept(globals, streams, None)))
         {
             return Ok(None);
+        }
+        // A verified cycle retains its owners even when an unrelated owner needs the
+        // root walk. Count only pending owners that the walk still has to find.
+        let cyclic = self.cyclic_finalizers.verified_owners(self);
+        let needs_root = |id: Id| {
+            !streams.is_some_and(|chain| chain.contains(&id)) && cyclic.binary_search(&id).is_err()
+        };
+        if !cyclic.is_empty() {
+            remaining = self
+                .ordinary_finalizers
+                .iter()
+                .filter(|&&id| needs_root(id))
+                .count();
         }
         // If the roots keep every pending finalizer alive, no finalizer can run.
         // Keep the visited links until the search ends so resetting a partial
@@ -6000,25 +6015,37 @@ impl Heap {
             let slot = &self.slots[id as usize];
             self.traces[id as usize].set(visited);
             visited = id as usize;
-            if slot.finalization == Finalization::Pending
-                && !streams.is_some_and(|chain| chain.contains(&id))
-            {
+            if slot.finalization == Finalization::Pending && needs_root(id) {
                 remaining -= 1;
             }
             if remaining != 0 {
                 self.get(id).children(&mut pending);
             }
         }
+        let mut retention = None;
         let next = if remaining == 0 {
             Ok(None)
         } else {
-            CycleSet::new(self.slots.len()).map(|mut cycles| self.identify_cycles(&mut cycles))
+            CycleSet::new(self.slots.len()).map(|mut cycles| {
+                let (owner, cyclic) = self.identify_indexed_cycles(
+                    &mut cycles,
+                    std::convert::identity,
+                    std::convert::identity,
+                );
+                if cyclic && owner.is_none() {
+                    retention = Some(weak_roots::CycleRetention::from_residual(self, &mut cycles));
+                }
+                owner
+            })
         };
         while let Some(id) = pending.pop() {
             self.traces[id as usize].set(UNMARKED);
         }
         while visited != END {
             visited = self.traces[visited].replace(UNMARKED);
+        }
+        if let Some(proof) = retention {
+            self.cyclic_finalizers = proof;
         }
         next
     }
@@ -7801,6 +7828,109 @@ mod tests {
             heap.released_last_finalizer_ref(child, [].into_iter())
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn prompt_finalizers_recheck_a_cycle_and_its_path_to_the_owner() {
+        let mut heap = Heap::new();
+        let owner = heap.alloc(Value::List(Vec::new()));
+        heap.register_finalizer(owner);
+        let child = heap.alloc(Value::List(vec![owner]));
+        let ring = heap.alloc(Value::List(vec![child]));
+        let Value::List(items) = heap.get_mut(ring) else {
+            unreachable!()
+        };
+        items.push(ring);
+        heap.release_temporaries_since(0);
+        let check = |heap: &mut Heap| {
+            heap.acyclic_finalizer([NONE; 2], [].into_iter(), None)
+                .unwrap()
+        };
+        assert_eq!(check(&mut heap), None);
+        assert_eq!(heap.cyclic_finalizers.verified_owners(&heap), &[owner]);
+        assert_eq!(check(&mut heap), None);
+
+        let Value::List(items) = heap.get_mut(child) else {
+            unreachable!()
+        };
+        items.insert(0, NONE);
+        assert!(heap.cyclic_finalizers.verified_owners(&heap).is_empty());
+        assert_eq!(check(&mut heap), None);
+
+        let Value::List(items) = heap.get_mut(child) else {
+            unreachable!()
+        };
+        items.clear();
+        assert!(heap.cyclic_finalizers.verified_owners(&heap).is_empty());
+        assert_eq!(check(&mut heap), Some(owner));
+
+        let Value::List(items) = heap.get_mut(child) else {
+            unreachable!()
+        };
+        items.push(owner);
+        assert_eq!(check(&mut heap), None);
+        let Value::List(items) = heap.get_mut(ring) else {
+            unreachable!()
+        };
+        items.pop();
+        assert_eq!(check(&mut heap), Some(owner));
+    }
+
+    #[test]
+    fn a_rooted_cycle_owner_cannot_account_for_a_different_pending_owner() {
+        let mut heap = Heap::new();
+        let retained = heap.alloc(Value::List(Vec::new()));
+        heap.register_finalizer(retained);
+        let Value::List(edges) = heap.get_mut(retained) else {
+            unreachable!()
+        };
+        edges.push(retained);
+        heap.release_temporaries_since(0);
+        assert_eq!(
+            heap.acyclic_finalizer([NONE; 2], [].into_iter(), None)
+                .unwrap(),
+            None
+        );
+        assert_eq!(heap.cyclic_finalizers.verified_owners(&heap), &[retained]);
+
+        let dying = heap.alloc(Value::List(Vec::new()));
+        heap.register_finalizer(dying);
+        heap.release_temporaries_since(0);
+        assert_eq!(
+            heap.acyclic_finalizer([NONE; 2], [retained].into_iter(), None)
+                .unwrap(),
+            Some(dying)
+        );
+    }
+
+    #[test]
+    fn cycle_proof_locates_siblings_in_one_wide_parent() {
+        let mut heap = Heap::new();
+        let ring = heap.alloc(Value::List(Vec::new()));
+        let mut items = vec![NONE; 16_384];
+        items[0] = ring;
+        let mut owners = Vec::new();
+        for slot in items.iter_mut().rev().take(32) {
+            let owner = heap.alloc(Value::List(Vec::new()));
+            heap.register_finalizer(owner);
+            owners.push(owner);
+            *slot = owner;
+        }
+        *heap.get_mut(ring) = Value::List(items);
+        heap.release_temporaries_since(0);
+        let check = |heap: &mut Heap| {
+            heap.acyclic_finalizer([NONE; 2], [].into_iter(), None)
+                .unwrap()
+        };
+        assert_eq!(check(&mut heap), None);
+        owners.sort_unstable();
+        assert_eq!(heap.cyclic_finalizers.verified_owners(&heap), owners);
+        let Value::List(items) = heap.get_mut(ring) else {
+            unreachable!()
+        };
+        let released = std::mem::replace(items.last_mut().unwrap(), NONE);
+        assert!(heap.cyclic_finalizers.verified_owners(&heap).is_empty());
+        assert_eq!(check(&mut heap), Some(released));
     }
 
     #[test]
