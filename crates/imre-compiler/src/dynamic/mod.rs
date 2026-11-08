@@ -1351,13 +1351,10 @@ pub(crate) fn compile(
     }
     // These bodies extend native module scopes. Keep them out of the source finder and
     // out of the checked project's winners, even when no explicit import names them.
-    let file_modules = sources.len();
-    for (name, filename, source) in
-        builtin_sources(options.target_os.unwrap_or(std::env::consts::OS))
-    {
-        let path = Path::new(bundled_root).join(filename);
-        sources.push((name.into(), path, source.into()));
-    }
+    let builtins: Vec<_> = builtin_sources(options.target_os.unwrap_or(std::env::consts::OS))
+        .into_iter()
+        .map(|(name, file, body)| (name.into(), Path::new(bundled_root).join(file), body.into()))
+        .collect();
     // The bundle lives in the launcher. This absolute, non-directory path can neither
     // expose the working directory under -I nor collide with an explicit source root.
     let bundle_entry = startup
@@ -1437,8 +1434,9 @@ pub(crate) fn compile(
             winners: &selected_sources,
         }),
     )?;
+    let modules = (sources.as_slice(), builtins.as_slice());
     let (units, used_archive) = if matches!(layout, crate::BoxedLayout::Check) {
-        emit::check(&sources, keep_docstrings, &source_initializers)?;
+        emit::check(modules, keep_docstrings, &source_initializers)?;
         (Vec::new(), false)
     } else {
         let providers = options
@@ -1450,8 +1448,7 @@ pub(crate) fn compile(
         let config = config.to_string();
         let emit = |split| {
             emit::emit(
-                &sources,
-                file_modules,
+                modules,
                 &config,
                 keep_docstrings,
                 Path::new(bundled_root),
