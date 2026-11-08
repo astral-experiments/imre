@@ -85,7 +85,11 @@ def sha(data):
 
 
 def diagnostic(exc, work):
-    return str(exc).replace(str(work), "<fixture>").strip().splitlines()[-1]
+    line = str(exc).strip().splitlines()[-1]
+    prefix = f"{work.resolve()}/"
+    if line.startswith(prefix):
+        return "<fixture>/" + line[len(prefix):]
+    return line
 
 
 def fnmatch_policy(tools, work, test_lib):
