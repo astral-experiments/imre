@@ -1,6 +1,7 @@
 """Compare imports, docstrings and template constant identity with packed boxed providers."""
 
 import argparse
+import mmap
 import os
 from pathlib import Path
 import subprocess
@@ -80,6 +81,11 @@ def main():
     if not __debug__ or sys.version_info[:2] != (3, 14):
         parser.error('run with CPython 3.14 and assertions enabled')
     compiler = args.compiler.resolve()
+    archive = compiler.parent / 'imre-toolchain' / 'lib' / 'imre-stdlib' / f'O{args.opt_level}' / 'providers.a'
+    with archive.open('rb') as file, mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ) as packed:
+        for source in [b'http/server.py', b'unittest/mock.py', b'urllib/robotparser.py']:
+            assert packed.find(b'<imre stdlib>/' + source + b'\0') >= 0, source
+
     with TemporaryDirectory(prefix='imre-providers-') as temp:
         root = Path(temp)
         entry = create_project(root)

@@ -25,6 +25,15 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
     let mut pending: VecDeque<_> = STDLIB_NAMES
         .lines()
         .chain(RUNTIME_PROVIDERS.iter().copied())
+        // Qualified late imports in the boxed importer are not roots in STDLIB_NAMES.
+        .chain([
+            "http.server",
+            "pathlib._local",
+            "pathlib.types",
+            "unittest.mock",
+            "urllib.robotparser",
+            "xml.parsers.expat",
+        ])
         .map(str::to_owned)
         .collect();
     let mut seen = HashSet::new();
