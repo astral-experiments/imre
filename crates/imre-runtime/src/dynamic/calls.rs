@@ -721,6 +721,58 @@ impl Context {
         })
     }
 
+    /// Mixed positional stars expand immediately; a sole star is consumed by the call.
+    pub(super) fn expand_positional_items(
+        &mut self,
+        args: &mut Vec<Id>,
+        iterable: Id,
+        sole_star_callable: Option<Id>,
+    ) -> Result<()> {
+        let iter = match self.iterator(iterable) {
+            Err(error)
+                if error.kind == "TypeError"
+                    && self.slot(iterable, "__iter__").is_none()
+                    && self.slot(iterable, "__getitem__").is_none() =>
+            {
+                let prefix = if let Some(callable) = sole_star_callable {
+                    format!(
+                        "{} argument after *",
+                        self.keyword_callable(Some(callable))?
+                    )
+                } else {
+                    "Value after *".into()
+                };
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "{prefix} must be an iterable, not {}",
+                        self.type_name(iterable)
+                    ),
+                ));
+            }
+            other => other?,
+        };
+        self.heap.keep(iter);
+        if sole_star_callable.is_none() {
+            let default = self.int(8);
+            let hint = self.length_hint(iterable, Some(default))?;
+            let hint = self.as_integer(hint)? as usize;
+            if hint <= isize::MAX as usize - args.len() {
+                args.try_reserve(hint)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+            }
+        }
+        while let Some(item) = self.next_item(iter)? {
+            args.try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            // Further arguments may clear the iterable and invoke Python callbacks.
+            self.heap.reserve_temporaries(1)?;
+            self.heap.keep(item);
+            args.push(item);
+        }
+        Ok(())
+    }
+
     /// CPython reports the qualified callable in errors while unpacking its keywords.
     pub(super) fn keyword_callable(&mut self, callable: Option<Id>) -> Result<String> {
         let Some(callable) = callable else {
@@ -2308,6 +2360,19 @@ impl Context {
             message.push_str(part);
         }
         Err(Error::new_static("TypeError", message))
+    }
+
+    /// Invoke the exit callable saved on entry with the exact body exception and traceback.
+    pub(super) fn call_context_exit(&mut self, exit: Id, exception: Id) -> Result<Id> {
+        let (class, traceback) = if exception == NONE {
+            (NONE, NONE)
+        } else {
+            (
+                self.exact_type(exception)?,
+                self.exception_traceback(exception)?,
+            )
+        };
+        self.call(exit, vec![class, exception, traceback], Vec::new())
     }
 
     /// Resolve an ordinary string method before evaluating positional arguments.

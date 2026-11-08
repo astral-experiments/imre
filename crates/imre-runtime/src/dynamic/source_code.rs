@@ -17,6 +17,7 @@ use imre_ast::comprehension::{
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
+use super::generator_protocol::{DelegateOutcome, GeneratorInput};
 use super::value::{Body, ExecGlobals, ExpressionPosition, Location, TracebackAnchor};
 use super::*;
 
@@ -659,17 +660,6 @@ impl<'a> SourceCursor<'a> {
             thrown,
         }
     }
-}
-
-pub(super) enum GeneratorInput {
-    Send(Id),
-    Throw { error: Error, args: Vec<Id> },
-}
-
-pub(super) enum DelegateOutcome {
-    Yield(Id),
-    Done(Id),
-    LookupFailed(Error),
 }
 
 #[derive(Clone, Copy)]
@@ -4208,6 +4198,7 @@ impl Context {
                     FunctionKind::AsyncGenerator => imre_ast::code_flags::ASYNC_GENERATOR,
                     FunctionKind::Plain => 0,
                 },
+            generator_lambda: program.kind == FunctionKind::GeneratorLambda,
             flags_complete: program.scope_flags & code_flags::OPTIMIZED != 0
                 && !program.unlowered_yield,
             body: Body::Source(program),
@@ -4803,20 +4794,10 @@ impl Context {
         let kind = match &definition.body {
             Body::Source(program) => program.kind,
             Body::PendingGenerator { .. } => FunctionKind::prelinked(definition),
-            Body::Native(_) => unreachable!("source function"),
+            Body::Native(_) | Body::Suspended(_) => unreachable!("source function"),
         };
         if kind != FunctionKind::Plain {
-            let frame = self.new_generator(code, scope, owner);
-            Ok(if kind == FunctionKind::Coroutine {
-                let origin = self.coroutine_origin();
-                let coroutine = self.alloc(Value::Coroutine { frame, origin });
-                self.heap.watch_unstarted_coroutine(coroutine)?;
-                coroutine
-            } else if kind == FunctionKind::AsyncGenerator {
-                self.async_generator(frame)
-            } else {
-                frame
-            })
+            self.new_suspended(code, scope, owner)
         } else {
             match self.run_source(
                 code,
@@ -4939,59 +4920,6 @@ impl Context {
         Ok(())
     }
 
-    pub(super) fn generator_send(&mut self, generator: Id, sent: Id) -> Result<Id> {
-        self.send_generator_frame(generator, generator, sent)
-    }
-
-    /// Send a value into a frame while keeping its public generator or coroutine alive.
-    pub(super) fn send_generator_frame(
-        &mut self,
-        generator: Id,
-        finalizer: Id,
-        sent: Id,
-    ) -> Result<Id> {
-        let Value::Generator {
-            code,
-            running,
-            offset,
-            ..
-        } = *self.heap.get(generator)
-        else {
-            return Err(Error::new(
-                "TypeError",
-                "generator.send requires a generator",
-            ));
-        };
-        let coroutine = self.code_object(code).is_coroutine();
-        let kind = if coroutine { "coroutine" } else { "generator" };
-        if running {
-            return Err(Error::new(
-                "ValueError",
-                format!("{kind} already executing"),
-            ));
-        }
-        if coroutine && offset.is_none() {
-            return Err(Error::new(
-                "RuntimeError",
-                "cannot reuse already awaited coroutine",
-            ));
-        }
-        if sent != NONE && offset == Some(0) {
-            return Err(Error::new(
-                "TypeError",
-                format!("can't send non-None value to a just-started {kind}"),
-            ));
-        }
-        let next = if matches!(self.code_object(code).body, Body::Native(_)) {
-            self.next_result(generator)?
-        } else {
-            stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
-                self.resume_source_input(generator, finalizer, GeneratorInput::Send(sent))
-            })?
-        };
-        next.ok_or_else(|| self.exception("StopIteration", &[]))
-    }
-
     pub(super) fn resume_source(&mut self, id: Id, sent: Id) -> Result<Option<Id>> {
         self.resume_source_input(id, id, GeneratorInput::Send(sent))
     }
@@ -5042,28 +4970,6 @@ impl Context {
         }
     }
 
-    fn source_frame_error(&mut self, error: Error, code: Id) -> Error {
-        match &self.code_object(code).body {
-            // Unlike generator defs and genexprs, generator lambdas have no StopIteration handler.
-            Body::Source(program) if program.kind == FunctionKind::GeneratorLambda => error,
-            Body::Source(program) if program.kind == FunctionKind::AsyncGenerator => {
-                let message = if self.is_builtin_error(&error, "StopAsyncIteration") {
-                    "async generator raised StopAsyncIteration"
-                } else if self.is_builtin_error(&error, "StopIteration") {
-                    "async generator raised StopIteration"
-                } else {
-                    return error;
-                };
-                let cause = self.raised_instance(error);
-                let mut converted = Error::new("RuntimeError", message);
-                converted.tracing().cause = Some(cause);
-                converted.context = cause;
-                converted
-            }
-            _ => self.frame_error(error, code),
-        }
-    }
-
     /// Resume one frame, retaining its running state while a delegated child executes.
     fn resume_source_frame(
         &mut self,
@@ -5074,20 +4980,7 @@ impl Context {
         nested_resume: bool,
     ) -> Result<Step> {
         if advanced.is_none() {
-            let input_roots = match &input {
-                GeneratorInput::Send(_) => 1,
-                GeneratorInput::Throw { error, args } => args.len() + error.roots().count(),
-            };
-            self.heap.reserve_temporaries(1 + input_roots)?;
-            self.heap.keep(finalizer);
-            match &input {
-                GeneratorInput::Send(value) => self.heap.keep(*value),
-                GeneratorInput::Throw { error, args } => {
-                    for root in error.roots().chain(args.iter().copied()) {
-                        self.heap.keep(root);
-                    }
-                }
-            }
+            input.keep(&mut self.heap, finalizer)?;
         }
         let Value::Generator {
             code,
@@ -5126,7 +5019,7 @@ impl Context {
                     && cursor.thrown.is_none();
                 self.run_source(code, frame_scope, FrameOwner::Generator(id), cursor)
             })
-            .map_err(|error| self.source_frame_error(error, code));
+            .map_err(|error| self.frame_error(error, code));
         // The public async-generator object owns its first-iteration/finalization hooks.
         let async_generator =
             self.code_object(code).flags & imre_ast::code_flags::ASYNC_GENERATOR != 0;
@@ -5936,15 +5829,7 @@ impl Context {
                 };
                 let suppress = match op {
                     Instruction::CallAsyncExit => {
-                        let (class, tb) = if exception == NONE {
-                            (NONE, NONE)
-                        } else {
-                            (
-                                self.exact_type(exception)?,
-                                self.exception_traceback(exception)?,
-                            )
-                        };
-                        *sent = self.call(exit, vec![class, exception, tb], Vec::new())?;
+                        *sent = self.call_context_exit(exit, exception)?;
                         if exception == NONE {
                             // Only exceptional cleanup retains its callable during the await and truth test.
                             block.kind = HandlerKind::With(NONE);
@@ -6265,7 +6150,10 @@ impl Context {
                 } else if thrown.is_none()
                     && code.kind != FunctionKind::Plain
                     && let Value::Generator { code, .. } = self.heap.get(iter)
-                    && !matches!(self.code_object(*code).body, Body::Native(_))
+                    && !matches!(
+                        self.code_object(*code).body,
+                        Body::Native(_) | Body::Suspended(_)
+                    )
                 {
                     return Ok(Some(Step::Advance(
                         iter,
@@ -7218,7 +7106,7 @@ impl Context {
                 let first = items.len();
                 let expanded = self
                     .source_expr(code, scope, &star.value)
-                    .and_then(|iterable| self.extend_source_items(&mut items, iterable, None));
+                    .and_then(|iterable| self.expand_positional_items(&mut items, iterable, None));
                 // Only yielded values outlive this operand. Release the iterator before
                 // evaluating the next element or dispatching a weakref callback.
                 let collect = self.heap.discard_truth_operands(mark, self.modules);
@@ -7292,57 +7180,6 @@ impl Context {
             self.discard_truth(mark + count - index);
         }
         Ok(result)
-    }
-
-    fn extend_source_items(
-        &mut self,
-        args: &mut Vec<Id>,
-        iterable: Id,
-        sole_star_callable: Option<Id>,
-    ) -> Result<()> {
-        let iter = match self.iterator(iterable) {
-            Err(error)
-                if error.kind == "TypeError"
-                    && self.slot(iterable, "__iter__").is_none()
-                    && self.slot(iterable, "__getitem__").is_none() =>
-            {
-                let prefix = if let Some(callable) = sole_star_callable {
-                    format!(
-                        "{} argument after *",
-                        self.keyword_callable(Some(callable))?
-                    )
-                } else {
-                    "Value after *".into()
-                };
-                return Err(Error::new(
-                    "TypeError",
-                    format!(
-                        "{prefix} must be an iterable, not {}",
-                        self.type_name(iterable)
-                    ),
-                ));
-            }
-            other => other?,
-        };
-        self.heap.keep(iter);
-        if sole_star_callable.is_none() {
-            let default = self.int(8);
-            let hint = self.length_hint(iterable, Some(default))?;
-            let hint = self.as_integer(hint)? as usize;
-            if hint <= isize::MAX as usize - args.len() {
-                args.try_reserve(hint)
-                    .map_err(|_| Error::new("MemoryError", ""))?;
-            }
-        }
-        while let Some(item) = self.next_item(iter)? {
-            args.try_reserve(1)
-                .map_err(|_| Error::new("MemoryError", ""))?;
-            // Further arguments may clear the iterable and invoke Python callbacks.
-            self.heap.reserve_temporaries(1)?;
-            self.heap.keep(item);
-            args.push(item);
-        }
-        Ok(())
     }
 
     fn store_named_result(&mut self, scope: Id, name: &str, value: Id, mark: usize) -> Result<()> {
@@ -7563,7 +7400,7 @@ impl Context {
                             // CALL_FUNCTION_EX consumes a sole iterable after evaluating keywords.
                             sole_star = Some(value);
                         } else {
-                            self.extend_source_items(&mut args, value, None)?;
+                            self.expand_positional_items(&mut args, value, None)?;
                         }
                     } else {
                         args.push(eval(self, arg)?);
@@ -7581,7 +7418,7 @@ impl Context {
                     None
                 };
                 if let Some(value) = sole_star {
-                    self.extend_source_items(&mut args, value, Some(f))?;
+                    self.expand_positional_items(&mut args, value, Some(f))?;
                 }
                 let result = if let Some(mapping) = mapping {
                     self.call_with_keyword_dict(scope, f, args, mapping)

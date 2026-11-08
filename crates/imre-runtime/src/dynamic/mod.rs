@@ -44,6 +44,7 @@ mod namedtuple;
 mod namespace;
 mod namespace_init;
 mod namespace_repr;
+mod native_suspension;
 mod object_size;
 mod object_state;
 mod operators;
@@ -1671,6 +1672,11 @@ impl Context {
                 return stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
                     match self.code_object(code).body {
                         value::Body::Native(_) => self.next_generator_item(id),
+                        value::Body::Suspended(_) => self.resume_native(
+                            id,
+                            id,
+                            generator_protocol::GeneratorInput::Send(NONE),
+                        ),
                         value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
                             self.resume_source(id, NONE)
                         }
@@ -3254,6 +3260,7 @@ impl Context {
     fn execute(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {
         let entry = match &self.code_object(code).body {
             value::Body::Native(entry) => *entry,
+            value::Body::Suspended(_) => return self.new_suspended(code, scope, owner),
             value::Body::Source(_) | value::Body::PendingGenerator { .. } => {
                 return self.call_source(code, scope, owner);
             }

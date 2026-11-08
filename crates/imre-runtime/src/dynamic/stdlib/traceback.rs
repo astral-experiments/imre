@@ -117,7 +117,10 @@ impl<'a> FrameLine<'a> {
         let code = ctx.code_object(code);
         let file = TraceText::read(ctx, code.filename)?;
         // Only native code has the original embedded source at this position.
-        let embedded_source = if !matches!(code.body, crate::dynamic::value::Body::Native(_)) {
+        let embedded_source = if !matches!(
+            code.body,
+            crate::dynamic::value::Body::Native(_) | crate::dynamic::value::Body::Suspended(_)
+        ) {
             None
         } else if matches!(&file, TraceText::Scalar(text) if text == "<string>") {
             ctx.config["command_source"].as_str()

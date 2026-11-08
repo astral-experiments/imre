@@ -479,6 +479,7 @@ fn iterator_paths_recheck_the_suspended_operands() {
         scope,
         iterators: vec![cursor],
         protected: Vec::new(),
+        native: None,
         offset: Some(0),
         running: false,
     });

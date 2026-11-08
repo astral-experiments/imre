@@ -329,8 +329,21 @@ impl Context {
             "fromlist" => self.prepare_fromlist(a, b),
             "from" => self.import_from(a, b),
             "import_star" => self.import_star(a, b),
-            "lookup_enter" => self.context_method(a, "__enter__"),
-            "lookup_exit" => self.context_method(a, "__exit__"),
+            "lookup_enter" => {
+                self.context_method(a, if b == TRUE { "__aenter__" } else { "__enter__" })
+            }
+            "lookup_exit" => {
+                self.context_method(a, if b == TRUE { "__aexit__" } else { "__exit__" })
+            }
+            "await_iter" => {
+                let method = match b {
+                    0 => None,
+                    1 => Some("__aenter__"),
+                    2 => Some("__aexit__"),
+                    _ => return Err(Error::new("SystemError", "invalid await context")),
+                };
+                self.await_iterator(a, method)
+            }
             "attr" | "method" => {
                 let name = self.copy_name(b)?;
                 if op == "method" {
@@ -371,7 +384,8 @@ impl Context {
                 if matches!(self.heap.get(a), Value::Tuple(_)) {
                     Ok(a)
                 } else {
-                    let items = self.items(a)?;
+                    let mut items = Vec::new();
+                    self.expand_positional_items(&mut items, a, Some(b))?;
                     Ok(self.alloc(Value::List(items)))
                 }
             }
@@ -401,8 +415,12 @@ impl Context {
                 Ok(a)
             }
             "extend" => {
-                let items = self.items(b)?;
-                if let Value::List(list) = self.heap.get_mut(a) {
+                if matches!(self.heap.get(a), Value::List(_)) {
+                    let mut items = Vec::new();
+                    self.expand_positional_items(&mut items, b, None)?;
+                    let Value::List(list) = self.heap.get_mut(a) else {
+                        unreachable!()
+                    };
                     // Fill the available space before growing so __sizeof__ and
                     // partial progress on allocation failure match repeated append.
                     let mut remaining = items.as_slice();
@@ -415,7 +433,7 @@ impl Context {
                         remaining = rest;
                     }
                 } else {
-                    for item in items {
+                    for item in self.items(b)? {
                         self.op("append", a, item, NONE)?;
                     }
                 }
@@ -510,6 +528,7 @@ impl Context {
             "yielded" => Ok(self.alloc(Value::Yielded(a))),
             "iter" => self.loop_iterator(a),
             "async_iter" => self.async_for_iter(a),
+            "async_next_iter" => self.async_for_next(a),
             "break_iter" => {
                 self.release_loop_iterator(a);
                 Ok(NONE)
@@ -591,8 +610,7 @@ impl Context {
                 Ok(self.raised_instance(error))
             }
             "restore_caught" => {
-                let enclosing = self.heap.caught_exception(a);
-                self.heap.replace_active(enclosing);
+                self.heap.restore_caught(a);
                 Ok(NONE)
             }
             "matches" => {
@@ -602,16 +620,16 @@ impl Context {
                     Ok(FALSE)
                 }
             }
-            "exit_context" => {
-                let (class, traceback, active) = if b == NONE {
-                    (NONE, NONE, self.heap.caught_exception(c))
+            "exit_context" | "async_exit_context" => {
+                let active = if b == NONE {
+                    self.heap.caught_exception(c)
                 } else {
-                    (self.exact_type(b)?, self.exception_traceback(b)?, b)
+                    b
                 };
                 let prior = self.heap.replace_active(active);
-                let result = self.call(a, vec![class, b, traceback], Vec::new());
+                let result = self.call_context_exit(a, b);
                 // The exceptional exit's truth test still runs inside the handler.
-                let result = if b == NONE {
+                let result = if b == NONE || op == "async_exit_context" {
                     result
                 } else {
                     result.and_then(|value| self.truth(value).map(flag))
@@ -1226,7 +1244,7 @@ pub(super) fn report_system_exit(ctx: &mut Context, error: Error) -> i32 {
     1
 }
 
-fn finish(ctx: &mut Context, result: Result<Id>) -> Id {
+pub(super) fn finish(ctx: &mut Context, result: Result<Id>) -> Id {
     finish_at(ctx, result, None)
 }
 
@@ -1506,9 +1524,10 @@ pub(super) unsafe extern "C" fn imre_dyn_lookup(
     if ctx.pending.is_some() {
         return NONE;
     }
-    let result = std::str::from_utf8(name)
+    let mut result = std::str::from_utf8(name)
         .map_err(|error| Error::new("UnicodeError", error.to_string()))
         .and_then(|name| ctx.lookup(scope, name));
+    finish_operand_position(ctx, &mut result);
     finish(ctx, result)
 }
 
@@ -1563,7 +1582,22 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
         return NONE;
     }
     let reraise = op == "reraise" && (a != NONE || ctx.heap.active_exception() != NONE);
-    let result = ctx.op(op, a, b, c);
+    let mut result = ctx.op(op, a, b, c);
+    if matches!(
+        op,
+        "attr"
+            | "method"
+            | "spread_arguments"
+            | "extend"
+            | "keywords"
+            | "iter"
+            | "await_iter"
+            | "async_exit_context"
+            | "truth"
+    ) || (b == TRUE && matches!(op, "lookup_enter" | "lookup_exit"))
+    {
+        finish_operand_position(ctx, &mut result);
+    }
     if reraise && let Err(error) = result {
         ctx.pending = Some(error);
         return NONE;
@@ -1668,10 +1702,11 @@ fn finish_method_target(
     target: Result<(Id, Id)>,
     bound_receiver: &mut Id,
 ) -> Id {
-    let result = target.map(|(callable, receiver)| {
+    let mut result = target.map(|(callable, receiver)| {
         *bound_receiver = receiver;
         callable
     });
+    finish_operand_position(ctx, &mut result);
     finish(ctx, result)
 }
 
@@ -1846,6 +1881,27 @@ pub(super) unsafe extern "C" fn imre_dyn_keyword_call_at(
     })
 }
 
+/// A failing packed operand or call may span multiple lines in a native resumable frame.
+fn finish_operand_position(ctx: &mut Context, result: &mut Result<Id>) {
+    if let Some([line, end_line, start, end]) = ctx.heap.take_call_position()
+        && let Err(error) = result
+        && matches!(
+            ctx.code_object(ctx.heap.current_code()).body,
+            value::Body::Suspended(_)
+        )
+    {
+        error.tracing().source_position = Some((
+            line,
+            value::TracebackSpan {
+                end_line,
+                start,
+                end,
+                anchor: value::TracebackAnchor::Uniform,
+            },
+        ));
+    }
+}
+
 /// Clear the recorded call position and publish the return value or exception.
 fn scoped_call(
     ctx: &mut Context,
@@ -1856,8 +1912,8 @@ fn scoped_call(
         ctx.heap.set_call_position(None);
         return NONE;
     }
-    let result = invoke(ctx);
-    ctx.heap.set_call_position(None);
+    let mut result = invoke(ctx);
+    finish_operand_position(ctx, &mut result);
     finish_at(ctx, result, span)
 }
 
@@ -1875,10 +1931,12 @@ pub(super) unsafe extern "C" fn imre_dyn_mark_class_annotation(
     finish(ctx, result)
 }
 
-/// The compiler emits a native entry when body_line is zero, or generator source otherwise.
+/// Zero tags an ordinary entry, NATIVE_SUSPENDED_BODY tags a native resumable entry,
+/// and a one-based line identifies a legacy embedded-source body.
 #[repr(C)]
 union PrelinkedEntry {
     native: Code,
+    suspended: value::ResumeCode,
     source: *const c_char,
 }
 
@@ -1894,6 +1952,7 @@ pub(super) struct PrelinkedSite {
 #[derive(Default, serde::Deserialize)]
 #[serde(default)]
 struct DefinitionMetadata {
+    generator_lambda: bool,
     annotation_class: serde_json::Value,
     scope_reads: serde_json::Value,
     scope_complete: serde_json::Value,
@@ -1933,11 +1992,13 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
             Ok(filename) => filename,
             Err(error) => return finish(ctx, Err(error)),
         };
-        // SAFETY: the compiler tags native functions with line zero and suspended suites
-        // with their one-based source line and a static, nul-terminated UTF-8 string.
+        // SAFETY: the compiler emits the corresponding function ABI or the static
+        // nul-terminated source selected by the definition's body_line tag.
         let body = unsafe {
             if definition.body_line == 0 {
                 value::Body::Native(definition.entry.native)
+            } else if definition.body_line == value::NATIVE_SUSPENDED_BODY {
+                value::Body::Suspended(definition.entry.suspended)
             } else {
                 value::Body::PendingGenerator {
                     source: cstr(definition.entry.source),
@@ -2129,6 +2190,7 @@ impl Context {
             module_definition,
             flags: flags.unwrap_or_default(),
             flags_complete: flags.is_some(),
+            generator_lambda: metadata.generator_lambda,
             nested: Vec::new(),
             freevars,
             closure_supported,
