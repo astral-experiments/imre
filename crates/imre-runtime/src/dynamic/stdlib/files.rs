@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::os::fd::AsRawFd;
+use std::os::unix::fs::MetadataExt;
 
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, argument, os_error};
 
@@ -37,9 +38,10 @@ impl BinaryFile {
             crate::objects::errno_with_filename(error, Some(path))
         })?;
         if access == 0 {
+            let capacity = crate::text_output::binary_capacity(opened.1.blksize().into());
             return Ok(Self::Reader {
                 path: name,
-                slot: RefCell::new(Some(BufReader::new(opened.0))),
+                slot: RefCell::new(Some(BufReader::with_capacity(capacity, opened.0))),
             });
         }
         Ok(Self::Writer {
