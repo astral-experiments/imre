@@ -4015,6 +4015,7 @@ for name in ("md4", "ripemd160"):
         compare("-IB", call_args, native_args=("run", call_args, "--quiet"))
         boxed_call_args = fixtures / "boxed_unittest_call_args.py"
         compare_module(boxed_call_args)
+        compare_module(fixtures / "boxed_doctest_results.py")
         mock_compile_flags = {"IMREFLAGS": "--opt-level 0"}
         patch_multiple = root / "patch_multiple.py"
         for call in ("with patch.multiple", "replace = patch.multiple\nwith replace"):

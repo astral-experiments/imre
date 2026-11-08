@@ -1,7 +1,26 @@
 # The boxed importer discovers docs from the live module instead of a fixed module graph.
+from collections import namedtuple
 import os
 import sys
 import types
+
+
+# From CPython 3.14.5, Lib/doctest.py (PSF-2.0).
+class TestResults(namedtuple('TestResults', 'failed attempted')):
+    def __new__(cls, failed, attempted, *, skipped=0):
+        results = super().__new__(cls, failed, attempted)
+        results.skipped = skipped
+        return results
+
+    def __repr__(self):
+        if self.skipped:
+            return (f'TestResults(failed={self.failed}, '
+                    f'attempted={self.attempted}, '
+                    f'skipped={self.skipped})')
+        else:
+            # Leave the repr() unchanged for backward compatibility
+            # if skipped is zero
+            return super().__repr__()
 
 
 def _from_module(item, owner):
