@@ -3543,6 +3543,7 @@ impl Context {
     /// Resolve registered and filesystem modules against the current import path.
     fn find_module(&mut self, name: &str) -> Result<Option<Id>> {
         self.find_module_from(name, NONE)
+            .map_err(|error| self.trim_import_traceback(error))
     }
 
     fn find_module_from(&mut self, mut name: &str, source_globals: Id) -> Result<Option<Id>> {

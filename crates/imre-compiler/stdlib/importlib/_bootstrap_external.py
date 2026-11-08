@@ -127,7 +127,7 @@ class _LoaderBasics:
         code = self.get_code(module.__name__)
         if code is None:
             raise ImportError(f"cannot load module {module.__name__!r} when get_code() returns None")
-        exec(code, module.__dict__)
+        _bootstrap._call_with_frames_removed(exec, code, module.__dict__)
 
     def load_module(self, fullname):
         return _bootstrap._load_module_shim(self, fullname)

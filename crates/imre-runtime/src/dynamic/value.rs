@@ -711,20 +711,72 @@ impl Context {
         };
         let mut head = trace.head;
         if !trace.pending_frames.is_empty() {
-            for (at, frame) in std::mem::take(&mut trace.pending_frames) {
-                head = self.alloc(Value::Traceback {
-                    frame,
-                    next: head,
-                    lineno: i64::from(at.line),
-                    span: at.span,
-                });
-            }
+            let pending = std::mem::take(&mut trace.pending_frames);
+            head = self.prepend_traceback_frames(pending, head);
             let Value::Raised(error) = self.heap.get_mut(exception) else {
                 unreachable!()
             };
             error.tracing().head = head;
         }
         Ok(head)
+    }
+
+    fn prepend_traceback_frames(&mut self, frames: Vec<(Location, Id)>, mut head: Id) -> Id {
+        for (at, frame) in frames {
+            head = self.alloc(Value::Traceback {
+                frame,
+                next: head,
+                lineno: i64::from(at.line),
+                span: at.span,
+            });
+        }
+        head
+    }
+
+    /// At the import boundary, unlink frozen loader frames through its explicit call marker.
+    /// ImportError discards every frozen loader frame. Exposed Python traceback tails retain identity.
+    pub(super) fn trim_import_traceback(&mut self, mut error: Error) -> Error {
+        let trim_all = self.is_builtin_error(&error, "ImportError");
+        let Some(trace) = error.trace.as_mut() else {
+            return error;
+        };
+        let pending = std::mem::take(&mut trace.pending_frames);
+        trace.head = self.prepend_traceback_frames(pending, trace.head);
+        let mut node = trace.head;
+        let mut previous = NONE;
+        let mut before_chunk = NONE;
+        let mut in_loader = false;
+        while let Value::Traceback { frame, next, .. } = *self.heap.get(node) {
+            let Value::PythonFrame { code, .. } = *self.heap.get(frame) else {
+                unreachable!("traceback frame")
+            };
+            let code = self.code_object(code);
+            let frozen = matches!(
+                self.str_value(code.filename),
+                Ok("<frozen importlib._bootstrap>" | "<frozen importlib._bootstrap_external>")
+            );
+            if frozen && !in_loader {
+                before_chunk = previous;
+            }
+            in_loader = frozen;
+            if frozen
+                && (trim_all
+                    || matches!(self.str_value(code.name), Ok("_call_with_frames_removed")))
+            {
+                if before_chunk == NONE {
+                    trace.head = next;
+                } else if let Value::Traceback { next: link, .. } = self.heap.get_mut(before_chunk)
+                {
+                    *link = next;
+                }
+                previous = before_chunk;
+                self.heap.collect_next_statement = true;
+            } else {
+                previous = node;
+            }
+            node = next;
+        }
+        error
     }
 
     /// Store an explicit cause, including None, using the same state as raise-from.
