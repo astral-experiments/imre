@@ -475,7 +475,9 @@ impl Context {
     pub(super) fn module_code(&mut self, entry: ModuleInitializer, path: &Path) -> Result<Id> {
         let filename = self.import_path_text(path)?;
         let entry = match entry {
-            ModuleInitializer::Native(entry) | ModuleInitializer::Builtin(entry) => entry,
+            ModuleInitializer::Native(entry)
+            | ModuleInitializer::File(entry)
+            | ModuleInitializer::Builtin(entry) => entry,
             ModuleInitializer::Source(text) => {
                 let source = self.text(text);
                 let mode = self.text("exec");
@@ -546,11 +548,41 @@ impl Context {
         self.loader_source(loader, filename)?.bundled_text
     }
 
-    /// Return the issued loader's body, or None to compile through its normal file hooks.
-    pub(super) fn registered_code(&mut self, loader: Id, path: Id) -> Result<Id> {
+    /// Return an issued loader's body or the matching initializer for a plain file loader.
+    pub(super) fn registered_code(
+        &mut self,
+        loader: Id,
+        path: Id,
+        registration: Option<(Id, Id, Id)>,
+    ) -> Result<Id> {
         if let Some(source) = self.loader_source(loader, path) {
-            let (entry, path) = (source.code, source.path.clone());
-            return self.module_code(entry, &path);
+            let (entry, origin) = (source.code, source.path.clone());
+            return self.module_code(entry, &origin);
+        }
+        // A Python-constructed file loader has no issued-loader binding.
+        if let Some((name, read, convert)) = registration
+            && matches!(self.heap.get(path), Value::Str(_) | Value::SurrogateStr(_))
+        {
+            let Value::Instance { class, .. } = *self.heap.get(loader) else {
+                return Ok(NONE);
+            };
+            // Reading a user descriptor to test eligibility would invoke a loader hook twice.
+            if self.class_attr(class, "__getattribute__").is_some_and(|hook| {
+                !matches!(self.heap.get(hook), Value::Native(symbol) if symbol == "object.__getattribute__")
+            }) || [("get_data", read), ("source_to_code", convert)].into_iter().any(|(attr, expected)| {
+                self.class_attr(class, attr) != Some(expected) || self.raw_instance_field(loader, attr).is_some()
+            }) {
+                return Ok(NONE);
+            }
+            let path = self.import_path(path)?;
+            // Nested code retains the exact filename supplied at build time.
+            if let Ok(name) = self.str_value(name)
+                && let Some(source) = self.registered_file(name, &path)
+                && source.path.as_os_str() == path.as_os_str()
+                && let entry @ ModuleInitializer::File(_) = source.code
+            {
+                return self.module_code(entry, &path);
+            }
         }
         Ok(NONE)
     }

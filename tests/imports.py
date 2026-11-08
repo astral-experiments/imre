@@ -1689,6 +1689,19 @@ ACCEPTED = {
         "main.py": (FIXTURES.parent / "source_loader_external_code.py").read_text(),
         "local_body.py": "value = 41\n",
     },
+    "source_loader_namespace_directory": {
+        "main.py": (
+            "from importlib.machinery import SourceFileLoader\n"
+            "import ns.child\n"
+            "try:\n"
+            "    SourceFileLoader('ns', ns.__path__[0]).get_code('ns')\n"
+            "except OSError:\n"
+            "    pass\n"
+            "else:\n"
+            "    raise AssertionError('file loader returned code for a namespace directory')\n"
+        ),
+        "ns/child.py": "",
+    },
     "bundled_source_loader_data": {
         "main.py": (FIXTURES.parent / "bundled_source_loader_data.py").read_text(),
     },
@@ -2021,11 +2034,13 @@ def main() -> None:
                     "email_address_parsers", "filesystem_resources", "fractions_indirect",
                     "function_type_for_selected_callback", "lzma_formats_and_error",
                     "optional_stdlib_probe_in_dependency", "platform_iot_indirect", "record_warnings",
-                    "source_loader_external_code", "warn_named_helper", "zip_source_spec",
+                    "source_loader_external_code", "source_loader_namespace_directory", "warn_named_helper",
+                    "zip_source_spec",
                 }
                 timeout = 300 if slow_optimized and level > 0 else build_timeout
                 require_success(run(command, temporary, timeout=timeout))
-                result = run([str(executable)], temporary)
+                arguments = ["41"] if name == "source_loader_external_code" else []
+                result = run([str(executable), *arguments], temporary)
                 require_success(result)
                 assert result.stdout == baseline.stdout, (name, level, result.stdout, baseline.stdout)
                 if name == "entry_module_attribute_guard":

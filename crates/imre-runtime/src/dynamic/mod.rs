@@ -88,6 +88,7 @@ use value::{
 #[derive(Clone, Copy)]
 enum ModuleInitializer {
     Native(Code),
+    File(Code),
     Builtin(Code),
     Source(&'static str),
 }

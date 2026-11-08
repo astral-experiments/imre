@@ -24,6 +24,8 @@ A reachable `exec(input())` or an import of a `.py` plug-in supplied only after 
 
 Today ordinary builds check arguments against explicitly annotated parameters of first-party functions even when an unrelated operation selects boxed compilation. The typed path rejects the callable dictionary above. Ordinary builds can still evaluate source with `exec(input())`, and the CLI offers `--runtime-imports`. We intend to retire the source evaluator and that fallback as known-source imports move to compiled bodies. [Argument-checking tests](../crates/imre-compiler/src/analysis/closed_program_tests.rs) · [Callable types](subset.md#callable-values-and-callbacks)
 
+A Python-constructed `SourceFileLoader` can execute a physical module’s linked initializer after the file changes or is removed when given the registered name and exact filename as a plain string. With a path-like object, the standard loader reads the file first and can use the initializer if the read and conversion yield that same filename. Custom read and conversion hooks still run. Issued loaders for bundled modules retain access to their own virtual origins.
+
 ## Runtime
 
 On the typed path, small integers fit in a tagged word and larger integers use a reference-counted `BigInt`. Containers own their elements. Reading an element before a callback that can remove it requires keeping the value alive across that call. Runtime functions and the emitter agree on which arguments they borrow, which results they transfer, and how they signal a Python exception. [Runtime calling conventions](../crates/imre-runtime/src/lib.rs) · [Compiler-side contracts](../crates/imre-compiler/src/contracts.rs)
