@@ -4211,6 +4211,8 @@ impl Context {
                 self.bind(scope, "_finder_external", finder);
             }
             "_imre_importlib" => {
+                let compiler = self.builtin("compile");
+                self.bind(scope, "builtin_compile", compiler);
                 let suffixes = imre_ast::module_suffixes()
                     .into_iter()
                     .map(|suffix| self.heap.owned_text(suffix.into()))

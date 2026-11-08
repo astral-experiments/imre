@@ -8998,6 +8998,25 @@ impl Context {
         self.scalar_scope_name(scope, member)?
     }
 
+    /// Prove both the compiler and its default policy without running Python before get_data.
+    pub(super) fn uses_builtin_compile(&self, converter: Id) -> bool {
+        let Value::Function {
+            scope, kwdefaults, ..
+        } = *self.heap.get(converter)
+        else {
+            return false;
+        };
+        let Some(Some(level)) = self.scalar_dict_name(kwdefaults, "_optimize") else {
+            return false;
+        };
+        if !matches!(self.heap.get(level), Value::Int(value) if value.to_i64() == Some(-1)) {
+            return false;
+        }
+        self.builtins
+            .get("compile")
+            .is_some_and(|&compiler| self.module_type_reference(scope, "compile") == Some(compiler))
+    }
+
     /// A generated annotation can close over a local type name. For an integer
     /// argument, prove that it names the builtin float without evaluating Python.
     fn captured_float_reference(&self, scope: Id, name: &str) -> Option<Id> {
