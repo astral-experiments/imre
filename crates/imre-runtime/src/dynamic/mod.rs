@@ -233,6 +233,25 @@ fn copy_ids<T: Copy>(values: &[T]) -> Result<Vec<T>> {
     Ok(copied)
 }
 
+/// Captured locals certified by the compiler for an ordinary frame.
+#[derive(Debug)]
+enum CellLayout {
+    Unspecified,
+    Incomplete,
+    Complete(Vec<String>),
+}
+
+impl CellLayout {
+    fn retains_displaced(&self, name: &str, cleared: bool) -> bool {
+        match self {
+            Self::Unspecified => false,
+            // After clear the reconstructed slots no longer contain cells.
+            Self::Incomplete => cleared,
+            Self::Complete(cells) => cleared || !cells.iter().any(|cell| cell == name),
+        }
+    }
+}
+
 /// Immutable parameter lists used to bind calls to the same code object.
 #[derive(Debug)]
 struct CallParameters {
@@ -240,6 +259,7 @@ struct CallParameters {
     positional_only: usize,
     keyword_only: Vec<String>,
     locals: value::DeclaredLocals,
+    cell_layout: CellLayout,
     nonlocals: Vec<String>,
     locals_complete: bool,
     class_cell: bool,
@@ -288,6 +308,11 @@ impl CallParameters {
             positional_only,
             keyword_only: names("kwonly")?,
             locals: locals.into(),
+            cell_layout: match metadata.get("scope_cellvars") {
+                Some(serde_json::Value::Array(_)) => CellLayout::Complete(names("scope_cellvars")?),
+                Some(serde_json::Value::Null) => CellLayout::Incomplete,
+                _ => CellLayout::Unspecified,
+            },
             nonlocals: names("scope_nonlocals")?,
             locals_complete: metadata["scope_locals_complete"].as_bool().unwrap_or(false),
             class_cell: metadata["class_cell"] == true,

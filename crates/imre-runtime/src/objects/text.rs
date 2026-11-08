@@ -605,7 +605,7 @@ fn owned_string_with<E>(
     cached_short(value, index, new)
 }
 
-fn short_index(value: &str) -> Option<usize> {
+pub(crate) fn short_index(value: &str) -> Option<usize> {
     Some(match value.as_bytes() {
         [] => 256,
         [byte] => usize::from(*byte),

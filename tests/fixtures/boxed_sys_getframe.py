@@ -11,7 +11,54 @@ def suspended():
     yield sys._getframe(), frame.f_back
 
 
+def overwritten_fast_locals():
+    import gc
+    import weakref
+
+    class Item:
+        pass
+
+    def run():
+        fast = Item()
+        cell = Item()
+        refs = weakref.ref(fast), weakref.ref(cell)
+        frame = sys._getframe()
+        frame.f_locals.update({'fast': None, 'cell': None})
+        gc.collect()
+        assert fast is None and refs[0]() is not None and refs[1]() is None
+        def read_cell():
+            return cell
+        assert read_cell() is None
+        return frame, refs[0]
+
+    frame, ref = run()
+    gc.collect()
+    assert ref() is not None
+    frame.clear()
+    gc.collect()
+    assert ref() is None
+
+    def with_nested_class():
+        slot = None
+        class Nested:
+            pass
+        return sys._getframe()
+
+    frame = with_nested_class()
+    frame.clear()
+    proxy = frame.f_locals
+    proxy['slot'] = Item()
+    ref = weakref.ref(proxy['slot'])
+    proxy['slot'] = None
+    gc.collect()
+    assert ref() is not None
+    frame.clear()
+    gc.collect()
+    assert ref() is None
+
+
 def current():
+    overwritten_fast_locals()
     frame = sys._getframe()
     assert caller() is frame and frame.f_globals is globals()
     assert frame.f_code.co_name == 'current' and frame.f_lineno > frame.f_code.co_firstlineno

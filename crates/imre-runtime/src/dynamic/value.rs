@@ -568,6 +568,7 @@ impl Context {
             let object = self.alloc(Value::PythonFrame {
                 unoptimized_locals,
                 class_proxy_scope,
+                overwritten_fast_locals: Vec::new(),
                 scope,
                 code,
                 globals,
@@ -616,6 +617,7 @@ impl Context {
         let object = self.alloc(Value::PythonFrame {
             unoptimized_locals: None,
             class_proxy_scope: None,
+            overwritten_fast_locals: Vec::new(),
             scope,
             code,
             globals,
@@ -1556,6 +1558,8 @@ pub(super) enum Value {
         unoptimized_locals: Option<Id>,
         // A class proxy sees lexical cells, even when its namespace shadows their names.
         class_proxy_scope: Option<Id>,
+        // The frame owns values displaced by writes through a locals proxy.
+        overwritten_fast_locals: Vec<Id>,
         scope: Id,
         code: Id,
         globals: Id,
@@ -2568,6 +2572,7 @@ impl Value {
             Self::PythonFrame {
                 unoptimized_locals,
                 class_proxy_scope,
+                overwritten_fast_locals,
                 scope,
                 code,
                 globals,
@@ -2576,6 +2581,7 @@ impl Value {
             } => {
                 visit.extend(*unoptimized_locals);
                 visit.extend(*class_proxy_scope);
+                visit.extend(overwritten_fast_locals.iter().rev());
                 visit.extend([*scope, *code, *globals]);
                 visit.extend(*back);
             }
@@ -4853,8 +4859,57 @@ impl Heap {
         self.disarm_finalizer(id);
     }
 
-    /// Drop the frame's ownership of completed locals without changing captured closure cells.
+    /// Keep a displaced fast local alive for the lifetime of its materialized frame.
+    pub(super) fn retain_overwritten_local(&mut self, frame: Id, old: Id) -> Result<()> {
+        // The prefix and the canonical short-object caches contain Python singletons.
+        // Other code-owned constants may still be mortal Python objects.
+        let permanent = (old as usize) < FIRST_DYNAMIC_SLOT
+            || match self.get(old) {
+                Value::Bytes(bytes) if bytes.len() <= 1 => {
+                    self.short_bytes.get(&bytes.first().copied()) == Some(&old)
+                }
+                Value::Str(text) if crate::objects::short_index(text).is_some() => {
+                    self.is_interned(old)
+                }
+                Value::Native(name) => super::builtins::is_static_gc_type(name),
+                _ => false,
+            };
+        if permanent {
+            return Ok(());
+        }
+        let Value::PythonFrame {
+            overwritten_fast_locals,
+            ..
+        } = self.get_mut(frame)
+        else {
+            unreachable!()
+        };
+        overwritten_fast_locals
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        overwritten_fast_locals.push(old);
+        Ok(())
+    }
+
+    /// Drop a frame's references only after its execution-state checks succeed.
     pub(super) fn clear_frame(&mut self, value: Id) -> Result<()> {
+        self.clear_frame_locals(value)?;
+        let Value::PythonFrame {
+            overwritten_fast_locals,
+            ..
+        } = self.get_mut(value)
+        else {
+            unreachable!()
+        };
+        if !overwritten_fast_locals.is_empty() {
+            *overwritten_fast_locals = Vec::new();
+            self.collect_next_statement = true;
+        }
+        Ok(())
+    }
+
+    /// Drop the frame's ownership of completed locals without changing captured closure cells.
+    fn clear_frame_locals(&mut self, value: Id) -> Result<()> {
         let Value::PythonFrame {
             scope,
             unoptimized_locals,

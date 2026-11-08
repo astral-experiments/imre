@@ -18,6 +18,7 @@ struct ClosureNames {
     globals: std::collections::BTreeSet<String>,
     nonlocals: std::collections::BTreeSet<String>,
     include_nested_reads: bool,
+    cell_reads: std::collections::BTreeSet<String>,
     string_annotations: bool,
     incomplete: bool,
     locals_incomplete: bool,
@@ -107,6 +108,7 @@ impl<'a> Visitor<'a> for ClosureNames {
                             reads.remove(param.name().as_str());
                         }
                     }
+                    self.cell_reads.extend(reads.iter().cloned());
                     self.reads.extend(reads);
                 } else {
                     self.incomplete = true;
@@ -213,6 +215,7 @@ impl<'a> Visitor<'a> for ClosureNames {
                     let reads = self.child_reads(lambda.parameters.as_deref(), |child| {
                         child.visit_expr(&lambda.body)
                     });
+                    self.cell_reads.extend(reads.iter().cloned());
                     self.reads.extend(reads);
                 } else {
                     self.incomplete = true;
@@ -229,9 +232,10 @@ impl<'a> Visitor<'a> for ClosureNames {
             | ast::Expr::SetComp(_)
             | ast::Expr::DictComp(_)
             | ast::Expr::Generator(_) => {
-                let (reads, bindings) =
+                let (reads, bindings, captured) =
                     class_metadata::comprehension_scope(expr, self.string_annotations);
                 self.reads.extend(reads);
+                self.cell_reads.extend(captured);
                 self.locals.extend(bindings);
                 if !self.include_nested_reads {
                     self.incomplete = true;
@@ -1050,6 +1054,15 @@ impl Function<'_, '_> {
             }
         }
         closure_names.finish_scope();
+        closure_names
+            .cell_reads
+            .retain(|name| closure_names.locals.contains(name));
+        // An emitted but unresolved layout still identifies a cleared compiled frame.
+        signature["scope_cellvars"] = if closure_names.incomplete {
+            serde_json::Value::Null
+        } else {
+            json!(closure_names.cell_reads)
+        };
         signature["scope_locals"] = json!(closure_names.locals.iter().collect::<Vec<_>>());
         signature["scope_reads"] = json!(closure_names.reads);
         signature["scope_nonlocals"] = json!(closure_names.nonlocals);
