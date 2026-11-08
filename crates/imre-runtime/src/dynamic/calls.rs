@@ -172,15 +172,12 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
     }
 }
 
-/// Format a Python call's unexpected keyword and any spelling suggestion.
 pub(super) fn unexpected_keyword_error(name: &str, key: &str, params: &[&str]) -> Error {
-    let mut message = format!("{name}() got an unexpected keyword argument '{key}'");
-    if let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, params) {
-        message.push_str(&format!(". Did you mean '{hint}'?"));
-    }
-    Error::new("TypeError", message)
+    Error::new(
+        "TypeError",
+        crate::source_arguments::unexpected_keyword_message(name, key, params),
+    )
 }
-
 pub(super) fn excess_positional_error(
     name: &str,
     allowed: usize,
@@ -188,50 +185,17 @@ pub(super) fn excess_positional_error(
     given: usize,
     keywords: usize,
 ) -> Error {
-    let limit = if defaults == 0 {
-        allowed.to_string()
-    } else {
-        format!("from {} to {allowed}", allowed as isize - defaults as isize)
-    };
-    let unit = if allowed == 1 && defaults == 0 {
-        "argument"
-    } else {
-        "arguments"
-    };
-    let (count, verb) = if keywords == 0 {
-        (given.to_string(), if given == 1 { "was" } else { "were" })
-    } else {
-        let positional_unit = if given == 1 { "argument" } else { "arguments" };
-        let keyword_unit = if keywords == 1 {
-            "argument"
-        } else {
-            "arguments"
-        };
-        (
-            format!(
-                "{given} positional {positional_unit} (and {keywords} keyword-only {keyword_unit})"
-            ),
-            "were",
-        )
-    };
     Error::new(
         "TypeError",
-        format!("{name}() takes {limit} positional {unit} but {count} {verb} given"),
+        crate::source_arguments::excess_positional_message(
+            name, allowed, defaults, given, keywords,
+        ),
     )
 }
-
 pub(super) fn missing_arguments_error(name: &str, kind: &str, missing: &[&str]) -> Error {
-    let count = missing.len();
-    let unit = if count == 1 { "argument" } else { "arguments" };
-    let names = match missing {
-        [one] => format!("'{one}'"),
-        [one, two] => format!("'{one}' and '{two}'"),
-        [rest @ .., last] => format!("'{}', and '{last}'", rest.join("', '")),
-        [] => unreachable!(),
-    };
     Error::new(
         "TypeError",
-        format!("{name}() missing {count} required {kind} {unit}: {names}"),
+        crate::source_arguments::missing_arguments_message(name, kind, missing),
     )
 }
 
@@ -8648,12 +8612,42 @@ impl Context {
                     frame.closure.nonlocals.insert(copy_label(name)?);
                 }
                 let pos = &sig.positional;
-                let posonly = &pos[..sig.positional_only];
-                let kwonly = &sig.keyword_only;
+                let shape = crate::source_arguments::Shape {
+                    positional: pos,
+                    positional_only: sig.positional_only,
+                    keyword_only: &sig.keyword_only,
+                    varargs: sig.varargs.is_some(),
+                    kwargs: sig.kwargs.is_some(),
+                };
+                let default_values = if defaults == NONE {
+                    Vec::new()
+                } else {
+                    self.items(defaults)?
+                };
+                let kwdefault = |ctx: &Self, n: &str| {
+                    ctx.dict_entries(kwdefaults).and_then(|entries| {
+                        entries.iter().find_map(|&(key, value)| {
+                            matches!(ctx.heap.get(key), Value::Str(text) if text == n)
+                                .then_some(value)
+                        })
+                    })
+                };
+                let mut keys = smallvec::SmallVec::<[&str; 8]>::new();
+                keys.try_reserve(kwargs.len())
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                keys.extend(kwargs.iter().map(|(key, _)| key.as_str()));
+                let binding = shape
+                    .bind(&name, args.len(), &keys, default_values.len(), |n| {
+                        kwdefault(self, n).is_some()
+                    })
+                    .map_err(|e| match e {
+                        crate::source_arguments::Error::Memory => Error::new("MemoryError", ""),
+                        crate::source_arguments::Error::Type(msg) => Error::new("TypeError", msg),
+                    })?;
+                drop(keys);
                 for (n, &v) in pos.iter().zip(&args) {
                     self.bind_argument(local, n, v)?;
                 }
-                let given = args.len();
                 if let Some(n) = sig.varargs.as_deref() {
                     let extra = if pos.is_empty() {
                         args
@@ -8664,111 +8658,27 @@ impl Context {
                     self.bind_argument(local, n, extra)?;
                 }
                 let mut extra = Vec::new();
-                let mut keywords = kwargs.into_iter();
-                while let Some((n, v)) = keywords.next() {
-                    if !posonly.contains(&n) && (pos.contains(&n) || kwonly.contains(&n)) {
-                        if self.scope_data(local).names.contains_key(n.as_str()) {
-                            return Err(Error::new(
-                                "TypeError",
-                                format!("{name}() got multiple values for argument '{n}'"),
-                            ));
-                        }
-                        self.bind_argument(local, &n, v)?;
-                    } else if sig.kwargs.is_some() {
-                        let k = self.text(n);
-                        extra.push((k, v));
+                for ((key, value), slot) in kwargs.into_iter().zip(binding.keywords) {
+                    if let Some(slot) = slot {
+                        self.bind_argument(local, shape.parameter(slot), value)?;
                     } else {
-                        let conflicts: Vec<_> = posonly
-                            .iter()
-                            .filter(|param| {
-                                **param == n
-                                    || keywords.as_slice().iter().any(|(key, _)| key == *param)
-                            })
-                            .map(String::as_str)
-                            .collect();
-                        if !conflicts.is_empty() {
-                            return Err(Error::new(
-                                "TypeError",
-                                format!(
-                                    "{name}() got some positional-only arguments passed as keyword arguments: '{}'",
-                                    conflicts.join(", ")
-                                ),
-                            ));
-                        }
-                        let candidates: Vec<_> = pos[posonly.len()..]
-                            .iter()
-                            .chain(kwonly)
-                            .map(String::as_str)
-                            .collect();
-                        return Err(unexpected_keyword_error(&name, &n, &candidates));
+                        let k = self.text(key);
+                        extra.push((k, value));
                     }
                 }
                 if let Some(n) = sig.kwargs.as_deref() {
                     let v = variadic.unwrap_or_else(|| self.dict(extra));
                     self.bind_argument(local, n, v)?;
                 }
-                let default_values = if defaults == NONE {
-                    Vec::new()
-                } else {
-                    self.items(defaults)?
-                };
-                if given > pos.len() && sig.varargs.is_none() {
-                    let bound = &self.scope_data(local).names;
-                    let keywords = kwonly
-                        .iter()
-                        .filter(|n| bound.contains_key(n.as_str()))
-                        .count();
-                    return Err(excess_positional_error(
-                        &name,
-                        pos.len(),
-                        default_values.len(),
-                        given,
-                        keywords,
-                    ));
-                }
-                // Defaults belong to the function. Validate the arguments supplied by the caller
-                // and report binding errors first, including missing keyword-only arguments.
                 let supplied_types = self.check_supplied_types(callable, local, &sig, &name);
-                let mut missing = Vec::new();
-                for (index, n) in pos.iter().enumerate() {
-                    if !self.scope_data(local).names.contains_key(n.as_str()) {
-                        let offset = index + default_values.len();
-                        if let Some(&val) = offset
-                            .checked_sub(pos.len())
-                            .and_then(|i| default_values.get(i))
-                        {
-                            self.bind_argument(local, n, val)?;
-                        } else {
-                            missing
-                                .try_reserve(1)
-                                .map_err(|_| Error::new("MemoryError", ""))?;
-                            missing.push(n.as_str());
-                        }
-                    }
-                }
-                if !missing.is_empty() {
-                    return Err(missing_arguments_error(&name, "positional", &missing));
-                }
-                for n in kwonly {
-                    if !self.scope_data(local).names.contains_key(n.as_str()) {
-                        let val = self.dict_entries(kwdefaults).and_then(|entries| {
-                            entries.iter().find_map(|&(key, value)| {
-                                matches!(self.heap.get(key), Value::Str(text) if text == n)
-                                    .then_some(value)
-                            })
-                        });
-                        if let Some(val) = val {
-                            self.bind_argument(local, n, val)?;
-                        } else {
-                            missing
-                                .try_reserve(1)
-                                .map_err(|_| Error::new("MemoryError", ""))?;
-                            missing.push(n.as_str());
-                        }
-                    }
-                }
-                if !missing.is_empty() {
-                    return Err(missing_arguments_error(&name, "keyword-only", &missing));
+                for slot in binding.defaults {
+                    let n = shape.parameter(slot);
+                    let value = if slot < pos.len() {
+                        default_values[slot + default_values.len() - pos.len()]
+                    } else {
+                        kwdefault(self, n).expect("bound keyword default")
+                    };
+                    self.bind_argument(local, n, value)?;
                 }
                 supplied_types?;
                 let Value::Scope(frame) = self.heap.get_mut(local) else {
