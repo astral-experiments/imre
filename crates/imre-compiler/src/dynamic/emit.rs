@@ -151,12 +151,21 @@ pub(crate) fn emit(
             ).unwrap();
             continue;
         }
+        // Python source files use universal newlines, including inside literals.
+        // Keep the original physical bytes for registration.
+        let physical = !builtin && physical_files.contains(path);
+        let code_source = if physical {
+            crate::normalize_source(source, crate::SourceKind::File)?
+        } else {
+            std::borrow::Cow::Borrowed(source.as_str())
+        };
         let check_archive = bundled && !providers.is_empty();
         // A standalone initializer can be compiled separately even without a provider pack.
         let separate = split && unit != 0 && !source.is_empty();
         let mut external = None;
         if (check_archive || separate)
-            && let Some((symbol, ir)) = initializer(name, path, source, keep_docstrings, bundled)?
+            && let Some((symbol, ir)) =
+                initializer(name, path, &code_source, keep_docstrings, bundled)?
         {
             let archived = check_archive && providers.contains(&symbol);
             if archived || separate {
@@ -179,14 +188,14 @@ pub(crate) fn emit(
                 unit,
                 name,
                 path,
-                source,
+                &code_source,
                 &file,
                 SourceBody::Module { bundled },
             )?,
         };
         // Physical code reads keep using the file. Identify its compiled snapshot without
         // embedding the source or exposing stale bytes through SourceFileLoader.get_data().
-        let (register, text, len) = if !builtin && physical_files.contains(path) {
+        let (register, text, len) = if physical {
             use sha2::{Digest, Sha256};
             let digest = Sha256::digest(source.as_bytes());
             (
