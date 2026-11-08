@@ -9003,6 +9003,9 @@ impl Context {
                 Value::Str(text) => Some(text.as_str()),
                 _ => return Ok(ScalarAnnotation::Value(value)),
             }
+        } else if fields.annotate == NONE {
+            // Reading __annotations__ here would create an empty dictionary.
+            return Ok(ScalarAnnotation::Missing);
         } else {
             None
         };
