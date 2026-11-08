@@ -278,12 +278,7 @@ fn run() -> Result<ExitCode, String> {
     let target_os = target_os(target.as_deref());
     let linux = cfg!(target_os = "linux") && target_os == "linux";
     let runtime = runtime_archive(runtime, allocator, linux, options.address_sanitizer)?;
-    if !runtime.is_file() {
-        return Err(format!(
-            "Runtime not found: {}. Build the workspace or pass --runtime.",
-            runtime.display()
-        ));
-    }
+    let runtime_is_file = runtime.is_file();
     let mut progress = BuildOutput::new(verbosity);
     let label = if execute { &source_path } else { &output };
     let bundled = clang
@@ -295,11 +290,12 @@ fn run() -> Result<ExitCode, String> {
         .filter(|_| target.as_deref().is_none_or(native_linux_gnu_target));
     let native_link = target.is_none() && lto_linker.is_none() && link.args.is_empty();
     let native_objects = native_link && llvm_path.is_none();
-    let native = if native_objects && clang.is_none() && !options.address_sanitizer {
-        build_cache::native_toolchain(&runtime, bundled_native)
-    } else {
-        None
-    };
+    let native =
+        if runtime_is_file && native_objects && clang.is_none() && !options.address_sanitizer {
+            build_cache::native_toolchain(&runtime, bundled_native)
+        } else {
+            None
+        };
     let split =
         !whole_program && (native.is_some() || (native_objects && options.address_sanitizer));
     if split && !options.address_sanitizer {
@@ -429,6 +425,12 @@ fn run() -> Result<ExitCode, String> {
         };
         (code, c.input_paths, c.source_inputs, c.extension_archives)
     };
+    if !runtime_is_file {
+        return Err(format!(
+            "Runtime not found: {}. Build the workspace or pass --runtime.",
+            runtime.display()
+        ));
+    }
     let (library_manifests, native_libraries) =
         extension_libraries(&extension_archives, &mut sources)?;
     // A wheel's -l flags may use implicit linker search directories beyond the
