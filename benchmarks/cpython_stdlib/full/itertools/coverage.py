@@ -28,6 +28,11 @@ PREFIX = "test.test_itertools."
 REVIEWED = {
     "LengthTransparency.test_repeat": ("int", ["repeat", "operator.length_hint"]),
     "LengthTransparency.test_repeat_with_negative_times": ("int", ["repeat", "operator.length_hint"]),
+    "SubclassWithKwargsTest.test_keywords_in_subclass": (None, [
+        "repeat", "builtins.zip", "builtins.filter", "filterfalse", "chain", "builtins.map",
+        "starmap", "islice", "takewhile", "dropwhile", "cycle", "compress",
+        "iterator subclass construction, keyword rejection and overridden __init__/__new__",
+    ]),
     "TestBasicOps.test_repeat_with_negative_times": ("str", ["repeat", "repr"]),
     "TestBasicOps.test_tee_del_backward": ("int", ["repeat", "tee", "any", "del"]),
     "TestExamples.test_chain": ("str", ["chain"]),

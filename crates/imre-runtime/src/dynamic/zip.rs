@@ -42,9 +42,14 @@ impl Context {
     pub(super) fn zip_or_map(
         &mut self,
         name: &str,
+        class: Id,
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Id> {
+        let base = self.builtin(name);
+        if !self.direct_subclass(class, base) {
+            return Err(self.invalid_new_subtype(name, class));
+        }
         let strict = match kwargs {
             [] => false,
             [(key, value)] if key == "strict" => self.truth(*value)?,
@@ -90,7 +95,8 @@ impl Context {
             },
             None => Value::Zip { inputs, strict },
         };
-        Ok(self.alloc(cursor))
+        let storage = self.alloc(cursor);
+        Ok(self.with_subclass_storage(class, base, storage))
     }
 
     /// Pull one row, preserving source errors and the strict mismatch probe order.
@@ -203,7 +209,7 @@ impl Context {
                 format!("descriptor '{name}' of '{owner}' object needs an argument"),
             ));
         };
-        let storage = if owner == "filter" {
+        let storage = if matches!(owner, "filter" | "map" | "zip") {
             self.scalar_value(cursor)
         } else {
             cursor

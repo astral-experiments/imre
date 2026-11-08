@@ -391,6 +391,7 @@ def _make_zip_longest(_allocate, _state, _State):
 
 
 zip_longest = _make_zip_longest(_itertools._zip_longest_allocate, _itertools._zip_longest_state, _ZipLongestState)
+_uses_base_init = _itertools._uses_base_init
 del _itertools
 
 
@@ -769,11 +770,10 @@ class islice:
 
     __slots__ = ("_source", "_position", "_target", "_stop", "_step")
 
-    def __init__(self, *args, **kwargs):
-        # CPython initializes the cursor in its constructor; explicit reinitialization is inert.
-        if hasattr(self, "_source"):
-            return
-        if kwargs:
+    def __new__(cls, /, *args, **kwargs):
+        if not isinstance(cls, type) or not issubclass(cls, __class__):
+            raise TypeError("expected an islice subclass")
+        if kwargs and _uses_base_init(__class__, cls):
             raise TypeError("islice() takes no keyword arguments")
         count = len(args)
         if count < 2:
@@ -792,11 +792,14 @@ class islice:
         stride = _islice_index(step, 1)
         if stride < 1:
             raise ValueError("Step for islice() must be a positive integer or None.")
-        self._source = iter(args[0])
+        source = iter(args[0])
+        self = object.__new__(cls)
+        self._source = source
         self._position = 0
         self._target = target
         self._stop = limit
         self._step = stride
+        return self
 
     def __iter__(self):
         return self

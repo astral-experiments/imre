@@ -1901,6 +1901,7 @@ impl Context {
             | ("slice", Value::Slice(_))
             | ("range", Value::Range(_))
             | ("map", Value::Map { .. })
+            | ("zip", Value::Zip { .. })
             | ("filter", Value::Filter { .. })
             | ("_contextvars.ContextVar", Value::ContextVar { .. })
             | ("_contextvars.Context", Value::Context(_))
@@ -4393,13 +4394,13 @@ impl Context {
                 return Ok(self.builtin("object.__reduce_ex__"));
             }
             Value::Native(ref class)
-                if class == "filter"
+                if matches!(class.as_str(), "filter" | "map" | "zip")
                     && let Some(member) = self.own_class_attr(obj, name) =>
             {
                 return Ok(member);
             }
             Value::Native(ref class)
-                if matches!(class.as_str(), "map" | "filter" | "memory_iterator") =>
+                if matches!(class.as_str(), "map" | "zip" | "filter" | "memory_iterator") =>
             {
                 match name {
                     "__iter__" | "__next__" => return Ok(self.builtin(&format!("{class}.{name}"))),
@@ -8046,6 +8047,7 @@ impl Context {
                                 | "str_iterator"
                                 | "tuple_iterator"
                                 | "map"
+                                | "zip"
                                 | "filter"
                                 | "mappingproxy"
                                 | "set"

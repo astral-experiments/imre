@@ -2330,6 +2330,18 @@ pub(super) fn call(
     if name == "_imre_itertools._zip_longest_state" {
         return itertools::iterator_state(ctx, args, kwargs, "zip_longest");
     }
+    if name == "_imre_itertools._uses_base_init" {
+        if let [base, class] = args
+            && kwargs.is_empty()
+            && ctx.is_type_object(*base)
+            && ctx.is_type_object(*class)
+        {
+            return Ok(builtins::boolean(itertools::uses_base_init(
+                ctx, *base, *class,
+            )));
+        }
+        return Err(Error::new("TypeError", "expected two classes"));
+    }
     if name == "_imre_itertools._chain_allocate" {
         let [base, class, source] = args else {
             return Err(Error::new(
@@ -2343,12 +2355,7 @@ pub(super) fn call(
             return Err(Error::new("TypeError", "expected a chain subclass"));
         }
         // A subclass initializer may consume extra keywords after allocation.
-        if !kwargs.is_empty()
-            && ctx.class_attr(*class, "__init__").is_none_or(|init| {
-                Some(init) == ctx.class_attr(*base, "__init__")
-                    || Some(&init) == ctx.builtins.get("object.__init__")
-            })
-        {
+        if !kwargs.is_empty() && itertools::uses_base_init(ctx, *base, *class) {
             return Err(Error::new(
                 "TypeError",
                 "chain() takes no keyword arguments",

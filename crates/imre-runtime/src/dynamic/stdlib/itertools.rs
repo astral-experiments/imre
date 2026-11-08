@@ -1,5 +1,13 @@
 use super::{Context, Error, Id, NONE, Result, Value};
 
+/// Inspect the initializer slot without binding descriptors or calling the metaclass.
+pub(super) fn uses_base_init(ctx: &Context, base: Id, class: Id) -> bool {
+    ctx.class_attr(class, "__init__").is_none_or(|init| {
+        Some(init) == ctx.class_attr(base, "__init__")
+            || Some(&init) == ctx.builtins.get("object.__init__")
+    })
+}
+
 /// Advance the current child, obtaining another from the outer iterator only on exhaustion.
 pub(super) fn chain_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [base, receiver] = args else {

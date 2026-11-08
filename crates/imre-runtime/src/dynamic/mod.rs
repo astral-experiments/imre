@@ -448,6 +448,8 @@ impl Context {
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
             | ("filter", Value::Filter { .. })
+            | ("map", Value::Map { .. })
+            | ("zip", Value::Zip { .. })
             | ("mappingproxy", Value::MappingProxy(_))
             | ("socket.socket", Value::Socket(_))
             | ("super", Value::Super { .. })
@@ -2898,17 +2900,24 @@ impl Context {
             let dictionary = self.dict(entries);
             self.native_type_dicts.insert(value, dictionary);
         }
-        if name == "filter" {
-            let doc = self.text(concat!(
-                "Return an iterator yielding those items of iterable for which function(item)\n",
-                "is true. If function is None, return the items that are true."
-            ));
+        if matches!(name, "filter" | "map" | "zip") {
             let mut entries = Vec::new();
-            for name in std::iter::once("__new__").chain(builtins::FILTER_METHODS.iter().copied()) {
-                let member = self.builtin(&format!("filter.{name}"));
-                entries.push((self.heap.code_name(name), member));
+            let methods = if name == "filter" {
+                builtins::FILTER_METHODS
+            } else {
+                builtins::ITERATOR_SLOTS
+            };
+            for slot in std::iter::once("__new__").chain(methods.iter().copied()) {
+                let member = self.builtin(&format!("{name}.{slot}"));
+                entries.push((self.heap.code_name(slot), member));
             }
-            entries.push((self.heap.code_name("__doc__"), doc));
+            if name == "filter" {
+                let doc = self.text(concat!(
+                    "Return an iterator yielding those items of iterable for which function(item)\n",
+                    "is true. If function is None, return the items that are true."
+                ));
+                entries.push((self.heap.code_name("__doc__"), doc));
+            }
             let dictionary = self.dict(entries);
             self.native_type_dicts.insert(value, dictionary);
         }
@@ -4116,6 +4125,7 @@ impl Context {
                     "_zip_longest_state",
                     "_predicate_allocate",
                     "_predicate_state",
+                    "_uses_base_init",
                     "_chain_allocate",
                     "_chain_next",
                 ] {
