@@ -588,7 +588,6 @@ fn object_fallback<T>(
                 registered.root,
                 registered.roots,
                 registered.winners.iter().copied(),
-                registered.inputs,
                 checked_graph.as_ref(),
             )?;
         }

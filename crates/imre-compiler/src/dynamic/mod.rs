@@ -595,18 +595,21 @@ pub(crate) struct RegisteredSource<'a> {
     pub(crate) path: &'a Path,
     pub(crate) source: &'a str,
     pub(crate) is_program: bool,
+    pub(crate) checked_module: Option<crate::modules::ModuleId>,
 }
 
 impl<'a> RegisteredSource<'a> {
     pub(crate) fn new(
         (name, path, source): &'a (String, PathBuf, String),
         is_program: bool,
+        checked_module: Option<crate::modules::ModuleId>,
     ) -> Self {
         Self {
             name,
             path,
             source,
             is_program,
+            checked_module,
         }
     }
 }
@@ -615,7 +618,6 @@ pub(crate) struct RegisteredSources<'a> {
     pub(crate) root: &'a Path,
     pub(crate) roots: &'a [PathBuf],
     pub(crate) winners: &'a [RegisteredSource<'a>],
-    pub(crate) inputs: &'a SourceInputs,
 }
 
 pub(crate) fn compile(
@@ -633,10 +635,18 @@ pub(crate) fn compile(
     let command = invocation.map(|i| &i.source);
     let module_entry = options.module_entry.as_deref();
     let in_memory = command.is_some() || module_entry.is_some();
+    // A retained native candidate may already own the graph's disk inputs. Only
+    // graphs with their original per-module snapshots can supply registrations.
+    let ordinary_graph = typed_graph.filter(|graph| {
+        !options.runtime_imports && graph.inputs.files.len() == graph.modules.len()
+    });
+    let file_entry = ordinary_graph.filter(|_| !in_memory);
     let src = if module_entry.is_some() {
         String::new()
     } else if let Some(command) = command {
         command.to_owned()
+    } else if let Some(graph) = file_entry {
+        graph.modules[graph.entry].original_source().to_owned()
     } else {
         // A direct .pyc operand already received its bytecode diagnostic from the script loader.
         if options.script_startup.is_some() && crate::named_bytecode(path) {
@@ -787,10 +797,14 @@ pub(crate) fn compile(
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let isolated = startup.is_some_and(|(flags, _)| flags.isolated);
     let entry = cwd.join(path);
-    let entry_identity = (!in_memory)
-        .then(|| filesystem.canonicalize(&entry))
-        .transpose()
-        .map_err(|e| e.to_string())?;
+    let entry_identity = if let Some(graph) = file_entry {
+        Some(graph.inputs.files[graph.entry].1.clone())
+    } else {
+        (!in_memory)
+            .then(|| filesystem.canonicalize(&entry))
+            .transpose()
+            .map_err(|e| e.to_string())?
+    };
     let root = if let Some(root) = module_root {
         cwd.join(root)
     } else if entry_identity.is_some() {
@@ -877,15 +891,15 @@ pub(crate) fn compile(
         src.clone(),
     )];
     if let Some(identity) = entry_identity {
-        inputs.files.push((
-            path.to_owned(),
-            identity,
-            blake3::hash(src.as_bytes()).to_hex().to_string(),
-        ));
+        let digest = file_entry.map_or_else(
+            || blake3::hash(src.as_bytes()).to_hex().to_string(),
+            |graph| graph.inputs.files[graph.entry].2.clone(),
+        );
+        inputs.files.push((path.to_owned(), identity, digest));
     }
     let mut selected_sources = Vec::new();
     if module_entry.is_none() && !options.runtime_imports {
-        selected_sources.push((0, true));
+        selected_sources.push((0, true, ordinary_graph.map(|graph| graph.entry)));
     }
     let mut source_initializers = HashSet::new();
     if first.misplaced_future {
@@ -1175,6 +1189,10 @@ pub(crate) fn compile(
                 if frozen_modules && prefix == "runpy" {
                     continue;
                 }
+                let graph_file = ordinary_graph.and_then(|graph| {
+                    let id = graph.python_file(&prefix)?;
+                    Some((id, &graph.modules[id], &graph.inputs.files[id]))
+                });
                 for root in roots.iter().filter(|_| !bundled_only) {
                     if implicit_dirs.contains(root) && before_site.contains(&prefix) {
                         continue;
@@ -1215,9 +1233,14 @@ pub(crate) fn compile(
                     let stem = root.join(prefix.replace('.', "/"));
                     let file = stem.with_extension("py");
                     let init = stem.join("__init__.py");
-                    let (path, package) = if filesystem.is_file(&init) {
+                    // The checked resolver already selected a concrete package or module at
+                    // this root. Other roots still supply alternatives for a live sys.path.
+                    let checked = graph_file
+                        .filter(|(_, module, _)| module.path == init || module.path == file);
+                    let package = checked.map(|(_, module, _)| module.path == init);
+                    let (path, package) = if package.unwrap_or_else(|| filesystem.is_file(&init)) {
                         (init, true)
-                    } else if filesystem.is_file(&file) {
+                    } else if checked.is_some() || filesystem.is_file(&file) {
                         inputs.missing.push(init);
                         (file, false)
                     } else {
@@ -1258,16 +1281,22 @@ pub(crate) fn compile(
                         return Ok(None);
                     }
                     installed = None;
-                    let identity = filesystem.canonicalize(&path);
-                    let src = filesystem
-                        .read_to_string(&path)
-                        .map_err(|e| format!("{}: {e}", path.display()))?;
+                    let src = if let Some((_, module, input)) = checked {
+                        inputs.files.push(input.clone());
+                        module.original_source().to_owned()
+                    } else {
+                        let identity = filesystem.canonicalize(&path);
+                        let src = filesystem
+                            .read_to_string(&path)
+                            .map_err(|e| format!("{}: {e}", path.display()))?;
+                        inputs.files.push((
+                            path.clone(),
+                            identity.map_err(|e| e.to_string())?,
+                            blake3::hash(src.as_bytes()).to_hex().to_string(),
+                        ));
+                        src
+                    };
                     let imports = imports_for_module(&path, &src)?;
-                    inputs.files.push((
-                        path.clone(),
-                        identity.map_err(|e| e.to_string())?,
-                        blake3::hash(src.as_bytes()).to_hex().to_string(),
-                    ));
                     // Later alternatives remain available to the runtime finder. Only the
                     // winning provider supplies the initial module binding.
                     let on_package_path = prefix
@@ -1289,7 +1318,11 @@ pub(crate) fn compile(
                             // Only path zero belongs to the program. With safe path
                             // the first remaining search entry may be an installation.
                             let program = initial[..path0_len].contains(root);
-                            selected_sources.push((sources.len(), program));
+                            selected_sources.push((
+                                sources.len(),
+                                program,
+                                checked.map(|(id, _, _)| id),
+                            ));
                         }
                         sources.push(registration);
                     }
@@ -1385,7 +1418,7 @@ pub(crate) fn compile(
     // Borrow the winners once discovery has finished growing the emitter's source table.
     let selected_sources: Vec<_> = selected_sources
         .into_iter()
-        .map(|(id, program)| RegisteredSource::new(&sources[id], program))
+        .map(|(id, program, module)| RegisteredSource::new(&sources[id], program, module))
         .collect();
     check(
         entry_requests_objects || startup_provider,
@@ -1393,7 +1426,6 @@ pub(crate) fn compile(
             root: &root,
             roots: &roots,
             winners: &selected_sources,
-            inputs: &inputs,
         }),
     )?;
     let (units, used_archive) = if matches!(layout, crate::BoxedLayout::Check) {

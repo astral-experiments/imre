@@ -101,82 +101,42 @@ pub(crate) fn check_registered_project<'a>(
         Item = crate::dynamic::RegisteredSource<'a>,
         IntoIter: ExactSizeIterator + Clone,
     >,
-    inputs: &crate::SourceInputs,
     checked: Option<&crate::modules::SourceGraph>,
 ) -> Result<(), String> {
     let sources = sources.into_iter();
     if sources.len() == 0 {
         return Ok(());
     }
-    if let Some(graph) = checked {
-        // Native lowering or the source check has validated these declarations.
-        // Reuse this result only for the same bindings, bytes, and program roles.
-        let mut remaining: HashMap<_, _> = graph
-            .modules
-            .iter()
-            .enumerate()
-            .filter(|(_, m)| {
-                !m.bundled
-                    && !m.is_namespace()
-                    && !m.path.extension().is_some_and(|ext| ext == "pyi")
-            })
-            .map(|(id, module)| (module.name.as_str(), id))
-            .collect();
-        let identities: HashMap<_, _> = inputs
-            .files
-            .iter()
-            .map(|(path, identity, digest)| {
-                // Only the entry spelling can be relative; imported paths are already absolute.
-                let path = if path.is_absolute() {
-                    std::borrow::Cow::Borrowed(path.as_path())
-                } else {
-                    std::borrow::Cow::Owned(
-                        std::path::absolute(path).map_err(|error| error.to_string())?,
-                    )
-                };
-                Ok((path, (identity, digest)))
-            })
-            .collect::<Result<_, String>>()?;
+    if let Some(graph) = checked
+        && let Some(result) = &graph.source_contract
+    {
+        let mut matched = std::collections::HashSet::new();
         let admitted = sources.clone().all(|winner| {
-            let crate::dynamic::RegisteredSource { name, path, source, is_program } = winner;
-            let key = if name == "__main__" { &graph.modules[graph.entry].name } else { name };
-            let Some(id) = remaining.remove(key) else { return false };
-            let module = &graph.modules[id];
-            if is_program != module.is_program_source() {
+            let Some(id) = winner.checked_module else {
+                return false;
+            };
+            if winner.is_program != graph.modules[id].is_program_source() || !matched.insert(id) {
                 return false;
             }
-            if name != "__main__" {
-                // A checked bundled declaration can intentionally mask its source.
-                // It cannot supply the type of a different, first-party registration.
-                let session = &graph.session;
-                let file = session.files[id];
-                let model = SemanticModel::new(&session.db, session.db.program_file(file));
-                if model
-                    .resolve_module(Some(name), 0)
-                    .and_then(|m| m.file(&session.db))
-                    != Some(file)
-                {
-                    return false;
-                }
+            if winner.name == "__main__" {
+                return true;
             }
-            if path == Path::new("<string>") {
-                return graph.virtual_command && module.source == source;
-            }
-            graph
-                .inputs
-                .files
-                .get(id)
-                .is_some_and(|(_, identity, digest)| {
-                    identities.get(path) == Some(&(identity, digest))
-                        && (module.path == path || graph.module_filename(id) == path)
-                        // The graph stores normalized text. Usually we can compare the
-                        // actual bytes directly; physical CR/CRLF inputs retain their raw digest.
-                        && (module.source == source || source.contains('\r') && blake3::hash(source.as_bytes()).to_hex().as_str() == digest)
-                })
+            // A checked bundled declaration can mask a different runtime definition.
+            let session = &graph.session;
+            let file = session.files[id];
+            let model = SemanticModel::new(&session.db, session.db.program_file(file));
+            model
+                .resolve_module(Some(winner.name), 0)
+                .and_then(|m| m.file(&session.db))
+                == Some(file)
         });
         if admitted
-            && remaining.is_empty()
-            && let Some(result) = &graph.source_contract
+            && graph.modules.iter().enumerate().all(|(id, module)| {
+                module.bundled
+                    || module.is_namespace()
+                    || module.path.extension().is_some_and(|ext| ext == "pyi")
+                    || matched.contains(&id)
+            })
         {
             return result.clone();
         }
