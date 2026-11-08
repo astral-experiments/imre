@@ -2,7 +2,24 @@ import _codecs
 import codecs
 
 
+def check_stream_file():
+    import tempfile
+    import warnings
+
+    with tempfile.TemporaryDirectory() as directory:
+        path = directory + "/lines"
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", DeprecationWarning)
+            with codecs.open(path, "w+", "utf-16") as stream:
+                stream.write("A\r\nΩ")
+                stream.seek(0)
+                assert stream.read() == "A\r\nΩ"
+        assert stream.stream.closed
+        assert len(caught) == 1 and caught[0].category is DeprecationWarning
+
+
 def current():
+    check_stream_file()
     assert codecs.utf_16_decode is _codecs.utf_16_decode
     assert codecs.utf_16_decode(b"\xfe\xff\x00A\xd8\x00") == ("A", 4)
     assert codecs.utf_16_decode(b"\xff\xfeA\x00!", "replace", True) == ("A\ufffd", 5)
