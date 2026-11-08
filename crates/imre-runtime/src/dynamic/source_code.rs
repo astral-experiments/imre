@@ -5587,13 +5587,32 @@ impl Context {
         Err(Error::new("TypeError", indices))
     }
 
-    /// Return the imported object and the hook that processed its fromlist.
+    /// Materialize the import operands recorded by the source compiler.
     fn import_source_module(
         &mut self,
         owner: Id,
         scope: Id,
         module: &str,
         names: Option<&[(String, String)]>,
+        level: u32,
+    ) -> Result<Id> {
+        let modname = self.text(module);
+        let fromlist = if let Some(names) = names {
+            let names = names.iter().map(|(name, _)| self.text(name)).collect();
+            self.alloc(Value::Tuple(names))
+        } else {
+            NONE
+        };
+        self.import_in_scope(owner, scope, modname, fromlist, level)
+    }
+
+    /// Import through the active globals and the selected `__import__` callable.
+    pub(super) fn import_in_scope(
+        &mut self,
+        owner: Id,
+        scope: Id,
+        modname: Id,
+        fromlist: Id,
         level: u32,
     ) -> Result<Id> {
         let mut root = scope;
@@ -5614,13 +5633,6 @@ impl Context {
                     error
                 }
             })?;
-        let modname = self.text(module);
-        let fromlist = if let Some(names) = names {
-            let names = names.iter().map(|(name, _)| self.text(name)).collect();
-            self.alloc(Value::Tuple(names))
-        } else {
-            NONE
-        };
         let level = self.int(i64::from(level));
         let locals = if self.code_object(owner).parameters == NONE {
             self.scope_data(scope).exec_locals.unwrap_or(globals)

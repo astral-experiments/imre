@@ -1348,6 +1348,51 @@ def check_tracemalloc_startup(imre, run):
     assert (traced.returncode, traced.stdout, traced.stderr) == (0, b"sample\n", b"")
 
 
+def check_registered_run_path(imre, root, run):
+    project = root / "reexecute"
+    for name, rate in (("wholesale", 7), ("retail", 11)):
+        package = project / name
+        package.mkdir(parents=True)
+        (package / "__init__.py").touch()
+        (package / "rates.py").write_text(f"rate = {rate}\n")
+    invoice = project / "wholesale" / "invoice.py"
+    invoice.write_text(
+        "from __future__ import annotations\n"
+        "from .rates import rate\n"
+        "def quote() -> int:\n"
+        "    assert 'annotations' in globals()\n"
+        "    return rate * globals().get('quantity', 1)\n"
+    )
+    entry = project / "report.py"
+    entry.write_text(
+        "import sys\n"
+        "from importlib import import_module\n"
+        "import wholesale.invoice\n"
+        "import retail.rates\n"
+        "def veto(name, g, local, fromlist, level):\n"
+        "    seen.append((name, fromlist, level))\n"
+        "    if name == '__future__': return __import__(name, g, local, fromlist, level)\n"
+        "    raise PermissionError(name)\n"
+        "runpy = import_module('runpy')\n"
+        "quotes = []\n"
+        "for package, quantity in [(wholesale.invoice.__package__, 2), (retail.rates.__package__, 3)]:\n"
+        "    result = runpy.run_path(sys.argv[1], {'quantity': quantity}, package + '.report')\n"
+        "    quotes.append(result['quote'])\n"
+        "assert quotes[0].__code__ is not quotes[1].__code__\n"
+        "seen = []\n"
+        "try: runpy.run_path(sys.argv[1], {'__builtins__': {'__import__': veto}}, 'retail.report')\n"
+        "except PermissionError as exc: assert exc.args == ('rates',)\n"
+        "assert seen == [('__future__', ('annotations',), 0), ('rates', ('rate',), 1)]\n"
+        "print(wholesale.invoice.quote(), quotes[0](), quotes[1]())\n"
+    )
+    application = project / "report"
+    build = run(imre, "build", entry, "--module-root", project, "-o", application, timeout=300)
+    assert build.returncode == 0, build
+    for command in ((sys.executable, "-BS", entry), (application,)):
+        result = run(*command, invoice)
+        assert (result.returncode, result.stdout, result.stderr) == (0, b"7 14 33\n", b""), result
+
+
 def check_frozen_modules_startup(imre, root, run):
     provider = root / "frozen_provider"
     provider.mkdir()
@@ -1782,6 +1827,7 @@ def main():
             )
 
         check_tracemalloc_startup(imre, run)
+        check_registered_run_path(imre, root, run)
         check_frozen_modules_startup(imre, root, run)
         if sys.platform == "darwin" or sys.platform.startswith("linux"):
             check_installed_site(imre, root, run)

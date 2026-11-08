@@ -28,6 +28,7 @@ declare i32 @imre_dyn_finish(ptr)
 declare i64 @imre_dyn_lit(ptr, i32, ptr, i64)
 declare i64 @imre_dyn_permanent_sequence(ptr, ptr, i64, i1)
 declare i64 @imre_dyn_lookup(ptr, i64, ptr, i64)
+declare i64 @imre_dyn_import_name(ptr, i64, i64, i64, i32)
 declare i64 @imre_dyn_mark_class_annotation(ptr, i64, i64, i32)
 declare i64 @imre_dyn_define(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
 declare i1 @imre_dyn_failed(ptr)
@@ -175,18 +176,28 @@ pub(crate) fn emit(
             Some(symbol) => symbol,
             None => output.module(unit, name, path, source, &file, bundled)?,
         };
-        // Retain the text of virtual providers alongside the installed initializer.
-        let (text, len) = if bundled {
-            (output.data(source.as_bytes()), source.len())
+        // Physical code reads keep using the file. Identify its compiled snapshot without
+        // embedding the source or exposing stale bytes through SourceFileLoader.get_data().
+        let (register, text, len) = if !builtin && physical_files.contains(path) {
+            use sha2::{Digest, Sha256};
+            let digest = Sha256::digest(source.as_bytes());
+            (
+                "imre_dyn_register_file_source",
+                output.data(&digest),
+                digest.len(),
+            )
         } else {
-            ("null".to_owned(), 0)
-        };
-        let register = if builtin {
-            "imre_dyn_register_builtin_source"
-        } else if physical_files.contains(path) {
-            "imre_dyn_register_file_source"
-        } else {
-            "imre_dyn_register_source"
+            let (text, len) = if bundled {
+                (output.data(source.as_bytes()), source.len())
+            } else {
+                ("null".to_owned(), 0)
+            };
+            let register = if builtin {
+                "imre_dyn_register_builtin_source"
+            } else {
+                "imre_dyn_register_source"
+            };
+            (register, text, len)
         };
         writeln!(
             main,
@@ -333,10 +344,6 @@ impl Output {
             parsed,
             replacements,
         } = parse_source(path, source, self.keep_docstrings)?;
-        let package = crate::modules::import_package(
-            name,
-            path.file_name().is_some_and(|file| file == "__init__.py"),
-        );
         let docs = if self.keep_docstrings && name == "collections" && bundled {
             crate::modules::doctest::sealed(crate::modules::IntrinsicModule::Collections)
         } else {
@@ -396,7 +403,6 @@ impl Output {
             barry_as_flufl: imre_ast::future_import(&body, "barry_as_FLUFL"),
             string_annotations: private_names.string_annotations,
             private_names,
-            package,
             text: source,
             file: &code_file,
             newlines: source
@@ -450,7 +456,6 @@ struct SourceMap<'a> {
     private_names: imre_ast::Names,
     method_imports: std::collections::BTreeSet<String>,
     text: &'a str,
-    package: &'a str,
     string_annotations: bool,
     barry_as_flufl: bool,
     file: &'a str,

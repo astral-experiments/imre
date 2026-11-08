@@ -88,7 +88,7 @@ use value::{
 #[derive(Clone, Copy)]
 enum ModuleInitializer {
     Native(Code),
-    File(Code),
+    File(Code, Option<&'static [u8; 32]>),
     Builtin(Code),
     Source(&'static str),
 }
@@ -173,7 +173,6 @@ pub(crate) struct Context {
     // Python alias frames represented by a renderer suspended in a tuple argument callback.
     suspended_typing_frames: usize,
     token_missing: Id,
-    native_code_objects: HashMap<usize, Id>,
     // Emitted filename constants live for the program. Their display spelling belongs to this interpreter.
     native_filename_labels: HashMap<usize, std::sync::Arc<str>>,
     // Builtin functions stay bound to the first builtins module across reimports.

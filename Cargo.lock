@@ -750,6 +750,7 @@ dependencies = [
  "salsa-macro-rules",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "ty_module_resolver",
  "ty_python_core",
