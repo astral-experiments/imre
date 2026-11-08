@@ -2207,6 +2207,7 @@ impl Context {
         self.alloc(Value::Code(value::CodeObject {
             parsed_parameters: Default::default(),
             varnames: NONE,
+            cellvars: NONE,
             body,
             name,
             qualname,

@@ -940,7 +940,7 @@ impl Function<'_, '_> {
             string_annotations: self.source.string_annotations,
             include_nested_reads: matches!(
                 &body,
-                Body::Statements(_) | Body::GeneratorFunction(..)
+                Body::Statements(_) | Body::GeneratorFunction(..) | Body::Expression(_)
             ),
             ..ClosureNames::default()
         };

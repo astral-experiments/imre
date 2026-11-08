@@ -28,6 +28,8 @@ pub(super) struct CodeObject {
     pub parameters: Id,
     /// The tuple of local names in declaration order, or None when that order is unknown.
     pub varnames: Id,
+    /// Captured parameters in slot order followed by cell-only locals, cached on first read.
+    pub cellvars: Id,
     /// Decoded argument metadata is shared by calls using this immutable code object.
     pub parsed_parameters: std::cell::OnceCell<std::rc::Rc<super::CallParameters>>,
     pub name: Id,
@@ -2467,6 +2469,7 @@ impl Value {
                 visit.push(code.filename);
                 visit.push(code.parameters);
                 visit.push(code.varnames);
+                visit.push(code.cellvars);
                 visit.extend(code.nested.iter().map(|&(_, id)| id));
                 if let Body::Source(program) = &code.body {
                     visit.push(program.string_roots);

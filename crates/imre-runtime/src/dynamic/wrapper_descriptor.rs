@@ -413,6 +413,7 @@ impl BuiltinDescriptor {
             "object.__repr__" => ("object", "__repr__"),
             "object.__str__" => ("object", "__str__"),
             "function.__call__" => ("function", "__call__"),
+            "function.__get__" => ("function", "__get__"),
             "classmethod.__get__" => ("classmethod", "__get__"),
             "functools.partial.__call__" => ("functools.partial", "__call__"),
             "functools.partial.__get__" => ("functools.partial", "__get__"),
@@ -1040,6 +1041,8 @@ pub(super) fn descriptor_get(
         descriptor
     };
     let slot = match ctx.heap.get(payload) {
+        Value::Function { .. } if class == "function" => None,
+        Value::Cached { .. } if class == stdlib::functools::LRU_CACHE_CLASS => None,
         Value::Super { .. } if class == "super" => None,
         Value::ClassMethod { .. } if class == "classmethod" => None,
         Value::Partial { .. } if class == "functools.partial" => None,

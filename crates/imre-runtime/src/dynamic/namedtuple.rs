@@ -639,6 +639,7 @@ pub(super) fn bind_new(
         unreachable!("prelinked code")
     };
     metadata.varnames = varnames;
+    metadata.cellvars = super::value::EMPTY_TUPLE;
     let name = ctx.text("__new__");
     let new = ctx.construct_function(&[code, globals, name, defaults.unwrap_or(NONE)], &[])?;
     ctx.heap.keep(new);
