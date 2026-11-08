@@ -9785,7 +9785,12 @@ impl<'a> Checker<'a> {
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::SimpleNamespace)) {
             return self.simple_namespace(call);
         }
-        calls::reject_unpacking(call, self.source)?;
+        if calls::has_unpacking(call)
+            && !matches!(self.resolve(&call.func), Some(Binding::Definition(id))
+                if self.functions.get(&id).is_some_and(|s| calls::rest_keywords(call, &s.params).1.is_some()))
+        {
+            calls::reject_unpacking(call, self.source)?;
+        }
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "dict" && !self.names.contains_key(name.id.as_str()))
             && self.resolve(&call.func).is_none()
             && call.arguments.args.is_empty()

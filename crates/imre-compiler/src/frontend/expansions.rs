@@ -159,6 +159,16 @@ impl Checker<'_> {
                 "an empty dictionary requires a concrete dict[K, V] context",
             )
         })?;
+        Ok(self.plain_dictionary(scope, (key, value), sources))
+    }
+
+    /// Copy the stored entries into a new plain dictionary, independent of the source's class.
+    pub(super) fn plain_dictionary(
+        &mut self,
+        mut scope: calls::ArgumentScope,
+        (key, value): (Type, Type),
+        mut sources: Vec<Expr>,
+    ) -> Expr {
         let empty = Expr {
             ty: self.types.dict(key, value),
             kind: ExprKind::Dict {
@@ -168,7 +178,7 @@ impl Checker<'_> {
             },
         };
         if sources.is_empty() {
-            return Ok(empty);
+            return empty;
         }
         let target = scope.hold(self, empty);
         sources.insert(0, target.clone());
@@ -179,7 +189,7 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::DictUpdate, sources),
             },
         );
-        Ok(scope.finish(target))
+        scope.finish(target)
     }
 
     /// A generator acquires its outer iterator on creation. Its first item,
