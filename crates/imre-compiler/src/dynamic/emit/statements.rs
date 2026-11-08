@@ -400,8 +400,9 @@ impl Function<'_, '_> {
                             let index = self.integer(index);
                             self.op("mark_module_annotation", &[&self.scope.clone(), &index]);
                         } else {
-                            let value =
-                                self.text(&crate::frontend::annotation_spelling(&v.annotation));
+                            let value = self.annotation_text(
+                                &crate::frontend::annotation_spelling(&v.annotation),
+                            );
                             self.op("annotate", &[&self.scope.clone(), &key, &value]);
                         }
                     }
@@ -947,7 +948,7 @@ impl Function<'_, '_> {
             _ => None,
         };
         let native_generator = trial.and_then(|suite| {
-            self.output.try_suspended(|output| {
+            self.output.try_native_body(|output| {
                 output.definition(
                     self.source,
                     prefix.clone(),
@@ -1257,7 +1258,12 @@ impl Function<'_, '_> {
             });
             let key = self.code_name(name);
             let value = if self.source.string_annotations {
-                self.text(&crate::frontend::annotation_spelling(expression))
+                self.annotation_text(&crate::frontend::annotation_spelling(expression))
+            } else if let ast::Expr::StringLiteral(literal) = expression
+                && !self.source.has_templates
+                && self.source.replacements.is_empty()
+            {
+                self.annotation_text(literal.value.to_str())
             } else if let ast::Expr::Starred(starred) = expression {
                 let value = self.expr(&starred.value);
                 let count = self.integer(1);

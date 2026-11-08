@@ -1006,6 +1006,17 @@ pub(super) unsafe extern "C" fn imre_dyn_register_bundled_source(
     );
 }
 
+/// Bind an emitted expression to its actual annotation string. Equal runtime
+/// text has no association with it. The heap forgets the binding on collection.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_bind_expression(ctx: *mut Context, text: Id, entry: Code) {
+    // SAFETY: compiled callers pass the active interpreter and a linked native entry.
+    let ctx = unsafe { &mut *ctx };
+    ctx.heap
+        .linked_sources
+        .insert(text, LinkedSource::Expression(entry));
+}
+
 fn register_source(
     ctx: &mut Context,
     name: &str,

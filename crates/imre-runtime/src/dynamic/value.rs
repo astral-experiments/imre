@@ -3590,7 +3590,7 @@ pub(super) struct Heap {
     pub(super) immutable_hashes: HashMap<Id, i64>,
     text_position: Cell<TextPosition>,
     // Weak loader identities. The executable owns the initializer and any embedded bytes.
-    pub(super) loader_sources: HashMap<Id, super::SourceModule>,
+    pub(super) linked_sources: HashMap<Id, super::LinkedSource>,
     frames: Vec<Frame>,
     // Empty storage that the next native activation can reuse.
     spare_frame_roots: Vec<Id>,
@@ -3855,7 +3855,7 @@ impl Heap {
             free_count: 0,
             immutable_hashes: HashMap::new(),
             text_position: Cell::default(),
-            loader_sources: HashMap::new(),
+            linked_sources: HashMap::new(),
             spare_frame_roots: Vec::new(),
             frames: vec![Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE)],
             fault_generation: Cell::new(None),
@@ -6897,8 +6897,8 @@ impl Heap {
         self.interned
             .retain(|_, entry| self.traces[entry.id as usize].get() != UNMARKED);
         let callbacks = self.clear_weak_targets(None, None);
-        self.loader_sources
-            .retain(|&loader, _| self.traces[loader as usize].get() != UNMARKED);
+        self.linked_sources
+            .retain(|&owner, _| self.traces[owner as usize].get() != UNMARKED);
         self.abc_registrations.retain(|&[owner, member]| {
             self.traces[owner as usize].get() != UNMARKED
                 && self.traces[member as usize].get() != UNMARKED

@@ -560,14 +560,18 @@ impl Context {
                 path: filename,
                 ..*source
             };
-            self.heap.loader_sources.insert(loader, source);
+            self.heap
+                .linked_sources
+                .insert(loader, super::LinkedSource::Loader(source));
         }
         Ok(())
     }
 
     fn loader_source(&mut self, loader: Id, filename: Id) -> Option<&super::SourceModule> {
         let path = self.import_path(filename).ok()?;
-        let source = self.heap.loader_sources.get(&loader)?;
+        let super::LinkedSource::Loader(source) = self.heap.linked_sources.get(&loader)? else {
+            return None;
+        };
         (source.path.as_os_str() == path.as_os_str()).then_some(source)
     }
 
