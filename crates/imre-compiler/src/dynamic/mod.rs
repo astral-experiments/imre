@@ -993,10 +993,6 @@ pub(crate) fn compile(
             }
             // A runtime-selected decimal module in a standalone binary needs its private provider.
             if startup.is_none() && computed_import && !seen.contains("decimal") {
-                // Carry its source for relocation, but leave compilation until the name is chosen.
-                if !seen.contains("_pydecimal") {
-                    source_initializers.insert(Path::new(bundled_root).join("_pydecimal.py"));
-                }
                 imports.add(0, "decimal");
             }
             if computed_import && !seen.contains("zoneinfo") {
