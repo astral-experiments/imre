@@ -4763,7 +4763,9 @@ impl Context {
         let scope = self.function_environment("<exec>", globals, builtins);
         let code = self.code_object(code_id);
         if code.parameters != NONE {
-            if let Some(cells) = closure {
+            // A complete layout can bind even a nested body without its defining frame.
+            if code.closure_supported || closure.is_some() {
+                let cells = closure.unwrap_or(NONE);
                 let name = code.name;
                 let function =
                     self.function_with_closure(code_id, scope, cells, (name, name), NONE, NONE);
