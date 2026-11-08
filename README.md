@@ -184,7 +184,7 @@ CPython 3.14.5 discovers **2,875 test occurrences** across these 19 families on 
 
 ### Whole-suite baselines for later additions
 
-We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 49 suites, 3,142 of 5,985 originals have paired passes. The totals include two complete module invocations that stopped during import, before a native test body began.
+We track these families separately to keep the original 16,202-test baseline comparable across revisions. Each row comes from complete runs of the upstream module. Across these 49 suites, 3,168 of 5,985 originals have paired passes. At both native tiers, `compileall` and `enum` stopped during import before any original test ran.
 
 | Module | Paired passes | Upstream tests | Stock CPython | Imre O0 and O3 |
 | --- | ---: | ---: | --- | --- |
@@ -214,7 +214,7 @@ We track these families separately to keep the original 16,202-test baseline com
 | `lzma` | 118 | 121 | 120 passed, 1 skipped | 118 passed, 2 errors, 1 skipped. Both native runs retained all 117 prior passes and added `FileTestCase.test_issue44439`. [Public change](https://github.com/astral-experiments/imre/pull/5489). |
 | `enum` | 0 | 1,083 | 1,079 passed, 4 skipped | Both complete native invocations stopped at the pydoc import before the original methods could run. [Measured public revision](https://github.com/astral-experiments/imre/commit/a2807752d8fb849775605faed6344ae46d4dd53d) |
 | `html.parser` | 67 | 67 | 67 passed | The intact parser suite passed by filename and as a named unittest module at O0 and O3, including the long start-tag case. [HTML parser](https://github.com/astral-experiments/imre/pull/5988) |
-| `mmap` | 0 | 51 | 43 passed, 8 skipped | Both complete native invocations stopped at the mmap import before registration. [Measured public revision](https://github.com/astral-experiments/imre/commit/f1bf15d782a620e88ed9de62879c9133e5d94f47) |
+| `mmap` | 26 | 51 | 43 passed, 8 skipped | Both tiers ran all 51 originals and exited 1. File-backed reads, bounded searches and overlapping moves passed. [Earlier baseline](https://github.com/astral-experiments/imre/commit/f1bf15d782a620e88ed9de62879c9133e5d94f47) [#6269](https://github.com/astral-experiments/imre/pull/6269) |
 | `operator` | 88 | 110 | 110 passed | Both original operator.call variants now pass. Installed callbacks use ordinary callable dispatch. [Forwarding](https://github.com/astral-experiments/imre/pull/6088) |
 | `optparse` | 151 | 154 | 154 passed | 151 passed, 2 skipped, 1 failure. The upstream `Tools/i18n/pygettext.py` found no messages at the module’s virtual source path. [Public revision](https://github.com/astral-experiments/imre/commit/276f0cbe28c37627fa4d0859dfe439303a208d74). |
 | `pydoc` | 54 | 120 | 117 passed, 3 skipped | Native method and getset documentation added seven paired passes. An installed JsonPointer bound method and property produced exactly the stock text and HTML. [Descriptor documentation](https://github.com/astral-experiments/imre/pull/6106) |
