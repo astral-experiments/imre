@@ -1,5 +1,6 @@
 import errno
 import mmap
+import os
 import tempfile
 
 
@@ -21,6 +22,11 @@ def current():
     assert mapping.tell() == 3
     view.release()
     assert tail.tobytes() == b"body" and tail.readonly
+    with tempfile.TemporaryFile() as sink:
+        assert os.write(sink.fileno(), tail) == 4
+        assert os.pwrite(sink.fileno(), tail, 1) == 4
+        sink.seek(0)
+        assert sink.read() == b"bbody"
     try:
         mapping.close()
     except BufferError:

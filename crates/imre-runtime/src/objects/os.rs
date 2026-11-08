@@ -550,7 +550,8 @@ pub unsafe extern "C" fn imre_os_write(fd: usize, bytes: *const crate::Bytes) ->
         c_int(fd)
             .and_then(|fd| {
                 transfer(
-                    || try_write(fd, bytes, None),
+                    // SAFETY: the rooted bytes remain live across the write.
+                    || unsafe { try_write(fd, bytes.as_ptr(), bytes.len(), None) },
                     super::stdlib::check_interrupt,
                 )
             })
@@ -730,24 +731,28 @@ pub(crate) fn try_readinto(fd: i32, dst: &mut [u8]) -> Result<Option<usize>> {
 }
 
 /// Attempt one write, returning None if a pending signal must be dispatched.
-pub(crate) fn try_write(
+///
+/// # Safety
+/// The caller keeps the entire source range live until the syscall returns. The
+/// kernel reads the range directly, including file-backed pages that can change.
+pub(crate) unsafe fn try_write(
     fd: i32,
-    data: &[u8],
+    data: *const u8,
+    length: usize,
     offset: Option<libc::off_t>,
 ) -> Result<Option<usize>> {
     crate::initialize_io();
-    let length = data.len();
     #[cfg(target_os = "macos")]
     let length = if offset.is_none() {
         length.min(i32::MAX as usize)
     } else {
         length
     };
-    // SAFETY: both syscalls borrow fd and read at most length bytes from the live slice.
+    // SAFETY: both syscalls read at most length bytes and retain no pointer.
     let count = unsafe {
         match offset {
-            Some(offset) => libc::pwrite(fd, data.as_ptr().cast(), length, offset),
-            None => libc::write(fd, data.as_ptr().cast(), length),
+            Some(offset) => libc::pwrite(fd, data.cast(), length, offset),
+            None => libc::write(fd, data.cast(), length),
         }
     };
     transferred(count)

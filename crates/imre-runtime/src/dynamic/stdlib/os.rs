@@ -770,15 +770,17 @@ fn write_fd(ctx: &mut Context, fd: i32, data: Id, offset: Option<Id>) -> Result<
         let offset = if let Some(offset) = offset {
             // PyBUF_SIMPLE acquisition precedes the offset's __index__ call.
             ctx.check_buffer_exporter(data)?;
-            ctx.native_buffer_bytes(data)?;
+            ctx.contiguous_buffer(data)?;
             Some(file_offset(ctx, offset)?)
         } else {
             None
         };
         loop {
             // Conversion or signal handlers can change bytes without resizing.
-            let bytes = ctx.native_buffer_bytes(data)?;
-            if let Some(count) = native::try_write(fd, bytes, offset)? {
+            let buffer = ctx.contiguous_buffer(data)?;
+            let ptr = buffer.read_ptr()?;
+            // SAFETY: the export holds this range live until the synchronous syscall returns.
+            if let Some(count) = unsafe { native::try_write(fd, ptr, buffer.len(), offset) }? {
                 return Ok(ctx.int(count as i64));
             }
             ctx.dispatch_signals()?;
