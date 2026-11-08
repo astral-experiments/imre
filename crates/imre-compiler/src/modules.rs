@@ -6973,7 +6973,16 @@ mod native_tests {
                     .iter()
                     .find(|module| module.is_bundled(name))
                     .unwrap();
-                assert_eq!(module.source, source, "checked source for {name}");
+                assert_eq!(
+                    module.original_source(),
+                    source,
+                    "physical source for {name}"
+                );
+                assert_eq!(
+                    module.source,
+                    crate::normalize_source(source, crate::SourceKind::File).unwrap(),
+                    "checked source for {name}",
+                );
             }
         }
     }
