@@ -1259,11 +1259,6 @@ impl Function<'_, '_> {
             let key = self.code_name(name);
             let value = if self.source.string_annotations {
                 self.annotation_text(&crate::frontend::annotation_spelling(expression))
-            } else if let ast::Expr::StringLiteral(literal) = expression
-                && !self.source.has_templates
-                && self.source.replacements.is_empty()
-            {
-                self.annotation_text(literal.value.to_str())
             } else if let ast::Expr::Starred(starred) = expression {
                 let value = self.expr(&starred.value);
                 let count = self.integer(1);
@@ -1271,7 +1266,7 @@ impl Function<'_, '_> {
                 let index = self.integer(0);
                 self.op("get", &[&items, &index])
             } else {
-                self.expr(expression)
+                self.annotation_value(expression)
             };
             self.op("put", &[&values, &key, &value]);
             if let Some(after) = after {
@@ -1280,6 +1275,17 @@ impl Function<'_, '_> {
             }
         }
         self.end(&format!("ret i64 {values}"));
+    }
+
+    fn annotation_value(&mut self, expression: &ast::Expr) -> String {
+        if let ast::Expr::StringLiteral(literal) = expression
+            && !self.source.has_templates
+            && self.source.replacements.is_empty()
+        {
+            self.annotation_text(literal.value.to_str())
+        } else {
+            self.expr(expression)
+        }
     }
 
     fn decorated(
