@@ -239,7 +239,9 @@ impl<'a> CompiledStrings<'a, '_> {
             // A global declared by the class also bypasses its dictionary in the annotation scope.
             for (name, (kind, _)) in self.directives {
                 if *kind == ScopeDirective::Global {
-                    provider.directives.insert(name.clone(), (*kind, 0.into()));
+                    provider
+                        .directives
+                        .insert(name.clone(), (*kind, Default::default()));
                 }
             }
         }

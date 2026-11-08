@@ -570,16 +570,20 @@ fn scan_imports(
         emit::check_parsed_source(path, &normalized, &parsed, keep_docstrings)?;
     }
     let mut body = parsed.into_syntax().body;
-    let bindings = imre_ast::executable::BindingErrors::check(&body);
-    let error = bindings
-        .first_symbol(imre_ast::future_import_error(&body))
-        .map(|(range, reason)| (range, reason.to_owned()))
-        .or(bindings.pattern);
+    let bindings = imre_ast::executable::BindingErrors::check(&body, &normalized);
+    let symbol_error = bindings.first_symbol(imre_ast::future_import_error(&body));
     // The optional file must satisfy the emitter's checks before registration.
     // Use its discovery tree for both checking and collecting the lowered imports.
     let checked_names = file_alternative
         .map(|(path, _)| emit::lower_source(path, &normalized, &mut body))
         .transpose()?;
+    let error = symbol_error
+        .map(|(range, reason)| (range, reason.to_owned()))
+        .or_else(|| {
+            bindings
+                .pattern
+                .map(|(range, message)| (range, message.checked().into_owned()))
+        });
     if let Some((range, message)) = error {
         // Discovery records the error. Only selection as the checked entry diagnoses it here.
         let diagnostic = crate::frontend::phase::Diagnostic::at(

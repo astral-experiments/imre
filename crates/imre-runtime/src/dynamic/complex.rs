@@ -251,15 +251,7 @@ impl Complex {
     }
 
     pub(super) fn repr(self) -> String {
-        let imag = crate::floats::render(self.imag);
-        let imag = imag.strip_suffix(".0").unwrap_or(&imag);
-        if self.real.to_bits() == 0 {
-            return format!("{imag}j");
-        }
-        let real = crate::floats::render(self.real);
-        let real = real.strip_suffix(".0").unwrap_or(&real);
-        let sign = if imag.starts_with('-') { "" } else { "+" };
-        format!("({real}{sign}{imag}j)")
+        imre_ast::numbers::complex_repr(self.real, self.imag)
     }
 }
 

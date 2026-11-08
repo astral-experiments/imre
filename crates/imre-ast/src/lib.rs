@@ -47,6 +47,7 @@ pub mod forward_refs;
 pub mod indentation;
 pub mod layout;
 pub mod lzma;
+pub mod numbers;
 pub mod providers;
 pub mod python_nodes;
 pub mod startup;

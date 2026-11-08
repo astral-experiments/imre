@@ -37,7 +37,8 @@ pub(super) struct Program {
     syntax_limit: Option<ruff_text_size::TextRange>,
     // An invalid pattern still has a symbol table. Let all its scopes finish checking
     // declarations before reporting the code-generation error. Valid modules use no slot.
-    deferred_pattern: Option<Rc<std::cell::RefCell<(ruff_text_size::TextRange, String)>>>,
+    deferred_pattern:
+        Option<Rc<std::cell::RefCell<(TextRange, imre_ast::executable::PatternMessage)>>>,
     pub name: String,
     qualname: String,
     nested_global: bool,
@@ -61,7 +62,7 @@ pub(super) struct Program {
     unlowered_yield: bool,
     interactive: bool,
     locals: indexmap::IndexSet<String>,
-    directives: HashMap<String, (ScopeDirective, ruff_text_size::TextSize)>,
+    directives: HashMap<String, (ScopeDirective, ruff_text_size::TextRange)>,
     reads: BTreeSet<String>,
     method_imports: Rc<std::collections::BTreeSet<String>>,
     private_names: Option<Rc<imre_ast::Names>>,
@@ -587,7 +588,7 @@ impl NamedBindings {
                 ));
             }
             if let Some((kind, directive)) = program.directives.get(&name)
-                && offset < *directive
+                && offset < directive.start()
             {
                 return Err(Error::new(
                     "SyntaxError",
@@ -604,7 +605,7 @@ impl NamedBindings {
                 program
                     .directives
                     .entry(name.clone())
-                    .or_insert((ScopeDirective::Global, 0.into()));
+                    .or_insert((ScopeDirective::Global, Default::default()));
             }
             program.locals.insert(name);
         }
@@ -781,7 +782,7 @@ struct CompiledStrings<'a, 'ctx> {
     comprehension_reads: BTreeSet<String>,
     eager_comprehension_targets: &'ctx mut HashMap<ruff_text_size::TextRange, HashSet<String>>,
     reads: &'ctx mut BTreeSet<String>,
-    directives: &'ctx HashMap<String, (ScopeDirective, ruff_text_size::TextSize)>,
+    directives: &'ctx HashMap<String, (ScopeDirective, ruff_text_size::TextRange)>,
     exhausted: bool,
 }
 
@@ -1009,7 +1010,7 @@ impl<'a> CompiledStrings<'a, '_> {
             match expr {
                 ast::Expr::Name(name) => {
                     if let Some((kind, position)) = self.directives.get(name.id.as_str())
-                        && name.start() < *position
+                        && name.start() < position.start()
                         && name.ctx == ast::ExprContext::Load
                     {
                         return Err(Error::new(
@@ -1740,7 +1741,9 @@ impl Program {
                             } else {
                                 ScopeDirective::Nonlocal
                             };
-                            child.directives.insert(name, (kind, offset));
+                            child
+                                .directives
+                                .insert(name, (kind, ruff_text_size::TextRange::empty(offset)));
                         }
                     }
                     child.lower_genexpr(genexpr, line_at)?
@@ -1869,8 +1872,7 @@ impl Program {
                     SyntaxSpan::InFields(range),
                 ));
             }
-            self.directives
-                .insert(name.to_string(), (kind, name.start()));
+            self.directives.insert(name.to_string(), (kind, range));
         }
         Ok(())
     }
@@ -1883,7 +1885,7 @@ impl Program {
     ) -> Result<()> {
         self.locals
             .retain(|name| !self.directives.contains_key(name));
-        for (name, (kind, _)) in &self.directives {
+        for (name, (kind, range)) in &self.directives {
             if *kind == ScopeDirective::Global {
                 module_globals.insert(name.clone());
             } else if let Some(binding) = enclosing(name) {
@@ -1903,7 +1905,10 @@ impl Program {
                 } else {
                     format!("no binding for nonlocal '{name}' found")
                 };
-                return Err(Error::new("SyntaxError", message));
+                return Err(Error::located_source_syntax(
+                    message,
+                    SyntaxSpan::InFields(*range),
+                ));
             }
         }
         let function = self.name != "<module>" && self.class_attributes.is_none();
@@ -2151,7 +2156,7 @@ impl Program {
         let line = plan.line;
         if matches!(expr, ast::Expr::Yield(_) | ast::Expr::YieldFrom(_)) {
             if !plan.function {
-                return Err(Error::new("SyntaxError", "'yield' outside function"));
+                self.invalid_transfer(expr.range(), "'yield' outside function")?;
             }
             if self.kind != FunctionKind::AsyncGenerator {
                 self.kind = FunctionKind::Generator;
@@ -2868,7 +2873,7 @@ impl Program {
                 }
                 Stmt::Return(s) => {
                     if !function {
-                        return Err(Error::new("SyntaxError", "'return' outside function"));
+                        self.invalid_transfer(s.range(), "'return' outside function")?;
                     }
                     let Some(value) = s.value else {
                         self.instructions.push((line, Instruction::Return(None)));
@@ -2983,10 +2988,10 @@ impl Program {
                     child.lower_namespace(s.body, lines, true)?;
                     for param in s.parameters.iter() {
                         let name = param.name().as_str();
-                        if let Some((kind, _)) = child.directives.get(name) {
-                            return Err(Error::new(
-                                "SyntaxError",
+                        if let Some((kind, range)) = child.directives.get(name) {
+                            return Err(Error::located_source_syntax(
                                 format!("name '{name}' is parameter and {}", kind.keyword()),
+                                SyntaxSpan::InFields(*range),
                             ));
                         }
                         child.locals.insert(name.to_owned());
@@ -3076,17 +3081,19 @@ impl Program {
                     }
                     Instruction::Define(definition)
                 }
-                Stmt::Break(_) => {
-                    let current = active
-                        .as_deref_mut()
-                        .ok_or_else(|| Error::new("SyntaxError", "'break' outside loop"))?;
+                Stmt::Break(s) => {
+                    let Some(current) = active.as_deref_mut() else {
+                        self.invalid_transfer(s.range(), "'break' outside loop")?;
+                        continue;
+                    };
                     current.breaks.push(self.instructions.len());
                     Instruction::Jump(0)
                 }
-                Stmt::Continue(_) => {
-                    let current = active.as_deref().ok_or_else(|| {
-                        Error::new("SyntaxError", "'continue' not properly in loop")
-                    })?;
+                Stmt::Continue(s) => {
+                    let Some(current) = active.as_deref() else {
+                        self.invalid_transfer(s.range(), "'continue' not properly in loop")?;
+                        continue;
+                    };
                     Instruction::Jump(current.head)
                 }
                 Stmt::For(_) | Stmt::While(_) => {
@@ -3363,27 +3370,13 @@ impl Program {
                     let line_offset = |offset: ruff_text_size::TextSize| {
                         lines.partition_point(|n| *n <= offset.to_usize()) as u32 - line
                     };
-                    for case in s.cases {
+                    let count = s.cases.len();
+                    for (i, case) in s.cases.into_iter().enumerate() {
                         let case_line = line_offset(case.pattern.start());
-                        let mut captures = indexmap::IndexMap::new();
-                        if let Err(error) = self.validate_pattern(&case.pattern, &mut captures) {
-                            let Some(deferred) = &self.deferred_pattern else {
-                                return Err(error);
-                            };
-                            if let Some(SyntaxSpan::InArgs(range)) =
-                                error.trace.as_ref().and_then(|trace| trace.pending_syntax)
-                            {
-                                let mut first = deferred.borrow_mut();
-                                if range.end() <= first.0.start() {
-                                    *first = (range, error.message);
-                                }
-                            } else if error.kind != "NotImplementedError" {
-                                return Err(error);
-                            }
-                        }
+                        let captures = self.case_captures(&case, i + 1 < count)?;
                         cases.push(SourceCase {
                             pattern: case.pattern,
-                            captures: captures.into_values().collect(),
+                            captures,
                             line_offset: case_line,
                             guard: case.guard.map(|expr| (line_offset(expr.start()), expr)),
                             body: self.instructions.len(),
@@ -3451,94 +3444,71 @@ impl Program {
         Ok(())
     }
 
-    /// Check the executable subset and record captures in binding order.
-    fn validate_pattern(
-        &mut self,
-        pattern: &ast::Pattern,
-        captures: &mut indexmap::IndexMap<String, String>,
+    /// Keep scanning declarations when a pattern already prevents execution.
+    fn invalid_transfer(
+        &self,
+        range: ruff_text_size::TextRange,
+        message: &'static str,
     ) -> Result<()> {
-        let name = match pattern {
-            ast::Pattern::MatchSingleton(_) | ast::Pattern::MatchValue(_) => None,
-            ast::Pattern::MatchClass(p)
-                if p.arguments.patterns.is_empty() && p.arguments.keywords.is_empty() =>
-            {
-                None
-            }
-            ast::Pattern::MatchSequence(p) => {
-                if p.patterns
-                    .iter()
-                    .filter(|p| matches!(p, ast::Pattern::MatchStar(_)))
-                    .count()
-                    > 1
-                {
-                    return Err(Error::source_syntax(
-                        "multiple starred names in sequence pattern",
-                        p.range(),
-                    ));
-                }
-                for child in &p.patterns {
-                    self.validate_pattern(child, captures)?;
-                }
-                None
-            }
-            ast::Pattern::MatchOr(p) => {
-                let mut first = indexmap::IndexMap::new();
-                for (i, arm) in p.patterns.iter().enumerate() {
-                    let mut names = indexmap::IndexMap::new();
-                    self.validate_pattern(arm, &mut names)?;
-                    let order = if i == 0 {
-                        first = names;
-                        (0..first.len()).collect()
-                    } else {
-                        let order: Option<Vec<_>> =
-                            first.keys().map(|name| names.get_index_of(name)).collect();
-                        order
-                            .filter(|order| order.len() == names.len())
-                            .ok_or_else(|| {
-                                Error::source_syntax(
-                                    "alternative patterns bind different names",
-                                    p.range(),
-                                )
-                            })?
-                    };
-                    if !order.is_empty() {
-                        self.alternative_captures.insert(arm.range(), order);
-                    }
-                }
-                for (name, binding) in first {
-                    if captures.contains_key(&name) {
-                        return Err(Error::source_syntax(
-                            format!("multiple assignments to name '{name}' in pattern"),
-                            p.range(),
-                        ));
-                    }
-                    captures.insert(name, binding);
-                }
-                None
-            }
-            ast::Pattern::MatchStar(p) => p.name.as_ref(),
-            ast::Pattern::MatchAs(p) => {
-                if let Some(inner) = &p.pattern {
-                    self.validate_pattern(inner, captures)?;
-                }
-                p.name.as_ref()
-            }
-            _ => return Err(unsupported("match pattern")),
+        let Some(pending) = &self.deferred_pattern else {
+            return Err(Error::source_syntax(message, range));
         };
-        if let Some(name) = name {
-            let spelling = self.definition_spelling(name);
-            if captures
-                .insert(spelling.to_owned(), name.to_string())
-                .is_some()
-            {
-                return Err(Error::source_syntax(
-                    format!("multiple assignments to name '{spelling}' in pattern"),
-                    pattern.range(),
-                ));
-            }
-            self.locals.insert(name.to_string());
+        let mut first = pending.borrow_mut();
+        if range.start() < first.0.start() {
+            *first = (range, message.to_owned().into());
         }
         Ok(())
+    }
+
+    fn case_captures(&mut self, case: &ast::MatchCase, has_next: bool) -> Result<Vec<String>> {
+        use ast::visitor::{self, Visitor};
+
+        struct Operands<'a> {
+            locals: &'a mut indexmap::IndexSet<String>,
+            supported: bool,
+        }
+        impl<'a> Visitor<'a> for Operands<'_> {
+            fn visit_pattern(&mut self, pattern: &'a ast::Pattern) {
+                visitor::walk_pattern(self, pattern);
+                self.supported &= match pattern {
+                    ast::Pattern::MatchMapping(_) => false,
+                    ast::Pattern::MatchClass(p) => {
+                        p.arguments.patterns.is_empty() && p.arguments.keywords.is_empty()
+                    }
+                    _ => true,
+                };
+                if let Some(name) = imre_ast::executable::capture_name(pattern) {
+                    self.locals.insert(name.to_string());
+                }
+            }
+
+            fn visit_expr(&mut self, _: &'a ast::Expr) {}
+        }
+
+        let mut operands = Operands {
+            locals: &mut self.locals,
+            supported: true,
+        };
+        operands.visit_pattern(&case.pattern);
+        // Finish collecting symbols in a rejected module. Its captures will never execute.
+        if self.deferred_pattern.is_some() {
+            return Ok(Vec::new());
+        }
+        if !operands.supported {
+            return Err(unsupported("match pattern"));
+        }
+        imre_ast::executable::source_case_bindings(
+            case,
+            has_next,
+            self.private_names.as_deref(),
+            &mut self.alternative_captures,
+        )
+        .map_err(|(range, message)| {
+            match message.render(crate::integer_text::check_decimal) {
+                Ok(reason) => Error::source_syntax(reason.into_owned(), range),
+                Err(error) => error.into(),
+            }
+        })
     }
 
     /// Declare every local name in a loop or unpacking target.
@@ -3994,7 +3964,9 @@ impl Context {
             )?);
         }
         let bindings = match parsed.syntax() {
-            ast::Mod::Module(module) => imre_ast::executable::BindingErrors::check(&module.body),
+            ast::Mod::Module(module) => {
+                imre_ast::executable::BindingErrors::check(&module.body, source)
+            }
             _ => Default::default(),
         };
         let symbol_error = bindings.first_symbol(future_error);
@@ -4038,7 +4010,21 @@ impl Context {
                     code.private_names = Some(Rc::new(imre_ast::lower_in(&mut body, "", true)));
                 }
                 code.syntax_limit = symbol_error.map(|(range, _)| range);
-                if let Err(error) = code.lower_namespace(body, &lines, false) {
+                let lowering = code.lower_namespace(body, &lines, false).and_then(|()| {
+                    // Closure binding resolution follows symbol collection and future placement.
+                    if symbol_error.is_none() {
+                        let mut module_globals = HashSet::new();
+                        code.resolve_directives(&|_| None, &mut module_globals)?;
+                        // A global declared by a nested block makes module assignments use the globals dictionary.
+                        for name in module_globals {
+                            code.directives
+                                .entry(name)
+                                .or_insert((ScopeDirective::Global, Default::default()));
+                        }
+                    }
+                    Ok(())
+                });
+                if let Err(error) = lowering {
                     if error.kind == "NotImplementedError"
                         && let Some((range, message)) = symbol_error
                     {
@@ -4060,17 +4046,6 @@ impl Context {
                     }
                     return Err(error);
                 }
-                // Closure binding resolution follows symbol collection and future placement.
-                if symbol_error.is_none() {
-                    let mut module_globals = HashSet::new();
-                    code.resolve_directives(&|_| None, &mut module_globals)?;
-                    // A global declared by a nested block makes module assignments use the globals dictionary.
-                    for name in module_globals {
-                        code.directives
-                            .entry(name)
-                            .or_insert((ScopeDirective::Global, 0.into()));
-                    }
-                }
             }
         }
         code.prepare_strings(
@@ -4090,7 +4065,7 @@ impl Context {
         if let Some(deferred) = &code.deferred_pattern {
             let (range, message) = &*deferred.borrow();
             return Err(self.located_syntax_error(
-                message,
+                &message.render(crate::integer_text::check_decimal)?,
                 SyntaxSpan::InArgs(*range),
                 filename_id,
                 &lines,
@@ -4859,12 +4834,17 @@ impl Context {
         let [ast::Stmt::FunctionDef(def)] = syntax.body.as_mut_slice() else {
             return Err(Error::new("SystemError", "invalid generator body"));
         };
-        let bindings = imre_ast::executable::BindingErrors::check(&def.body);
+        let bindings = imre_ast::executable::BindingErrors::check(&def.body, source);
         if let Some((_, message)) = bindings.symbol {
             return Err(Error::new("SyntaxError", message));
         }
         if let Some((_, message)) = bindings.pattern {
-            return Err(Error::new("SyntaxError", message));
+            return Err(Error::new(
+                "SyntaxError",
+                message
+                    .render(crate::integer_text::check_decimal)?
+                    .into_owned(),
+            ));
         }
         #[derive(serde::Deserialize)]
         struct Signature<'a> {

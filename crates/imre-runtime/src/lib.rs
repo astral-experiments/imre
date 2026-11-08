@@ -1062,22 +1062,7 @@ pub unsafe extern "C" fn imre_int_literal(data: *const u8, length: usize) -> usi
 
 /// Parse the spelling of a source integer, including signed literals stored in
 /// an argparse schema. Runtime conversion of a string argument stays decimal.
-fn parse_integer_literal(literal: &str) -> Option<BigInt> {
-    let literal = literal.replace('_', "");
-    let (literal, negative) = literal
-        .strip_prefix('-')
-        .map_or((literal.as_str(), false), |s| (s, true));
-    let (digits, radix) = if literal.starts_with("0x") || literal.starts_with("0X") {
-        (&literal[2..], 16)
-    } else if literal.starts_with("0o") || literal.starts_with("0O") {
-        (&literal[2..], 8)
-    } else if literal.starts_with("0b") || literal.starts_with("0B") {
-        (&literal[2..], 2)
-    } else {
-        (literal, 10)
-    };
-    BigInt::parse_bytes(digits.as_bytes(), radix).map(|value| if negative { -value } else { value })
-}
+use imre_ast::numbers::parse_integer_literal;
 
 /// # Safety
 /// Both arguments must be live integer handles; the result is a new reference.
