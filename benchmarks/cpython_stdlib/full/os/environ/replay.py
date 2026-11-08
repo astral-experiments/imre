@@ -86,7 +86,6 @@ def stage(work, cpython, layout, wrong):
             raise ValueError("negative-control assertion no longer unique")
         source = source.replace(old, b'            self.assertEqual(os.environ.get(key), value + "!")\n')
     (package / "test_os.py").write_bytes(source)
-    shutil.copyfile(HERE / "entry.py", root / "entry.py")
     return root
 
 
@@ -169,7 +168,10 @@ def main():
     version = subprocess.check_output([str(python), "-V"], text=True).strip()
     if version != "Python 3.14.5":
         raise ValueError(f"unexpected reference version: {version}")
-    entry = root / "entry.py"
+    app = work / "app"
+    app.mkdir()
+    entry = app / "entry.py"
+    shutil.copyfile(HERE / "entry.py", entry)
     results = {"source_commit": PINS["source"], "source_blobs": PINS["test_blobs"],
                "source_layout": args.layout, "engine": args.engine, "level": args.level,
                "wrong_test_items": args.wrong, "staged_test_os_sha256": sha256(root / "test" / "test_os.py"),
@@ -190,7 +192,8 @@ def main():
         results["toolchain_sha256"] = {str(p): sha256(p) for p in (launcher, archive, clang)}
         flags = ["--no-cache", "--runtime", str(archive), "--clang", str(clang), "--opt-level", args.level]
         binary = work / "environ-tests"
-        command = [launcher, "build", entry, "--module-root", root, *flags, "-o", binary]
+        command = [launcher, "build", entry, "--module-root", app, "--extension-path", root,
+                   *flags, "-o", binary]
         buildenv = dict(os.environ)
         for key in ("PYTHONPATH", "IMREFLAGS", "IMRE_ENCODED_FLAGS"):
             buildenv.pop(key, None)
@@ -208,6 +211,8 @@ def main():
            "PYTHONDONTWRITEBYTECODE": "1", "IMRE_ENVIRON_BASELINE": "original"}
     if native:
         env.update(IMRE_PYTHON=str(launcher), IMRE_ENCODED_FLAGS="\x1f".join(flags))
+    else:
+        env["PYTHONPATH"] = str(root)
     discovery = invoke([*prefix, "--list"], work / "discovery", env, 120)
     results["discovery"] = discovery
     results["exact_order"] = fields(discovery, "ID") == ids and discovery["exit"] == 0

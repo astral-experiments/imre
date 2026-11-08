@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -45,25 +46,28 @@ def main():
         if reference != EXPECTED:
             raise RuntimeError(f"unexpected CPython reference {reference!r}")
         # Import the unchanged fixture through a build-known module entry.
-        native_entry = site / "run_access_log.py"
+        app = work / "app"
+        app.mkdir()
+        native_entry = app / "run_access_log.py"
         native_entry.write_text('import importlib\nimportlib.import_module("access_log")\n')
         for opt in (0, 3):
             binary = work / f"access-O{opt}"
-            llvm = binary.with_suffix(".ll")
             build = capture(
-                [compiler, "build", native_entry, "--module-root", site,
-                 "--runtime", runtime, "--opt-level", str(opt), "--no-cache",
-                 "--emit-llvm", llvm, "-o", binary],
+                [compiler, "build", native_entry, "--module-root", app, "--extension-path", site,
+                 "--runtime", runtime, "--opt-level", str(opt), "--no-cache", "-o", binary],
                 site, env,
             )
             row = rows[f"O{opt}"] = {"build": build, "matches_reference": False}
             if build[0] == 0:
-                ir = llvm.read_bytes()
-                if b"call ptr @imre_dyn_new" not in ir:
+                main = subprocess.check_output(
+                    ["objdump", "-d", "--disassemble=main", binary], env=env, text=True, timeout=120,
+                )
+                boxed_call = re.search(r"\bcallq?\s+\S+ <imre_dyn_new(?:@plt)?>", main)
+                if boxed_call is None:
                     raise RuntimeError("the access log did not use the boxed execution path")
                 run = capture([binary], work, env | {"PATH": "/nonexistent"})
                 row.update(run=run, matches_reference=run == reference,
-                           executable_sha256=gate.digest(binary), llvm_sha256=gate.digest(llvm))
+                           executable_sha256=gate.digest(binary), main_boxed_call=boxed_call.group())
     report = {"python": sys.version.split()[0], "wheels": wheels, "source_sha256": SOURCE_HASH,
               "fixture_sha256": gate.digest(fixture), "compiler_sha256": gate.digest(compiler),
               "runtime_sha256": gate.digest(runtime), "reference": reference, "native": rows}
