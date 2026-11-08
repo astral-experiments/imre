@@ -93,7 +93,12 @@ impl Function<'_, '_> {
                         .value
                         .as_deref()
                         .map_or_else(|| permanent::NONE.to_string(), |value| f.expr(value));
-                    f.suspend_at(&value, Suspension::Yield, yielded.range, &mark)
+                    let kind = if f.async_generator {
+                        Suspension::AsyncYield
+                    } else {
+                        Suspension::Yield
+                    };
+                    f.suspend_at(&value, kind, yielded.range, &mark)
                 })
             }
             ast::Expr::YieldFrom(delegation) if self.native_suspension => {
@@ -295,11 +300,11 @@ impl Function<'_, '_> {
                 };
                 let operands = if let Some(star) = single_spread {
                     let source = self.expr(&star.value);
-                    let kwargs = self.keyword_arguments(&v.arguments, &callable);
+                    let kwargs = self.keyword_arguments(&v.arguments, Some(&callable));
                     let args = self.pack_operand("spread_arguments", &[&source, &callable]);
                     CallArguments::Packed { args, kwargs }
                 } else if let Some(args) = packed {
-                    let kwargs = self.arguments(&args, &v.arguments, &callable);
+                    let kwargs = self.arguments(&args, &v.arguments, Some(&callable));
                     CallArguments::Packed { args, kwargs }
                 } else if !v.arguments.keywords.is_empty() {
                     self.fixed_keyword_arguments(&v.arguments)
@@ -344,10 +349,7 @@ impl Function<'_, '_> {
                 v.parameters.as_deref(),
                 None,
                 None,
-                match v.body.as_ref() {
-                    ast::Expr::Yield(_) => Body::YieldingLambda(&v.body),
-                    body => Body::Expression(body),
-                },
+                Body::Expression(&v.body),
             ),
             ast::Expr::TString(v) => self.template(&v.value),
             ast::Expr::FString(v) => {
@@ -692,7 +694,7 @@ impl Function<'_, '_> {
         &mut self,
         args: &str,
         syntax: &ast::Arguments,
-        callable: &str,
+        callable: Option<&str>,
     ) -> String {
         // Python evaluates starred positional arguments before the keyword arguments.
         for arg in &syntax.args {
@@ -726,7 +728,11 @@ impl Function<'_, '_> {
     }
 
     /// Evaluate keyword expressions and merge mappings in source order.
-    fn keyword_arguments(&mut self, syntax: &ast::Arguments, callable: &str) -> String {
+    fn keyword_arguments(&mut self, syntax: &ast::Arguments, callable: Option<&str>) -> String {
+        let (merge, callable) = match callable {
+            Some(callable) => ("keywords", callable),
+            None => ("class_keywords", "0"),
+        };
         let kwargs = if syntax.keywords.is_empty() {
             "0".into()
         } else {
@@ -737,7 +743,7 @@ impl Function<'_, '_> {
         while let Some(key) = keywords.peek() {
             if key.arg.is_none() {
                 let value = self.expr(&keywords.next().unwrap().value);
-                self.pack_operand("keywords", &[&kwargs, &value, callable]);
+                self.pack_operand(merge, &[&kwargs, &value, callable]);
                 unpacked = true;
             } else {
                 // Python builds each group of named arguments before merging it
@@ -757,7 +763,7 @@ impl Function<'_, '_> {
                     );
                 }
                 if unpacked {
-                    self.pack_operand("keywords", &[&kwargs, &group, callable]);
+                    self.pack_operand(merge, &[&kwargs, &group, callable]);
                 }
             }
         }

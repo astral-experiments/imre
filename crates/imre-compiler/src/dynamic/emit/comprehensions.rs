@@ -21,7 +21,14 @@ impl Function<'_, '_> {
         {
             return self.unsupported("async comprehension");
         }
-        let iterator = self.iteration_cursor(plan.outer, plan.outer_async);
+        let iterator = if matches!(plan.output, Output::Generator(_))
+            && plan.body_suspends()
+            && !plan.outer_async
+        {
+            self.iteration_input(plan.outer, "get_iter")
+        } else {
+            self.iteration_cursor(plan.outer, plan.outer_async)
+        };
         let names: indexmap::IndexSet<String> = plan.collect_target_names();
         let declaration: Vec<_> = names.iter().map(String::as_str).collect();
         let targets = self.text(&declaration.join(" "));
@@ -32,7 +39,7 @@ impl Function<'_, '_> {
                 None,
                 None,
                 None,
-                Body::Generator(generator, &plan, names),
+                Body::Generator(&plan, names),
             );
             return self.op("generator", &[&function, &iterator, &targets]);
         }
@@ -47,12 +54,16 @@ impl Function<'_, '_> {
     }
 
     pub(super) fn iteration_cursor(&mut self, iterable: &ast::Expr, is_async: bool) -> String {
+        self.iteration_input(iterable, if is_async { "async_iter" } else { "iter" })
+    }
+
+    fn iteration_input(&mut self, iterable: &ast::Expr, operation: &str) -> String {
         self.iteration_result(|f| {
             let value = f.expr(iterable);
             if f.native_suspension {
                 f.suspension_position(iterable.range());
             }
-            f.op(if is_async { "async_iter" } else { "iter" }, &[&value])
+            f.op(operation, &[&value])
         })
     }
 
@@ -80,6 +91,11 @@ impl Function<'_, '_> {
         } else {
             ".iterator"
         });
+        let outer = if self.native_suspension && !plan.outer_async {
+            self.op("loop_cursor", &[&outer])
+        } else {
+            outer
+        };
         self.comprehension_steps(plan, outer, None);
     }
 

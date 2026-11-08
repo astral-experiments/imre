@@ -515,10 +515,8 @@ enum Body<'a> {
         Option<statements::ClassBindings>,
     ),
     Expression(&'a ast::Expr),
-    YieldingLambda(&'a ast::Expr),
     TypeAlias(&'a ast::Expr),
     Generator(
-        &'a ast::ExprGenerator,
         &'a imre_ast::comprehension::Plan<'a>,
         indexmap::IndexSet<String>,
     ),
@@ -529,8 +527,8 @@ impl Body<'_> {
         use imre_ast::code_flags::{ASYNC_GENERATOR, GENERATOR, yields_in_expression};
         match self {
             Self::GeneratorFunction(_, flags) => *flags,
-            Self::Generator(_, plan, _) if plan.body_suspends() => ASYNC_GENERATOR,
-            Self::Generator(..) | Self::YieldingLambda(_) => GENERATOR,
+            Self::Generator(plan, _) if plan.body_suspends() => ASYNC_GENERATOR,
+            Self::Generator(..) => GENERATOR,
             Self::Expression(expr) if yields_in_expression(expr) => GENERATOR,
             _ => 0,
         }
@@ -540,7 +538,6 @@ impl Body<'_> {
 enum Entry {
     Compiled,
     Suspended,
-    Source(String, usize),
 }
 
 struct SourceMap<'a> {
@@ -621,8 +618,7 @@ struct Output {
 }
 
 impl Output {
-    /// Keep a supported native body exactly as emitted. An unsupported operation in
-    /// this body rolls back its private code sites before it gets a source entry.
+    /// Roll back private code sites when an optional annotation expression cannot be compiled.
     fn try_native_body(&mut self, emit: impl FnOnce(&mut Self) -> String) -> Option<String> {
         let code = self.count;
         let functions = self.functions.len();
@@ -660,28 +656,20 @@ impl Output {
         entry: Entry,
     ) -> String {
         let site = format!("@code_site{}", self.count);
-        let (entry, body_line) = if let Entry::Source(text, line) = entry {
-            self.count += 1;
-            (text, line)
+        let suspended = matches!(entry, Entry::Suspended);
+        let tag = if suspended {
+            if !self.declarations.declared_suspension {
+                self.functions.push_str(suspension::ABI);
+                self.declarations.declared_suspension = true;
+            }
+            permanent::NATIVE_SUSPENDED_BODY
         } else {
-            let native_suspension = matches!(entry, Entry::Suspended);
-            let tag = if native_suspension {
-                if !self.declarations.declared_suspension {
-                    self.functions.push_str(suspension::ABI);
-                    self.declarations.declared_suspension = true;
-                }
-                permanent::NATIVE_SUSPENDED_BODY as usize
-            } else {
-                0
-            };
-            (
-                self.code(source, prefix, body, in_function, native_suspension),
-                tag,
-            )
+            0
         };
+        let entry = self.code(source, prefix, body, in_function, suspended);
         writeln!(
             self.constants,
-            "{site} = private constant %code_site {{ ptr {entry}, ptr {}, i32 {}, i32 {body_line} }}",
+            "{site} = private constant %code_site {{ ptr {entry}, ptr {}, i32 {}, i32 {tag} }}",
             source.file,
             source.line(start)
         )
@@ -736,6 +724,10 @@ impl Output {
             output: self,
             source,
             native_suspension,
+            async_generator: matches!(
+                body,
+                Body::GeneratorFunction(_, imre_ast::code_flags::ASYNC_GENERATOR)
+            ),
             current_range: ruff_text_size::TextRange::empty(source.module_start),
             class_sites: None,
             module_annotation_sites: None,
@@ -804,8 +796,8 @@ impl Output {
             Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
             Body::Annotations(entries, class) => f.annotations(&entries, class, false),
             Body::ModuleAnnotations(entries) => f.annotations(&entries, None, true),
-            Body::Generator(_, plan, _) => f.generator_step(plan),
-            Body::Expression(expr) | Body::YieldingLambda(expr) | Body::TypeAlias(expr) => {
+            Body::Generator(plan, _) => f.generator_step(plan),
+            Body::Expression(expr) | Body::TypeAlias(expr) => {
                 f.checkpoint(expr);
                 if matches!(body, Body::TypeAlias(_)) {
                     let format = f.lookup(".format");
@@ -900,6 +892,7 @@ struct Function<'a, 'p> {
     simple_call: Option<ruff_text_size::TextRange>,
     expression_line: usize,
     native_suspension: bool,
+    async_generator: bool,
     current_range: ruff_text_size::TextRange,
 }
 
@@ -1386,39 +1379,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unsupported_generator_keeps_its_own_staged_body() {
-        let source = "def supported():\n    yield 1\ndef staged():\n    def nested():\n        yield 2\n    class Local(**{}):\n        pass\n    yield 3\ndef outer():\n    def inner():\n        class Local(**{}):\n            pass\n        yield 4\n    yield 5\n";
+    fn exception_group_handlers_in_nested_generators_have_native_entries() {
+        let source = "def supported():\n    yield 1\ndef handled():\n    def nested():\n        yield 2\n    try:\n        yield 3\n    except* ValueError:\n        pass\ndef outer():\n    def inner():\n        try:\n            yield 4\n        except* ValueError:\n            pass\n    yield 5\n";
         let (_, ir) = initializer("sample", Path::new("sample.py"), source, true, false)
             .unwrap()
             .unwrap();
         let tag = format!(", i32 {} }}", permanent::NATIVE_SUSPENDED_BODY);
-        assert_eq!(ir.lines().filter(|line| line.ends_with(&tag)).count(), 2);
+        assert_eq!(ir.lines().filter(|line| line.ends_with(&tag)).count(), 5);
         assert_eq!(
             ir.matches("call void @imre_dyn_suspend_operands(").count(),
-            2
+            5
         );
-        assert_eq!(ir.matches("class Local(**{})").count(), 2);
+        assert!(!ir.contains("except* ValueError"));
     }
 
     #[test]
-    fn named_sync_generators_use_native_entries_in_each_module_origin() {
+    fn suspended_definitions_use_native_entries_in_each_module_origin() {
         let source = "def items(xs):\n    yield 1\n    yield from xs\npark = lambda: (yield 2)\nresume = lambda: 1 + (yield 3)\nasync def more(xs):\n    async for x in xs:\n        yield x\nasync def consume(f):\n    return await f()\n";
         for bundled in [false, true] {
             let (_, ir) = initializer("example", Path::new("example.py"), source, true, bundled)
                 .unwrap()
                 .unwrap();
             let tag = format!(", i32 {} }}", permanent::NATIVE_SUSPENDED_BODY);
-            assert_eq!(ir.lines().filter(|line| line.ends_with(&tag)).count(), 3);
+            assert_eq!(ir.lines().filter(|line| line.ends_with(&tag)).count(), 5);
             let operations: Vec<_> = ir
                 .lines()
                 .filter(|line| line.contains("call void @imre_dyn_suspend_operands("))
                 .map(|line| line.rsplit_once(", i32 ").unwrap().1)
                 .collect();
-            if bundled {
-                assert_eq!(operations, ["0)", "3)", "0)", "0)"]);
-            } else {
-                assert_eq!(operations, ["0)", "3)", "0)", "2)"]);
-            }
+            assert_eq!(operations, ["0)", "3)", "0)", "0)", "2)", "1)", "2)"]);
         }
     }
 

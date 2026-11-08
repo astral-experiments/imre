@@ -47,6 +47,18 @@ def current():
         raise AssertionError("discarded the exception from __class__")
 
 
+# Both the matched subgroup and the untouched rest survive a yield inside the handler.
+def grouped_rows():
+    try:
+        yield "start"
+        raise Batch("items", [ValueError(1), TypeError(2)])
+    except* ValueError as matched:
+        yield matched
+        raise
+    except* TypeError as failed:
+        raise KeyError("replacement") from failed
+
+
 first = ValueError("bad header")
 second = ValueError("bad record")
 missing = KeyError("missing file")
@@ -115,3 +127,17 @@ assert amounts == [35, 7]
 
 if __name__ == "__main__":
     current()
+    rows = grouped_rows()
+    first_yield = next(rows)
+    assert first_yield == "start"
+    matched = next(rows)
+    assert type(matched) is Batch and matched.exceptions[0].args == (1,)
+    try:
+        next(rows)
+    except ExceptionGroup as merged:
+        replacement, reraised = merged.exceptions
+        assert type(replacement) is KeyError and type(replacement.__cause__) is Batch
+        assert replacement.__cause__.exceptions[0].args == (2,)
+        assert type(reraised) is Batch and reraised.exceptions == matched.exceptions
+    else:
+        raise AssertionError("except* lost the reraised and replacement exceptions")

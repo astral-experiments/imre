@@ -692,10 +692,7 @@ impl Function<'_, '_> {
     fn create_class(&mut self, class: &ast::StmtClassDef, parameters: Option<String>) -> String {
         let bases = self.op("list", &[]);
         let kwargs = if let Some(args) = class.arguments.as_deref() {
-            if args.keywords.iter().any(|kw| kw.arg.is_none()) {
-                self.unsupported("expanded class keyword arguments");
-            }
-            self.arguments(&bases, args, "0")
+            self.arguments(&bases, args, None)
         } else {
             "0".into()
         };
@@ -887,7 +884,7 @@ impl Function<'_, '_> {
         if let Some(flags) = flags {
             signature["code_flags"] = json!(flags);
         }
-        if matches!(body, Body::YieldingLambda(_) | Body::Expression(_))
+        if matches!(body, Body::Expression(_))
             && flags.is_some_and(|flags| flags & code_flags::GENERATOR != 0)
         {
             signature["generator_lambda"] = json!(true);
@@ -918,13 +915,11 @@ impl Function<'_, '_> {
             Body::Statements(body) | Body::GeneratorFunction(body, _) => Some(
                 imre_ast::class_cell::function_needed(body, params, self.source.string_annotations),
             ),
-            Body::Expression(body) | Body::YieldingLambda(body) => {
-                Some(imre_ast::class_cell::expression_needed(
-                    body,
-                    params,
-                    self.source.string_annotations,
-                ))
-            }
+            Body::Expression(body) => Some(imre_ast::class_cell::expression_needed(
+                body,
+                params,
+                self.source.string_annotations,
+            )),
             _ => None,
         };
         if let Some(captures_class) = class_cell {
@@ -935,91 +930,11 @@ impl Function<'_, '_> {
                 signature["method_class_cell"] = json!(captures_class);
             }
         }
-        // Keep the existing staged generator when its suite cannot be lowered. Its
-        // surrounding caller and any neighboring supported suites remain compiled.
-        let trial = match &body {
-            Body::GeneratorFunction(stmts, code_flags::GENERATOR) if !self.source.bundled => {
-                Some(Body::GeneratorFunction(stmts, code_flags::GENERATOR))
-            }
-            Body::Generator(expr, plan, _) if !self.source.bundled && plan.outer_async => {
-                Some(Body::Generator(expr, plan, Default::default()))
-            }
-            Body::YieldingLambda(expr) if !self.source.bundled => Some(Body::YieldingLambda(expr)),
-            _ => None,
-        };
-        let native_generator = trial.and_then(|suite| {
-            self.output.try_native_body(|output| {
-                output.definition(
-                    self.source,
-                    prefix.clone(),
-                    suite,
-                    start,
-                    true,
-                    Entry::Suspended,
-                )
-            })
-        });
-        // Synchronous genexprs already have a compiled comprehension step.
-        let entry = if native_generator.is_some()
-            || (flags.is_some_and(|flags| {
-                if self.source.bundled {
-                    flags & code_flags::GENERATOR != 0
-                } else {
-                    flags & code_flags::COROUTINE != 0
-                }
-            }) && !matches!(body, Body::Generator(..)))
-        {
-            Entry::Suspended
-        } else {
-            match &body {
-                Body::GeneratorFunction(stmts, flag) => {
-                    let first = stmts[0].start();
-                    let start = first.to_usize();
-                    let end = stmts.last().unwrap().end().to_usize();
-                    let indent =
-                        imre_ast::indentation::generator_prefix(&self.source.text[..start]);
-                    // Slice the suite as written so indentation inside multiline strings survives.
-                    let header = if *flag == code_flags::GENERATOR {
-                        "def"
-                    } else {
-                        "async def"
-                    };
-                    let text = format!("{header} _():\n{indent}{}", &self.source.text[start..end]);
-                    Some((first, indent.len(), text))
-                }
-                Body::Generator(expr, plan, _) if plan.body_suspends() => {
-                    // The same resumable interpreter that runs async def bodies
-                    // consumes this expression's canonical plan, with .0 supplied
-                    // by the caller when the generator is created.
-                    signature["generator_expression"] = json!(true);
-                    let text = &self.source.text[expr.start().to_usize()..expr.end().to_usize()];
-                    Some((
-                        expr.start(),
-                        " return (".len(),
-                        format!("async def _():\n return ({text})"),
-                    ))
-                }
-                Body::YieldingLambda(expr) => {
-                    let text = &self.source.text[expr.start().to_usize()..expr.end().to_usize()];
-                    Some((
-                        expr.start(),
-                        " return (".len(),
-                        format!("def _():\n return ({text})"),
-                    ))
-                }
-                _ => None,
-            }
-            .map_or(Entry::Compiled, |(first, prefix, text)| {
-                let (line, column) = self.source.line_and_column(first);
-                signature["body_column_delta"] = json!(column as i64 - prefix as i64);
-                if !self.source.method_imports.is_empty() {
-                    signature["method_imports"] = json!(self.source.method_imports);
-                }
-                if let Some(owner) = self.source.private_names.suite_owner(first) {
-                    signature["private_scope"] = json!([owner, self.source.string_annotations]);
-                }
-                Entry::Source(self.output.data(text.as_bytes()), line)
-            })
+        // A synchronous generator expression has its own compiled comprehension step.
+        let entry = match &body {
+            Body::Generator(plan, _) if !plan.body_suspends() => Entry::Compiled,
+            _ if body.generator_flags() != 0 => Entry::Suspended,
+            _ => Entry::Compiled,
         };
         let mut closure_names = ClosureNames {
             string_annotations: self.source.string_annotations,
@@ -1052,10 +967,8 @@ impl Function<'_, '_> {
                     closure_names.incomplete = true;
                 }
             }
-            Body::Expression(expr) | Body::YieldingLambda(expr) | Body::TypeAlias(expr) => {
-                closure_names.visit_expr(expr)
-            }
-            Body::Generator(_, plan, names) => {
+            Body::Expression(expr) | Body::TypeAlias(expr) => closure_names.visit_expr(expr),
+            Body::Generator(plan, names) => {
                 closure_names = class_metadata::generator_scope(
                     plan,
                     std::mem::take(names),
@@ -1110,10 +1023,9 @@ impl Function<'_, '_> {
         if matches!(entry, Entry::Compiled) {
             signature["return_type"] = json!(returns.and_then(scalar));
         }
-        let code = native_generator.unwrap_or_else(|| {
-            self.output
-                .definition(self.source, prefix, body, start, in_function, entry)
-        });
+        let code = self
+            .output
+            .definition(self.source, prefix, body, start, in_function, entry);
         if let Some(p) = params {
             self.output
                 .interned_identifiers

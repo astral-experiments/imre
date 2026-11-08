@@ -57,10 +57,6 @@ pub(super) enum Body {
     Native(Code),
     Suspended(ResumeCode),
     Source(std::rc::Rc<super::source_code::Program>),
-    PendingGenerator {
-        source: &'static str,
-        body_line: u32,
-    },
 }
 
 #[derive(Clone, Copy)]

@@ -30,9 +30,8 @@ struct SourceFilename {
 
 pub(super) struct Program {
     filename: SourceFilename,
-    // All nested code shares a source map. Prelinked suspended suites start in a synthetic header.
+    // All nested code shares a source map.
     source_lines: Rc<[usize]>,
-    linked_body_line: Option<(u32, Option<i64>)>,
     // Stop symbol collection at the first invalid binding or misplaced future import.
     syntax_limit: Option<ruff_text_size::TextRange>,
     // An invalid pattern still has a symbol table. Let all its scopes finish checking
@@ -120,16 +119,6 @@ enum FunctionKind {
 }
 
 impl FunctionKind {
-    fn prelinked(code: &value::CodeObject) -> Self {
-        if code.flags & imre_ast::code_flags::ASYNC_GENERATOR != 0 {
-            Self::AsyncGenerator
-        } else if code.is_coroutine() {
-            Self::Coroutine
-        } else {
-            Self::Generator
-        }
-    }
-
     fn is_async(self) -> bool {
         matches!(self, Self::Coroutine | Self::AsyncGenerator)
     }
@@ -1692,7 +1681,6 @@ impl Program {
             child.scope_flags = nested_scope_flags;
             child.strip_docstrings = self.strip_docstrings;
             child.source_lines = self.source_lines.clone();
-            child.linked_body_line = self.linked_body_line;
             child.qualname =
                 Self::qualified_name(&self.qualname, self.class_attributes.is_some(), name);
             child.method_imports = self.method_imports.clone();
@@ -1979,22 +1967,10 @@ impl Program {
             let byte = offset.to_usize();
             let line = self.source_lines.partition_point(|&start| start <= byte);
             let column = byte - self.source_lines[line - 1];
-            if let Some((body_line, column_delta)) = self.linked_body_line {
-                // The synthetic header and prefix replace only the text before the suite.
-                let line = u32::try_from(line).ok()?.checked_sub(2)?;
-                let column = if line == 0 {
-                    // Older native definitions did not record this first-line displacement.
-                    i64::try_from(column).ok()? + column_delta?
-                } else {
-                    column as i64
-                };
-                Some((body_line + line, u32::try_from(column).ok()?))
-            } else {
-                Some((line as u32, column as u32))
-            }
+            (line as u32, column as u32)
         };
-        let (start_line, start_col) = point(range.start())?;
-        let (end_line, end_col) = point(range.end())?;
+        let (start_line, start_col) = point(range.start());
+        let (end_line, end_col) = point(range.end());
         Some([start_line, end_line, start_col, end_col])
     }
 
@@ -2005,16 +1981,12 @@ impl Program {
         let line = self
             .source_lines
             .partition_point(|&start| start <= offset.to_usize()) as u32;
-        Some(
-            self.linked_body_line
-                .map_or(line, |(base, _)| base + line.saturating_sub(2)),
-        )
+        Some(line)
     }
 
     fn nested_program(&self, name: &str) -> Self {
         let mut child = Self::new(self.filename.clone(), name, self.has_named_bindings);
         child.source_lines = self.source_lines.clone();
-        child.linked_body_line = self.linked_body_line;
         child.syntax_limit = self.syntax_limit;
         child.deferred_pattern.clone_from(&self.deferred_pattern);
         child.strip_docstrings = self.strip_docstrings;
@@ -2038,7 +2010,6 @@ impl Program {
         Self {
             filename,
             source_lines: Rc::default(),
-            linked_body_line: None,
             syntax_limit: None,
             deferred_pattern: None,
             name: name.to_owned(),
@@ -4798,13 +4769,10 @@ impl Context {
     }
 
     pub(super) fn call_source(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {
-        let definition = self.code_object(code);
-        let kind = match &definition.body {
-            Body::Source(program) => program.kind,
-            Body::PendingGenerator { .. } => FunctionKind::prelinked(definition),
-            Body::Native(_) | Body::Suspended(_) => unreachable!("source function"),
+        let Body::Source(program) = &self.code_object(code).body else {
+            unreachable!("source function")
         };
-        if kind != FunctionKind::Plain {
+        if program.kind != FunctionKind::Plain {
             self.new_suspended(code, scope, owner)
         } else {
             match self.run_source(
@@ -4825,119 +4793,6 @@ impl Context {
                 }
             }
         }
-    }
-
-    fn prepare_generator(&mut self, id: Id) -> Result<()> {
-        let code = self.code_object(id);
-        let Body::PendingGenerator { source, body_line } = &code.body else {
-            return Ok(());
-        };
-        let body_line = *body_line;
-        let input = imre_ast::indentation::parser_source(source)
-            .map_err(|err| Error::new(err.kind, err.to_string()))?;
-        let parsed = ruff_python_parser::parse_module(&input)
-            .map_err(|err| Error::new("SyntaxError", err.to_string()))?;
-        let spellings = string_replacements(source, parsed.tokens());
-        let template_expressions =
-            imre_ast::strings::template_expressions(source, parsed.tokens(), parsed.syntax());
-        let bindings = imre_ast::executable::BindingErrors::check(&parsed.syntax().body, &input);
-        let mut syntax = parsed.into_syntax();
-        let [ast::Stmt::FunctionDef(def)] = syntax.body.as_mut_slice() else {
-            return Err(Error::new("SystemError", "invalid generator body"));
-        };
-        if let Some((_, message)) = bindings.first_symbol(None) {
-            return Err(Error::new("SyntaxError", message));
-        }
-        if let Some(issue) = bindings.handler {
-            return Err(Error::new("SyntaxError", issue.message));
-        }
-        if let Some((_, message)) = bindings.pattern {
-            return Err(Error::new(
-                "SyntaxError",
-                message
-                    .render(crate::integer_text::check_decimal)?
-                    .into_owned(),
-            ));
-        }
-        #[derive(serde::Deserialize)]
-        struct Signature<'a> {
-            #[serde(borrow)]
-            private_scope: Option<(&'a str, bool)>,
-            #[serde(default)]
-            generator_lambda: bool,
-            body_column_delta: Option<i64>,
-            #[serde(default)]
-            generator_expression: bool,
-            #[serde(default)]
-            method_imports: std::collections::BTreeSet<String>,
-        }
-        let signature: Signature<'_> = serde_json::from_str(self.str_value(code.parameters)?)
-            .map_err(|_| Error::new("SystemError", "invalid generator signature"))?;
-        let postponed = code.flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0;
-        let private_names = signature
-            .private_scope
-            .or(postponed.then_some(("", true)))
-            .map(|(owner, postponed)| Rc::new(imre_ast::lower_in(&mut def.body, owner, postponed)));
-        let lines: Rc<[usize]> =
-            line_starts(source.match_indices('\n').map(|(offset, _)| offset + 1))?.into();
-        let mut program = Program::new(
-            self.source_filename(code.filename)?,
-            self.str_value(code.name)?,
-            source.contains(":="),
-        );
-        program.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
-        program.source_lines = lines.clone();
-        program.linked_body_line = Some((body_line, signature.body_column_delta));
-        program.method_imports = Rc::new(signature.method_imports);
-        program.template_expressions = Rc::new(template_expressions);
-        program.private_names = private_names;
-        program.qualname = self.str_value(code.qualname)?.to_owned();
-        program.first_line = code.first_line;
-        program.scope_flags = code.flags;
-        program.kind = FunctionKind::prelinked(code);
-        if signature.generator_expression {
-            let [ast::Stmt::Return(ret)] = def.body.as_slice() else {
-                return Err(Error::new(
-                    "SystemError",
-                    "invalid generator expression body",
-                ));
-            };
-            let Some(ast::Expr::Generator(expr)) = ret.value.as_deref() else {
-                return Err(Error::new("SystemError", "invalid generator expression"));
-            };
-            program.lower_genexpr(expr, &|offset| {
-                lines.partition_point(|n| *n <= offset) as u32
-            })?;
-        } else {
-            program.lower_namespace(std::mem::take(&mut def.body), &lines, true)?;
-        }
-        if signature.generator_lambda {
-            program.kind = FunctionKind::GeneratorLambda;
-        }
-        for (line, _) in &mut program.instructions {
-            *line = body_line + line.saturating_sub(2);
-        }
-        // The prelinked generator was compiled in its enclosing lexical scope.
-        program.resolve_directives(
-            &|name| {
-                (!code.closure_supported || code.freevars.iter().any(|var| var == name))
-                    .then_some(EnclosingBinding::Local)
-            },
-            &mut HashSet::new(),
-        )?;
-        program.prepare_strings(
-            &mut self.heap,
-            &mut SharedConstants::default(),
-            &spellings,
-            &|offset| {
-                body_line + (lines.partition_point(|n| *n <= offset) as u32).saturating_sub(2)
-            },
-        )?;
-        let Value::Code(code) = self.heap.get_mut(id) else {
-            unreachable!()
-        };
-        code.body = Body::Source(Rc::new(program));
-        Ok(())
     }
 
     pub(super) fn resume_source(&mut self, id: Id, sent: Id) -> Result<Option<Id>> {
@@ -5028,17 +4883,14 @@ impl Context {
         let mut active = std::mem::take(iterators);
         let mut blocks = std::mem::take(protected);
         self.heap.disarm_finalizer(finalizer);
+        let mut cursor = SourceCursor::new(ip, &mut active, &mut blocks, advanced, input);
+        cursor.nested_resume = nested_resume
+            && ip != 0
+            && cursor.advanced.is_none()
+            && cursor.sent == NONE
+            && cursor.thrown.is_none();
         let result = self
-            .prepare_generator(code)
-            .and_then(|()| {
-                let mut cursor = SourceCursor::new(ip, &mut active, &mut blocks, advanced, input);
-                cursor.nested_resume = nested_resume
-                    && ip != 0
-                    && cursor.advanced.is_none()
-                    && cursor.sent == NONE
-                    && cursor.thrown.is_none();
-                self.run_source(code, frame_scope, FrameOwner::Generator(id), cursor)
-            })
+            .run_source(code, frame_scope, FrameOwner::Generator(id), cursor)
             .map_err(|error| self.frame_error(error, code));
         // The public async-generator object owns its first-iteration/finalization hooks.
         let async_generator =
