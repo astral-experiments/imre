@@ -128,10 +128,33 @@ impl Context {
         scope: Id,
         name: &str,
         original: Option<Id>,
+        report_missing: bool,
     ) -> Result<Id> {
         match self.default_get_attr(module, name) {
             Err(error) if self.is_attribute_error(&error) => {
                 let Some(hook) = self.scope_name(scope, "__getattr__") else {
+                    // Optional lookups suppress the diagnostic without probing a user spec.
+                    if report_missing
+                        && let Some(label) = self.scope_name(scope, "__name__")
+                        && let Some(text) = self.string_storage(label)
+                    {
+                        self.heap.keep(label);
+                        if let Some(origin) =
+                            self.spec_file_origin(self.scope_name(scope, "__spec__"))?
+                            && self.possibly_shadowing(origin)?
+                            && self.stdlib_name(label)?
+                        {
+                            let module_name = self.display(text);
+                            let path =
+                                self.display(self.string_storage(origin).expect("file origin"));
+                            return Err(Error::new(
+                                "AttributeError",
+                                format!(
+                                    "module '{module_name}' has no attribute '{name}' (consider renaming '{path}' since it has the same name as the standard library module named '{module_name}' and prevents importing that standard library module)"
+                                ),
+                            ));
+                        }
+                    }
                     // ModuleType reports a failed descriptor lookup in the module's namespace.
                     if let Value::Module {
                         constructor: Some(class),
@@ -391,7 +414,7 @@ impl Context {
             if name == "__getattribute__" {
                 let key = rest[0];
                 let attr = builtins::attribute_name(self, key)?;
-                return self.module_get_attribute(receiver, scope, &attr, Some(key));
+                return self.module_get_attribute(receiver, scope, &attr, Some(key), true);
             }
             if name == "__repr__" {
                 if self.bootstrap_globals != NONE

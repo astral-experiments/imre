@@ -3297,18 +3297,7 @@ impl Context {
         }
 
         let spec = self.optional_attr(object, "__spec__")?;
-        let origin = if let Some(spec) = spec {
-            self.heap.keep(spec);
-            let has_location = self.optional_attr(spec, "has_location")?;
-            if self.optional_truth(has_location, false)? {
-                self.optional_attr(spec, "origin")?
-                    .filter(|&id| self.string_storage(id).is_some())
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let origin = self.spec_file_origin(spec)?;
         // Only the spec's file origin participates in the shadowing check.
         let shadow = origin
             .map(|id| self.possibly_shadowing(id))
@@ -3324,15 +3313,7 @@ impl Context {
             self.heap.keep(path);
         }
         let label = module.unwrap_or_else(|| self.text("<unknown module name>"));
-        let shadowed_stdlib = if shadow
-            && let Some(names) = self.sys_binding("stdlib_module_names")?
-            && let storage = self.scalar_value(names)
-            && matches!(self.heap.get(storage), Value::Set { .. })
-        {
-            builtins::set_member(self, storage, label, false)?
-        } else {
-            false
-        };
+        let shadowed_stdlib = shadow && self.stdlib_name(label)?;
         let mut fields = vec![member, label];
         let format = if shadowed_stdlib {
             fields.extend([origin.unwrap(), label]);
@@ -3363,6 +3344,33 @@ impl Context {
         trace.import_message = Some(message);
         trace.import_names = Some([module.unwrap_or(NONE), path.unwrap_or(NONE), member]);
         Err(error)
+    }
+
+    fn spec_file_origin(&mut self, spec: Option<Id>) -> Result<Option<Id>> {
+        let Some(spec) = spec else { return Ok(None) };
+        self.heap.keep(spec);
+        let has_location = self.optional_attr(spec, "has_location")?;
+        if !self.optional_truth(has_location, false)? {
+            return Ok(None);
+        }
+        let origin = self
+            .optional_attr(spec, "origin")?
+            .filter(|&id| self.string_storage(id).is_some());
+        if let Some(origin) = origin {
+            self.heap.keep(origin);
+        }
+        Ok(origin)
+    }
+
+    fn stdlib_name(&mut self, name: Id) -> Result<bool> {
+        if let Some(names) = self.sys_binding("stdlib_module_names")?
+            && let storage = self.scalar_value(names)
+            && matches!(self.heap.get(storage), Value::Set { .. })
+        {
+            builtins::set_member(self, storage, name, false)
+        } else {
+            Ok(false)
+        }
     }
 
     /// Check whether the script's startup search path could shadow an installed module.

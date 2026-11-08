@@ -2211,7 +2211,7 @@ impl Context {
 
     /// Read an optional attribute, preserving exceptions raised by user lookup hooks.
     pub(super) fn optional_attr(&mut self, obj: Id, name: &str) -> Result<Option<Id>> {
-        match self.lookup_attr(obj, name) {
+        match self.lookup_attribute(obj, name, None, false) {
             Ok(value) => Ok(Some(value)),
             Err(error) if self.is_attribute_error(&error) => Ok(None),
             Err(error) => Err(error),
@@ -2228,6 +2228,16 @@ impl Context {
         obj: Id,
         name: &str,
         original: Option<Id>,
+    ) -> Result<Id> {
+        self.lookup_attribute(obj, name, original, true)
+    }
+
+    pub(super) fn lookup_attribute(
+        &mut self,
+        obj: Id,
+        name: &str,
+        original: Option<Id>,
+        report_missing: bool,
     ) -> Result<Id> {
         let obj = self.weak_proxy_target(obj)?;
         let obj = super::typing::generic_attr_target(self, obj, name, false)?;
@@ -2253,7 +2263,7 @@ impl Context {
                 {
                     return Ok(field);
                 }
-                return self.module_get_attribute(obj, scope, name, original);
+                return self.module_get_attribute(obj, scope, name, original, report_missing);
             }
             Value::Super { .. } => return self.super_getattribute(obj, name),
             _ => return self.default_get_attr(obj, name),
@@ -2267,7 +2277,7 @@ impl Context {
             // object.__class__ is a data descriptor and takes precedence over instance fields.
             Ok(class)
         } else if let Value::Module { scope, .. } = *self.heap.get(obj) {
-            self.module_get_attribute(obj, scope, name, original)
+            self.module_get_attribute(obj, scope, name, original, report_missing)
         } else {
             self.default_get_attr(obj, name)
         };
