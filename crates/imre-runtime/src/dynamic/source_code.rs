@@ -4297,10 +4297,9 @@ impl Context {
                 "function construction without closure metadata",
             ));
         }
-        let freevars = data.freevars.clone();
+        let required = data.freevars.len();
         let code_name = data.name;
-        let code_qualname = data.qualname;
-        let code_doc = data.doc;
+        let qualname = data.qualname;
         let name = name.filter(|&v| v != NONE).unwrap_or(code_name);
         if self.string_storage(name).is_none() {
             return Err(Error::new(
@@ -4318,7 +4317,7 @@ impl Context {
         let closure = closure.unwrap_or(NONE);
         let cells = match self.heap.get(closure) {
             Value::Tuple(cells) => cells.as_slice(),
-            _ if closure == NONE && freevars.is_empty() => &[],
+            _ if closure == NONE && required == 0 => &[],
             _ if closure == NONE => {
                 return Err(Error::new("TypeError", "arg 5 (closure) must be tuple"));
             }
@@ -4336,13 +4335,13 @@ impl Context {
                 "arg 6 (kwdefaults) must be None or dict",
             ));
         }
-        if cells.len() != freevars.len() {
+        if cells.len() != required {
             return Err(Error::new(
                 "ValueError",
                 format!(
                     "{} requires closure of length {}, not {}",
                     self.str_value(code_name)?,
-                    freevars.len(),
+                    required,
                     cells.len()
                 ),
             ));
@@ -4358,26 +4357,50 @@ impl Context {
                 ));
             }
         }
-        let cells = cells.to_vec();
         let builtins = match self.dict_named_item(globals, "__builtins__") {
             Some(value) => self.definition_builtins(value)?,
             None => self.function_builtins(self.heap.current_scope())?,
         };
         let scope = self.function_environment("", globals, builtins);
+        Ok(
+            self.function_with_closure(
+                code,
+                scope,
+                closure,
+                (name, qualname),
+                defaults,
+                kwdefaults,
+            ),
+        )
+    }
+
+    /// Bind a validated closure to its code object's free variables in order.
+    fn function_with_closure(
+        &mut self,
+        code: Id,
+        scope: Id,
+        closure: Id,
+        (name, qualname): (Id, Id),
+        defaults: Id,
+        kwdefaults: Id,
+    ) -> Id {
+        let data = self.code_object(code);
+        let freevars = data.freevars.clone();
+        let code_doc = data.doc;
+        let cells = match self.heap.get(closure) {
+            Value::Tuple(cells) => cells.to_vec(),
+            _ if closure == NONE => Vec::new(),
+            _ => unreachable!("validated function closure"),
+        };
         let class_cell = freevars
             .iter()
             .position(|name| name == "__class__")
             .map(|index| cells[index]);
         let scope = self.closure_environment(scope, freevars, &cells);
         let fields = super::function_fields::FunctionFields::new(
-            self,
-            scope,
-            name,
-            code_qualname,
-            code_doc,
-            NONE,
+            self, scope, name, qualname, code_doc, NONE,
         );
-        Ok(self.alloc(Value::Function {
+        self.alloc(Value::Function {
             fields,
             closure,
             code,
@@ -4385,7 +4408,7 @@ impl Context {
             class_cell,
             defaults,
             kwdefaults,
-        }))
+        })
     }
 
     /// Populate the public module with the same native objects used by compiled calls.
@@ -4690,13 +4713,9 @@ impl Context {
         {
             self.function_builtins(scope)?
         } else if let Some(builtins) = self.dict_named_item(globals, "__builtins__") {
-            if let Value::Module { scope, .. } = *self.heap.get(builtins) {
-                self.module_globals(scope)?
-            } else {
-                builtins
-            }
+            self.definition_builtins(builtins)?
         } else {
-            let builtins = self.default_source_builtins()?;
+            let builtins = self.function_builtins(self.heap.current_scope())?;
             let key = self.text("__builtins__");
             self.put_item(
                 self.dict_storage(globals).expect("exec dictionary"),
@@ -4720,12 +4739,16 @@ impl Context {
                         .iter()
                         .all(|&id| matches!(self.heap.get(id), Value::Cell(_)))
                 {
-                    return Err(unsupported("exec with an explicit closure"));
+                    if !matches!(code.body, Body::Native(_) | Body::Suspended(_)) {
+                        return Err(unsupported("exec with an explicit closure"));
+                    }
+                    source
+                } else {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!("code object requires a closure of exactly length {required}"),
+                    ));
                 }
-                return Err(Error::new(
-                    "TypeError",
-                    format!("code object requires a closure of exactly length {required}"),
-                ));
             }
             Value::Code(_) if closure.is_some() => {
                 return Err(Error::new(
@@ -4752,20 +4775,16 @@ impl Context {
                 ));
             }
         };
+        let scope = self.function_environment("<exec>", globals, builtins);
         let code = self.code_object(code_id);
-        let function_code = code.parameters != NONE;
-        let module_definition = code.module_definition;
-        let scope = self.scope("<exec>", None);
-        let Value::Scope(environment) = self.heap.get_mut(scope) else {
-            unreachable!()
-        };
-        environment.namespace = Some(globals);
-        environment.exec_globals = Some(ExecGlobals {
-            dict: globals,
-            builtins,
-        });
-        if function_code {
-            if !module_definition {
+        if code.parameters != NONE {
+            if let Some(cells) = closure {
+                let name = code.name;
+                let function =
+                    self.function_with_closure(code_id, scope, cells, (name, name), NONE, NONE);
+                return self.call(function, Vec::new(), Vec::new());
+            }
+            if !code.module_definition {
                 return Err(unsupported(
                     "exec of a prelinked function with an enclosing scope",
                 ));
