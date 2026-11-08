@@ -7,6 +7,13 @@ use super::*;
 
 const KEY_WRAPPER: &str = "functools.KeyWrapper";
 
+/// Names of the read-only argument counts on a code object.
+pub(super) fn code_argument_field(name: &str) -> Option<&'static str> {
+    ["co_argcount", "co_posonlyargcount", "co_kwonlyargcount"]
+        .into_iter()
+        .find(|field| *field == name)
+}
+
 /// These native result types inherit object.__new__ but reject direct allocation.
 fn nonconstructible_result_type(name: &str) -> bool {
     matches!(
@@ -3910,8 +3917,11 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("property.{name}")));
             }
-            Value::Native(ref class) if class == "code" && name == "co_argcount" => {
-                return Ok(self.readonly_member("code", "co_argcount"));
+            Value::Native(ref class)
+                if class == "code"
+                    && let Some(field) = code_argument_field(name) =>
+            {
+                return Ok(self.readonly_member("code", field));
             }
             Value::Code(ref code) => match name {
                 "co_argcount" => {
@@ -3926,6 +3936,18 @@ impl Context {
                     }
                     let count = signature["posonly"].as_array().map_or(0, Vec::len)
                         + signature["positional"].as_array().map_or(0, Vec::len);
+                    return Ok(self.int(count as i64));
+                }
+                "co_posonlyargcount" | "co_kwonlyargcount" => {
+                    if code.parameters == NONE {
+                        return Ok(self.int(0));
+                    }
+                    let parameters = self.parsed_parameters(obj)?;
+                    let count = if name == "co_posonlyargcount" {
+                        parameters.positional_only
+                    } else {
+                        parameters.keyword_only.len()
+                    };
                     return Ok(self.int(count as i64));
                 }
                 "co_varnames" | "co_nlocals" if code.varnames != NONE => {
@@ -6076,8 +6098,10 @@ impl Context {
                 Err(self.readonly_getset_error("code", name, obj))
             }
             Value::Code(ref code)
-                if matches!(name, "co_qualname" | "co_argcount")
-                    || name == "co_nlocals" && code.varnames != NONE =>
+                if matches!(
+                    name,
+                    "co_qualname" | "co_argcount" | "co_posonlyargcount" | "co_kwonlyargcount"
+                ) || name == "co_nlocals" && code.varnames != NONE =>
             {
                 Err(Error::new("AttributeError", "readonly attribute"))
             }
@@ -7240,6 +7264,8 @@ impl Context {
                         | "co_firstlineno"
                         | "co_flags"
                         | "co_argcount"
+                        | "co_posonlyargcount"
+                        | "co_kwonlyargcount"
                 ) || name == "co_nlocals" && code.varnames != NONE =>
             {
                 return Err(Error::new("AttributeError", "readonly attribute"));
