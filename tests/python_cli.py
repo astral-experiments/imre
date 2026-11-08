@@ -4321,6 +4321,7 @@ for name in ("md4", "ripemd160"):
             "boxed_function_closure_edges.py",
             "boxed_function_annotation_closure.py",
             "boxed_functiontype.py",
+            "boxed_module_function_builtins.py",
             "boxed_function_call.py",
             "boxed_any_generator.py",
             "boxed_global.py",

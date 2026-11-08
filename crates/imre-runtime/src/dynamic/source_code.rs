@@ -4694,7 +4694,11 @@ impl Context {
                 ),
             ));
         }
-        let builtins = if let Some(builtins) = self.dict_named_item(globals, "__builtins__") {
+        let builtins = if let Some(function) = function
+            && let Value::Function { scope, .. } = *self.heap.get(function)
+        {
+            self.function_builtins(scope)?
+        } else if let Some(builtins) = self.dict_named_item(globals, "__builtins__") {
             if let Value::Module { scope, .. } = *self.heap.get(builtins) {
                 self.module_globals(scope)?
             } else {
