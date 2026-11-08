@@ -116,6 +116,8 @@ pub struct CompileOptions {
     pub bundled_provider_archive: Option<PathBuf>,
     /// Compiler-owned archive for a Python launcher missing its installed companion.
     pub stdlib_fallback: Option<PathBuf>,
+    /// Adjacent SDK archive selected by the Python launcher.
+    pub installed_stdlib_archive: Option<PathBuf>,
     /// The base interpreter's installed filesystem standard library, when present.
     pub stdlib_dir: Option<PathBuf>,
     /// Existing user and prefix package directories in the launcher's search order.

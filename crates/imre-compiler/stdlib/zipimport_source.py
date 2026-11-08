@@ -1,5 +1,5 @@
 """Source package imports for the native module registry."""
-from _imre_importlib import _zip_path_importers as _path_importers
+from _imre_importlib import _zip_path_importers as _path_importers, compile_file as _compile_file
 
 
 class zipimporter(_ZipResourceLoader):
@@ -40,7 +40,7 @@ class zipimporter(_ZipResourceLoader):
 
     def get_code(self, fullname):
         filename = self.get_filename(fullname)
-        return compile(self.get_data(filename), filename, 'exec')
+        return _compile_file(compile, self.get_data(filename), filename)
 
     def create_module(self, spec):
         # Use the standard module object allocated by module_from_spec.
