@@ -214,6 +214,44 @@ def check_utf8_incremental_encoder():
     assert factory("ignore").encode("\ud800Z") == b"Z"
 
 
+def check_single_byte_stream_readers():
+    import encodings
+    import sys
+    from encodings import ascii, latin_1
+    from io import BytesIO
+
+    for name, provider in (("ascii", ascii), ("L1", latin_1)):
+        registry = codecs.lookup(name)
+        entry = provider.getregentry()
+        assert codecs.getreader(name) is entry.streamreader is provider.StreamReader
+        assert provider.StreamReader.__bases__ == (provider.Codec, codecs.StreamReader)
+        assert registry.encode is entry.encode is provider.Codec.encode
+        assert registry.decode is entry.decode is provider.StreamReader.decode
+        # A default search cache hit must not import the provider or its parent again.
+        for key in (provider.__name__, "encodings"):
+            saved = sys.modules[key]
+            sys.modules[key] = None
+            try:
+                assert encodings.search_function(name.lower()) is registry
+            finally:
+                sys.modules[key] = saved
+    assert ascii.StreamReader is not latin_1.StreamReader
+    latin = latin_1.StreamReader(BytesIO(b"A\xffB"))
+    assert latin.read(2) == "Aÿ"
+    latin.seek(1)
+    assert latin.read() == "ÿB" and latin.read() == ""
+
+    assert codecs.getreader("ascii") is ascii.StreamReader
+    factory = codecs.getreader("ascii")
+    assert factory is codecs.lookup("us-ascii").streamreader
+    raw = BytesIO(b"A\xffB")
+    reader = factory(raw, "replace")
+    assert reader.read(1) == "A" and raw.tell() == 1
+    assert reader.read(1) == "\ufffd" and raw.tell() == 2
+    assert reader.read() == "B"
+    assert reader.read() == reader.read() == ""
+
+
 def check_utf8_stream_readers():
     from io import BytesIO
 
@@ -343,6 +381,7 @@ def current():
     check_utf8_stream_readers()
     check_charmap_factories()
     check_incremental_decoder_factory()
+    check_single_byte_stream_readers()
     check_text_encoding_flag()
     check_escape_decode()
     fixed_endian_encoders()
