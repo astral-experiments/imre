@@ -164,8 +164,7 @@ def common_adapter(tools, work, test_lib):
                     cache[key] = diagnostic(exc, work)
             native = cache[key]
             if isinstance(native, str):
-                # Preserve the unchanged method, recording the sole host call
-                # explicitly while Imre has no native bytearray construction.
+                # Record the host call if the native bytearray probe fails to compile.
                 operations.append({"input": type(value).__name__, "operation": "cpython", "blocker": native})
                 return os.path.normcase(value)
             output = run(native).rstrip("\n")
