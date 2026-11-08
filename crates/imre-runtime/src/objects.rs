@@ -141,7 +141,8 @@ pub(crate) use text::{
 };
 mod typing;
 pub(crate) use text::{
-    Form, bidirectional, chr_scalar, general_category, legacy, short_string, ucd_character,
+    Form, bidirectional, chr_scalar, general_category, legacy, short_index, short_string,
+    ucd_character,
 };
 pub(crate) use typing::{OVERLOAD_DUMMY_ERROR, register_overload};
 mod unions;

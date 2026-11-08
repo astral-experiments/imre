@@ -75,11 +75,16 @@ pub(super) fn annotation_reads(
 pub(super) fn comprehension_scope(
     expression: &ast::Expr,
     string_annotations: bool,
-) -> (BTreeSet<String>, BTreeSet<String>) {
-    let mut uses = Uses::new(string_annotations);
+) -> (BTreeSet<String>, BTreeSet<String>, BTreeSet<String>) {
+    // Eager comprehensions use the enclosing frame's fast slots. An escaping
+    // genexpr or function nested inside the display still captures its reads.
+    let mut uses = Uses {
+        inline_comprehensions: true,
+        ..Uses::new(string_annotations)
+    };
     uses.visit_expr(expression);
-    uses.direct.append(&mut uses.nested);
-    (uses.direct, uses.walrus)
+    uses.direct.extend(uses.nested.iter().cloned());
+    (uses.direct, uses.walrus, uses.nested)
 }
 
 /// Resolve the body in its own scope. The leftmost iterable has already been
@@ -111,6 +116,7 @@ struct Uses {
     nested: BTreeSet<String>,
     walrus: BTreeSet<String>,
     implicit_class: bool,
+    inline_comprehensions: bool,
     string_annotations: bool,
 }
 
@@ -125,6 +131,7 @@ impl Uses {
     fn child_scope(&self) -> Self {
         Self {
             implicit_class: self.implicit_class,
+            inline_comprehensions: self.inline_comprehensions,
             ..Self::new(self.string_annotations)
         }
     }
@@ -171,6 +178,25 @@ impl Uses {
         };
         plan.visit_body(|expr| child.visit_expr(expr));
         // Assignment expressions escape comprehension scopes, but stop at a lambda or function.
+        if self.inline_comprehensions {
+            if !matches!(plan.output, imre_ast::comprehension::Output::Generator(_)) {
+                self.walrus.append(&mut child.walrus);
+                self.direct.extend(
+                    child
+                        .direct
+                        .into_iter()
+                        .filter(|name| !bounds.locals.contains(name.as_str())),
+                );
+                self.nested.extend(
+                    child
+                        .nested
+                        .into_iter()
+                        .filter(|name| !bounds.locals.contains(name.as_str())),
+                );
+                return;
+            }
+            self.nested.extend(child.walrus.iter().cloned());
+        }
         self.walrus.append(&mut child.walrus);
         self.child(child, bounds, None, false);
     }

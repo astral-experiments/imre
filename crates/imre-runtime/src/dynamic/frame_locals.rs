@@ -201,7 +201,7 @@ fn access(ctx: &mut Context, frame: Id, key: Id, op: Access) -> Result<Option<Id
     ctx.heap.keep(slots);
     let (hash, index) = ctx.find_dictionary_key(slots, key, None)?;
     // Hashing or comparing a Python key can clear this frame.
-    let (scope, ..) = frame_scope(ctx, frame)?;
+    let (scope, code, optimized) = frame_scope(ctx, frame)?;
     if let Some(index) = index {
         let name = &names[index];
         let mut owner = scope;
@@ -231,6 +231,19 @@ fn access(ctx: &mut Context, frame: Id, key: Id, op: Access) -> Result<Option<Id
                         if let Some(cell) = cell {
                             ctx.heap.replace_cell(cell, Some(value));
                         } else {
+                            if owner == scope
+                                && optimized
+                                && code != NONE
+                                && !data.closure.cells.contains_key(name)
+                                && let Some(&old) = data.names.get(name.as_str())
+                                && old != value
+                                && ctx
+                                    .parsed_parameters(code)?
+                                    .cell_layout
+                                    .retains_displaced(name, data.closure.cleared)
+                            {
+                                ctx.heap.retain_overwritten_local(frame, old)?;
+                            }
                             ctx.bind_local(owner, name, value);
                         }
                         Ok(None)
