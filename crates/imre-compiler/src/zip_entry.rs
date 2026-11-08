@@ -86,11 +86,22 @@ impl ZipSources {
         let (mut file, digest) = filesystem.open_hashed(archive).map_err(|e| e.to_string())?;
         file.rewind().map_err(|e| e.to_string())?;
         let reader = ZipArchive::new(BufReader::new(file)).map_err(|e| e.to_string())?;
-        inputs.files.push((
+        let input = (
             archive.to_owned(),
             identity.map_err(|e| e.to_string())?,
             digest.to_hex().to_string(),
-        ));
+        );
+        if let Some(previous) = inputs.files.iter().find(|(path, _, _)| path == archive) {
+            if previous != &input {
+                return Err(format!(
+                    "ZIP archive changed during compilation: {}",
+                    archive.display()
+                ));
+            }
+        } else {
+            // Multiple declared search directories can belong to the same archive file.
+            inputs.files.push(input);
+        }
         let prefix = path
             .strip_prefix(archive)
             .map_err(|e| e.to_string())?
