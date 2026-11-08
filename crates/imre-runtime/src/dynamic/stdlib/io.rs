@@ -1486,6 +1486,9 @@ fn restore_stream_dict(ctx: &mut Context, receiver: Id, dict: Id, item: &str) ->
                 ),
             ));
         }
+        if let Value::Instance { class, .. } = *ctx.heap.get(receiver) {
+            ctx.register_stream_with_attributes(receiver, class);
+        }
         let Value::Instance { namespace, .. } = ctx.heap.get_mut(receiver) else {
             unreachable!("memory stream methods have an instance receiver");
         };

@@ -1956,6 +1956,11 @@ impl Value {
         }
     }
 
+    /// Exact in-memory streams free their buffer directly on ordinary deallocation.
+    pub(super) fn is_exact_memory_stream(&self) -> bool {
+        matches!(self.io_kind(), Some("BytesIO" | "StringIO"))
+    }
+
     /// Only Python instances and exception subclasses have instance finalizers.
     pub(super) fn finalizer_class(&self) -> Option<Id> {
         match self {
@@ -6301,12 +6306,22 @@ impl Heap {
         (first_finalizer, remaining != 0)
     }
 
-    /// Age participating slots before Python callbacks can allocate into a recycled slot.
-    fn promote_generation(&mut self, generation: u8) {
+    /// Age participating slots and arm cyclic stream finalizers before running callbacks.
+    fn prepare_collection_callbacks(&mut self, generation: u8, cycles: &CycleSet) {
         let next = (generation + 1).min(2);
-        for slot in &mut self.slots {
+        for (id, &incoming) in cycles.incoming.iter().enumerate() {
+            let slot = &mut self.slots[id];
             if slot.generation <= generation {
                 slot.generation = next;
+            }
+            // Cyclic GC calls the inherited IOBase finalizer even when the exact
+            // type's ordinary deallocator bypasses it.
+            if incoming != 0
+                && slot.finalization == Finalization::None
+                && let Some(class) = slot.value.as_ref().and_then(Value::finalizer_class)
+                && self.get(class).is_exact_memory_stream()
+            {
+                self.register_finalizer(id as Id);
             }
         }
     }
@@ -6363,7 +6378,7 @@ impl Heap {
                 .count();
             self.gc_schedule.record_survivors(generation, survivors);
         }
-        self.promote_generation(generation);
+        self.prepare_collection_callbacks(generation, &cycles);
         // The per-base subclass links are weak references too. A callback or a
         // finalizer can ask for __subclasses__ before the isolated objects are swept.
         self.classes.retain(|&id| cycles.incoming[id as usize] == 0);
