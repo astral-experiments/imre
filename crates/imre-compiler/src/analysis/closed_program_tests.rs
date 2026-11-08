@@ -106,7 +106,7 @@ fn new_registration_checks_dormant_bodies_against_registered_declarations() {
     let project = tempdir().unwrap();
     let root = project.path();
     let code = "from api import take\n\ndef unused() -> int:\n    return take('x')\n";
-    let mut registrations = vec![
+    let mut registrations = [
         (
             "api".into(),
             root.join("api.pyi"),

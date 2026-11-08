@@ -438,7 +438,8 @@ fn object_fallback<T>(
                     false,
                 );
             }
-            CheckedProgram::Native((mut module, mut owners)) if !boxed_startup => {
+            CheckedProgram::Native(ir) if !boxed_startup => {
+                let (mut module, mut owners) = *ir;
                 if matches!(layout, BoxedLayout::Check) {
                     verify_after(&module, "lowering")?;
                 } else {
@@ -827,14 +828,14 @@ type CheckedIr = (ir::Module, Vec<modules::ModuleId>);
 
 /// The source checker admits the program before the driver chooses its representation.
 enum CheckedProgram {
-    Native(CheckedIr),
+    Native(Box<CheckedIr>),
     Runtime(LoweringDiagnostic),
 }
 
 impl CheckedProgram {
     fn into_native(self) -> Result<CheckedIr, String> {
         match self {
-            Self::Native(ir) => Ok(ir),
+            Self::Native(ir) => Ok(*ir),
             Self::Runtime(reason) => Err(reason.to_string()),
         }
     }
@@ -907,7 +908,7 @@ fn checked_lower_with(
         lowered
     };
     match result {
-        Ok(ir) => Ok(CheckedProgram::Native(ir)),
+        Ok(ir) => Ok(CheckedProgram::Native(Box::new(ir))),
         Err(reason) => {
             if let Some(compiler) = cache {
                 compiler.callers = frontend::CallerCache::default();
