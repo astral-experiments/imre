@@ -109,8 +109,8 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 8, 2026, Imre has a paired pass for **12,965 of 16,202 tests (80.02%)** across the 44 standard library module families tracked below.
-The paired pass rate is 78.6% (10,476 of 13,327) for the original 25 families and 86.6% (2,489 of 2,875) for the 19 additional families.
+As of November 8, 2026, Imre has a paired pass for **12,971 of 16,202 tests (80.06%)** across the 44 standard library module families tracked below.
+The paired pass rate is 78.7% (10,482 of 13,327) for the original 25 families and 86.6% (2,489 of 2,875) for the 19 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
@@ -121,7 +121,7 @@ The [supplemental `test_urllib2` decision](docs/stdlib-omissions.md#test_urllib2
 
 On the campaign's x86-64 Linux runner, stock CPython 3.14.5 registered **16,191** of these originals.
 It passed **15,161**, skipped 1,023, and reported 7 errors.
-Across the 44 families, **12,873 of the 15,161 stock Linux passes (84.9%)** have paired passes, leaving **772** more to reach 90%. The other 92 paired originals skipped or recorded an error in that stock run.
+Across the 44 families, **12,873 of the 15,161 stock Linux passes (84.9%)** have paired passes, leaving **772** more to reach 90%. The other 98 paired originals skipped or recorded an error in that stock run.
 
 | Module | Paired passes | Upstream tests | Omitted | How the tests ran |
 | --- | ---: | ---: | ---: | --- |
@@ -139,7 +139,7 @@ Across the 44 families, **12,873 of the 15,161 stock Linux passes (84.9%)** have
 | `json` | 215 | 216 | 0 | Stock and public Imre at O0 and O3 each ran all 216 originals in separate working directories, passed 215 and skipped the same address-space test. The one new pair was `TestPyRecursion.test_highly_nested_objects_encoding`. The separate encoder candidate added no pairs. Earlier runs of all 34 CLI originals recorded 32 child subtests and 64 tool subprocesses per lane. The O0/O3 children ran native code. Two help cases matched the upstream usage-prefix assertion while their full stdout differed from stock. [Tested public revision](https://github.com/astral-experiments/imre/commit/af2d9fc74ef99c453a76948aeb42927712c47b87). |
 | `logging` | 232 | 272 | 0 | Seven more originals passed from the full upstream logging test file in separate stock and native processes. They cover task names, formatter precision, shutdown and recursion. |
 | `os` | 469 | 579 | 0 | The public filesystem census verified 13 previously unrecorded pairs, including five spawn cases with real native children. Twelve passed on frozen stock. Two further originals cover Linux waitid and its child-status constants. [Linux waitid](https://github.com/astral-experiments/imre/pull/5985) |
-| `pathlib` | 974 | 1,369 | 1 | All 1,369 originals ran in order on Linux. Stock passed 978 and skipped 391. O0 and O3 each reproduced all 974 earlier pairs, skipped 392 and errored on three `test_parts_multithreaded` cases at `Thread.start()`, before any worker read `path.parts`. The extra skip was the CPython-only lazy-import test. [Intact replay](https://github.com/astral-experiments/imre/commit/3e1a1db51d3ebea1cab66a1afb90eca9c6596d91) |
+| `pathlib` | 980 | 1,369 | 1 | All 1,369 originals ran in order on Linux. Stock passed 978 and skipped 391. O0 and O3 each reproduced all 974 earlier pairs, skipped 392 and errored on three `test_parts_multithreaded` cases at `Thread.start()`, before any worker read `path.parts`. The extra skip was the CPython-only lazy-import test. Six more owner and group tests passed as UID 0 with different ownership for a symlink and its target. [Intact replay](https://github.com/astral-experiments/imre/commit/3e1a1db51d3ebea1cab66a1afb90eca9c6596d91) |
 | `re` | 147 | 165 | 7 | Seven CPython compiler and bytecode checks have explicit omissions. The 147 paired originals include focused and complete runs. |
 | `shutil` | 174 | 223 | 0 | All 173 originals that passed on the fixed Linux stock build now pass on Imre at O0 and O3. The new Zstandard test created four archives and extracted them eight times on each engine. A separate stock build verified the bzip2 archive test, bringing the raw total to 174. [#5899](https://github.com/astral-experiments/imre/pull/5899) |
 | `socket` | 106 | 746 | 0 | Socket ownership and UDP-Lite add paired passes. The sendfile original was withdrawn when the descriptor fast path was reverted. [Ownership](https://github.com/astral-experiments/imre/pull/6035) · [Datagrams](https://github.com/astral-experiments/imre/pull/6049) · [File transfer rollback](https://github.com/astral-experiments/imre/pull/6072) |
@@ -150,7 +150,7 @@ Across the 44 families, **12,873 of the 15,161 stock Linux passes (84.9%)** have
 | `typing` | 710 | 712 | 2 | All three ordinary module runs registered 712 parents, including the same 11 doctests with 43 examples. Stock passed 712. Each native run passed 706, errored on four and skipped two. Six named successes are new to the accumulated ledger. Upstream-defined CPython-only guards skipped two tests on Imre. Both passed on stock and have [individual omission decisions](docs/stdlib-omissions.md#typing). |
 | `unittest` | 921 | 1,090 | 0 | The matched complete suite retained its 908 passes and gained nine when native coroutines began reporting unawaited warnings. All 22 AsyncMockAssert originals passed, as did 29 async-patch and thread-mock controls. The cumulative total also includes the earlier Mock directory-listing passes. [Earlier directory checks](https://github.com/astral-experiments/imre/pull/5995) · [Coroutine warnings](https://github.com/astral-experiments/imre/pull/6050) |
 | `urllib` | 173 | 178 | 0 | The public ledger at `4ac5e885` records both unchanged scripts at O0 and O3 in ordinary and explicit `--runtime-imports` modes. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **10,476** | **13,327** | **105** | **4 complete suites match stock on `main`** |
+| **Total** | **10,482** | **13,327** | **105** | **4 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
