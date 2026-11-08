@@ -1,12 +1,12 @@
 //! Unicode 16.0 text properties for integer conversion, matching CPython 3.14.
 
+use imre_ast::numbers::{DEFAULT_DIGITS, decimal_fits};
 use std::borrow::Cow;
-use std::cell::RefCell;
 use std::fmt::{self, Write};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use num_bigint::{BigInt, BigUint};
+use num_bigint::BigInt;
 use num_traits::Zero;
 
 use crate::{Error, Kind, Str};
@@ -151,13 +151,7 @@ pub extern "C" fn imre_integer_digits_init(isolated: u32) {
     let _ = DIGITS.set(AtomicU32::new(configured));
 }
 
-const DEFAULT_DIGITS: u32 = 4300;
 static DIGITS: OnceLock<AtomicU32> = OnceLock::new();
-
-thread_local! {
-    // Cache only the threshold for the most recently checked nonzero limit on this thread.
-    static MAXIMUM_EXCLUSIVE: RefCell<(u32, BigUint)> = const { RefCell::new((0, BigUint::ZERO)) };
-}
 
 fn decimal_limit() -> &'static AtomicU32 {
     // Runtime unit tests may call the formatting ABI without a generated main.
@@ -212,19 +206,7 @@ fn check_digit_count(count: usize, limit: u32) -> crate::Result<()> {
 /// A broad bit-length bound avoids allocating a configured power of ten for small inputs.
 pub(super) fn check_decimal(value: &num_bigint::BigInt) -> crate::Result<()> {
     let limit = decimal_digit_limit();
-    let digits = u64::from(limit);
-    let bits = value.bits();
-    if limit == 0 || bits <= digits * 3 {
-        return Ok(());
-    }
-    if bits > digits * 4
-        || MAXIMUM_EXCLUSIVE.with_borrow_mut(|cached| {
-            if cached.0 != limit {
-                *cached = (limit, BigUint::from(10u8).pow(limit));
-            }
-            value.magnitude() >= &cached.1
-        })
-    {
+    if !decimal_fits(value, limit) {
         Err(Error::new(Kind::ValueError, output_limit_message(limit)?))
     } else {
         Ok(())
