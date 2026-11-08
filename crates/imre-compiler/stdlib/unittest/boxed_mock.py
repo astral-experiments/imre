@@ -372,7 +372,7 @@ class NonCallableMock(_FixedMock):
             self._mock_children[name] = value
         return True
 
-    def _mock_path(self):
+    def _extract_mock_name(self):
         node = self._node
         suffix = ""
         while hasattr(node, "_owner"):
@@ -380,8 +380,10 @@ class NonCallableMock(_FixedMock):
             node = node._owner._node
         return (node._mock_name or "mock") + suffix
 
+    _mock_path = _extract_mock_name
+
     def __repr__(self):
-        name = self._mock_path()
+        name = self._extract_mock_name()
         name_part = f" name={name!r}" if name not in ("mock", "mock.") else ""
         spec_part = ""
         if self._spec_class is not None:
@@ -429,7 +431,7 @@ class NonCallableMock(_FixedMock):
                 return
             adopted = self._adopt(value, "." + name)
             if self._mock_sealed and not adopted and not hasattr(self, name):
-                raise AttributeError("Cannot set " + self._mock_path() + "." + name)
+                raise AttributeError("Cannot set " + self._extract_mock_name() + "." + name)
             if isinstance(value, PropertyMock):
                 # Installing the mock must not call the property's setter.
                 self.__dict__[name] = value
@@ -495,7 +497,7 @@ class NonCallableMock(_FixedMock):
                 seal(child)
             return child
         if self._mock_sealed and name not in self._mock_children:
-            raise AttributeError(self._mock_path() + "." + name)
+            raise AttributeError(self._extract_mock_name() + "." + name)
         return self._get_child(name)
 
     @property
@@ -526,7 +528,7 @@ class NonCallableMock(_FixedMock):
             if self._mock_wraps is not None:
                 return DEFAULT
             if self._mock_sealed:
-                raise AttributeError(self._mock_path() + ".return_value")
+                raise AttributeError(self._extract_mock_name() + ".return_value")
         index = self._return_index()
         node = self._nodes[index]
         if hasattr(node, "_configured_return"):
@@ -717,7 +719,7 @@ class _MagicSlot:
 
     def __get__(self, instance, owner):
         if self.parent._mock_sealed and self.parent._mock_children.get(self.name, _deleted) is _deleted:
-            raise AttributeError(self.parent._mock_path() + "." + self.name)
+            raise AttributeError(self.parent._extract_mock_name() + "." + self.name)
         child = self.parent._get_child(self.name, magic=True)
         setattr(self.parent, self.name, child)
         name = self.name
@@ -731,7 +733,7 @@ class _MagicSlot:
         elif name == "__sizeof__":
             child.return_value = object.__sizeof__(parent)
         elif name == "__fspath__":
-            child.return_value = f"{type(parent).__name__}/{parent._mock_path()}/{id(parent)}"
+            child.return_value = f"{type(parent).__name__}/{parent._extract_mock_name()}/{id(parent)}"
         elif name in ("__eq__", "__ne__"):
             def compare(other):
                 if child._node._result != -1:
@@ -1124,6 +1126,12 @@ def _autospec_function(spec, mock, sig, return_value):
     return funcopy
 
 
+def _check_spec_arg_typos(kwargs):
+    for typo in ("autospect", "auto_spec", "set_spec"):
+        if typo in kwargs:
+            raise RuntimeError(f"{typo!r} might be a typo; use unsafe=True if this is intended")
+
+
 def create_autospec(spec, spec_set=False, instance=False, *, unsafe=False, **kwargs):
     """Create a mock that checks calls against the source signatures."""
     from types import BuiltinFunctionType
@@ -1141,9 +1149,7 @@ def create_autospec(spec, spec_set=False, instance=False, *, unsafe=False, **kwa
     else:
         wrap_function = isinstance(spec, FunctionType)
     if not unsafe:
-        for typo in ("autospect", "auto_spec", "set_spec"):
-            if typo in kwargs:
-                raise RuntimeError(f"{typo!r} might be a typo; use unsafe=True if this is intended")
+        _check_spec_arg_typos(kwargs)
     wraps = kwargs.pop("wraps", None) if wrap_function else None
     for option in ("wraps", "parent"):
         if option in kwargs:

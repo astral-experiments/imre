@@ -101,14 +101,14 @@ class _patch:
     _active_patches = _active_patches
 
     def __init__(self, getter, attribute, new, create, *, spec=None, spec_set=None,
-                 autospec=None, new_callable=None, **kwargs):
+                 autospec=None, new_callable=None, unsafe=False, **kwargs):
         if new_callable is not None:
             if new is not DEFAULT:
                 raise ValueError("Cannot use 'new' and 'new_callable' together")
             if autospec is not None:
                 raise ValueError("Cannot use 'autospec' and 'new_callable' together")
-        if 'unsafe' in kwargs:
-            raise TypeError("unsupported patch option: 'unsafe'")
+        if not unsafe:
+            _check_spec_arg_typos(kwargs)
         self.getter = getter
         self.attribute = attribute
         self.new = new
@@ -297,18 +297,18 @@ class _patch:
 
 
 def _patch_attribute(self, target, new=DEFAULT, spec=None, create=False, spec_set=None,
-                     autospec=None, new_callable=None, **kwargs):
+                     autospec=None, new_callable=None, *, unsafe=False, **kwargs):
     getter, attribute = _get_target(target)
     return _patch(getter, attribute, new, create, spec=spec, spec_set=spec_set,
-                  autospec=autospec, new_callable=new_callable, **kwargs)
+                  autospec=autospec, new_callable=new_callable, unsafe=unsafe, **kwargs)
 
 
 def _patch_object(target, attribute, new=DEFAULT, spec=None, create=False, spec_set=None,
-                  autospec=None, new_callable=None, **kwargs):
+                  autospec=None, new_callable=None, *, unsafe=False, **kwargs):
     if type(target) is str:
         raise TypeError(f"{target!r} must be the actual object to be patched, not a str")
     return _patch(lambda: target, attribute, new, create, spec=spec, spec_set=spec_set,
-                  autospec=autospec, new_callable=new_callable, **kwargs)
+                  autospec=autospec, new_callable=new_callable, unsafe=unsafe, **kwargs)
 
 
 def _patch_multiple(target, spec=None, create=False, spec_set=None,
