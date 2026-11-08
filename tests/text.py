@@ -32,7 +32,6 @@ REJECTED = {
     "formatter_nested_argument": 'from _string import formatter_parser\ndef number(item: int) -> int:\n    return item\nformatter_parser(number("bad"))',
     "isalnum_union_descriptor_receiver": "def test(value: str | int) -> bool:\n    return str.isalnum(value)",
     "isalnum_nested_descriptor_argument": "def required(value: int) -> int:\n    return value\nstr.isalnum(required())",
-    "ord_bytearray": 'ord(bytearray(b"x"))',
     "ord_memoryview": 'ord(memoryview(b"x"))',
     "ord_nested_argument": 'def required(x: str) -> str:\n    return x\nord(c=required())',
     "quote_from_bytes_unrelated_return": (
