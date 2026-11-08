@@ -604,7 +604,7 @@ Use `--extension-path DIRECTORY` to add an import root to `imre check` or `imre 
 imre build main.py --extension-path build/site -o app
 ```
 
-The build follows the imported Python modules and links their code into the executable. The installation directory can be removed before running the program. Supply the option again for another root. A filename launch also searches `PYTHONPATH` during Python startup unless `-E` or `-I` disables it. Standalone builds take additional installed roots from their build options. For native modules, install the typed declarations and compiled archive from an [Imre extension wheel](extensions.md) in a declared directory.
+The build follows the imported Python modules and links their code into the executable. In this example, the executable can import `packaging.version` after `build/site` is removed. Supply the option again for another root. A filename launch also searches `PYTHONPATH` during Python startup unless `-E` or `-I` disables it. Standalone builds take additional installed roots from their build options. For native modules, install the typed declarations and compiled archive from an [Imre extension wheel](extensions.md) in a declared directory.
 
 An imported Python module may check its identity before other imports, for example
 `if __name__ != "pkg.helper": raise ValueError("unexpected module name")`.
