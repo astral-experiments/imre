@@ -330,6 +330,77 @@ def check_charmap_factories():
     assert reader.read() == "€\ufffd"
 
 
+def check_module_factory_results():
+    from encodings import latin_1
+
+    calls = []
+    def invalid():
+        calls.append("invalid")
+        return None
+
+    def legacy():
+        calls.append("legacy")
+        return codecs.ascii_encode, codecs.ascii_decode, None, None
+
+    original = latin_1.getregentry
+    try:
+        latin_1.getregentry = invalid
+        try:
+            codecs.lookup("csisolatin1")
+        except TypeError as error:
+            assert str(error) == "object of type 'NoneType' has no len()"
+        else:
+            raise AssertionError("accepted an invalid module factory result")
+        latin_1.getregentry = legacy
+        info = codecs.lookup("csisolatin1")
+        assert isinstance(info, codecs.CodecInfo) and info.name == "latin_1"
+        assert codecs.getencoder("csisolatin1") is info.encode is codecs.ascii_encode
+        assert info.encode("é", "replace") == (b"?", 1)
+        assert calls == ["invalid", "legacy"]
+    finally:
+        latin_1.getregentry = original
+
+
+def check_cached_package_callback():
+    import encodings
+    import sys
+    from encodings import ascii
+
+    search = encodings.search_function
+    saved = sys.modules["encodings"]
+    sys.modules["encodings"] = None
+    try:
+        entry = search("us_ascii!")
+        assert entry.decode is ascii.Codec.decode
+        assert search("us_ascii!") is entry
+    finally:
+        sys.modules["encodings"] = saved
+
+
+def check_reentrant_codec_factory():
+    import encodings
+    from encodings import latin_1
+
+    original = latin_1.getregentry
+    expected = original()
+    seen = []
+
+    class Factory:
+        def __call__(self):
+            latin_1.getregentry = original
+            return expected
+
+        def __del__(self):
+            seen.append(encodings.search_function("iso_ir_100"))
+
+    try:
+        latin_1.getregentry = Factory()
+        assert codecs.lookup("iso_ir_100") is expected
+        assert seen == [expected] and seen[0] is expected
+    finally:
+        latin_1.getregentry = original
+
+
 def check_incremental_decoder_factory():
     from encodings.utf_8 import IncrementalDecoder
 
@@ -431,6 +502,9 @@ def current():
     check_utf8_stream_readers()
     check_charmap_factories()
     check_incremental_decoder_factory()
+    check_module_factory_results()
+    check_reentrant_codec_factory()
+    check_cached_package_callback()
     check_single_byte_stream_readers()
     check_text_encoding_flag()
     check_escape_decode()
