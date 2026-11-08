@@ -2911,6 +2911,23 @@ mod tests {
     use std::rc::{Rc, Weak};
 
     #[test]
+    fn native_function_construction_uses_interpreter_builtins_without_mutating_globals() {
+        let mut ctx = new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let namespace = ctx.dict(Vec::new());
+        let source = ctx.text("def size(): return len('abc')");
+        ctx.exec_source(source, namespace, None, None).unwrap();
+        let builtins = ctx.dict_named_item(namespace, "__builtins__").unwrap();
+        let original = ctx.dict_named_item(namespace, "size").unwrap();
+        let code = ctx.lookup_attr(original, "__code__").unwrap();
+        let globals = ctx.dict(Vec::new());
+        let function = ctx.construct_function(&[code, globals], &[]).unwrap();
+        assert_eq!(ctx.lookup_attr(function, "__builtins__").unwrap(), builtins);
+        assert!(ctx.dict_named_item(globals, "__builtins__").is_none());
+        let size = ctx.call(function, vec![], vec![]).unwrap();
+        assert_eq!(ctx.as_int(size).unwrap().to_i64(), Some(3));
+    }
+
+    #[test]
     fn newly_created_functions_capture_rebound_builtins_in_the_same_globals() {
         let mut ctx = new_context(
             serde_json::json!({"paths": [], "python_version": "3.14"}),
