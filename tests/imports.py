@@ -2034,7 +2034,8 @@ def main() -> None:
                     "email_address_parsers", "filesystem_resources", "fractions_indirect",
                     "function_type_for_selected_callback", "lzma_formats_and_error",
                     "optional_stdlib_probe_in_dependency", "platform_iot_indirect", "record_warnings",
-                    "source_loader_external_code", "warn_named_helper", "zip_source_spec",
+                    "source_loader_external_code", "source_loader_namespace_directory", "warn_named_helper",
+                    "zip_source_spec",
                 }
                 timeout = 300 if slow_optimized and level > 0 else build_timeout
                 require_success(run(command, temporary, timeout=timeout))
