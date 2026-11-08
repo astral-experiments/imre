@@ -2,11 +2,10 @@
 //! final ownership cleanup only closes resources and never changes error state.
 
 use crate::StrOwner;
-use std::ffi::OsStr;
-use std::fs::{File, OpenOptions};
+use std::ffi::CString;
+use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
-use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
-use std::os::unix::ffi::OsStrExt;
+use std::os::fd::{AsRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::os::unix::fs::MetadataExt;
 
 use super::exceptions::{Error, Kind, Result, finish};
@@ -102,15 +101,21 @@ impl Drop for FileState {
 }
 
 impl FileState {
-    /// Opens a buffered binary writer with the same ownership and errors as typed files.
-    pub(crate) fn binary_writer(path: &str, mode: u32, capacity: Option<usize>) -> Result<Self> {
-        open_state_with_capacity(
+    /// Wrap an open binary writer with the same buffering and ownership as typed files.
+    pub(crate) fn binary_writer(
+        path: &str,
+        mode: u32,
+        capacity: Option<usize>,
+        opened: (File, std::fs::Metadata),
+    ) -> Result<Self> {
+        state_from_file(
             &super::text::try_owned_string(path)?,
             mode,
             true,
             false,
             None,
             capacity,
+            opened,
         )
     }
 
@@ -597,7 +602,7 @@ pub(crate) fn errno_error(error: io::Error) -> Error {
     errno_with_filename(error, None)
 }
 
-pub(super) fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
+pub(crate) fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
     errno_with_filenames(
         error,
         path.map(|s| super::exceptions::Filename::Str(StrOwner::new(Str::from(s)))),
@@ -778,24 +783,25 @@ fn open_state_with_encoding(
     gzip: bool,
     encoding: Option<(&str, &str)>,
 ) -> Result<FileState> {
-    open_state_with_capacity(path, mode, binary, gzip, encoding, None)
-}
-
-fn open_state_with_capacity(
-    path: &StrOwner,
-    mode: u32,
-    binary: bool,
-    gzip: bool,
-    encoding: Option<(&str, &str)>,
-    writer_capacity: Option<usize>,
-) -> Result<FileState> {
-    let (file, metadata) = open_file_with(path.as_bytes(), mode, false, |error| {
+    let opened = open_file_with(path.as_bytes(), mode, |error| {
         errno_with_filenames(
             error,
             Some(super::exceptions::Filename::Str(path.clone())),
             None,
         )
     })?;
+    state_from_file(path, mode, binary, gzip, encoding, None, opened)
+}
+
+fn state_from_file(
+    path: &StrOwner,
+    mode: u32,
+    binary: bool,
+    gzip: bool,
+    encoding: Option<(&str, &str)>,
+    writer_capacity: Option<usize>,
+    (file, metadata): (File, std::fs::Metadata),
+) -> Result<FileState> {
     // CPython 3.14 bounds the device's preferred block size for buffered I/O.
     let capacity = writer_capacity
         .unwrap_or_else(|| crate::text_output::binary_capacity(metadata.blksize().into()));
@@ -836,40 +842,57 @@ fn open_state_with_capacity(
 
 /// Open a raw descriptor with the same pathname and directory errors as Python open().
 pub(crate) fn open_file(path: &str, mode: u32) -> Result<(std::fs::File, std::fs::Metadata)> {
-    open_file_with(path.as_bytes(), mode, false, |error| {
+    open_file_with(path.as_bytes(), mode, |error| {
         errno_with_filename(error, Some(path))
     })
 }
 
-pub(crate) fn open_raw_file(
-    path: &[u8],
-    mode: u32,
-    update: bool,
-) -> Result<(std::fs::File, std::fs::Metadata)> {
-    open_file_with(path, mode, update, errno_error)
+/// Translate the parsed FileIO mode into the flags passed to an opener.
+pub(crate) fn file_flags(mode: u32, update: bool) -> i32 {
+    let access = if update {
+        libc::O_RDWR
+    } else if matches!(mode, 0 | 4) {
+        libc::O_RDONLY
+    } else {
+        libc::O_WRONLY
+    };
+    let create = match mode {
+        0 | 4 => 0,
+        1 => libc::O_CREAT | libc::O_TRUNC,
+        2 => libc::O_CREAT | libc::O_APPEND,
+        3 => libc::O_CREAT | libc::O_EXCL,
+        _ => fail("SystemError", "invalid file mode"),
+    };
+    access | create | libc::O_CLOEXEC
 }
 
-/// Use the caller's filename when opening the path or rejecting a directory.
+/// Open on the typed caller's thread and preserve its original filename on errors.
 fn open_file_with(
     path: &[u8],
     mode: u32,
-    update: bool,
     path_error: impl Fn(io::Error) -> Error,
-) -> Result<(std::fs::File, std::fs::Metadata)> {
+) -> Result<(File, std::fs::Metadata)> {
     super::super::initialize_io();
-    if path.contains(&0) {
-        return Err(Error::new(Kind::ValueError, "embedded null byte"));
-    }
-    let mut options = OpenOptions::new();
-    options.read(update);
-    match mode {
-        0 | 4 => options.read(true).write(update),
-        1 => options.write(true).create(true).truncate(true),
-        2 => options.append(true).create(true),
-        3 => options.write(true).create_new(true),
-        _ => fail("SystemError", "invalid file mode"),
-    };
-    let mut file = options.open(OsStr::from_bytes(path)).map_err(&path_error)?;
+    let path =
+        CString::new(path).map_err(|_| Error::new(Kind::ValueError, "embedded null byte"))?;
+    let flags = file_flags(mode, false);
+    let fd = super::os::open_at(
+        &path,
+        flags,
+        0o666,
+        libc::AT_FDCWD,
+        super::stdlib::check_interrupt,
+    )?
+    .map_err(&path_error)?;
+    prepare_file(fd, mode, path_error)
+}
+
+pub(crate) fn prepare_file(
+    fd: OwnedFd,
+    mode: u32,
+    path_error: impl Fn(io::Error) -> Error,
+) -> Result<(File, std::fs::Metadata)> {
+    let mut file = File::from(fd);
     let metadata = file.metadata().map_err(errno_error)?;
     if metadata.is_dir() {
         return Err(path_error(io::Error::from_raw_os_error(libc::EISDIR)));
@@ -1904,6 +1927,7 @@ mod tests {
     #[test]
     fn append_open_positions_existing_files_and_accepts_pipes() {
         use std::ffi::CString;
+        use std::fs::OpenOptions;
         use std::io::Read;
         use std::os::unix::ffi::OsStrExt;
         use std::os::unix::fs::OpenOptionsExt;

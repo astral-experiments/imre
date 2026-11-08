@@ -24,36 +24,30 @@ pub(in crate::dynamic) enum BinaryFile {
 }
 
 impl BinaryFile {
-    /// Opens the documented read, truncate, append, or exclusive-create mode.
-    pub(in crate::dynamic) fn open(
+    /// Wrap the descriptor acquired by open() without performing a second path lookup.
+    pub(in crate::dynamic) fn from_open(
         path: &str,
         name: Id,
-        mode: &str,
+        access: u32,
+        mode: &'static str,
         writer_capacity: Option<usize>,
+        fd: std::os::fd::OwnedFd,
     ) -> Result<Self> {
-        let (flags, mode) = match mode {
-            "rb" => {
-                let (file, _) = crate::objects::open_file(path, 0)?;
-                return Ok(Self::Reader {
-                    path: name,
-                    slot: RefCell::new(Some(BufReader::new(file))),
-                });
-            }
-            "wb" | "bw" => (1, "wb"),
-            "ab" | "ba" => (2, "ab"),
-            "xb" | "bx" => (3, "xb"),
-            _ => {
-                return Err(Error::new(
-                    "ValueError",
-                    "unsupported mode for dynamic files",
-                ));
-            }
-        };
+        let opened = crate::objects::prepare_file(fd, access, |error| {
+            crate::objects::errno_with_filename(error, Some(path))
+        })?;
+        if access == 0 {
+            return Ok(Self::Reader {
+                path: name,
+                slot: RefCell::new(Some(BufReader::new(opened.0))),
+            });
+        }
         Ok(Self::Writer {
             file: RefCell::new(crate::objects::FileState::binary_writer(
                 path,
-                flags,
+                access,
                 writer_capacity,
+                opened,
             )?),
             path: name,
             mode,

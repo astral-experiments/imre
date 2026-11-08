@@ -57,6 +57,8 @@ pub(crate) mod epoll;
 mod errno;
 pub(crate) mod exceptions;
 mod files;
+#[cfg(test)]
+pub(crate) use files::open_file;
 pub(crate) use files::peek_bytes;
 mod text_file;
 pub(crate) use text_file::{MemoryText, TextFile};
@@ -156,8 +158,8 @@ pub(crate) use zipfile::Archive as ZipArchive;
 
 pub(crate) use errno::{DOC as ERRNO_DOC, platform_entries as errno_entries};
 pub(crate) use files::{
-    FileState, GzipDecoder, Memory, Random, errno_error, open_file, open_raw_file,
-    os_error as gzip_read_error,
+    FileState, GzipDecoder, Memory, Random, errno_error, errno_with_filename, file_flags,
+    os_error as gzip_read_error, prepare_file,
 };
 
 use super::{
