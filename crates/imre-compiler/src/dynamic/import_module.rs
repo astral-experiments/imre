@@ -64,10 +64,8 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "runpy" => bundled_source!("runpy.py"),
         // CPython 3.14.5 Lib/trace.py. See licenses/CPython.txt.
         "trace" => bundled_source!("trace.py"),
-        "traceback" => Some((
-            "traceback.py",
-            include_str!("../../stdlib/traceback_stack.py"),
-        )),
+        // CPython 3.14.5 Lib/traceback.py with native traceback positions.
+        "traceback" => bundled_source!("traceback.py"),
         "subprocess" if cfg!(unix) => {
             bundled_source!("subprocess.py")
         }

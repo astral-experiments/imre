@@ -3108,10 +3108,7 @@ impl Context {
             }
             Value::Native(ref class)
                 if ((builtins::is_builtin_type(class) && !class.contains('.'))
-                    || matches!(
-                        class.as_str(),
-                        "cell" | "function" | "traceback" | "frame" | "mappingproxy"
-                    ))
+                    || builtins::CORE_RUNTIME_TYPES.contains(&class.as_str()))
                     && matches!(name, "__name__" | "__qualname__" | "__module__") =>
             {
                 match name {
