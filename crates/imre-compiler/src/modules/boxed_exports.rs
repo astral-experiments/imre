@@ -76,6 +76,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
         ),
         M::CodecsNative => exports!(
             "_codecs",
+            "_imre_bind_module_search",
             "_imre_codec_functions",
             "_imre_idna_label",
             "_imre_native_search",

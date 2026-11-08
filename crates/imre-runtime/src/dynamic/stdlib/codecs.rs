@@ -17,6 +17,8 @@ pub(in crate::dynamic) struct Registry {
     // The boxed provider preserves an entry for each normalized spelling across
     // registry cache invalidations. Its object belongs to this interpreter.
     entries: HashMap<String, Id>,
+    // The registered provider keeps its package globals, including the spelling cache.
+    module_search: Option<Id>,
     initialized: bool,
     search_path: Vec<Id>,
     // None denotes an existing stateless native transform with no boxed CodecInfo.
@@ -35,6 +37,7 @@ impl Registry {
                     .values()
                     .flat_map(|(encode, decode)| [encode, decode]),
             )
+            .chain(&self.module_search)
             .chain(self.handlers.values())
             .chain(&self.search_path)
             .chain(self.search_cache.values().filter_map(Option::as_ref))
@@ -538,12 +541,34 @@ fn native_functions(ctx: &mut Context, codec: Codec) -> Result<(Id, Id)> {
     Ok(functions)
 }
 
+/// Keep the default provider bound to its original package globals as in CPython.
+/// The ordered search path remains usable before encodings is imported.
+pub(super) fn bind_module_search(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let search = unary_arg("_imre_bind_module_search", args, kwargs)?;
+    if !ctx.callable(search) {
+        return Err(type_error("module search must be callable"));
+    }
+    ctx.codec_entries.module_search.get_or_insert(search);
+    Ok(ctx.builtin("encodings.search_function"))
+}
+
 /// Look up a Python codec module's entry using the default provider's original spelling.
 fn module_entry(ctx: &mut Context, spelling: Id, module: &str) -> Result<Id> {
-    let provider = ctx.module(module)?;
-    let package = ctx.module("encodings")?;
-    let entry = ctx.lookup_attr(package, "_module_entry")?;
-    ctx.call(entry, vec![spelling, provider], Vec::new())
+    if ctx.codec_entries.module_search.is_none() {
+        ctx.module("encodings")?;
+    }
+    let search = ctx.codec_entries.module_search.ok_or_else(|| {
+        Error::new(
+            "ImportError",
+            "encodings did not initialize its module search",
+        )
+    })?;
+    let name = ctx.text(module);
+    ctx.call(search, vec![spelling, name], Vec::new())
 }
 
 fn box_native_entry(ctx: &mut Context, key: String, codec: Codec, spelling: Id) -> Result<Id> {
@@ -560,16 +585,15 @@ fn box_native_entry(ctx: &mut Context, key: String, codec: Codec, spelling: Id) 
             return module_entry(ctx, spelling, &module);
         }
     };
-    let module = ctx.module(&format!("encodings.{suffix}"))?;
-    let id = match codec {
-        Codec::CodePage(_) | Codec::DoubleByte(DoubleByte::ShiftJis) => {
-            native_codec_info(ctx, codec, module)?
-        }
-        _ => {
-            let getregentry = ctx.lookup_attr(module, "getregentry")?;
-            ctx.call(getregentry, Vec::new(), Vec::new())?
-        }
-    };
+    let module = format!("encodings.{suffix}");
+    if matches!(
+        codec,
+        Codec::Ascii | Codec::Latin1 | Codec::Utf8 { .. } | Codec::DoubleByte(DoubleByte::Big5)
+    ) {
+        return module_entry(ctx, spelling, &module);
+    }
+    let module = ctx.module(&module)?;
+    let id = native_codec_info(ctx, codec, module)?;
     ctx.codec_entries
         .entries
         .try_reserve(1)

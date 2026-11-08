@@ -548,6 +548,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("codecs" | "_codecs", name) if codecs::WideFunction::named(name).is_some() => {
             ctx.builtin(&format!("codecs.{name}"))
         }
+        ("_codecs", "_imre_bind_module_search") => ctx.builtin("_codecs._imre_bind_module_search"),
         ("_codecs", "_imre_codec_functions") => ctx.builtin("_codecs._imre_codec_functions"),
         ("_codecs", "_imre_idna_label") => ctx.builtin("_codecs._imre_idna_label"),
         ("_codecs", "_imre_native_search") => ctx.builtin("encodings.search_function"),
@@ -2867,6 +2868,9 @@ pub(super) fn call(
     }
     if name == "_codecs._imre_idna_label" {
         return idna::label(ctx, args, kwargs);
+    }
+    if name == "_codecs._imre_bind_module_search" {
+        return codecs::bind_module_search(ctx, args, kwargs);
     }
     if name == "_codecs._imre_codec_functions" {
         return codecs::entry_functions(ctx, args, kwargs);
