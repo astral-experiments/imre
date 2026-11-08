@@ -4,7 +4,6 @@ import builtins
 import sys
 from contextlib import ContextDecorator, ExitStack
 from functools import wraps
-from importlib import import_module
 from types import ModuleType
 
 
@@ -46,21 +45,8 @@ _deleted = sentinel.DELETED
 
 
 def _patch_owner(name):
-    # Import the longest module prefix, then look up the remaining attributes.
-    parts = name.split('.')
-    prefix = parts.pop(0)
-    owner = import_module(prefix)
-    while parts:
-        candidate = prefix + '.' + parts[0]
-        try:
-            owner = import_module(candidate)
-        except ImportError:
-            break
-        prefix = candidate
-        parts.pop(0)
-    for part in parts:
-        owner = getattr(owner, part)
-    return owner
+    from pkgutil import resolve_name
+    return resolve_name(name)
 
 
 def _get_target(target):
