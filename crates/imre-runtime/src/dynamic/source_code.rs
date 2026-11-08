@@ -3997,10 +3997,7 @@ impl Context {
             ast::Mod::Module(module) => imre_ast::executable::BindingErrors::check(&module.body),
             _ => Default::default(),
         };
-        let symbol_error = future_error
-            .into_iter()
-            .chain(bindings.symbol)
-            .min_by_key(|(range, _)| range.start());
+        let symbol_error = bindings.first_symbol(future_error);
         let mut code = Program::new(filename, "<module>", source.contains(":="));
         code.deferred_pattern = bindings
             .pattern

@@ -41,7 +41,7 @@ struct Imports {
     explicit_roots: Vec<PathBuf>,
     runtime_imports: bool,
     private_names: imre_ast::Names,
-    invalid_executable: bool,
+    invalid_executable: Option<Box<crate::frontend::phase::Diagnostic>>,
     uses_import_builtin: bool,
     uses_exec: bool,
     computed_import: bool,
@@ -563,13 +563,19 @@ fn scan_imports(
     crate::analysis::check_form_feeds(&normalized, parsed.tokens())?;
     let mut body = parsed.into_syntax().body;
     let bindings = imre_ast::executable::BindingErrors::check(&body);
-    if bindings.symbol.is_some()
-        || bindings.pattern.is_some()
-        || imre_ast::future_import_error(&body).is_some()
-    {
-        // This module fails compilation before any of its imports or path edits execute.
+    let error = bindings
+        .first_symbol(imre_ast::future_import_error(&body))
+        .map(|(range, reason)| (range, reason.to_owned()))
+        .or(bindings.pattern);
+    if let Some((range, message)) = error {
+        // Discovery records the error. Only selection as the checked entry diagnoses it here.
+        let diagnostic = crate::frontend::phase::Diagnostic::at(
+            &normalized,
+            &range,
+            format!("SyntaxError: {message}"),
+        );
         return Ok(Imports {
-            invalid_executable: true,
+            invalid_executable: Some(Box::new(diagnostic)),
             ..Imports::default()
         });
     }
@@ -744,11 +750,13 @@ pub(crate) fn compile(
     ) else {
         return Ok(None);
     };
-    if first.invalid_executable && startup.is_none() {
-        // The checked graph can reach object fallback for an unrelated representation
-        // error (e.g. a generic class). Report its owned diagnostics before declining.
+    if startup.is_none()
+        && let Some(error) = first.invalid_executable.take()
+    {
+        // Preserve diagnostics owned by the original first-party graph before
+        // reporting why this entry cannot supply an executable Python body.
         check(false, None)?;
-        return Ok(None);
+        return Err(error.with_path(path).to_string());
     }
     // Python entries can import these bundled sources when static lowering cannot handle the entry.
     let imports_provider = |provider: &str| {
@@ -766,7 +774,7 @@ pub(crate) fn compile(
         || first.runtime_imports
         || (first.uses_import_builtin && startup.is_some())
         || provider_script;
-    let object_entry = first.invalid_executable
+    let object_entry = first.invalid_executable.is_some()
         || object_hint
             && (entry_requests_objects
                 || (operation.is_some() && !ordered_command)
@@ -810,7 +818,7 @@ pub(crate) fn compile(
         }
     }
     let registered_imports = typed_graph
-        .filter(|_| object_imports && !first.invalid_executable)
+        .filter(|_| object_imports && first.invalid_executable.is_none())
         .map(import_module::registered_imports)
         .unwrap_or_default();
     first
@@ -924,7 +932,7 @@ pub(crate) fn compile(
         selected_sources.push((0, true, ordinary_graph.map(|graph| graph.entry)));
     }
     let mut source_initializers = HashSet::new();
-    if first.invalid_executable {
+    if first.invalid_executable.is_some() {
         source_initializers.insert(sources[0].1.clone());
     }
     let mut seen = HashSet::new();
@@ -1389,8 +1397,8 @@ pub(crate) fn compile(
                     if winner {
                         entry_sources.insert(prefix.clone(), (root.clone(), package));
                     }
-                    if !imports.invalid_executable || startup.is_none() {
-                        if imports.invalid_executable {
+                    if imports.invalid_executable.is_none() || startup.is_none() {
+                        if imports.invalid_executable.is_some() {
                             source_initializers.insert(path.clone());
                         } else {
                             let queue = if winner && select_member && filesystem_import {

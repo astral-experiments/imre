@@ -36,6 +36,17 @@ impl BindingErrors {
         errors
     }
 
+    /// Future directives and reserved bindings are diagnosed during symbol-table construction.
+    pub fn first_symbol(
+        &self,
+        future: Option<(TextRange, &'static str)>,
+    ) -> Option<(TextRange, &'static str)> {
+        future
+            .into_iter()
+            .chain(self.symbol)
+            .min_by_key(|(range, _)| range.start())
+    }
+
     fn record_unreachable(&mut self, binding: Option<ast::IrrefutablePattern>) {
         if self.pattern.is_none()
             && let Some(binding) = binding
