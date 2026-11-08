@@ -123,7 +123,7 @@ impl Function<'_, '_> {
                 after
             });
             self.checkpoint(&site.expression);
-            let value = self.expr(&site.expression);
+            let value = self.annotation_value(&site.expression);
             let key = self.code_name(&site.name);
             self.op("put", &[&result, &key, &value]);
             if let Some(after) = after {
