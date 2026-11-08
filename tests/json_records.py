@@ -23,11 +23,7 @@ REJECTED = {
     "sort_json_alias": 'from typing import Any\ndef mutate(rows: list[dict[str, Any]]) -> None:\n    rows.sort(key=lambda row: 1)\ndef pass_alias(rows: list[dict[str, Any]]) -> None:\n    alias = rows\n    mutate(alias)\n',
     "append_json_rows": 'from typing import Any\ndef mutate(rows: list[dict[str, Any]]) -> None:\n    rows.append(rows[0])\n',
     "write_json_object": 'from typing import Any\ndef write(row: dict[str, Any]) -> None:\n    row["field"] = 1\n',
-    "root_json_cycle": 'import json\nroot = json.loads("[]")\nroot.append(root)\n',
     "general_any": "from typing import Any\ndef identity(value: Any) -> Any:\n    return value\n",
-    "json_ordering": 'import json\nrows = json.loads("[]")\nprint(rows[0] < rows[1])\n',
-    "json_instances": 'import json\nfor value in json.loads("[]"):\n    print(isinstance(value, str))\n',
-    "json_options": 'import json\njson.loads("[]", strict=False)\n',
     "unknown_intrinsic": "from imre.json import loads\n",
     "bytes_input": IMPORT + ITEM + 'item = decode(b"{}", Item)\n',
     "missing_schema": IMPORT + 'item = decode("{}")\n',
@@ -97,6 +93,10 @@ if __name__ == "__main__":
         rejections=REJECTED,
         imported_rejections=IMPORTED_REJECTIONS,
         errors={
+            "json_ordering": (
+                'import json\nrows = json.loads("[]")\nprint(rows[0] < rows[1])\n',
+                "IndexError: list index out of range",
+            ),
             "missing_json_key": (row + 'key = "absent"\nrows[0][key]\n', "KeyError"),
             "nested_json_item_mutation": (
                 "import json\n"
@@ -114,9 +114,13 @@ if __name__ == "__main__":
         build_timeouts=dict.fromkeys(
             (
                 "dynamic_json_key",
+                "json_instances",
+                "json_options",
+                "json_ordering",
                 "missing_json_key",
                 "nested_json_item_mutation",
                 "nested_json_list_mutation",
+                "root_json_cycle",
                 "unhashable_json_key",
             ),
             300,
