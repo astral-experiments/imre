@@ -42,6 +42,7 @@ pub mod comprehension;
 #[cfg(target_os = "linux")]
 pub mod epoll;
 pub mod exceptions;
+pub mod executable;
 pub mod indentation;
 pub mod layout;
 pub mod lzma;

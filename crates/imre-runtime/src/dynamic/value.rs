@@ -161,7 +161,7 @@ pub(super) struct Trace {
     pub cause: Option<Id>,
     pub import_message: Option<Id>,
     /// Location of a compiler error before its Python exception can be built.
-    pub pending_syntax: Option<ruff_text_size::TextRange>,
+    pub pending_syntax: Option<super::source_code::SyntaxSpan>,
     /// Live members belong to the exception instance across traceback clones.
     pub source_syntax: Option<crate::shared::Shared<[std::cell::Cell<Id>; 9]>>,
     pub import_names: Option<[Id; 3]>,
@@ -229,6 +229,13 @@ impl Error {
     pub(super) fn source_syntax(
         message: impl Into<String>,
         span: ruff_text_size::TextRange,
+    ) -> Self {
+        Self::located_source_syntax(message, super::source_code::SyntaxSpan::InArgs(span))
+    }
+
+    pub(super) fn located_source_syntax(
+        message: impl Into<String>,
+        span: super::source_code::SyntaxSpan,
     ) -> Self {
         let mut error = Self::new("SyntaxError", message);
         let Some(trace) = error.try_tracing() else {

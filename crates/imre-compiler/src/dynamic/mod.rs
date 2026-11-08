@@ -41,7 +41,7 @@ struct Imports {
     explicit_roots: Vec<PathBuf>,
     runtime_imports: bool,
     private_names: imre_ast::Names,
-    misplaced_future: bool,
+    invalid_executable: bool,
     uses_import_builtin: bool,
     uses_exec: bool,
     computed_import: bool,
@@ -562,10 +562,14 @@ fn scan_imports(
     let parsed = input.parse_module()?;
     crate::analysis::check_form_feeds(&normalized, parsed.tokens())?;
     let mut body = parsed.into_syntax().body;
-    if imre_ast::future_import_error(&body).is_some() {
+    let bindings = imre_ast::executable::BindingErrors::check(&body);
+    if bindings.symbol.is_some()
+        || bindings.pattern.is_some()
+        || imre_ast::future_import_error(&body).is_some()
+    {
         // This module fails compilation before any of its imports or path edits execute.
         return Ok(Imports {
-            misplaced_future: true,
+            invalid_executable: true,
             ..Imports::default()
         });
     }
@@ -740,7 +744,7 @@ pub(crate) fn compile(
     ) else {
         return Ok(None);
     };
-    if first.misplaced_future && startup.is_none() {
+    if first.invalid_executable && startup.is_none() {
         // The checked graph can reach object fallback for an unrelated representation
         // error (e.g. a generic class). Report its owned diagnostics before declining.
         check(false, None)?;
@@ -762,7 +766,7 @@ pub(crate) fn compile(
         || first.runtime_imports
         || (first.uses_import_builtin && startup.is_some())
         || provider_script;
-    let object_entry = first.misplaced_future
+    let object_entry = first.invalid_executable
         || object_hint
             && (entry_requests_objects
                 || (operation.is_some() && !ordered_command)
@@ -806,7 +810,7 @@ pub(crate) fn compile(
         }
     }
     let registered_imports = typed_graph
-        .filter(|_| object_imports && !first.misplaced_future)
+        .filter(|_| object_imports && !first.invalid_executable)
         .map(import_module::registered_imports)
         .unwrap_or_default();
     first
@@ -920,7 +924,7 @@ pub(crate) fn compile(
         selected_sources.push((0, true, ordinary_graph.map(|graph| graph.entry)));
     }
     let mut source_initializers = HashSet::new();
-    if first.misplaced_future {
+    if first.invalid_executable {
         source_initializers.insert(sources[0].1.clone());
     }
     let mut seen = HashSet::new();
@@ -1385,8 +1389,8 @@ pub(crate) fn compile(
                     if winner {
                         entry_sources.insert(prefix.clone(), (root.clone(), package));
                     }
-                    if !imports.misplaced_future || startup.is_none() {
-                        if imports.misplaced_future {
+                    if !imports.invalid_executable || startup.is_none() {
+                        if imports.invalid_executable {
                             source_initializers.insert(path.clone());
                         } else {
                             let queue = if winner && select_member && filesystem_import {

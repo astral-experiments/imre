@@ -98,9 +98,8 @@ impl Checker<'_> {
     ) -> Result<(Vec<Statement>, bool), String> {
         for (index, case) in branch.cases.iter().enumerate() {
             self.pattern_names(&case.pattern)?;
-            if case.pattern.is_irrefutable()
-                && case.guard.is_none()
-                && index + 1 != branch.cases.len()
+            if imre_ast::executable::unreachable_case(case, index + 1 < branch.cases.len())
+                .is_some()
             {
                 return Err(error(
                     self.source,
@@ -1026,7 +1025,12 @@ impl Checker<'_> {
                             "OR patterns must bind the same names in every alternative",
                         ));
                     }
-                    if pattern.is_irrefutable() && index + 1 != or.patterns.len() {
+                    if imre_ast::executable::unreachable_alternative(
+                        pattern,
+                        index + 1 < or.patterns.len(),
+                    )
+                    .is_some()
+                    {
                         return Err(error(
                             self.source,
                             pattern,

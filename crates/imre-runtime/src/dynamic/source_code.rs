@@ -33,8 +33,11 @@ pub(super) struct Program {
     // All nested code shares a source map. Prelinked suspended suites start in a synthetic header.
     source_lines: Rc<[usize]>,
     linked_body_line: Option<(u32, Option<i64>)>,
-    // Check earlier scope declarations before reporting a misplaced future import.
+    // Stop symbol collection at the first invalid binding or misplaced future import.
     syntax_limit: Option<ruff_text_size::TextRange>,
+    // An invalid pattern still has a symbol table. Let all its scopes finish checking
+    // declarations before reporting the code-generation error. Valid modules use no slot.
+    deferred_pattern: Option<Rc<std::cell::RefCell<(ruff_text_size::TextRange, String)>>>,
     pub name: String,
     qualname: String,
     nested_global: bool,
@@ -1838,7 +1841,12 @@ impl Program {
         Ok((self.string_roots, &self.reads))
     }
 
-    fn declare(&mut self, kind: ScopeDirective, names: &[ast::Identifier]) -> Result<()> {
+    fn declare(
+        &mut self,
+        kind: ScopeDirective,
+        names: &[ast::Identifier],
+        range: ruff_text_size::TextRange,
+    ) -> Result<()> {
         for name in names {
             let spelling = name.as_str();
             let message = if self
@@ -1856,7 +1864,10 @@ impl Program {
                 None
             };
             if let Some(message) = message {
-                return Err(Error::new("SyntaxError", message));
+                return Err(Error::located_source_syntax(
+                    message,
+                    SyntaxSpan::InFields(range),
+                ));
             }
             self.directives
                 .insert(name.to_string(), (kind, name.start()));
@@ -2000,6 +2011,7 @@ impl Program {
         child.source_lines = self.source_lines.clone();
         child.linked_body_line = self.linked_body_line;
         child.syntax_limit = self.syntax_limit;
+        child.deferred_pattern.clone_from(&self.deferred_pattern);
         child.strip_docstrings = self.strip_docstrings;
         child.scope_flags = self.nested_scope_flags();
         child
@@ -2023,6 +2035,7 @@ impl Program {
             source_lines: Rc::default(),
             linked_body_line: None,
             syntax_limit: None,
+            deferred_pattern: None,
             name: name.to_owned(),
             qualname: name.to_owned(),
             nested_global: false,
@@ -2562,18 +2575,6 @@ impl Program {
         let mut names = HashSet::new();
         for param in params {
             let name = param.name();
-            match name.as_str() {
-                "__classdict__" => {
-                    return Err(Error::new(
-                        "SyntaxError",
-                        "reserved name '__classdict__' cannot be used for type parameter",
-                    ));
-                }
-                "__debug__" => {
-                    return Err(Error::new("SyntaxError", "cannot assign to __debug__"));
-                }
-                _ => {}
-            }
             if param.default().is_some()
                 || matches!(param, ast::TypeParam::TypeVar(var) if var.bound.is_some())
             {
@@ -2750,11 +2751,11 @@ impl Program {
             let op = match stmt {
                 Stmt::Pass(_) => continue,
                 Stmt::Global(s) => {
-                    self.declare(ScopeDirective::Global, &s.names)?;
+                    self.declare(ScopeDirective::Global, &s.names, s.range())?;
                     continue;
                 }
                 Stmt::Nonlocal(s) => {
-                    self.declare(ScopeDirective::Nonlocal, &s.names)?;
+                    self.declare(ScopeDirective::Nonlocal, &s.names, s.range())?;
                     continue;
                 }
                 Stmt::Expr(s) => match self.lower_suspension(*s.value, line, function)? {
@@ -3359,18 +3360,27 @@ impl Program {
                     self.instructions.push((line, Instruction::Jump(0)));
                     let mut cases = Vec::new();
                     let mut ends = Vec::new();
-                    let count = s.cases.len();
                     let line_offset = |offset: ruff_text_size::TextSize| {
                         lines.partition_point(|n| *n <= offset.to_usize()) as u32 - line
                     };
                     for case in s.cases {
                         let case_line = line_offset(case.pattern.start());
                         let mut captures = indexmap::IndexMap::new();
-                        self.validate_pattern(
-                            &case.pattern,
-                            &mut captures,
-                            case.guard.is_some() || cases.len() + 1 == count,
-                        )?;
+                        if let Err(error) = self.validate_pattern(&case.pattern, &mut captures) {
+                            let Some(deferred) = &self.deferred_pattern else {
+                                return Err(error);
+                            };
+                            if let Some(SyntaxSpan::InArgs(range)) =
+                                error.trace.as_ref().and_then(|trace| trace.pending_syntax)
+                            {
+                                let mut first = deferred.borrow_mut();
+                                if range.end() <= first.0.start() {
+                                    *first = (range, error.message);
+                                }
+                            } else if error.kind != "NotImplementedError" {
+                                return Err(error);
+                            }
+                        }
                         cases.push(SourceCase {
                             pattern: case.pattern,
                             captures: captures.into_values().collect(),
@@ -3446,7 +3456,6 @@ impl Program {
         &mut self,
         pattern: &ast::Pattern,
         captures: &mut indexmap::IndexMap<String, String>,
-        allow_irrefutable: bool,
     ) -> Result<()> {
         let name = match pattern {
             ast::Pattern::MatchSingleton(_) | ast::Pattern::MatchValue(_) => None,
@@ -3468,7 +3477,7 @@ impl Program {
                     ));
                 }
                 for child in &p.patterns {
-                    self.validate_pattern(child, captures, true)?;
+                    self.validate_pattern(child, captures)?;
                 }
                 None
             }
@@ -3476,11 +3485,7 @@ impl Program {
                 let mut first = indexmap::IndexMap::new();
                 for (i, arm) in p.patterns.iter().enumerate() {
                     let mut names = indexmap::IndexMap::new();
-                    self.validate_pattern(
-                        arm,
-                        &mut names,
-                        allow_irrefutable && i + 1 == p.patterns.len(),
-                    )?;
+                    self.validate_pattern(arm, &mut names)?;
                     let order = if i == 0 {
                         first = names;
                         (0..first.len()).collect()
@@ -3514,16 +3519,7 @@ impl Program {
             ast::Pattern::MatchStar(p) => p.name.as_ref(),
             ast::Pattern::MatchAs(p) => {
                 if let Some(inner) = &p.pattern {
-                    self.validate_pattern(inner, captures, allow_irrefutable)?;
-                } else if !allow_irrefutable {
-                    let reason = match &p.name {
-                        Some(name) => format!("name capture '{}'", self.definition_spelling(name)),
-                        None => "wildcard".to_owned(),
-                    };
-                    return Err(Error::source_syntax(
-                        format!("{reason} makes remaining patterns unreachable"),
-                        p.range(),
-                    ));
+                    self.validate_pattern(inner, captures)?;
                 }
                 p.name.as_ref()
             }
@@ -3577,36 +3573,6 @@ pub(super) enum SyntaxSpan {
     InFields(ruff_text_size::TextRange),
 }
 
-/// Reserved captures are symbol errors, before code generation checks sequence shapes or duplicates.
-fn reserved_pattern_capture(body: &[ast::Stmt]) -> Option<ruff_text_size::TextRange> {
-    use ast::visitor::{self, Visitor};
-
-    struct Check(Option<ruff_text_size::TextRange>);
-    impl<'a> Visitor<'a> for Check {
-        fn visit_pattern(&mut self, pattern: &'a ast::Pattern) {
-            if self.0.is_some() {
-                return;
-            }
-            visitor::walk_pattern(self, pattern);
-            let name = match pattern {
-                ast::Pattern::MatchAs(p) => &p.name,
-                ast::Pattern::MatchStar(p) => &p.name,
-                ast::Pattern::MatchMapping(p) => &p.rest,
-                _ => return,
-            };
-            if self.0.is_none() && name.as_ref().is_some_and(|name| name == "__debug__") {
-                self.0 = Some(pattern.range());
-            }
-        }
-
-        fn visit_expr(&mut self, _: &'a ast::Expr) {}
-    }
-
-    let mut check = Check(None);
-    check.visit_body(body);
-    check.0
-}
-
 pub(super) fn syntax_member(name: &str) -> Option<usize> {
     [
         "msg",
@@ -3649,6 +3615,28 @@ impl Context {
         Ok(())
     }
 
+    fn syntax_program_line(&mut self, filename: Id, lineno: usize) -> Option<Id> {
+        use std::io::{BufRead, BufReader};
+        let file = std::fs::File::open(self.import_path(filename).ok()?).ok()?;
+        if !file.metadata().ok()?.is_file() {
+            return None;
+        }
+        let mut reader = BufReader::new(file);
+        let mut bytes = Vec::new();
+        // The tokenizer uses the first two lines to resolve the file's encoding.
+        for _ in 0..lineno.max(2) {
+            if reader.read_until(b'\n', &mut bytes).ok()? == 0 {
+                break;
+            }
+        }
+        let terminated = bytes.ends_with(b"\n") || bytes.ends_with(b"\r");
+        let mut lines = crate::objects::decode_source_lines(&bytes).ok()?;
+        if lineno == lines.len() && !terminated {
+            lines.last_mut()?.pop();
+        }
+        (lineno <= lines.len()).then(|| self.text(lines.swap_remove(lineno - 1)))
+    }
+
     pub(super) fn located_syntax_error(
         &mut self,
         message: &str,
@@ -3664,13 +3652,16 @@ impl Context {
         };
         let (line, column) = position(range.start());
         let (end_line, end_column) = position(range.end());
+        let text = self
+            .syntax_program_line(filename, line as usize)
+            .unwrap_or(NONE);
         let msg = self.text(message);
         let line = self.int(line);
         let location = [
             filename,
             line,
             self.int(column),
-            NONE,
+            text,
             self.int(end_line),
             self.int(end_column),
         ];
@@ -4002,17 +3993,18 @@ impl Context {
                 &lines,
             )?);
         }
-        if let ast::Mod::Module(module) = parsed.syntax()
-            && let Some(range) = reserved_pattern_capture(&module.body)
-        {
-            return Err(self.located_syntax_error(
-                "cannot assign to __debug__",
-                SyntaxSpan::InFields(range),
-                filename_id,
-                &lines,
-            )?);
-        }
+        let bindings = match parsed.syntax() {
+            ast::Mod::Module(module) => imre_ast::executable::BindingErrors::check(&module.body),
+            _ => Default::default(),
+        };
+        let symbol_error = future_error
+            .into_iter()
+            .chain(bindings.symbol)
+            .min_by_key(|(range, _)| range.start());
         let mut code = Program::new(filename, "<module>", source.contains(":="));
+        code.deferred_pattern = bindings
+            .pattern
+            .map(|issue| Rc::new(std::cell::RefCell::new(issue)));
         code.scope_flags = inherited;
         code.source_lines = lines.clone();
         code.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
@@ -4048,10 +4040,10 @@ impl Context {
                     code.scope_flags |= code_flags::FUTURE_ANNOTATIONS;
                     code.private_names = Some(Rc::new(imre_ast::lower_in(&mut body, "", true)));
                 }
-                code.syntax_limit = future_error.map(|(range, _)| range);
+                code.syntax_limit = symbol_error.map(|(range, _)| range);
                 if let Err(error) = code.lower_namespace(body, &lines, false) {
                     if error.kind == "NotImplementedError"
-                        && let Some((range, message)) = future_error
+                        && let Some((range, message)) = symbol_error
                     {
                         return Err(self.located_syntax_error(
                             message,
@@ -4064,7 +4056,7 @@ impl Context {
                     {
                         return Err(self.located_syntax_error(
                             &error.message,
-                            SyntaxSpan::InArgs(span),
+                            span,
                             filename_id,
                             &lines,
                         )?);
@@ -4072,7 +4064,7 @@ impl Context {
                     return Err(error);
                 }
                 // Closure binding resolution follows symbol collection and future placement.
-                if future_error.is_none() {
+                if symbol_error.is_none() {
                     let mut module_globals = HashSet::new();
                     code.resolve_directives(&|_| None, &mut module_globals)?;
                     // A global declared by a nested block makes module assignments use the globals dictionary.
@@ -4090,10 +4082,19 @@ impl Context {
             &spellings,
             &|offset| lines.partition_point(|n| *n <= offset) as u32,
         )?;
-        if let Some((range, message)) = future_error {
+        if let Some((range, message)) = symbol_error {
             return Err(self.located_syntax_error(
                 message,
                 SyntaxSpan::InFields(range),
+                filename_id,
+                &lines,
+            )?);
+        }
+        if let Some(deferred) = &code.deferred_pattern {
+            let (range, message) = &*deferred.borrow();
+            return Err(self.located_syntax_error(
+                message,
+                SyntaxSpan::InArgs(*range),
                 filename_id,
                 &lines,
             )?);
@@ -4840,8 +4841,12 @@ impl Context {
         let [ast::Stmt::FunctionDef(def)] = syntax.body.as_mut_slice() else {
             return Err(Error::new("SystemError", "invalid generator body"));
         };
-        if reserved_pattern_capture(&def.body).is_some() {
-            return Err(Error::new("SyntaxError", "cannot assign to __debug__"));
+        let bindings = imre_ast::executable::BindingErrors::check(&def.body);
+        if let Some((_, message)) = bindings.symbol {
+            return Err(Error::new("SyntaxError", message));
+        }
+        if let Some((_, message)) = bindings.pattern {
+            return Err(Error::new("SyntaxError", message));
         }
         #[derive(serde::Deserialize)]
         struct Signature<'a> {
