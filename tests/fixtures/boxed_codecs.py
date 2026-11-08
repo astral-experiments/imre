@@ -314,6 +314,31 @@ def check_utf8_stream_readers():
         assert reader.read() == expected
 
 
+def check_charmap_undefined_bytes():
+    for name, value in (("cp1251", 0x98), ("cp1252", 0x81), ("cp424", 0x80)):
+        raw = bytes([value])
+        assert ord(raw.decode(name, "surrogateescape")) == 0xdc00 + value
+    raw = b"\x80\x70"
+    try:
+        raw.decode("cp424", "surrogateescape")
+    except UnicodeDecodeError as exc:
+        assert (exc.encoding, exc.object, exc.start, exc.end) == ("charmap", raw, 1, 2)
+    else:
+        raise AssertionError("surrogate-escaped an unmapped ASCII byte")
+
+    def replace_byte(exc):
+        assert exc.encoding == "charmap" and exc.object == raw
+        return str(exc.start), exc.end
+
+    for errors in ("strict", "replace", "ignore", "surrogateescape"):
+        previous = codecs.lookup_error(errors)
+        codecs.register_error(errors, replace_byte)
+        try:
+            assert raw.decode("cp424", errors) == "01"
+        finally:
+            codecs.register_error(errors, previous)
+
+
 def check_charmap_factories():
     from encodings import cp1252
     from io import BytesIO
@@ -501,6 +526,7 @@ def current():
     check_utf8_provider_entries()
     check_utf8_stream_readers()
     check_charmap_factories()
+    check_charmap_undefined_bytes()
     check_incremental_decoder_factory()
     check_module_factory_results()
     check_reentrant_codec_factory()

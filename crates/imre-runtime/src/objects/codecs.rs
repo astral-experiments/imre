@@ -36,6 +36,27 @@ impl CodePage {
             encode,
         }
     }
+
+    /// Append mapped code points up to the next byte requiring an error handler.
+    pub(crate) fn decode_prefix(
+        &self,
+        points: &mut Vec<u32>,
+        data: &[u8],
+        offset: usize,
+        surrogateescape: bool,
+    ) -> Result<Option<DecodeIssue>> {
+        points
+            .try_reserve(data.len() - offset)
+            .map_err(|_| Error::allocation())?;
+        for (index, &byte) in data.iter().enumerate().skip(offset) {
+            points.push(match self.decode.decode(byte) {
+                Some(ch) => u32::from(ch),
+                None if surrogateescape && !byte.is_ascii() => 0xdc00 + u32::from(byte),
+                None => return Ok(Some(charmap_issue(index))),
+            });
+        }
+        Ok(None)
+    }
 }
 
 static CP1251: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(4, "cp1251"));
@@ -704,21 +725,19 @@ impl Codec {
             format.decode_filesystem(data, &mut points);
             return Ok(points);
         }
-        for (index, &byte) in data.iter().enumerate() {
-            let ch = match self {
-                Self::Ascii => byte.is_ascii().then(|| char::from(byte)),
-                Self::Latin1 => Some(char::from(byte)),
-                Self::CodePage(page) => page.decode.decode(byte),
-                Self::Utf8 { .. } | Self::DoubleByte(_) | Self::Idna | Self::Wide(_) => {
-                    unreachable!()
+        if let Self::CodePage(page) = self {
+            if let Some(issue) = page.decode_prefix(&mut points, data, 0, true)? {
+                return Err(issue.error(data));
+            }
+        } else {
+            // The remaining codecs are ASCII and Latin-1.
+            points.extend(data.iter().map(|&byte| {
+                if matches!(self, Self::Ascii) && !byte.is_ascii() {
+                    0xdc00 + u32::from(byte)
+                } else {
+                    u32::from(byte)
                 }
-            };
-            points.push(match ch {
-                Some(ch) => u32::from(ch),
-                None if !byte.is_ascii() => 0xdc00 + u32::from(byte),
-                // The surrogateescape handler cannot consume an unmapped ASCII byte.
-                None => return Err(charmap_decode_error(data, index)),
-            });
+            }));
         }
         Ok(points)
     }
@@ -747,7 +766,7 @@ impl Codec {
                         text.push(ch);
                     } else {
                         decoding_error(&mut text, errors, &[byte], || {
-                            charmap_decode_error(data, index)
+                            charmap_issue(index).error(data)
                         })?;
                     }
                 }
@@ -1026,20 +1045,13 @@ pub(crate) fn unknown_handler(name: &str) -> Error {
     option_error(Kind::LookupError, "unknown error handler name '", name, "'")
 }
 
-fn charmap_decode_error(data: &[u8], index: usize) -> Error {
-    let bytes = match owned_input(data) {
-        Ok(bytes) => bytes,
-        Err(error) => return error,
-    };
-    let reason = "character maps to <undefined>";
-    let byte = data[index];
-    Error::unicode_decode(
-        "charmap",
-        bytes,
-        index..index + 1,
-        reason,
-        format!("'charmap' codec can't decode byte 0x{byte:02x} in position {index}: {reason}"),
-    )
+fn charmap_issue(index: usize) -> DecodeIssue {
+    DecodeIssue {
+        encoding: "charmap",
+        start: index,
+        end: index + 1,
+        reason: "character maps to <undefined>",
+    }
 }
 
 pub(crate) fn decoding_error(
