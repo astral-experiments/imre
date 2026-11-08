@@ -1,6 +1,6 @@
 import fcntl
 import os
-from fcntl import FD_CLOEXEC, F_GETPIPE_SZ, F_SETPIPE_SZ
+from fcntl import FD_CLOEXEC, F_DUPFD, F_DUPFD_CLOEXEC, F_GETPIPE_SZ, F_SETPIPE_SZ
 from posix import O_PATH
 
 
@@ -32,6 +32,17 @@ def current():
         os.close(fd)
     reader, writer = os.pipe()
     try:
+        for command, flag in ((F_DUPFD, 0), (F_DUPFD_CLOEXEC, FD_CLOEXEC)):
+            duplicate = query(Descriptor(reader), command, Index(256))
+            try:
+                assert duplicate >= 256
+                assert query(duplicate, fcntl.F_GETFD) & FD_CLOEXEC == flag
+                os.set_blocking(duplicate, False)
+                assert not os.get_blocking(reader)
+                os.set_blocking(reader, True)
+                assert os.get_blocking(duplicate)
+            finally:
+                os.close(duplicate)
         before = query(reader, F_GETPIPE_SZ)
         adjusted = query(Descriptor(writer), Index(F_SETPIPE_SZ), Index(2**80 + 1))
         assert 0 < adjusted <= before

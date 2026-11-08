@@ -1701,6 +1701,12 @@ impl IntrinsicModule {
             (Self::Warnings, "formatwarning") => Intrinsic::WarningDisplay { show: false },
             (Self::Warnings, "showwarning") => Intrinsic::WarningDisplay { show: true },
             #[cfg(target_os = "linux")]
+            (Self::Fcntl, "F_DUPFD") => Intrinsic::IntConstant(i64::from(libc::F_DUPFD)),
+            #[cfg(target_os = "linux")]
+            (Self::Fcntl, "F_DUPFD_CLOEXEC") => {
+                Intrinsic::IntConstant(i64::from(libc::F_DUPFD_CLOEXEC))
+            }
+            #[cfg(target_os = "linux")]
             (Self::Time, "CLOCK_REALTIME") => {
                 Intrinsic::IntConstant(i64::from(libc::CLOCK_REALTIME))
             }
