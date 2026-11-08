@@ -173,11 +173,13 @@ fn main() {
     std::fs::write(&path, c).unwrap();
     println!("cargo:rerun-if-changed=native/ssl_capabilities.c");
     println!("cargo:rerun-if-changed=native/locale_decode.c");
+    println!("cargo:rerun-if-changed=native/mmap.c");
     println!("cargo:rerun-if-changed=native/faulthandler.c");
     cc::Build::new()
         .file("native/faulthandler.c")
         .file("native/ssl_capabilities.c")
         .file(path)
         .file("native/locale_decode.c")
+        .file("native/mmap.c")
         .compile("imre_errno_headers");
 }

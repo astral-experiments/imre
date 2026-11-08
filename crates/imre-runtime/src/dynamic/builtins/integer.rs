@@ -1,5 +1,7 @@
 use num_bigint::{BigInt, Sign};
 
+#[cfg(target_os = "linux")]
+use super::super::stdlib::mmap;
 use super::*;
 
 /// Apply the integer addition slot without invoking a reflected method or coercion.
@@ -135,6 +137,13 @@ pub(super) fn from_bytes(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     let bytes = match ctx.heap.get(ctx.scalar_value(source)) {
         Value::Bytes(data) | Value::ByteArray(data) => data.as_slice(),
         Value::MemoryView { .. } => ctx.bytes_like(source)?,
+        #[cfg(target_os = "linux")]
+        map @ Value::Mmap { .. } => {
+            // A snapshot followed by num-bigint's infallible limb allocation can abort.
+            // Keep live maps at the same unsupported boundary as mapped memoryviews.
+            mmap::region(map)?;
+            return Err(mmap::unsupported_borrow());
+        }
         Value::Array(array) => array.as_bytes(),
         Value::Str(_) | Value::SurrogateStr(_) => {
             return Err(type_error(format!(

@@ -1,25 +1,118 @@
 //! Native memoryview indexing, casting and assignment.
 use super::{Context, Error, Id, Result, Value, builtins, slice};
 use num_traits::ToPrimitive;
+use std::{borrow::Cow, ops::Range};
 
 mod shape;
 pub(super) use shape::ViewLayout;
 
+pub(super) enum Storage<'a> {
+    Native(&'a [u8]),
+    #[cfg(target_os = "linux")]
+    Mapped(&'a super::stdlib::mmap::Region, Range<usize>),
+}
+
 struct Span<'a> {
-    data: &'a [u8],
+    data: Storage<'a>,
     array: Option<&'a super::array::Array>,
     layout: ViewLayout,
     format: &'static str,
     width: usize,
 }
 
-impl<'a> Span<'a> {
-    fn element(&self, index: usize) -> &[u8] {
-        let offset = self.layout.byte_at(index, self.width);
-        &self.data[offset..offset + self.width]
+impl<'a> Storage<'a> {
+    /// Append exactly the requested bytes, reserving the destination before reading a live map.
+    pub(super) fn append_buffered(
+        &self,
+        buffer: &mut Vec<u8>,
+        start: usize,
+        count: usize,
+    ) -> Result<()> {
+        if start > self.len() || count > self.len() - start {
+            return Err(Error::new("BufferError", "exported buffer changed size"));
+        }
+        buffer
+            .try_reserve_exact(count)
+            .map_err(|_| crate::Error::memory_error())?;
+        match self {
+            Self::Native(bytes) => buffer.extend_from_slice(&bytes[start..start + count]),
+            #[cfg(target_os = "linux")]
+            Self::Mapped(region, span) => {
+                let old_len = buffer.len();
+                buffer.resize(old_len + count, 0);
+                if let Err(error) = region.read_into(span.start + start, &mut buffer[old_len..]) {
+                    buffer.truncate(old_len);
+                    return Err(error);
+                }
+            }
+        }
+        Ok(())
     }
 
-    fn contiguous(&self) -> Result<&'a [u8]> {
+    pub(super) fn len(&self) -> usize {
+        match self {
+            Self::Native(bytes) => bytes.len(),
+            #[cfg(target_os = "linux")]
+            Self::Mapped(_, span) => span.len(),
+        }
+    }
+
+    pub(super) fn read(&self, range: Range<usize>) -> Result<Cow<'a, [u8]>> {
+        if range.end > self.len() || range.start > range.end {
+            return Err(Error::new("BufferError", "exported buffer changed size"));
+        }
+        match self {
+            Self::Native(bytes) => Ok(Cow::Borrowed(&bytes[range])),
+            #[cfg(target_os = "linux")]
+            Self::Mapped(map, span) => {
+                super::stdlib::mmap::read(map, span.start + range.start..span.start + range.end)
+                    .map(Cow::Owned)
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Storage<'_> {
+    fn read_ptr(&self) -> Result<*const u8> {
+        match self {
+            Self::Native(bytes) => Ok(bytes.as_ptr()),
+            Self::Mapped(map, span) => map.readable_ptr(span.start, span.len()),
+        }
+    }
+
+    /// Search two bounded exports without borrowing externally mutable mapped bytes as a Rust slice.
+    pub(super) fn find(&self, needle: &Storage<'_>, reverse: bool) -> Result<Option<usize>> {
+        unsafe extern "C" {
+            fn imre_mmap_find(
+                data: *const u8,
+                len: usize,
+                needle: *const u8,
+                needle_len: usize,
+                reverse: bool,
+            ) -> isize;
+        }
+        // SAFETY: both views stay live, and the search reads only within their checked lengths.
+        let index = unsafe {
+            imre_mmap_find(
+                self.read_ptr()?,
+                self.len(),
+                needle.read_ptr()?,
+                needle.len(),
+                reverse,
+            )
+        };
+        Ok(usize::try_from(index).ok())
+    }
+}
+
+impl<'a> Span<'a> {
+    fn element(&self, index: usize) -> Result<Cow<'a, [u8]>> {
+        let offset = self.layout.byte_at(index, self.width);
+        self.data.read(offset..offset + self.width)
+    }
+
+    fn contiguous_range(&self) -> Result<Range<usize>> {
         if !self.layout.is_contiguous() {
             return Err(Error::new(
                 "BufferError",
@@ -27,24 +120,41 @@ impl<'a> Span<'a> {
             ));
         }
         let begin = self.layout.byte_start(self.width);
-        Ok(&self.data[begin..begin + self.layout.len * self.width])
+        Ok(begin..begin + self.layout.len * self.width)
+    }
+
+    fn contiguous(&self) -> Result<Cow<'a, [u8]>> {
+        self.data.read(self.contiguous_range()?)
+    }
+
+    fn borrowed_contiguous(&self) -> Result<&'a [u8]> {
+        let range = self.contiguous_range()?;
+        match &self.data {
+            Storage::Native(bytes) => Ok(&bytes[range]),
+            #[cfg(target_os = "linux")]
+            Storage::Mapped(..) => Err(super::stdlib::mmap::unsupported_borrow()),
+        }
     }
 
     fn gather(&self, fortran: bool) -> Result<Vec<u8>> {
+        let reorder = fortran && self.layout.shape().len() > 1 && !self.layout.is_f_contiguous();
+        if !reorder && self.layout.is_contiguous() {
+            return match self.contiguous()? {
+                Cow::Borrowed(bytes) => super::copy_ids(bytes),
+                Cow::Owned(bytes) => Ok(bytes),
+            };
+        }
         let mut bytes = Vec::new();
         bytes
             .try_reserve_exact(self.layout.len * self.width)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        if fortran && self.layout.shape().len() > 1 && !self.layout.is_f_contiguous() {
-            for i in 0..self.layout.len {
-                bytes.extend_from_slice(self.element(self.layout.fortran_index(i)));
-            }
-        } else if let Ok(data) = self.contiguous() {
-            bytes.extend_from_slice(data);
-        } else {
-            for i in 0..self.layout.len {
-                bytes.extend_from_slice(self.element(i));
-            }
+        for i in 0..self.layout.len {
+            let at = if reorder {
+                self.layout.fortran_index(i)
+            } else {
+                i
+            };
+            bytes.extend_from_slice(&self.element(at)?);
         }
         Ok(bytes)
     }
@@ -53,9 +163,9 @@ impl<'a> Span<'a> {
         if let Some(array) = self.array {
             return array.at(self.layout.element(index));
         }
-        let bytes = self.element(index);
+        let bytes = self.element(index)?;
         let number = match self.format {
-            "I" | "@I" => i64::from(u32::from_ne_bytes(bytes.try_into().unwrap())),
+            "I" | "@I" => i64::from(u32::from_ne_bytes(bytes.as_ref().try_into().unwrap())),
             _ => i64::from(bytes[0]),
         };
         Ok(Value::Int(number.into()))
@@ -103,7 +213,7 @@ impl Context {
             None => ViewLayout::full(self.view_element_count(owner)?),
         };
         let (_, width) = self.view_format_width(owner, &layout);
-        layout.checked(self.owner_bytes(owner)?.len(), width)
+        layout.checked(self.owner_byte_len(owner)?, width)
     }
 
     pub(super) fn view_format_width(
@@ -134,8 +244,18 @@ impl Context {
             (id, ViewLayout::full(self.view_element_count(id)?))
         };
         let (format, width) = self.view_format_width(owner, &layout);
+        let native = || self.owner_bytes(owner).map(Storage::Native);
+        #[cfg(target_os = "linux")]
+        let data = match super::stdlib::mmap::owner(self, owner)? {
+            Some((map, range)) => {
+                Storage::Mapped(super::stdlib::mmap::region(self.heap.get(map))?, range)
+            }
+            None => native()?,
+        };
+        #[cfg(not(target_os = "linux"))]
+        let data = native()?;
         Ok(Span {
-            data: self.owner_bytes(owner)?,
+            data,
             array: match self.heap.get(self.view_storage_id(owner)) {
                 Value::Array(array)
                     if layout.byte_format.is_none()
@@ -351,7 +471,7 @@ impl Context {
     /// Acquire a contiguous source before checking the exporter’s element size.
     pub(super) fn byte_sized_buffer(&self, input: Id) -> Result<&[u8]> {
         let span = self.buffer_span(input)?;
-        let data = span.contiguous()?;
+        let data = span.borrowed_contiguous()?;
         if span.width != 1 {
             return Err(Error::new("TypeError", "a bytes-like object is required"));
         }
@@ -360,7 +480,7 @@ impl Context {
 
     pub(super) fn view_bytes(&self, view: Id) -> Result<&[u8]> {
         self.check_view_export(view)?;
-        self.buffer_span(view)?.contiguous()
+        self.buffer_span(view)?.borrowed_contiguous()
     }
 
     pub(super) fn memoryview_bytes(&self, view: Id) -> Result<Vec<u8>> {
@@ -722,6 +842,18 @@ impl Context {
             let layout = self.view_layout(view)?;
             (layout.scalar_at(index), bytes)
         };
+        #[cfg(target_os = "linux")]
+        if let Some((map, range)) = super::stdlib::mmap::owner(self, owner)? {
+            let dest = dest.checked(range.len(), width)?;
+            let map = super::stdlib::mmap::region(self.heap.get(map))?;
+            if dest.is_contiguous() {
+                return map.write_from(range.start + dest.byte_start(width), &source);
+            }
+            for (i, item) in source.chunks_exact(width).enumerate() {
+                map.write_from(range.start + dest.byte_at(i, width), item)?;
+            }
+            return Ok(());
+        }
         let bytes = self.writable_owner_bytes(owner)?;
         let dest = dest.checked(bytes.len(), width)?;
         for (i, item) in source.chunks_exact(width).enumerate() {

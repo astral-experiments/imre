@@ -1328,6 +1328,11 @@ pub(super) enum Value {
     },
     #[cfg(target_os = "linux")]
     Epoll(std::rc::Rc<crate::objects::epoll::Epoll>),
+    #[cfg(target_os = "linux")]
+    Mmap {
+        region: Option<std::rc::Rc<super::stdlib::mmap::Region>>,
+        pos: usize,
+    },
     Poll(std::rc::Rc<std::cell::RefCell<crate::objects::readiness::Poll>>),
     Scandir(std::rc::Rc<super::stdlib::os::scandir::Scan>),
     DirEntry(super::stdlib::os::scandir::Entry),
@@ -1828,6 +1833,8 @@ impl Value {
             Self::File(file) => file.owns_open_descriptor(),
             #[cfg(target_os = "linux")]
             Self::Epoll(epoll) => epoll.fd() >= 0,
+            #[cfg(target_os = "linux")]
+            Self::Mmap { region, .. } => region.is_some(),
             Self::Socket(socket)
             | Self::Instance {
                 socket: Some(socket),
@@ -1868,6 +1875,8 @@ impl Value {
         Some(match self {
             #[cfg(target_os = "linux")]
             Self::Epoll(_) => "select.epoll",
+            #[cfg(target_os = "linux")]
+            Self::Mmap { .. } => "mmap.mmap",
             Self::Selector(handle) => handle.borrow().class_name(),
             #[cfg(unix)]
             Self::MemoryBio(_) => "_ssl.MemoryBIO",
@@ -2686,6 +2695,8 @@ impl Value {
             }
             #[cfg(target_os = "linux")]
             Self::Epoll(_) => {}
+            #[cfg(target_os = "linux")]
+            Self::Mmap { .. } => {}
             Self::None
             | Self::Ellipsis
             | Self::NotImplemented

@@ -4799,6 +4799,13 @@ else:
             plugin.write_bytes((fixtures / "boxed_os_getrandom.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
             compare("-IB", str(fixtures / "epoll_descriptors.py"))
+            plugin.write_bytes((fixtures / "boxed_mmap_integer.py").read_bytes())
+            child = run(imre, "-IB", "-c", imports + "arithmetic.current()")
+            assert (child.returncode, child.stdout, child.stderr) == (0, b"", b""), child
+            plugin.write_bytes((fixtures / "boxed_mmap.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            compare("-IB", "-c", imports + "arithmetic.assignment_callbacks()")
+            compare("-IB", "-c", imports + "arithmetic.limits()")
             plugin.write_bytes((fixtures / "boxed_epoll_capability.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current(False)")
             compare("-IB", "-c", imports + "arithmetic.current(True)")

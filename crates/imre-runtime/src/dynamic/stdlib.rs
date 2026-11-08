@@ -59,6 +59,8 @@ pub(super) use math::fraction_hash;
 #[cfg(target_os = "linux")]
 pub(super) mod epoll;
 mod metadata;
+#[cfg(target_os = "linux")]
+pub(super) mod mmap;
 pub(super) mod monitoring;
 pub(super) mod opcode;
 pub(super) mod operator;
@@ -2798,6 +2800,14 @@ pub(super) fn call(
         if let Some(op) = operator::Operation::named(name) {
             return op.call(ctx, name, args, kwargs);
         }
+    }
+    #[cfg(target_os = "linux")]
+    if name == "mmap.mmap" {
+        return mmap::create(ctx, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(method) = name.strip_prefix("mmap.mmap.") {
+        return mmap::call(ctx, method, args, kwargs);
     }
     #[cfg(target_os = "linux")]
     if name == "select.epoll" {

@@ -452,6 +452,8 @@ impl Context {
     /// Slot descriptors require the native layout even when a proxy passes isinstance.
     fn builtin_slot_accepts(&self, object: Id, owner: &str) -> bool {
         match (owner, self.heap.get(self.scalar_value(object))) {
+            #[cfg(target_os = "linux")]
+            ("mmap.mmap", Value::Mmap { .. }) => true,
             ("type", _) => self.is_type_object(object),
             (weakref::PROXY_TYPE | weakref::CALLABLE_PROXY_TYPE, Value::Weak(wr)) => {
                 wr.kind.class() == owner
@@ -623,7 +625,7 @@ impl Context {
         if let Some(method) = self.python_buffer_method(data, true)? {
             self.with_contiguous_python_buffer(data, method, 0, consume)
         } else {
-            self.native_buffer_bytes(data)?;
+            self.contiguous_buffer(data)?;
             self.with_buffer_export(data, |ctx| consume(ctx, data))
         }
     }
@@ -638,7 +640,7 @@ impl Context {
     ) -> Result<T> {
         let view = self.acquire_python_buffer(object, method, flags)?;
         // A failed export of the returned view does not call the provider's release hook.
-        self.view_bytes(view)?;
+        self.contiguous_buffer(view)?;
         self.with_python_buffer_export(object, view, |ctx| consume(ctx, view))
     }
 
@@ -751,6 +753,8 @@ impl Context {
             Value::Bytes(bytes) | Value::ByteArray(bytes) => Ok(bytes),
             Value::Array(a) => Ok(a.as_bytes()),
             Value::RawReadWindow(w) => self.window_bytes(*w),
+            #[cfg(target_os = "linux")]
+            Value::Mmap { .. } => Err(stdlib::mmap::unsupported_borrow()),
             Value::BytesIoStorage(state) => Ok(state.file()?.storage()),
             _ => Err(Error::new(
                 "TypeError",
@@ -762,11 +766,19 @@ impl Context {
         }
     }
 
+    fn owner_byte_len(&self, owner: Id) -> Result<usize> {
+        #[cfg(target_os = "linux")]
+        if let Some((_, range)) = stdlib::mmap::owner(self, owner)? {
+            return Ok(range.len());
+        }
+        Ok(self.owner_bytes(owner)?.len())
+    }
+
     fn view_element_count(&self, owner: Id) -> Result<usize> {
         match self.heap.get(self.view_storage_id(owner)) {
             Value::Array(a) => Ok(a.len()),
             Value::BytesIoStorage(state) => Ok(state.file()?.bytes().len()),
-            _ => Ok(self.owner_bytes(owner)?.len()),
+            _ => self.owner_byte_len(owner),
         }
     }
 
@@ -786,6 +798,8 @@ impl Context {
     fn mutable_storage_bytes(value: &mut Value) -> Result<&mut [u8]> {
         match value {
             Value::ByteArray(bytes) => Ok(bytes.as_mut_slice()),
+            #[cfg(target_os = "linux")]
+            Value::Mmap { .. } => Err(stdlib::mmap::unsupported_borrow()),
             Value::Array(a) => Ok(a.as_bytes_mut()?),
             Value::BytesIoStorage(state) => Ok(state.file_mut()?.storage_mut()?.as_mut_slice()),
             _ => Err(Error::new("TypeError", "cannot modify read-only memory")),
@@ -797,12 +811,17 @@ impl Context {
             Value::MemoryView { owner, .. } => Self::memoryview_owner(*owner)?,
             _ => id,
         };
-        Ok(self.heap.get(self.view_storage_id(owner)))
+        Ok(match self.heap.get(self.view_storage_id(owner)) {
+            Value::RawReadWindow(window) => self.heap.get(window.backing),
+            storage => storage,
+        })
     }
 
     fn bytes_like(&self, id: Id) -> Result<&[u8]> {
         match self.heap.get(self.scalar_value(id)) {
             Value::MemoryView { .. } => self.view_bytes(id),
+            #[cfg(target_os = "linux")]
+            Value::Mmap { .. } => Err(stdlib::mmap::unsupported_borrow()),
             Value::BytesIoBuffer { storage, .. } => match self.heap.get(*storage) {
                 Value::BytesIoStorage(state) => Ok(state.file()?.bytes()),
                 _ => Err(Error::new("ValueError", "I/O operation on closed file.")),
@@ -817,6 +836,25 @@ impl Context {
                 ))
             }
         }
+    }
+
+    /// Resolve a contiguous export without copying any mapped bytes before argument conversion.
+    fn contiguous_buffer(&self, id: Id) -> Result<memoryview::Storage<'_>> {
+        #[cfg(target_os = "linux")]
+        if let Some((map, range)) = stdlib::mmap::mapped_span(self, id)? {
+            return Ok(memoryview::Storage::Mapped(
+                stdlib::mmap::region(self.heap.get(map))?,
+                range,
+            ));
+        }
+        self.native_buffer_bytes(id)
+            .map(memoryview::Storage::Native)
+    }
+
+    /// Obtain the current contents of a contiguous export at the point of consumption.
+    fn read_buffer_bytes(&self, id: Id) -> Result<std::borrow::Cow<'_, [u8]>> {
+        let buffer = self.contiguous_buffer(id)?;
+        buffer.read(0..buffer.len())
     }
 
     fn native_buffer_bytes(&self, id: Id) -> Result<&[u8]> {
@@ -842,7 +880,12 @@ impl Context {
             unreachable!()
         };
         let owner = Self::memoryview_owner(owner)?;
-        Ok(readonly || matches!(self.heap.get(self.view_storage_id(owner)), Value::Bytes(_)))
+        let storage = self.heap.get(self.view_storage_id(owner));
+        #[cfg(target_os = "linux")]
+        if matches!(storage, Value::Mmap { .. }) {
+            return Ok(readonly || stdlib::mmap::region(storage)?.readonly());
+        }
+        Ok(readonly || matches!(storage, Value::Bytes(_)))
     }
 
     fn new_memoryview(&mut self, object: Id) -> Result<Id> {
@@ -865,6 +908,11 @@ impl Context {
         }
         let (owner, anonymous, layout, lease) = match *self.heap.get(self.scalar_value(object)) {
             Value::Bytes(_) | Value::ByteArray(_) => (object, false, None, None),
+            #[cfg(target_os = "linux")]
+            Value::Mmap { .. } => {
+                stdlib::mmap::region(self.heap.get(object))?;
+                (object, false, None, None)
+            }
             Value::MemoryView {
                 owner,
                 anonymous,
@@ -900,6 +948,10 @@ impl Context {
             }
         };
         let storage = self.view_storage_id(owner);
+        #[cfg(target_os = "linux")]
+        if matches!(self.heap.get(storage), Value::Mmap { .. }) {
+            self.heap.note_buffer_view(storage);
+        }
         if matches!(
             self.heap.get(storage),
             Value::Array(_) | Value::ByteArray(_) | Value::BytesIoStorage(_)
@@ -928,19 +980,31 @@ impl Context {
         convert: impl FnOnce(&mut Self) -> Result<T>,
     ) -> Result<T> {
         let input = self.scalar_value(input);
-        if !matches!(
-            self.heap.get(input),
+        let tracks_exports = match self.heap.get(input) {
             Value::ByteArray(_)
-                | Value::Array(_)
-                | Value::MemoryView { .. }
-                | Value::BytesIoBuffer { .. }
-                | Value::BytesIoStorage(_)
-        ) {
+            | Value::Array(_)
+            | Value::MemoryView { .. }
+            | Value::BytesIoBuffer { .. }
+            | Value::BytesIoStorage(_) => true,
+            #[cfg(target_os = "linux")]
+            Value::Mmap { .. } => true,
+            _ => false,
+        };
+        if !tracks_exports {
             return convert(self);
         }
+        let mark = self.buffer_exports.len();
         self.buffer_exports.push(input);
+        // A raw callback view has no public obj. Keep its mapped backing open
+        // for the duration of any further buffer acquisition through that view.
+        #[cfg(target_os = "linux")]
+        if let Some(window) = self.raw_read_window(input)
+            && matches!(self.heap.get(window.backing), Value::Mmap { .. })
+        {
+            self.buffer_exports.push(window.backing);
+        }
         let result = convert(self);
-        self.buffer_exports.pop();
+        self.buffer_exports.truncate(mark);
         result
     }
 
@@ -4661,6 +4725,8 @@ impl Context {
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
             "_io" => stdlib::io::install_native(self, scope, module),
             "ast" => stdlib::ast::install(self, scope),
+            #[cfg(target_os = "linux")]
+            "mmap" => stdlib::mmap::install(self, scope),
             #[cfg(target_os = "linux")]
             "select" => {
                 let epoll = self.builtin("select.epoll");

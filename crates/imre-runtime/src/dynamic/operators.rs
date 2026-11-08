@@ -206,7 +206,7 @@ impl FormatPart {
 }
 
 /// Count normalized positions without traversing the slice or negating a minimum stride.
-fn slice_count(start: i64, end: i64, step: i64) -> usize {
+pub(super) fn slice_count(start: i64, end: i64, step: i64) -> usize {
     let distance = if step > 0 {
         end.saturating_sub(start)
     } else {
@@ -215,7 +215,11 @@ fn slice_count(start: i64, end: i64, step: i64) -> usize {
     (distance.max(0) as u64).div_ceil(step.unsigned_abs()) as usize
 }
 
-fn slice_positions(start: i64, end: i64, step: i64) -> impl Iterator<Item = usize> + Clone {
+pub(super) fn slice_positions(
+    start: i64,
+    end: i64,
+    step: i64,
+) -> impl Iterator<Item = usize> + Clone {
     std::iter::successors(Some(start), move |&i| i.checked_add(step))
         .take_while(move |&i| if step > 0 { i < end } else { i > end })
         .map(|i| i as usize)
@@ -486,6 +490,8 @@ impl Context {
             Value::SurrogateStr(points) => !points.is_empty(),
             Value::Bytes(b) | Value::ByteArray(b) => !b.is_empty(),
             Value::MemoryView { .. } => self.view_layout(id)?.first_len()? != 0,
+            #[cfg(target_os = "linux")]
+            obj @ Value::Mmap { .. } => super::stdlib::mmap::region(obj)?.len() != 0,
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => !v.is_empty(),
             Value::Set { entries: v, .. }
             | Value::Dict(v)
@@ -3199,6 +3205,10 @@ impl Context {
         {
             return Ok(item);
         }
+        #[cfg(target_os = "linux")]
+        if matches!(self.heap.get(obj), Value::Mmap { .. }) {
+            return super::stdlib::mmap::get_item(self, obj, key);
+        }
         if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
             return self.memoryview_get(obj, key);
         }
@@ -3428,9 +3438,13 @@ impl Context {
     }
 
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        if matches!(self.heap.get(obj), Value::Mmap { .. }) {
+            return super::stdlib::mmap::put_item(self, obj, key, val);
+        }
         if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
             if let Some(window) = self.raw_read_window(obj) {
-                self.window_bytes(window)?;
+                window.checked_range(self.owner_byte_len(window.backing)?)?;
                 // An index or value conversion can try to resize the unpinned backing.
                 return self
                     .with_buffer_export(window.backing, |ctx| ctx.memoryview_set(obj, key, val));
