@@ -24,6 +24,7 @@ use ruff_python_parser::{Mode, lexer::lex};
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use salsa::Setter;
 use ty_python_core::program::ProgramSettings;
+use ty_python_core::scope::FileScopeId;
 use ty_python_core::{Program, ProgramFile};
 use ty_python_semantic::dependency::DependencyMetadata;
 use ty_python_semantic::lint::{LintRegistry, RuleSelection};
@@ -1031,8 +1032,7 @@ impl Session {
         self.errors(skipped, overloads, FileChecks::Full, None, None)
     }
 
-    /// Check calls to explicit source parameters before choosing a representation.
-    /// Keep an existing native diagnostic when it describes the same argument.
+    /// Check explicit source signatures before choosing a representation.
     pub(crate) fn check_closed_program(
         &mut self,
         modules: &[impl ClosedSource],
@@ -1041,16 +1041,18 @@ impl Session {
         native: Option<&crate::frontend::phase::Diagnostic>,
     ) -> Result<(), String> {
         // Native lowering and the ordinary fallback checker own the rest of the type
-        // contract. Check the same declared calls even when lowering stops at a
+        // contract. Check the same declared signatures when lowering stops at a
         // representation choice, or registration selects a different source graph.
         let mut rules = RuleSelection::default();
-        rules.enable(
-            default_lint_registry()
-                .get("invalid-argument-type")
-                .expect("registered ty lint"),
-            Severity::Error,
-            ty_python_semantic::lint::LintSource::Default,
-        );
+        for name in ["invalid-argument-type", "invalid-return-type"] {
+            rules.enable(
+                default_lint_registry()
+                    .get(name)
+                    .expect("registered ty lint"),
+                Severity::Error,
+                ty_python_semantic::lint::LintSource::Default,
+            );
+        }
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
             .to(Arc::new(rules));
@@ -1069,6 +1071,7 @@ impl Session {
             return Ok(());
         }
         let mut parameters = Vec::new();
+        let mut result_scopes = Vec::new();
         for (module, &file) in modules.iter().zip(&self.files) {
             if !module.supplies_declarations() {
                 continue;
@@ -1081,9 +1084,17 @@ impl Session {
                 if let ty_python_core::scope::NodeWithScopeKind::Function(function) =
                     scope.node(&self.db)
                 {
+                    let function = function.node(&parsed);
+                    // A generator's annotation describes the iterator, including a separate
+                    // completion value. Leave that contract with the generator checker.
+                    if module.project_path().is_some()
+                        && function.returns.is_some()
+                        && !scope.file_scope_id(&self.db).is_generator_function(index)
+                    {
+                        result_scopes.push((file, scope.file_scope_id(&self.db)));
+                    }
                     parameters.extend(
                         function
-                            .node(&parsed)
                             .parameters
                             .iter()
                             .filter(|p| p.annotation().is_some())
@@ -1092,10 +1103,11 @@ impl Session {
                 }
             }
         }
-        if parameters.is_empty() {
+        if parameters.is_empty() && result_scopes.is_empty() {
             return Ok(());
         }
-        let declarations = DeclaredParameters::new(&self.db, parameters);
+        result_scopes.sort_unstable();
+        let declarations = DeclaredSignatures::new(&self.db, parameters, result_scopes);
         let mut errors = Vec::new();
         for (index, (module, &file)) in modules.iter().zip(&self.files).enumerate() {
             let Some(path) = module.project_path() else {
@@ -1109,7 +1121,7 @@ impl Session {
                 file,
                 skipped.map_or(&[][..], |ranges| ranges[index].as_slice()),
                 overloads.get(index).map_or(&[][..], Vec::as_slice),
-                FileChecks::DeclaredArguments,
+                FileChecks::DeclaredSignatures,
                 None,
                 true,
                 self.explicit_check,
@@ -1181,19 +1193,20 @@ struct CheckedFile<'db> {
     #[returns(copy)]
     explicit_check: bool,
     #[returns(copy)]
-    declarations: Option<DeclaredParameters<'db>>,
+    declarations: Option<DeclaredSignatures<'db>>,
 }
 
-/// Explicit parameters from the selected Python sources and SDK declarations.
+/// Source and SDK parameters, and first-party function scopes with declared results.
 #[salsa::interned]
-struct DeclaredParameters<'db> {
-    ranges: Vec<(File, TextRange)>,
+struct DeclaredSignatures<'db> {
+    parameters: Vec<(File, TextRange)>,
+    result_scopes: Vec<(File, FileScopeId)>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum FileChecks {
     Full,
-    DeclaredArguments,
+    DeclaredSignatures,
     FallbackReturns,
     FunctionBodyCalls,
     NamedFunctionCalls,
@@ -1388,7 +1401,7 @@ struct CheckedError {
 fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedError> {
     let file = checked.file(db);
     let checks = checked.checks(db);
-    let full = matches!(checks, FileChecks::Full | FileChecks::DeclaredArguments);
+    let full = matches!(checks, FileChecks::Full | FileChecks::DeclaredSignatures);
     if !full {
         let parsed =
             ruff_db::parsed::parsed_module(db, db.program_file(file).python_file(db)).load(db);
@@ -1408,9 +1421,21 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedEr
         .iter()
         .filter(|diagnostic| {
             diagnostic.severity() >= Severity::Error
-                && checked
-                    .declarations(db)
-                    .is_none_or(|sources| declared_parameter(diagnostic, sources.ranges(db)))
+                && checked.declarations(db).is_none_or(|sources| {
+                    if diagnostic.id().is_lint_named("invalid-return-type") {
+                        primary_range(diagnostic, file)
+                            .and_then(|range| return_scope(db, file, range))
+                            .is_some_and(|scope| {
+                                sources
+                                    .result_scopes(db)
+                                    .binary_search(&(file, scope))
+                                    .is_ok()
+                            })
+                    } else {
+                        diagnostic.id().is_lint_named("invalid-argument-type")
+                            && declared_parameter(diagnostic, sources.parameters(db))
+                    }
+                })
                 && (full
                     || diagnostic.id().as_str() != "invalid-assignment"
                     || checked.first_party(db)
@@ -1432,7 +1457,8 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedEr
                                     diagnostic.id().as_str(),
                                 ))
                             // ty also reports implicit None returns at the annotation span.
-                            || (diagnostic.id().as_str() == "invalid-return-type"
+                            || (checks != FileChecks::DeclaredSignatures
+                                && diagnostic.id().is_lint_named("invalid-return-type")
                                 && diagnostic.headline_message()
                                     == "Return type does not match returned value"
                                 && contextmanager_annotation(db, file, range))
@@ -1447,11 +1473,7 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedEr
         })
         .map(|diagnostic| CheckedError {
             rule: diagnostic.id(),
-            range: diagnostic.primary_span().and_then(|span| {
-                (span.file() == &ruff_db::diagnostic::UnifiedFile::Ty(file))
-                    .then(|| span.range())
-                    .flatten()
-            }),
+            range: primary_range(diagnostic, file),
             rendered: diagnostic
                 .display(
                     &(db as &dyn ruff_db::Db),
@@ -1540,6 +1562,39 @@ fn scalar_initializer(db: &dyn Db, file: File, range: TextRange) -> bool {
         .into_iter().any(|class| declared == scalar(class))
         // ty widens a float annotation to float | int.
         || declared == UnionType::from_two_elements(db, &env, scalar(KnownClass::Float), scalar(KnownClass::Int))
+}
+
+fn primary_range(diagnostic: &Diagnostic, file: File) -> Option<TextRange> {
+    let span = diagnostic.primary_span()?;
+    (span.file() == &ruff_db::diagnostic::UnifiedFile::Ty(file))
+        .then(|| span.range())
+        .flatten()
+}
+
+/// Resolve an explicit return site to its indexed function. An implicit fallthrough
+/// points at the annotation, outside any return statement.
+fn return_scope(db: &dyn Db, file: File, range: TextRange) -> Option<FileScopeId> {
+    use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
+    use ty_python_core::scope::NodeWithScopeRef;
+
+    let program = db.program_file(file);
+    let parsed = ruff_db::parsed::parsed_module(db, program.python_file(db)).load(db);
+    let body = parsed.suite();
+    let stmt = body.get(body.partition_point(|stmt| stmt.end() <= range.start()))?;
+    if !stmt.range().contains_range(range) {
+        return None;
+    }
+    let nodes = covering_node(AnyNodeRef::from(stmt), range);
+    let mut ancestors = nodes.ancestors();
+    ancestors.find(|node| matches!(node, AnyNodeRef::StmtReturn(_)))?;
+    let function = ancestors.find_map(|node| match node {
+        AnyNodeRef::StmtFunctionDef(function) => Some(function),
+        _ => None,
+    })?;
+    Some(
+        ty_python_core::semantic_index(db, program)
+            .node_scope(NodeWithScopeRef::Function(function)),
+    )
 }
 
 /// ty identifies the matched source parameter in an argument diagnostic. Use that

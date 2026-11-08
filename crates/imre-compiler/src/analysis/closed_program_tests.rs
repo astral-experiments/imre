@@ -4,6 +4,21 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
+fn registered_body_checks_its_declared_result() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    let suspect = project.path().join("suspect.py");
+    fs::write(&entry, "from ast import literal_eval\ntry:\n    import suspect\nexcept ImportError:\n    pass\nprint(literal_eval('27'))\n").unwrap();
+    fs::write(&suspect, "def dormant() -> int:\n    return 'wrong'\n").unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(error.contains("suspect.py:2:12"), "{error}");
+    assert!(error.contains("invalid-return-type"), "{error}");
+
+    fs::write(&suspect, "def dormant() -> str:\n    return 'wrong'\n").unwrap();
+    crate::check_file(&entry, None).unwrap();
+}
+
+#[test]
 fn closed_program_keeps_first_party_contracts_across_cached_edits() {
     let project = tempdir().unwrap();
     let entry = project.path().join("main.py");
