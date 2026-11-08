@@ -1039,6 +1039,8 @@ pub(crate) fn compile(
         {
             graph.require_fallback_calls();
         }
+        // Include the current module's computed imports when deciding its ownership.
+        computed_import |= imports.computed_import;
         // A boxed provider can discover further site modules while collecting dependencies.
         // Keep checked machinery diagnostics on the modules in the original program.
         let machinery_graph = typed_graph.filter(|_| {
@@ -1059,7 +1061,6 @@ pub(crate) fn compile(
             return Ok(None);
         }
         uses_exec |= imports.uses_exec;
-        computed_import |= imports.computed_import;
         // A checked caller can request the loader before its other annotated calls are lowered.
         if options.python_startup().is_none()
             && (imports.uses_machinery_export("BuiltinImporter")
