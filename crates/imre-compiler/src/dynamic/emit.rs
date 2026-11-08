@@ -270,7 +270,20 @@ fn parse_source(path: &Path, source: &str, keep_docstrings: bool) -> Result<Pars
     let parsed = imre_ast::indentation::prepare(source)
         .parse_module()
         .map_err(|err| format!("{}: {err}", path.display()))?;
-    if let Some((range, reason)) = imre_ast::comprehension::dict_unpacking_error(&parsed) {
+    let replacements = check_parsed_source(path, source, &parsed, keep_docstrings)?;
+    Ok(ParsedSource {
+        parsed,
+        replacements,
+    })
+}
+
+pub(super) fn check_parsed_source(
+    path: &Path,
+    source: &str,
+    parsed: &ruff_python_parser::Parsed<ast::ModModule>,
+    keep_docstrings: bool,
+) -> Result<HashMap<ruff_text_size::TextRange, Vec<u32>>, String> {
+    if let Some((range, reason)) = imre_ast::comprehension::dict_unpacking_error(parsed) {
         let error =
             crate::frontend::diagnostic_message(source, &range, &format!("SyntaxError: {reason}"));
         return Err(format!("{}:{error}", path.display()));
@@ -288,13 +301,10 @@ fn parse_source(path: &Path, source: &str, keep_docstrings: bool) -> Result<Pars
         strings::check_docs(source, &parsed.syntax().body, &replacements)
             .map_err(|error| format!("{}:{error}", path.display()))?;
     }
-    Ok(ParsedSource {
-        parsed,
-        replacements,
-    })
+    Ok(replacements)
 }
 
-fn lower_source(
+pub(super) fn lower_source(
     path: &Path,
     source: &str,
     body: &mut [ast::Stmt],
@@ -332,7 +342,7 @@ pub(super) fn check(
     Ok(())
 }
 
-pub(super) fn check_source(path: &Path, source: &str, keep_docstrings: bool) -> Result<(), String> {
+fn check_source(path: &Path, source: &str, keep_docstrings: bool) -> Result<(), String> {
     let source_tree = parse_source(path, source, keep_docstrings)?;
     lower_source(path, source, &mut source_tree.parsed.into_syntax().body)?;
     Ok(())
