@@ -72,16 +72,17 @@ impl<'a> Storage<'a> {
     }
 }
 
-#[cfg(target_os = "linux")]
 impl Storage<'_> {
-    fn read_ptr(&self) -> Result<*const u8> {
+    pub(in crate::dynamic) fn read_ptr(&self) -> Result<*const u8> {
         match self {
             Self::Native(bytes) => Ok(bytes.as_ptr()),
+            #[cfg(target_os = "linux")]
             Self::Mapped(map, span) => map.readable_ptr(span.start, span.len()),
         }
     }
 
     /// Search two bounded exports without borrowing externally mutable mapped bytes as a Rust slice.
+    #[cfg(target_os = "linux")]
     pub(super) fn find(&self, needle: &Storage<'_>, reverse: bool) -> Result<Option<usize>> {
         unsafe extern "C" {
             fn imre_mmap_find(
