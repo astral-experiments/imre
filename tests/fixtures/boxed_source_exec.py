@@ -1296,6 +1296,30 @@ def exec_caller_namespaces():
     exec("result = n", globals={"n": 8}, locals=separate, closure=None)
     assert separate == {"result": 8}
 
+    def update():
+        nonlocal value
+        value = abs(value)
+
+    other = 11
+
+    def alternate():
+        return other
+
+    namespace = {"abs": lambda n: n * 2}
+    result = exec(update.__code__, namespace, closure=alternate.__closure__)
+    assert result is None
+    assert (value, other) == (7, 22)
+
+    def needs(arg):
+        return value + arg
+
+    try:
+        exec(needs.__code__, namespace, closure=needs.__closure__)
+    except TypeError as exc:
+        assert str(exc) == "needs() missing 1 required positional argument: 'arg'"
+    else:
+        raise AssertionError("missing argument accepted")
+
     outer = {"__doc__": "outer"}
     exec(
         '"""  Measure time.\n\tRead the clock.\n"""\n'
