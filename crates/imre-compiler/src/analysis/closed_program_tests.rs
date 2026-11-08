@@ -65,8 +65,7 @@ fn registered_parameter_changes_recheck_the_unchanged_caller() {
         super::check_registered_project(
             root,
             &[],
-            sources.iter().map(|s| RegisteredSource::new(s, true)),
-            &graph.inputs,
+            sources.iter().map(|s| RegisteredSource::new(s, true, None)),
             Some(&graph),
         )
     };
@@ -90,8 +89,7 @@ fn registered_parameter_changes_recheck_the_unchanged_caller() {
         registered
             .iter()
             .enumerate()
-            .map(|(i, s)| RegisteredSource::new(s, i == 0)),
-        &graph.inputs,
+            .map(|(i, s)| RegisteredSource::new(s, i == 0, None)),
         Some(&graph),
     )
     .unwrap_err();
@@ -114,15 +112,13 @@ fn new_registration_checks_dormant_bodies_against_registered_declarations() {
         ),
         ("new".into(), root.join("new.py"), code.into()),
     ];
-    let inputs = crate::SourceInputs::default();
     let error = super::check_registered_project(
         root,
         &[],
         registrations
             .iter()
             .enumerate()
-            .map(|(i, s)| RegisteredSource::new(s, i == 1)),
-        &inputs,
+            .map(|(i, s)| RegisteredSource::new(s, i == 1, None)),
         None,
     )
     .unwrap_err();
@@ -137,8 +133,7 @@ fn new_registration_checks_dormant_bodies_against_registered_declarations() {
         registrations
             .iter()
             .enumerate()
-            .map(|(i, s)| RegisteredSource::new(s, i == 1)),
-        &inputs,
+            .map(|(i, s)| RegisteredSource::new(s, i == 1, None)),
         None,
     )
     .unwrap();
@@ -161,7 +156,6 @@ fn registered_python_shadow_provides_the_call_signature() {
             "import subprocess\n\ndef dormant() -> None:\n    subprocess.run(1)\n".into(),
         ),
     ];
-    let inputs = crate::SourceInputs::default();
     let verify = |sources: &[_]| {
         super::check_registered_project(
             root,
@@ -169,8 +163,7 @@ fn registered_python_shadow_provides_the_call_signature() {
             sources
                 .iter()
                 .enumerate()
-                .map(|(i, s)| RegisteredSource::new(s, i == 1)),
-            &inputs,
+                .map(|(i, s)| RegisteredSource::new(s, i == 1, None)),
             None,
         )
     };

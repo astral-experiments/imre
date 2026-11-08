@@ -2797,6 +2797,8 @@ pub(crate) struct SourceModule {
     pub(crate) path: PathBuf,
     pub(crate) name: String,
     pub(crate) source: String,
+    /// Physical text when newline normalization changed the source for analysis.
+    original_source: Option<Box<str>>,
     pub(crate) bundled: bool,
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) bindings: HashMap<String, Binding>,
@@ -2825,6 +2827,10 @@ pub(crate) struct SourceModule {
 }
 
 impl SourceModule {
+    pub(crate) fn original_source(&self) -> &str {
+        self.original_source.as_deref().unwrap_or(&self.source)
+    }
+
     pub(crate) fn is_program_source(&self) -> bool {
         !self.bundled
             && self.archive.is_none()
@@ -3136,6 +3142,7 @@ pub(crate) struct SourceGraph {
     zip_files: Vec<(PathBuf, PathBuf, String)>,
     pub(crate) session: Session,
     pub(crate) modules: Vec<SourceModule>,
+    by_name: HashMap<String, ModuleId>,
     pub(crate) entry: ModuleId,
     ordered_bindings: Option<ordered_imports::Bindings>,
     /// The absolute entry spelling used for Python's `__file__`.
@@ -3148,6 +3155,17 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    /// A concrete Python file registered by the checked resolver, before object lowering.
+    pub(crate) fn python_file(&self, name: &str) -> Option<ModuleId> {
+        let id = *self.by_name.get(name)?;
+        let module = &self.modules[id];
+        (!module.bundled
+            && !module.is_namespace()
+            && module.archive.is_none()
+            && !(id == self.entry && self.virtual_command))
+            .then_some(id)
+    }
+
     /// Request checked-file diagnostics without replacing checks requested by a Python entry.
     pub(crate) fn require_fallback_calls(&self) {
         if matches!(self.check_fallback_calls.get(), FallbackCalls::None) {
@@ -4518,9 +4536,11 @@ impl<'a> Loader<'a> {
             identity.clone(),
             blake3::hash(source.as_bytes()).to_hex().to_string(),
         ));
-        let source = crate::normalize_source(source, kind)
-            .map_err(|error| format!("{}: {error}", path.display()))?
-            .into_owned();
+        let normalized = crate::normalize_source(source, kind)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        let original_source =
+            matches!(normalized, std::borrow::Cow::Owned(_)).then(|| source.into());
+        let source = normalized.into_owned();
         let parsed = self.session.add(&path, &source, kind)?;
         let id = self.modules.len();
         self.by_name.insert(name.clone(), id);
@@ -4530,6 +4550,7 @@ impl<'a> Loader<'a> {
             path,
             name,
             source,
+            original_source,
             bundled: false,
             parsed,
             is_package,
@@ -4688,6 +4709,7 @@ impl<'a> Loader<'a> {
                 .ordered_imports
                 .then(|| ordered_imports::Bindings::new(&self.modules)),
             modules: self.modules,
+            by_name: self.by_name,
             entry,
             initialization: self.initialization,
             errno_names: self.errno_names,
