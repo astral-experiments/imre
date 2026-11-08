@@ -5629,20 +5629,25 @@ impl Heap {
         !self.ordinary_finalizers.is_empty()
     }
 
-    pub(super) fn pending_full_finalizer(&self) -> Option<Id> {
-        if !self.has_ordinary_finalizers() {
-            return None;
-        }
-        let cohort = self.full_collection.as_ref()?;
-        let mut index = self.gc_order.head;
-        while index != END {
-            let slot = &self.slots[index];
-            if slot.finalization == Finalization::Pending
-                && cohort.incoming.get(index).is_some_and(|&count| count != 0)
-            {
-                return Some(index as Id);
+    /// Finalize original isolate members in encounter order. A previous callback may
+    /// have resumed a generator or changed the class of a later member.
+    pub(super) fn pending_full_finalizer(&mut self) -> Option<Id> {
+        while let Some(index) = self.full_collection.as_mut()?.work.pop() {
+            let id = index as Id;
+            if self.is_pending_finalizer(id) {
+                return Some(id);
             }
-            index = slot.gc_next.get();
+            // Even a plain or never-started generator gets an implicit close in cyclic GC.
+            // Coroutine and async-generator wrappers own their frames' finalization.
+            if !self.finalizer_ran(id)
+                && let Value::Generator { code, .. } = self.get(id)
+                && let Value::Code(code) = self.get(*code)
+                && !code.is_coroutine()
+                && code.flags & imre_ast::code_flags::ASYNC_GENERATOR == 0
+            {
+                self.register_finalizer(id);
+                return Some(id);
+            }
         }
         None
     }
@@ -6645,6 +6650,17 @@ impl Heap {
             self.gc_schedule.record_survivors(generation, survivors);
         }
         self.prepare_collection_callbacks(generation, &cycles);
+        // mark_full placed the unreachable objects at the tail in encounter order.
+        // Reuse the cycle workspace as a stack so callbacks can mutate the heap
+        // without making us revisit earlier members or follow a recycled link.
+        cycles.work.clear();
+        let mut id = self.gc_order.tail;
+        while id != END && self.traces[id].get() == UNMARKED {
+            if cycles.incoming[id] != 0 {
+                cycles.work.push(id);
+            }
+            id = self.slots[id].gc_prev.get();
+        }
         // The per-base subclass links are weak references too. A callback or a
         // finalizer can ask for __subclasses__ before the isolated objects are swept.
         self.classes.retain(|&id| cycles.incoming[id as usize] == 0);
