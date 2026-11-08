@@ -4,6 +4,8 @@ use num_traits::ToPrimitive;
 use std::io;
 
 const COMMANDS: &[(&str, libc::c_int)] = &[
+    ("F_DUPFD", libc::F_DUPFD),
+    ("F_DUPFD_CLOEXEC", libc::F_DUPFD_CLOEXEC),
     ("F_GETFD", libc::F_GETFD),
     ("F_SETFD", libc::F_SETFD),
     ("F_GETFL", libc::F_GETFL),
