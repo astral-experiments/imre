@@ -706,15 +706,11 @@ impl Inference {
                     for (parameter, signature) in
                         closed_calls::parameters(&function.parameters).zip(&signature.params)
                     {
-                        let slot =
-                            checker.declare(parameter.name().as_str(), signature.ty, parameter)?;
-                        checker.assigned.insert(slot);
+                        checker.bind_parameter(parameter, signature.ty)?;
                     }
                     if let Some(keyword) = &function.parameters.kwarg {
                         let parameter = signature.params.last().expect("keyword-rest signature");
-                        let slot =
-                            checker.declare(keyword.name.as_str(), parameter.ty, &**keyword)?;
-                        checker.assigned.insert(slot);
+                        checker.bind_parameter(keyword, parameter.ty)?;
                     }
                     checker.collect_local_definitions(&function.body)?;
                     let (_, falls_through) = checker.block(&function.body)?;
