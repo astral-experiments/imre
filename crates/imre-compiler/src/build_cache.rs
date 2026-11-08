@@ -586,7 +586,7 @@ impl Cache {
                 (&options.stdlib_dir, &options.site_dirs),
                 &options.user_site_pth,
                 (options.sitecustomize, options.stdlib_sitecustomize),
-                &options.stdlib_fallback,
+                (&options.stdlib_fallback, &options.installed_stdlib_archive),
             ),
             env::current_dir().ok()?.join(entry).into_os_string(),
             module_root,

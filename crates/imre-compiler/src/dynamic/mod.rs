@@ -901,6 +901,7 @@ pub(crate) fn compile(
     let bundled_root = BUNDLED_SOURCE_ROOT;
     let mut inputs = SourceInputs::default();
     let mut archives = HashMap::new();
+    let mut physical_files = HashSet::new();
     for path in options
         .extension_paths
         .iter()
@@ -1152,6 +1153,13 @@ pub(crate) fn compile(
                     file_alternatives && frozen && searched_frozen_files.insert(prefix.clone());
                 let selected_member = if select_member && on_sdk_path {
                     crate::zip_entry::packaged_member(&prefix)
+                } else if options.installed_stdlib_archive.is_some()
+                    && selected
+                    && !frozen
+                    && literal
+                    && on_sdk_path
+                {
+                    crate::zip_entry::installed_member(&prefix)
                 } else {
                     None
                 };
@@ -1429,9 +1437,38 @@ pub(crate) fn compile(
                     }
                 }
                 if let Some(member) = installed {
-                    let source = crate::zip_entry::installed_source(member)?;
-                    let path = Path::new(bundled_root).join(member);
-                    let package = member.ends_with("/__init__.py");
+                    let shipped = crate::zip_entry::installed_source(member)?;
+                    let (path, source, package) = if let Some(root) =
+                        &options.installed_stdlib_archive
+                        && selected_member.is_some()
+                    {
+                        let archive = match archives.entry(root.clone()) {
+                            std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+                            std::collections::hash_map::Entry::Vacant(e) => {
+                                e.insert(crate::zip_entry::ZipSources::open(
+                                    root,
+                                    &mut inputs,
+                                    &mut filesystem,
+                                )?)
+                            }
+                        };
+                        let Some((path, source, package)) = archive.module(&prefix) else {
+                            continue;
+                        };
+                        // Other SDK sources retain their ordinary loader and syntax checks.
+                        if source != shipped {
+                            continue;
+                        }
+                        let path = root.join(path);
+                        physical_files.insert(path.clone());
+                        (path, source, package)
+                    } else {
+                        (
+                            Path::new(bundled_root).join(member),
+                            shipped,
+                            member.ends_with("/__init__.py"),
+                        )
+                    };
                     let imports = imports_for_module(&path, &source)?;
                     let next = (prefix.clone(), package, imports);
                     if selected_member.is_some() {
@@ -1553,12 +1590,13 @@ pub(crate) fn compile(
             .and_then(provider_archive::symbols)
             .unwrap_or_default();
         let config = config.to_string();
-        // Namespace portions and ZIP members have import filenames but no individual file input.
-        let physical_files = inputs
-            .files
-            .iter()
-            .flat_map(|(path, identity, _)| [cwd.join(path), identity.clone()])
-            .collect();
+        // SDK members retain their loader-visible filenames while the ZIP is the build input.
+        physical_files.extend(
+            inputs
+                .files
+                .iter()
+                .flat_map(|(path, identity, _)| [cwd.join(path), identity.clone()]),
+        );
         let emit = |split| {
             emit::emit(
                 modules,

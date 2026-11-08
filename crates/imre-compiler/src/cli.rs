@@ -205,7 +205,9 @@ impl BuildOptions {
                     .any(has_hook));
         options.compile.stdlib_sitecustomize = stdlib_sitecustomize;
         #[cfg(unix)]
-        if !layout.stdlib_archive.is_file() {
+        if layout.stdlib_archive.is_file() {
+            options.compile.installed_stdlib_archive = Some(layout.stdlib_archive.clone());
+        } else {
             options.compile.stdlib_fallback = Some(super::build_cache::stdlib_archive_path()?);
         }
         options.compile.user_site_pth = user_site.filter(|_| process_pth);
