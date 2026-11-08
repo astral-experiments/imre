@@ -287,6 +287,20 @@ def check_single_byte_stream_readers():
     assert reader.read() == reader.read() == ""
 
 
+def check_utf8_provider_entries():
+    from encodings import utf_8, utf_8_sig
+
+    for provider, name in ((utf_8, "utf-8"), (utf_8_sig, "utf-8-sig")):
+        entry = provider.getregentry()
+        registered = codecs.lookup(name)
+        assert registered.encode is entry.encode is provider.encode
+        assert registered.decode is entry.decode is provider.decode
+        assert registered.streamreader is entry.streamreader is provider.StreamReader
+        assert registered.streamwriter is entry.streamwriter is provider.StreamWriter
+        assert registered.incrementalencoder is entry.incrementalencoder is provider.IncrementalEncoder
+        assert registered.incrementaldecoder is entry.incrementaldecoder is provider.IncrementalDecoder
+
+
 def check_utf8_stream_readers():
     from io import BytesIO
 
@@ -413,6 +427,7 @@ def current():
     check_utf8_error_handler()
     check_utf8_buffer_slice()
     check_utf8_incremental_encoder()
+    check_utf8_provider_entries()
     check_utf8_stream_readers()
     check_charmap_factories()
     check_incremental_decoder_factory()
