@@ -3,7 +3,6 @@
 use std::io::Write;
 
 use super::{Error, Result};
-use crate::dynamic::builtins;
 
 pub(super) fn int(out: &mut Vec<u8>, protocol: u8, number: &crate::Int) -> Result<()> {
     let small = number.to_i64().and_then(|n| i32::try_from(n).ok());
@@ -166,19 +165,8 @@ pub(super) fn memo_get(out: &mut Vec<u8>, protocol: u8, id: u32) {
     }
 }
 
-pub(super) fn global(
-    out: &mut Vec<u8>,
-    protocol: u8,
-    module: &str,
-    name: &str,
-    fix_imports: bool,
-) -> Result<()> {
+pub(super) fn global(out: &mut Vec<u8>, protocol: u8, module: &str, name: &str) -> Result<()> {
     debug_assert!(protocol < 4);
-    let (module, name) = if protocol < 3 && fix_imports {
-        legacy_global(module, name)?
-    } else {
-        (module, name)
-    };
     if module.contains('\n') || name.contains('\n') {
         return Err(Error::new(
             "PicklingError",
@@ -199,113 +187,4 @@ pub(super) fn global(
     out.extend_from_slice(name.as_bytes());
     out.push(b'\n');
     Ok(())
-}
-
-// Protocols 0–2 use _compat_pickle's Python 2 names when fix_imports is enabled.
-// Other modules that need a legacy translation must be handled explicitly before
-// the generic, unchanged module name can be used.
-fn legacy_global<'a>(module: &'a str, name: &'a str) -> Result<(&'a str, &'a str)> {
-    let unsupported = || {
-        Error::new(
-            "NotImplementedError",
-            format!("legacy pickle name for {module}.{name}"),
-        )
-    };
-    if module == "builtins" {
-        return Ok(match name {
-            "int" => ("__builtin__", "long"),
-            "str" => ("__builtin__", "unicode"),
-            "chr" => ("__builtin__", "unichr"),
-            "range" => ("__builtin__", "xrange"),
-            "zip" => ("itertools", "izip"),
-            "map" => ("itertools", "imap"),
-            "filter" => ("itertools", "ifilter"),
-            "bool" | "bytearray" | "bytes" | "complex" | "dict" | "float" | "frozenset"
-            | "getattr" | "iter" | "list" | "object" | "set" | "slice" | "super" | "tuple"
-            | "type" | "Ellipsis" | "NotImplemented" => ("__builtin__", name),
-            _ if builtins::is_builtin_function(name) => ("__builtin__", name),
-            _ => return Err(unsupported()),
-        });
-    }
-    if matches!(module, "_functools" | "functools") && name == "reduce" {
-        return Ok(("__builtin__", "reduce"));
-    }
-    if module == "itertools" {
-        return Ok(match name {
-            "filterfalse" => (module, "ifilterfalse"),
-            "zip_longest" => (module, "izip_longest"),
-            _ => (module, name),
-        });
-    }
-    if module == "collections" {
-        return Ok(match name {
-            "UserDict" => ("UserDict", "IterableUserDict"),
-            "UserList" => ("UserList", "UserList"),
-            "UserString" => ("UserString", "UserString"),
-            _ => (module, name),
-        });
-    }
-    if module == "collections.abc" {
-        return Ok(("_abcoll", name));
-    }
-    if module == "copyreg" {
-        return Ok(("copy_reg", name));
-    }
-    const LEGACY_MODULES: &[&str] = &[
-        "_bz2",
-        "_dbm",
-        "_dummy_thread",
-        "_functools",
-        "_gdbm",
-        "_markupbase",
-        "_pickle",
-        "_socket",
-        "_thread",
-        "configparser",
-        "dbm",
-        "dbm.bsd",
-        "dbm.dumb",
-        "dbm.gnu",
-        "dbm.ndbm",
-        "html.entities",
-        "html.parser",
-        "http.client",
-        "http.cookiejar",
-        "http.cookies",
-        "http.server",
-        "multiprocessing.connection",
-        "multiprocessing.context",
-        "multiprocessing.popen_fork",
-        "queue",
-        "reprlib",
-        "socket",
-        "socketserver",
-        "subprocess",
-        "sys",
-        "test.support",
-        "tkinter",
-        "tkinter.colorchooser",
-        "tkinter.commondialog",
-        "tkinter.constants",
-        "tkinter.dialog",
-        "tkinter.dnd",
-        "tkinter.filedialog",
-        "tkinter.font",
-        "tkinter.messagebox",
-        "tkinter.scrolledtext",
-        "tkinter.simpledialog",
-        "tkinter.ttk",
-        "urllib.error",
-        "urllib.parse",
-        "urllib.request",
-        "urllib.robotparser",
-        "winreg",
-        "xmlrpc.client",
-        "xmlrpc.server",
-    ];
-    if LEGACY_MODULES.contains(&module) {
-        Err(unsupported())
-    } else {
-        Ok((module, name))
-    }
 }

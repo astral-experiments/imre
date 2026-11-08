@@ -1272,6 +1272,8 @@ pub(super) enum NativeModuleState {
     PickleWriter {
         pickling_error: Id,
         dispatch_table: Id,
+        reverse_names: Id,
+        reverse_imports: Id,
     },
 }
 
@@ -1287,7 +1289,14 @@ impl NativeModuleState {
             Self::PickleWriter {
                 pickling_error,
                 dispatch_table,
-            } => visit.extend([pickling_error, dispatch_table]),
+                reverse_names,
+                reverse_imports,
+            } => visit.extend([
+                pickling_error,
+                dispatch_table,
+                reverse_names,
+                reverse_imports,
+            ]),
         }
     }
 }
