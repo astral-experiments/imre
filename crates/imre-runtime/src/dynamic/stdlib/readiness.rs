@@ -53,20 +53,6 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) -> Result<()>
     let namespace = ctx.dict(fields);
     let class = builtins::call(ctx, "type", &[name, bases, namespace], &[])?;
     ctx.bind(scope, "_SelectorMapping", class);
-    #[cfg(target_os = "linux")]
-    let source = concat!(
-        include_str!("selectors_base.py"),
-        "\n",
-        include_str!("selectors_epoll.py")
-    );
-    #[cfg(not(target_os = "linux"))]
-    let source = include_str!("selectors_base.py");
-    let source = ctx.text(source);
-    let filename = ctx.text("<imre stdlib>/selectors.py");
-    let mode = ctx.text("exec");
-    let code = ctx.compile_source(source, filename, mode, false)?;
-    let globals = ctx.module_globals(scope)?;
-    ctx.exec_source(code, globals, None, None)?;
     Ok(())
 }
 

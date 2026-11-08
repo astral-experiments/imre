@@ -896,18 +896,38 @@ pub(super) unsafe extern "C" fn imre_dyn_register_source(
     len: u64,
     code: Code,
 ) {
+    // SAFETY: compiled entries supply static module names, source and executable code.
+    unsafe { register_compiled(ctx, name, file, text, len, ModuleInitializer::Native(code)) }
+}
+
+/// Register compiled Python that runs after a built-in module installs its native bindings.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_builtin_source(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    text: *const u8,
+    len: u64,
+    code: Code,
+) {
+    // SAFETY: the compiler supplies the same static storage as for a file initializer.
+    unsafe { register_compiled(ctx, name, file, text, len, ModuleInitializer::Builtin(code)) }
+}
+
+unsafe fn register_compiled(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    text: *const u8,
+    len: u64,
+    initializer: ModuleInitializer,
+) {
     // SAFETY: module names and filenames are static compiler-emitted strings.
     let (ctx, name, file) = unsafe { (&mut *ctx, cstr(name), native_path(file)) };
     // SAFETY: non-null text points to a static source constant with exactly len bytes.
     let bundled_text =
         (!text.is_null()).then(|| unsafe { std::slice::from_raw_parts(text, len as usize) });
-    register_source(
-        ctx,
-        name,
-        file,
-        ModuleInitializer::Native(code),
-        bundled_text,
-    );
+    register_source(ctx, name, file, initializer, bundled_text);
 }
 
 /// Register a bundled Python module whose loader compiles its source on request.

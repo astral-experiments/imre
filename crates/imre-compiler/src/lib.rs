@@ -96,6 +96,8 @@ pub struct PythonCommand {
 
 #[derive(Default)]
 pub struct CompileOptions {
+    /// Operating system for the linked runtime. Library callers default to the compiler's target.
+    pub target_os: Option<&'static str>,
     /// Compile the supplied command without creating a script in the caller's working directory.
     pub command: Option<PythonCommand>,
     /// Canonical import name requested by the interpreter's `-m` entry.

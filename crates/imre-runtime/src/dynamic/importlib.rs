@@ -400,7 +400,6 @@ impl Context {
             };
             let Ok(root) = root else { continue };
             let stem = root.join(child);
-            let choices = self.sources.get(name).map_or(&[][..], Vec::as_slice);
             let disk = !bundle.as_ref().is_some_and(|dir| root.starts_with(dir))
                 && Path::new(child).file_name() == Some(std::ffi::OsStr::new(child));
             for path in [stem.join("__init__.py"), stem.with_extension("py")] {
@@ -416,7 +415,10 @@ impl Context {
                     )));
                 }
             }
-            let entry = choices.iter().find(|m| m.path == stem).map(|m| m.code);
+            let entry = self
+                .file_sources(name)
+                .find(|m| m.path == stem)
+                .map(|m| m.code);
             if entry.is_some() || (disk && stem.is_dir()) {
                 locations.push(stem.clone());
                 namespace.get_or_insert((stem, SourceBody::Namespace));
@@ -473,7 +475,7 @@ impl Context {
     pub(super) fn module_code(&mut self, entry: ModuleInitializer, path: &Path) -> Result<Id> {
         let filename = self.import_path_text(path)?;
         let entry = match entry {
-            ModuleInitializer::Native(entry) => entry,
+            ModuleInitializer::Native(entry) | ModuleInitializer::Builtin(entry) => entry,
             ModuleInitializer::Source(text) => {
                 let source = self.text(text);
                 let mode = self.text("exec");
@@ -503,9 +505,7 @@ impl Context {
 
     fn registered_file(&self, name: &str, filename: &Path) -> Option<&super::SourceModule> {
         let source = self
-            .sources
-            .get(name)?
-            .iter()
+            .file_sources(name)
             .find(|source| source.path == filename)?;
         // Standalone programs carry first-party source for relocation. While the actual
         // file is present, let SourceFileLoader read it, including after a failed import.

@@ -88,6 +88,7 @@ use value::{
 #[derive(Clone, Copy)]
 enum ModuleInitializer {
     Native(Code),
+    Builtin(Code),
     Source(&'static str),
 }
 
@@ -3688,18 +3689,7 @@ impl Context {
             }
             // A sealed namespace may have both native operations and bundled Python classes.
             // Only its bundled initializer may extend it, never a same-named file on sys.path.
-            self.sources.get(name).and_then(|sources| {
-                let root = std::path::Path::new(self.config["bundled_root"].as_str()?);
-                sources
-                    .iter()
-                    .find(|source| source.path.starts_with(root))
-                    .map(|source| {
-                        (
-                            source.path.clone(),
-                            importlib::SourceBody::Registered(source.code),
-                        )
-                    })
-            })
+            self.bundled_source(name)
         } else {
             let (search, child) = if let Some((parent, child)) = parent {
                 (self.parent_import_path(name, parent)?, child)
@@ -4790,6 +4780,15 @@ impl Context {
                 self.bind(scope, "get_native_id", id);
             }
         }
+        let source = source.or_else(|| {
+            self.builtin_initializer(name).map(|body| {
+                (
+                    body.path.clone(),
+                    importlib::SourceBody::Registered(body.code),
+                    None,
+                )
+            })
+        });
         if let Some((path, body, origin)) = source {
             let result = match body {
                 importlib::SourceBody::Namespace if self.sources.contains_key("importlib") => {

@@ -40,6 +40,9 @@ impl Context {
         let registered = self.sources.iter().any(|(name, entries)| {
             let leaf = OsStr::new(name.rsplit('.').next().unwrap());
             entries.iter().any(|entry| {
+                if matches!(entry.code, super::ModuleInitializer::Builtin(_)) {
+                    return false;
+                }
                 let parent = entry.path.parent();
                 parent == Some(&root)
                     || (entry.path.ends_with("__init__.py")
@@ -66,9 +69,7 @@ impl Context {
             let find = self.lookup_attr(loader, "find_spec")?;
             return self.call(find, vec![name], Vec::new());
         }
-        let Some(entries) = self.sources.get(fullname) else {
-            return Ok(NONE);
-        };
+
         let leaf = fullname.rsplit('.').next().unwrap();
         if Path::new(leaf).file_name() != Some(OsStr::new(leaf)) {
             return Ok(NONE);
@@ -76,7 +77,7 @@ impl Context {
         let stem = path.join(leaf);
         let init = stem.join("__init__.py");
         let file = stem.with_extension("py");
-        let contains = |path: &Path| entries.iter().any(|entry| entry.path == path);
+        let contains = |path: &Path| self.file_sources(fullname).any(|entry| entry.path == path);
         let (origin, package) = if contains(&init) {
             (Some(init), true)
         } else if contains(&file) {

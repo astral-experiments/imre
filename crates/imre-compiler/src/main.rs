@@ -215,6 +215,8 @@ fn run() -> Result<ExitCode, String> {
         return Ok(ExitCode::SUCCESS);
     }
     let source_path = source_path.ok_or(USAGE)?;
+    let target_os = target_os(target.as_deref());
+    options.target_os = Some(target_os);
     if command == "check" {
         if watch {
             imre_compiler::IncrementalCompiler::default().watch_file_with_options(
@@ -275,7 +277,6 @@ fn run() -> Result<ExitCode, String> {
             })
         })
         .transpose()?;
-    let target_os = target_os(target.as_deref());
     let linux = cfg!(target_os = "linux") && target_os == "linux";
     let runtime = runtime_archive(runtime, allocator, linux, options.address_sanitizer)?;
     let runtime_is_file = runtime.is_file();

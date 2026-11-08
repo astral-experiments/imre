@@ -77,12 +77,25 @@ impl Context {
         })
     }
 
-    fn bundled_registration(&self, name: &str) -> Option<&SourceModule> {
-        let root = Path::new(self.config["bundled_root"].as_str()?);
+    pub(super) fn file_sources(&self, name: &str) -> impl Iterator<Item = &SourceModule> {
+        self.sources
+            .get(name)
+            .into_iter()
+            .flatten()
+            .filter(|source| !matches!(source.code, ModuleInitializer::Builtin(_)))
+    }
+
+    pub(super) fn builtin_initializer(&self, name: &str) -> Option<&SourceModule> {
         self.sources
             .get(name)?
             .iter()
-            .find(|s| s.path.starts_with(root))
+            .find(|source| matches!(source.code, ModuleInitializer::Builtin(_)))
+    }
+
+    fn bundled_registration(&self, name: &str) -> Option<&SourceModule> {
+        let root = Path::new(self.config["bundled_root"].as_str()?);
+        self.file_sources(name)
+            .find(|source| source.path.starts_with(root))
     }
 
     /// Mark the class defined by the bundled body, including when a file loader executes it.
@@ -108,7 +121,7 @@ impl Context {
             if self.scope_data(*scope).class_namespace.as_ref().is_some_and(|layout| layout.bundled_decimal))
     }
 
-    fn bundled_source(&self, name: &str) -> Option<(PathBuf, SourceBody)> {
+    pub(super) fn bundled_source(&self, name: &str) -> Option<(PathBuf, SourceBody)> {
         let source = self.bundled_registration(name)?;
         Some((source.path.clone(), SourceBody::Registered(source.code)))
     }
@@ -174,6 +187,7 @@ impl Context {
     pub(super) fn native_source(&mut self, name: &str, bundled: bool) -> Result<Id> {
         let text = self
             .native_registration(name, bundled)?
+            .or_else(|| self.builtin_initializer(name))
             .and_then(|source| source.bundled_text);
         Ok(if self.is_frozen(name) {
             NONE

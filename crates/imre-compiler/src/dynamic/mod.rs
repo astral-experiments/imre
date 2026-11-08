@@ -1349,6 +1349,15 @@ pub(crate) fn compile(
     for (name, file, body) in runtime_sources(|name| seen.contains(name), threading) {
         sources.push((name.into(), Path::new(bundled_root).join(file), body.into()));
     }
+    // These bodies extend native module scopes. Keep them out of the source finder and
+    // out of the checked project's winners, even when no explicit import names them.
+    let file_modules = sources.len();
+    for (name, filename, source) in
+        builtin_sources(options.target_os.unwrap_or(std::env::consts::OS))
+    {
+        let path = Path::new(bundled_root).join(filename);
+        sources.push((name.into(), path, source.into()));
+    }
     // The bundle lives in the launcher. This absolute, non-directory path can neither
     // expose the working directory under -I nor collide with an explicit source root.
     let bundle_entry = startup
@@ -1442,6 +1451,7 @@ pub(crate) fn compile(
         let emit = |split| {
             emit::emit(
                 &sources,
+                file_modules,
                 &config,
                 keep_docstrings,
                 Path::new(bundled_root),
@@ -1529,6 +1539,22 @@ pub(crate) fn builtin_inventory_sources(graph: &crate::modules::SourceGraph) -> 
     names.sort_unstable();
     names.dedup();
     names.join("\0")
+}
+
+// A builtin may create native bindings before executing a fixed Python body in that scope.
+fn builtin_sources(
+    target_os: &str,
+) -> impl IntoIterator<Item = (&'static str, &'static str, &'static str)> {
+    let selectors = if target_os == "linux" {
+        concat!(
+            include_str!("../../../imre-runtime/src/dynamic/stdlib/selectors_base.py"),
+            "\n",
+            include_str!("../../../imre-runtime/src/dynamic/stdlib/selectors_epoll.py")
+        )
+    } else {
+        include_str!("../../../imre-runtime/src/dynamic/stdlib/selectors_base.py")
+    };
+    [("selectors", "selectors.py", selectors)]
 }
 
 const NAMEDTUPLE_COLLECTIONS: &str = include_str!("../../stdlib/collections/namedtuple_repr.py");
