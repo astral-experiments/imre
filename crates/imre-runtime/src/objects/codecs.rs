@@ -36,6 +36,24 @@ impl CodePage {
             encode,
         }
     }
+    /// Append mapped characters up to the next byte that needs an error handler.
+    pub(crate) fn decode_prefix(
+        &self,
+        points: &mut Vec<u32>,
+        data: &[u8],
+        offset: usize,
+    ) -> Result<Option<DecodeIssue>> {
+        points
+            .try_reserve(data.len() - offset)
+            .map_err(|_| Error::allocation())?;
+        for (index, &byte) in data.iter().enumerate().skip(offset) {
+            let Some(ch) = self.decode.decode(byte) else {
+                return Ok(Some(charmap_decode_issue(index)));
+            };
+            points.push(u32::from(ch));
+        }
+        Ok(None)
+    }
 }
 
 static CP1251: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(4, "cp1251"));
@@ -717,7 +735,7 @@ impl Codec {
                 Some(ch) => u32::from(ch),
                 None if !byte.is_ascii() => 0xdc00 + u32::from(byte),
                 // The surrogateescape handler cannot consume an unmapped ASCII byte.
-                None => return Err(charmap_decode_error(data, index)),
+                None => return Err(charmap_decode_issue(index).error(data)),
             });
         }
         Ok(points)
@@ -747,7 +765,7 @@ impl Codec {
                         text.push(ch);
                     } else {
                         decoding_error(&mut text, errors, &[byte], || {
-                            charmap_decode_error(data, index)
+                            charmap_decode_issue(index).error(data)
                         })?;
                     }
                 }
@@ -1026,20 +1044,13 @@ pub(crate) fn unknown_handler(name: &str) -> Error {
     option_error(Kind::LookupError, "unknown error handler name '", name, "'")
 }
 
-fn charmap_decode_error(data: &[u8], index: usize) -> Error {
-    let bytes = match owned_input(data) {
-        Ok(bytes) => bytes,
-        Err(error) => return error,
-    };
-    let reason = "character maps to <undefined>";
-    let byte = data[index];
-    Error::unicode_decode(
-        "charmap",
-        bytes,
-        index..index + 1,
-        reason,
-        format!("'charmap' codec can't decode byte 0x{byte:02x} in position {index}: {reason}"),
-    )
+fn charmap_decode_issue(index: usize) -> DecodeIssue {
+    DecodeIssue {
+        encoding: "charmap",
+        start: index,
+        end: index + 1,
+        reason: "character maps to <undefined>",
+    }
 }
 
 pub(crate) fn decoding_error(

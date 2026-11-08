@@ -869,6 +869,25 @@ pub(in crate::dynamic) fn decode_bytes(
                 .map(|(text, _)| text)
         });
     }
+    if let Codec::CodePage(page) = codec
+        && name == "surrogateescape"
+    {
+        return ctx.with_buffer_export(input, |ctx| {
+            let data = ctx.bytes_like(input)?;
+            let mut points = Vec::new();
+            let Some(issue) = page.decode_prefix(&mut points, data, 0)? else {
+                return Ok(ctx.text_codepoints(points));
+            };
+            let error = issue.error(data);
+            resume_decode(
+                ctx,
+                "surrogateescape",
+                points,
+                error,
+                |points, data, offset| Ok(page.decode_prefix(points, data, offset)?),
+            )
+        });
+    }
     if matches!(codec, Codec::Ascii) && name == "surrogateescape" {
         let bytes = ctx.bytes_like(input)?;
         if !bytes.is_ascii() {
