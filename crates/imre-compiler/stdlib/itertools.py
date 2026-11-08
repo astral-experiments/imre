@@ -2,7 +2,7 @@
 
 
 import _imre_itertools as _itertools
-from operator import index as _index
+from operator import getitem as _getitem, index as _index
 from sys import maxsize as _maxsize
 
 
@@ -572,7 +572,7 @@ class product:
             raise StopIteration
         pools = self._pools
         indices = self._indices
-        result = tuple(pool[index] for pool, index in zip(pools, indices))
+        result = tuple(map(_getitem, pools, indices))
         for position in range(len(indices) - 1, -1, -1):
             indices[position] += 1
             if indices[position] < len(pools[position]):
