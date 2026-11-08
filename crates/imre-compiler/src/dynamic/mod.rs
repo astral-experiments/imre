@@ -580,11 +580,42 @@ fn scan_imports(
     Ok(imports)
 }
 
+pub(crate) const BUNDLED_SOURCE_ROOT: &str = "<imre stdlib>";
+
 pub(crate) enum ObjectOperation {
     CheckedEntry,
     Builtin,
     OrderedCommandImport,
     ClassLayout,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct RegisteredSource<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) path: &'a Path,
+    pub(crate) source: &'a str,
+    pub(crate) is_program: bool,
+}
+
+impl<'a> RegisteredSource<'a> {
+    pub(crate) fn new(
+        (name, path, source): &'a (String, PathBuf, String),
+        is_program: bool,
+    ) -> Self {
+        Self {
+            name,
+            path,
+            source,
+            is_program,
+        }
+    }
+}
+
+pub(crate) struct RegisteredSources<'a> {
+    pub(crate) root: &'a Path,
+    pub(crate) roots: &'a [PathBuf],
+    pub(crate) winners: &'a [RegisteredSource<'a>],
+    pub(crate) inputs: &'a SourceInputs,
 }
 
 pub(crate) fn compile(
@@ -594,7 +625,7 @@ pub(crate) fn compile(
     operation: Option<ObjectOperation>,
     typed_graph: Option<&crate::modules::SourceGraph>,
     layout: crate::BoxedLayout<'_>,
-    check_returns: impl FnOnce(bool) -> Result<(), String>,
+    check: impl FnOnce(bool, Option<RegisteredSources<'_>>) -> Result<(), String>,
 ) -> Result<Option<UnitCompilation>, String> {
     let invocation = options.command.as_ref();
     let startup = options.python_startup();
@@ -684,7 +715,7 @@ pub(crate) fn compile(
     if first.misplaced_future && startup.is_none() {
         // The checked graph can reach object fallback for an unrelated representation
         // error (e.g. a generic class). Report its owned diagnostics before declining.
-        check_returns(false)?;
+        check(false, None)?;
         return Ok(None);
     }
     // Python entries can import these bundled sources when static lowering cannot handle the entry.
@@ -741,9 +772,7 @@ pub(crate) fn compile(
         first.add(0, "runpy");
         // Register source candidates without interpreting a module operand as a filesystem path.
         // runpy and the normal finder decide which one can actually execute.
-        if name.split('.').all(|part| {
-            !part.is_empty() && Path::new(part).file_name().is_some_and(|file| file == part)
-        }) {
+        if crate::modules::valid_module_operand(name) {
             first.add(0, name);
             first.add(0, &format!("{name}.__main__"));
         }
@@ -786,7 +815,7 @@ pub(crate) fn compile(
         // an explicitly requested entry even when isolated startup omits the cwd.
         initial.push(entry.clone());
     } else if !safe_path {
-        initial.push(root);
+        initial.push(root.clone());
     }
     // site removes duplicate startup paths before Python prepends path[0].
     let path0_len = initial.len();
@@ -821,7 +850,7 @@ pub(crate) fn compile(
     // Discover each search directory once even when it appears twice in sys.path.
     let mut seen_roots = HashSet::new();
     roots.retain(|root| seen_roots.insert(root.clone()));
-    let bundled_root = "<imre stdlib>";
+    let bundled_root = BUNDLED_SOURCE_ROOT;
     let mut inputs = SourceInputs::default();
     let mut archives = HashMap::new();
     for path in options
@@ -853,6 +882,10 @@ pub(crate) fn compile(
             identity,
             blake3::hash(src.as_bytes()).to_hex().to_string(),
         ));
+    }
+    let mut selected_sources = Vec::new();
+    if module_entry.is_none() && !options.runtime_imports {
+        selected_sources.push((0, true));
     }
     let mut source_initializers = HashSet::new();
     if first.misplaced_future {
@@ -1235,20 +1268,31 @@ pub(crate) fn compile(
                         identity.map_err(|e| e.to_string())?,
                         blake3::hash(src.as_bytes()).to_hex().to_string(),
                     ));
-                    if imports.misplaced_future {
-                        // Python starts consult the real file on each import attempt. A closed
-                        // binary retains the source and lets its loader report the error on import.
-                        if startup.is_none() {
-                            source_initializers.insert(path.clone());
-                            sources.push((prefix.clone(), path, src));
-                        }
-                    } else {
-                        sources.push((prefix.clone(), path, src));
-                        work.push_back((prefix.clone(), package, imports));
+                    // Later alternatives remain available to the runtime finder. Only the
+                    // winning provider supplies the initial module binding.
+                    let on_package_path = prefix
+                        .rsplit_once('.')
+                        .and_then(|(parent, _)| entry_sources.get(parent))
+                        .is_none_or(|(selected, is_package)| *is_package && selected == root);
+                    let winner = on_package_path && !entry_sources.contains_key(&prefix);
+                    if winner {
+                        entry_sources.insert(prefix.clone(), (root.clone(), package));
                     }
-                    entry_sources
-                        .entry(prefix.clone())
-                        .or_insert_with(|| (root.clone(), package));
+                    if !imports.misplaced_future || startup.is_none() {
+                        if imports.misplaced_future {
+                            source_initializers.insert(path.clone());
+                        } else {
+                            work.push_back((prefix.clone(), package, imports));
+                        }
+                        let registration = (prefix.clone(), path, src);
+                        if winner && !options.runtime_imports {
+                            // Only path zero belongs to the program. With safe path
+                            // the first remaining search entry may be an installation.
+                            let program = initial[..path0_len].contains(root);
+                            selected_sources.push((sources.len(), program));
+                        }
+                        sources.push(registration);
+                    }
                     if module_entry.is_some() {
                         break;
                     }
@@ -1338,7 +1382,20 @@ pub(crate) fn compile(
         "command_source":command,"path0_bytes":path0_bytes,
         "command":in_memory,"module_entry":module_entry,"path_entry":options.path_entry,"paths":paths,
     });
-    check_returns(entry_requests_objects || startup_provider)?;
+    // Borrow the winners once discovery has finished growing the emitter's source table.
+    let selected_sources: Vec<_> = selected_sources
+        .into_iter()
+        .map(|(id, program)| RegisteredSource::new(&sources[id], program))
+        .collect();
+    check(
+        entry_requests_objects || startup_provider,
+        Some(RegisteredSources {
+            root: &root,
+            roots: &roots,
+            winners: &selected_sources,
+            inputs: &inputs,
+        }),
+    )?;
     let (units, used_archive) = if matches!(layout, crate::BoxedLayout::Check) {
         emit::check(&sources, keep_docstrings, &source_initializers)?;
         (Vec::new(), false)

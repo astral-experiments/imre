@@ -22,6 +22,8 @@ mod declarations;
 pub(crate) mod doctest;
 mod empty_keywords;
 mod entry_profile;
+#[cfg(test)]
+mod module_entry_tests;
 mod namedtuple_fields;
 mod ordered_imports;
 mod os;
@@ -31,6 +33,12 @@ pub(crate) use reachability::{definition_effect, http_command_key};
 mod type_aliases;
 
 pub(crate) type ModuleId = usize;
+
+pub(crate) fn valid_module_operand(name: &str) -> bool {
+    name.split('.').all(|part| {
+        !part.is_empty() && Path::new(part).file_name().is_some_and(|file| file == part)
+    })
+}
 
 /// Return the package used to resolve imports originating in this module.
 pub(crate) fn import_package(module: &str, is_package: bool) -> &str {
@@ -2816,6 +2824,14 @@ pub(crate) struct SourceModule {
     pub(crate) archive: Option<NativeArchive>,
 }
 
+impl SourceModule {
+    pub(crate) fn is_program_source(&self) -> bool {
+        !self.bundled
+            && self.archive.is_none()
+            && matches!(self.search_roots, SearchRoots::Single(0))
+    }
+}
+
 pub(crate) struct NativeArchive {
     path: PathBuf,
     pub(crate) identity: PathBuf,
@@ -3086,6 +3102,10 @@ pub(crate) enum SetLayoutHint {
 pub(crate) struct SourceGraph {
     /// Fixed at graph construction, in the checked resolver's search order.
     pub(crate) filesystem_roots: Box<[PathBuf]>,
+    /// Whether the caller explicitly selected legacy runtime imports.
+    pub(crate) runtime_imports: bool,
+    /// Declaration result for these exact selected files, prior to any object-path re-selection.
+    pub(crate) source_contract: Option<Result<(), String>>,
     pub(crate) set_layout_hint: std::cell::Cell<SetLayoutHint>,
     pub(crate) float_components: std::cell::Cell<FloatComponents>,
     pub(crate) missing_repr: std::cell::Cell<Option<DefinitionId>>,
@@ -3731,6 +3751,75 @@ impl SourceGraph {
         Ok(graph)
     }
 
+    /// Resolve a Python module operand through the same ordered loader used for imports.
+    /// The runtime launcher still executes runpy and the selected package initializers.
+    /// A non-project provider, or a launcher whose selection requires Python execution,
+    /// leaves the authoritative source set to that launcher's manifest.
+    pub(crate) fn module_entry(
+        path: &Path,
+        name: &str,
+        options: &crate::CompileOptions,
+        mut fs: FileSystem<'_>,
+        site_probes: &mut SiteProbes,
+    ) -> Result<Option<Self>, String> {
+        if !valid_module_operand(name)
+            || !options.path_entry && name.split('.').next() == Some("__main__")
+            || options.sitecustomize
+            || options.stdlib_sitecustomize
+            || options.user_site_pth.is_some()
+        {
+            return Ok(None);
+        }
+        let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+        let spelling = if options.path_entry {
+            cwd.join(path)
+        } else {
+            cwd
+        };
+        if options.path_entry && !fs.is_dir(&spelling) {
+            // A ZIP operand belongs to the ZIP finder, even under isolated startup.
+            return Ok(None);
+        }
+        let root = fs.canonicalize(&spelling).map_err(|e| e.to_string())?;
+        let mut loader = Loader::new(
+            root.clone(),
+            &options.extension_paths,
+            &options.python_archive_indices,
+            Some((options, site_probes)),
+            fs,
+        )?;
+        let startup = options.python_startup();
+        loader.skip_current_root =
+            !options.path_entry && startup.is_some_and(|(flags, _)| flags.safe_path);
+        loader.frozen_modules = startup.is_none_or(|(flags, _)| flags.frozen_modules);
+        loader.reachable_only = options.reachable_only || options.entry_profile.is_some();
+        if !loader.skip_current_root {
+            loader.inputs.directories.push((spelling, root));
+        }
+        loader.module_operand = Some(name.to_owned());
+        if loader.has_project_source("runpy") {
+            return Ok(None);
+        }
+        let entry = match loader.load_module_entry(name) {
+            Ok(Some(id)) => id,
+            Ok(None) => return Ok(None),
+            Err(_) if loader.import_failure.is_some() => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let filename = loader.modules[entry].path.clone();
+        let reachable_only = loader.reachable_only;
+        let mut graph = loader.finish(
+            entry,
+            filename,
+            reachable_only,
+            options.entry_profile.as_deref(),
+        )?;
+        if let Some((flags, executable)) = startup {
+            graph.command_startup = Some((flags.clone(), executable.to_owned()));
+        }
+        Ok(Some(graph))
+    }
+
     /// A directly invoked file is __main__; its enclosing package is not imported.
     pub(crate) fn script(
         path: &Path,
@@ -4237,6 +4326,7 @@ pub(crate) enum EntryImportFailure {
     AfterStatement,
     MissingModule,
     ZipImport,
+    RuntimeProvider,
 }
 
 /// File probes that affect checked admission, even when the program later uses object imports.
@@ -4274,6 +4364,7 @@ impl SiteProbes {
 }
 
 struct Loader<'a> {
+    module_operand: Option<String>,
     fs: FileSystem<'a>,
     /// ty only searches typeshed for builtins; record sealed imports missing from its inventory.
     checked_builtin_imports: Vec<(ModuleId, TextRange)>,
@@ -4362,6 +4453,7 @@ impl<'a> Loader<'a> {
             site_probes = Some((site_roots, probes));
         }
         Ok(Self {
+            module_operand: None,
             fs,
             archive_roots,
             site_probes,
@@ -4570,6 +4662,8 @@ impl<'a> Loader<'a> {
                 self.needs_object_imports && self.runtime_initializer.is_none(),
             ),
             has_object_constructor_fallback: Default::default(),
+            runtime_imports: false,
+            source_contract: None,
             set_layout_hint: std::cell::Cell::new(SetLayoutHint::Available),
             check_fallback_calls: Default::default(),
             imports_runtime_class: self.imports_runtime_class,
@@ -4634,6 +4728,7 @@ impl<'a> Loader<'a> {
     }
 
     fn scan(&mut self, id: ModuleId) -> Result<(), String> {
+        let is_entry = self.is_entry(id);
         let parsed = self.modules[id].parsed.clone();
         let mut imports = Vec::new();
         for stmt in &parsed.syntax().body {
@@ -4674,7 +4769,7 @@ impl<'a> Loader<'a> {
             )
         });
         let mut pending_builtin_functions = HashSet::new();
-        if id == 0 {
+        if is_entry {
             pending_builtin_functions.extend(
                 parsed
                     .syntax()
@@ -4717,7 +4812,7 @@ impl<'a> Loader<'a> {
                     }
                 }
                 ast::Stmt::Try(guard)
-                    if (id == 0 || self.partial_source(id))
+                    if (is_entry || self.partial_source(id))
                         && !executable
                         && self.modules[id].entry_globals.is_empty()
                         && let Some((module, names)) =
@@ -4738,7 +4833,7 @@ impl<'a> Loader<'a> {
                 }
                 ast::Stmt::FunctionDef(function) => {
                     definition_prefix |= self.partial_source(id);
-                    if executable && id == 0 {
+                    if executable && is_entry {
                         return Err(self.modules[id].error(
                             statement,
                             "definitions must precede executable module statements",
@@ -4772,7 +4867,7 @@ impl<'a> Loader<'a> {
                             .body
                             .iter()
                             .any(|stmt| matches!(stmt, ast::Stmt::Assign(_)));
-                    if executable && id == 0 {
+                    if executable && is_entry {
                         return Err(self.modules[id].error(
                             statement,
                             "definitions must precede executable module statements",
@@ -4819,9 +4914,9 @@ impl<'a> Loader<'a> {
                                         })
                                     || nested_source && matches!(stmt, ast::Stmt::Expr(_))
                             });
-                        if id == 0 || !simple && !ordered {
+                        if is_entry || !simple && !ordered {
                             self.import_failure =
-                                (id == 0).then_some(EntryImportFailure::AfterStatement);
+                                is_entry.then_some(EntryImportFailure::AfterStatement);
                             return Err(self.modules[id].error(
                                 statement,
                                 "imports must precede executable module statements",
@@ -4870,7 +4965,7 @@ impl<'a> Loader<'a> {
                             &mut field_separators,
                         );
                     }
-                    if executable && id == 0 {
+                    if executable && is_entry {
                         return Err(self.modules[id].error(
                             statement,
                             "definitions must precede executable module statements",
@@ -4934,7 +5029,7 @@ impl<'a> Loader<'a> {
                             }
                         }
                     }
-                    let entry_global = id == 0
+                    let entry_global = is_entry
                         && !executable
                         && (last_definition.is_some_and(|last| index < last)
                             || matches!(
@@ -4970,7 +5065,7 @@ impl<'a> Loader<'a> {
                     }
                     self.scan_value_writes(id, statement)?;
                     if let Some(name) = value_name(statement) {
-                        if (id != 0 || entry_global)
+                        if (!is_entry || entry_global)
                             && self.modules[id].rebound_target(id, statement).is_none()
                         {
                             self.bind(
@@ -5705,13 +5800,42 @@ impl<'a> Loader<'a> {
 
     fn partial_source(&self, id: ModuleId) -> bool {
         let module = &self.modules[id];
-        id != 0 && !module.bundled && module.archive.is_none()
+        !self.is_entry(id) && !module.bundled && module.archive.is_none()
     }
 
     fn initialized(&self, def: DefinitionId) -> bool {
         self.initialization.iter().any(|(module, statements)| {
             *module == def.module && statements.contains(&def.statement)
         })
+    }
+
+    fn is_entry(&self, id: ModuleId) -> bool {
+        let Some(name) = &self.module_operand else {
+            return id == 0;
+        };
+        let module = &self.modules[id];
+        !module.is_package
+            && (module.name == *name
+                || module.name.strip_suffix(".__main__") == Some(name.as_str()))
+    }
+
+    fn load_module_entry(&mut self, name: &str) -> Result<Option<ModuleId>, String> {
+        let mut id = self.load_module(name)?;
+        if self.modules[id].bundled || self.modules[id].archive.is_some() {
+            return Ok(None);
+        }
+        if self.modules[id].is_package {
+            if name == "__main__" || name.ends_with(".__main__") {
+                return Ok(None);
+            }
+            id = self.load_module(&format!("{name}.__main__"))?;
+        }
+        let module = &self.modules[id];
+        let project_source = !module.is_package
+            && !module.bundled
+            && module.archive.is_none()
+            && matches!(module.search_roots, SearchRoots::Single(index) if index <= self.archive_roots);
+        Ok(project_source.then_some(id))
     }
 
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
@@ -5950,6 +6074,9 @@ impl<'a> Loader<'a> {
                 return Ok(declaration);
             }
         }
+        if self.module_operand.is_some() {
+            self.import_failure = Some(EntryImportFailure::RuntimeProvider);
+        }
         Err(format!(
             "standard-library imports and shadowing are unsupported: {first:?}"
         ))
@@ -5957,7 +6084,13 @@ impl<'a> Loader<'a> {
 
     fn load_new_module(&mut self, name: &str) -> Result<ModuleId, String> {
         let first = name.split('.').next().unwrap_or("");
-        let declaration = self.checked_import_declaration(first)?;
+        let directory_main = name == "__main__" && self.module_operand.as_deref() == Some(name);
+        let declaration = if directory_main {
+            // runpy removes the startup __main__ from sys.modules for a path operand.
+            None
+        } else {
+            self.checked_import_declaration(first)?
+        };
         let parent = self.package_parent(name)?;
         // Parent initialization can have loaded this child while exposing re-exports.
         if let Some(&id) = self.by_name.get(name) {
@@ -6690,6 +6823,33 @@ mod native_tests {
                 .unwrap()
                 .contains("cannot resolve first-party module")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_ownership_follows_the_winning_search_entry() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().canonicalize().unwrap();
+        let installed = root.join("installed");
+        fs::create_dir(&installed).unwrap();
+        let entry = root.join("main.py");
+        let dependency = installed.join("helper.py");
+        fs::write(&entry, "import helper\n").unwrap();
+        fs::write(&dependency, "value = 7\n").unwrap();
+        let load =
+            || SourceGraph::load(&entry, Some(&root), std::slice::from_ref(&installed)).unwrap();
+        let graph = load();
+        assert!(graph.modules[graph.entry].is_program_source());
+        let helper = graph.modules.iter().find(|m| m.name == "helper").unwrap();
+        assert!(!helper.is_program_source());
+
+        let local = root.join("helper.py");
+        std::os::unix::fs::symlink(&dependency, &local).unwrap();
+        let graph = load();
+        let helper = graph.modules.iter().find(|m| m.name == "helper").unwrap();
+        assert!(helper.is_program_source());
+        assert_eq!(helper.path, local);
+        assert_eq!(fs::canonicalize(&helper.path).unwrap(), dependency);
     }
 
     #[cfg(unix)]

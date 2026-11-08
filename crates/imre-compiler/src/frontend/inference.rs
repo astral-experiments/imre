@@ -778,6 +778,13 @@ impl Inference {
                     self.revisit_forwarded_returns();
                     continue;
                 }
+                let mut reports =
+                    errors
+                        .into_iter()
+                        .filter_map(|(module, failure)| match failure {
+                            Failure::Diagnostic(report) => Some(report.in_module(graph, module)),
+                            Failure::PendingSignature { .. } => None,
+                        });
                 if let Some((module, range)) = conflicting_returns {
                     let mut report = Diagnostic::at(
                         &graph.modules[module].source,
@@ -785,17 +792,15 @@ impl Inference {
                         "inferred returns require one supported exact or nullable type".to_owned(),
                     );
                     report.kind = Kind::ReturnType;
-                    return Err(report.in_module(graph, module));
+                    return Err(report.in_module(graph, module).with_following(reports));
                 }
                 if !self.unresolved() {
                     break;
                 }
                 // Only the failure that escaped the checker controls this round.
                 // An alternative may have waited for a signature and been discarded.
-                for (module, failure) in errors {
-                    if let Failure::Diagnostic(report) = failure {
-                        return Err(report.in_module(graph, module));
-                    }
+                if let Some(primary) = reports.next() {
+                    return Err(primary.with_following(reports));
                 }
                 if self.infer_inherited_parameters(definitions, classes) {
                     continue;

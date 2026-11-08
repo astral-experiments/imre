@@ -35,6 +35,7 @@ pub(crate) struct Diagnostic<M = String> {
     position: Option<Position>,
     path: Option<PathBuf>,
     pub(crate) kind: Kind,
+    following: Box<[Diagnostic<M>]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,6 +55,7 @@ impl<M> Diagnostic<M> {
             position: None,
             path: None,
             kind: Kind::Ordinary,
+            following: Box::new([]),
         }
     }
 
@@ -80,6 +82,35 @@ impl<M> Diagnostic<M> {
     pub(crate) fn with_path(mut self, path: &std::path::Path) -> Self {
         self.path = Some(path.to_owned());
         self
+    }
+
+    pub(super) fn with_following(mut self, reports: impl Iterator<Item = Self>) -> Self {
+        self.following = reports.collect();
+        self
+    }
+
+    pub(crate) fn matching_contract(
+        &self,
+        path: &std::path::Path,
+        range: TextRange,
+        rule: &str,
+    ) -> Option<&Self> {
+        std::iter::once(self)
+            .chain(self.following.iter())
+            .find(|report| {
+                report.path.as_deref() == Some(path)
+                    && report
+                        .position
+                        .as_ref()
+                        .is_some_and(|position| position.range == range)
+                    && matches!(
+                        (report.kind, rule),
+                        (
+                            Kind::ExactType | Kind::DeclaredArgument,
+                            "invalid-argument-type"
+                        ) | (Kind::ReturnType, "invalid-return-type")
+                    )
+            })
     }
 
     pub(super) fn in_module(self, graph: &SourceGraph, module: ModuleId) -> Self {
