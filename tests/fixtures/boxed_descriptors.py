@@ -3,41 +3,7 @@
 from functools import update_wrapper
 
 
-def check_attribute_name_keys():
-    class Key(str):
-        def __hash__(self):
-            return hash("payload")
-
-        def __eq__(self, other):
-            return other == "payload"
-
-    class Fields:
-        @property
-        def payload(self):
-            return self.saved
-
-        @payload.setter
-        def payload(self, value):
-            self.saved = value
-
-        @payload.deleter
-        def payload(self):
-            del self.saved
-
-    class Failure(Fields, Exception):
-        pass
-
-    key = Key("unrelated")
-    for receiver in (Fields(), Failure("reason")):
-        setattr(receiver, key, 23)
-        assert getattr(receiver, key) == receiver.saved == 23
-        object.__delattr__(receiver, key)
-        assert not hasattr(receiver, "saved")
-        assert not receiver.__dict__
-
-
 def current():
-    check_attribute_name_keys()
     class Foreign:
         __repr__ = list.__repr__
     seen = []

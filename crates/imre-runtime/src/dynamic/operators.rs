@@ -3090,7 +3090,7 @@ impl Context {
             } if let Value::Native(symbol) = self.heap.get(*callable)
                 && let Some(slot) =
                     super::wrapper_descriptor::BuiltinDescriptor::lookup(symbol)
-                && !slot.method =>
+                && slot.class() == "wrapper_descriptor" =>
             {
                 slot.bound_repr(self, *receiver)
             }
