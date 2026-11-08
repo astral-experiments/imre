@@ -321,14 +321,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "../../../benchmarks/cpython_stdlib/full/linecache/upstream/Lib/encodings/aliases.py"
             ),
         )),
-        "encodings.ascii" => Some((
-            "encodings/ascii.py",
-            include_str!("../stdlib/encodings/writer_ascii.py"),
-        )),
-        "encodings.latin_1" => Some((
-            "encodings/latin_1.py",
-            include_str!("../stdlib/encodings/writer_latin_1.py"),
-        )),
+        "encodings.ascii" => bundled_source!("encodings/ascii.py"),
+        "encodings.latin_1" => bundled_source!("encodings/latin_1.py"),
         "encodings.utf_8" => Some((
             "encodings/utf_8.py",
             include_str!("../stdlib/encodings/writer_utf_8.py"),

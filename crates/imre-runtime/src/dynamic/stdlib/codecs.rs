@@ -561,6 +561,22 @@ fn box_native_entry(ctx: &mut Context, key: String, codec: Codec, spelling: Id) 
         }
     };
     let module = ctx.module(&format!("encodings.{suffix}"))?;
+    let id = match codec {
+        Codec::Ascii | Codec::Latin1 => {
+            let getregentry = ctx.lookup_attr(module, "getregentry")?;
+            ctx.call(getregentry, Vec::new(), Vec::new())?
+        }
+        _ => native_codec_info(ctx, codec, module)?,
+    };
+    ctx.codec_entries
+        .entries
+        .try_reserve(1)
+        .map_err(|_| crate::Error::allocation())?;
+    ctx.codec_entries.entries.insert(key, id);
+    Ok(id)
+}
+
+fn native_codec_info(ctx: &mut Context, codec: Codec, module: Id) -> Result<Id> {
     // Keep the pending constructor arguments across Python-visible module lookups.
     ctx.heap.reserve_temporaries(7)?;
     ctx.heap.keep(module);
@@ -603,7 +619,7 @@ fn box_native_entry(ctx: &mut Context, key: String, codec: Codec, spelling: Id) 
     ctx.heap.keep(reader);
     let decoder = factory(ctx, "IncrementalDecoder")?;
     let name = ctx.text(codec.name());
-    let id = ctx.call(
+    ctx.call(
         class,
         Vec::new(),
         vec![
@@ -615,13 +631,7 @@ fn box_native_entry(ctx: &mut Context, key: String, codec: Codec, spelling: Id) 
             ("streamreader".into(), reader),
             ("streamwriter".into(), writer),
         ],
-    )?;
-    ctx.codec_entries
-        .entries
-        .try_reserve(1)
-        .map_err(|_| crate::Error::allocation())?;
-    ctx.codec_entries.entries.insert(key, id);
-    Ok(id)
+    )
 }
 
 pub(in crate::dynamic) fn encode_text(
