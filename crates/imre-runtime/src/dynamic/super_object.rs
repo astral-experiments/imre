@@ -1,13 +1,17 @@
 use super::*;
 
 impl Context {
+    pub(super) fn assigned_class_name(&self, scope: Id) -> Option<Id> {
+        self.scope_data(scope)
+            .class_namespace
+            .as_ref()
+            .and_then(|namespace| namespace.name_override)
+    }
+
     pub(super) fn class_name(&self, class: Id) -> &str {
         match self.heap.get(class) {
             Value::Class { name, scope, .. } => self
-                .scope_data(*scope)
-                .class_namespace
-                .as_ref()
-                .and_then(|namespace| namespace.name_override)
+                .assigned_class_name(*scope)
                 .map_or(name.as_str(), |id| {
                     self.str_value(id).expect("class name is a string")
                 }),

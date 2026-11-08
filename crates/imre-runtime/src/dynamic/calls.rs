@@ -2630,15 +2630,11 @@ impl Context {
             if let Some(value) = typing::subclass_alias_attribute(self, obj, class, name) {
                 return value;
             }
-            if matches!(name, "name" | "value") {
-                if self.float_enum_names(class).is_some() {
-                    let attr = self.class_attr(class, name);
-                    if attr.is_none_or(|attr| matches!(self.heap.get(attr), Value::Instance { class: owner, .. } if *owner == class)) {
-                        let field = if name == "name" { "_name_" } else { "_value_" };
-                        return self.lookup_attr(obj, field);
-                    }
-                } else if let Some((_, member_name, value)) = self.enum_member(obj) {
-                    return Ok(if name == "name" { member_name } else { value });
+            if matches!(name, "name" | "value") && self.enum_values(class).is_some() {
+                let attr = self.class_attr(class, name);
+                if attr.is_none_or(|attr| matches!(self.heap.get(attr), Value::Instance { class: owner, .. } if *owner == class)) {
+                    let field = if name == "name" { "_name_" } else { "_value_" };
+                    return self.lookup_attr(obj, field);
                 }
             }
             let layout = self.instance_layout(class, name);
@@ -5356,12 +5352,7 @@ impl Context {
                     return Ok(value);
                 }
                 if name == "__name__" && metaclass_member.is_none() {
-                    let assigned = self
-                        .scope_data(scope)
-                        .class_namespace
-                        .as_ref()
-                        .and_then(|namespace| namespace.name_override);
-                    if let Some(name) = assigned {
+                    if let Some(name) = self.assigned_class_name(scope) {
                         return Ok(name);
                     }
                     let class_name = class_name.clone();
