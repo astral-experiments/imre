@@ -85,6 +85,12 @@ use value::{
     Result, Scope, TRUE, Value,
 };
 
+/// A live Python object can carry the linked body supplied by its producer.
+enum LinkedSource {
+    Loader(SourceModule),
+    Expression(Code),
+}
+
 /// How a registered module supplies its code object to importlib.
 #[derive(Clone, Copy)]
 enum ModuleInitializer {

@@ -43,6 +43,7 @@ pub mod comprehension;
 pub mod epoll;
 pub mod exceptions;
 pub mod executable;
+pub mod forward_refs;
 pub mod indentation;
 pub mod layout;
 pub mod lzma;

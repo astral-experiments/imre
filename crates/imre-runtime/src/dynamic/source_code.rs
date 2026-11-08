@@ -4439,14 +4439,15 @@ impl Context {
     /// Evaluate one forward-reference expression in its defining Python namespaces.
     pub(super) fn eval_type_expression(&mut self, text: Id, globals: Id, locals: Id) -> Result<Id> {
         let source = self.str_value(text)?;
-        let parsed = ruff_python_parser::parse_expression(source).map_err(|_| {
-            Error::new(
-                "SyntaxError",
-                format!("Forward reference must be an expression -- got {source:?}"),
-            )
-        })?;
-        if let ast::Expr::Name(ident) = parsed.syntax().body.as_ref()
-            && usize::from(ident.range().len()) == source.len()
+        if let Some(&LinkedSource::Expression(entry)) = self.heap.linked_sources.get(&text) {
+            let code = self.module_code(
+                ModuleInitializer::Native(entry),
+                std::path::Path::new("<string>"),
+            )?;
+            return self.run_in_namespace(code, globals, Some(locals), None, "eval", None);
+        }
+        if crate::objects::python_isidentifier(source)
+            && !ruff_python_stdlib::keyword::is_keyword(source)
         {
             // ForwardRef.evaluate looks up the original string for a bare identifier.
             // The parser applies NFKC to ident.id, as required for compound expressions.
@@ -4459,7 +4460,21 @@ impl Context {
         }
         let filename = self.text("<string>");
         let mode = self.text("eval");
-        let code = self.compile_source(text, filename, mode, false)?;
+        let code = match self.compile_source(text, filename, mode, false) {
+            Ok(code) => code,
+            Err(error) => {
+                // Preserve the forward-reference diagnostic for invalid grammar, while
+                // keeping errors from scope checking or allocation as originally raised.
+                let source = self.str_value(text)?;
+                if ruff_python_parser::parse_expression(source).is_err() {
+                    return Err(Error::new(
+                        "SyntaxError",
+                        format!("Forward reference must be an expression -- got {source:?}"),
+                    ));
+                }
+                return Err(error);
+            }
+        };
         self.run_in_namespace(code, globals, Some(locals), None, "eval", None)
     }
 

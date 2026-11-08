@@ -175,7 +175,14 @@ pub(crate) fn emit(
         }
         let code = match external {
             Some(symbol) => symbol,
-            None => output.module(unit, name, path, source, &file, bundled)?,
+            None => output.source_body(
+                unit,
+                name,
+                path,
+                source,
+                &file,
+                SourceBody::Module { bundled },
+            )?,
         };
         // Physical code reads keep using the file. Identify its compiled snapshot without
         // embedding the source or exposing stale bytes through SourceFileLoader.get_data().
@@ -231,7 +238,7 @@ pub(super) fn initializer(
     };
     let filename = path.as_os_str().as_encoded_bytes();
     let file = output.data(filename);
-    let entry = output.module(0, name, path, source, &file, bundled)?;
+    let entry = output.source_body(0, name, path, source, &file, SourceBody::Module { bundled })?;
     // These slots are numbered across the whole program and must stay in its codegen unit.
     if !output.string_constant_slots.is_empty() {
         return Ok(None);
@@ -332,33 +339,59 @@ pub(super) fn check_source(path: &Path, source: &str, keep_docstrings: bool) -> 
 }
 
 impl Output {
-    fn module(
+    fn source_body(
         &mut self,
         unit: usize,
         name: &str,
         path: &Path,
         source: &str,
         file: &str,
-        bundled: bool,
+        kind: SourceBody<'_>,
     ) -> Result<String, String> {
-        let ParsedSource {
-            parsed,
-            replacements,
-        } = parse_source(path, source, self.keep_docstrings)?;
+        let bundled = matches!(&kind, SourceBody::Module { bundled: true });
+        let expression = matches!(&kind, SourceBody::Expression(_));
+        // The expression grammar supplies its own checked syntax and tokens.
+        // Both inputs below then use the same name lowering and native code entry.
+        enum Input<'a> {
+            Module(ParsedSource),
+            Expression(ast::ModModule, &'a ast::token::Tokens),
+        }
+        let input = match kind {
+            SourceBody::Module { .. } => {
+                Input::Module(parse_source(path, source, self.keep_docstrings)?)
+            }
+            SourceBody::Expression(parsed) => {
+                let expression = parsed.syntax();
+                let stmt = ast::Stmt::Expr(ast::StmtExpr {
+                    node_index: Default::default(),
+                    range: expression.body.range(),
+                    value: expression.body.clone(),
+                });
+                Input::Expression(
+                    ast::ModModule {
+                        node_index: Default::default(),
+                        range: expression.range(),
+                        body: std::iter::once(stmt).collect(),
+                    },
+                    parsed.tokens(),
+                )
+            }
+        };
+        let (syntax, tokens) = match &input {
+            Input::Module(p) => (p.parsed.syntax(), p.parsed.tokens()),
+            Input::Expression(syntax, tokens) => (syntax, *tokens),
+        };
         let docs = if self.keep_docstrings && name == "collections" && bundled {
             crate::modules::doctest::sealed(crate::modules::IntrinsicModule::Collections)
         } else {
             None
         };
-        let has_templates = parsed
-            .tokens()
+        let has_templates = tokens
             .iter()
             .any(|t| t.kind() == ast::token::TokenKind::TStringStart);
-        let template_expressions =
-            imre_ast::strings::template_expressions(source, parsed.tokens(), parsed.syntax());
+        let template_expressions = imre_ast::strings::template_expressions(source, tokens, syntax);
         // CPython starts the module provider at the first statement, excluding its decorators.
-        let module_start = parsed
-            .syntax()
+        let module_start = syntax
             .body
             .first()
             .map(|stmt| {
@@ -368,7 +401,7 @@ impl Output {
                     _ => None,
                 };
                 last.and_then(|decorator| {
-                    parsed.tokens().after(decorator.end()).iter().find(|token| {
+                    tokens.after(decorator.end()).iter().find(|token| {
                         use ast::token::TokenKind;
                         matches!(
                             token.kind(),
@@ -379,13 +412,17 @@ impl Output {
                 .map_or_else(|| stmt.start(), Ranged::start)
             })
             .unwrap_or_default();
-        let class_keywords = parsed
-            .tokens()
+        let class_keywords = tokens
             .iter()
             .filter(|token| token.kind() == ast::token::TokenKind::Class)
             .map(Ranged::start)
             .collect();
-        let mut body = parsed.into_syntax().body;
+        let (mut body, replacements) = match input {
+            Input::Module(p) => (p.parsed.into_syntax().body, p.replacements),
+            Input::Expression(syntax, tokens) => {
+                (syntax.body, strings::literal_replacements(source, tokens))
+            }
+        };
         let method_imports = imre_ast::module_imports(&body);
         let private_names = lower_source(path, source, &mut body)?;
         // Frozen code exposes its origin independently of the module's registered source path.
@@ -420,18 +457,25 @@ impl Output {
                 .map(|(offset, _)| offset)
                 .collect(),
         };
-        let code = self.code(
-            &location,
-            String::new(),
-            Body::Namespace(&body, false),
-            false,
-            false,
-        );
+        let suite = if expression {
+            let [ast::Stmt::Expr(statement)] = body.as_slice() else {
+                return Err("expected an annotation expression".into());
+            };
+            Body::Expression(&statement.value)
+        } else {
+            Body::Namespace(&body, false)
+        };
+        let code = self.code(&location, String::new(), suite, false, false);
         match self.diagnostic.take() {
             Some(diagnostic) => Err(diagnostic),
             None => Ok(code),
         }
     }
+}
+
+enum SourceBody<'a> {
+    Module { bundled: bool },
+    Expression(&'a ruff_python_parser::Parsed<ast::ModExpression>),
 }
 
 enum DefinitionName<'a> {
@@ -540,6 +584,7 @@ struct Declarations {
     emitted_named_op: bool,
     emitted_guarded_lit: bool,
     emitted_guarded_named_op: bool,
+    registered_expression: bool,
 }
 
 #[derive(Default)]
@@ -559,7 +604,7 @@ struct Output {
 impl Output {
     /// Keep a supported native body exactly as emitted. An unsupported operation in
     /// this body rolls back its private code sites before it gets a source entry.
-    fn try_suspended(&mut self, emit: impl FnOnce(&mut Self) -> String) -> Option<String> {
+    fn try_native_body(&mut self, emit: impl FnOnce(&mut Self) -> String) -> Option<String> {
         let code = self.count;
         let functions = self.functions.len();
         let constants = self.constants.len();
@@ -1020,6 +1065,50 @@ impl Function<'_, '_> {
             "call i64 {loader}(ptr %ctx, i32 {kind}, ptr {literal}, i64 {})",
             bytes.len()
         ))
+    }
+
+    /// An annotation's text is still a normal str. Retain its native expression
+    /// separately so a later evaluation can supply a new globals/locals pair.
+    fn annotation_text(&mut self, value: &str) -> String {
+        if !self.source.bundled
+            && let Ok(parsed) = imre_ast::forward_refs::parse(value)
+            && imre_ast::forward_refs::validate(&parsed).is_ok()
+            && !parsed.syntax().body.is_name_expr()
+            && !parsed.syntax().body.is_literal_expr()
+        {
+            let unit = self.source.unit;
+            let code = self.output.try_native_body(|output| {
+                let file = output.data(b"<string>");
+                match output.source_body(
+                    unit,
+                    "",
+                    Path::new("<string>"),
+                    value,
+                    &file,
+                    SourceBody::Expression(&parsed),
+                ) {
+                    Ok(code) => code,
+                    Err(err) => {
+                        output.diagnostic = Some(err);
+                        String::new()
+                    }
+                }
+            });
+            if let Some(code) = code {
+                if !self.output.declarations.registered_expression {
+                    self.output
+                        .functions
+                        .push_str("declare void @imre_dyn_bind_expression(ptr, i64, ptr)\n");
+                    self.output.declarations.registered_expression = true;
+                }
+                let text = self.text(value);
+                self.line(&format!(
+                    "call void @imre_dyn_bind_expression(ptr %ctx, i64 {text}, ptr {code})"
+                ));
+                return text;
+            }
+        }
+        self.text(value)
     }
 
     fn text(&mut self, value: &str) -> String {
