@@ -135,6 +135,33 @@ fn take_pattern_temporary(value: Expr, slot: usize) -> Expr {
     }
 }
 
+/// Evaluate a shared RHS once, then bind each target from left to right.
+/// The last target takes the temporary before its receiver or index runs.
+pub(super) fn bind_assignment<B: PatternBinder>(
+    binder: &mut B,
+    targets: &[ast::Expr],
+    value: Expr,
+) -> StdResult<Vec<Statement>, B::Error> {
+    if let [target] = targets {
+        return bind_targets(binder, target, value, None);
+    }
+    let slot = binder.pattern_hidden(value.ty);
+    let mut body = vec![Statement::Assign(slot, value)];
+    for (index, target) in targets.iter().enumerate() {
+        let value = binder.pattern_local(slot);
+        let value = if index + 1 == targets.len() {
+            take_pattern_temporary(value, slot)
+        } else {
+            value
+        };
+        body.extend(bind_targets(binder, target, value, None)?);
+    }
+    Ok(vec![Statement::Scope {
+        body,
+        clear: vec![slot],
+    }])
+}
+
 /// Capture a sequence level before its first store. A nested level is unpacked
 /// when its target is reached, after the preceding sibling's stores and callbacks.
 pub(super) fn bind_targets<B: PatternBinder>(
@@ -318,20 +345,7 @@ impl Checker<'_> {
                 .unwrap_or(&assignment.targets[0]);
             self.unpacking_value(target, &assignment.value)?
         };
-        let captured = self.hidden(value.ty);
-        let mut body = vec![Statement::Assign(captured, value)];
-        for (index, target) in assignment.targets.iter().enumerate() {
-            let value = if index + 1 == assignment.targets.len() {
-                self.take_temporary(captured)
-            } else {
-                self.local(captured)
-            };
-            body.extend(self.bind_pattern(target, value)?);
-        }
-        Ok(vec![Statement::Scope {
-            body,
-            clear: vec![captured],
-        }])
+        bind_assignment(self, &assignment.targets, value)
     }
 
     /// Receivers and indices are checked after the RHS and preceding targets.
