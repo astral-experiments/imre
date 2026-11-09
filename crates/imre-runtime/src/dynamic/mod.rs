@@ -3479,7 +3479,7 @@ impl Context {
         error.args = Some(self.alloc(Value::Tuple(vec![message])));
         let trace = error.tracing();
         trace.import_message = Some(message);
-        trace.import_names = Some([module.unwrap_or(NONE), path.unwrap_or(NONE), member]);
+        trace.import_names = [module.unwrap_or(NONE), path.unwrap_or(NONE), member].map(Some);
         Err(error)
     }
 
@@ -3552,12 +3552,12 @@ impl Context {
         Ok(first == root)
     }
 
-    fn missing_module(name: &str) -> Error {
+    fn missing_module(name: &str, key: Id) -> Error {
         Error::new(
             "ModuleNotFoundError",
             format!("No module named {}", string_repr(name)),
         )
-        .with_import(Some(name), None, None)
+        .with_import_name(key)
     }
 
     /// Read the interpreter's original sys dictionary even if its import-cache entry changed.
@@ -3590,25 +3590,45 @@ impl Context {
         }
     }
 
-    fn public_module_get(&mut self, name: Id, default: Option<Id>) -> Result<Id> {
-        let modules = self.public_modules()?;
-        if matches!(self.heap.get(modules), Value::Dict(_)) {
-            let (_, index) = self.find_dictionary_key(modules, name, None)?;
-            return Ok(index.map_or(default.unwrap_or(NONE), |i| {
-                self.stored_entries(modules)[i].1
-            }));
+    fn loading_sentinel(&mut self) -> Result<Id> {
+        if !self.import_registry_installed {
+            return Ok(self.import_missing);
         }
-        let get = self.lookup_attr(modules, "get")?;
-        let args = match default {
-            Some(default) => vec![name, default],
-            None => vec![name],
+        let dict = self.bootstrap_globals;
+        if let Some(sentinel) = self.dict_named_item(dict, "_NEEDS_LOADING") {
+            return Ok(sentinel);
+        }
+        let builtins = self.namespace_builtins(dict, None)?;
+        self.source_global(value::ExecGlobals { dict, builtins }, "_NEEDS_LOADING")
+    }
+
+    fn public_module_get(&mut self, name: Id, with_sentinel: bool) -> Result<Id> {
+        let modules = self.public_modules()?;
+        let get = if matches!(self.heap.get(modules), Value::Dict(_)) {
+            None
+        } else {
+            let method = self.lookup_attr(modules, "get")?;
+            self.heap.keep(method);
+            Some(method)
         };
-        self.call(get, args, Vec::new())
+        // A get descriptor can replace _NEEDS_LOADING before the argument is evaluated.
+        let default = with_sentinel.then(|| self.loading_sentinel()).transpose()?;
+        if let Some(get) = get {
+            let args = match default {
+                Some(default) => vec![name, default],
+                None => vec![name],
+            };
+            return self.call(get, args, Vec::new());
+        }
+        let (_, index) = self.find_dictionary_key(modules, name, None)?;
+        Ok(index.map_or(default.unwrap_or(NONE), |i| {
+            self.stored_entries(modules)[i].1
+        }))
     }
 
     fn public_registered_module(&mut self, name: Id) -> Result<Option<Id>> {
-        let value = self.public_module_get(name, Some(self.import_missing))?;
-        Ok((value != self.import_missing).then_some(value))
+        let value = self.public_module_get(name, true)?;
+        Ok((value != self.loading_sentinel()?).then_some(value))
     }
 
     fn spec_initializing(&mut self, spec: Id) -> Result<bool> {
@@ -3639,8 +3659,7 @@ impl Context {
         Ok(Some(module))
     }
 
-    fn cached_import(&mut self, name: &str) -> Result<Option<Id>> {
-        let key = self.text(name);
+    fn cached_import(&mut self, name: &str, key: Id) -> Result<Option<Id>> {
         let mut retries = 0;
         let module = loop {
             let Some(module) = self.public_registered_module(key)? else {
@@ -3651,7 +3670,7 @@ impl Context {
             if self.module_initializing(module)? {
                 break self.public_registered_module(key)?;
             }
-            if self.public_module_get(key, None)? == module {
+            if self.public_module_get(key, false)? == module {
                 break Some(module);
             }
             // A callback can replace the entry while _find_and_load checks its spec.
@@ -3663,7 +3682,7 @@ impl Context {
                 "ModuleNotFoundError",
                 format!("import of {name} halted; None in sys.modules"),
             )
-            .with_import(Some(name), None, None)),
+            .with_import_name(key)),
             module => Ok(module),
         }
     }
@@ -3676,41 +3695,54 @@ impl Context {
 
     fn module(&mut self, name: &str) -> Result<Id> {
         let key = self.text(name);
+        self.module_by_key(name, key)
+    }
+
+    fn module_by_key(&mut self, name: &str, key: Id) -> Result<Id> {
         if let Some(module) = self.registered_module(key)?
             && module != NONE
         {
             return Ok(module);
         }
-        self.find_module(name)?
-            .ok_or_else(|| Self::missing_module(name))
+        self.find_module_from(name, key, NONE)
+            .map_err(|error| self.trim_import_traceback(error))?
+            .ok_or_else(|| Self::missing_module(name, key))
     }
 
     /// Resolve registered and filesystem modules against the current import path.
     fn find_module(&mut self, name: &str) -> Result<Option<Id>> {
-        self.find_module_from(name, NONE)
+        let key = self.text(name);
+        self.find_module_from(name, key, NONE)
             .map_err(|error| self.trim_import_traceback(error))
     }
 
-    fn find_module_from(&mut self, mut name: &str, source_globals: Id) -> Result<Option<Id>> {
+    fn find_module_from(
+        &mut self,
+        mut name: &str,
+        mut key: Id,
+        source_globals: Id,
+    ) -> Result<Option<Id>> {
         let mut parents = Vec::new();
         let mut module = loop {
-            if let Some(id) = self.cached_import(name)? {
+            if let Some(id) = self.cached_import(name, key)? {
                 break Some(id);
             }
             let Some((parent, child)) = name.rsplit_once('.') else {
-                break self.load_module(name, None, source_globals)?;
+                break self.load_module(name, key, None, source_globals)?;
             };
             // Each unresolved parent consumes three importlib frames.
             self.check_call_depth(3 * (parents.len() + 1))?;
             parents
                 .try_reserve(1)
                 .map_err(|_| crate::Error::allocation())?;
-            parents.push((name, parent, child));
+            parents.push((name, key, parent, child));
             name = parent;
+            key = self.text(parent);
         };
-        for (name, parent, child) in parents.into_iter().rev() {
-            let id = module.ok_or_else(|| Self::missing_module(parent))?;
-            module = self.load_module(name, Some((id, child)), source_globals)?;
+        for (name, child_key, parent, child) in parents.into_iter().rev() {
+            let id = module.ok_or_else(|| Self::missing_module(parent, key))?;
+            key = child_key;
+            module = self.load_module(name, key, Some((id, child)), source_globals)?;
         }
         Ok(module)
     }
@@ -3719,23 +3751,22 @@ impl Context {
     fn load_module(
         &mut self,
         name: &str,
+        key: Id,
         parent: Option<(Id, &str)>,
         source_globals: Id,
     ) -> Result<Option<Id>> {
         if parent.is_some() {
-            let key = self.text(name);
-            let child = self.public_module_get(key, None)?;
+            let child = self.public_module_get(key, false)?;
             if child != NONE {
                 return Ok(Some(child));
             }
         }
         if self.import_registry_installed {
             let path = match parent {
-                Some((parent, _)) => self.parent_import_path(name, parent)?,
+                Some((parent, _)) => self.parent_import_path(name, key, parent)?,
                 None => NONE,
             };
-            let name_id = self.text(name);
-            let spec = self.meta_call(source_globals, "_find_spec", vec![name_id, path])?;
+            let spec = self.meta_call(source_globals, "_find_spec", vec![key, path])?;
             if spec == NONE {
                 return Ok(None);
             }
@@ -3745,7 +3776,7 @@ impl Context {
         }
         // Bootstrap initializers and live sys.modules hooks can reenter Python.
         stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
-            self.load_bootstrap_module(name, parent, source_globals)
+            self.load_bootstrap_module(name, key, parent, source_globals)
         })
     }
 
@@ -3861,6 +3892,7 @@ impl Context {
     fn load_bootstrap_module(
         &mut self,
         name: &str,
+        key: Id,
         parent: Option<(Id, &str)>,
         source_globals: Id,
     ) -> Result<Option<Id>> {
@@ -3881,7 +3913,7 @@ impl Context {
             self.bundled_source(name)
         } else {
             let (search, child) = if let Some((parent, child)) = parent {
-                (self.parent_import_path(name, parent)?, child)
+                (self.parent_import_path(name, key, parent)?, child)
             } else {
                 (self.startup_search_path()?, name)
             };
@@ -4079,11 +4111,11 @@ impl Context {
     }
 
     /// Run an importlib exception handler with its caught exception visible to Python callbacks.
-    fn with_import_exception(
+    fn with_import_exception<T>(
         &mut self,
         exception: Id,
-        handler: impl FnOnce(&mut Self) -> Result<()>,
-    ) -> Result<()> {
+        handler: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
         self.heap.reserve_temporaries(1)?;
         let previous = self.heap.replace_active(exception);
         self.heap.keep(previous);
@@ -4619,7 +4651,7 @@ impl Context {
                 } else {
                     let operator = self
                         .find_module("_operator")?
-                        .ok_or_else(|| Self::missing_module("_operator"))?;
+                        .ok_or_else(|| Self::missing_module("_operator", self.text("_operator")))?;
                     (operator, "_compare_digest")
                 };
                 let compare = self.lookup_attr(module, attr)?;
@@ -4769,12 +4801,11 @@ impl Context {
                     self.bootstrap_globals = self.module_globals(scope)?;
                 }
                 let key = self.text("_frozen_importlib_external");
-                let cached = self.public_module_get(key, Some(self.import_missing))?;
-                let external = if cached == self.import_missing {
-                    self.find_module("_frozen_importlib_external")?
-                        .ok_or_else(|| Self::missing_module("_frozen_importlib_external"))?
+                let external = if let Some(module) = self.public_registered_module(key)? {
+                    module
                 } else {
-                    cached
+                    self.find_module("_frozen_importlib_external")?
+                        .ok_or_else(|| Self::missing_module("_frozen_importlib_external", key))?
                 };
                 self.bind(scope, "_bootstrap_external", external);
             }

@@ -2576,12 +2576,10 @@ pub(super) fn call(
                 return Ok(NONE);
             }
             ("native_code", [name, bundled], []) => {
-                let name = ctx.str_value(*name)?.to_owned();
-                return ctx.native_code(&name, *bundled == TRUE);
+                return ctx.native_code(*name, *bundled == TRUE);
             }
             ("native_source", [name, bundled], []) => {
-                let name = ctx.str_value(*name)?.to_owned();
-                return ctx.native_source(&name, *bundled == TRUE);
+                return ctx.native_source(*name, *bundled == TRUE);
             }
             ("native_spec_info", [name, path, bundled], []) => {
                 let name = ctx.str_value(*name)?.to_owned();
@@ -2592,11 +2590,11 @@ pub(super) fn call(
                 return ctx.registered_path_spec(*name, *path);
             }
             ("frozen_info" | "frozen_code", [name], []) => {
-                let name = ctx.str_value(*name)?.to_owned();
                 return if method == "frozen_info" {
+                    let name = ctx.str_value(*name)?.to_owned();
                     Ok(ctx.frozen_info(&name))
                 } else {
-                    ctx.frozen_code(&name)
+                    ctx.frozen_code(*name)
                 };
             }
             ("builtin_names_contains", [sys, key], []) => {
@@ -2629,17 +2627,15 @@ pub(super) fn call(
                 ctx.warn_import(*globals, &message, line, args.get(3).map(|id| *id == TRUE))?;
                 return Ok(NONE);
             }
-            ("import_module", [name] | [name, _], []) => {
-                let name = ctx.str_value(*name)?.to_owned();
+            ("import_module", [key] | [key, _], []) => {
+                let name = ctx.str_value(*key)?.to_owned();
                 let source_globals = args.get(1).copied().unwrap_or(NONE);
                 return ctx
-                    .find_module_from(&name, source_globals)?
-                    .ok_or_else(|| Context::missing_module(&name));
+                    .find_module_from(&name, *key, source_globals)?
+                    .ok_or_else(|| Context::missing_module(&name, *key));
             }
             ("find_spec", [fullname, original, finder], []) => {
-                let fullname = ctx.str_value(*fullname)?.to_owned();
-                let original = ctx.str_value(*original)?.to_owned();
-                return ctx.find_spec(&fullname, &original, false, Some(*finder));
+                return ctx.find_spec(*fullname, *original, false, Some(*finder));
             }
             ("namespace_locations", [name, path], []) => {
                 let name = ctx.str_value(*name)?.to_owned();
