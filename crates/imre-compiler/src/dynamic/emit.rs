@@ -500,9 +500,9 @@ impl<'a> PreparedBody<'a> {
         let method_imports = imre_ast::module_imports(&body);
         let private_names = lower_source(path, source, &mut body)?;
         // Bundled functions opt in only when their own module initializer is admitted.
-        let ordinary = !expression && !has_templates && replacements.is_empty();
+        let ordinary = !expression;
         let initializer = if ordinary {
-            crate::frontend::registered_suite(&body, true)
+            crate::frontend::registered_suite(&body, true, &replacements, has_templates)
         } else {
             None
         };
@@ -818,39 +818,44 @@ impl Output {
         } else {
             0
         };
-        let entry = if matches!(body, Body::Statements(_))
-            && let Some(checked) = source
+        let checked = source
+            .program_bodies
+            .checked
+            .and_then(|functions| functions.get(&start));
+        let native = if matches!(body, Body::Statements(_)) && checked.is_none() {
+            source
                 .program_bodies
-                .checked
+                .native
                 .and_then(|functions| functions.get(&start))
-        {
-            let mut frame = RegisteredFrame::new(self, &source.positions, false);
-            frame.checked_body(checked);
-            frame.finish(false)
         } else {
-            let native = match body {
-                Body::Statements(_) => source.program_bodies.native.and_then(|map| map.get(&start)),
-                _ => None,
-            };
-            let lowered;
-            let body = match body {
-                Body::Statements(stmts)
-                    if source
-                        .definitions
-                        .as_ref()
-                        .and_then(|defs| defs.get(&start))
-                        .is_some_and(|def| def.type_params.is_none()) =>
-                {
-                    lowered = crate::frontend::registered_suite(stmts, false);
-                    match lowered.as_ref() {
-                        Some(checked) => Body::Checked(checked, stmts),
-                        None => body,
-                    }
-                }
-                _ => body,
-            };
-            self.code(source, prefix, body, in_function, suspended, native)
+            None
         };
+        let lowered;
+        let body = match body {
+            Body::Statements(stmts) => {
+                let selected = if checked.is_some() {
+                    checked
+                } else if source
+                    .definitions
+                    .as_ref()
+                    .and_then(|defs| defs.get(&start))
+                    .is_some_and(|def| def.type_params.is_none())
+                {
+                    lowered = crate::frontend::registered_suite(
+                        stmts,
+                        false,
+                        &source.replacements,
+                        source.has_templates,
+                    );
+                    lowered.as_ref()
+                } else {
+                    None
+                };
+                selected.map_or(body, |function| Body::Checked(function, stmts))
+            }
+            _ => body,
+        };
+        let entry = self.code(source, prefix, body, in_function, suspended, native);
         writeln!(
             self.constants,
             "{site} = private constant %code_site {{ ptr {entry}, ptr {}, i32 {}, i32 {tag} }}",

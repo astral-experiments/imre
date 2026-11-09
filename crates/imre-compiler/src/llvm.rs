@@ -3308,19 +3308,14 @@ impl Emitter<'_, '_> {
     fn other_expression(&mut self, expression: &Expr) -> Value {
         match &expression.kind {
             ExprKind::Int(_)
+            | ExprKind::Float(_)
+            | ExprKind::Str(_)
+            | ExprKind::Bytes(_)
             | ExprKind::Bool(_)
             | ExprKind::None
-            | ExprKind::Str(_)
-            | ExprKind::Dict { .. }
             | ExprKind::Local(_)
             | ExprKind::Binary(..)
             | ExprKind::Builtin(..) => unreachable!("shared IR expression"),
-            ExprKind::Float(value) => Value {
-                ty: Type::Float,
-                operand: format!("0x{:016X}", value.to_bits()),
-                small_integer: false,
-            },
-            ExprKind::Bytes(value) => self.pooled_literal(value, Type::Bytes),
             ExprKind::Bind(slot, expression) => {
                 let value = self.expr(expression);
                 self.retain(&value);
@@ -3412,6 +3407,30 @@ impl Emitter<'_, '_> {
                     }
                 }
                 list
+            }
+            ExprKind::Dict {
+                key,
+                value,
+                entries,
+            } => {
+                let dict = Value {
+                    ty: expression.ty,
+                    operand: self.instruction(format!(
+                        "call ptr @imre_dict_new(i32 {}, i32 {})",
+                        representation_kind(*key, &self.module.types),
+                        representation_kind(*value, &self.module.types)
+                    )),
+                    small_integer: false,
+                };
+                let dict = self.owned(dict);
+                for (key, value) in entries {
+                    let key = self.operand(key);
+                    let value = self.operand(value);
+                    self.set_item(&dict, &key.value, &value.value, false);
+                    self.release_operand(&value);
+                    self.release_operand(&key);
+                }
+                dict
             }
             ExprKind::Set { element, values } => {
                 let set = Value {
@@ -5116,6 +5135,13 @@ impl Emitter<'_, '_> {
             Builtin::RegisteredDefinition(_)
             | Builtin::RegisteredStatement(..)
             | Builtin::RegisteredCall(..)
+            | Builtin::RegisteredName(_)
+            | Builtin::RegisteredAttribute(_)
+            | Builtin::RegisteredSubscript(..)
+            | Builtin::RegisteredDict(_)
+            | Builtin::RegisteredEllipsis
+            | Builtin::RegisteredComplex(..)
+            | Builtin::RegisteredString(_)
             | Builtin::RegisteredLocation(_) => {
                 unreachable!("registered operation in fixed calling convention")
             }

@@ -2,9 +2,68 @@
 
 use super::*;
 
+pub(super) mod values;
+
+pub(super) struct Frame<'a> {
+    pub(super) literals: &'a values::Literals,
+    pub(super) deferred: std::cell::RefCell<Option<Failure>>,
+}
+
+impl Frame<'_> {
+    pub(super) fn require_object(&self, source: &str, site: &impl Ranged) {
+        self.deferred.borrow_mut().get_or_insert_with(|| {
+            error(
+                source,
+                site,
+                "operation requires its compiled object representation",
+            )
+            .classify(Kind::ScopedObject)
+        });
+    }
+}
+
 pub(crate) struct RegisteredFunction {
     pub(crate) function: ir::Function,
     pub(crate) local_names: HashMap<usize, String>,
+}
+
+/// Lower a definition whose binder supplies Python object handles in its normal function scope.
+pub(super) fn lower_definition<'a>(
+    mut checker: Checker<'a>,
+    definition: &ast::StmtFunctionDef,
+    signature: &Signature,
+    literals: &'a values::Literals,
+) -> Result<RegisteredFunction, String> {
+    checker.registered = Some(Frame {
+        literals,
+        deferred: Default::default(),
+    });
+    let source = checker.source;
+    let helpers = checker.helpers;
+    let first_helper = helpers.len();
+    let mut local_names = HashMap::new();
+    let (body, _) = lower_function(checker, definition, signature, Some(&mut local_names))?;
+    if !body.calls.is_empty() || helpers.len() != first_helper {
+        return Err(error(
+            source,
+            definition,
+            "the registered frame requires a callable with a Python binding",
+        )
+        .classify(Kind::ScopedObject));
+    }
+    let function = RegisteredFunction {
+        function: body.function,
+        local_names,
+    };
+    if !crate::dynamic::supports_registered_function(&function) {
+        return Err(error(
+            source,
+            definition,
+            "function body has no checked registered-frame representation",
+        )
+        .classify(Kind::ScopedObject));
+    }
+    Ok(function)
 }
 
 pub(super) fn capture(
@@ -17,6 +76,7 @@ pub(super) fn capture(
     retain_live_parameters: bool,
 ) {
     let mut registered = HashMap::<ModuleId, HashMap<TextSize, RegisteredFunction>>::new();
+    let mut literals = HashMap::new();
     for (&owner, signature) in signatures {
         let id = owner.module;
         let module = &graph.modules[id];
@@ -33,16 +93,7 @@ pub(super) fn capture(
                 let helpers = Helpers::new(inference.len());
                 let checker =
                     Checker::new(graph, id, signatures, classes, types, &helpers, globals);
-                if let Some(native) =
-                    retained::capture(checker, function, &signature, inference.len(), &helpers)
-                {
-                    graph
-                        .native_functions
-                        .borrow_mut()
-                        .entry(id)
-                        .or_default()
-                        .insert(native.site.start(), native);
-                }
+                retained::capture(checker, function, &signature, inference.len(), false);
             }
             continue;
         };
@@ -51,18 +102,14 @@ pub(super) fn capture(
         }
         let helpers = Helpers::new(inference.len());
         let checker = Checker::new(graph, id, signatures, classes, types, &helpers, globals);
-        let mut local_names = HashMap::new();
-        if let Ok((body, _)) = lower_function(checker, function, &signature, Some(&mut local_names))
-            && body.calls.is_empty()
-            && helpers.len() == 0
-        {
-            registered.entry(id).or_default().insert(
-                function.start(),
-                RegisteredFunction {
-                    function: body.function,
-                    local_names,
-                },
-            );
+        let literals = literals
+            .entry(id)
+            .or_insert_with(|| values::Literals::new(module));
+        if let Ok(body) = lower_definition(checker, function, &signature, literals) {
+            registered
+                .entry(id)
+                .or_default()
+                .insert(function.start(), body);
         }
     }
     if retain_live_parameters {
@@ -93,19 +140,18 @@ pub(super) fn located(node: &ast::Expr, value: Expr) -> Expr {
     )
 }
 
-pub(super) fn call(node: &ast::ExprCall, operands: Vec<Expr>) -> Expr {
-    operation(
-        Builtin::RegisteredCall(node.range(), node.func.end()),
-        Type::PythonObject,
-        operands,
-    )
-}
-
 /// Lower a physical suite for an existing Python namespace. Binding indices name entries
 /// in the runtime scope; they never cache a global value across executable statements.
-pub(crate) fn registered_suite(stmts: &[ast::Stmt], module: bool) -> Option<RegisteredFunction> {
+pub(crate) fn registered_suite(
+    stmts: &[ast::Stmt],
+    module: bool,
+    replacements: &HashMap<TextRange, Vec<u32>>,
+    has_templates: bool,
+) -> Option<RegisteredFunction> {
     let mut scope = SourceScope {
         module,
+        replacements,
+        has_templates,
         names: HashMap::new(),
     };
     let mut body = Vec::new();
@@ -131,17 +177,7 @@ pub(crate) fn registered_suite(stmts: &[ast::Stmt], module: bool) -> Option<Regi
     })
 }
 
-/// Lower a deferred annotation in its runtime-provided namespace.
-pub(crate) fn registered_operand(node: &ast::Expr) -> Option<(Expr, HashMap<usize, String>)> {
-    let mut scope = SourceScope {
-        module: false,
-        names: HashMap::new(),
-    };
-    let operand = scope.operand(node)?;
-    Some((operand, scope.bindings()))
-}
-
-impl statements::StatementLowering for SourceScope {
+impl statements::StatementLowering for SourceScope<'_> {
     type Error = ();
 
     fn assignment(&mut self, assign: &ast::StmtAssign) -> StdResult<Vec<Statement>, ()> {
@@ -201,19 +237,14 @@ impl statements::StatementLowering for SourceScope {
     }
 }
 
-struct SourceScope {
+struct SourceScope<'a> {
     module: bool,
+    replacements: &'a HashMap<TextRange, Vec<u32>>,
+    has_templates: bool,
     names: HashMap<String, usize>,
 }
 
-impl SourceScope {
-    fn bindings(self) -> HashMap<usize, String> {
-        self.names
-            .into_iter()
-            .map(|(name, slot)| (slot, name))
-            .collect()
-    }
-
+impl SourceScope<'_> {
     fn slot(&mut self, name: &str) -> usize {
         let next = self.names.len();
         *self.names.entry(name.to_owned()).or_insert(next)
@@ -228,85 +259,68 @@ impl SourceScope {
         }
     }
 
-    fn operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
-        let value = match expr {
-            ast::Expr::Name(n) => {
-                let slot = self.slot(n.id.as_str());
-                if self.module {
-                    operation(Builtin::GlobalGet(slot), Type::PythonObject, vec![])
-                } else {
-                    Expr::local(slot, Type::PythonObject)
-                }
-            }
-            ast::Expr::StringLiteral(text) => Expr {
-                ty: Type::Str,
-                kind: ExprKind::Str(text.value.to_str().to_owned()),
-            },
-            ast::Expr::Dict(display) => {
-                let mut entries = Vec::with_capacity(display.items.len());
-                for item in &display.items {
-                    // Inserting these exact keys cannot call Python between value operands.
-                    let key = item.key.as_ref()?;
-                    if !matches!(
-                        key,
-                        ast::Expr::StringLiteral(_)
-                            | ast::Expr::NumberLiteral(_)
-                            | ast::Expr::BooleanLiteral(_)
-                            | ast::Expr::NoneLiteral(_)
-                    ) {
-                        return None;
-                    }
-                    entries.push((self.operand(key)?, self.operand(&item.value)?));
-                }
-                Expr {
-                    ty: Type::PythonObject,
-                    kind: ExprKind::Dict {
-                        key: Type::PythonObject,
-                        value: Type::PythonObject,
-                        entries,
-                    },
-                }
-            }
-            ast::Expr::Subscript(item) => operation(
-                Builtin::DictGet,
-                Type::PythonObject,
-                vec![self.operand(&item.value)?, self.operand(&item.slice)?],
-            ),
-            ast::Expr::BinOp(bin) if bin.op == ast::Operator::Add => {
-                let left = self.operand(&bin.left)?;
-                let right = self.operand(&bin.right)?;
-                Expr {
-                    ty: Type::PythonObject,
-                    kind: ExprKind::Binary(Binary::Add, Box::new(left), Box::new(right)),
-                }
-            }
-            ast::Expr::NumberLiteral(n) => {
-                let ast::Number::Int(value) = &n.value else {
-                    return None;
-                };
-                Expr::integer(value)
-            }
-            ast::Expr::BooleanLiteral(b) => Expr::boolean(b.value),
-            ast::Expr::NoneLiteral(_) => Expr::none(),
-            ast::Expr::Call(node)
-                if node.arguments.keywords.is_empty()
-                    && !node.arguments.args.iter().any(ast::Expr::is_starred_expr) =>
-            {
-                let operands = std::iter::once(node.func.as_ref())
-                    .chain(node.arguments.args.iter())
-                    .map(|e| self.operand(e))
-                    .collect::<Option<_>>()?;
-                call(node, operands)
-            }
-            _ => return None,
-        };
-        Some(located(expr, value))
+    fn operand(&self, expr: &ast::Expr) -> Option<Expr> {
+        values::registered_value(expr, self.replacements, self.has_templates)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn module_and_function_stores_share_the_registered_dictionary_operand() {
+        let graph = SourceGraph::single("out = {key: callback(arg), **more}[index]\n").unwrap();
+        let source = &graph.modules[graph.entry].parsed.syntax().body;
+        for module in [false, true] {
+            let suite = registered_suite(source, module, &HashMap::new(), false).unwrap();
+            assert_eq!(suite.local_names, HashMap::from([(0, "out".to_owned())]));
+            let [Statement::Expr(_), store] = suite.function.body.as_slice() else {
+                panic!("expected one checkpoint followed by one store")
+            };
+            let operand = match (module, store) {
+                (false, Statement::Assign(0, value)) => value,
+                (
+                    true,
+                    Statement::Expr(Expr {
+                        kind: ExprKind::Builtin(Builtin::GlobalSet(0), operands),
+                        ..
+                    }),
+                ) => &operands[0],
+                _ => panic!("expected the destination's namespace store"),
+            };
+            let ExprKind::Builtin(Builtin::RegisteredLocation(site), operands) = &operand.kind
+            else {
+                panic!("expected the subscript's original range")
+            };
+            let ExprKind::Builtin(Builtin::RegisteredSubscript(index, _), indexed) =
+                &operands[0].kind
+            else {
+                panic!("expected registered subscription")
+            };
+            assert_eq!(site, index);
+            let ExprKind::Builtin(Builtin::RegisteredLocation(_), display) = &indexed[0].kind
+            else {
+                panic!("expected a located dictionary operand")
+            };
+            let ExprKind::Builtin(Builtin::RegisteredDict(entries), elements) = &display[0].kind
+            else {
+                panic!("expected the registered Python dictionary protocol")
+            };
+            assert_eq!(
+                entries,
+                &[ir::DictEntryKind::Pair, ir::DictEntryKind::Unpack]
+            );
+            assert_eq!(elements.len(), 3);
+            let mut names = Vec::new();
+            ir::walk_expressions(&suite.function.body, &mut |expr| {
+                if let ExprKind::Builtin(Builtin::RegisteredName(name), _) = &expr.kind {
+                    names.push(name.clone());
+                }
+            });
+            assert_eq!(names, ["key", "callback", "arg", "more", "index"]);
+        }
+    }
 
     #[test]
     fn registered_arguments_share_the_checked_integer_body() {
@@ -337,6 +351,98 @@ mod tests {
     }
 
     #[test]
+    fn callback_body_uses_registered_dictionary_global_and_subscript_with_checked_add() {
+        let graph = SourceGraph::single(concat!(
+            "KEY = 'target'\n",
+            "def report(x: int, sink, y: int):\n",
+            "    answer = x + y\n",
+            "    callbacks = {KEY: sink}\n",
+            "    callbacks[KEY](answer)\n",
+        ))
+        .unwrap();
+        assert!(super::super::lower(&graph).is_err());
+        let bodies = graph.registered_functions();
+        let body = bodies[&graph.entry]
+            .values()
+            .next()
+            .expect("registered callback");
+        let mut operations = Vec::new();
+        ir::walk_expressions(&body.function.body, &mut |value| match &value.kind {
+            ExprKind::Builtin(Builtin::RegisteredDict(entries), _) => {
+                assert_eq!(entries, &[ir::DictEntryKind::Pair]);
+                operations.push("dict");
+            }
+            ExprKind::Builtin(Builtin::RegisteredName(name), _) if name == "KEY" => {
+                operations.push("name")
+            }
+            ExprKind::Builtin(Builtin::RegisteredSubscript(..), _) => operations.push("get"),
+            ExprKind::Builtin(Builtin::RegisteredCall(..), _) => operations.push("call"),
+            ExprKind::Binary(Binary::Add, left, right) => {
+                assert_eq!(
+                    (left.ty, right.ty, value.ty),
+                    (Type::Int, Type::Int, Type::Int)
+                );
+                operations.push("add");
+            }
+            _ => {}
+        });
+        operations.sort_unstable();
+        assert_eq!(operations, ["add", "call", "dict", "get", "name", "name"]);
+    }
+
+    #[test]
+    fn a_mixed_definition_keeps_its_original_list_write_diagnostic() {
+        let graph = SourceGraph::single(concat!(
+            "def publish(send):\n",
+            "    previous: int = 0\n",
+            "    previous = send(1)\n",
+            "    values: list[int] = [3]\n",
+            "    values.append(True)\n",
+            "    print(locals()['previous'])\n",
+            "def echo(value):\n    return 41\n",
+            "entries = {'publish': publish}\n",
+            "entries[input()]({'send': echo}[input()])\n",
+        ))
+        .unwrap();
+        let diagnostic = super::super::lower(&graph).err().unwrap();
+        assert!(diagnostic.contains(":5:19:"), "{diagnostic}");
+        assert!(
+            diagnostic.contains("expected int, got bool"),
+            "{diagnostic}"
+        );
+    }
+
+    #[test]
+    fn an_annotated_noncallable_local_keeps_its_checked_call_error() {
+        let graph = SourceGraph::single("def bad(x: int, arg):\n    x(arg)\n").unwrap();
+        assert!(super::super::lower(&graph).is_err());
+        assert!(graph.registered_functions().is_empty());
+    }
+
+    #[test]
+    fn region_boundaries_preserve_specialized_and_packed_operands() {
+        let many = std::iter::repeat_n("1", 65).collect::<Vec<_>>().join(",");
+        for source in [
+            "s.partition('-')[1]",
+            "s[:2]",
+            "f(*items)",
+            "f(k=v)",
+            "{'key': recv.method()}",
+            &format!("f({many})"),
+        ] {
+            let graph = SourceGraph::single(source).unwrap();
+            let ast::Stmt::Expr(statement) = &graph.modules[graph.entry].parsed.syntax().body[0]
+            else {
+                panic!("expected an expression")
+            };
+            assert!(
+                values::registered_value(&statement.value, &HashMap::new(), false).is_none(),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
     fn fixed_layout_folds_cannot_erase_object_operations() {
         // A runtime int subclass can supply a distinct implementation for each operation.
         for operation in ["x += y", "x = +x", "x = int(x)", "x = x.real"] {
@@ -345,6 +451,25 @@ mod tests {
             let graph = SourceGraph::single(&program).unwrap();
             assert!(super::super::lower(&graph).is_err());
             assert!(graph.registered_functions().is_empty(), "{operation}");
+        }
+    }
+
+    #[test]
+    fn an_imported_initializer_keeps_its_priority_over_a_registered_body_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("app.py");
+        std::fs::write(&app, "import operations\n").unwrap();
+        let registered =
+            "def apply(send):\n    items: list[int] = [1]\n    items.append(True)\n    send(1)\n";
+        let initialize =
+            "def report(value):\n    print(value)\nhandlers = {'cb': report}\ncount: int = 'bad'\n";
+        for source in [
+            format!("{registered}{initialize}apply(handlers[input()])\n"),
+            format!("{initialize}{registered}apply(handlers[input()])\n"),
+        ] {
+            std::fs::write(dir.path().join("operations.py"), source).unwrap();
+            let error = crate::check_file(&app, None).unwrap_err();
+            assert!(error.contains("expected int, got str"), "{error}");
         }
     }
 

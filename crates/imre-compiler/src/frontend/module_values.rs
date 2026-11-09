@@ -10,6 +10,9 @@ type ClassLiteral = (Option<ModuleId>, Rc<[String]>);
 
 #[derive(Default)]
 pub(super) struct ModuleValues {
+    pub(super) registered_initializers: bool,
+    /// A concrete source read supplies the registered function's ordinary Python binding.
+    pub(super) missing_bindings: RefCell<std::collections::BTreeMap<usize, Diagnostic>>,
     pub(super) class_data: RefCell<class_data::Storage>,
     definitions: RefCell<HashMap<DefinitionId, (usize, Type)>>,
     class_slots: RefCell<HashMap<(DefinitionId, usize), usize>>,
@@ -21,6 +24,13 @@ pub(super) struct ModuleValues {
 }
 
 impl ModuleValues {
+    pub(super) fn for_initializers(registered_initializers: bool) -> Self {
+        Self {
+            registered_initializers,
+            ..Self::default()
+        }
+    }
+
     /// Each declaration owns a single tuple for its entire class lifetime,
     /// including references through aliases and subclasses.
     fn initialize_class_tuples(

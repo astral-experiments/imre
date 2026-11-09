@@ -1827,6 +1827,21 @@ impl Types {
         false
     }
 
+    /// Whether any stored part of this operand requires a live Python handle.
+    pub(crate) fn stores_python_object(&self, ty: Type) -> bool {
+        let mut pending = vec![ty];
+        let mut visited = std::collections::HashSet::new();
+        while let Some(ty) = pending.pop() {
+            if ty == Type::PythonObject {
+                return true;
+            }
+            if visited.insert(ty) {
+                pending.extend(self.children(ty));
+            }
+        }
+        false
+    }
+
     /// Enumerates stored types for the class-field acyclicity check.
     pub(crate) fn children(&self, ty: Type) -> Vec<Type> {
         if let Type::ForwardRef(id) | Type::AnnotationValue(id) | Type::CmpKey(id, _) = ty {

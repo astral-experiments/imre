@@ -3171,7 +3171,8 @@ impl SourceGraph {
     pub(crate) fn try_complete_body<T>(
         &self,
         module: ModuleId,
-        lower: impl FnOnce() -> T,
+        selected: bool,
+        lower: impl FnOnce() -> Option<T>,
     ) -> Option<T> {
         let diagnostics = self.checked_diagnostic_count(module);
         let deferred = self.deferred_object_error.take();
@@ -3185,24 +3186,36 @@ impl SourceGraph {
         let deferred_here = self.deferred_object_error.replace(deferred).is_some();
         let needed_here = self.needs_object_runtime.replace(needs_object);
         let used_constructor = self.has_object_constructor_fallback.replace(constructor);
-        self.check_fallback_calls.set(calls);
-        self.float_components.set(floats);
-        self.set_layout_hint.set(set);
-        self.missing_repr.set(repr);
-        self.checked_diagnostics.borrow_mut()[module].truncate(diagnostics);
-        (!deferred_here && !needed_here && !used_constructor).then_some(result)
+        let result = result.filter(|_| !deferred_here && !needed_here && !used_constructor);
+        if !selected || result.is_none() {
+            self.check_fallback_calls.set(calls);
+            self.float_components.set(floats);
+            self.set_layout_hint.set(set);
+            self.missing_repr.set(repr);
+            self.checked_diagnostics.borrow_mut()[module].truncate(diagnostics);
+        }
+        result
     }
 
     /// Keep the checked bodies that can execute with the registered calling convention.
     pub(crate) fn set_registered_functions(
         &self,
-        mut modules: HashMap<ModuleId, crate::dynamic::CheckedFunctions>,
+        modules: HashMap<ModuleId, crate::dynamic::CheckedFunctions>,
     ) {
-        modules.retain(|_, functions| {
-            functions.retain(|_, function| crate::dynamic::supports_registered_function(function));
-            !functions.is_empty()
-        });
         self.registered_functions.replace(modules);
+    }
+
+    pub(crate) fn register_function(
+        &self,
+        module: ModuleId,
+        start: TextSize,
+        body: crate::frontend::RegisteredFunction,
+    ) {
+        self.registered_functions
+            .borrow_mut()
+            .entry(module)
+            .or_default()
+            .insert(start, body);
     }
 
     pub(crate) fn registered_functions(

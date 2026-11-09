@@ -491,22 +491,15 @@ impl Checker<'_> {
 
     /// Callable types contain positional types, not parameter names or defaults.
     pub(super) fn invoke(&mut self, call: &ast::ExprCall, callable: Expr) -> Result<Expr, String> {
-        if self.registered {
-            if callable.ty != Type::PythonObject
-                || !call.arguments.keywords.is_empty()
-                || call.arguments.args.iter().any(ast::Expr::is_starred_expr)
-            {
-                return Err(error(
-                    self.source,
-                    call,
-                    "unsupported registered-frame call",
-                ));
+        if callable.ty == Type::PythonObject {
+            if registered::values::registered_positional_call(call) {
+                return registered::values::positional_call(call, callable, |arg| self.expr(arg));
             }
-            let mut operands = vec![callable];
-            for arg in &call.arguments.args {
-                operands.push(self.expr(arg)?);
-            }
-            return Ok(registered::call(call, operands));
+            return Err(self.classified_error(
+                Kind::ScopedObject,
+                call,
+                "this Python call requires the registered argument binder",
+            ));
         }
         if let Type::WeakProxy(class) = callable.ty {
             return self.weak_proxy_call(call, callable, class);

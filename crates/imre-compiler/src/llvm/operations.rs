@@ -3,6 +3,18 @@
 use super::records;
 use super::{Binary, Builtin, Expr, ExprKind, Statement, Type};
 
+/// Evaluate a positional call's callable first, then each argument exactly once.
+pub(crate) fn call_arguments<C, E, V>(
+    context: &mut C,
+    callee: &E,
+    args: &[E],
+    mut evaluate: impl FnMut(&mut C, &E) -> V,
+) -> (V, Vec<V>) {
+    let callable = evaluate(context, callee);
+    let values = args.iter().map(|arg| evaluate(context, arg)).collect();
+    (callable, values)
+}
+
 pub(crate) trait Operations: Sized {
     type Value;
     type Operand;
@@ -18,16 +30,14 @@ pub(crate) trait Operations: Sized {
         callee: &Expr,
         args: &[Expr],
     ) -> (Self::Operand, Vec<Self::Operand>) {
-        let callable = self.operand(callee);
-        let values = args.iter().map(|arg| self.operand(arg)).collect();
-        (callable, values)
+        call_arguments(self, callee, args, Self::operand)
     }
 
     fn evaluate(&mut self, expr: &Expr) -> Self::Value;
     fn integer(&mut self, text: &str) -> Self::Value;
+    fn float(&mut self, value: f64) -> Self::Value;
     fn string(&mut self, value: &str, ty: Type) -> Self::Value;
-    fn new_dict(&mut self, key: Type, item: Type, ty: Type) -> Self::Value;
-    fn insert_entry(&mut self, dict: &Self::Value, key: Self::Operand, value: Self::Operand);
+    fn bytes(&mut self, value: &[u8]) -> Self::Value;
     fn boolean(&mut self, value: bool) -> Self::Value;
     fn none(&mut self) -> Self::Value;
     fn local(&mut self, slot: usize, expr: &Expr) -> Self::Value;
@@ -44,15 +54,9 @@ pub(crate) trait Operations: Sized {
     fn emit_value(&mut self, expr: &Expr) -> Self::Value {
         match &expr.kind {
             ExprKind::Int(n) => self.integer(n),
+            ExprKind::Float(n) => self.float(*n),
+            ExprKind::Bytes(bytes) => self.bytes(bytes),
             ExprKind::Str(text) => self.string(text, expr.ty),
-            ExprKind::Dict { key, value, entries } => {
-                let dict = self.new_dict(*key, *value, expr.ty);
-                for (key, value) in entries {
-                    let (key, value) = self.binary_operands(key, value);
-                    self.insert_entry(&dict, key, value);
-                }
-                dict
-            }
             ExprKind::Bool(b) => self.boolean(*b),
             ExprKind::None => self.none(),
             ExprKind::Local(slot) => self.local(*slot, expr),
@@ -237,26 +241,23 @@ impl Operations for Emitter<'_, '_> {
         }
     }
 
-    fn string(&mut self, value: &str, ty: Type) -> Value {
-        Value { ty, ..self.pooled_literal(value.as_bytes(), Type::Str) }
-    }
-
-    fn new_dict(&mut self, key: Type, item: Type, ty: Type) -> Value {
-        let dict = Value {
-            ty,
-            operand: self.instruction(format!(
-                "call ptr @imre_dict_new(i32 {}, i32 {})", super::representation_kind(key, &self.module.types),
-                super::representation_kind(item, &self.module.types)
-            )),
+    fn float(&mut self, value: f64) -> Value {
+        Value {
+            ty: Type::Float,
+            operand: format!("0x{:016X}", value.to_bits()),
             small_integer: false,
-        };
-        self.owned(dict)
+        }
     }
 
-    fn insert_entry(&mut self, dict: &Value, key: Self::Operand, value: Self::Operand) {
-        self.set_item(dict, &key.value, &value.value, false);
-        self.release_operand(&value);
-        self.release_operand(&key);
+    fn string(&mut self, value: &str, ty: Type) -> Value {
+        Value {
+            ty,
+            ..self.pooled_literal(value.as_bytes(), Type::Str)
+        }
+    }
+
+    fn bytes(&mut self, value: &[u8]) -> Value {
+        self.pooled_literal(value, Type::Bytes)
     }
 
     fn boolean(&mut self, value: bool) -> Value {

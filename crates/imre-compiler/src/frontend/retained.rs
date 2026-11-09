@@ -10,13 +10,40 @@ pub(crate) struct RegisteredNative {
     pub(crate) builtins: Vec<String>,
 }
 
+/// Keep the exact checked body at its original definition. A selected body supplies the
+/// ordinary checker facts for this definition as well as its native registered entry.
 pub(super) fn capture(
+    checker: Checker<'_>,
+    function: &ast::StmtFunctionDef,
+    signature: &Signature,
+    first_helper: usize,
+    selected: bool,
+) -> bool {
+    let graph = checker.graph;
+    let module = checker.module;
+    let native = graph.try_complete_body(module, selected, || {
+        close(checker, function, signature, first_helper)
+    });
+    if let Some(native) = native {
+        graph
+            .native_functions
+            .borrow_mut()
+            .entry(module)
+            .or_default()
+            .insert(native.site.start(), native);
+        true
+    } else {
+        false
+    }
+}
+
+fn close(
     mut checker: Checker<'_>,
     function: &ast::StmtFunctionDef,
     signature: &Signature,
     first_helper: usize,
-    helpers: &Helpers,
 ) -> Option<RegisteredNative> {
+    let helpers = checker.helpers;
     if signature.params.is_empty()
         || signature.returns != Type::Int
         || !signature
@@ -56,11 +83,7 @@ pub(super) fn capture(
     let owner = checker.module;
     checker.native_activation = true;
     let mut local_names = HashMap::new();
-    let (body, sums) = graph
-        .try_complete_body(owner, || {
-            lower_function(checker, function, signature, Some(&mut local_names))
-        })?
-        .ok()?;
+    let (body, sums) = lower_function(checker, function, signature, Some(&mut local_names)).ok()?;
     if !body.class_reads.is_empty() || !body.calls.iter().all(|&id| id >= first_helper) {
         return None;
     }
@@ -399,7 +422,15 @@ mod tests {
             "    return sum([n * (n + 1) for n in values])\n",
         ))
         .unwrap();
-        assert!(super::super::lower(&graph).is_err());
+        let (result, definitions) = caller_cache::observe_lowerings(|| super::super::lower(&graph));
+        assert!(result.is_err());
+        assert_eq!(
+            definitions
+                .iter()
+                .filter(|name| *name == "reduction")
+                .count(),
+            1
+        );
         let closures = graph.native_functions.borrow();
         let closure = closures
             .get(&graph.entry)

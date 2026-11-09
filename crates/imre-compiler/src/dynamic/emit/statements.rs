@@ -1213,10 +1213,6 @@ impl Function<'_, '_> {
             && self.source.replacements.is_empty()
         {
             self.annotation_text(literal.value.to_str())
-        } else if self.source.definitions.is_some()
-            && let Some((value, names)) = crate::frontend::registered_operand(expression)
-        {
-            self.checked_operand(&value, &names)
         } else {
             self.expr(expression)
         }
@@ -1291,8 +1287,12 @@ impl Function<'_, '_> {
         match place {
             Place::Name(n) => self.frame.op("assign", &[&self.scope.clone(), n, value]),
             Place::Attr(v, n) => self.op("setattr", &[v, n, value]),
-            Place::Item(v, k) => self.op("put", &[v, k, value]),
+            Place::Item(v, k) => self.put_item(v, k, value),
         };
+    }
+
+    pub(super) fn put_item(&mut self, receiver: &str, index: &str, value: &str) -> String {
+        self.op("put", &[receiver, index, value])
     }
 
     pub(super) fn assign(&mut self, target: &ast::Expr, value: &str) {

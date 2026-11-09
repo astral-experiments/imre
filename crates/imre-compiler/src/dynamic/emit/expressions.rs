@@ -7,7 +7,17 @@ use super::{Body, CallArguments, DefinitionName, Function, permanent};
 
 impl Function<'_, '_> {
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
-        self.with_expression_range(expr.range(), |f| f.located_expr(expr))
+        self.with_expression_range(expr.range(), |code| {
+            if let Some(value) = crate::frontend::registered_value(
+                expr,
+                &code.source.replacements,
+                code.source.has_templates,
+            ) {
+                code.registered_value(&value)
+            } else {
+                code.located_expr(expr)
+            }
+        })
     }
 
     pub(super) fn with_expression_range(
@@ -105,27 +115,6 @@ impl Function<'_, '_> {
                     f.suspend_at(&iterable, Suspension::Delegate, delegation.range, &mark)
                 })
             }
-            ast::Expr::NoneLiteral(_) => permanent::NONE.to_string(),
-            ast::Expr::EllipsisLiteral(_) => permanent::ELLIPSIS.to_string(),
-            ast::Expr::BooleanLiteral(v) => (if v.value {
-                permanent::TRUE
-            } else {
-                permanent::FALSE
-            })
-            .to_string(),
-            ast::Expr::NumberLiteral(v) => match &v.value {
-                ast::Number::Int(n) => match n.as_i64() {
-                    Some(value) => self.integer(value),
-                    None => self.lit(0, n.to_string().as_bytes()),
-                },
-                ast::Number::Float(value) => self.lit(3, &value.to_le_bytes()),
-                ast::Number::Complex { real, imag } => {
-                    self.lit(4, &[real.to_le_bytes(), imag.to_le_bytes()].concat())
-                }
-            },
-            ast::Expr::StringLiteral(v) => self.literal_text(v.value.to_str(), v.value.iter()),
-            ast::Expr::BytesLiteral(v) => self.lit(2, &v.value.bytes().collect::<Vec<_>>()),
-            ast::Expr::Name(v) => self.lookup(v.id.as_str()),
             ast::Expr::Attribute(v) => {
                 let base = self.attribute_receiver(v);
                 self.attr(&base, v.attr.as_str())
@@ -137,11 +126,11 @@ impl Function<'_, '_> {
                         span.map_or_else(|| "null".into(), |span| self.output.position(span));
                     return self.expr_inner(&v.value, Some((index, position)));
                 }
-                let object = self.expr(&v.value);
-                let span = self.expression_span(expr, &v.value, b'[');
                 if let ast::Expr::Slice(slice) = v.slice.as_ref()
                     && slice.step.is_none()
                 {
+                    let object = self.expr(&v.value);
+                    let span = self.expression_span(expr, &v.value, b'[');
                     let [start, stop] = [&slice.lower, &slice.upper].map(|bound| {
                         bound
                             .as_deref()
@@ -154,8 +143,13 @@ impl Function<'_, '_> {
                         "call i64 @imre_dyn_get_slice_at(ptr %ctx, i64 {object}, i64 {start}, i64 {stop}, ptr {position})"
                     ));
                 }
-                let key = self.expr(&v.slice);
-                self.op_at("get", &[&object, &key], span)
+                self.subscript(
+                    v.value.as_ref(),
+                    v.slice.as_ref(),
+                    v.range(),
+                    v.value.end(),
+                    Self::expr,
+                )
             }
             ast::Expr::Slice(slice) => {
                 let [start, stop, step] = [&slice.lower, &slice.upper, &slice.step]
@@ -181,20 +175,10 @@ impl Function<'_, '_> {
                 };
                 self.op(op, &[&list])
             }
-            ast::Expr::Dict(v) => {
-                let dict = self.op("dict", &[]);
-                for item in &v.items {
-                    if let Some(key) = &item.key {
-                        let key = self.expr(key);
-                        let value = self.expr(&item.value);
-                        self.op("put", &[&dict, &key, &value]);
-                    } else {
-                        let value = self.expr(&item.value);
-                        self.op("update", &[&dict, &value]);
-                    }
-                }
-                dict
-            }
+            ast::Expr::Dict(v) => self.dict_display(
+                v.items.iter().map(|item| (item.key.as_ref(), &item.value)),
+                Self::expr,
+            ),
             ast::Expr::BinOp(v) => {
                 let left = self.expr(&v.left);
                 let right = self.expr(&v.right);
@@ -234,6 +218,17 @@ impl Function<'_, '_> {
                 value
             }
             ast::Expr::Call(v) => {
+                if crate::frontend::registered_positional_call(v) {
+                    // An operand still needs the residual expression emitter.
+                    return self.positional_call(
+                        v.func.as_ref(),
+                        &v.arguments.args,
+                        v.range(),
+                        v.func.end(),
+                        v.func.is_name_expr().then(|| v.func.range()),
+                        Self::expr,
+                    );
+                }
                 let mark = self.temporary_mark();
                 // Cap the fixed entry-block scratch space even for calls in cold branches.
                 let fixed = v.arguments.args.len() + v.arguments.keywords.len() <= 64
@@ -347,7 +342,13 @@ impl Function<'_, '_> {
                     match part {
                         ast::FStringPartRef::Literal(lit) => {
                             if !lit.value.is_empty() {
-                                parts.push(self.literal_text(&lit.value, std::iter::once(lit)));
+                                let value = crate::frontend::registered_string(
+                                    &lit.value,
+                                    std::iter::once(lit),
+                                    &self.source.replacements,
+                                    self.source.has_templates,
+                                );
+                                parts.push(self.registered_value(&value));
                             }
                         }
                         ast::FStringPartRef::FString(s) => {

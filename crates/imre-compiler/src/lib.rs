@@ -430,7 +430,7 @@ fn object_fallback(
     let mut site_probes = modules::SiteProbes::default();
     let mut infer_sets = true;
     let mut native_candidate = None;
-    let (mut error, graph, checked_entry) = loop {
+    let (mut refusal, graph) = loop {
         let mut graph = match options.load_graph(
             path,
             module_root,
@@ -441,12 +441,11 @@ fn object_fallback(
             Ok(Some(graph)) => graph,
             Ok(None) => {
                 break (
-                    "the module launcher requires its registered sources".into(),
+                    Some("the module launcher requires its registered sources".into()),
                     None,
-                    false,
                 );
             }
-            Err(error) => break (error.into(), None, false),
+            Err(error) => break (Some(error.into()), None),
         };
         graph.registered_startup = boxed_startup;
         site_probes.record(&mut graph.inputs);
@@ -458,15 +457,14 @@ fn object_fallback(
                 // All first-party code lowered successfully. The unresolved import alone
                 // must use the same admission policy as an unresolved module in the loader.
                 break (
-                    graph.runtime_initializer.take().unwrap().into(),
+                    Some(graph.runtime_initializer.take().unwrap().into()),
                     Some(graph),
-                    false,
                 );
             }
             CheckedProgram::Native(ir) if !boxed_startup => {
                 let (mut module, mut owners) = *ir;
                 if let Some(object) = required_object_diagnostic(&graph, &module) {
-                    break (object, Some(graph), false);
+                    break (Some(object), Some(graph));
                 }
                 if checking {
                     verify_after(&module, "lowering")?;
@@ -487,20 +485,14 @@ fn object_fallback(
                 };
                 LoweringDiagnostic::plain(reason.to_owned()).classified(LoweringKind::Object)
             }
-            // Tracing and startup imports both need the same Python heap as the entry.
-            CheckedProgram::Native(_) => {
-                break (
-                    "Python startup requires a boxed entry".into(),
-                    Some(graph),
-                    true,
-                );
-            }
+            // A solved object ABI or Python startup directly selects the registered entry.
+            CheckedProgram::Registered | CheckedProgram::Native(_) => break (None, Some(graph)),
             CheckedProgram::Runtime(error) => error,
         };
         // A guessed layout must not turn a working object program into a type error,
         // or mask a diagnostic that the ordinary checked-file path would have issued.
         if graph.set_layout_hint.get() != modules::SetLayoutHint::Applied {
-            break (error, Some(graph), false);
+            break (Some(error), Some(graph));
         }
         native_candidate = None;
         infer_sets = false;
@@ -509,7 +501,8 @@ fn object_fallback(
     };
     // Admit an unresolved fixed signature only when its own definition has checked IR
     // for the registered calling convention. Other inference diagnostics still apply.
-    if let LoweringKind::UnresolvedParameter(owner, start) = error.kind
+    if let Some(error) = &mut refusal
+        && let LoweringKind::UnresolvedParameter(owner, start) = error.kind
         && let Some(graph) = graph.as_ref()
         && graph
             .registered_functions()
@@ -518,9 +511,19 @@ fn object_fallback(
     {
         error.kind = LoweringKind::ScopedObject;
     }
+    let checked_entry = refusal.is_none();
+    let kind = refusal
+        .as_ref()
+        .map_or(LoweringKind::Ordinary, |error| error.kind);
+    let refusal_message = || {
+        refusal.as_ref().map_or_else(
+            || "the checked program requires a registered entry".to_owned(),
+            ToString::to_string,
+        )
+    };
     // A newly found checked provider can lower normally. If lowering fails, its
     // dependencies alone do not admit the caller to the object importer.
-    let fallback = |graph| match (graph, native_candidate, error.kind) {
+    let fallback = |graph| match (graph, native_candidate, kind) {
         (Some(graph), Some(value), _) => native_result(graph, value),
         (Some(graph), None, LoweringKind::ExecutionOperand(id))
             if graph.modules[id].is_program_source() =>
@@ -533,9 +536,9 @@ fn object_fallback(
             graph
                 .session
                 .check_execution_escapes(std::iter::once((id, graph.modules[id].path.as_path())))?;
-            Err(error.to_string())
+            Err(refusal_message())
         }
-        _ => Err(error.to_string()),
+        _ => Err(refusal_message()),
     };
     let checked_graph = graph;
     let graph = checked_graph
@@ -545,7 +548,7 @@ fn object_fallback(
         || (checked_file
             && graph.as_ref().is_some_and(|g| {
                 matches!(
-                    error.kind,
+                    kind,
                     LoweringKind::ReturnType | LoweringKind::DeclaredArgument
                 ) || g.imports_struct_decorator()
             }))
@@ -555,12 +558,11 @@ fn object_fallback(
     let operation = graph.as_ref().and_then(|g| {
         if checked_entry {
             Some(dynamic::ObjectOperation::CheckedEntry)
-        } else if error.kind.is_class_layout() {
+        } else if kind.is_class_layout() {
             Some(dynamic::ObjectOperation::ClassLayout)
         } else {
-            (error.kind.checks_object_calls()
-                || g.has_object_constructor_fallback.get()
-                    && error.kind != LoweringKind::ReturnType)
+            (kind.checks_object_calls()
+                || g.has_object_constructor_fallback.get() && kind != LoweringKind::ReturnType)
                 .then_some(dynamic::ObjectOperation::Builtin)
         }
     });
@@ -599,7 +601,7 @@ fn object_fallback(
                 || checked_file && graph.has_object_constructor_fallback.get()
                 || !entry.optional_imports.is_empty()
                 || compound_probe
-                || !graph.needs_object_runtime.get() && error.kind.checks_object_calls()
+                || !graph.needs_object_runtime.get() && kind.checks_object_calls()
                 || checked_file && graph.uses_source_loader();
             let checked_calls = if !checked_file {
                 if check_class_import
@@ -926,7 +928,8 @@ fn compile_file_units_with(
 type CheckedIr = (ir::Module, Vec<modules::ModuleId>);
 
 /// The source checker admits the program before the driver chooses its representation.
-enum CheckedProgram {
+pub(crate) enum CheckedProgram {
+    Registered,
     Native(Box<CheckedIr>),
     Runtime(LoweringDiagnostic),
 }
@@ -936,6 +939,7 @@ impl CheckedProgram {
         match self {
             Self::Native(ir) => Ok(*ir),
             Self::Runtime(reason) => Err(reason.to_string()),
+            Self::Registered => Err("the checked program requires a registered entry".into()),
         }
     }
 }
@@ -1008,7 +1012,7 @@ fn checked_lower_with(
         compiler.cache.retain_hints(graph, result.is_ok());
         result
     } else {
-        frontend::lower_with_owners(graph)
+        frontend::lower_with_caller_cache(graph, None)
     };
     // Registered-body admission runs after checking the application's source contracts.
     if let Some(error) = call_error.filter(|error| error.kind != LoweringKind::RegisteredExecution)
@@ -1065,7 +1069,7 @@ fn checked_lower_with(
         lowered
     };
     match result {
-        Ok(ir) => Ok(CheckedProgram::Native(Box::new(ir))),
+        Ok(program) => Ok(program),
         Err(reason) => {
             if let Some(compiler) = cache {
                 compiler.callers = frontend::CallerCache::default();
@@ -1254,6 +1258,90 @@ fn check_encoding(source: &str) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::{CompileOptions, compile};
+
+    #[test]
+    fn a_registered_call_preserves_later_operand_diagnostics() {
+        let root = tempfile::tempdir().unwrap();
+        let app = root.path().join("app.py");
+        let source = r#"def publish(a: int, b: int, send):
+    total = a + b
+    send(total)
+
+
+def report(value):
+    print(value)
+
+
+handlers = {"callback": report}
+sink = handlers[input()]
+publish(3, 5, sink)
+values: list[int] = [3]
+checked_offset = 17
+values.append(True)
+print(values)
+"#;
+        std::fs::write(&app, source).unwrap();
+        let error = super::check_file(&app, None).unwrap_err();
+        assert!(
+            error.contains("app.py:15:15: Imre: expected int, got bool"),
+            "{error}"
+        );
+        std::fs::write(&app, source.replace("append(True)", "append(4)")).unwrap();
+        super::check_file(&app, None).unwrap();
+        let selected = source
+            .replace(
+                "publish(3, 5, sink)",
+                r#"{"publish": publish}[input()](3, 5, sink)"#,
+            )
+            .replace("append(True)", "append(4)");
+        std::fs::write(&app, selected).unwrap();
+        super::check_file(&app, None).unwrap();
+    }
+
+    #[test]
+    fn a_namespace_store_can_run_a_finalizer_after_installing_the_new_value() {
+        let root = tempfile::tempdir().unwrap();
+        let entry = root.path().join("app.py");
+        let source = include_str!("../../../tests/fixtures/registered_scope_replacement.py");
+        let install = "globals()[\"values\"] = previous()";
+        for statement in [
+            install,
+            "scope = globals()\nkey = 'values'\nscope[key] = previous()",
+        ] {
+            std::fs::write(&entry, source.replace(install, statement)).unwrap();
+            super::check_file(&entry, None).unwrap();
+        }
+        for statement in ["", &format!("if False:\n    {install}")] {
+            std::fs::write(&entry, source.replace(install, statement)).unwrap();
+            let error = super::check_file(&entry, None).unwrap_err();
+            assert!(error.contains("expected int, got bool"), "{error}");
+        }
+    }
+
+    #[test]
+    fn a_registered_integer_subclass_can_supply_its_compiled_callback() {
+        let root = tempfile::tempdir().unwrap();
+        let entry = root.path().join("app.py");
+        std::fs::write(
+            &entry,
+            include_str!("../../../tests/fixtures/registered_add_callback.py"),
+        )
+        .unwrap();
+        super::check_file(&entry, None).unwrap();
+    }
+
+    #[test]
+    fn a_bound_callback_call_can_use_the_registered_definition() {
+        let root = tempfile::tempdir().unwrap();
+        let entry = root.path().join("app.py");
+        std::fs::write(&entry, "import operations\n").unwrap();
+        std::fs::write(
+            root.path().join("operations.py"),
+            "def apply(send):\n    items: list[int] = [1]\n    items.append(7)\n    send(1)\ndef report(value):\n    print(value)\nhandlers = {'cb': report}\napply(handlers[input()])\n",
+        )
+        .unwrap();
+        super::check_file(&entry, None).unwrap();
+    }
 
     #[test]
     fn inference_outcomes_survive_a_directory_rename() {

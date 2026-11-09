@@ -678,6 +678,13 @@ impl Builtin {
             Self::ObjectCall(..)
             | Self::RegisteredDefinition(_)
             | Self::RegisteredStatement(..)
+            | Self::RegisteredName(_)
+            | Self::RegisteredDict(_)
+            | Self::RegisteredAttribute(_)
+            | Self::RegisteredSubscript(..)
+            | Self::RegisteredEllipsis
+            | Self::RegisteredComplex(..)
+            | Self::RegisteredString(_)
             | Self::RegisteredCall(..)
             | Self::SortByComparator => Contract::new(true, Unknown),
             Self::ListReserveRange | Self::StructCyclePrefix => Contract::new(false, PreservesOwners),

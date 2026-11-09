@@ -179,7 +179,10 @@ impl Checker<'_> {
         let mut reachable = true;
         for first in prefix {
             let left = self.boolean_operand(first, expected)?;
-            let known = self.known_truth(left.ty);
+            let known = match left.kind {
+                ExprKind::Bool(value) => Some(value),
+                _ => self.known_truth(left.ty),
+            };
             // A present record with a false override can be the selected operand of "and".
             let selected = if and && self.needs_truth_dispatch(left.ty) {
                 left.ty
