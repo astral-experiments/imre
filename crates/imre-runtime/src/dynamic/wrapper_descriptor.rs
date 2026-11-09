@@ -10,6 +10,15 @@ pub(super) struct BuiltinDescriptor {
 
 impl BuiltinDescriptor {
     pub(super) fn lookup(symbol: &str) -> Option<Self> {
+        if let Some(attr) = symbol.strip_prefix("str.")
+            && let Some(&name) = builtins::STR_METHODS.iter().find(|&&name| name == attr)
+        {
+            return Some(Self {
+                owner: "str",
+                name,
+                method: !name.starts_with("__") || name == "__format__",
+            });
+        }
         if let Some(attr) = symbol.strip_prefix("_thread._ThreadHandle.")
             && let Some(&name) = thread_handle::METHODS.iter().find(|&&name| name == attr)
         {
@@ -367,27 +376,6 @@ impl BuiltinDescriptor {
             "int.__repr__" => ("int", "__repr__"),
             "float.__repr__" => ("float", "__repr__"),
             "int.__format__" => ("int", "__format__"),
-            "str.__eq__" => ("str", "__eq__"),
-            "str.__hash__" => ("str", "__hash__"),
-            "str.__format__" => ("str", "__format__"),
-            "str.__mod__" => ("str", "__mod__"),
-            "str.__rmod__" => ("str", "__rmod__"),
-            "str.join" => ("str", "join"),
-            "str.isascii" => ("str", "isascii"),
-            "str.isalpha" => ("str", "isalpha"),
-            "str.isdigit" => ("str", "isdigit"),
-            "str.isidentifier" => ("str", "isidentifier"),
-            "str.isprintable" => ("str", "isprintable"),
-            "str.casefold" => ("str", "casefold"),
-            "str.lower" => ("str", "lower"),
-            "str.title" => ("str", "title"),
-            "str.swapcase" => ("str", "swapcase"),
-            "str.islower" => ("str", "islower"),
-            "str.center" => ("str", "center"),
-            "str.ljust" => ("str", "ljust"),
-            "str.rjust" => ("str", "rjust"),
-            "str.zfill" => ("str", "zfill"),
-            "str.istitle" => ("str", "istitle"),
             "float.__format__" => ("float", "__format__"),
             "collections._tuplegetter.__repr__" => (super::namedtuple::GETTER, "__repr__"),
             "module.__init__" => ("module", "__init__"),
@@ -420,8 +408,6 @@ impl BuiltinDescriptor {
             "functools.partial.__repr__" => (stdlib::functools::PARTIAL_CLASS, "__repr__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "wrapper_descriptor.__get__" => ("wrapper_descriptor", "__get__"),
-            "str.__str__" => ("str", "__str__"),
-            "str.__repr__" => ("str", "__repr__"),
             "bytes.__repr__" => ("bytes", "__repr__"),
             "dict.__or__" => ("dict", "__or__"),
             "dict.__ror__" => ("dict", "__ror__"),
@@ -465,25 +451,9 @@ impl BuiltinDescriptor {
                     | "__reversed__"
                     | "count"
                     | "index"
-                    | "join"
                     | "fromhex"
                     | "from_bytes"
                     | "fromkeys"
-                    | "isascii"
-                    | "isalpha"
-                    | "isdigit"
-                    | "isidentifier"
-                    | "islower"
-                    | "isprintable"
-                    | "istitle"
-                    | "center"
-                    | "ljust"
-                    | "rjust"
-                    | "zfill"
-                    | "casefold"
-                    | "lower"
-                    | "title"
-                    | "swapcase"
             ),
         })
     }

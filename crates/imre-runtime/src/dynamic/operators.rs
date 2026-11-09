@@ -4513,6 +4513,23 @@ impl Context {
             .is_some_and(|slot| self.builtins.get(builtin_add) != Some(&slot))
     }
 
+    /// Concatenate a string receiver directly, with no reflected operation on the other operand.
+    pub(super) fn concat_str(&mut self, left: Id, right: Id) -> Result<Id> {
+        if self.string_storage(right).is_none() {
+            let name = self.type_name(right);
+            let name = &name[..name.floor_char_boundary(200)];
+            return Err(Error::new(
+                "TypeError",
+                format!("can only concatenate str (not \"{name}\") to str"),
+            ));
+        }
+        match (self.heap.get(left), self.heap.get(right)) {
+            (Value::Str(s), Value::Str(_) | Value::SurrogateStr(_)) if s.is_empty() => Ok(right),
+            (Value::Str(_) | Value::SurrogateStr(_), Value::Str(s)) if s.is_empty() => Ok(left),
+            _ => self.concat_strings(left, right),
+        }
+    }
+
     /// Concatenate the two reference arrays without invoking either operand's iterator.
     pub(super) fn concat_list(&mut self, storage: Id, other: Id) -> Result<Id> {
         let Value::List(left) = self.heap.get(storage) else {
@@ -4873,21 +4890,18 @@ impl Context {
                 return self.concat_template(a, b);
             }
             "+" if self.string_storage(a).is_some() => {
-                let message = if self.overrides_add(a, "str.__add__") {
-                    format!(
-                        "unsupported operand type(s) for +{}: '{}' and '{}'",
-                        if inplace { "=" } else { "" },
-                        self.type_name(a),
-                        self.type_name(b)
-                    )
-                } else if self.string_storage(b).is_some() {
-                    return self.concat_strings(a, b);
-                } else {
-                    let name = self.type_name(b);
-                    let name = &name[..name.floor_char_boundary(200)];
-                    format!("can only concatenate str (not \"{name}\") to str")
-                };
-                return Err(Error::new("TypeError", message));
+                if self.overrides_add(a, "str.__add__") {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "unsupported operand type(s) for +{}: '{}' and '{}'",
+                            if inplace { "=" } else { "" },
+                            self.type_name(a),
+                            self.type_name(b)
+                        ),
+                    ));
+                }
+                return self.concat_str(a, b);
             }
             "+" if self.builtin_slot_accepts(a, "tuple") => {
                 if self.overrides_add(a, "tuple.__add__") {
@@ -5305,6 +5319,7 @@ impl Context {
         // Sequence concatenation runs after the right operand's reflected numeric slot.
         if name == "__add__" {
             let native = match self.heap.get(self.scalar_value(obj)) {
+                Value::Str(_) | Value::SurrogateStr(_) => Some("str.__add__"),
                 Value::List(_) => Some("list.__add__"),
                 Value::Deque(_) => Some("collections.deque.__add__"),
                 _ => None,
