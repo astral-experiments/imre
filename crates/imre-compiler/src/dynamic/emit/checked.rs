@@ -2,6 +2,7 @@
 
 use super::{CallArguments, Function, RegisteredFrame, permanent};
 use crate::frontend::RegisteredFunction;
+use crate::ir::DisplayKind;
 use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Statement, Type};
 use crate::llvm::body::FunctionBody;
 
@@ -13,7 +14,7 @@ use std::collections::BTreeSet;
 pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
     let body = &checked.function.body;
     let mut uses_python_protocol = false;
-    let private = private_slots(checked);
+    let private = checked.private_slots();
     let has_slot = |slot: &usize| private.contains(slot) || checked.local_names.contains_key(slot);
     let mut supported = true;
     ir::walk_statements(body, &mut |stmt| {
@@ -72,9 +73,7 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                 !suspends(body) && !suspension
             }
             ExprKind::Conditional(..) => true,
-            ExprKind::List(items) => items.is_empty(),
             ExprKind::Dict { entries, .. } => entries.is_empty(),
-            ExprKind::Set { values, .. } => values.is_empty(),
             ExprKind::Builtin(Builtin::Bool, args) => args.len() == 1,
             ExprKind::Builtin(Builtin::Append | Builtin::SetAdd, args) => args.len() == 2,
             ExprKind::Builtin(Builtin::RegisteredUnpack { .. }, args) => args.len() == 1,
@@ -84,6 +83,11 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                 expr.ty == Type::PythonObject
                     || left.ty == Type::Int && right.ty == Type::Int && expr.ty == Type::Int
             }
+            ExprKind::List(_) | ExprKind::Tuple(_) | ExprKind::Set { .. } => {
+                uses_python_protocol = true;
+                true
+            }
+            ExprKind::Builtin(Builtin::RegisteredSpread, args) => args.len() == 1,
             ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
                 uses_python_protocol = true;
                 operands.len() > usize::from(call.explicit_scope)
@@ -130,24 +134,6 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
     supported && uses_python_protocol
 }
 
-/// Only IR scopes name compiler-owned storage. User-visible names stay in the Python frame.
-fn private_slots(checked: &RegisteredFunction) -> BTreeSet<usize> {
-    let body = &checked.function.body;
-    let mut slots = BTreeSet::new();
-    ir::walk_statements(body, &mut |stmt| {
-        if let Statement::Scope { clear, .. } = stmt {
-            slots.extend(clear);
-        }
-    });
-    ir::walk_expressions(body, &mut |expr| {
-        if let ExprKind::Scope { clear, .. } = &expr.kind {
-            slots.extend(clear);
-        }
-    });
-    slots.retain(|slot| !checked.local_names.contains_key(slot));
-    slots
-}
-
 fn suspends(body: &[Statement]) -> bool {
     let mut suspension = false;
     ir::walk_expressions(body, &mut |expr| {
@@ -189,8 +175,24 @@ impl Frame<'_, '_, '_> {
         self.materialize(&value)
     }
 
+    pub(crate) fn sequence(&mut self, values: &[Expr], display: DisplayKind) -> CheckedValue {
+        let names = self.names;
+        CheckedValue::handle(
+            self.code
+                .checked_sequence(values, display, |code, operand| {
+                    Frame { code, names }.evaluate_handle(operand)
+                }),
+        )
+    }
+
     pub(crate) fn lookup_local(&mut self, slot: usize) -> String {
-        if self.code.iteration.private_slots.binary_search(&slot).is_ok() {
+        if self
+            .code
+            .iteration
+            .private_slots
+            .binary_search(&slot)
+            .is_ok()
+        {
             return self.load_private(slot);
         }
         let binding = &self.names.expect("registered local names").local_names[&slot];
@@ -204,7 +206,13 @@ impl Frame<'_, '_, '_> {
 
     pub(crate) fn assign(&mut self, slot: usize, value: CheckedValue) {
         let handle = self.materialize(&value);
-        if self.code.iteration.private_slots.binary_search(&slot).is_ok() {
+        if self
+            .code
+            .iteration
+            .private_slots
+            .binary_search(&slot)
+            .is_ok()
+        {
             self.store_private(slot, &handle);
             return;
         }
@@ -291,7 +299,11 @@ impl Frame<'_, '_, '_> {
     }
     fn physical_slot(&self, slot: usize) -> usize {
         let frame = &self.code.iteration;
-        frame.first_slot + frame.private_slots.binary_search(&slot).expect("checked private slot")
+        frame.first_slot
+            + frame
+                .private_slots
+                .binary_search(&slot)
+                .expect("checked private slot")
     }
 
     fn load_private(&mut self, slot: usize) -> String {
@@ -384,7 +396,7 @@ impl Frame<'_, '_, '_> {
     }
 
     pub(crate) fn string(&mut self, value: &str) -> CheckedValue {
-        CheckedValue::handle(self.code.text(value))
+        CheckedValue::handle(self.code.source_text(value, None))
     }
 
     pub(crate) fn float(&mut self, value: f64) -> CheckedValue {
@@ -413,7 +425,13 @@ impl Frame<'_, '_, '_> {
             true
         } else if matches!(
             expr.kind,
-            ExprKind::Builtin(Builtin::RegisteredAttribute { action: ir::AttributeAction::Store, .. }, _)
+            ExprKind::Builtin(
+                Builtin::RegisteredAttribute {
+                    action: ir::AttributeAction::Store,
+                    ..
+                },
+                _
+            )
         ) {
             let mark = self.target_mark();
             self.evaluate(expr);
@@ -505,10 +523,7 @@ impl Frame<'_, '_, '_> {
             (Builtin::RegisteredComplex(real, imag), []) => self
                 .code
                 .lit(4, &[real.to_le_bytes(), imag.to_le_bytes()].concat()),
-            (Builtin::RegisteredString(points), []) if self.code.source.has_templates => {
-                self.code.linked_string(points.clone())
-            }
-            (Builtin::RegisteredString(points), []) => self.code.lit(7, points),
+            (Builtin::RegisteredString(points), []) => self.code.linked_string(points.clone()),
             (Builtin::RegisteredLocation(range, position), [value]) => {
                 let previous_range = std::mem::replace(&mut self.code.current_range, *range);
                 let previous_line = self.code.enter_expression(*position);
@@ -777,7 +792,10 @@ impl Function<'_, '_> {
 
         let mark = self.temporary_mark();
         if self.native_suspension
-            && let RegisteredCallTarget::Callable { suspended_name: Some(name), .. } = &call.target
+            && let RegisteredCallTarget::Callable {
+                suspended_name: Some(name),
+                ..
+            } = &call.target
         {
             self.call_position(*name);
         }
@@ -1030,11 +1048,7 @@ impl Function<'_, '_> {
         result
     }
 
-    pub(super) fn checked_block(
-        &mut self,
-        statements: &[Statement],
-        checked: &RegisteredFunction,
-    ) {
+    pub(super) fn checked_block(&mut self, statements: &[Statement], checked: &RegisteredFunction) {
         CheckedBody::registered(Frame {
             code: self,
             names: Some(checked),
@@ -1049,10 +1063,17 @@ impl Function<'_, '_> {
         checked: &RegisteredFunction,
         emit: impl FnOnce(&mut Self),
     ) {
+        #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+        if let Err(error) = crate::verify::registered(checked) {
+            self.output.diagnostic = Some(format!(
+                "internal compiler error: invalid registered IR: {error}"
+            ));
+            return;
+        }
         let enclosing = std::mem::take(&mut self.iteration);
         let roots = self.live_slots.len();
         let first = self.private_slot_count;
-        self.iteration.private_slots = private_slots(checked).into_iter().collect();
+        self.iteration.private_slots = checked.private_slots().into_iter().collect();
         self.iteration.first_slot = first;
         let end = first + self.iteration.private_slots.len();
         self.private_slot_count = end;

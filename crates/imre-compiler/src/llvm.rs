@@ -3118,49 +3118,8 @@ impl Emitter<'_, '_> {
             | ExprKind::Binary(..)
             | ExprKind::Conditional(..)
             | ExprKind::Builtin(..) => unreachable!("shared IR expression"),
-            ExprKind::List(values) => {
-                let list = if expression.ty == Type::ListInt {
-                    self.call("imre_list_new", expression.ty, &[])
-                } else {
-                    let element = self.module.types.element(expression.ty).unwrap();
-                    let op = if self.module.types.is_value_struct(element) {
-                        let layout = self.output.record_layout(element);
-                        format!("call ptr @imre_struct_list_new(ptr @{layout})")
-                    } else {
-                        format!(
-                            "call ptr @imre_seq_new(i32 {})",
-                            representation_kind(element, &self.module.types)
-                        )
-                    };
-                    let value = Value {
-                        ty: expression.ty,
-                        operand: self.instruction(op),
-                        small_integer: false,
-                    };
-                    self.owned(value)
-                };
-                let mut remaining = values.as_slice();
-                if list.ty == Type::ListInt {
-                    while let [first, second, rest @ ..] = remaining {
-                        let first = self.operand(first);
-                        let second = self.operand(second);
-                        self.runtime_call(&LIST_APPEND_PAIR, [&list, &first.value, &second.value]);
-                        self.release_operand(&second);
-                        self.release_operand(&first);
-                        remaining = rest;
-                    }
-                }
-                for value in remaining {
-                    if self.append_struct_constructor(&list, value) {
-                        continue;
-                    }
-                    let value = self.operand(value);
-                    if !self.try_append_owned(&list, &value) {
-                        self.append(&list, &value.value);
-                        self.release_operand(&value);
-                    }
-                }
-                list
+            ExprKind::List(_) | ExprKind::Tuple(_) | ExprKind::Set { .. } => {
+                unreachable!("shared checked display")
             }
             ExprKind::Dict {
                 key,
@@ -3186,24 +3145,6 @@ impl Emitter<'_, '_> {
                 }
                 dict
             }
-            ExprKind::Set { element, values } => {
-                let set = Value {
-                    ty: expression.ty,
-                    operand: self.instruction(format!(
-                        "call ptr @imre_set_new(i32 {})",
-                        representation_kind(*element, &self.module.types)
-                    )),
-                    small_integer: false,
-                };
-                let set = self.owned(set);
-                for value in values {
-                    let value = self.operand(value);
-                    self.set_member(&set, &value.value, true);
-                    self.release_operand(&value);
-                }
-                set
-            }
-            ExprKind::Tuple(values) => self.tuple(expression.ty, values, None),
             ExprKind::Present(expression_value) => {
                 let value = self.operand(expression_value);
                 let value = self.own_operand(value);
@@ -4901,6 +4842,7 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredName(_)
             | Builtin::RegisteredUnary(_)
             | Builtin::RegisteredSubscript(..)
+            | Builtin::RegisteredSpread
             | Builtin::RegisteredDict(_)
             | Builtin::RegisteredEllipsis
             | Builtin::RegisteredComplex(..)

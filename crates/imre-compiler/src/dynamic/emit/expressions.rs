@@ -180,8 +180,10 @@ impl Function<'_, '_> {
             Some(&self.source.private_names),
         );
         let previous = self.enter_expression(position);
-        let value = if let Some(operation) = self.source.registered_source().object_operation(expr)
-        {
+        // The display itself is covered even if an operand still needs the syntax adapter.
+        let value = if let Some((items, display)) = crate::frontend::display_elements(expr) {
+            self.sequence_display(items, display, None, ast_spread, Self::expr)
+        } else if let Some(operation) = self.source.registered_source().object_operation(expr) {
             self.object_operation(
                 &operation.opcode,
                 operation.target,
@@ -247,25 +249,6 @@ impl Function<'_, '_> {
                 let [start, stop, step] = [&slice.lower, &slice.upper, &slice.step]
                     .map(|e| e.as_deref().map_or_else(|| "0".into(), |e| self.expr(e)));
                 self.op("slice_object", &[&start, &stop, &step])
-            }
-            ast::Expr::List(v) => self
-                .permanent_sequence(&v.elts, false)
-                .unwrap_or_else(|| self.display("list", &v.elts)),
-            ast::Expr::Set(v) => self.display("set", &v.elts),
-            ast::Expr::Tuple(v) => {
-                if let Some(tuple) = self.permanent_sequence(&v.elts, true) {
-                    return tuple;
-                }
-                if let Some(tuple) = self.literal_string_tuple(&v.elts) {
-                    return tuple;
-                }
-                let list = self.display("list", &v.elts);
-                let op = if v.elts.iter().all(imre_ast::literal_tuple_element) {
-                    "constant_tuple"
-                } else {
-                    "tuple"
-                };
-                self.op(op, &[&list])
             }
             ast::Expr::Dict(v) => self.dict_display(
                 v.items.iter().map(|item| (item.key.as_ref(), &item.value)),
@@ -444,13 +427,21 @@ impl Function<'_, '_> {
         mark: &str,
         body: impl FnOnce(&mut Self) -> T,
     ) -> T {
+        self.unwind_with(|f| f.discard_truth(mark), body)
+    }
+
+    pub(super) fn unwind_with<T>(
+        &mut self,
+        release: impl FnOnce(&mut Self),
+        body: impl FnOnce(&mut Self) -> T,
+    ) -> T {
         let failed = self.name("b");
         let outer = std::mem::replace(&mut self.body.error_target, failed.clone());
         let result = body(self);
         let ready = self.name("b");
         self.jump(&ready);
         self.label(&failed);
-        self.discard_truth(mark);
+        release(self);
         self.jump(&outer);
         self.label(&ready);
         self.body.error_target = outer;
@@ -586,50 +577,6 @@ impl Function<'_, '_> {
         self.value(&format!("phi {ty} {}", incoming.join(", ")))
     }
 
-    /// Put immutable element handles in the module data for one list or tuple construction.
-    fn permanent_sequence(&mut self, elements: &[ast::Expr], tuple: bool) -> Option<String> {
-        if elements.is_empty() {
-            return None;
-        }
-        let mut bytes = Vec::new();
-        for element in elements {
-            let id = match element {
-                ast::Expr::NoneLiteral(_) => permanent::NONE,
-                ast::Expr::EllipsisLiteral(_) => permanent::ELLIPSIS,
-                ast::Expr::BooleanLiteral(v) => {
-                    if v.value {
-                        permanent::TRUE
-                    } else {
-                        permanent::FALSE
-                    }
-                }
-                ast::Expr::NumberLiteral(v) => {
-                    let ast::Number::Int(n) = &v.value else {
-                        return None;
-                    };
-                    permanent::small_integer_id(n.as_i64()?)?
-                }
-                _ => return None,
-            };
-            bytes.extend_from_slice(&u16::try_from(id).ok()?.to_le_bytes());
-        }
-        let data = self.output.data(&bytes);
-        Some(self.checked(&format!(
-            "call i64 @imre_dyn_permanent_sequence(ptr %ctx, ptr {data}, i64 {}, i1 {tuple})",
-            bytes.len()
-        )))
-    }
-
-    fn display(&mut self, kind: &str, elements: &[ast::Expr]) -> String {
-        let target = self.op(kind, &[]);
-        self.pack_positionals(
-            &target,
-            crate::frontend::positional_elements(elements),
-            &mut Self::expr,
-        );
-        target
-    }
-
     pub(super) fn pack_operand(&mut self, operation: &str, args: &[&str]) -> String {
         if self.native_suspension {
             self.frame.call_position(self.current_range);
@@ -721,4 +668,8 @@ impl Function<'_, '_> {
             .reduce(|left, right| self.op("format_concat", &[&left, &right]))
             .unwrap_or_else(|| self.text(""))
     }
+}
+
+fn ast_spread(element: &ast::Expr) -> Option<&ast::Expr> {
+    element.as_starred_expr().map(|star| star.value.as_ref())
 }

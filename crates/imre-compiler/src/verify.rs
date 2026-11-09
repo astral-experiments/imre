@@ -65,6 +65,88 @@ pub(crate) fn module(module: &Module) -> Result<(), String> {
     Ok(())
 }
 
+/// Registered frames resolve slots by their original Python names and can carry either a
+/// checked native scalar or a Python handle as a display operand. They have no native
+/// container layout table. Validate this handoff before the emitter indexes its operands.
+pub(crate) fn registered(frame: &crate::frontend::RegisteredFunction) -> Result<(), String> {
+    let function = &frame.function;
+    let private = frame.private_slots();
+    let local = |slot: usize| {
+        require(
+            slot < function.locals.len()
+                && (frame.local_names.contains_key(&slot) || private.contains(&slot)),
+            "invalid registered frame slot or missing Python name",
+        )
+    };
+    for &slot in &function.params {
+        local(slot)?;
+    }
+    for &slot in frame.local_names.keys() {
+        local(slot)?;
+    }
+    let mut result = Ok(());
+    ir::walk_nodes(&function.body, &mut |node, parent| {
+        if result.is_err() {
+            return;
+        }
+        result = match node {
+            ir::Node::Statement(Statement::Assign(slot, _)) => local(*slot),
+            ir::Node::Expression(value) => match &value.kind {
+                ExprKind::Local(slot) => local(*slot),
+                ExprKind::List(_) => require(
+                    matches!(value.ty, Type::PythonObject | Type::ListInt | Type::List(_)),
+                    "invalid checked list type",
+                ),
+                ExprKind::Tuple(_) => require(
+                    matches!(value.ty, Type::PythonObject | Type::Tuple(_)),
+                    "invalid checked tuple type",
+                ),
+                ExprKind::Set { element, values } => require(
+                    match value.ty {
+                        Type::PythonObject => *element == Type::PythonObject,
+                        Type::Set(_) => {
+                            *element != Type::PythonObject
+                                && values.iter().all(|item| {
+                                    matches!(
+                                        item.kind,
+                                        ExprKind::Builtin(Builtin::RegisteredSpread, _)
+                                    ) || item.ty == *element
+                                })
+                        }
+                        _ => false,
+                    },
+                    "inconsistent checked set element type",
+                ),
+                ExprKind::Builtin(Builtin::GlobalSet(slot), args) => local(*slot).and_then(|()| {
+                    require(
+                        args.len() == 1,
+                        "registered namespace write needs one operand",
+                    )
+                }),
+                ExprKind::Builtin(Builtin::RegisteredLocation(..), args) => match args.as_slice() {
+                    [inner] => same(value.ty, inner.ty),
+                    _ => Err("registered location needs one operand".into()),
+                },
+                ExprKind::Builtin(Builtin::RegisteredSpread, args) => {
+                    let display = parent.is_some_and(|parent| {
+                        matches!(
+                            parent.kind,
+                            ExprKind::List(_) | ExprKind::Tuple(_) | ExprKind::Set { .. }
+                        )
+                    });
+                    require(
+                        display && value.ty == Type::PythonObject && args.len() == 1,
+                        "registered spread needs one operand inside a Python display",
+                    )
+                }
+                _ => Ok(()),
+            },
+            _ => Ok(()),
+        };
+    });
+    result
+}
+
 fn require(condition: bool, message: &str) -> Result<(), String> {
     if condition {
         Ok(())
@@ -664,6 +746,53 @@ mod tests {
     fn reject(module: &Module, expected: &str) {
         let error = super::module(module).unwrap_err();
         assert!(error.contains(expected), "{error}");
+    }
+
+    #[test]
+    fn registered_display_handoff_accepts_heterogeneous_operands_and_checks_frame_slots() {
+        use crate::{frontend, modules::SourceGraph};
+        let text = "out = [1, ('s', callback(arg)), *rest]\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let source = frontend::RegisteredSource {
+            text,
+            private_names: None,
+            replacements: &Default::default(),
+            has_templates: false,
+            method_imports: &Default::default(),
+        };
+        let operations = Default::default();
+        let prepare = frontend::SuitePreparation::new(&operations, source);
+        for scope in [
+            frontend::RegisteredScope::Module,
+            frontend::RegisteredScope::Function { is_async: false },
+        ] {
+            let mut frame = prepare
+                .complete(&graph.modules[graph.entry].parsed.syntax().body, scope)
+                .unwrap()
+                .checked;
+            registered(&frame).unwrap();
+            frame.local_names.clear();
+            assert!(registered(&frame).unwrap_err().contains("frame slot"));
+        }
+    }
+
+    #[test]
+    fn registered_display_handoff_rejects_a_misplaced_or_malformed_spread() {
+        let mut frame = crate::frontend::RegisteredFunction {
+            function: empty().entry,
+            local_names: Default::default(),
+        };
+        let spread = |args| Expr {
+            ty: Type::PythonObject,
+            kind: ExprKind::Builtin(Builtin::RegisteredSpread, args),
+        };
+        frame.function.body = vec![Statement::Expr(spread(vec![Expr::integer(42)]))];
+        assert!(registered(&frame).unwrap_err().contains("spread"));
+        frame.function.body = vec![Statement::Expr(Expr {
+            ty: Type::PythonObject,
+            kind: ExprKind::Tuple(vec![Expr::integer(42), spread(vec![])]),
+        })];
+        assert!(registered(&frame).unwrap_err().contains("spread"));
     }
 
     #[test]

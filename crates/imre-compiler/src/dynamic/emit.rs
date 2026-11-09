@@ -18,6 +18,7 @@ mod frame;
 mod retained;
 use frame::{RegisteredFrame, SourcePositions};
 mod patterns;
+mod sequences;
 mod statements;
 mod strings;
 mod suspension;
@@ -32,7 +33,13 @@ declare ptr @imre_dyn_new(i32, ptr, ptr)
 declare void @imre_dyn_register(ptr, ptr, ptr, ptr)
 declare i32 @imre_dyn_finish(ptr)
 declare i64 @imre_dyn_lit(ptr, i32, ptr, i64)
-declare i64 @imre_dyn_permanent_sequence(ptr, ptr, i64, i1)
+declare i64 @imre_dyn_build_sequence(ptr, ptr, i64, i1, i1, ptr)
+declare i64 @imre_dyn_build_set(ptr, ptr, i64, i64)
+declare i64 @imre_dyn_display_item(ptr, i64, i64, i64, i1)
+declare void @imre_dyn_unwind_display(ptr, i64)
+declare i64 @imre_dyn_cached_handle(ptr, ptr)
+declare i64 @imre_dyn_linked_value(ptr, ptr, i64)
+declare i64 @imre_dyn_linked_string(ptr, ptr, i32, ptr, i64)
 declare i64 @imre_dyn_lookup(ptr, i64, ptr, i64)
 declare i64 @imre_dyn_import_name(ptr, i64, i64, i64, i32)
 declare i64 @imre_dyn_mark_class_annotation(ptr, i64, i64, i32)
@@ -692,7 +699,7 @@ impl<'a> PreparedBody<'a> {
         }
     }
 
-    /// Return independent IR only when all its constant slots can live in this unit.
+    /// Emit independent IR with private, address-significant constant slots.
     pub(super) fn standalone(&self) -> Result<Option<(String, String)>, String> {
         let mut output = Output {
             keep_docstrings: self.keep_docstrings,
@@ -701,10 +708,6 @@ impl<'a> PreparedBody<'a> {
         let filename = self.source.path.as_os_str().as_encoded_bytes();
         let file = output.data(filename);
         let entry = self.emit(&mut output, 0, &file)?;
-        // These slots are numbered across the whole program and must stay in its codegen unit.
-        if !output.string_constant_slots.is_empty() {
-            return Ok(None);
-        }
         output.native_prelude();
         let mut ir = format!("{ABI}\n{}\n{}", output.constants, output.functions);
         let mut hash = blake3::Hasher::new();
@@ -886,9 +889,16 @@ impl SourceMap<'_> {
 }
 
 #[derive(Clone, Eq, Hash, PartialEq)]
-enum StringConstant {
+enum Constant {
+    None,
+    Ellipsis,
+    Bool(bool),
+    Int(String),
+    Float(u64),
+    Complex(u64, u64),
+    Bytes(Vec<u8>),
     Text(Vec<u8>),
-    Tuple(Vec<Vec<u8>>),
+    Tuple(Vec<Self>),
 }
 
 #[derive(Clone, Copy, Default)]
@@ -909,7 +919,7 @@ struct Output {
     declarations: Declarations,
     diagnostic: Option<String>,
     keep_docstrings: bool,
-    string_constant_slots: HashMap<(usize, StringConstant), usize>,
+    constant_slots: HashMap<(usize, Constant), usize>,
     strings: HashMap<Vec<u8>, u32>,
     interned_identifiers: BTreeSet<String>,
     positions: HashMap<[usize; 4], usize>,
@@ -926,7 +936,7 @@ impl Output {
         let constants = self.constants.len();
         let strings = self.strings.len() as u32;
         let positions = self.positions.len();
-        let slots = self.string_constant_slots.len();
+        let slots = self.constant_slots.len();
         let declarations = self.declarations;
         let names = std::mem::take(&mut self.interned_identifiers);
         let outer_diagnostic = self.diagnostic.take();
@@ -941,7 +951,7 @@ impl Output {
         self.constants.truncate(constants);
         self.strings.retain(|_, id| *id < strings);
         self.positions.retain(|_, id| *id < positions);
-        self.string_constant_slots.retain(|_, id| *id < slots);
+        self.constant_slots.retain(|_, id| *id < slots);
         self.declarations = declarations;
         None
     }
@@ -1285,11 +1295,7 @@ impl Function<'_, '_> {
     }
 
     fn text(&mut self, value: &str) -> String {
-        if !value.is_empty()
-            && value
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'_')
-        {
+        if !value.is_empty() && strings::interned_spelling(value) {
             self.output.interned_identifiers.insert(value.to_owned());
         }
         self.lit(1, value.as_bytes())
@@ -1564,36 +1570,29 @@ mod tests {
     fn provider_substitution() {
         let root = Path::new("<imre stdlib>");
         let path = root.join("example.py");
-        let source = "value = 1";
+        let source = "value = t'{123}'";
         let compiled = |name, path: &Path, src, docs| {
             PreparedBody::module(name, path, src, docs, ModuleOrigin::Bundled)
                 .unwrap()
                 .standalone()
                 .unwrap()
                 .unwrap()
-                .0
         };
-        let symbol = compiled("example", &path, source, true);
-        assert_ne!(symbol, compiled("other", &path, source, true));
+        let (symbol, ir) = compiled("example", &path, source, true);
+        let slot = ir
+            .lines()
+            .find_map(|line| line.strip_suffix(" = private constant i8 0"))
+            .expect("a source-local address for the template strings");
+        assert!(ir.contains(&format!(
+            "call i64 @imre_dyn_cached_handle(ptr %ctx, ptr {slot})"
+        )));
+        assert_ne!(symbol, compiled("other", &path, source, true).0);
         assert_ne!(
             symbol,
-            compiled("example", &root.join("other.py"), source, true)
+            compiled("example", &root.join("other.py"), source, true).0
         );
-        assert_ne!(symbol, compiled("example", &path, "value = 2", true));
-        assert_ne!(symbol, compiled("example", &path, source, false));
-        assert!(
-            PreparedBody::module(
-                "example",
-                &path,
-                "value = t'{123}'",
-                true,
-                ModuleOrigin::Bundled
-            )
-            .unwrap()
-            .standalone()
-            .unwrap()
-            .is_none()
-        );
+        assert_ne!(symbol, compiled("example", &path, "value = 2", true).0);
+        assert_ne!(symbol, compiled("example", &path, source, false).0);
 
         let bundled = ("example".into(), path, source.into());
         let project = (
@@ -1634,19 +1633,26 @@ mod tests {
             refs(&[bundled.clone(), project.clone(), bundled.clone()]),
             [true, false, true]
         );
-        assert!(
-            !emit(
-                (std::slice::from_ref(&project), &[]),
-                "{}",
-                true,
-                root,
-                &symbols,
-                crate::BoxedLayout::Whole,
-                initializers
-            )
-            .unwrap()
-            .1
+        let changed = (
+            bundled.0.clone(),
+            bundled.1.clone(),
+            "value = t'{456}'".into(),
         );
+        for missing in [&project, &changed] {
+            assert!(
+                !emit(
+                    (std::slice::from_ref(missing), &[]),
+                    "{}",
+                    true,
+                    root,
+                    &symbols,
+                    crate::BoxedLayout::Whole,
+                    initializers
+                )
+                .unwrap()
+                .1
+            );
+        }
         assert_eq!(refs(&[project.clone(), bundled.clone()]), [false, true]);
 
         let (units, used) = emit(

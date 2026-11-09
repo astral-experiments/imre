@@ -27,36 +27,13 @@ pub(super) fn check_docs(
     Ok(())
 }
 
+pub(super) fn interned_spelling(value: &str) -> bool {
+    value
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
 impl Function<'_, '_> {
-    // Equal constants are merged across nested code objects in one compilation.
-    fn string_constant_slot(&mut self, constant: StringConstant) -> String {
-        let slots = &mut self.frame.output.string_constant_slots;
-        let next = slots.len();
-        let slot = *slots.entry((self.source.unit, constant)).or_insert(next);
-        self.integer(slot)
-    }
-
-    pub(super) fn literal_string_tuple(&mut self, items: &[ast::Expr]) -> Option<String> {
-        if !self.source.has_templates || items.is_empty() {
-            return None;
-        }
-        let segments = items
-            .iter()
-            .map(|item| {
-                let ast::Expr::StringLiteral(text) = item else {
-                    return None;
-                };
-                let mut segment = Vec::new();
-                for part in text.value.iter() {
-                    let points = self.source.replacements.get(&part.range());
-                    push_codepoints(&mut segment, part, points.map(Vec::as_slice));
-                }
-                Some(segment)
-            })
-            .collect::<Option<_>>()?;
-        Some(self.emit_string_tuple(segments))
-    }
-
     pub(super) fn template_strings(&mut self, template: &ast::TStringValue) -> String {
         let mut segments = Vec::new();
         let mut segment = Vec::new();
@@ -76,13 +53,33 @@ impl Function<'_, '_> {
     }
 
     fn emit_string_tuple(&mut self, segments: Vec<Vec<u8>>) -> String {
-        let list = self.op("list", &[]);
-        for segment in &segments {
-            let value = self.linked_string(segment.clone());
-            self.op("append", &[&list, &value]);
+        let slot = self.constant_slot(Constant::Tuple(
+            segments.iter().cloned().map(Constant::Text).collect(),
+        ));
+        self.cached_tuple(&slot, |code| {
+            let values = segments
+                .into_iter()
+                .map(|segment| code.linked_string(segment))
+                .collect::<Vec<_>>();
+            code.build_sequence(&values, true, Some(&slot))
+        })
+    }
+
+    pub(super) fn source_text(&mut self, text: &str, points: Option<Vec<u8>>) -> String {
+        let mut chars = text.chars();
+        let short = chars
+            .next()
+            .is_none_or(|ch| ch <= '\u{ff}' && chars.next().is_none());
+        if short || interned_spelling(text) {
+            return self.text(text);
         }
-        let slot = self.string_constant_slot(StringConstant::Tuple(segments));
-        self.op("linked_string_tuple", &[&list, &slot])
+        let points = points.unwrap_or_else(|| {
+            let mut points = Vec::new();
+            push_codepoints(&mut points, text, None);
+            points
+        });
+        let data = self.output.data(text.as_bytes());
+        self.cached_string(1, data, text.len(), points)
     }
 
     pub(super) fn linked_string(&mut self, points: Vec<u8>) -> String {
@@ -92,13 +89,19 @@ impl Function<'_, '_> {
             .iter()
             .map(|bytes| char::from_u32(u32::from_le_bytes(*bytes)))
             .collect::<Option<String>>();
-        let value = if let Some(text) = text {
-            self.text(&text)
-        } else {
-            self.lit(7, &points)
-        };
-        let slot = self.string_constant_slot(StringConstant::Text(points));
-        self.op("linked_string", &[&value, &slot])
+        if let Some(text) = text {
+            return self.source_text(&text, Some(points));
+        }
+        let data = self.output.data(&points);
+        self.cached_string(7, data, points.len(), points)
+    }
+
+    fn cached_string(&mut self, kind: i32, data: String, len: usize, points: Vec<u8>) -> String {
+        let slot = self.constant_slot(Constant::Text(points));
+        self.take_matching_check();
+        self.checked(&format!(
+            "call i64 @imre_dyn_linked_string(ptr %ctx, ptr {slot}, i32 {kind}, ptr {data}, i64 {len})"
+        ))
     }
 
     pub(super) fn format_literal(

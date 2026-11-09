@@ -15,6 +15,13 @@ use std::sync::{Arc, Weak};
 use super::Context;
 
 pub(super) type Id = u64;
+
+#[derive(Eq, Hash, PartialEq)]
+pub(super) enum ConstantSlot {
+    Legacy(i64),
+    Linked(usize),
+}
+
 type MemberValues = hashbrown::HashMap<Id, Id, std::collections::hash_map::RandomState>;
 pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
 /// The entry reloads this slot before borrowing the interpreter on every activation.
@@ -3567,7 +3574,7 @@ pub(super) struct Heap {
     slot_shapes: Vec<SlotShape>,
     generator_owners: GeneratorOwners,
     gc_order: GcOrder,
-    linked_string_constants: HashMap<i64, Id>,
+    linked_constants: HashMap<ConstantSlot, Id>,
     short_bytes: HashMap<Option<u8>, Id>,
     full_collection: Option<CycleSet>,
     prompt_cycles: CycleSet,
@@ -3830,7 +3837,7 @@ impl Heap {
             gc_order: GcOrder::EMPTY,
             full_collection: None,
             prompt_cycles: CycleSet::default(),
-            linked_string_constants: HashMap::new(),
+            linked_constants: HashMap::new(),
             short_bytes: HashMap::new(),
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
@@ -4150,17 +4157,34 @@ impl Heap {
         &mut self,
         slot: Id,
         build: impl FnOnce(&mut Self) -> Id,
-    ) -> Id {
+    ) -> Result<Id> {
         let Value::Int(key) = self.get(slot) else {
             unreachable!("compiler constant slot")
         };
-        let key = key.to_i64().expect("compiler constant slot fits in i64");
-        if let Some(&value) = self.linked_string_constants.get(&key) {
-            return value;
+        self.cached_constant(
+            ConstantSlot::Legacy(key.to_i64().expect("compiler slot fits in i64")),
+            |heap| Ok(build(heap)),
+        )
+    }
+
+    pub(super) fn constant_at(&self, key: &ConstantSlot) -> Option<Id> {
+        self.linked_constants.get(key).copied()
+    }
+
+    pub(super) fn cached_constant(
+        &mut self,
+        key: ConstantSlot,
+        build: impl FnOnce(&mut Self) -> Result<Id>,
+    ) -> Result<Id> {
+        if let Some(value) = self.constant_at(&key) {
+            return Ok(value);
         }
-        let value = build(self);
-        self.linked_string_constants.insert(key, value);
-        value
+        self.linked_constants
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        let value = build(self)?;
+        self.linked_constants.insert(key, value);
+        Ok(value)
     }
 
     /// Packing an array skips tracking when its elements all have non-GC types.
@@ -5348,7 +5372,7 @@ impl Heap {
     fn mark_roots(&self, globals: impl Iterator<Item = Id>, pending: &mut impl VisitReferences) {
         globals.for_each(pending.visitor());
         pending.extend(self.full_collection_members());
-        pending.extend(self.linked_string_constants.values().copied());
+        pending.extend(self.linked_constants.values().copied());
         pending.extend(self.short_bytes.values().copied());
         pending.extend(
             self.interned
@@ -6363,8 +6387,49 @@ impl Heap {
         if self.slots[child as usize].finalization != Finalization::Pending {
             return Ok(false);
         }
+        self.released_last_reference(child, roots, Some(child))
+    }
+
+    /// Replace a dead list or tuple operand with its owned elements. Popping those roots
+    /// releases elements from the end, including the contents of nested displays.
+    pub(super) fn expand_released_sequence(
+        &mut self,
+        index: usize,
+        roots: impl Iterator<Item = Id>,
+    ) -> bool {
+        let owner = *self.temporary_root(index);
+        if !matches!(self.get(owner), Value::List(items) | Value::Tuple(items) if !items.is_empty())
+        {
+            return false;
+        }
+        *self.temporary_root(index) = NONE;
+        if !self
+            .released_last_reference(owner, roots, None)
+            .unwrap_or(false)
+        {
+            *self.temporary_root(index) = owner;
+            return false;
+        }
+        let (Value::List(items) | Value::Tuple(items)) = self.get_mut(owner) else {
+            unreachable!()
+        };
+        let items = std::mem::take(items);
+        self.release_temporaries_since(index);
+        for item in items {
+            self.keep(item);
+        }
+        true
+    }
+
+    /// Check for references from live frames, finalizers and cycles before deallocation.
+    fn released_last_reference(
+        &self,
+        child: Id,
+        roots: impl Iterator<Item = Id>,
+        releasing: Option<Id>,
+    ) -> Result<bool> {
         let mut cycles = CycleSet::new(self.slots.len())?;
-        self.mark_reference_survivors(roots, &mut cycles, Some(child));
+        self.mark_reference_survivors(roots, &mut cycles, releasing);
         let last = self.traces[child as usize].get() == UNMARKED;
         self.clear_marks();
         Ok(last)

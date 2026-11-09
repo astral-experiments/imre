@@ -115,13 +115,13 @@ mod regex;
 mod registered;
 mod retained;
 pub(crate) use registered::values::{
-    RegisteredSource, literal_replacements, packed_arguments, positional_elements, push_codepoints,
+    RegisteredSource, display_elements, literal_replacements, packed_arguments, push_codepoints,
     registered_arguments, registered_string, registered_value,
 };
 pub(crate) use registered::{
     AnnotationValue, DeferredModuleAnnotation, RegisteredFunction, RegisteredScope,
-    RegisteredSuite, SuitePreparation, annotation_expression, module_annotations,
-    attribute_effects, delete_targets, namespace_operations,
+    RegisteredSuite, SuitePreparation, annotation_expression, attribute_effects, delete_targets,
+    module_annotations, namespace_operations,
 };
 pub(crate) use retained::RegisteredNative;
 mod sequences;
@@ -3472,7 +3472,18 @@ impl<'a> Checker<'a> {
         coerce: impl Fn(&Self, Expr, Type, &ast::Expr) -> Result<Expr, String>,
     ) -> Result<Expr, String> {
         if self.registered.is_some() {
-            let value = self.expr(expression)?;
+            let layout = self.types.payload(expected).unwrap_or(expected);
+            let concrete_display = match expression {
+                ast::Expr::List(_) => self.types.element(layout).is_some(),
+                ast::Expr::Tuple(_) => self.types.fields(layout).is_some(),
+                ast::Expr::Set(_) => self.types.set_element(layout).is_some(),
+                _ => false,
+            };
+            let value = if concrete_display {
+                self.fixed_expr(expression)?
+            } else {
+                self.expr(expression)?
+            };
             return if alternative(self, value.ty) {
                 Ok(value)
             } else {
@@ -6906,6 +6917,18 @@ impl<'a> Checker<'a> {
                 .unwrap()
                 .require_object(self.source, expression);
         }
+        self.fixed_expr(expression)
+    }
+
+    fn can_mix_list_items(&self, left: Type, right: Type) -> bool {
+        !self.module_scope
+            && matches!(left, Type::Int | Type::Str)
+            && matches!(right, Type::Int | Type::Str)
+    }
+
+    /// Check the current operation with its ordinary layout rules. Children still use their
+    /// selected calling convention, including registered functions and Python values.
+    fn fixed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         if let Some(method) = self.boxed_descriptor(expression) {
             return Err(self.scoped_builtin_error(method, expression));
         }
@@ -7616,10 +7639,7 @@ impl<'a> Checker<'a> {
                     if values.is_empty() {
                         element = item.ty;
                     }
-                    if !self.module_scope
-                        && matches!(element, Type::Int | Type::Str)
-                        && matches!(item.ty, Type::Int | Type::Str)
-                    {
+                    if self.can_mix_list_items(element, item.ty) {
                         mixed |= item.ty != element;
                     } else {
                         self.expect(element, item.ty, value)?;

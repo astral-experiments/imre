@@ -93,6 +93,12 @@ pub(super) fn snapshot_locals(module: &Module, f: &Function) -> Vec<bool> {
     eligible
 }
 
+pub(super) struct PackedRow {
+    scratch: String,
+    layout: String,
+    values: Vec<Operand>,
+}
+
 impl Emitter<'_, '_> {
     /// Collapse a counted loop whose only effect is appending the same
     /// immutable struct. The runtime guard keeps ordinary list behavior for
@@ -303,11 +309,19 @@ impl Emitter<'_, '_> {
     /// Evaluate constructor operands in source order; copy only their checked
     /// scalar values to the destination in declared field order.
     pub(super) fn append_struct_constructor(&mut self, list: &Value, item: &Expr) -> bool {
-        let ExprKind::Construct { args, .. } = &item.kind else {
+        let Some(row) = self.packed_constructor(item) else {
             return false;
         };
+        self.append_packed(list, row);
+        true
+    }
+
+    pub(super) fn packed_constructor(&mut self, item: &Expr) -> Option<PackedRow> {
+        let ExprKind::Construct { args, .. } = &item.kind else {
+            return None;
+        };
         if !self.module.types.is_value_struct(item.ty) {
-            return false;
+            return None;
         }
         let name = self.output.record_type(item.ty);
         let scratch = self.entry_alloca(format!("%{name}"));
@@ -321,6 +335,19 @@ impl Emitter<'_, '_> {
             let word = self.word(v);
             self.line(format!("store i64 {word}, ptr {p}"));
         }
+        Some(PackedRow {
+            scratch,
+            layout,
+            values,
+        })
+    }
+
+    pub(super) fn append_packed(&mut self, list: &Value, row: PackedRow) {
+        let PackedRow {
+            scratch,
+            layout,
+            values,
+        } = row;
         self.checked_status(format!(
             "call i32 @imre_struct_append(ptr {}, ptr @{layout}, ptr {scratch})",
             list.operand
@@ -328,7 +355,6 @@ impl Emitter<'_, '_> {
         for value in &values {
             self.release_operand(value);
         }
-        true
     }
 
     /// Snapshot one complete row before releasing either operand or allowing

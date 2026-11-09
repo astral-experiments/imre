@@ -761,6 +761,13 @@ fn negative_component(value: &Expr) -> Option<i64> {
     (-(1_i64 << 62)..0).contains(&value).then_some(value)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DisplayKind {
+    List,
+    Tuple,
+    Set,
+}
+
 /// Values are evaluated and rooted in source order. `order` is a permutation of
 /// their indices that supplies the native call's parameter order without
 /// reevaluation. Methods include their receiver first; constructors omit the
@@ -1727,6 +1734,8 @@ pub(crate) enum Builtin {
     /// In source order, each pair consumes a key and value, and each unpack one mapping.
     /// The registered frame owns these operands through dictionary construction.
     RegisteredDict(Vec<DictEntryKind>),
+    /// A starred operand consumed by its enclosing registered list or tuple display.
+    RegisteredSpread,
     /// Object and key operands, with the original subscript and end of its receiver.
     RegisteredSubscript(ruff_text_size::TextRange, ruff_text_size::TextSize),
     RegisteredEllipsis,
@@ -2977,33 +2986,45 @@ impl Statement {
     }
 }
 
-enum Node<'a> {
+pub(crate) enum Node<'a> {
     Statement(&'a Statement),
     Expression(&'a Expr),
 }
 
-fn walk_nodes<'a>(body: &'a [Statement], visit: &mut impl FnMut(Node<'a>)) {
+/// Visits every IR node together with its immediate containing expression, when present.
+pub(crate) fn walk_nodes<'a>(
+    body: &'a [Statement],
+    visit: &mut impl FnMut(Node<'a>, Option<&'a Expr>),
+) {
     for statement in body {
-        visit(Node::Statement(statement));
-        statement_children!(statement, |value| walk_expression(value, visit), |suite| {
-            walk_nodes(suite, visit)
-        });
+        visit(Node::Statement(statement), None);
+        statement_children!(
+            statement,
+            |value| walk_expression(value, None, visit),
+            |suite| { walk_nodes(suite, visit) }
+        );
     }
 }
 
-fn walk_expression<'a>(value: &'a Expr, visit: &mut impl FnMut(Node<'a>)) {
-    visit(Node::Expression(value));
-    if let ExprKind::Scope { body, value, .. } = &value.kind {
+fn walk_expression<'a>(
+    expression: &'a Expr,
+    parent: Option<&'a Expr>,
+    visit: &mut impl FnMut(Node<'a>, Option<&'a Expr>),
+) {
+    visit(Node::Expression(expression), parent);
+    if let ExprKind::Scope { body, value, .. } = &expression.kind {
         walk_nodes(body, visit);
-        walk_expression(value, visit);
+        walk_expression(value, Some(expression), visit);
     } else {
-        children(value, |child| walk_expression(child, visit));
+        children(expression, |child| {
+            walk_expression(child, Some(expression), visit)
+        });
     }
 }
 
 /// Visits all statement nodes once, including those nested inside eager expressions.
 pub(crate) fn walk_statements<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Statement)) {
-    walk_nodes(body, &mut |node| {
+    walk_nodes(body, &mut |node, _| {
         if let Node::Statement(statement) = node {
             visit(statement);
         }
@@ -3021,7 +3042,7 @@ pub(crate) fn contains_loop(body: &[Statement]) -> bool {
 
 /// Visits an operand and its nested expressions, including eager scope bodies.
 pub(crate) fn walk_operand_expressions<'a>(value: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
-    walk_expression(value, &mut |node| {
+    walk_expression(value, None, &mut |node, _| {
         if let Node::Expression(expression) = node {
             visit(expression);
         }
@@ -3031,7 +3052,7 @@ pub(crate) fn walk_operand_expressions<'a>(value: &'a Expr, visit: &mut impl FnM
 /// Visits expression trees, including statements embedded in eager expressions.
 /// Analyses must include every checked branch, even when it never executes.
 pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Expr)) {
-    walk_nodes(body, &mut |node| {
+    walk_nodes(body, &mut |node, _| {
         if let Node::Expression(value) = node {
             visit(value);
         }
@@ -3049,7 +3070,7 @@ pub(crate) fn private_string_cursors(function: &Function) -> Vec<usize> {
     for &parameter in &function.params {
         exposed[parameter] = true;
     }
-    walk_nodes(&function.body, &mut |node| {
+    walk_nodes(&function.body, &mut |node, _| {
         match &node {
             Node::Statement(Statement::IterNext {
                 iterator,
@@ -3223,7 +3244,7 @@ pub(crate) fn plain_link_owners(function: &Function, owners: &[&Expr]) -> bool {
         plain[parameter] = false;
     }
     let mut copies = Vec::new();
-    walk_nodes(&function.body, &mut |node| match node {
+    walk_nodes(&function.body, &mut |node, _| match node {
         // Clearing a slot does not give it a new callable.
         Node::Statement(Statement::Clear(_) | Statement::Scope { .. })
         | Node::Expression(Expr {
@@ -3247,12 +3268,12 @@ pub(crate) fn plain_link_owners(function: &Function, owners: &[&Expr]) -> bool {
 
 /// Visits every local write in a suite. Only ordinary assignments carry a right-hand side.
 pub(crate) fn walk_writes(body: &[Statement], mut visit: impl FnMut(usize, Option<&Expr>)) {
-    walk_nodes(body, &mut |node| node_writes(node, &mut visit));
+    walk_nodes(body, &mut |node, _| node_writes(node, &mut visit));
 }
 
 /// Visits writes during operand evaluation, including assignments in eager scopes.
 pub(crate) fn walk_expression_writes(value: &Expr, mut visit: impl FnMut(usize, Option<&Expr>)) {
-    walk_expression(value, &mut |node| node_writes(node, &mut visit));
+    walk_expression(value, None, &mut |node, _| node_writes(node, &mut visit));
 }
 
 /// Whether evaluating an operand leaves the previously loaded local in place.
