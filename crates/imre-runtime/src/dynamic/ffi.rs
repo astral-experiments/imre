@@ -6,6 +6,38 @@ use std::sync::Arc;
 
 use super::*;
 
+/// Check that specializing these name loads cannot bypass Python.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_native_bindings(
+    ctx: *const Context,
+    scope: Id,
+    names: *const u8,
+    len: usize,
+) -> bool {
+    // SAFETY: the registered activation and NUL-separated UTF-8 constant are live for this call.
+    let (ctx, names) = unsafe {
+        (
+            &*ctx,
+            std::str::from_utf8_unchecked(std::slice::from_raw_parts(names, len)),
+        )
+    };
+    ctx.pending.is_none()
+        && crate::objects::exceptions::imre_error_pending() == 0
+        && !crate::objects::exceptions::has_active_native_handler()
+        && crate::objects::exceptions::plain_reserves_ready()
+        // Statement publication may run finalizers, weak callbacks or coroutine warnings.
+        && !ctx.heap.has_weak_values
+        && (!ctx.heap.tracks_finalizers() || ctx.can_skip_finalizer_sweep(0))
+        && !ctx.heap.has_unstarted_coroutines()
+        && ctx.threads.count.load(std::sync::atomic::Ordering::Acquire) == 0
+        && !ctx.heap.allocation_traces.is_tracing()
+        && ctx.signal_handlers.iter().all(|&handler| {
+            !ctx.callable(handler)
+                || ctx.builtins.get("_signal.default_int_handler") == Some(&handler)
+        })
+        && ctx.retained_builtin_bindings(scope, names)
+}
+
 fn flag(v: bool) -> Id {
     if v { TRUE } else { FALSE }
 }
@@ -3109,6 +3141,33 @@ impl Context {
 mod tests {
     use super::*;
     use std::rc::{Rc, Weak};
+
+    #[test]
+    fn retained_list_allocation_failure_reaches_the_registered_handler() {
+        let mut ctx = new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let list = crate::List::new(vec![
+            crate::Int::small(3).unwrap(),
+            crate::Int::small(7).unwrap(),
+        ]);
+        // The element count fits the native signed bound; the byte request exceeds the
+        // x86-64/AArch64 user address space and fails inside the actual reserve operation.
+        let repeats = crate::Int::small(1_i64 << 55).unwrap();
+        let mut result = std::mem::MaybeUninit::uninit();
+        assert!(crate::objects::exceptions::plain_reserves_ready());
+        // SAFETY: the list and count are rooted and the registered output is writable.
+        unsafe {
+            assert!(crate::imre_list_repeat(&list, repeats.0).is_null());
+            assert!(imre_dyn_finish_native_int(&mut ctx, 1, result.as_mut_ptr()));
+            assert_eq!(result.assume_init(), NONE);
+        }
+        assert_eq!(crate::objects::exceptions::imre_error_pending(), 0);
+        let error = ctx.pending.take().unwrap();
+        assert_eq!(error.kind, "MemoryError");
+        let Value::Tuple(args) = ctx.heap.get(error.args.unwrap()) else {
+            panic!("expected args")
+        };
+        assert!(args.is_empty());
+    }
 
     #[test]
     fn native_call_returns_registered_errors_or_retains_opaque_native_owners() {

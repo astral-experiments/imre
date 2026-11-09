@@ -950,6 +950,27 @@ fn lower_graph(
         });
     let helpers = Helpers::new(definitions.len() + graph.initializers(entry_declarations).count());
     let globals = ModuleValues::default();
+    // Fixed FILE compilations need no secondary body. A registered launch or an
+    // actual representation failure can still use functions whose signatures solved.
+    let captured = std::cell::Cell::new(false);
+    let capture = || {
+        if !captured.replace(true) {
+            registered::capture(
+                graph,
+                &signatures,
+                &classes,
+                &types,
+                &inference,
+                &globals,
+                false,
+            );
+        }
+    };
+    let capture_on_object = |failure: &Failure| {
+        if failure.is_object() {
+            capture();
+        }
+    };
     let mut initializations = Vec::new();
     let mut available = HashSet::new();
     for (module_id, range) in graph.initializers(entry_declarations) {
@@ -964,8 +985,12 @@ fn lower_graph(
         );
         initializations.push(
             Initialization::lower(checker, &mut available, range)
+                .inspect_err(capture_on_object)
                 .map_err(|failure| failure.terminal_in(graph, module_id))?,
         );
+    }
+    if graph.registered_startup {
+        capture();
     }
     if let Some(cache) = cache.as_deref_mut() {
         cache.validate_abi(&definitions, &globals);
@@ -991,7 +1016,9 @@ fn lower_graph(
             Some(cache) if signature.method.is_none() => cache.body(checker, definition, signature),
             _ => lower_body(checker, definition, signature),
         };
-        let (body, sums) = result.map_err(|failure| failure.terminal_in(graph, *module_id))?;
+        let (body, sums) = result
+            .inspect_err(capture_on_object)
+            .map_err(|failure| failure.terminal_in(graph, *module_id))?;
         let LoweredBody {
             function,
             calls,
@@ -1054,6 +1081,7 @@ fn lower_graph(
             .collect::<Vec<_>>();
         let (mut body, _) = checker
             .block(&statements)
+            .inspect_err(capture_on_object)
             .map_err(|failure| failure.terminal_in(graph, module_id))?;
         if module_id == graph.entry {
             let mut startup = (0..initializations.len())
@@ -1078,6 +1106,9 @@ fn lower_graph(
         }
     }
     if let Some(error) = graph.deferred_object_error.take() {
+        if error.kind.is_object() {
+            capture();
+        }
         return Err(error);
     }
     let fault_enabled = graph

@@ -822,6 +822,11 @@ impl Inference {
                 // Only the failure that escaped the checker controls this round.
                 // An alternative may have waited for a signature and been discarded.
                 if let Some(primary) = reports.next() {
+                    if primary.kind.is_object() {
+                        registered::capture(
+                            graph, signatures, classes, types, self, &globals, false,
+                        );
+                    }
                     return Err(primary.with_following(reports));
                 }
                 if self.infer_inherited_parameters(definitions, classes) {
@@ -859,7 +864,7 @@ impl Inference {
                         }
                         continue;
                     };
-                    registered::capture(graph, signatures, classes, types, self, &globals);
+                    registered::capture(graph, signatures, classes, types, self, &globals, true);
                     return Err(unresolved.in_module(graph, *module));
                 }
                 unreachable!("an unresolved signature has a missing parameter or return");

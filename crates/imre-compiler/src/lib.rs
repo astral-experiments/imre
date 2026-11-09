@@ -448,6 +448,7 @@ fn object_fallback(
             }
             Err(error) => break (error.into(), None, false),
         };
+        graph.registered_startup = boxed_startup;
         site_probes.record(&mut graph.inputs);
         if !infer_sets {
             graph.set_layout_hint.set(modules::SetLayoutHint::Disabled);

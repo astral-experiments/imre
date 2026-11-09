@@ -14,13 +14,14 @@ pub(crate) mod checked;
 mod comprehensions;
 mod expressions;
 mod frame;
+mod retained;
 use frame::{RegisteredFrame, SourcePositions};
 mod patterns;
 mod statements;
 mod strings;
 mod suspension;
 
-mod permanent {
+pub(super) mod permanent {
     include!("../../../imre-runtime/native/boxed-handles.rs");
 }
 
@@ -113,7 +114,7 @@ pub(super) struct PhysicalFile {
 /// Snapshots and admission facts for the bodies selected by import resolution.
 #[derive(Default)]
 pub(super) struct RegisteredBodies<'a> {
-    pub(super) checked_functions: HashMap<usize, &'a super::CheckedFunctions>,
+    pub(super) program_bodies: HashMap<usize, ProgramBodies<'a>>,
     // Decoded installed files retain the fingerprint of their original loader bytes.
     pub(super) physical_files: HashMap<PathBuf, PhysicalFile>,
     pub(super) archive_members: HashMap<PathBuf, ([u8; 32], u32)>,
@@ -123,9 +124,18 @@ pub(super) struct RegisteredBodies<'a> {
     pub(super) python_providers: HashSet<usize>,
 }
 
+/// Each source slot can use the checked bodies owned by its selected physical file.
+#[derive(Clone, Copy, Default)]
+pub(super) struct ProgramBodies<'a> {
+    pub(super) checked: Option<&'a super::CheckedFunctions>,
+    pub(super) native:
+        Option<&'a HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredNative>>,
+    pub(super) sanitize: bool,
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum ModuleOrigin<'a> {
-    Program(Option<&'a super::CheckedFunctions>),
+    Program(ProgramBodies<'a>),
     Provider,
     Bundled,
 }
@@ -144,7 +154,7 @@ pub(crate) fn emit(
     ),
 ) -> Result<(Vec<CodegenUnit>, bool), String> {
     let RegisteredBodies {
-        checked_functions,
+        program_bodies,
         physical_files,
         archive_members,
         python_providers,
@@ -188,7 +198,7 @@ pub(crate) fn emit(
         } else if python_providers.contains(&unit) {
             ModuleOrigin::Provider
         } else {
-            ModuleOrigin::Program(checked_functions.get(&unit).copied())
+            ModuleOrigin::Program(program_bodies.get(&unit).copied().unwrap_or_default())
         };
         let module_name = output.data(name.as_bytes());
         let file = output.data(path.as_os_str().as_encoded_bytes());
@@ -277,6 +287,7 @@ pub(crate) fn emit(
         )
         .unwrap();
     }
+    output.native_prelude();
     main.push_str("  %status = call i32 @imre_dyn_finish(ptr %ctx)\n  ret i32 %status\n}\n");
     units.insert(
         0,
@@ -411,9 +422,9 @@ impl<'a> PreparedBody<'a> {
         let bundled = matches!(kind, SourceBody::Module(ModuleOrigin::Bundled));
         let provider = matches!(kind, SourceBody::Module(ModuleOrigin::Provider));
         let expression = matches!(&kind, SourceBody::Expression(_));
-        let checked_functions = match kind {
-            SourceBody::Module(ModuleOrigin::Program(checked)) => checked,
-            _ => None,
+        let program_bodies = match kind {
+            SourceBody::Module(ModuleOrigin::Program(bodies)) => bodies,
+            _ => ProgramBodies::default(),
         };
         // The expression grammar supplies its own checked syntax and tokens.
         // Both inputs below then use the same name lowering and native code entry.
@@ -498,7 +509,7 @@ impl<'a> PreparedBody<'a> {
         let lower_definitions = ordinary && (!bundled || initializer.is_some());
         let source = SourceInfo {
             initializer,
-            checked_functions,
+            program_bodies,
             bundled,
             path,
             // These CPython providers implement their own call semantics in Python.
@@ -549,7 +560,7 @@ impl<'a> PreparedBody<'a> {
         } else {
             Body::Namespace(&self.body, false)
         };
-        let code = output.code(&location, String::new(), suite, false, false);
+        let code = output.code(&location, String::new(), suite, false, false, None);
         match output.diagnostic.take() {
             Some(diagnostic) => Err(diagnostic),
             None => Ok(code),
@@ -569,6 +580,7 @@ impl<'a> PreparedBody<'a> {
         if !output.string_constant_slots.is_empty() {
             return Ok(None);
         }
+        output.native_prelude();
         let mut ir = format!("{ABI}\n{}\n{}", output.constants, output.functions);
         let mut hash = blake3::Hasher::new();
         for field in [
@@ -683,7 +695,7 @@ impl<'a> std::ops::Deref for SourceMap<'a> {
 
 struct SourceInfo<'a> {
     initializer: Option<crate::frontend::RegisteredFunction>,
-    checked_functions: Option<&'a super::CheckedFunctions>,
+    program_bodies: ProgramBodies<'a>,
     bundled: bool,
     path: &'a Path,
     python_annotations: bool,
@@ -740,6 +752,7 @@ struct Declarations {
     emitted_guarded_named_op: bool,
     registered_expression: bool,
     checked_integer_arithmetic: bool,
+    retained_native: bool,
 }
 
 #[derive(Default)]
@@ -807,13 +820,18 @@ impl Output {
         };
         let entry = if matches!(body, Body::Statements(_))
             && let Some(checked) = source
-                .checked_functions
+                .program_bodies
+                .checked
                 .and_then(|functions| functions.get(&start))
         {
             let mut frame = RegisteredFrame::new(self, &source.positions, false);
             frame.checked_body(checked);
             frame.finish(false)
         } else {
+            let native = match body {
+                Body::Statements(_) => source.program_bodies.native.and_then(|map| map.get(&start)),
+                _ => None,
+            };
             let lowered;
             let body = match body {
                 Body::Statements(stmts)
@@ -831,7 +849,7 @@ impl Output {
                 }
                 _ => body,
             };
-            self.code(source, prefix, body, in_function, suspended)
+            self.code(source, prefix, body, in_function, suspended, native)
         };
         writeln!(
             self.constants,
@@ -882,6 +900,7 @@ impl Output {
         body: Body<'_>,
         in_function: bool,
         native_suspension: bool,
+        native: Option<&crate::frontend::RegisteredNative>,
     ) -> String {
         let frame = RegisteredFrame::new(self, &source.positions, native_suspension);
         let module = matches!(body, Body::Namespace(..)) && prefix.is_empty();
@@ -909,6 +928,9 @@ impl Output {
             loops: Vec::new(),
             exits: Vec::new(),
         };
+        if let Some(native) = native {
+            f.select_native(native);
+        }
         match body {
             Body::Namespace(stmts, _) => {
                 if module && imre_ast::annotations::has_variable_annotation(stmts) {
@@ -1234,7 +1256,7 @@ mod tests {
             Path::new("sample.py"),
             source,
             true,
-            ModuleOrigin::Program(None),
+            ModuleOrigin::Program(ProgramBodies::default()),
         )
         .unwrap()
         .standalone()
@@ -1261,7 +1283,7 @@ mod tests {
                 if bundled {
                     ModuleOrigin::Bundled
                 } else {
-                    ModuleOrigin::Program(None)
+                    ModuleOrigin::Program(ProgramBodies::default())
                 },
             )
             .unwrap()

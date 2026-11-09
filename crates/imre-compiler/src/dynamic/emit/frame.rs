@@ -229,7 +229,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         result
     }
 
-    fn check_error(&mut self) {
+    pub(super) fn check_error(&mut self) {
         self.pending_check = Some(ErrorCheck {
             handler: self.body.error_target.clone(),
             failed: self.name("%v"),

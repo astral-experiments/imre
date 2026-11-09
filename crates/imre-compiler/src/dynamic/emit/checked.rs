@@ -266,22 +266,7 @@ impl RegisteredFrame<'_, '_> {
     }
 
     fn checked_integer_add(&mut self, left: &str, right: &str) -> String {
-        if !self.output.declarations.checked_integer_arithmetic {
-            self.output.declarations.checked_integer_arithmetic = true;
-            self.output.functions.push_str(
-                r#"
-declare i64 @imre_dyn_exact_int_word(ptr, i64)
-declare i64 @imre_dyn_take_int(ptr, i64)
-declare i64 @imre_int_binary(i64, i64, i32)
-declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
-!0 = !{!"branch_weights", i32 1, i32 2000}
-!1 = !{!"branch_weights", i32 2000, i32 1}
-"#,
-            );
-            self.output
-                .functions
-                .push_str(&crate::llvm::integer_arithmetic_helper(Binary::Add));
-        }
+        self.output.declarations.checked_integer_arithmetic = true;
         let a = self.value(&format!(
             "call i64 @imre_dyn_exact_int_word(ptr %ctx, i64 {left})"
         ));

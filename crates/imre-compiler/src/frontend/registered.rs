@@ -14,6 +14,7 @@ pub(super) fn capture(
     types: &Types,
     inference: &inference::Inference,
     globals: &ModuleValues,
+    retain_live_parameters: bool,
 ) {
     let mut registered = HashMap::<ModuleId, HashMap<TextSize, RegisteredFunction>>::new();
     for (&owner, signature) in signatures {
@@ -40,11 +41,14 @@ pub(super) fn capture(
                         .borrow_mut()
                         .entry(id)
                         .or_default()
-                        .insert(function.start(), native);
+                        .insert(native.site.start(), native);
                 }
             }
             continue;
         };
+        if !retain_live_parameters {
+            continue;
+        }
         let helpers = Helpers::new(inference.len());
         let checker = Checker::new(graph, id, signatures, classes, types, &helpers, globals);
         let mut local_names = HashMap::new();
@@ -61,7 +65,9 @@ pub(super) fn capture(
             );
         }
     }
-    graph.set_registered_functions(registered);
+    if retain_live_parameters {
+        graph.set_registered_functions(registered);
+    }
 }
 
 pub(super) fn checkpoint(stmt: &ast::Stmt) -> Statement {

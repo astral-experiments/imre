@@ -3116,6 +3116,8 @@ pub(crate) enum SetLayoutHint {
 pub(crate) struct SourceGraph {
     /// Fixed at graph construction, in the checked resolver's search order.
     pub(crate) filesystem_roots: Box<[PathBuf]>,
+    /// The launcher has already selected a registered module initializer.
+    pub(crate) registered_startup: bool,
     pub(crate) native_functions:
         std::cell::RefCell<HashMap<ModuleId, HashMap<TextSize, crate::frontend::RegisteredNative>>>,
     registered_functions: std::cell::RefCell<HashMap<ModuleId, crate::dynamic::CheckedFunctions>>,
@@ -4801,6 +4803,7 @@ impl<'a> Loader<'a> {
             has_object_constructor_fallback: Default::default(),
             registered_functions: Default::default(),
             native_functions: Default::default(),
+            registered_startup: false,
             source_contract: None,
             set_layout_hint: std::cell::Cell::new(SetLayoutHint::Available),
             check_fallback_calls: Default::default(),

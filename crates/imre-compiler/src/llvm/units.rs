@@ -9,6 +9,7 @@ pub(super) struct Output {
     /// Whether a reference to this named type also needs its destruction descriptor.
     pub(super) record_types: HashMap<Type, bool>,
     pub(super) registered: Option<usize>,
+    pub(super) frame_lists: Vec<(usize, String, usize)>,
     pub(super) statement_lines: HashMap<ruff_text_size::TextSize, usize>,
     units: Vec<String>,
     common: Option<String>,
@@ -35,6 +36,7 @@ impl Output {
         Self {
             record_types: HashMap::new(),
             registered: None,
+            frame_lists: vec![],
             statement_lines: HashMap::new(),
             units: vec![String::new(); count],
             common: split.then(|| "source_filename = \"imre-unit\"\n".to_owned()),

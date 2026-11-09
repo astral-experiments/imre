@@ -340,11 +340,17 @@ pub(crate) fn registered_native(
     module: &Module,
     site: usize,
     sanitize: bool,
+    frame_lists: &[(usize, String)],
     line_of: impl Fn(ruff_text_size::TextSize) -> usize,
 ) -> Result<RegisteredCode, Unsupported> {
     let ranges = crate::ranges::analyze(module);
     let mut output = Output::new(&vec![0; module.functions.len()], 1, 0, false);
     output.registered = Some(site);
+    for (slot, name) in frame_lists {
+        let label = format!("imre_registered_{site}_name_{slot}");
+        output.byte_constant(0, &label, name.as_bytes());
+        output.frame_lists.push((*slot, label, name.len()));
+    }
     crate::ir::walk_expressions(&module.functions[0].body, &mut |expr| {
         if let ExprKind::Builtin(Builtin::RegisteredStatement(range, _), _) = &expr.kind {
             output
@@ -363,6 +369,7 @@ pub(crate) fn registered_native(
 pub(crate) fn registered_native_prelude() -> String {
     let mut ir = String::new();
     write_declarations(&mut ir);
+    ir.push_str("declare void @imre_dyn_native_frame_int_list(ptr, i64, ptr, i64, ptr)\n");
     ir.push_str(&integer_helpers());
     ir.push_str(&nullable_pointer_helpers());
     ir.push_str(BRANCH_WEIGHTS);
@@ -599,7 +606,9 @@ fn emit_program(
             emitter.body.reset_names();
         }
         let frame = function_source_frame(module, &repr_methods, id);
-        let mut params = emitter.function(function, entry, frame, &borrows[id])?;
+        // Only the source root has a registered frame. Helpers unwind into that root.
+        let frame_lists = std::mem::take(&mut emitter.output.frame_lists);
+        let mut params = emitter.function(function, entry, frame, &borrows[id], &frame_lists)?;
         if id == 0 && emitter.output.registered.is_some() {
             let names = "ptr %ctx, i64 %scope, ptr %file";
             params = if params.is_empty() {
@@ -2222,6 +2231,7 @@ impl Emitter<'_, '_> {
         entry: bool,
         frame: Option<&ir::SourceFrame>,
         borrows: &FunctionBorrows,
+        frame_lists: &[(usize, String, usize)],
     ) -> Result<String, Unsupported> {
         self.uses_regex_positions =
             self.module_reads_regex_positions && regex_positions_may_escape(self.module, function);
@@ -2342,7 +2352,7 @@ impl Emitter<'_, '_> {
             })
             .collect();
         self.directory_slot_count = directory_slots.len();
-        let separate_exits = entry || !directory_slots.is_empty();
+        let separate_exits = entry || !directory_slots.is_empty() || !frame_lists.is_empty();
         self.return_exit = self.label();
         self.body.error_target = if separate_exits {
             self.label()
@@ -2560,6 +2570,13 @@ impl Emitter<'_, '_> {
             let cleanup = self.label();
             self.jump(&cleanup);
             self.start(&self.body.error_target.clone());
+            for (slot, name, len) in frame_lists {
+                let list = self.borrow_slot(*slot);
+                self.line(format!(
+                    "call void @imre_dyn_native_frame_int_list(ptr %ctx, i64 %scope, ptr @{name}, i64 {len}, ptr {})",
+                    list.operand
+                ));
+            }
             self.with_directory_frame(|out, frame| {
                 for &slot in &directory_slots {
                     let value = out.borrow_slot(slot);
@@ -12236,8 +12253,16 @@ mod tests {
         let mut graph = crate::modules::SourceGraph::single(source).unwrap();
         let (mut module, _) = crate::frontend::lower_with_owners(&mut graph).unwrap();
         crate::specialize(&mut module).unwrap();
-        let native = super::registered_native(&module, 2, false, |_| 1).unwrap();
+        let native =
+            super::registered_native(&module, 2, false, &[(1, "digits".into())], |_| 1).unwrap();
         assert_eq!(native.symbol, "imre_registered_2_0");
+        assert_eq!(
+            native
+                .definitions
+                .matches("call void @imre_dyn_native_frame_int_list(")
+                .count(),
+            1
+        );
         assert!(native.definitions.contains("call ptr @imre_str_int_list("));
         assert!(
             native
