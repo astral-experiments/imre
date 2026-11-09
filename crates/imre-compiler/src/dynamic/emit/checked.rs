@@ -501,9 +501,7 @@ impl Frame<'_, '_, '_> {
             CheckedValue::Native(..) => None,
         };
         if let Some(handle) = handle {
-            self.code.line(&format!(
-                "call void @imre_dyn_discard_expression(ptr %ctx, i64 {handle})"
-            ));
+            self.code.discard_handle(handle);
         }
     }
 
@@ -1372,6 +1370,12 @@ impl Function<'_, '_> {
 }
 
 impl RegisteredFrame<'_, '_> {
+    pub(super) fn discard_handle(&mut self, handle: &str) {
+        self.line(&format!(
+            "call void @imre_dyn_discard_expression(ptr %ctx, i64 {handle})"
+        ));
+    }
+
     /// The heap takes the reference even if adding its temporary root fails.
     fn move_integer(&mut self, slot: usize, word: &str) -> String {
         self.line(&format!("store i64 1, ptr %int_owner{slot}"));
