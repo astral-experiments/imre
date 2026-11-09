@@ -87,21 +87,18 @@ def check_restored_descriptor():
                 os.close(reserved)
 
 
-check(False)
-check(True)
-check_restored_descriptor()
-
-
 def check_reattached_socket(detach):
     sender, peer = socket.socketpair()
     with sender, peer:
-        class Source(io.BytesIO):
+        data = io.BytesIO(b"private")
+
+        class Source:
             def read(self, n):
                 fd = sender.detach() if detach else sender.fileno()
                 socket.socket.__init__(sender, fileno=fd)
-                return super().read(n)
+                return data.read(n)
 
-        source = Source(b"private")
+        source = Source()
         if detach:
             try:
                 sender.sendfile(source, count=7)
@@ -116,5 +113,8 @@ def check_reattached_socket(detach):
         assert peer.recv(3) == b"own"
 
 
+check(False)
+check(True)
+check_restored_descriptor()
 check_reattached_socket(True)
 check_reattached_socket(False)
