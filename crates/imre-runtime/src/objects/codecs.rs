@@ -17,7 +17,6 @@ use std::sync::LazyLock;
 
 pub(crate) struct CodePage {
     index: usize,
-    pub(crate) module_name: &'static str,
     decode: Charmap,
     encode: HashMap<char, u8>,
 }
@@ -31,7 +30,6 @@ impl CodePage {
             .collect();
         Self {
             index,
-            module_name,
             decode,
             encode,
         }

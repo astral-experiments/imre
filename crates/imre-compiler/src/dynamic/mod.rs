@@ -1838,7 +1838,7 @@ fn runtime_sources(
         .chain((!seen("encodings.big5")).then_some((
             "encodings.big5",
             "encodings/big5.py",
-            include_str!("../../stdlib/encodings/big5.py"),
+            include_str!("../../stdlib/encodings/multibyte.py"),
         )))
         .chain(
             RUNTIME_PROVIDERS

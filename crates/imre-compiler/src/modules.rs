@@ -335,7 +335,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             include_str!("../stdlib/encodings/utf_wide.py"),
         )),
         "encodings.idna" => bundled_source!("encodings/idna.py"),
-        "encodings.shift_jis" => bundled_source!("encodings/shift_jis.py"),
+        "encodings.shift_jis" => Some((
+            "encodings/shift_jis.py",
+            include_str!("../stdlib/encodings/multibyte.py"),
+        )),
         "codeop" => bundled_source!("codeop.py"),
         "keyword" => Some((
             "keyword.py",

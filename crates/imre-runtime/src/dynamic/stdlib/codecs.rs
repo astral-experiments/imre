@@ -14,9 +14,6 @@ use crate::objects::{Codec, DecodeIssue, DoubleByte, FixedUnicode, StrEncoder};
 
 #[derive(Default)]
 pub(in crate::dynamic) struct Registry {
-    // The boxed provider preserves an entry for each normalized spelling across
-    // registry cache invalidations. Its object belongs to this interpreter.
-    entries: HashMap<String, Id>,
     // The registered provider keeps its package globals, including the spelling cache.
     module_search: Option<Id>,
     initialized: bool,
@@ -30,13 +27,9 @@ pub(in crate::dynamic) struct Registry {
 
 impl Registry {
     pub(in crate::dynamic) fn roots(&self) -> impl Iterator<Item = &Id> {
-        self.entries
+        self.functions
             .values()
-            .chain(
-                self.functions
-                    .values()
-                    .flat_map(|(encode, decode)| [encode, decode]),
-            )
+            .flat_map(|(encode, decode)| [encode, decode])
             .chain(&self.module_search)
             .chain(self.handlers.values())
             .chain(&self.search_path)
@@ -386,19 +379,19 @@ pub(super) fn native_search(ctx: &mut Context, args: &[Id], kwargs: &[(String, I
     if key.bytes().any(|c| c.is_ascii_uppercase()) {
         return Ok(NONE);
     }
-    if let Some((format, true)) = FixedUnicode::encoding(&key) {
-        let module = format!("encodings.{}", format.codec_name(true).replace('-', "_"));
-        return module_entry(ctx, arg, &module);
-    }
-    let normalized = crate::objects::normalize_codec(&key)?;
-    if let Some(&entry) = ctx.codec_entries.entries.get(&normalized) {
-        return Ok(entry);
-    }
-    match Codec::by_key(&normalized, &key).map_err(Error::from) {
-        Ok(codec) => box_native_entry(ctx, normalized, codec, arg),
-        Err(error) if error.kind == "LookupError" => Ok(NONE),
-        Err(error) => Err(error),
-    }
+    let name = if let Some((format, true)) = FixedUnicode::encoding(&key) {
+        format.codec_name(true)
+    } else {
+        let normalized = crate::objects::normalize_codec(&key)?;
+        match Codec::by_key(&normalized, &key).map_err(Error::from) {
+            Ok(Codec::Latin1) => "latin_1",
+            Ok(codec) => codec.name(),
+            Err(error) if error.kind == "LookupError" => return Ok(NONE),
+            Err(error) => return Err(error),
+        }
+    };
+    let module = format!("encodings.{}", name.replace('-', "_"));
+    module_entry(ctx, arg, &module)
 }
 
 pub(in crate::dynamic) fn lookup_name(ctx: &mut Context, spelling: &str) -> Result<Id> {
@@ -569,84 +562,6 @@ fn module_entry(ctx: &mut Context, spelling: Id, module: &str) -> Result<Id> {
     })?;
     let name = ctx.text(module);
     ctx.call(search, vec![spelling, name], Vec::new())
-}
-
-fn box_native_entry(ctx: &mut Context, key: String, codec: Codec, spelling: Id) -> Result<Id> {
-    let suffix = match codec {
-        Codec::Ascii => "ascii",
-        Codec::Latin1 => "latin_1",
-        Codec::Utf8 { signature: false } => "utf_8",
-        Codec::Utf8 { signature: true } => "utf_8_sig",
-        Codec::CodePage(page) => page.module_name,
-        Codec::DoubleByte(_) => codec.name(),
-        Codec::Idna => return module_entry(ctx, spelling, "encodings.idna"),
-        Codec::Wide(format) => {
-            let module = format!("encodings.{}", format.name().replace('-', "_"));
-            return module_entry(ctx, spelling, &module);
-        }
-    };
-    let module = format!("encodings.{suffix}");
-    if matches!(
-        codec,
-        Codec::Ascii | Codec::Latin1 | Codec::Utf8 { .. } | Codec::DoubleByte(DoubleByte::Big5)
-    ) {
-        return module_entry(ctx, spelling, &module);
-    }
-    let module = ctx.module(&module)?;
-    let id = native_codec_info(ctx, codec, module)?;
-    ctx.codec_entries
-        .entries
-        .try_reserve(1)
-        .map_err(|_| crate::Error::allocation())?;
-    ctx.codec_entries.entries.insert(key, id);
-    Ok(id)
-}
-
-fn native_codec_info(ctx: &mut Context, codec: Codec, module: Id) -> Result<Id> {
-    // Keep the pending constructor arguments across Python-visible module lookups.
-    ctx.heap.reserve_temporaries(7)?;
-    ctx.heap.keep(module);
-    let codecs = ctx.lookup_attr(module, "codecs")?;
-    let class = ctx.lookup_attr(codecs, "CodecInfo")?;
-    ctx.heap.keep(class);
-    let writer = ctx.lookup_attr(module, "StreamWriter")?;
-    ctx.heap.keep(writer);
-    // Each alias entry exposes fresh bound Codec methods for these providers.
-    let codec_class = ctx.lookup_attr(module, "Codec")?;
-    let encoder = ctx.call(codec_class, Vec::new(), Vec::new())?;
-    let decoder = ctx.call(codec_class, Vec::new(), Vec::new())?;
-    let encode = ctx.lookup_attr(encoder, "encode")?;
-    let decode = ctx.lookup_attr(decoder, "decode")?;
-    ctx.heap.keep(encode);
-    ctx.heap.keep(decode);
-    // getregentry resolves the factories as globals in the encoding module.
-    let factory = |ctx: &mut Context, name: &str| match *ctx.heap.get(module) {
-        Value::Module { scope, .. } => ctx.lookup(scope, name),
-        _ => ctx.lookup_attr(module, name),
-    };
-    let encoder = factory(ctx, "IncrementalEncoder")?;
-    ctx.heap.keep(encoder);
-    let reader = if matches!(codec, Codec::CodePage(_)) {
-        factory(ctx, "StreamReader")?
-    } else {
-        NONE
-    };
-    ctx.heap.keep(reader);
-    let decoder = factory(ctx, "IncrementalDecoder")?;
-    let name = ctx.text(codec.name());
-    ctx.call(
-        class,
-        Vec::new(),
-        vec![
-            ("name".into(), name),
-            ("encode".into(), encode),
-            ("decode".into(), decode),
-            ("incrementalencoder".into(), encoder),
-            ("incrementaldecoder".into(), decoder),
-            ("streamreader".into(), reader),
-            ("streamwriter".into(), writer),
-        ],
-    )
 }
 
 pub(in crate::dynamic) fn encode_text(
@@ -1399,14 +1314,9 @@ pub(in crate::dynamic) fn decode(
     };
     if let Codec::DoubleByte(format) = codec {
         let (arguments, end) = match args {
-            [_, _, final_input, rest @ ..]
-                if rest.is_empty() || (rest.len() == 1 && matches!(format, DoubleByte::Big5)) =>
-            {
+            [_, _, final_input] | [_, _, final_input, _] => {
                 let end = if ctx.truth(*final_input)? {
-                    match format {
-                        DoubleByte::Big5 => ChunkEnd::Final,
-                        DoubleByte::ShiftJis => ChunkEnd::Scalar,
-                    }
+                    ChunkEnd::Final
                 } else {
                     ChunkEnd::Partial
                 };
