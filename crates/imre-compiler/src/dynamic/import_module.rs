@@ -4,14 +4,7 @@ use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph, bundled_s
 /// Prefer boxed module implementations over the common bundled sources.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
     if let Some(path) = crate::modules::charmap_provider_path(name, true) {
-        return Some((
-            path,
-            concat!(
-                include_str!("../../stdlib/encodings/writer_charmap.py"),
-                "\n",
-                include_str!("../../stdlib/encodings/charmap_factories.py")
-            ),
-        ));
+        return Some((path, include_str!("../../stdlib/encodings/charmap.py")));
     }
     if let Some((_, path)) = super::FIXED_UTF_PROVIDERS
         .iter()

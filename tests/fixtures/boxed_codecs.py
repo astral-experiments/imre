@@ -641,6 +641,22 @@ def current():
         assert text[128:131] == "Çüé" and text.encode(name) == wire
         assert codecs.lookup(name).name == "cp437"
 
+    koi8_r = codecs.lookup("cskoi8r")
+    assert koi8_r.name == "koi8-r"
+    assert koi8_r.incrementaldecoder().decode(b"\xa4", final=True) == "╓"
+    assert wire.decode("KOI8-R").encode("cskoi8r") == wire
+
+    from encodings import koi8_r as provider
+    fresh = provider.getregentry()
+    assert fresh is not provider.getregentry() and fresh is not koi8_r
+    assert fresh.name == koi8_r.name and fresh.encode("╓") == (b"\xa4", 1)
+    assert fresh.decode(b"\xa4") == ("╓", 1)
+    assert fresh.encode.__self__ is not fresh.decode.__self__
+    assert fresh.encode.__self__.__class__ is fresh.decode.__self__.__class__ is provider.Codec
+    assert fresh.incrementalencoder is provider.IncrementalEncoder
+    assert fresh.incrementaldecoder is provider.IncrementalDecoder
+    assert fresh.streamwriter is provider.StreamWriter and fresh.streamreader is provider.StreamReader
+
     from encodings.iso8859_2 import Codec as Latin2
     latin2 = codecs.lookup("iso.ir.101")
     assert latin2.decode.__self__.__class__ is Latin2
