@@ -1420,6 +1420,41 @@ pub(super) fn take_pending() -> Option<crate::ObjectOwner> {
     pending
 }
 
+/// Move a fresh builtin exception with plain arguments to a registered Python frame.
+/// Keep every native owner in place when its identity or additional state can be observed.
+pub(crate) fn take_plain_pending() -> Option<(&'static str, Option<StrOwner>)> {
+    let plain = PENDING.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        let value = crate::ObjectOwner::get_mut(pending.as_mut()?)?;
+        // SAFETY: the pending owner has no aliases or weak observers.
+        unsafe {
+            value.0.with_mut(|storage| {
+                let Storage::Exception(exception) = storage else {
+                    return None;
+                };
+                let name = exception.kind.name();
+                if exception.details.is_some()
+                    || exception.suppress_context
+                    || imre_ast::exceptions::boxed_builtin_kind(name) != Some(exception.kind)
+                {
+                    return None;
+                }
+                let message = match &mut exception.payload {
+                    Payload::Empty => None,
+                    Payload::Message(text) => {
+                        StrOwner::get_mut(text)?;
+                        Some(text.clone())
+                    }
+                    _ => return None,
+                };
+                Some((name, message))
+            })
+        }
+    })?;
+    drop(take_pending());
+    Some(plain)
+}
+
 /// A suspended task retains the exception dynamically active in its own handlers.
 pub(super) fn swap_active(saved: &mut Option<crate::ObjectOwner>) {
     ACTIVE.with(|active| std::mem::swap(&mut *active.borrow_mut(), saved));
