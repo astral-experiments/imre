@@ -292,10 +292,8 @@ impl Function<'_, '_> {
                 let mark = self.temporary_mark();
                 let value = self.expr(&v.value);
                 let name = self.code_name(target.id.as_str());
-                let replaced = self
-                    .frame
-                    .op("assign_named_target", &[&self.scope.clone(), &name, &value]);
-                self.release_replaced(&replaced, Some((&mark, &value)));
+                let scope = self.scope.clone();
+                self.assign_expression_name(&scope, &name, &value, &mark);
                 value
             }
             ast::Expr::Lambda(v) => self.define(

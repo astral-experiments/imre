@@ -50,6 +50,10 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
     ir::walk_expressions(body, &mut |expr| {
         supported &= match &expr.kind {
             ExprKind::Local(slot) => has_slot(slot),
+            ExprKind::Bind(slot, _) => {
+                uses_python_protocol = true;
+                checked.local_names.contains_key(slot)
+            }
             ExprKind::None
             | ExprKind::Bool(_)
             | ExprKind::Int(_)
@@ -180,7 +184,7 @@ impl Frame<'_, '_, '_> {
         .emit_value(expr)
     }
 
-    fn evaluate_handle(&mut self, expr: &Expr) -> String {
+    pub(crate) fn evaluate_handle(&mut self, expr: &Expr) -> String {
         let value = self.evaluate(expr);
         self.materialize(&value)
     }
@@ -204,6 +208,13 @@ impl Frame<'_, '_, '_> {
             self.store_private(slot, &handle);
             return;
         }
+        let (scope, name) = self.assignment_name(slot);
+        let mark = self.target_mark();
+        self.code
+            .assign_owned_name(&scope, &name, &handle, mark.as_deref());
+    }
+
+    fn assignment_name(&mut self, slot: usize) -> (String, String) {
         let binding = &self.names.expect("registered local names").local_names[&slot];
         let scope = if let Some(slot) = binding.namespace {
             self.load_private(slot)
@@ -211,10 +222,15 @@ impl Frame<'_, '_, '_> {
             self.code.scope.clone()
         };
         let name = self.code.code_name(&binding.name);
-        let mark = self.target_mark();
-        self.code
-            .assign_owned_name(&scope, &name, &handle, mark.as_deref());
+        (scope, name)
     }
+
+    /// Retain the original RHS across a replaced owner's finalizer.
+    pub(crate) fn bind_expression(&mut self, slot: usize, mark: &str, handle: &str) {
+        let (scope, name) = self.assignment_name(slot);
+        self.code.assign_expression_name(&scope, &name, handle, mark);
+    }
+
     pub(crate) fn body(&mut self) -> &mut FunctionBody {
         self.code.flush_check();
         &mut self.code.body

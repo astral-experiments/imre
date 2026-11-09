@@ -565,6 +565,12 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         self.release_replaced(&replaced, mark.map(|mark| (mark, value)));
     }
 
+    /// Keep the expression result rooted while releasing the previous binding.
+    pub(super) fn assign_expression_name(&mut self, scope: &str, name: &str, value: &str, mark: &str) {
+        let replaced = self.op("assign_named_target", &[scope, name, value]);
+        self.release_replaced(&replaced, Some((mark, value)));
+    }
+
     /// An item/attribute setter can replace an owner without reporting which object it dropped.
     pub(super) fn release_target(&mut self, mark: Option<&str>) {
         self.release_replaced("2", mark.map(|mark| (mark, "0")));
