@@ -527,7 +527,12 @@ pub(crate) enum StrEncoder {
 
 impl StrEncoder {
     pub(crate) fn lookup(encoding: &str, errors: &str) -> Result<Self> {
-        let key = encode_key(encoding, errors)?;
+        check_encode_names(encoding, errors)?;
+        Self::for_stream(encoding)
+    }
+
+    pub(crate) fn for_stream(encoding: &str) -> Result<Self> {
+        let key = normalize(encoding)?;
         if let Some((format, signature)) = FixedUnicode::encoding(&key) {
             Ok(Self::Wide { format, signature })
         } else {
@@ -535,7 +540,16 @@ impl StrEncoder {
         }
     }
 
-    fn encode<'a>(
+    pub(super) fn signature_mut(&mut self) -> Option<&mut bool> {
+        match self {
+            Self::Registered(Codec::Utf8 { signature }) | Self::Wide { signature, .. } => {
+                Some(signature)
+            }
+            _ => None,
+        }
+    }
+
+    pub(super) fn encode<'a>(
         self,
         text: &'a str,
         errors: &str,
@@ -570,11 +584,11 @@ impl StrEncoder {
     }
 }
 
-fn encode_key(encoding: &str, errors: &str) -> Result<String> {
+fn check_encode_names(encoding: &str, errors: &str) -> Result<()> {
     if encoding.contains('\0') || errors.contains('\0') {
         return Err(Error::new(Kind::ValueError, "embedded null character"));
     }
-    normalize(encoding)
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -620,7 +634,8 @@ impl Codec {
     }
 
     pub(super) fn for_encode(encoding: &str, errors: &str) -> Result<Self> {
-        Self::by_key(&encode_key(encoding, errors)?, encoding)
+        check_encode_names(encoding, errors)?;
+        Self::lookup(encoding)
     }
 
     pub(crate) fn encode_str(text: &str, encoding: &str, errors: &str) -> Result<Vec<u8>> {

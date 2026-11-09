@@ -133,7 +133,7 @@ pub(super) fn call(
         }
         let name = option_text(ctx, encoding)?;
         let error_mode = option_text(ctx, errors)?;
-        let codec = StreamCodec::lookup(&name)?;
+        let codec = StreamCodec::for_stream(&name)?;
         let coder = Coder {
             codec,
             errors: ctx.text(error_mode),

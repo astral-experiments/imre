@@ -7,13 +7,13 @@ use std::mem::MaybeUninit;
 
 use smallvec::SmallVec;
 
-use super::super::codecs::Codec;
+use super::super::codecs::{Codec, StrEncoder};
 use super::gzip::GzipDecoder;
 use super::{Bytes, Error, Kind, Result, Str, decode_text, errno_error};
 use crate::{BinaryOutput, StrOwner};
 
 struct TextEncoder {
-    codec: Codec,
+    codec: StrEncoder,
     errors: Option<StrOwner>,
     newline: Option<&'static str>,
 }
@@ -48,22 +48,26 @@ impl Output {
     /// Keep a signature pending only when this stream starts at offset zero.
     pub(super) fn set_encoding(
         &mut self,
-        mut codec: Codec,
+        mut codec: StrEncoder,
         errors: Option<StrOwner>,
         newline: Option<&str>,
     ) {
-        if matches!(codec, Codec::Utf8 { signature: true })
-            && self
+        let wide = matches!(codec, StrEncoder::Wide { .. });
+        if let Some(signature) = codec.signature_mut()
+            && *signature
+        {
+            // UTF-16/32 fast encoders omit the BOM on pipes. UTF-8-SIG emits it.
+            *signature = self
                 .raw
                 .inner
                 .stream_position()
-                .is_ok_and(|position| position != 0)
-        {
-            codec = Codec::Utf8 { signature: false };
+                .map_or(!wide, |position| position == 0);
         }
         // A native str already contains the bytes needed by an untranslated UTF-8 writer.
-        if matches!(codec, Codec::Utf8 { signature: false })
-            && !matches!(newline, Some("\r" | "\r\n"))
+        if matches!(
+            codec,
+            StrEncoder::Registered(Codec::Utf8 { signature: false })
+        ) && !matches!(newline, Some("\r" | "\r\n"))
         {
             self.encoder = None;
             return;
@@ -103,22 +107,30 @@ impl Output {
             .filter(|_| text.contains('\n'))
             .map(|newline| super::path_text::output_newlines(text, newline))
             .transpose()?;
-        let encoded = encoder.codec.encode(
+        // Even a failed encoding attempt consumes the stream's pending signature.
+        let codec = encoder.codec;
+        if let Some(signature) = encoder.codec.signature_mut() {
+            *signature = false;
+        }
+        let encoded = codec.encode(
             translated.as_deref().unwrap_or(text),
-            encoder.errors.as_deref().map(Str::as_str),
+            encoder.errors.as_deref().map_or("strict", Str::as_str),
             || match &translated {
                 Some(value) => super::super::text::try_owned_string(value),
                 None => input(),
             },
         )?;
-        if matches!(encoder.codec, Codec::Utf8 { signature: true }) {
-            encoder.codec = Codec::Utf8 { signature: false };
-        }
-        self.write(&encoded).map_err(errno_error)
+        let flush_line = self.line_buffering && text.contains(['\r', '\n']);
+        self.write_buffered(&encoded, flush_line)
+            .map_err(errno_error)
     }
 
     pub(super) fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
         let flush_line = self.line_buffering && memchr::memchr2(b'\r', b'\n', bytes).is_some();
+        self.write_buffered(bytes, flush_line)
+    }
+
+    fn write_buffered(&mut self, bytes: &[u8], flush_line: bool) -> io::Result<()> {
         let Some(pending) = &mut self.text else {
             self.raw.write_all(bytes)?;
             return if flush_line { self.raw.flush() } else { Ok(()) };

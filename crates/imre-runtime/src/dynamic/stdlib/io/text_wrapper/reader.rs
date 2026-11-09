@@ -96,8 +96,12 @@ impl Reader {
 
     pub(super) fn flags(&self, codec: StreamCodec, newline: Option<&str>) -> i32 {
         let flags = match codec {
-            StreamCodec::Wide { bom: true, .. } if self.beginning => 2,
-            StreamCodec::Wide { bom: true, .. } => i32::from(self.order == -NATIVE_ORDER),
+            StreamCodec::Wide {
+                signature: true, ..
+            } if self.beginning => 2,
+            StreamCodec::Wide {
+                signature: true, ..
+            } => i32::from(self.order == -NATIVE_ORDER),
             StreamCodec::Registered(Codec::Utf8 { signature: true }) => i32::from(self.beginning),
             _ => 0,
         };
@@ -118,7 +122,9 @@ impl Reader {
         self.tail.clear();
         self.cr = universal && cookie.flags & 1 != 0;
         self.beginning = match codec {
-            StreamCodec::Wide { bom: true, .. } => !matches!(flags, 0 | 1),
+            StreamCodec::Wide {
+                signature: true, ..
+            } => !matches!(flags, 0 | 1),
             StreamCodec::Registered(Codec::Utf8 { signature: true }) => flags != 0,
             _ => false,
         };
@@ -260,12 +266,15 @@ impl Reader {
             .map_err(|_| crate::Error::allocation())?;
             raw.extend_from_slice(&self.tail);
             raw.extend_from_slice(bytes);
-            let codec = if let StreamCodec::Wide { format, bom: true } = codec
+            let codec = if let StreamCodec::Wide {
+                format,
+                signature: true,
+            } = codec
                 && !self.beginning
             {
                 StreamCodec::Wide {
                     format: format.with_order(self.order),
-                    bom: false,
+                    signature: false,
                 }
             } else {
                 codec
