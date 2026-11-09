@@ -1,6 +1,7 @@
 //! Lower a run of pure integer assignments under one range and ownership guard.
 
 use super::*;
+use crate::llvm::operations::Operations;
 
 struct Input {
     slot: usize,
@@ -183,7 +184,7 @@ impl Emitter<'_, '_> {
 
         self.start(&slow);
         for stmt in &statements[..group.writes.len()] {
-            self.statement(stmt);
+            self.emit_statement(stmt);
         }
         self.jump(&end);
         self.start(&end);

@@ -333,8 +333,7 @@ impl Emitter<'_, '_> {
         returns: Type,
     ) -> Value {
         let targets = self.callable_targets.get(callable.ty).to_vec();
-        let callable = self.operand(callable);
-        let mut values = self.call_operands(args);
+        let (callable, mut values) = self.call_arguments(callable, &args.values);
         self.transfer_call_operands(&mut values);
         let target = if let [target] = targets.as_slice() {
             format!(

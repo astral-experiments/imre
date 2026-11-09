@@ -30,6 +30,7 @@ mod integer_regions;
 mod json;
 mod line_views;
 mod literals;
+pub(crate) mod operations;
 mod paths;
 mod posixpath;
 mod processes;
@@ -45,6 +46,7 @@ mod truthiness;
 mod unions;
 mod units;
 
+use operations::Operations;
 use units::Output;
 pub(crate) use units::emit_units;
 
@@ -81,6 +83,9 @@ impl Type {
     /// Classifies the type once for LLVM values, retain/release calls, and field descriptors.
     fn word_kind(self) -> WordKind {
         match self {
+            Self::PythonObject => {
+                unreachable!("registered heap handle in fixed calling convention")
+            }
             Self::None => WordKind::None,
             Self::Bool => WordKind::Bool,
             Self::Int => WordKind::Int,
@@ -2625,30 +2630,16 @@ impl Emitter<'_, '_> {
 
     fn block(&mut self, statements: &[Statement]) {
         let incoming = self.temporaries.clone();
-        let mut remaining = statements;
-        while let Some((statement, tail)) = remaining.split_first() {
-            if self.terminated {
-                break;
-            }
-            let grouped = self.integer_assignments(remaining);
-            if grouped > 0 {
-                remaining = &remaining[grouped..];
-            } else if let Some((next, after)) = tail.split_first()
-                && (self.move_cleared_local(statement, next) || self.append_pair(statement, next))
-            {
-                remaining = after;
-            } else {
-                self.statement(statement);
-                remaining = tail;
-            }
+        self.emit_block(statements, |emitter| {
             debug_assert!(
-                self.temporaries
+                emitter
+                    .temporaries
                     .iter()
                     .map(|value| (&value.operand, value.ty))
                     .eq(incoming.iter().map(|value| (&value.operand, value.ty))),
                 "statement changed its enclosing expression owners"
             );
-        }
+        });
     }
 
     /// A copy immediately followed by clearing its private source transfers one owner.
@@ -2660,7 +2651,7 @@ impl Emitter<'_, '_> {
             && self.owns_slot(source)
             && self.owns_slot(*target)
         {
-            self.statement(&Statement::Move(*target, source));
+            self.emit_statement(&Statement::Move(*target, source));
             return true;
         }
         false
@@ -2756,69 +2747,10 @@ impl Emitter<'_, '_> {
         }
     }
 
-    fn statement(&mut self, statement: &Statement) {
+    fn other_statement(&mut self, statement: &Statement) {
         match statement {
-            Statement::Assign(slot, expression) => {
-                if let Some(cursor) = self.forward_cursors.get(slot).cloned() {
-                    self.assign_forward_cursor(*slot, expression, cursor);
-                    return;
-                }
-                if self.line_slots[*slot] {
-                    self.assign_line(*slot, expression);
-                    return;
-                }
-                if let ExprKind::Builtin(Builtin::SplitIntSource(mask), args) = &expression.kind {
-                    let value = self.expr(&args[0]);
-                    self.line(format!("call void @imre_str_prepare_int_fields(ptr {}, ptr %split_fields{slot}, i32 {mask})", value.operand));
-                    self.store(*slot, &value);
-                    return;
-                }
-                if let ExprKind::Builtin(Builtin::SplitTextSource(fields), args) = &expression.kind
-                {
-                    let value = self.expr(&args[0]);
-                    self.line(format!("call void @imre_str_field_spans(ptr {}, ptr %text_fields{slot}, i32 {fields})", value.operand));
-                    self.store(*slot, &value);
-                    return;
-                }
-                if self.locals[*slot] == Type::ByteOutput
-                    && matches!(&expression.kind, ExprKind::List(values) if values.is_empty())
-                {
-                    let value = self.call("imre_byte_output_new", Type::ByteOutput, &[]);
-                    if self.byte_output_owners.get(*slot) == Some(&Some(*slot)) {
-                        self.line(format!(
-                            "store {{ ptr, i64, i64 }} zeroinitializer, ptr %byte_window{slot}"
-                        ));
-                    }
-                    self.store(*slot, &value);
-                    return;
-                }
-                if self.struct_locals[*slot] {
-                    let value = self
-                        .struct_snapshot(expression)
-                        .expect("checked scalar struct source");
-                    self.store_borrowed(*slot, &value);
-                    return;
-                }
-                if self.borrowed_locals[*slot] {
-                    let value = self.borrow_projection(expression);
-                    self.store_borrowed(*slot, &value);
-                    return;
-                }
-                if self.concat_assign(*slot, expression) {
-                    return;
-                }
-                if !self.loops.is_empty()
-                    && let Some(fields) = records::replacement_fields(self.module, expression)
-                {
-                    self.assign_loop_record(*slot, fields);
-                    return;
-                }
-                let previous_small = self.assignment_replaces_small(*slot, expression);
-                let value = self.expr(expression);
-                self.store_with_previous_small(*slot, &value, previous_small);
-                if self.fixed_int_lists[*slot] {
-                    self.remember_int_buffer(*slot, &value);
-                }
+            Statement::Assign(..) | Statement::Expr(_) | Statement::Return(_) => {
+                unreachable!("shared IR statement")
             }
             Statement::Move(target, source) => {
                 debug_assert_eq!(self.locals[*target], self.locals[*source]);
@@ -3006,32 +2938,6 @@ impl Emitter<'_, '_> {
                 self.release_operand(&right);
                 self.release_operand(&old);
                 self.release_operand(&receiver);
-            }
-            // Discarded scalar literals have no effects. In particular, a
-            // function docstring must not allocate on every call. Literal
-            // allocation exhaustion is already fatal rather than catchable.
-            Statement::Expr(expression)
-                if matches!(
-                    expression.kind,
-                    ExprKind::Int(_)
-                        | ExprKind::Float(_)
-                        | ExprKind::Bool(_)
-                        | ExprKind::Str(_)
-                        | ExprKind::Bytes(_)
-                        | ExprKind::None
-                ) => {}
-            Statement::Expr(expression) => {
-                if let ExprKind::Builtin(Builtin::TextWrite, args) = &expression.kind {
-                    self.write_discard(args);
-                } else {
-                    let value = self.expr(expression);
-                    self.release(&value);
-                }
-            }
-            Statement::Return(expression) => {
-                let value = self.expr(expression);
-                self.forget(&value);
-                self.route(Completion::Return(value));
             }
             Statement::If(test, yes, no) => {
                 let mut bounded = false;
@@ -3324,31 +3230,23 @@ impl Emitter<'_, '_> {
             self.retain(&value);
             value
         } else {
-            self.expression(expression)
+            self.emit_value(expression)
         };
         value.small_integer |= self.ranges.integer(expression).is_some();
         self.owned(value)
     }
 
-    fn expression(&mut self, expression: &Expr) -> Value {
+    fn other_expression(&mut self, expression: &Expr) -> Value {
         match &expression.kind {
-            ExprKind::Int(value) => {
-                if let Ok(value) = value.parse::<i64>()
-                    && (-(1_i64 << 62)..(1_i64 << 62)).contains(&value)
-                {
-                    small(value)
-                } else {
-                    self.pooled_literal(value.as_bytes(), Type::Int)
-                }
-            }
+            ExprKind::Int(_)
+            | ExprKind::Bool(_)
+            | ExprKind::None
+            | ExprKind::Local(_)
+            | ExprKind::Binary(..)
+            | ExprKind::Builtin(..) => unreachable!("shared IR expression"),
             ExprKind::Float(value) => Value {
                 ty: Type::Float,
                 operand: format!("0x{:016X}", value.to_bits()),
-                small_integer: false,
-            },
-            ExprKind::Bool(value) => Value {
-                ty: Type::Bool,
-                operand: u8::from(*value).to_string(),
                 small_integer: false,
             },
             ExprKind::Str(value) => Value {
@@ -3356,13 +3254,6 @@ impl Emitter<'_, '_> {
                 ..self.pooled_literal(value.as_bytes(), Type::Str)
             },
             ExprKind::Bytes(value) => self.pooled_literal(value, Type::Bytes),
-            ExprKind::None => none(),
-            ExprKind::Local(slot) => {
-                let mut value = self.borrow_slot(*slot);
-                value.small_integer |= self.ranges.integer(expression).is_some();
-                self.retain(&value);
-                value
-            }
             ExprKind::Bind(slot, expression) => {
                 let value = self.expr(expression);
                 self.retain(&value);
@@ -3527,41 +3418,6 @@ impl Emitter<'_, '_> {
                 };
                 self.decode_word(word, expression.ty)
             }
-            ExprKind::Binary(Binary::Concat, ..) if expression.ty == Type::Str => {
-                self.concat(expression)
-            }
-            ExprKind::Binary(op, left, right) => {
-                if matches!(op, Binary::Add)
-                    && matches!(&left.kind, ExprKind::Builtin(Builtin::IntBounded { .. }, _))
-                    && let Some(slot) = self.active_subtotal().map(str::to_owned)
-                {
-                    let subtotal = self.instruction(format!("load i64, ptr {slot}"));
-                    let term = self.operand(right);
-                    let decoded = self.instruction(format!("ashr i64 {}, 1", term.value.operand));
-                    let updated = self.instruction(format!("add nsw i64 {subtotal}, {decoded}"));
-                    self.release_operand(&term);
-                    self.line(format!("store i64 {updated}, ptr {slot}"));
-                    return self.tag_small(&updated);
-                }
-                let direct = self.small_binary_proof(expression, left, right, *op);
-                let left_value = self.operand(left);
-                let right_value = self.operand(right);
-                let result = if let Some(adjust_floor) = direct {
-                    let bounds = self.ranges.integer(left).zip(self.ranges.integer(right));
-                    self.small_binary(
-                        *op,
-                        &left_value.value,
-                        &right_value.value,
-                        adjust_floor,
-                        bounds,
-                    )
-                } else {
-                    self.binary(*op, &left_value.value, &right_value.value)
-                };
-                self.release_operand(&left_value);
-                self.release_operand(&right_value);
-                result
-            }
             ExprKind::Negate(value) => {
                 let direct = self.ranges.integer(expression).is_some()
                     && self.ranges.integer(value).is_some();
@@ -3685,7 +3541,6 @@ impl Emitter<'_, '_> {
                 self.release_operand(&receiver);
                 value
             }
-            ExprKind::Builtin(builtin, args) => self.builtin(builtin, args, expression.ty),
         }
     }
 
@@ -4473,6 +4328,9 @@ impl Emitter<'_, '_> {
             self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
         } else {
             match left.ty {
+                Type::PythonObject => {
+                    unreachable!("registered comparison in fixed calling convention")
+                }
                 Type::CmpKey(..) => unreachable!("comparator keys use their callback"),
                 Type::ForwardRef(_) | Type::AnnotationValue(_) => {
                     let symbol = if matches!(left.ty, Type::ForwardRef(_)) {
@@ -5086,7 +4944,7 @@ impl Emitter<'_, '_> {
                 ty: Type::Tuple(*layout),
                 kind: ExprKind::Builtin(Builtin::RecordView, expressions.to_vec()),
             };
-            return self.expression(&Expr {
+            return self.emit_value(&Expr {
                 ty: returns,
                 kind: ExprKind::Field(Box::new(frame), 0),
             });
@@ -5108,7 +4966,7 @@ impl Emitter<'_, '_> {
                 ty: Type::Tuple(id),
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![reference.clone()]),
             };
-            return self.expression(&Expr {
+            return self.emit_value(&Expr {
                 ty: returns,
                 kind: ExprKind::Field(Box::new(frame), *index),
             });
@@ -5205,6 +5063,11 @@ impl Emitter<'_, '_> {
             })
             .collect::<Vec<_>>();
         let result = match builtin {
+            Builtin::RegisteredStatement(..)
+            | Builtin::RegisteredCall(..)
+            | Builtin::RegisteredLocation(_) => {
+                unreachable!("registered operation in fixed calling convention")
+            }
             Builtin::PairTable(ir::PairTableOp::ViewLen(slot)) => {
                 let count = self.instruction(format!(
                     "getelementptr inbounds {{ ptr, i64 }}, ptr %pair_view{slot}, i32 0, i32 1"
@@ -12126,36 +11989,8 @@ done:
             .unwrap();
         }
     }
-    for (op, intrinsic, number) in [("add", "sadd", 0), ("sub", "ssub", 1), ("mul", "smul", 2)] {
-        let (left, decode) = if op == "mul" {
-            ("%x", "  %x = ashr i64 %a, 1\n")
-        } else {
-            ("%a", "")
-        };
-        writeln!(
-            output,
-            r#"
-define internal i64 @int_{op}(i64 %a, i64 %b) alwaysinline {{
-entry:
-  %both = and i64 %a, %b
-  %tag = and i64 %both, 1
-  %small = icmp eq i64 %tag, 1
-  br i1 %small, label %fast, label %big, !prof !1
-fast:
-{decode}  %right = sub i64 %b, 1
-  %pair = call {{ i64, i1 }} @llvm.{intrinsic}.with.overflow.i64(i64 {left}, i64 %right)
-  %result = extractvalue {{ i64, i1 }} %pair, 0
-  %overflow = extractvalue {{ i64, i1 }} %pair, 1
-  br i1 %overflow, label %big, label %done, !prof !0
-done:
-  %encoded = or i64 %result, 1
-  ret i64 %encoded
-big:
-  %slow = call i64 @imre_int_binary(i64 %a, i64 %b, i32 {number}) cold
-  ret i64 %slow
-}}"#
-        )
-        .unwrap();
+    for op in [Binary::Add, Binary::Subtract, Binary::Multiply] {
+        output.push_str(&integer_arithmetic_helper(op));
     }
     output.push_str(conditionals::INTEGER_ABSOLUTE_HELPER);
     output.push_str(&division_helpers());
@@ -12181,6 +12016,44 @@ big:
 "#,
     );
     output
+}
+
+/// Tagged add, subtract and multiply used by checked integer operations in either call ABI.
+pub(crate) fn integer_arithmetic_helper(op: Binary) -> String {
+    let (op, intrinsic, number) = match op {
+        Binary::Add => ("add", "sadd", 0),
+        Binary::Subtract => ("sub", "ssub", 1),
+        Binary::Multiply => ("mul", "smul", 2),
+        _ => unreachable!("expected integer addition, subtraction or multiplication"),
+    };
+    let (left, decode) = if op == "mul" {
+        ("%x", "  %x = ashr i64 %a, 1\n")
+    } else {
+        ("%a", "")
+    };
+    format!(
+        r#"
+define internal i64 @int_{op}(i64 %a, i64 %b) alwaysinline {{
+entry:
+  %both = and i64 %a, %b
+  %tag = and i64 %both, 1
+  %small = icmp eq i64 %tag, 1
+  br i1 %small, label %fast, label %big, !prof !1
+fast:
+{decode}  %right = sub i64 %b, 1
+  %pair = call {{ i64, i1 }} @llvm.{intrinsic}.with.overflow.i64(i64 {left}, i64 %right)
+  %result = extractvalue {{ i64, i1 }} %pair, 0
+  %overflow = extractvalue {{ i64, i1 }} %pair, 1
+  br i1 %overflow, label %big, label %done, !prof !0
+done:
+  %encoded = or i64 %result, 1
+  ret i64 %encoded
+big:
+  %slow = call i64 @imre_int_binary(i64 %a, i64 %b, i32 {number}) cold
+  ret i64 %slow
+}}
+"#
+    )
 }
 
 /// Decoded small integers cannot overflow i64 division. Guard zero before any

@@ -197,6 +197,8 @@ impl Types {
     pub(crate) fn verify_type(&self, ty: Type, classes: usize) -> Result<(), String> {
         let storage = self.0.borrow();
         let valid = match ty {
+            // Registered object handles cannot enter a fixed-layout module.
+            Type::PythonObject => false,
             Type::StrLiteral(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::StringLiterals(_)))
             }

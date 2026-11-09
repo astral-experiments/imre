@@ -1493,6 +1493,31 @@ pub(super) unsafe extern "C" fn imre_dyn_permanent_sequence(
     finish(ctx, Ok(id))
 }
 
+/// Borrow a tagged integer from an exact Python int. Zero indicates another type.
+///
+/// # Safety
+/// Generated code keeps the object rooted until its last use of the borrowed word.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_exact_int_word(ctx: *const Context, object: Id) -> usize {
+    // SAFETY: the caller supplies its active context and a live handle.
+    match unsafe { &*ctx }.heap.get(object) {
+        Value::Int(integer) => integer.0,
+        _ => 0,
+    }
+}
+
+/// Move one owned tagged integer into the active Python heap.
+///
+/// # Safety
+/// The caller transfers a live integer reference and owns the context for this call.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_take_int(ctx: *mut Context, word: usize) -> Id {
+    // SAFETY: the caller owns the context and transfers the reference to the heap.
+    let ctx = unsafe { &mut *ctx };
+    let object = ctx.alloc(Value::Int(crate::Int(word)));
+    finish(ctx, Ok(object))
+}
+
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_lit(
     ctx: *mut Context,

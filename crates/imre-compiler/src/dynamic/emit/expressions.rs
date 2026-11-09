@@ -28,16 +28,24 @@ impl Function<'_, '_> {
             &self.source.method_imports,
             Some(&self.source.private_names),
         );
+        self.with_expression_line(position, |function| function.expr_inner(expr, None))
+    }
+
+    pub(super) fn with_expression_line(
+        &mut self,
+        position: ruff_text_size::TextSize,
+        emit: impl FnOnce(&mut Self) -> String,
+    ) -> String {
         let line = self.source.line(position);
         let previous = self.expression_line;
         if previous == line {
-            return self.expr_inner(expr, None);
+            return emit(self);
         }
         self.expression_line = line;
         self.line(&format!(
             "call void @imre_dyn_expression_line(ptr %ctx, i32 {line})"
         ));
-        let value = self.expr_inner(expr, None);
+        let value = emit(self);
         self.expression_line = previous;
         if !self.terminated {
             self.line(&format!(
@@ -331,16 +339,7 @@ impl Function<'_, '_> {
                     }
                 };
                 let span = self.expression_span(expr, &v.func, b'(');
-                // A caller inspecting this live frame needs the full call range, including
-                // simple and multiline calls for which traceback highlighting is suppressed.
-                let (start_line, start_col) = self.source.line_and_column(v.start());
-                let (end_line, end_col) = self.source.line_and_column(v.end());
-                let position = self
-                    .output
-                    .position([start_line, end_line, start_col, end_col]);
-                self.line(&format!(
-                    "call void @imre_dyn_call_position(ptr %ctx, ptr {position})"
-                ));
+                self.call_position(v.range());
                 self.call_at(&callable, operands, &mark, span)
             }
             ast::Expr::Lambda(v) => self.define(

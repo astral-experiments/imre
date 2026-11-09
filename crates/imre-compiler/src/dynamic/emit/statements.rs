@@ -1265,6 +1265,11 @@ impl Function<'_, '_> {
         self.assign_target(target, value, false);
     }
 
+    pub(super) fn assign_owned_name(&mut self, name: &str, value: &str) {
+        let replaced = self.op("assign_target", &[&self.scope.clone(), name, value]);
+        self.release_replaced(&replaced);
+    }
+
     /// Transfer unpacked items to their targets while retaining the outstanding operands.
     fn assign_target(&mut self, target: &ast::Expr, value: &str, owned: bool) {
         let elements = match target {
@@ -1273,16 +1278,13 @@ impl Function<'_, '_> {
             _ => {
                 if let Some(p) = self.place(target) {
                     if owned {
-                        let replaced = match &p {
-                            Place::Name(name) => {
-                                self.op("assign_target", &[&self.scope.clone(), name, value])
-                            }
-                            _ => {
-                                self.write(&p, value);
-                                "2".to_owned() // An attribute or item setter may replace a writer.
-                            }
-                        };
-                        self.release_replaced(&replaced);
+                        if let Place::Name(name) = &p {
+                            self.assign_owned_name(name, value);
+                        } else {
+                            self.write(&p, value);
+                            // An attribute or item setter may replace a writer.
+                            self.release_replaced("2");
+                        }
                     } else {
                         self.write(&p, value);
                     }

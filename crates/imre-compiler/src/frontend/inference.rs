@@ -368,6 +368,24 @@ impl Inference {
         id
     }
 
+    pub(super) fn len(&self) -> usize {
+        self.pending.borrow().len()
+    }
+
+    /// The registered binder has real Python objects even when fixed callers cannot infer a layout.
+    pub(super) fn registered_signature(&self, signature: &Signature) -> Option<Signature> {
+        let pending = self.pending.borrow();
+        let params = &pending[signature.id].params;
+        if params.iter().all(Option::is_some) {
+            return None;
+        }
+        let mut signature = signature.clone();
+        for (param, inferred) in signature.params.iter_mut().zip(params) {
+            param.ty = inferred.unwrap_or(Type::PythonObject);
+        }
+        Some(signature)
+    }
+
     fn unresolved(&self) -> bool {
         self.pending
             .borrow()
@@ -803,34 +821,35 @@ impl Inference {
                     let inferred = &pending[signature.id];
                     // A first-class function can bind Python values when its callers could
                     // not establish a scalar signature. Its definition is already known.
-                    if inferred.used_as_value
+                    let unresolved = if inferred.used_as_value
                         && (inferred.returns.is_none()
                             || inferred.params.iter().any(Option::is_none))
                     {
-                        return Err(Diagnostic::at(
+                        Diagnostic::at(
                             &graph.modules[*module].source,
                             function,
                             "using this function as a value requires Python argument binding"
                                 .to_owned(),
                         )
                         .classified(Kind::ScopedObject)
-                        .in_module(graph, *module));
-                    }
-                    if let Some(index) = inferred.params.iter().position(Option::is_none) {
+                    } else if let Some(index) = inferred.params.iter().position(Option::is_none) {
                         let name = &signature.params[index].name;
-                        return Err(Diagnostic::at(&graph.modules[*module].source,
+                        Diagnostic::at(
+                            &graph.modules[*module].source,
                             function,
-                            format!(
-                                "cannot infer parameter {name:?}; add an annotation or a concrete direct call"
-                            ),
-                        ).in_module(graph, *module));
-                    }
-                    if inferred.returns.is_none() {
-                        return Err(Diagnostic::at(&graph.modules[*module].source,
-                            function,
-                            "cannot infer function return type; add an annotation; recursive calls remain unsupported".to_owned(),
-                        ).in_module(graph, *module));
-                    }
+                            format!("cannot infer parameter {name:?}; add an annotation or a concrete direct call"),
+                        ).classified(Kind::UnresolvedParameter(*module, function.start()))
+                    } else {
+                        if inferred.returns.is_none() {
+                            return Err(Diagnostic::at(&graph.modules[*module].source,
+                                function,
+                                "cannot infer function return type; add an annotation; recursive calls remain unsupported".to_owned(),
+                            ).in_module(graph, *module));
+                        }
+                        continue;
+                    };
+                    registered::capture(graph, signatures, classes, types, self, &globals);
+                    return Err(unresolved.in_module(graph, *module));
                 }
                 unreachable!("an unresolved signature has a missing parameter or return");
             }

@@ -711,6 +711,10 @@ fn scan_imports(
     Ok(imports)
 }
 
+pub(crate) use emit::checked::supports as supports_registered_function;
+pub(crate) type CheckedFunctions =
+    HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredFunction>;
+
 pub(crate) const BUNDLED_SOURCE_ROOT: &str = "<imre stdlib>";
 
 pub(crate) enum ObjectOperation {
@@ -1936,11 +1940,22 @@ pub(crate) fn compile(
                 .get("runpy")
                 .is_none_or(|(root, _)| root == Path::new(bundled_root)));
     // Borrow the winners once discovery has finished growing the emitter's source table.
+    let checked_functions = checked_graph.map(|graph| graph.registered_functions());
     let selected_sources: Vec<_> = selected_sources
         .into_iter()
         .enumerate()
         .map(|(index, (id, program, module))| {
             let application = !registrations.python_providers.contains(&id);
+            if application && let (Some(graph), Some(module_id)) = (checked_graph, module) {
+                let checked = &graph.modules[module_id];
+                if checked.original_source() == sources[id].2
+                    && let Some(functions) = checked_functions
+                        .as_ref()
+                        .and_then(|all| all.get(&module_id))
+                {
+                    registrations.checked_functions.insert(id, functions);
+                }
+            }
             // Emit the selected application's signature. Preserve the existing checker
             // scope: owning a declaration does not prove that a call will reach it.
             let mut registration =

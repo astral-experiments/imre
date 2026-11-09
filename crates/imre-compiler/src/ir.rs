@@ -89,6 +89,8 @@ pub(crate) enum Type {
     NamedException(usize),
     /// An owned view of a concrete Python scalar, tuple, or native module attribute.
     ObjectValue,
+    /// A live Python value rooted by the registered activation and identified in its heap.
+    PythonObject,
     ReadOnlyObjectMapping,
     /// A builtin ImportError (including its ModuleNotFoundError and marker subclasses).
     ImportException,
@@ -361,6 +363,7 @@ impl std::fmt::Display for Type {
             Self::Iterator => "iterator",
             Self::Exception | Self::NamedException(_) => "Exception",
             Self::ObjectValue => "object value",
+            Self::PythonObject => "Python object",
             Self::WeakProxy(_) => "weakref.proxy",
             Self::ReadOnlyObjectMapping => "Mapping[str, object]",
             Self::ImportException => "ImportError",
@@ -1593,6 +1596,12 @@ pub(crate) enum Builtin {
         line: u32,
     },
     FaultLine(u32),
+    /// An original statement checkpoint and its optional call without a separate highlight.
+    RegisteredStatement(ruff_text_size::TextRange, Option<ruff_text_size::TextRange>),
+    /// The source position in effect while this registered operand is evaluated.
+    RegisteredLocation(ruff_text_size::TextSize),
+    /// The loaded callable is followed by its positional arguments in evaluation order.
+    RegisteredCall(ruff_text_size::TextRange, ruff_text_size::TextSize),
     GeneratorFrameEnter(String),
     GeneratorFrameLeave,
     SysSetRecursionLimit,

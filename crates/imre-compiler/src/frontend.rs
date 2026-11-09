@@ -111,6 +111,8 @@ mod readiness;
 mod record_inputs;
 mod records;
 mod regex;
+mod registered;
+pub(crate) use registered::RegisteredFunction;
 mod sequences;
 mod shutil;
 mod sign_parameters;
@@ -1309,10 +1311,20 @@ struct LoweredBody {
 type BodyResult = Result<(LoweredBody, HashMap<usize, zip_sums::Sum>), String>;
 
 fn lower_body(
-    mut checker: Checker<'_>,
+    checker: Checker<'_>,
     definition: &ast::StmtFunctionDef,
     signature: &Signature,
 ) -> BodyResult {
+    lower_function(checker, definition, signature, None)
+}
+
+fn lower_function(
+    mut checker: Checker<'_>,
+    definition: &ast::StmtFunctionDef,
+    signature: &Signature,
+    registered_locals: Option<&mut HashMap<usize, String>>,
+) -> BodyResult {
+    checker.registered = registered_locals.is_some();
     #[cfg(test)]
     caller_cache::record_lowering(definition.name.as_str());
     let module = &checker.graph.modules[checker.module];
@@ -1419,7 +1431,9 @@ fn lower_body(
     if classes.generators.contains(&signature.id) {
         body = checker.generator_body(body);
     }
-    if module.archive.is_none() {
+    if let Some(names) = registered_locals {
+        names.extend(checker.names.into_iter().map(|(name, slot)| (slot, name)));
+    } else if module.archive.is_none() {
         checker.fault_frame(&mut body, definition.name.as_str(), definition.start());
     }
     Ok((
@@ -2476,6 +2490,8 @@ enum Iteration {
 }
 
 struct Checker<'a> {
+    /// Locals in this body are bound in an existing Python activation.
+    registered: bool,
     /// Doctest prompts share an exec-style namespace until the case ends.
     interactive_names: bool,
     /// A later local assignment shadows builtin iter throughout a function.
@@ -2553,6 +2569,7 @@ impl<'a> Checker<'a> {
         globals: &'a ModuleValues,
     ) -> Self {
         Self {
+            registered: false,
             interactive_names: false,
             local_iter: false,
             positional_pack: None,
@@ -3299,6 +3316,14 @@ impl<'a> Checker<'a> {
         alternative: impl Fn(&Self, Type) -> bool,
         coerce: impl Fn(&Self, Expr, Type, &ast::Expr) -> Result<Expr, String>,
     ) -> Result<Expr, String> {
+        if self.registered {
+            let value = self.expr(expression)?;
+            return if alternative(self, value.ty) {
+                Ok(value)
+            } else {
+                coerce(self, value, expected, expression)
+            };
+        }
         if matches!(expected, Type::ContextVar(_))
             && let ast::Expr::Call(call) = expression
             && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::ContextVar))
@@ -4824,7 +4849,19 @@ impl<'a> Checker<'a> {
             {
                 lowered.push(Statement::Assign(*flag, Expr::boolean(true)));
             }
-            if self.fault_enabled() && !lowered.is_empty() {
+            if self.registered {
+                // Even a pass has a Python frame checkpoint for pending signals and exceptions.
+                body.push(Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(
+                        Builtin::RegisteredStatement(
+                            statement.range(),
+                            imre_ast::unhighlighted_call(statement),
+                        ),
+                        vec![],
+                    ),
+                }));
+            } else if !lowered.is_empty() && self.fault_enabled() {
                 body.push(self.fault_line(statement));
             }
             body.extend(lowered);
@@ -4868,6 +4905,24 @@ impl<'a> Checker<'a> {
         statement: &ast::Stmt,
         later: &[ast::Stmt],
     ) -> Result<(Vec<Statement>, bool), String> {
+        if self.registered {
+            // Fixed layouts can erase Python stores (for example, a local += becomes +).
+            // Keep every operation in this frame explicit until it has an object-ABI lowering.
+            let supported = match statement {
+                ast::Stmt::Assign(assign) => assign.targets.iter().all(ast::Expr::is_name_expr),
+                ast::Stmt::Return(_) | ast::Stmt::Expr(_) | ast::Stmt::Pass(_) => true,
+                _ => false,
+            };
+            if !supported {
+                return Err(error(
+                    self.source,
+                    statement,
+                    "unsupported registered-frame statement",
+                ));
+            }
+            // A failed representation trial cannot defer or discard an application's operation.
+            return self.lower_statement(statement);
+        }
         let result = self.lower_statement(statement);
         if let Err(error) = &result {
             // A boxed operation in a checked source file must not hide a bad call in
@@ -6716,6 +6771,25 @@ impl<'a> Checker<'a> {
     }
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        if self.registered {
+            // Choose the available operation before fixed-layout folds such as +x or int(x).
+            let supported = match expression {
+                ast::Expr::Name(name) => self.names.contains_key(name.id.as_str()),
+                ast::Expr::BinOp(binary) => binary.op == ast::Operator::Add,
+                ast::Expr::NumberLiteral(_)
+                | ast::Expr::BooleanLiteral(_)
+                | ast::Expr::NoneLiteral(_)
+                | ast::Expr::Call(_) => true,
+                _ => false,
+            };
+            if !supported {
+                return Err(error(
+                    self.source,
+                    expression,
+                    "unsupported registered-frame operand",
+                ));
+            }
+        }
         if let Some(method) = self.boxed_descriptor(expression) {
             return Err(self.scoped_builtin_error(method, expression));
         }
@@ -6729,13 +6803,28 @@ impl<'a> Checker<'a> {
         }
         // Calls and binary operators recursively check their operands. Keep
         // the large general expression frame off both paths in debug builds.
-        match expression {
+        let value = match expression {
             ast::Expr::Name(name) if self.class_lexical.contains(name.id.as_str()) => {
                 Ok(self.local(self.names[name.id.as_str()]))
+            }
+            ast::Expr::Call(call) if self.registered => {
+                let callable = self.expr(&call.func)?;
+                self.invoke(call, callable)
             }
             ast::Expr::Call(call) => self.call(call),
             ast::Expr::BinOp(binary) => self.binary_operation(binary),
             _ => self.non_call_expr(expression),
+        }?;
+        if self.registered {
+            Ok(Expr {
+                ty: value.ty,
+                kind: ExprKind::Builtin(
+                    Builtin::RegisteredLocation(expression.start()),
+                    vec![value],
+                ),
+            })
+        } else {
+            Ok(value)
         }
     }
 

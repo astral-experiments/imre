@@ -3116,6 +3116,7 @@ pub(crate) enum SetLayoutHint {
 pub(crate) struct SourceGraph {
     /// Fixed at graph construction, in the checked resolver's search order.
     pub(crate) filesystem_roots: Box<[PathBuf]>,
+    registered_functions: std::cell::RefCell<HashMap<ModuleId, crate::dynamic::CheckedFunctions>>,
     /// Declaration result for these exact selected files, prior to any object-path re-selection.
     pub(crate) source_contract: Option<Result<(), String>>,
     pub(crate) set_layout_hint: std::cell::Cell<SetLayoutHint>,
@@ -3161,6 +3162,24 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    /// Keep the checked bodies that can execute with the registered calling convention.
+    pub(crate) fn set_registered_functions(
+        &self,
+        mut modules: HashMap<ModuleId, crate::dynamic::CheckedFunctions>,
+    ) {
+        modules.retain(|_, functions| {
+            functions.retain(|_, function| crate::dynamic::supports_registered_function(function));
+            !functions.is_empty()
+        });
+        self.registered_functions.replace(modules);
+    }
+
+    pub(crate) fn registered_functions(
+        &self,
+    ) -> std::cell::Ref<'_, HashMap<ModuleId, crate::dynamic::CheckedFunctions>> {
+        self.registered_functions.borrow()
+    }
+
     /// A concrete Python file registered by the checked resolver, before object lowering.
     pub(crate) fn python_file(&self, name: &str) -> Option<ModuleId> {
         let id = *self.by_name.get(name)?;
@@ -4751,6 +4770,7 @@ impl<'a> Loader<'a> {
                 self.needs_object_imports && self.runtime_initializer.is_none(),
             ),
             has_object_constructor_fallback: Default::default(),
+            registered_functions: Default::default(),
             source_contract: None,
             set_layout_hint: std::cell::Cell::new(SetLayoutHint::Available),
             check_fallback_calls: Default::default(),

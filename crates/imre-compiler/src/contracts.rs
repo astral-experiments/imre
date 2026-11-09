@@ -595,6 +595,7 @@ impl Builtin {
             | Self::SysContextAwareWarnings
             | Self::FaultFrame { .. }
             | Self::FaultLine(_)
+            | Self::RegisteredLocation(_)
             | Self::GeneratorFrameLeave
             | Self::IntExtremum { .. }
             | Self::IntBitCount
@@ -674,7 +675,10 @@ impl Builtin {
             | Self::SortByKeys => {
                 Contract::new(true, PreservesOwners)
             }
-            Self::ObjectCall(..) | Self::SortByComparator => Contract::new(true, Unknown),
+            Self::ObjectCall(..)
+            | Self::RegisteredStatement(..)
+            | Self::RegisteredCall(..)
+            | Self::SortByComparator => Contract::new(true, Unknown),
             Self::ListReserveRange | Self::StructCyclePrefix => Contract::new(false, PreservesOwners),
             Self::AnnotationRef
             | Self::BinaryOpen(_)

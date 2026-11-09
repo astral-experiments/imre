@@ -430,7 +430,7 @@ fn object_fallback(
     let mut site_probes = modules::SiteProbes::default();
     let mut infer_sets = true;
     let mut native_candidate = None;
-    let (error, graph, checked_entry) = loop {
+    let (mut error, graph, checked_entry) = loop {
         let mut graph = match options.load_graph(
             path,
             module_root,
@@ -506,6 +506,17 @@ fn object_fallback(
         import_failure = None;
         site_probes = site_probes.next_layout();
     };
+    // Admit an unresolved fixed signature only when its own definition has checked IR
+    // for the registered calling convention. Other inference diagnostics still apply.
+    if let LoweringKind::UnresolvedParameter(owner, start) = error.kind
+        && let Some(graph) = graph.as_ref()
+        && graph
+            .registered_functions()
+            .get(&owner)
+            .is_some_and(|functions| functions.contains_key(&start))
+    {
+        error.kind = LoweringKind::ScopedObject;
+    }
     // A newly found checked provider can lower normally. If lowering fails, its
     // dependencies alone do not admit the caller to the object importer.
     let fallback = |graph| match (graph, native_candidate, error.kind) {

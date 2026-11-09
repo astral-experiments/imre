@@ -10,6 +10,7 @@ use ruff_text_size::Ranged;
 use crate::CodegenUnit;
 
 mod boolean;
+pub(crate) mod checked;
 mod comprehensions;
 mod expressions;
 mod patterns;
@@ -109,7 +110,8 @@ pub(super) struct PhysicalFile {
 
 /// Snapshots and admission facts for the bodies selected by import resolution.
 #[derive(Default)]
-pub(super) struct RegisteredBodies {
+pub(super) struct RegisteredBodies<'a> {
+    pub(super) checked_functions: HashMap<usize, &'a super::CheckedFunctions>,
     // Decoded installed files retain the fingerprint of their original loader bytes.
     pub(super) physical_files: HashMap<PathBuf, PhysicalFile>,
     pub(super) archive_members: HashMap<PathBuf, ([u8; 32], u32)>,
@@ -120,8 +122,8 @@ pub(super) struct RegisteredBodies {
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum ModuleOrigin {
-    Program,
+pub(super) enum ModuleOrigin<'a> {
+    Program(Option<&'a super::CheckedFunctions>),
     Provider,
     Bundled,
 }
@@ -136,10 +138,11 @@ pub(crate) fn emit(
     split: bool,
     (module_errors, registrations): (
         &HashMap<PathBuf, Box<super::ModuleSyntaxError>>,
-        &RegisteredBodies,
+        &RegisteredBodies<'_>,
     ),
 ) -> Result<(Vec<CodegenUnit>, bool), String> {
     let RegisteredBodies {
+        checked_functions,
         physical_files,
         archive_members,
         python_providers,
@@ -183,7 +186,7 @@ pub(crate) fn emit(
         } else if python_providers.contains(&unit) {
             ModuleOrigin::Provider
         } else {
-            ModuleOrigin::Program
+            ModuleOrigin::Program(checked_functions.get(&unit).copied())
         };
         let module_name = output.data(name.as_bytes());
         let file = output.data(path.as_os_str().as_encoded_bytes());
@@ -296,7 +299,7 @@ pub(super) fn initializer(
     path: &Path,
     source: &str,
     keep_docstrings: bool,
-    origin: ModuleOrigin,
+    origin: ModuleOrigin<'_>,
 ) -> Result<Option<(String, String)>, String> {
     let mut output = Output {
         keep_docstrings,
@@ -426,6 +429,10 @@ impl Output {
         let bundled = matches!(kind, SourceBody::Module(ModuleOrigin::Bundled));
         let provider = matches!(kind, SourceBody::Module(ModuleOrigin::Provider));
         let expression = matches!(&kind, SourceBody::Expression(_));
+        let checked_functions = match kind {
+            SourceBody::Module(ModuleOrigin::Program(checked)) => checked,
+            _ => None,
+        };
         // The expression grammar supplies its own checked syntax and tokens.
         // Both inputs below then use the same name lowering and native code entry.
         enum Input<'a> {
@@ -510,6 +517,7 @@ impl Output {
             _ => file.to_owned(),
         };
         let location = SourceMap {
+            checked_functions,
             bundled,
             path,
             // These CPython providers implement their own call semantics in Python.
@@ -550,7 +558,7 @@ impl Output {
 }
 
 enum SourceBody<'a> {
-    Module(ModuleOrigin),
+    Module(ModuleOrigin<'a>),
     Expression(&'a ruff_python_parser::Parsed<ast::ModExpression>),
 }
 
@@ -563,6 +571,7 @@ enum Body<'a> {
     Namespace(&'a [ast::Stmt], bool),
     ClassParameters(&'a ast::StmtClassDef),
     Statements(&'a [ast::Stmt]),
+    Checked(&'a crate::frontend::RegisteredFunction),
     /// A suspended suite and its generator, coroutine, or async generator code flag.
     GeneratorFunction(&'a [ast::Stmt], u32),
     ModuleAnnotations(Vec<(&'a str, &'a ast::Expr)>),
@@ -598,6 +607,7 @@ enum Entry {
 }
 
 struct SourceMap<'a> {
+    checked_functions: Option<&'a super::CheckedFunctions>,
     bundled: bool,
     path: &'a Path,
     python_annotations: bool,
@@ -670,6 +680,7 @@ struct Declarations {
     emitted_guarded_lit: bool,
     emitted_guarded_named_op: bool,
     registered_expression: bool,
+    checked_integer_arithmetic: bool,
 }
 
 #[derive(Default)]
@@ -734,6 +745,16 @@ impl Output {
             permanent::NATIVE_SUSPENDED_BODY
         } else {
             0
+        };
+        let body = match body {
+            Body::Statements(_)
+                if let Some(function) = source
+                    .checked_functions
+                    .and_then(|functions| functions.get(&start)) =>
+            {
+                Body::Checked(function)
+            }
+            body => body,
         };
         let entry = self.code(source, prefix, body, in_function, suspended);
         writeln!(
@@ -857,6 +878,7 @@ impl Output {
                     f.jump("module_body");
                 }
             }
+            Body::Checked(function) => f.checked_body(function),
             Body::ClassParameters(class) => f.parameterized_class(class),
             Body::Statements(stmts) | Body::GeneratorFunction(stmts, _) => {
                 f.declare_globals(stmts);
@@ -1334,13 +1356,21 @@ impl Function<'_, '_> {
         prefix: &ast::Expr,
         opener: u8,
     ) -> Option<[usize; 4]> {
-        let range = expr.range();
+        self.expression_range_span(expr.range(), prefix.end(), opener)
+    }
+
+    fn expression_range_span(
+        &self,
+        range: ruff_text_size::TextRange,
+        prefix_end: ruff_text_size::TextSize,
+        opener: u8,
+    ) -> Option<[usize; 4]> {
         if self.simple_call == Some(range) {
             return None;
         }
         let start = range.start().to_usize();
         let end = range.end().to_usize();
-        let prefix_end = prefix.end().to_usize();
+        let prefix_end = prefix_end.to_usize();
         let text = self.source.text.as_bytes();
         if text.get(start..end)?.contains(&b'\n') {
             return None;
@@ -1392,6 +1422,18 @@ impl Function<'_, '_> {
             &mark,
             None,
         )
+    }
+
+    /// A live caller retains the full range even when traceback highlighting is suppressed.
+    fn call_position(&mut self, range: ruff_text_size::TextRange) {
+        let (start_line, start_col) = self.source.line_and_column(range.start());
+        let (end_line, end_col) = self.source.line_and_column(range.end());
+        let position = self
+            .output
+            .position([start_line, end_line, start_col, end_col]);
+        self.line(&format!(
+            "call void @imre_dyn_call_position(ptr %ctx, ptr {position})"
+        ));
     }
 
     /// Pass the caller's temporary root boundary and optional traceback position.
@@ -1455,7 +1497,7 @@ mod tests {
             Path::new("sample.py"),
             source,
             true,
-            ModuleOrigin::Program,
+            ModuleOrigin::Program(None),
         )
         .unwrap()
         .unwrap();
@@ -1480,7 +1522,7 @@ mod tests {
                 if bundled {
                     ModuleOrigin::Bundled
                 } else {
-                    ModuleOrigin::Program
+                    ModuleOrigin::Program(None)
                 },
             )
             .unwrap()
