@@ -15,6 +15,25 @@ def current():
         def method(self):
             pass
 
+    def capture():
+        return obj
+
+    code_type = types.CodeType
+    code_object = capture.__code__
+    assert code_object.co_freevars == ("obj",)
+    assert code_type.co_freevars.__get__(code_object, code_type) is code_object.co_freevars
+    assert code_type.__base__ is object and code_type.__mro__ == (code_type, object)
+    assert code_type.co_name.__get__(code_object, code_type) is code_object.co_name
+    assert "co_flags" in dir(code_object) and dir(code_object) == dir(code_type)
+
+    def stream():
+        yield obj
+
+    names = stream.__code__.co_freevars
+    marked = types.coroutine(stream).__code__
+    assert marked.co_freevars == names == ("obj",)
+    assert marked.co_freevars is not names
+
     method = Owner().method
     for value in (method.__func__.__code__, method.__func__, method, 42, "abc"):
         assert type(value).__init__ is object.__init__

@@ -140,7 +140,8 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
             return namespace_directory(ctx, object, true);
         }
         Value::Class { .. } | Value::Native(_) => object,
-        Value::Count { .. }
+        Value::Code(_)
+        | Value::Count { .. }
         | Value::Calendar { .. }
         | Value::Coroutine { .. }
         | Value::Repeat(_)

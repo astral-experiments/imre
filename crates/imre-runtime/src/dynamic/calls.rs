@@ -1819,7 +1819,7 @@ impl Context {
             Value::GetSetDescriptor {
                 owner, name, get, ..
             } => match (owner, name) {
-                ("code", "co_varnames" | "co_cellvars") => None,
+                ("code", _) => None,
                 ("int", "numerator") => Some("the numerator of a rational number in lowest terms"),
                 ("int", "denominator") => {
                     Some("the denominator of a rational number in lowest terms")
@@ -3914,10 +3914,11 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("property.{name}")));
             }
-            Value::Native(ref class) if class == "code" => {
-                if let Some(descriptor) = self.own_class_attr(obj, name) {
-                    return Ok(descriptor);
-                }
+            Value::Native(ref class)
+                if class == "code"
+                    && let Some(descriptor) = self.own_class_attr(obj, name) =>
+            {
+                return Ok(descriptor);
             }
             Value::Code(ref code) => match name {
                 "co_argcount" => {
@@ -3946,7 +3947,7 @@ impl Context {
                     };
                     return Ok(self.int(count as i64));
                 }
-                "co_varnames" | "co_cellvars" | "co_nlocals" => {
+                "co_varnames" | "co_cellvars" | "co_nlocals" | "co_freevars" => {
                     return self.code_local_field(obj, name);
                 }
                 "co_flags" => {
@@ -3962,21 +3963,6 @@ impl Context {
                 "co_qualname" => return Ok(code.qualname),
                 "co_filename" => return Ok(code.filename),
                 "co_firstlineno" => return Ok(self.int(i64::from(code.first_line))),
-                "co_freevars" => {
-                    if !code.closure_supported && !code.module_definition {
-                        return Err(Error::new(
-                            "NotImplementedError",
-                            "code lacks closure metadata",
-                        ));
-                    }
-                    let names = code
-                        .freevars
-                        .clone()
-                        .into_iter()
-                        .map(|name| self.text(name))
-                        .collect();
-                    return Ok(self.alloc(Value::Tuple(names)));
-                }
                 _ => {}
             },
             Value::Cell(contents) if name == "cell_contents" => {
@@ -5283,16 +5269,14 @@ impl Context {
                 }
             }
             Value::Native(ref class)
-                if name == "__base__"
-                    && matches!(class.as_str(), defaultdict::CLASS | "NoneType") =>
+                if matches!(name, "__base__" | "__bases__" | "__mro__")
+                    && (builtins::CORE_RUNTIME_TYPES.contains(&class.as_str())
+                        || class == defaultdict::CLASS
+                        || (name != "__base__" && builtins::is_exported_type(class))) =>
             {
-                return Ok(self.builtin(Self::native_base(class).unwrap_or("object")));
-            }
-            Value::Native(ref class)
-                if matches!(name, "__bases__" | "__mro__")
-                    && (builtins::is_exported_type(class)
-                        || matches!(class.as_str(), defaultdict::CLASS | "NoneType")) =>
-            {
+                if name == "__base__" {
+                    return Ok(self.builtin(Self::native_base(class).unwrap_or("object")));
+                }
                 return Ok(self.builtin_hierarchy_tuple(obj, name));
             }
             Value::Native(ref builtin)
@@ -6100,21 +6084,6 @@ impl Context {
                 self.update_dictionary_field(obj, dictionary, name, None)
             }
             Value::Function { fields, .. } => self.delete_function_attr(obj, fields, name),
-            Value::Code(_) if matches!(name, "co_varnames" | "co_cellvars") => {
-                Err(self.readonly_getset_error("code", name, obj))
-            }
-            Value::Code(_)
-                if matches!(
-                    name,
-                    "co_qualname"
-                        | "co_argcount"
-                        | "co_posonlyargcount"
-                        | "co_kwonlyargcount"
-                        | "co_nlocals"
-                ) =>
-            {
-                Err(Error::new("AttributeError", "readonly attribute"))
-            }
             Value::Complex(_) if matches!(name, "real" | "imag") => {
                 Err(Error::new("AttributeError", "readonly attribute"))
             }
@@ -6355,7 +6324,8 @@ impl Context {
         }
         if matches!(
             self.heap.get(obj),
-            Value::LzmaDecompressor(_)
+            Value::Code(_)
+                | Value::LzmaDecompressor(_)
                 | Value::Bz2Decompressor(_)
                 | Value::ThreadHandle(_)
                 | Value::ZstdDecompressor(_)
@@ -7273,25 +7243,6 @@ impl Context {
         }
         let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
-            Value::Code(_) if matches!(name, "co_varnames" | "co_cellvars") => {
-                return Err(self.readonly_getset_error("code", name, obj));
-            }
-            Value::Code(_)
-                if matches!(
-                    name,
-                    "co_name"
-                        | "co_qualname"
-                        | "co_filename"
-                        | "co_firstlineno"
-                        | "co_flags"
-                        | "co_argcount"
-                        | "co_posonlyargcount"
-                        | "co_kwonlyargcount"
-                        | "co_nlocals"
-                ) =>
-            {
-                return Err(Error::new("AttributeError", "readonly attribute"));
-            }
             Value::Property(property) if name == "__doc__" => property.doc = value,
             Value::Complex(_) if matches!(name, "real" | "imag") => {
                 return Err(Error::new("AttributeError", "readonly attribute"));
