@@ -49,6 +49,9 @@ pub(super) struct RegisteredFrame<'a, 'p> {
     pub(super) scope: String,
     // Handles held in native registers across statement boundaries must stay reachable.
     pub(super) live: Vec<String>,
+    /// Addressable IR temporaries whose contents survive Python statement boundaries.
+    pub(super) live_slots: Vec<usize>,
+    pub(super) private_slot_count: usize,
     pub(super) max_live: usize,
     pub(super) integer_owners: usize,
     pub(super) expression_integer_start: Option<usize>,
@@ -82,6 +85,8 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             pending_check: None,
             scope: "%scope".into(),
             live: Vec::new(),
+            live_slots: Vec::new(),
+            private_slot_count: 0,
             max_live: 0,
             integer_owners: 0,
             expression_integer_start: None,
@@ -103,6 +108,9 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         } else {
             format!("  %live = alloca [{} x i64]\n", self.max_live)
         };
+        for slot in 0..self.private_slot_count {
+            writeln!(entry, "  %ir_slot{slot} = alloca i64\n  store i64 0, ptr %ir_slot{slot}").unwrap();
+        }
         for slot in 0..self.integer_owners {
             writeln!(
                 entry,
@@ -397,6 +405,26 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         ))
     }
 
+    /// Evaluate Python truthiness and produce the LLVM branch condition.
+    pub(super) fn truth(&mut self, value: &str) -> String {
+        let boolean = self.op("truth", &[value]);
+        self.value(&format!("icmp eq i64 {boolean}, 2"))
+    }
+
+    /// End the lifetime of the operands evaluated after the mark.
+    pub(super) fn discard_truth(&mut self, mark: &str) {
+        self.line(&format!(
+            "call void @imre_dyn_discard_truth(ptr %ctx, i64 {mark})"
+        ));
+    }
+
+    /// Keep just the live stack operands when Python may observe their release.
+    pub(super) fn keep_operands(&mut self, mark: &str, first: &str, second: &str) -> String {
+        self.value(&format!(
+            "call i64 @imre_dyn_keep_operands(ptr %ctx, i64 {mark}, i64 {first}, i64 {second})"
+        ))
+    }
+
     /// Save the caller's earlier operands before an expression can release a writer.
     pub(super) fn temporary_mark(&mut self) -> String {
         self.value("call i64 @imre_dyn_truth_mark(ptr %ctx)")
@@ -425,7 +453,12 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
 
     /// Store the handles that must survive the next statement or assignment target.
     fn live_handles(&mut self) -> (&'static str, usize) {
-        self.handle_array(&self.live.clone())
+        let mut live = self.live.clone();
+        for i in 0..self.live_slots.len() {
+            let slot = self.live_slots[i];
+            live.push(self.value(&format!("load i64, ptr %ir_slot{slot}")));
+        }
+        self.handle_array(&live)
     }
 
     /// Copy evaluated handles into reusable storage in this activation's entry block.
@@ -471,8 +504,18 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         mark: &str,
         span: Option<[usize; 4]>,
     ) -> String {
+        self.call_in_scope(callable, operands, mark, span, &self.scope.clone())
+    }
+
+    pub(super) fn call_in_scope(
+        &mut self,
+        callable: &str,
+        operands: CallArguments,
+        mark: &str,
+        span: Option<[usize; 4]>,
+        scope: &str,
+    ) -> String {
         let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
-        let scope = &self.scope;
         let (function, args) = match operands {
             CallArguments::PartitionField {
                 array,
@@ -511,14 +554,29 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         self.checked(&format!("call i64 @{function}(ptr %ctx, i64 {callable}, {args}, i64 {mark}, ptr {position}, i64 {scope})"))
     }
 
-    pub(super) fn assign_owned_name(&mut self, name: &str, value: &str) {
-        let replaced = self.op("assign_target", &[&self.scope.clone(), name, value]);
-        self.release_replaced(&replaced);
+    pub(super) fn assign_owned_name(
+        &mut self,
+        scope: &str,
+        name: &str,
+        value: &str,
+        mark: Option<&str>,
+    ) {
+        let replaced = self.op("assign_target", &[scope, name, value]);
+        self.release_replaced(&replaced, mark.map(|mark| (mark, value)));
     }
 
-    /// Collect discarded owners while retaining the operands needed after the transfer.
-    pub(super) fn release_replaced(&mut self, replaced: &str) {
-        let (ptr, count) = self.live_handles();
-        self.line(&format!("call void @imre_dyn_assignment_target(ptr %ctx, ptr {ptr}, i64 {count}, i64 {replaced})"));
+    /// An item/attribute setter can replace an owner without reporting which object it dropped.
+    pub(super) fn release_target(&mut self, mark: Option<&str>) {
+        self.release_replaced("2", mark.map(|mark| (mark, "0")));
+    }
+
+    /// Preserve earlier expression operands when present, or the statement's explicit live handles.
+    pub(super) fn release_replaced(&mut self, replaced: &str, expression: Option<(&str, &str)>) {
+        if let Some((mark, value)) = expression {
+            self.line(&format!("call void @imre_dyn_named_assignment(ptr %ctx, i64 {mark}, i64 {value}, i64 {replaced})"));
+        } else {
+            let (ptr, count) = self.live_handles();
+            self.line(&format!("call void @imre_dyn_assignment_target(ptr %ctx, ptr {ptr}, i64 {count}, i64 {replaced})"));
+        }
     }
 }

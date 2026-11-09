@@ -141,14 +141,100 @@ pub(super) enum ModuleOrigin<'a> {
     Bundled,
 }
 
+/// Root constants, registration calls and declarations for one output layout.
+#[derive(Clone)]
+struct RootCode {
+    output: Output,
+    main: String,
+    declarations: HashSet<String>,
+}
+
+impl RootCode {
+    fn new(
+        config: &str,
+        keep_docstrings: bool,
+        has_zip: bool,
+        has_builtins: bool,
+        has_errors: bool,
+    ) -> Self {
+        let mut output = Output {
+            keep_docstrings,
+            ..Output::default()
+        };
+        let config = output.data(config.as_bytes());
+        // Entry-only registration must not change fingerprints of unrelated packed providers.
+        let main = format!(
+            "declare void @imre_dyn_register_source(ptr, ptr, ptr, ptr, i64, ptr)\n\ndefine i32 @main(i32 %argc, ptr %argv) {{\nentry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
+        );
+        output
+            .functions
+            .push_str("declare void @imre_dyn_register_file_code(ptr, ptr, ptr, ptr, i32, ptr)\n");
+        if has_zip {
+            output.functions.push_str(
+                "declare void @imre_dyn_register_zip_source(ptr, ptr, ptr, ptr, i32, ptr)\n",
+            );
+        }
+        if has_builtins {
+            output.functions.push_str(
+                "declare void @imre_dyn_register_builtin_source(ptr, ptr, ptr, ptr, i64, ptr)\n",
+            );
+        }
+        if has_errors {
+            output.functions.push_str(
+            "declare void @imre_dyn_register_module_error(ptr, ptr, ptr, ptr, i64, ptr, ptr, i8, ptr)\n",
+        );
+        }
+        Self {
+            output,
+            main,
+            declarations: HashSet::new(),
+        }
+    }
+
+    fn register_error(
+        &mut self,
+        (name, path, source): &ModuleSource,
+        error: &super::ModuleSyntaxError,
+        zip: Option<&([u8; 32], u32)>,
+    ) {
+        let Self { output, main, .. } = self;
+        let module_name = output.data(name.as_bytes());
+        let file = output.data(path.as_os_str().as_encoded_bytes());
+        let message = output.data(error.message.as_bytes());
+        let position = error
+            .position
+            .map_or_else(|| "null".into(), |span| output.position(span));
+        let text = output.data(source.as_bytes());
+        let hash = zip.map_or_else(|| "null".into(), |(digest, _)| output.data(digest));
+        writeln!(
+                main,
+                "  call void @imre_dyn_register_module_error(ptr %ctx, ptr {module_name}, ptr {file}, ptr {text}, i64 {}, ptr {message}, ptr {position}, i8 {}, ptr {hash})",
+                source.len(), if error.parse_error { 2 } else { u8::from(error.in_args) }
+            ).unwrap();
+    }
+
+    fn finish(mut self) -> CodegenUnit {
+        self.output.native_prelude();
+        self.main
+            .push_str("  %status = call i32 @imre_dyn_finish(ptr %ctx)\n  ret i32 %status\n}\n");
+        CodegenUnit {
+            name: "__main__".into(),
+            llvm_ir: format!(
+                "{ABI}\n{}\n{}\n{}",
+                self.output.constants, self.output.functions, self.main
+            ),
+        }
+    }
+}
+
 /// All module source has already been resolved. Import execution remains conditional.
-pub(crate) fn emit(
+pub(super) fn emit(
     (files, builtins): (&[ModuleSource], &[ModuleSource]),
     config: &str,
     keep_docstrings: bool,
     bundled_root: &Path,
     providers: &HashSet<String>,
-    split: bool,
+    layout: crate::BoxedLayout<'_>,
     (module_errors, registrations): (
         &HashMap<PathBuf, Box<super::ModuleSyntaxError>>,
         &RegisteredBodies<'_>,
@@ -160,39 +246,33 @@ pub(crate) fn emit(
         archive_members,
         python_providers,
     } = registrations;
+    let split = matches!(
+        layout,
+        crate::BoxedLayout::Split | crate::BoxedLayout::WholeWithUnits(_)
+    );
     let mut units = Vec::new();
     let mut used_archive = false;
-    let mut output = Output {
+    let mut root = RootCode::new(
+        config,
         keep_docstrings,
-        ..Output::default()
-    };
-    let config = output.data(config.as_bytes());
-    // Entry-only registration must not change fingerprints of unrelated packed providers.
-    let mut main = format!(
-        "declare void @imre_dyn_register_source(ptr, ptr, ptr, ptr, i64, ptr)\n\ndefine i32 @main(i32 %argc, ptr %argv) {{\nentry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
+        !archive_members.is_empty(),
+        !builtins.is_empty(),
+        !module_errors.is_empty(),
     );
-    output
-        .functions
-        .push_str("declare void @imre_dyn_register_file_code(ptr, ptr, ptr, ptr, i32, ptr)\n");
-    if !archive_members.is_empty() {
-        output
-            .functions
-            .push_str("declare void @imre_dyn_register_zip_source(ptr, ptr, ptr, ptr, i32, ptr)\n");
-    }
-    if !builtins.is_empty() {
-        output.functions.push_str(
-            "declare void @imre_dyn_register_builtin_source(ptr, ptr, ptr, ptr, i64, ptr)\n",
-        );
-    }
-    if !module_errors.is_empty() {
-        output.functions.push_str(
-            "declare void @imre_dyn_register_module_error(ptr, ptr, ptr, ptr, i64, ptr, ptr, i8, ptr)\n",
-        );
-    }
-    let mut declarations = HashSet::new();
+    // The requested whole IR and split native root share their exact prefix.
+    // Fork only when the split layout acquires its first independent local unit.
+    let mut whole: Option<RootCode> = None;
     let files = files.iter().map(|module| (module, false));
     let builtins = builtins.iter().map(|module| (module, true));
-    for (unit, ((name, path, source), builtin)) in files.chain(builtins).enumerate() {
+    for (unit, (module, builtin)) in files.chain(builtins).enumerate() {
+        let (name, path, source) = module;
+        let zip = archive_members.get(path);
+        if !builtin && let Some(error) = module_errors.get(path) {
+            for state in std::iter::once(&mut root).chain(whole.as_mut()) {
+                state.register_error(module, error, zip);
+            }
+            continue;
+        }
         let bundled = path.starts_with(bundled_root);
         let origin = if bundled {
             ModuleOrigin::Bundled
@@ -201,102 +281,94 @@ pub(crate) fn emit(
         } else {
             ModuleOrigin::Program(program_bodies.get(&unit).copied().unwrap_or_default())
         };
-        let module_name = output.data(name.as_bytes());
-        let file = output.data(path.as_os_str().as_encoded_bytes());
-        if !builtin && let Some(error) = module_errors.get(path) {
-            let message = output.data(error.message.as_bytes());
-            let position = error
-                .position
-                .map_or_else(|| "null".into(), |span| output.position(span));
-            let text = output.data(source.as_bytes());
-            let hash = archive_members
-                .get(path)
-                .map_or_else(|| "null".into(), |(digest, _)| output.data(digest));
-            writeln!(
-                main,
-                "  call void @imre_dyn_register_module_error(ptr %ctx, ptr {module_name}, ptr {file}, ptr {text}, i64 {}, ptr {message}, ptr {position}, i8 {}, ptr {hash})",
-                source.len(), if error.parse_error { 2 } else { u8::from(error.in_args) }
-            ).unwrap();
-            continue;
-        }
-        // Python source files use universal newlines, including inside literals.
-        // Keep the original physical bytes for registration.
-        let physical = !builtin && physical_files.contains_key(path);
+        // Preserve the loader's digest while compiling its normalized source.
+        let physical = physical_files.get(path).filter(|_| !builtin);
         let file_digest = physical_files.get(path).and_then(|file| file.digest);
-        let code_source = if physical && file_digest.is_none() {
+        let code_source = if physical.is_some() && file_digest.is_none() {
             crate::normalize_source(source, crate::SourceKind::File)?
-        } else if file_digest.is_some() || archive_members.contains_key(path) {
+        } else if file_digest.is_some() || zip.is_some() {
             crate::normalize_source(source, crate::SourceKind::DecodedFile)?
         } else {
             std::borrow::Cow::Borrowed(source.as_str())
         };
         let initializer = PreparedBody::module(name, path, &code_source, keep_docstrings, origin)?;
         let check_archive = bundled && !providers.is_empty();
-        // A standalone initializer can be compiled separately even without a provider pack.
         let separate = split && unit != 0 && !source.is_empty();
         let mut external = None;
+        let mut archived = false;
         if (check_archive || separate)
             && let Some((symbol, ir)) = initializer.standalone()?
         {
-            let archived = check_archive && providers.contains(&symbol);
-            if archived || separate {
-                if declarations.insert(symbol.clone()) {
-                    writeln!(output.functions, "declare i64 @{symbol}(ptr, i64)").unwrap();
-                    if !archived {
-                        units.push(CodegenUnit {
-                            name: name.clone(),
-                            llvm_ir: ir,
-                        });
-                    }
+            archived = check_archive && providers.contains(&symbol);
+            if !archived && separate && !root.declarations.contains(&symbol) {
+                if whole.is_none() && matches!(layout, crate::BoxedLayout::WholeWithUnits(_)) {
+                    whole = Some(root.clone());
                 }
-                used_archive |= archived;
-                external = Some(format!("@{symbol}"));
+                units.push(CodegenUnit {
+                    name: name.clone(),
+                    llvm_ir: ir,
+                });
+            }
+            used_archive |= archived;
+            if archived || separate {
+                external = Some(symbol);
             }
         }
-        let code = match external {
-            Some(symbol) => symbol,
-            None => initializer.emit(&mut output, unit, &file)?,
+        let register = |state: &mut RootCode, symbol: Option<&str>| -> Result<(), String> {
+            let RootCode {
+                output,
+                main,
+                declarations,
+            } = state;
+            let module_name = output.data(name.as_bytes());
+            let file = output.data(path.as_os_str().as_encoded_bytes());
+            let code = if let Some(symbol) = symbol {
+                if declarations.insert(symbol.to_owned()) {
+                    writeln!(output.functions, "declare i64 @{symbol}(ptr, i64)").unwrap();
+                }
+                format!("@{symbol}")
+            } else {
+                initializer.emit(output, unit, &file)?
+            };
+            if let Some((digest, flags)) = zip {
+                let hash = output.data(digest);
+                writeln!(main, "  call void @imre_dyn_register_zip_source(ptr %ctx, ptr {module_name}, ptr {file}, ptr {hash}, i32 {flags}, ptr {code})").unwrap();
+                return Ok(());
+            }
+            // Physical code reads keep using the file. Identify its compiled snapshot without
+            // embedding the source or exposing stale bytes through SourceFileLoader.get_data().
+            if let Some(physical) = physical {
+                use sha2::{Digest, Sha256};
+                let digest = physical
+                    .digest
+                    .unwrap_or_else(|| Sha256::digest(source.as_bytes()).into());
+                let hash = output.data(&digest);
+                let flags = physical.future_flags;
+                writeln!(main, "  call void @imre_dyn_register_file_code(ptr %ctx, ptr {module_name}, ptr {file}, ptr {hash}, i32 {flags}, ptr {code})").unwrap();
+                return Ok(());
+            }
+            let (text, len) = if bundled {
+                (output.data(source.as_bytes()), source.len())
+            } else {
+                ("null".to_owned(), 0)
+            };
+            let register = if builtin {
+                "imre_dyn_register_builtin_source"
+            } else {
+                "imre_dyn_register_source"
+            };
+            writeln!(main, "  call void @{register}(ptr %ctx, ptr {module_name}, ptr {file}, ptr {text}, i64 {len}, ptr {code})").unwrap();
+            Ok(())
         };
-        if let Some((digest, flags)) = archive_members.get(path) {
-            let hash = output.data(digest);
-            writeln!(main, "  call void @imre_dyn_register_zip_source(ptr %ctx, ptr {module_name}, ptr {file}, ptr {hash}, i32 {flags}, ptr {code})").unwrap();
-            continue;
+        register(&mut root, external.as_deref())?;
+        if let Some(whole) = &mut whole {
+            register(whole, external.as_deref().filter(|_| archived))?;
         }
-        // Physical code reads keep using the file. Identify its compiled snapshot without
-        // embedding the source or exposing stale bytes through SourceFileLoader.get_data().
-        if physical {
-            use sha2::{Digest, Sha256};
-            let digest = file_digest.unwrap_or_else(|| Sha256::digest(source.as_bytes()).into());
-            let hash = output.data(&digest);
-            let flags = physical_files[path].future_flags;
-            writeln!(main, "  call void @imre_dyn_register_file_code(ptr %ctx, ptr {module_name}, ptr {file}, ptr {hash}, i32 {flags}, ptr {code})").unwrap();
-            continue;
-        }
-        let (text, len) = if bundled {
-            (output.data(source.as_bytes()), source.len())
-        } else {
-            ("null".to_owned(), 0)
-        };
-        let register = if builtin {
-            "imre_dyn_register_builtin_source"
-        } else {
-            "imre_dyn_register_source"
-        };
-        writeln!(
-            main,
-            "  call void @{register}(ptr %ctx, ptr {module_name}, ptr {file}, ptr {text}, i64 {len}, ptr {code})"
-        )
-        .unwrap();
     }
-    output.native_prelude();
-    main.push_str("  %status = call i32 @imre_dyn_finish(ptr %ctx)\n  ret i32 %status\n}\n");
-    units.insert(
-        0,
-        CodegenUnit {
-            name: "__main__".into(),
-            llvm_ir: format!("{ABI}\n{}\n{}\n{main}", output.constants, output.functions),
-        },
-    );
+    units.insert(0, root.finish());
+    if let (crate::BoxedLayout::WholeWithUnits(native), Some(whole)) = (layout, whole) {
+        *native = std::mem::replace(&mut units, vec![whole.finish()]);
+    }
     Ok((units, used_archive))
 }
 
@@ -506,17 +578,23 @@ impl<'a> PreparedBody<'a> {
             has_templates,
             method_imports: &method_imports,
         };
-        let initializer = if !expression {
-            crate::frontend::registered_suite(
-                &body,
-                crate::frontend::RegisteredScope::Module,
-                values,
-            )
-        } else {
-            None
-        };
+        let mut operations = crate::frontend::namespace_operations(&body, &private_names);
+        let module_annotations = crate::frontend::module_annotations(
+            &body,
+            private_names.string_annotations,
+            &mut operations,
+            values,
+            bundled,
+        );
+        let mut prepare = crate::frontend::SuitePreparation::new(&operations, values);
+        let initializer =
+            (!expression).then(|| prepare.suite(&body, crate::frontend::RegisteredScope::Module));
         let mut function_bodies = HashMap::new();
         let mut class_bodies = HashMap::new();
+        let prepare_classes = !bundled
+            || initializer
+                .as_ref()
+                .is_some_and(|body| body.fully_checked());
         if !expression {
             for (start, site) in definition_sites(&body) {
                 match site {
@@ -526,20 +604,21 @@ impl<'a> PreparedBody<'a> {
                                 .checked
                                 .is_some_and(|sites| sites.contains_key(&start)) =>
                     {
-                        if let Some(suite) = crate::frontend::registered_suite(
-                            &def.body,
-                            crate::frontend::RegisteredScope::Function {
-                                is_async: def.is_async,
-                            },
-                            values,
-                        ) {
-                            function_bodies.insert(start, suite);
+                        let kind = crate::frontend::RegisteredScope::Function {
+                            is_async: def.is_async,
+                        };
+                        // Suspended activations keep their existing whole-body selection.
+                        if def.is_async || imre_ast::code_flags::is_generator(&def.body) {
+                            if let Some(suite) = prepare.complete(&def.body, kind) {
+                                function_bodies.insert(start, suite);
+                            }
+                        } else {
+                            function_bodies.insert(start, prepare.suite(&def.body, kind));
                         }
                     }
-                    DefinitionSite::Class(class) if !bundled || initializer.is_some() => {
+                    DefinitionSite::Class(class) if prepare_classes => {
                         if let Some(first) = class.body.first()
-                            && let Some(suite) =
-                                crate::frontend::registered_class_body(class, values)
+                            && let Some(suite) = prepare.class_body(class)
                         {
                             class_bodies.insert(first.start(), suite);
                         }
@@ -549,6 +628,9 @@ impl<'a> PreparedBody<'a> {
             }
         }
         let source = SourceInfo {
+            nested_bodies: prepare.nested,
+            namespace_operations: operations,
+            module_annotations,
             function_bodies,
             class_bodies,
             initializer,
@@ -658,7 +740,10 @@ enum Body<'a> {
     Statements(&'a [ast::Stmt]),
     /// A suspended suite and its generator, coroutine, or async generator code flag.
     GeneratorFunction(&'a [ast::Stmt], u32),
-    ModuleAnnotations(Vec<(&'a str, &'a ast::Expr)>),
+    ModuleAnnotations(
+        &'a crate::frontend::RegisteredSuite,
+        &'a [&'a crate::frontend::DeferredModuleAnnotation],
+    ),
     ClassAnnotations(Vec<statements::class_annotations::Site>, BTreeSet<String>),
     Annotations(
         Vec<(&'a str, &'a ast::Expr)>,
@@ -741,9 +826,13 @@ impl<'a> std::ops::Deref for SourceMap<'a> {
 }
 
 struct SourceInfo<'a> {
-    function_bodies: super::CheckedFunctions,
-    class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredFunction>,
-    initializer: Option<crate::frontend::RegisteredFunction>,
+    namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
+    module_annotations:
+        HashMap<ruff_text_size::TextSize, crate::frontend::DeferredModuleAnnotation>,
+    nested_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
+    function_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
+    class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
+    initializer: Option<crate::frontend::RegisteredSuite>,
     program_bodies: ProgramBodies<'a>,
     bundled: bool,
     path: &'a Path,
@@ -797,7 +886,7 @@ impl SourceMap<'_> {
     }
 }
 
-#[derive(Eq, Hash, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 enum StringConstant {
     Text(Vec<u8>),
     Tuple(Vec<Vec<u8>>),
@@ -816,7 +905,7 @@ struct Declarations {
     retained_native: bool,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Output {
     declarations: Declarations,
     diagnostic: Option<String>,
@@ -937,7 +1026,18 @@ impl Output {
             .and_then(|key| source.program_bodies.checked?.get(&key));
         let frame = RegisteredFrame::new(self, &source.positions, native_suspension);
         let module = matches!(body, Body::Namespace(..)) && prefix.is_empty();
+        let prepared = match body {
+            Body::Namespace(..) if module => source.initializer.as_ref(),
+            Body::Namespace(stmts, _) => stmts
+                .first()
+                .and_then(|stmt| source.class_bodies.get(&stmt.start())),
+            Body::Statements(_) | Body::GeneratorFunction(..) if checked.is_none() => {
+                start.and_then(|key| source.function_bodies.get(&key))
+            }
+            _ => None,
+        };
         let mut f = Function {
+            prepare_nested_suites: prepared.is_some_and(|plan| !plan.fully_checked()),
             frame,
             source,
             current_range: ruff_text_size::TextRange::empty(source.module_start),
@@ -950,7 +1050,7 @@ impl Output {
             in_function,
             module,
             declared_globals: Default::default(),
-            annotation_lookup: false,
+            annotation_values: None,
             class_locals: match &body {
                 Body::Namespace(stmts, _) if !prefix.is_empty() => {
                     Some(statements::class_locals(stmts))
@@ -959,6 +1059,7 @@ impl Output {
             },
             prefix,
             loops: Vec::new(),
+            iteration: Default::default(),
             exits: Vec::new(),
         };
         if checked.is_none()
@@ -990,15 +1091,10 @@ impl Output {
                     f.bind("__doc__", &value);
                 }
                 f.declare_globals(stmts);
-                let checked = match body {
-                    Body::Namespace(..) if module => source.initializer.as_ref(),
-                    Body::Namespace(..) => stmts
-                        .first()
-                        .and_then(|stmt| source.class_bodies.get(&stmt.start())),
-                    _ => checked.or_else(|| start.and_then(|key| source.function_bodies.get(&key))),
-                };
                 if let Some(checked) = checked {
                     f.checked_body(checked);
+                } else if let Some(prepared) = prepared {
+                    f.prepared_function(prepared, |code, run| code.source_statements(&stmts[run]));
                 } else if f.class_locals.is_some() && !f.source.string_annotations {
                     f.annotated_class_body(stmts);
                 } else {
@@ -1013,8 +1109,12 @@ impl Output {
             }
             Body::ClassParameters(class) => f.parameterized_class(class),
             Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
-            Body::Annotations(entries, class) => f.annotations(&entries, class, false),
-            Body::ModuleAnnotations(entries) => f.annotations(&entries, None, true),
+            Body::Annotations(entries, class) => f.annotations(&entries, class),
+            Body::ModuleAnnotations(plan, entries) => f.prepared_function(plan, |code, run| {
+                for index in run {
+                    code.unprepared_annotation(index, entries[index]);
+                }
+            }),
             Body::Generator(plan, _) => f.generator_step(plan),
             Body::Expression(expr) | Body::TypeAlias(expr) => {
                 f.checkpoint(expr);
@@ -1055,6 +1155,7 @@ enum CallArguments {
 }
 
 struct Function<'a, 'p> {
+    prepare_nested_suites: bool,
     frame: RegisteredFrame<'a, 'p>,
     source: &'p SourceMap<'p>,
     current_range: ruff_text_size::TextRange,
@@ -1062,11 +1163,12 @@ struct Function<'a, 'p> {
     declared_globals: std::collections::BTreeSet<String>,
     in_function: bool,
     module: bool,
-    module_annotation_sites: Option<Vec<(String, ast::Expr)>>,
+    module_annotation_sites: Option<Vec<ruff_text_size::TextSize>>,
     class_sites: Option<statements::class_annotations::ClassSites>,
     class_locals: Option<statements::ClassBindings>,
-    annotation_lookup: bool,
+    annotation_values: Option<String>,
     loops: Vec<LoopTarget>,
+    iteration: checked::IterationState,
     exits: Vec<(Cleanup, String)>,
     async_generator: bool,
 }
@@ -1125,43 +1227,49 @@ impl Function<'_, '_> {
     /// separately so a later evaluation can supply a new globals/locals pair.
     fn annotation_text(&mut self, value: &str) -> String {
         if !self.source.bundled
-            && let Ok(parsed) = imre_ast::forward_refs::parse(value)
-            && imre_ast::forward_refs::validate(&parsed).is_ok()
-            && !parsed.syntax().body.is_name_expr()
-            && !parsed.syntax().body.is_literal_expr()
+            && let Some(parsed) = crate::frontend::annotation_expression(value)
         {
-            let unit = self.source.unit;
-            let code = self.output.try_native_body(|output| {
-                let file = output.data(b"<string>");
-                match PreparedBody::new(
-                    "",
-                    Path::new("<string>"),
-                    value,
-                    output.keep_docstrings,
-                    SourceBody::Expression(&parsed),
-                )
-                .and_then(|body| body.emit(output, unit, &file))
-                {
-                    Ok(code) => code,
-                    Err(err) => {
-                        output.diagnostic = Some(err);
-                        String::new()
-                    }
+            return self.preparsed_annotation_text(value, &parsed);
+        }
+        self.text(value)
+    }
+
+    fn preparsed_annotation_text(
+        &mut self,
+        value: &str,
+        parsed: &ruff_python_parser::Parsed<ast::ModExpression>,
+    ) -> String {
+        let unit = self.source.unit;
+        let code = self.output.try_native_body(|output| {
+            let file = output.data(b"<string>");
+            match PreparedBody::new(
+                "",
+                Path::new("<string>"),
+                value,
+                output.keep_docstrings,
+                SourceBody::Expression(parsed),
+            )
+            .and_then(|body| body.emit(output, unit, &file))
+            {
+                Ok(code) => code,
+                Err(err) => {
+                    output.diagnostic = Some(err);
+                    String::new()
                 }
-            });
-            if let Some(code) = code {
-                if !self.output.declarations.registered_expression {
-                    self.output
-                        .functions
-                        .push_str("declare void @imre_dyn_bind_expression(ptr, i64, ptr)\n");
-                    self.output.declarations.registered_expression = true;
-                }
-                let text = self.text(value);
-                self.line(&format!(
-                    "call void @imre_dyn_bind_expression(ptr %ctx, i64 {text}, ptr {code})"
-                ));
-                return text;
             }
+        });
+        if let Some(code) = code {
+            if !self.output.declarations.registered_expression {
+                self.output
+                    .functions
+                    .push_str("declare void @imre_dyn_bind_expression(ptr, i64, ptr)\n");
+                self.output.declarations.registered_expression = true;
+            }
+            let text = self.text(value);
+            self.line(&format!(
+                "call void @imre_dyn_bind_expression(ptr %ctx, i64 {text}, ptr {code})"
+            ));
+            return text;
         }
         self.text(value)
     }
@@ -1179,13 +1287,13 @@ impl Function<'_, '_> {
 
     fn lookup(&mut self, name: &str) -> String {
         let op = match &self.class_locals {
-            Some(class) if self.annotation_lookup && class.globals.contains(name) => {
+            Some(class) if self.annotation_values.is_some() && class.globals.contains(name) => {
                 "lookup_annotation_global"
             }
-            Some(class) if self.annotation_lookup && class.locals.contains(name) => {
+            Some(class) if self.annotation_values.is_some() && class.locals.contains(name) => {
                 "lookup_class_annotation_global"
             }
-            Some(_) if self.annotation_lookup => "lookup_class_annotation",
+            Some(_) if self.annotation_values.is_some() => "lookup_class_annotation",
             Some(class) if class.locals.contains(name) => "lookup_class_local",
             _ => "lookup",
         };
@@ -1199,18 +1307,6 @@ impl Function<'_, '_> {
 
     fn attr(&mut self, object: &str, name: &str) -> String {
         self.named_op("attr", object, name, "0")
-    }
-
-    fn truth(&mut self, value: &str) -> String {
-        let boolean = self.op("truth", &[value]);
-        self.value(&format!("icmp eq i64 {boolean}, 2"))
-    }
-
-    /// End the lifetime of the operands evaluated after the mark.
-    fn discard_truth(&mut self, mark: &str) {
-        self.line(&format!(
-            "call void @imre_dyn_discard_truth(ptr %ctx, i64 {mark})"
-        ));
     }
 
     fn select(
@@ -1367,6 +1463,79 @@ mod tests {
     }
 
     #[test]
+    fn whole_ir_and_split_link_share_the_same_module_selection() {
+        use crate::BoxedLayout;
+        let root = Path::new("<imre stdlib>");
+        let modules: Vec<ModuleSource> = vec![
+            (
+                "driver".into(),
+                PathBuf::from("driver.py"),
+                "import helper\n".into(),
+            ),
+            (
+                "helper".into(),
+                PathBuf::from("helper.py"),
+                "from . import extra\n".into(),
+            ),
+            (
+                "broken".into(),
+                PathBuf::from("broken.py"),
+                "invalid (".into(),
+            ),
+            (
+                "archived".into(),
+                root.join("archived.py"),
+                "value = 1\n".into(),
+            ),
+        ];
+        let (name, path, source) = &modules[3];
+        let (symbol, _) = PreparedBody::module(name, path, source, true, ModuleOrigin::Bundled)
+            .unwrap()
+            .standalone()
+            .unwrap()
+            .unwrap();
+        let providers = HashSet::from([symbol]);
+        let registrations = RegisteredBodies {
+            archive_members: HashMap::from([(modules[1].1.clone(), ([23; 32], 16))]),
+            ..Default::default()
+        };
+        let errors = HashMap::from([(
+            modules[2].1.clone(),
+            Box::new(super::super::ModuleSyntaxError::new(
+                &modules[2].2,
+                ruff_text_size::TextRange::default(),
+                "invalid".into(),
+                false,
+            )),
+        )]);
+        let build = |layout| {
+            emit(
+                (&modules, &[]),
+                "{}",
+                true,
+                root,
+                &providers,
+                layout,
+                (&errors, &registrations),
+            )
+            .unwrap()
+        };
+        let (whole, whole_packed) = build(BoxedLayout::Whole);
+        let (split, split_packed) = build(BoxedLayout::Split);
+        let mut native = Vec::new();
+        let (combined, packed) = build(BoxedLayout::WholeWithUnits(&mut native));
+        assert!(packed && whole_packed && split_packed);
+        assert_eq!(combined.len(), 1);
+        assert_eq!(whole[0].llvm_ir, combined[0].llvm_ir);
+        assert_eq!(native.len(), split.len());
+        assert!(native.len() > 1);
+        for (actual, expected) in native.iter().zip(&split) {
+            assert_eq!(actual.name, expected.name);
+            assert_eq!(actual.llvm_ir, expected.llvm_ir);
+        }
+    }
+
+    #[test]
     fn declare_exit_line_only_for_compiled_with() {
         let path = Path::new("<imre stdlib>/example.py");
         let declare = "declare void @imre_dyn_set_statement_line";
@@ -1435,7 +1604,7 @@ mod tests {
                 true,
                 root,
                 &symbols,
-                false,
+                crate::BoxedLayout::Whole,
                 initializers,
             )
             .unwrap();
@@ -1462,7 +1631,7 @@ mod tests {
                 true,
                 root,
                 &symbols,
-                false,
+                crate::BoxedLayout::Whole,
                 initializers
             )
             .unwrap()
@@ -1476,7 +1645,7 @@ mod tests {
             true,
             root,
             &symbols,
-            false,
+            crate::BoxedLayout::Whole,
             (
                 &HashMap::from([(
                     bundled.1.clone(),
@@ -1523,7 +1692,7 @@ mod tests {
             true,
             root,
             &symbols,
-            true,
+            crate::BoxedLayout::Split,
             (&HashMap::new(), &registrations),
         )
         .unwrap();

@@ -1639,7 +1639,39 @@ impl Types {
         Some(element)
     }
 
-    /// Mutable sequences with integer positions; their storage layouts remain distinct.
+    /// Preserve the common element type when an iterator traverses a fixed tuple.
+    pub(crate) fn tuple_iteration_element(&self, fields: &[Type]) -> Option<Type> {
+        let first = *fields.first()?;
+        if fields.iter().all(|ty| *ty == first) {
+            return Some(first);
+        }
+        let non_none = *fields.iter().find(|&&ty| ty != Type::None)?;
+        let payload = self.payload(non_none).unwrap_or(non_none);
+        fields
+            .iter()
+            .all(|&ty| ty == Type::None || self.payload(ty).unwrap_or(ty) == payload)
+            .then(|| self.optional(payload))
+    }
+
+    /// The element contract for an ordinary container or mapping view.
+    pub(crate) fn iteration_element(&self, ty: Type, items: bool) -> Option<Type> {
+        self.indexed_element(ty)
+            .or_else(|| self.var_tuple_element(ty))
+            .or_else(|| self.readable_set_element(ty))
+            .or((ty == Type::Str).then_some(Type::Str))
+            .or((ty == Type::Bytes).then_some(Type::Int))
+            .or_else(|| {
+                self.mapping(ty).map(|(key, value)| {
+                    if items {
+                        self.tuple(vec![key, value])
+                    } else {
+                        key
+                    }
+                })
+            })
+    }
+
+    /// Mutable sequences with integer positions and distinct storage layouts.
     pub(crate) fn indexed_element(&self, ty: Type) -> Option<Type> {
         self.element(ty).or_else(|| self.deque_element(ty))
     }

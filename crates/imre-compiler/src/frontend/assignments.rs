@@ -474,8 +474,8 @@ impl Checker<'_> {
     pub(super) fn live_module_binding(&self, expr: &ast::Expr) -> Option<Expr> {
         let name = expr.as_name_expr()?.id.as_str();
         (self.module_scope
-            && (self.namespace.exposed.contains(name)
-                || self.namespace.unknown_key && self.names.contains_key(name)))
+            && (self.module_namespace.exposed.contains(name)
+                || self.module_namespace.unknown_key && self.names.contains_key(name)))
         .then(|| registered::values::name_binding(name))
     }
 
@@ -484,7 +484,7 @@ impl Checker<'_> {
             ExprKind::Builtin(Builtin::RegisteredCall(site), _) => {
                 self.namespace_calls.contains(&site.range)
             }
-            ExprKind::Local(slot) => self.namespace.aliases.contains(slot),
+            ExprKind::Local(slot) => self.module_namespace.aliases.contains(slot),
             _ => false,
         }
     }
@@ -496,14 +496,14 @@ impl Checker<'_> {
     // A store installs its RHS before releasing the previous owner. A Python finalizer
     // can change any binding already visible in this module before the next lookup.
     fn release_module_owner(&mut self) {
-        self.namespace.exposed.extend(self.names.keys().cloned());
-        self.namespace.keys.clear();
+        self.module_namespace.exposed.extend(self.names.keys().cloned());
+        self.module_namespace.keys.clear();
     }
 
     pub(super) fn namespace_item_store(&mut self, index: &Expr, value: &Expr) {
-        if let Some(name) = self.namespace.key(index) {
-            if self.namespace.unknown_key
-                || self.namespace.exposed.contains(&name)
+        if let Some(name) = self.module_namespace.key(index) {
+            if self.module_namespace.unknown_key
+                || self.module_namespace.exposed.contains(&name)
                 || self
                     .names
                     .get(&name)
@@ -512,11 +512,11 @@ impl Checker<'_> {
                 self.release_module_owner();
             }
             if self.types.stores_python_object(value.ty) {
-                self.namespace.exposed.insert(name);
+                self.module_namespace.exposed.insert(name);
             }
         } else if matches!(index.ty, Type::Str | Type::PythonObject) {
-            if !self.namespace.exposed.is_empty()
-                || self.namespace.unknown_key
+            if !self.module_namespace.exposed.is_empty()
+                || self.module_namespace.unknown_key
                 || self
                     .names
                     .values()
@@ -524,32 +524,32 @@ impl Checker<'_> {
             {
                 self.release_module_owner();
             }
-            self.namespace.unknown_key |= self.types.stores_python_object(value.ty);
+            self.module_namespace.unknown_key |= self.types.stores_python_object(value.ty);
         }
     }
 
     pub(super) fn namespace_assignment(&mut self, slot: usize, value: &Expr) {
         let alias = self.is_module_namespace(value);
-        let key = self.namespace.key(value);
+        let key = self.module_namespace.key(value);
         let releases_owner = self.can_release_owner(slot)
-            || self.namespace.unknown_key
-            || !self.namespace.exposed.is_empty()
+            || self.module_namespace.unknown_key
+            || !self.module_namespace.exposed.is_empty()
                 && self
                     .names
                     .iter()
-                    .any(|(name, &local)| local == slot && self.namespace.exposed.contains(name));
+                    .any(|(name, &local)| local == slot && self.module_namespace.exposed.contains(name));
         if releases_owner {
             self.release_module_owner();
         }
         if alias {
-            self.namespace.aliases.insert(slot);
+            self.module_namespace.aliases.insert(slot);
         } else if !releases_owner {
-            self.namespace.aliases.remove(&slot);
+            self.module_namespace.aliases.remove(&slot);
         }
         if let Some(key) = key.filter(|_| !releases_owner) {
-            self.namespace.keys.insert(slot, key);
+            self.module_namespace.keys.insert(slot, key);
         } else {
-            self.namespace.keys.remove(&slot);
+            self.module_namespace.keys.remove(&slot);
         }
     }
 }
@@ -558,7 +558,7 @@ impl Checker<'_> {
 pub(super) struct LocalState {
     pub(super) assigned: Assigned,
     pub(super) narrowed: Narrowed,
-    namespace: ModuleNamespace,
+    module_namespace: ModuleNamespace,
 }
 
 impl LocalState {
@@ -569,7 +569,7 @@ impl LocalState {
             &other.assigned,
             &other.narrowed,
         );
-        self.namespace.join(&other.namespace);
+        self.module_namespace.join(&other.module_namespace);
     }
 }
 
@@ -588,7 +588,7 @@ impl Checker<'_> {
         LocalState {
             assigned: self.assigned.clone(),
             narrowed: self.narrowed.clone(),
-            namespace: self.namespace.clone(),
+            module_namespace: self.module_namespace.clone(),
         }
     }
 
@@ -605,7 +605,7 @@ impl Checker<'_> {
     pub(super) fn restore_state(&mut self, state: LocalState) {
         self.assigned = state.assigned;
         self.narrowed = state.narrowed;
-        self.namespace = state.namespace;
+        self.module_namespace = state.module_namespace;
     }
 
     /// A binding yields the original RHS value; optional promotion belongs to

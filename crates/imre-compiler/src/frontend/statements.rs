@@ -14,6 +14,7 @@ pub(super) trait StatementLowering {
     ) -> StdResult<Option<Statement>, Self::Error>;
     fn effect(&mut self, value: &ast::Expr) -> StdResult<(Option<Statement>, bool), Self::Error>;
     fn returned(&mut self, ret: &ast::StmtReturn) -> StdResult<Expr, Self::Error>;
+    fn for_loop(&mut self, loop_: &ast::StmtFor) -> StdResult<Block, Self::Error>;
     fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<Block, Self::Error>;
 
     fn attribute_statements(
@@ -36,6 +37,7 @@ pub(super) trait StatementLowering {
             ast::Stmt::Return(ret) if !module => {
                 (Some(Statement::Return(self.returned(ret)?)), false)
             }
+            ast::Stmt::For(loop_) if !loop_.is_async => return self.for_loop(loop_),
             ast::Stmt::Pass(_) => (None, true),
             _ => return self.other_statement(stmt),
         };
@@ -75,7 +77,7 @@ impl StatementLowering for Checker<'_> {
                     "attribute target requires a Python object",
                 ));
             }
-            statements.push(effect.lower(values));
+            statements.push(registered::attribute_statement(effect.action, effect.field, values));
         }
         Ok(Some(statements))
     }
@@ -172,6 +174,10 @@ impl StatementLowering for Checker<'_> {
         } else {
             self.coerce_return(value, self.returns, ret)
         }
+    }
+
+    fn for_loop(&mut self, loop_: &ast::StmtFor) -> Result<Block, String> {
+        self.iteration(loop_)
     }
 
     fn other_statement(&mut self, stmt: &ast::Stmt) -> Result<Block, String> {

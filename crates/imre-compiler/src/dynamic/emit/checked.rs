@@ -1,50 +1,98 @@
 //! Checked operations inside a Python function with a registered frame and object arguments.
 
-use ruff_text_size::{TextRange, TextSize};
-
 use super::{CallArguments, Function, RegisteredFrame, permanent};
 use crate::frontend::RegisteredFunction;
 use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Statement, Type};
 use crate::llvm::body::FunctionBody;
-use crate::llvm::operations::{CheckedBody, CheckedValue};
-use std::collections::HashMap;
+
+use crate::llvm::operations::{CheckedBody, CheckedValue, LoopEdges};
+use ruff_text_size::{TextRange, TextSize};
+use std::collections::BTreeSet;
 
 /// Only take a body when all its operations have a lowering for the registered calling convention.
 pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
     let body = &checked.function.body;
-    let mut uses_object_operation = false;
-    let mut supported = body.iter().all(|stmt| match stmt {
-        Statement::Assign(slot, _) => checked.local_names.contains_key(slot),
-        Statement::SetItem(receiver, _, _) => {
-            uses_object_operation = true;
-            receiver.ty == Type::PythonObject
-        }
-        Statement::Return(_) | Statement::Expr(_) => true,
-        _ => false,
+    let mut uses_python_protocol = false;
+    let private = private_slots(checked);
+    let has_slot = |slot: &usize| private.contains(slot) || checked.local_names.contains_key(slot);
+    let mut supported = true;
+    ir::walk_statements(body, &mut |stmt| {
+        supported &= match stmt {
+            Statement::Assign(slot, _) => has_slot(slot),
+            Statement::Return(_)
+            | Statement::Expr(_)
+            | Statement::While(..)
+            | Statement::Break
+            | Statement::Continue
+            | Statement::Exhaust => true,
+            Statement::Scope { body, .. } => !suspends(body),
+            Statement::SetItem(receiver, _, _) => {
+                uses_python_protocol |= receiver.ty == Type::PythonObject;
+                matches!(receiver.ty, Type::Dict(_) | Type::PythonObject)
+            }
+            Statement::Clear(slot) => private.contains(slot),
+            Statement::If(_, _, no) => no.is_empty(),
+            Statement::IterNext {
+                kind: ir::IterNextKind::Generic,
+                iterator,
+                key,
+                value: None,
+                ready,
+            } => {
+                checked.function.locals[*iterator] == Type::PythonObject
+                    && [iterator, key, ready]
+                        .into_iter()
+                        .all(|slot| private.contains(slot))
+            }
+            _ => false,
+        };
     });
     ir::walk_expressions(body, &mut |expr| {
         supported &= match &expr.kind {
-            ExprKind::Local(slot) => checked.local_names.contains_key(slot),
+            ExprKind::Local(slot) => has_slot(slot),
             ExprKind::None
             | ExprKind::Bool(_)
             | ExprKind::Int(_)
             | ExprKind::Float(_)
             | ExprKind::Str(_)
-            | ExprKind::Bytes(_) => true,
+            | ExprKind::Bytes(_)
+            | ExprKind::Not(_) => true,
+            ExprKind::Scope { body, value, .. } => {
+                let mut suspension = false;
+                ir::walk_operand_expressions(value, &mut |expr| {
+                    suspension |= matches!(
+                        expr.kind,
+                        ExprKind::Builtin(Builtin::RegisteredSuspend(..), _)
+                    )
+                });
+                !suspends(body) && !suspension
+            }
+            ExprKind::Conditional(..) => true,
+            ExprKind::List(items) => items.is_empty(),
+            ExprKind::Dict { entries, .. } => entries.is_empty(),
+            ExprKind::Set { values, .. } => values.is_empty(),
+            ExprKind::Builtin(Builtin::Bool, args) => args.len() == 1,
+            ExprKind::Builtin(Builtin::Append | Builtin::SetAdd, args) => args.len() == 2,
+            ExprKind::Builtin(Builtin::RegisteredUnpack { .. }, args) => args.len() == 1,
+            ExprKind::Builtin(Builtin::ListGet, args) => args.len() == 2,
+            ExprKind::Builtin(Builtin::RegisteredNamespace(_), args) => args.len() <= 1,
             ExprKind::Binary(Binary::Add, left, right) => {
                 expr.ty == Type::PythonObject
                     || left.ty == Type::Int && right.ty == Type::Int && expr.ty == Type::Int
             }
-            ExprKind::Conditional(..) => true,
-            ExprKind::Builtin(Builtin::RegisteredCall(..), operands) => {
-                uses_object_operation = true;
-                !operands.is_empty()
+            ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
+                uses_python_protocol = true;
+                operands.len() > usize::from(call.explicit_scope)
+            }
+            ExprKind::Builtin(Builtin::RegisteredIter, args) => {
+                uses_python_protocol = true;
+                args.len() == 1
             }
             ExprKind::Builtin(Builtin::RegisteredStatement(..), _) => true,
             ExprKind::Builtin(Builtin::RegisteredLocation(..), operands) => operands.len() == 1,
             ExprKind::Builtin(Builtin::RegisteredAttribute { action, .. }, operands) => {
                 use ir::AttributeAction;
-                uses_object_operation |= *action != AttributeAction::Load;
+                uses_python_protocol |= *action != AttributeAction::Load;
                 operands.len()
                     == match action {
                         AttributeAction::Load | AttributeAction::Delete => 1,
@@ -55,9 +103,9 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                 matches!(operands.as_slice(), [operand] if operand.ty == Type::PythonObject)
             }
             ExprKind::Builtin(Builtin::RegisteredSubscript(..), operands) => operands.len() == 2,
+            ExprKind::Builtin(Builtin::RegisteredName(_), scope) => scope.len() <= 1,
             ExprKind::Builtin(
-                Builtin::RegisteredName(_)
-                | Builtin::RegisteredEllipsis
+                Builtin::RegisteredEllipsis
                 | Builtin::RegisteredString(_)
                 | Builtin::RegisteredComplex(..),
                 operands,
@@ -75,13 +123,52 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
             _ => false,
         };
     });
-    supported && uses_object_operation
+    supported && uses_python_protocol
+}
+
+/// Only IR scopes name compiler-owned storage. User-visible names stay in the Python frame.
+fn private_slots(checked: &RegisteredFunction) -> BTreeSet<usize> {
+    let body = &checked.function.body;
+    let mut slots = BTreeSet::new();
+    ir::walk_statements(body, &mut |stmt| {
+        if let Statement::Scope { clear, .. } = stmt {
+            slots.extend(clear);
+        }
+    });
+    ir::walk_expressions(body, &mut |expr| {
+        if let ExprKind::Scope { clear, .. } = &expr.kind {
+            slots.extend(clear);
+        }
+    });
+    slots.retain(|slot| !checked.local_names.contains_key(slot));
+    slots
+}
+
+fn suspends(body: &[Statement]) -> bool {
+    let mut suspension = false;
+    ir::walk_expressions(body, &mut |expr| {
+        suspension |= matches!(
+            expr.kind,
+            ExprKind::Builtin(Builtin::RegisteredSuspend(..), _)
+        )
+    });
+    suspension
+}
+
+#[derive(Default)]
+pub(super) struct IterationState {
+    private_slots: Vec<usize>,
+    first_slot: usize,
+    cursors: BTreeSet<usize>,
+    scopes: Vec<Vec<usize>>,
+    loops: Vec<(LoopEdges, usize)>,
+    in_expression: bool,
 }
 
 /// The registered binder owns the scope, argument identities and frame.
 pub(crate) struct Frame<'f, 'a, 'p> {
     code: &'f mut Function<'a, 'p>,
-    names: Option<&'f HashMap<usize, String>>,
+    names: Option<&'f RegisteredFunction>,
 }
 
 impl Frame<'_, '_, '_> {
@@ -99,20 +186,176 @@ impl Frame<'_, '_, '_> {
     }
 
     pub(crate) fn lookup_local(&mut self, slot: usize) -> String {
-        self.code
-            .lookup(&self.names.expect("registered local names")[&slot])
+        if self.code.iteration.private_slots.binary_search(&slot).is_ok() {
+            return self.load_private(slot);
+        }
+        let binding = &self.names.expect("registered local names").local_names[&slot];
+        if let Some(slot) = binding.namespace {
+            let scope = self.load_private(slot);
+            self.code.named_op("lookup", &scope, &binding.name, "0")
+        } else {
+            self.code.lookup(&binding.name)
+        }
     }
 
     pub(crate) fn assign(&mut self, slot: usize, value: CheckedValue) {
         let handle = self.materialize(&value);
-        let name = &self.names.expect("registered local names")[&slot];
-        self.bind(name, &handle);
+        if self.code.iteration.private_slots.binary_search(&slot).is_ok() {
+            self.store_private(slot, &handle);
+            return;
+        }
+        let binding = &self.names.expect("registered local names").local_names[&slot];
+        let scope = if let Some(slot) = binding.namespace {
+            self.load_private(slot)
+        } else {
+            self.code.scope.clone()
+        };
+        let name = self.code.code_name(&binding.name);
+        let mark = self.target_mark();
+        self.code
+            .assign_owned_name(&scope, &name, &handle, mark.as_deref());
     }
     pub(crate) fn body(&mut self) -> &mut FunctionBody {
         self.code.flush_check();
         &mut self.code.body
     }
 
+    pub(crate) fn block_name(&mut self) -> String {
+        self.code.name("b")
+    }
+    pub(crate) fn invert(&mut self, value: &str) -> String {
+        self.code.value(&format!("xor i1 {value}, true"))
+    }
+    pub(crate) fn mark(&mut self) -> String {
+        self.code.temporary_mark()
+    }
+    pub(crate) fn target_mark(&mut self) -> Option<String> {
+        self.code.iteration.in_expression.then(|| self.mark())
+    }
+    pub(crate) fn drop_truth(&mut self, mark: &str) {
+        self.code.discard_truth(mark);
+    }
+    pub(crate) fn truth(&mut self, value: &str) -> String {
+        self.code.truth(value)
+    }
+    pub(crate) fn target_release(&mut self, mark: Option<&str>) {
+        self.code.release_target(mark);
+    }
+    pub(crate) fn op(&mut self, operation: &str, operands: &[&str]) -> String {
+        self.code.op(operation, operands)
+    }
+    pub(crate) fn unpack(&mut self, value: &str, count: usize, star: Option<usize>) -> String {
+        let count = self.code.integer(count);
+        let star = star.map_or_else(|| "0".into(), |index| self.code.integer(index));
+        self.code.op("unpack_read", &[value, &count, &star])
+    }
+    pub(crate) fn comprehension_scope(
+        &mut self,
+        parent: Option<String>,
+        names: &[String],
+    ) -> String {
+        let parent = parent.unwrap_or_else(|| self.code.scope.clone());
+        let names = self.code.lit(1, names.join(" ").as_bytes());
+        self.code.op("comprehension_scope", &[&parent, &names])
+    }
+    pub(crate) fn start_expression(&mut self) -> (String, bool) {
+        (
+            self.mark(),
+            std::mem::replace(&mut self.code.iteration.in_expression, true),
+        )
+    }
+    pub(crate) fn finish_expression(&mut self, mark: &str, outer: bool, result: &CheckedValue) {
+        self.code.iteration.in_expression = outer;
+        let handle = match result {
+            CheckedValue::Handle { id, .. } => id.as_str(),
+            CheckedValue::IntOrHandle { fallback, .. } => fallback.as_str(),
+            CheckedValue::Native(..) => "0",
+        };
+        self.code.keep_operands(mark, handle, "0");
+    }
+    fn physical_slot(&self, slot: usize) -> usize {
+        let frame = &self.code.iteration;
+        frame.first_slot + frame.private_slots.binary_search(&slot).expect("checked private slot")
+    }
+
+    fn load_private(&mut self, slot: usize) -> String {
+        let slot = self.physical_slot(slot);
+        self.code.value(&format!("load i64, ptr %ir_slot{slot}"))
+    }
+    fn store_private(&mut self, slot: usize, value: &str) {
+        let slot = self.physical_slot(slot);
+        self.code
+            .line(&format!("store i64 {value}, ptr %ir_slot{slot}"));
+    }
+    pub(crate) fn enter_scope(&mut self, clear: &[usize]) {
+        self.code.iteration.scopes.push(clear.to_vec());
+    }
+    pub(crate) fn leave_scope(&mut self) {
+        self.code.iteration.scopes.pop();
+    }
+    pub(crate) fn clear_slots(&mut self, slots: &[usize]) {
+        for &slot in slots {
+            if self
+                .names
+                .is_some_and(|n| n.local_names.contains_key(&slot))
+            {
+                continue;
+            }
+            if self.code.iteration.cursors.contains(&slot) {
+                let old = self.load_private(slot);
+                self.store_private(slot, "0");
+                self.code.op("break_iter", &[&old]);
+            } else {
+                self.store_private(slot, "0");
+            }
+        }
+    }
+    pub(crate) fn enter_loop(&mut self, edges: &LoopEdges) {
+        let depth = self.code.iteration.scopes.len();
+        self.code.iteration.loops.push((edges.clone(), depth));
+    }
+    pub(crate) fn leave_loop(&mut self) {
+        self.code.iteration.loops.pop();
+    }
+    pub(crate) fn transfer_loop(&mut self, stmt: &Statement) {
+        let (edges, depth) = self.code.iteration.loops.last().expect("loop transfer");
+        let dest = match stmt {
+            Statement::Break => &edges.done,
+            Statement::Continue => &edges.step,
+            _ => &edges.exhausted,
+        }
+        .clone();
+        for slots in self.code.iteration.scopes[*depth..].to_vec().iter().rev() {
+            self.clear_slots(slots);
+        }
+        self.code.jump(&dest);
+    }
+    pub(crate) fn begin_step(&mut self, mark: &str) {
+        self.code.line(&format!(
+            "call void @imre_dyn_comprehension_step(ptr %ctx, i64 {mark})"
+        ));
+    }
+    pub(crate) fn pull_ready(&mut self, iterator: usize, ready: usize) -> (String, String) {
+        let cursor = self.load_private(iterator);
+        let has_else = self
+            .code
+            .iteration
+            .loops
+            .last()
+            .is_some_and(|(edges, _)| edges.exhausted != edges.done);
+        let more = self
+            .code
+            .op(if has_else { "more_else" } else { "more" }, &[&cursor]);
+        self.store_private(ready, &more);
+        let available = self
+            .code
+            .value(&format!("icmp eq i64 {more}, {}", permanent::TRUE));
+        (cursor, available)
+    }
+    pub(crate) fn pull_item(&mut self, cursor: &str, key: usize) {
+        let item = self.code.op("next", &[cursor]);
+        self.store_private(key, &item);
+    }
     pub(crate) fn declare_int_add(&mut self) {
         self.code.declare_integer_arithmetic();
     }
@@ -154,13 +397,23 @@ impl Frame<'_, '_, '_> {
             true
         } else if matches!(
             expr.kind,
+            ExprKind::Builtin(Builtin::RegisteredAttribute { action: ir::AttributeAction::Store, .. }, _)
+        ) {
+            let mark = self.target_mark();
+            self.evaluate(expr);
+            self.target_release(mark.as_deref());
+            true
+        } else if matches!(
+            expr.kind,
             ExprKind::Builtin(
                 Builtin::GlobalSet(_)
                     | Builtin::RegisteredImport(_)
+                    | Builtin::RegisteredDeleteName(..)
+                    | Builtin::RegisteredModuleAnnotation(_)
+                    | Builtin::RegisteredAnnotationStart
+                    | Builtin::RegisteredAnnotationInsert { .. }
                     | Builtin::RegisteredAttribute {
-                        action: ir::AttributeAction::Store
-                            | ir::AttributeAction::Delete
-                            | ir::AttributeAction::InPlace(_),
+                        action: ir::AttributeAction::Delete | ir::AttributeAction::InPlace(_),
                         ..
                     },
                 _
@@ -189,7 +442,7 @@ impl Frame<'_, '_, '_> {
 
     pub(crate) fn return_result(&mut self, value: CheckedValue) {
         let value = self.materialize(&value);
-        self.code.return_value(&value);
+        self.code.return_from_scope(value);
     }
 
     pub(crate) fn terminated(&self) -> bool {
@@ -222,6 +475,10 @@ impl Frame<'_, '_, '_> {
     pub(crate) fn builtin(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
         let handle = match (op, operands) {
             (Builtin::RegisteredName(name), []) => self.code.lookup(name),
+            (Builtin::RegisteredName(name), [scope]) => {
+                let scope = self.evaluate_handle(scope);
+                self.code.named_op("lookup", &scope, name, "0")
+            }
             (Builtin::RegisteredSuspend(kind, range), [value]) => {
                 let names = self.names;
                 self.code.suspend_value(*kind, *range, |code| {
@@ -255,16 +512,43 @@ impl Frame<'_, '_, '_> {
                 self.code.namespace_import(import);
                 "0".to_owned()
             }
+            (Builtin::RegisteredAnnotationStart, []) => {
+                self.code.begin_annotations(None);
+                "0".to_owned()
+            }
+            (Builtin::RegisteredAnnotationInsert { index, name }, [value]) => {
+                let names = self.names;
+                self.code.insert_annotation(Some(*index), name, |code| {
+                    Frame { code, names }.evaluate_handle(value)
+                });
+                "0".to_owned()
+            }
+            (Builtin::RegisteredAnnotationResult, []) => self.code.take_annotation_result(),
+            (Builtin::RegisteredModuleAnnotation(annotation), []) => {
+                self.code.registered_module_annotation(annotation);
+                "0".to_owned()
+            }
+            (Builtin::RegisteredDeleteName(name, range), []) => {
+                let name = self.code.code_name(name);
+                let scope = self.code.scope.clone();
+                let (line, start) = self.code.source.positions.line_and_column(range.start());
+                let (_, end) = self.code.source.positions.line_and_column(range.end());
+                self.code
+                    .frame
+                    .op_at("delname", &[&scope, &name], Some([line, start, start, end]))
+            }
             (Builtin::GlobalSet(slot), [value]) => {
                 let value = self.evaluate_handle(value);
-                let name = self.names.expect("registered local names")[slot].clone();
+                let name = self.names.expect("registered local names").local_names[slot]
+                    .name
+                    .clone();
                 self.bind(&name, &value);
                 return CheckedValue::handle("0".into());
             }
             (Builtin::RegisteredSubscript(range, base_end), [base, key]) => {
                 let names = self.names;
                 self.code
-                    .subscript(base, key, *range, *base_end, |code, expr| {
+                    .subscript(base, key, Some((*range, *base_end)), |code, expr| {
                         Frame { code, names }.evaluate_handle(expr)
                     })
             }
@@ -287,7 +571,8 @@ impl Frame<'_, '_, '_> {
 
     pub(crate) fn bind(&mut self, name: &str, handle: &str) {
         let name = self.code.code_name(name);
-        self.code.assign_owned_name(&name, handle);
+        let scope = self.code.scope.clone();
+        self.code.assign_owned_name(&scope, &name, handle, None);
     }
 
     pub(crate) fn object_operation(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
@@ -362,17 +647,6 @@ impl Frame<'_, '_, '_> {
 
     pub(crate) fn protocol_add(&mut self, left: &str, right: &str) -> String {
         self.code.op("+", &[left, right])
-    }
-
-    pub(crate) fn assign_item(&mut self, receiver: &Expr, index: &Expr, value: &Expr) {
-        let (receiver, index, value) = crate::llvm::operations::assignment_operands(
-            self,
-            receiver,
-            index,
-            value,
-            Self::evaluate_handle,
-        );
-        self.code.put_item(&receiver, &index, &value);
     }
 }
 
@@ -479,25 +753,26 @@ impl Function<'_, '_> {
         &mut self,
         call: &ir::RegisteredCall,
         target: &T,
-        args: impl Iterator<Item = &'e T>,
+        mut args: impl Iterator<Item = &'e T>,
         partition: Option<(u32, String)>,
         mut evaluate: impl FnMut(&mut Self, &T) -> String,
     ) -> String {
         use ir::{RegisteredArguments, RegisteredCallTarget};
 
         let mark = self.temporary_mark();
+        if self.native_suspension
+            && let RegisteredCallTarget::Callable { suspended_name: Some(name), .. } = &call.target
+        {
+            self.call_position(*name);
+        }
+        let (scope, target) = if call.explicit_scope {
+            let scope = evaluate(self, target);
+            (scope, args.next().expect("scoped call has a target"))
+        } else {
+            (self.scope.clone(), target)
+        };
         let (callable, receiver, callee_end) = match &call.target {
-            RegisteredCallTarget::Callable {
-                end,
-                suspended_name,
-            } => {
-                if self.native_suspension
-                    && let Some(name) = suspended_name
-                {
-                    self.call_position(*name);
-                }
-                (evaluate(self, target), None, *end)
-            }
+            RegisteredCallTarget::Callable { end, .. } => (evaluate(self, target), None, *end),
             RegisteredCallTarget::Method { name, attribute } => self.unwind_operands(&mark, |f| {
                 let receiver = evaluate(f, target);
                 let direct = matches!(call.arguments, RegisteredArguments::Positional);
@@ -546,7 +821,7 @@ impl Function<'_, '_> {
         };
         let span = self.expression_range_span(call.range, callee_end, b'(');
         self.call_position(call.range);
-        self.call_at(&callable, operands, &mark, span)
+        self.call_in_scope(&callable, operands, &mark, span, &scope)
     }
 
     /// Python calls convert a lone starred operand after the keywords. Class bases
@@ -653,13 +928,13 @@ impl Function<'_, '_> {
         &mut self,
         base: &T,
         key: &T,
-        range: TextRange,
-        base_end: TextSize,
+        site: Option<(TextRange, TextSize)>,
         mut evaluate: impl FnMut(&mut Self, &T) -> String,
     ) -> String {
         let base = evaluate(self, base);
         let key = evaluate(self, key);
-        let span = self.expression_range_span(range, base_end, b'[');
+        let span =
+            site.and_then(|(range, base_end)| self.expression_range_span(range, base_end, b'['));
         self.op_at("get", &[&base, &key], span)
     }
 
@@ -739,12 +1014,51 @@ impl Function<'_, '_> {
         result
     }
 
-    pub(super) fn checked_body(&mut self, checked: &RegisteredFunction) {
+    pub(super) fn checked_block(
+        &mut self,
+        statements: &[Statement],
+        checked: &RegisteredFunction,
+    ) {
         CheckedBody::registered(Frame {
             code: self,
-            names: Some(&checked.local_names),
+            names: Some(checked),
         })
-        .emit_function(&checked.function);
+        .emit_block(statements);
+    }
+
+    /// Give each prepared suite private storage in the prologue of its physical function.
+    /// Residual source can enter another prepared suite before returning to this one.
+    pub(super) fn with_checked_slots(
+        &mut self,
+        checked: &RegisteredFunction,
+        emit: impl FnOnce(&mut Self),
+    ) {
+        let enclosing = std::mem::take(&mut self.iteration);
+        let roots = self.live_slots.len();
+        let first = self.private_slot_count;
+        self.iteration.private_slots = private_slots(checked).into_iter().collect();
+        self.iteration.first_slot = first;
+        let end = first + self.iteration.private_slots.len();
+        self.private_slot_count = end;
+        self.live_slots.extend(first..end);
+        ir::walk_statements(&checked.function.body, &mut |stmt| {
+            if let Statement::IterNext { iterator, .. } = stmt {
+                self.iteration.cursors.insert(*iterator);
+            }
+        });
+        emit(self);
+        self.live_slots.truncate(roots);
+        self.iteration = enclosing;
+    }
+
+    pub(super) fn checked_body(&mut self, checked: &RegisteredFunction) {
+        self.with_checked_slots(checked, |code| {
+            CheckedBody::registered(Frame {
+                code,
+                names: Some(checked),
+            })
+            .emit_function(&checked.function);
+        });
     }
 }
 

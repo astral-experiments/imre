@@ -279,6 +279,7 @@ fn call_site(call: &ast::ExprCall, target: ir::RegisteredCallTarget) -> ir::Regi
         range: call.range(),
         target,
         arguments: registered_argument_layout(&call.arguments),
+        explicit_scope: false,
     }
 }
 
@@ -431,6 +432,16 @@ impl Checker<'_> {
         node: &ast::Expr,
         module: &ModuleSource,
     ) -> Result<Option<Expr>, String> {
+        let source = module.context(self.source);
+        if matches!(
+            node,
+            ast::Expr::ListComp(_) | ast::Expr::DictComp(_) | ast::Expr::SetComp(_)
+        ) && let Some(plan) = imre_ast::comprehension::Plan::from_expr(node)
+            && !plan.suspends()
+        {
+            let value = self.lower_display(node, &plan, None)?;
+            return Ok(Some(source.located(node, value)));
+        }
         // A checked local with a fixed callable layout uses its original call checker.
         if let ast::Expr::Call(call) = node
             && let Some(name) = call.func.as_name_expr()
@@ -445,7 +456,6 @@ impl Checker<'_> {
             .as_name_expr()
             .and_then(|n| self.names.get(n.id.as_str()))
             .map(|&slot| self.local(slot));
-        let source = module.context(self.source);
         let graph = self.graph;
         let owner = self.module;
         let Some(mut value) = operation(
@@ -470,6 +480,16 @@ impl Checker<'_> {
                 self.binary_operands(node.as_bin_op_expr().unwrap(), *left, *right)?
             };
             return Ok(Some(source.located(node, value)));
+        }
+        if let Some(slot) = self.namespace {
+            match &mut value.kind {
+                ExprKind::Builtin(Builtin::RegisteredCall(call), args) => {
+                    args.insert(0, self.local(slot));
+                    call.explicit_scope = true;
+                }
+                ExprKind::Builtin(Builtin::RegisteredName(_), args) => args.push(self.local(slot)),
+                _ => {}
+            }
         }
         // Checked locals and exact literals keep their known types in the registered frame.
         value.ty = match &value.kind {

@@ -1089,13 +1089,21 @@ pub(crate) enum DictEntryKind {
     Unpack,
 }
 
-/// The first operand evaluates the callable or method receiver; all remaining
-/// operands are evaluated by the Python argument binder.
+/// The source declaration or future spelling of one simple module annotation.
+#[derive(Clone)]
+pub(crate) enum ModuleAnnotation {
+    Deferred(ruff_text_size::TextSize),
+    String { name: String, spelling: String },
+}
+
+/// A call evaluates its callable or method receiver before the argument binder runs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RegisteredCall {
     pub(crate) range: ruff_text_size::TextRange,
     pub(crate) target: RegisteredCallTarget,
     pub(crate) arguments: RegisteredArguments,
+    /// A comprehension supplies its Python namespace before the callable operand.
+    pub(crate) explicit_scope: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1696,6 +1704,16 @@ pub(crate) enum Builtin {
     RegisteredDefinition(ruff_text_size::TextSize),
     RegisteredImport(NamespaceImport),
     RegisteredSuspend(SuspendValue, ruff_text_size::TextRange),
+    /// A module annotation records execution at startup; its provider evaluates values on demand.
+    RegisteredModuleAnnotation(ModuleAnnotation),
+    RegisteredAnnotationStart,
+    RegisteredAnnotationInsert {
+        index: usize,
+        name: String,
+    },
+    RegisteredAnnotationResult,
+    /// Delete one current-scope binding, reporting a missing name at its source target.
+    RegisteredDeleteName(String, ruff_text_size::TextRange),
     RegisteredCall(RegisteredCall),
     /// Resolve the code name in the live registered Python scope.
     RegisteredName(String),
@@ -1715,6 +1733,15 @@ pub(crate) enum Builtin {
     RegisteredComplex(f64, f64),
     /// Little-endian Python code points preserve non-scalar values and linked literal identity.
     RegisteredString(Vec<u8>),
+    /// Acquire an iterator through the Python protocol on the original heap object.
+    RegisteredIter,
+    /// Snapshot a sequence for ordered target stores, including the optional starred remainder.
+    RegisteredUnpack {
+        count: usize,
+        star: Option<usize>,
+    },
+    /// Allocate a child of the supplied Python namespace, declaring its private target names.
+    RegisteredNamespace(Vec<String>),
     GeneratorFrameEnter(String),
     GeneratorFrameLeave,
     SysSetRecursionLimit,

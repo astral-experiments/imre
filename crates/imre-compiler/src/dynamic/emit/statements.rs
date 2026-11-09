@@ -282,22 +282,73 @@ impl Function<'_, '_> {
         }
     }
 
-    pub(super) fn statements(&mut self, suite: &[ast::Stmt]) {
-        for stmt in suite {
-            if self.body.terminated {
-                if self.module_annotation_sites.is_none() {
-                    break;
+    fn start_statement(&mut self) -> bool {
+        if self.body.terminated {
+            if self.module_annotation_sites.is_none() {
+                return false;
+            }
+            // Unreachable statements still contribute to a module provider's site order.
+            let dead = self.name("b");
+            self.label(&dead);
+        }
+        true
+    }
+
+    /// A physically complete frame takes the canonical function entry. Partial
+    /// frames interleave its checked blocks with only their unprepared source.
+    pub(super) fn prepared_function(
+        &mut self,
+        prepared: &crate::frontend::RegisteredSuite,
+        emit_source: impl FnMut(&mut Self, std::ops::Range<usize>),
+    ) {
+        if prepared.fully_checked() {
+            self.checked_body(&prepared.checked);
+        } else {
+            self.checked_runs(prepared, emit_source);
+        }
+    }
+
+    pub(super) fn checked_runs(
+        &mut self,
+        prepared: &crate::frontend::RegisteredSuite,
+        mut emit_source: impl FnMut(&mut Self, std::ops::Range<usize>),
+    ) {
+        self.with_checked_slots(&prepared.checked, |code| {
+            let body = &prepared.checked.function.body;
+            let mut offset = 0;
+            for run in &prepared.residual {
+                if offset < run.at && code.start_statement() {
+                    code.checked_block(&body[offset..run.at], &prepared.checked);
                 }
-                // Unreachable statements still contribute to a module provider's site order.
-                let dead = self.name("b");
-                self.label(&dead);
+                emit_source(code, run.statements.clone());
+                offset = run.at;
+            }
+            if offset < body.len() && code.start_statement() {
+                code.checked_block(&body[offset..], &prepared.checked);
+            }
+        });
+    }
+
+    pub(super) fn statements(&mut self, suite: &[ast::Stmt]) {
+        if self.prepare_nested_suites {
+            if let Some(first) = suite.first() {
+                let plan = &self.source.nested_bodies[&first.start()];
+                self.checked_runs(plan, |code, run| code.source_statements(&suite[run]));
+            }
+        } else {
+            self.source_statements(suite);
+        }
+    }
+
+    pub(super) fn source_statements(&mut self, suite: &[ast::Stmt]) {
+        for stmt in suite {
+            if !self.start_statement() {
+                break;
             }
             self.checkpoint(stmt);
             self.simple_call = imre_ast::unhighlighted_call(stmt);
-            if let Some(import) =
-                crate::frontend::registered_import(stmt, Some(&self.source.private_names))
-            {
-                self.registered_value(&import);
+            if let Some(import) = self.source.namespace_operations.get(&stmt.range()) {
+                self.registered_value(import);
                 continue;
             }
             if let Some(effects) = crate::frontend::attribute_effects(stmt) {
@@ -367,6 +418,10 @@ impl Function<'_, '_> {
                 }
                 ast::Stmt::Delete(v) => {
                     for target in crate::frontend::delete_targets(v) {
+                        if let Some(binding) = self.source.namespace_operations.get(&target.range()) {
+                            self.registered_value(binding);
+                            continue;
+                        }
                         if let ast::Expr::Attribute(field) = target {
                             self.attribute_operation(
                                 crate::ir::AttributeAction::Delete,
@@ -378,9 +433,6 @@ impl Function<'_, '_> {
                             continue;
                         }
                         match self.place(target) {
-                            Some(Place::Name(name)) => {
-                                self.frame.op("delname", &[&self.scope.clone(), &name]);
-                            }
                             Some(Place::Item(obj, key)) => {
                                 self.op("delitem", &[&obj, &key]);
                             }
@@ -410,21 +462,20 @@ impl Function<'_, '_> {
                             _ => {}
                         }
                     }
-                    if let ast::Expr::Name(name) = &*v.target
+                    if self.module
+                        && let Some(marker) =
+                            self.source.namespace_operations.get(&v.target.range())
+                    {
+                        self.registered_value(marker);
+                    } else if let ast::Expr::Name(name) = &*v.target
                         && v.simple
-                        && (self.module || self.class_locals.is_some())
+                        && self.class_locals.is_some()
                     {
                         let key = self.code_name(name.id.as_str());
-                        if self.class_locals.is_some() && !self.source.string_annotations {
+                        if !self.source.string_annotations {
                             self.remember_annotation(v, name.id.as_str());
                             let offset = v.start().to_u32();
                             self.frame.checked(&format!("call i64 @imre_dyn_mark_class_annotation(ptr %ctx, i64 {}, i64 {key}, i32 {offset})", self.scope));
-                        } else if let Some(sites) = &mut self.module_annotation_sites {
-                            let index = sites.len();
-                            sites.push((name.id.to_string(), (*v.annotation).clone()));
-                            let index = self.integer(index);
-                            self.frame
-                                .op("mark_module_annotation", &[&self.scope.clone(), &index]);
                         } else {
                             let value = self.annotation_text(
                                 &crate::frontend::annotation_spelling(&v.annotation),
@@ -484,10 +535,7 @@ impl Function<'_, '_> {
                         .value
                         .as_deref()
                         .map_or_else(|| "0".into(), |e| self.expr(e));
-                    self.live.push(value.clone());
-                    self.run_cleanups(0, Some(&value));
-                    self.live.pop();
-                    self.return_value(&value);
+                    self.return_from_scope(value);
                 }
                 ast::Stmt::Match(v) => self.match_statement(v),
                 ast::Stmt::If(v) => {
@@ -801,7 +849,10 @@ impl Function<'_, '_> {
                 let mut flags = self.source.function_flags(
                     params,
                     nested,
-                    self.class_locals.is_some() && !self.annotation_lookup && !header && !generic,
+                    self.class_locals.is_some()
+                        && self.annotation_values.is_none()
+                        && !header
+                        && !generic,
                 );
                 if doc.is_some() {
                     flags |= code_flags::HAS_DOCSTRING;
@@ -912,7 +963,10 @@ impl Function<'_, '_> {
             if captures_class {
                 signature["class_cell"] = json!(true);
             }
-            if self.class_locals.is_some() && !self.annotation_lookup && type_params.is_none() {
+            if self.class_locals.is_some()
+                && self.annotation_values.is_none()
+                && type_params.is_none()
+            {
                 signature["method_class_cell"] = json!(captures_class);
             }
         }
@@ -960,7 +1014,7 @@ impl Function<'_, '_> {
                     std::mem::take(names),
                     self.source.string_annotations,
                 );
-                if self.class_locals.is_some() && !self.annotation_lookup {
+                if self.class_locals.is_some() && self.annotation_values.is_none() {
                     signature["method_class_cell"] =
                         json!(closure_names.reads.contains("__class__"));
                 }
@@ -1108,15 +1162,44 @@ impl Function<'_, '_> {
         self.op("annotation_format", &[&format]);
     }
 
+    pub(super) fn registered_module_annotation(
+        &mut self,
+        annotation: &crate::ir::ModuleAnnotation,
+    ) {
+        match annotation {
+            crate::ir::ModuleAnnotation::Deferred(site) => {
+                let name = &self.source.module_annotations[site].name;
+                self.code_name(name);
+                let sites = self
+                    .module_annotation_sites
+                    .as_mut()
+                    .expect("module annotation provider");
+                // A finally suite can emit the same declaration on several independent paths.
+                let index = sites.len();
+                sites.push(*site);
+                let index = self.integer(index);
+                self.frame
+                    .op("mark_module_annotation", &[&self.scope.clone(), &index]);
+            }
+            crate::ir::ModuleAnnotation::String { name, spelling } => {
+                let name = self.code_name(name);
+                let value = self.annotation_text(spelling);
+                self.frame
+                    .op("annotate", &[&self.scope.clone(), &name, &value]);
+            }
+        }
+    }
+
     /// Publish a module's provider before its first statement. Every simple
     /// annotation, including an unconditional one, becomes visible only after
     /// execution reaches its assignment.
-    pub(super) fn setup_deferred_module_annotations(&mut self, sites: &[(String, ast::Expr)]) {
+    pub(super) fn setup_deferred_module_annotations(&mut self, sites: &[TextSize]) {
         if !sites.is_empty() {
-            let entries = sites
+            let entries: Vec<_> = sites
                 .iter()
-                .map(|(name, expr)| (name.as_str(), expr))
+                .map(|site| &self.source.module_annotations[site])
                 .collect();
+            let plan = crate::frontend::DeferredModuleAnnotation::prepare_body(&entries);
             let signature = self.text(
                 &json!({
                     "posonly": ["format"], "scope_complete": true, "scope_locals_complete": true,
@@ -1127,7 +1210,7 @@ impl Function<'_, '_> {
             let code = self.frame.output.definition(
                 self.source,
                 String::new(),
-                Body::ModuleAnnotations(entries),
+                Body::ModuleAnnotations(&plan, &entries),
                 self.source.module_start,
                 false,
                 Entry::Compiled,
@@ -1140,49 +1223,90 @@ impl Function<'_, '_> {
             .op("setup_module_annotations", &[&self.scope.clone()]);
     }
 
+    pub(super) fn begin_annotations(&mut self, class: Option<ClassBindings>) {
+        self.check_annotation_format();
+        self.annotation_values = Some(self.op("dict", &[]));
+        // Annotation expressions resolve outside the provider's public format parameter.
+        self.scope = self.frame.op("annotation_scope", &[&self.scope.clone()]);
+        self.class_locals = class;
+    }
+
+    pub(super) fn insert_annotation(
+        &mut self,
+        index: Option<usize>,
+        name: &str,
+        evaluate: impl FnOnce(&mut Self) -> String,
+    ) {
+        let after = index.map(|index| {
+            let active = self.lookup("__conditional_annotations__");
+            let index = self.integer(index);
+            let present = self.op("in", &[&index, &active]);
+            let condition = self.truth(&present);
+            let yes = self.name("b");
+            let after = self.name("b");
+            self.branch(&condition, &yes, &after);
+            self.label(&yes);
+            after
+        });
+        let key = self.code_name(name);
+        let value = evaluate(self);
+        let values = self
+            .annotation_values
+            .as_ref()
+            .expect("annotation dictionary")
+            .clone();
+        self.op("put", &[&values, &key, &value]);
+        if let Some(after) = after {
+            self.jump(&after);
+            self.label(&after);
+        }
+    }
+
+    pub(super) fn take_annotation_result(&mut self) -> String {
+        self.annotation_values
+            .take()
+            .expect("annotation dictionary")
+    }
+
+    pub(super) fn unprepared_annotation(
+        &mut self,
+        index: usize,
+        entry: &crate::frontend::DeferredModuleAnnotation,
+    ) {
+        use crate::frontend::AnnotationValue;
+
+        self.insert_annotation(Some(index), &entry.name, |code| match &entry.value {
+            AnnotationValue::Source(expression) => code.source_annotation_value(expression),
+            AnnotationValue::Forward { text, parsed } => code.preparsed_annotation_text(text, parsed),
+            AnnotationValue::Checked(_) => unreachable!("checked annotation outside its prepared run"),
+        });
+    }
+
     pub(super) fn annotations(
         &mut self,
         entries: &[(&str, &ast::Expr)],
         class: Option<ClassBindings>,
-        module: bool,
     ) {
-        self.check_annotation_format();
-        let values = self.op("dict", &[]);
-        // The public format parameter is outside the annotation expressions' lexical scope.
-        self.scope = self.frame.op("annotation_scope", &[&self.scope.clone()]);
-        self.annotation_lookup = true;
-        self.class_locals = class;
-        for (index, &(name, expression)) in entries.iter().enumerate() {
-            let after = module.then(|| {
-                let active = self.lookup("__conditional_annotations__");
-                let index = self.integer(index);
-                let present = self.op("in", &[&index, &active]);
-                let condition = self.truth(&present);
-                let yes = self.name("b");
-                let after = self.name("b");
-                self.branch(&condition, &yes, &after);
-                self.label(&yes);
-                after
-            });
-            let key = self.code_name(name);
-            let value = if self.source.string_annotations {
-                self.annotation_text(&crate::frontend::annotation_spelling(expression))
-            } else if let ast::Expr::Starred(starred) = expression {
-                let value = self.expr(&starred.value);
-                let count = self.integer(1);
-                let items = self.op("unpack", &[&value, &count, "0"]);
-                let index = self.integer(0);
-                self.op("get", &[&items, &index])
-            } else {
-                self.annotation_value(expression)
-            };
-            self.op("put", &[&values, &key, &value]);
-            if let Some(after) = after {
-                self.jump(&after);
-                self.label(&after);
-            }
+        self.begin_annotations(class);
+        for &(name, expression) in entries {
+            self.insert_annotation(None, name, |code| code.source_annotation_value(expression));
         }
-        self.end(&format!("ret i64 {values}"));
+        let values = self.take_annotation_result();
+        self.return_value(&values);
+    }
+
+    fn source_annotation_value(&mut self, expression: &ast::Expr) -> String {
+        if self.source.string_annotations {
+            self.annotation_text(&crate::frontend::annotation_spelling(expression))
+        } else if let ast::Expr::Starred(starred) = expression {
+            let value = self.expr(&starred.value);
+            let count = self.integer(1);
+            let items = self.op("unpack", &[&value, &count, "0"]);
+            let index = self.integer(0);
+            self.op("get", &[&items, &index])
+        } else {
+            self.annotation_value(expression)
+        }
     }
 
     fn annotation_value(&mut self, expression: &ast::Expr) -> String {
@@ -1280,7 +1404,7 @@ impl Function<'_, '_> {
                     code.expr(&field.value)
                 });
                 if owned {
-                    self.release_replaced("2");
+                    self.release_target(None);
                 }
                 return;
             }
@@ -1288,11 +1412,12 @@ impl Function<'_, '_> {
                 if let Some(p) = self.place(target) {
                     if owned {
                         if let Place::Name(name) = &p {
-                            self.assign_owned_name(name, value);
+                            let scope = self.scope.clone();
+                            self.assign_owned_name(&scope, name, value, None);
                         } else {
                             self.write(&p, value);
                             // An item setter may replace a writer.
-                            self.release_replaced("2");
+                            self.release_target(None);
                         }
                     } else {
                         self.write(&p, value);
@@ -1684,6 +1809,13 @@ impl Function<'_, '_> {
     }
 
     /// Collect discarded owners while retaining the operands needed after the transfer.
+    pub(super) fn return_from_scope(&mut self, value: String) {
+        self.live.push(value.clone());
+        self.run_cleanups(0, Some(&value));
+        self.live.pop();
+        self.return_value(&value);
+    }
+
     /// A return, break or continue inside a finally may replace the pending exit.
     fn run_cleanups(&mut self, depth: usize, pending: Option<&str>) {
         let active = self.exits.clone();
@@ -1717,7 +1849,7 @@ impl Function<'_, '_> {
                     }
                     let slot = self.live.iter().rposition(|live| live == value).unwrap();
                     discarded.push((slot, self.live.remove(slot)));
-                    self.release_replaced("2");
+                    self.release_target(None);
                 }
                 Cleanup::Finally {
                     body,

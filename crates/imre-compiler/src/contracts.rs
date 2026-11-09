@@ -678,6 +678,11 @@ impl Builtin {
             Self::ObjectCall(..)
             | Self::RegisteredImport(_)
             | Self::RegisteredSuspend(..)
+            | Self::RegisteredModuleAnnotation(_)
+            | Self::RegisteredAnnotationStart
+            | Self::RegisteredAnnotationInsert { .. }
+            | Self::RegisteredAnnotationResult
+            | Self::RegisteredDeleteName(..)
             | Self::RegisteredDefinition(_)
             | Self::RegisteredStatement(..)
             | Self::RegisteredName(_)
@@ -688,6 +693,9 @@ impl Builtin {
             | Self::RegisteredEllipsis
             | Self::RegisteredComplex(..)
             | Self::RegisteredString(_)
+            | Self::RegisteredNamespace(_)
+            | Self::RegisteredUnpack { .. }
+            | Self::RegisteredIter
             | Self::RegisteredCall(..)
             | Self::SortByComparator => Contract::new(true, Unknown),
             Self::ListReserveRange | Self::StructCyclePrefix => Contract::new(false, PreservesOwners),
