@@ -610,7 +610,7 @@ fn initializer_calls_use_original_bindings_and_all_arguments() {
             session.add(path, source, crate::SourceKind::File).unwrap();
         }
         session
-            .initializer_call_error((0, &paths[0].0), |name| {
+            .initializer_call_error((0, &paths[0].0), true, |name| {
                 (name == "scores").then_some((1, &paths[1].0))
             })
             .map(|e| e.to_string())
@@ -732,6 +732,7 @@ fn a_linked_signature_requires_a_reaching_initializer_call() {
             sources.iter().enumerate().map(|(index, source)| {
                 let mut registered = RegisteredSource::new(source, false, None);
                 registered.initial = index == 0;
+                registered.main_body = index == 0;
                 registered.declares_signatures = index == 0 || declares;
                 registered
             }),
@@ -739,6 +740,20 @@ fn a_linked_signature_requires_a_reaching_initializer_call() {
             None,
         )
     };
+    let read = "from __main__ import take as use\nif False: use('x')\n";
+    let take = "def take(n: int): return n\n";
+    assert!(
+        check(&format!("{take}import rules\n"), read, true)
+            .unwrap_err()
+            .contains("rules.py:2:15")
+    );
+    check(&format!("import rules\n{take}"), read, true).unwrap();
+    check(
+        "def __class__(n: int): pass\nfrom __main__ import __class__ as cls\ncls('child')\n",
+        "",
+        true,
+    )
+    .unwrap();
     let bad = "def take(n: int): return n\ntake('x')\n";
     let error = check("from rules import take\n", bad, true).unwrap_err();
     assert!(error.contains("rules.py:2:6"), "{error}");

@@ -950,9 +950,12 @@ fn checked_lower_with(
     let call_error = analysis::ClosedSource::project_path(&graph.modules[graph.entry])
         .filter(|_| !registered_entry)
         .and_then(|entry| {
+            // Python startup and -m have a separately selected registration.
+            let runs_as_main = graph.command_startup.is_none()
+                && graph.python_file("__main__") == Some(graph.entry);
             graph
                 .session
-                .initializer_call_error((graph.entry, entry), |name| {
+                .initializer_call_error((graph.entry, entry), runs_as_main, |name| {
                     let id = graph.python_file(name)?;
                     Some((
                         id,

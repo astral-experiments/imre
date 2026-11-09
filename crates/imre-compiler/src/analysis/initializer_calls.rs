@@ -2,10 +2,9 @@
 
 use super::{Session, concrete_scalar};
 use crate::frontend::phase::{Diagnostic, Kind};
-use ruff_db::files::File;
 use ruff_python_ast::helpers::Truthiness;
 use ruff_python_ast::{Expr, ExprCall, Stmt};
-use ruff_text_size::{Ranged, TextRange};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 use std::{collections::HashSet, path::Path};
 use ty_python_core::FileScopeId;
 use ty_python_core::definition::{Definition, DefinitionKind};
@@ -99,17 +98,30 @@ fn statement_call(mut stmt: &Stmt, bound_name: impl Fn(&Expr) -> bool) -> Option
 }
 
 impl Session {
+    pub(super) fn empty_initializer(&self, module: usize) -> bool {
+        after_docstring(self.parsed(self.files[module]).suite())
+            .iter()
+            .all(Stmt::is_pass_stmt)
+    }
+
     /// Follow the selected initializer only while its imported sources, callable and
     /// operand evaluations are known. A registered module can still lose to sys.modules.
     pub(crate) fn initializer_call_error<'a>(
         &self,
         entry: (usize, &'a Path),
+        runs_as_main: bool,
         application_module: impl Fn(&str) -> Option<(usize, &'a Path)>,
     ) -> Option<Diagnostic> {
         // These semantic queries establish a diagnostic. Only native lowering's
         // layout queries should retain a hint session for subsequent compilations.
         let hints = self.hint_reads.get();
-        let error = self.reached_initializer_error(entry, application_module);
+        let error = self.reached_initializer_error(entry, |name| {
+            if name == "__main__" {
+                runs_as_main.then_some(entry)
+            } else {
+                application_module(name)
+            }
+        });
         self.hint_reads.set(hints);
         error
     }
@@ -119,6 +131,9 @@ impl Session {
         entry: (usize, &'a Path),
         application_module: impl Fn(&str) -> Option<(usize, &'a Path)>,
     ) -> Option<Diagnostic> {
+        // The startup module is already in sys.modules. Its namespace is visible
+        // to imports before its initializer finishes, including from a child.
+        let mut resident = (entry.0, TextSize::default());
         let mut entered = HashSet::from([entry.0]);
         let mut pending = vec![(entry, 0, Vec::new())];
         while let Some(((module, path), start, mut imports)) = pending.pop() {
@@ -130,7 +145,12 @@ impl Session {
                 .enumerate()
                 .skip(start)
             {
-                if let Some(owner) = self.initializer_import(stmt, &model, &application_module) {
+                if module == resident.0 {
+                    resident.1 = stmt.start();
+                }
+                if let Some(owner) =
+                    self.initializer_import(stmt, &model, entry.0, &application_module)
+                {
                     let file = self.files[owner.0];
                     // Loading from a module may query __path__ or a missing member.
                     let passive_load = stmt.as_import_from_stmt().is_none_or(|import| {
@@ -140,13 +160,15 @@ impl Session {
                             .place_table(FileScopeId::global())
                             .symbol_id("__getattr__")
                             .is_none()
-                            && import
-                                .names
-                                .iter()
-                                .all(|a| self.initialized_function(file, a.name.as_str()).is_some())
+                            && import.names.iter().all(|a| {
+                                self.initialized_function(owner.0, a.name.as_str(), resident)
+                                    .is_some()
+                            })
                     });
-                    if self.parsed(file).suite().iter().all(passive) && passive_load {
-                        imports.push((stmt.range(), file));
+                    if passive_load
+                        && (owner.0 == resident.0 || self.parsed(file).suite().iter().all(passive))
+                    {
+                        imports.push((stmt.range(), owner.0));
                         pending.push(((module, path), i + 1, imports));
                     }
                     if entered.insert(owner.0) {
@@ -164,8 +186,8 @@ impl Session {
                             .classified(Kind::ExecutionOperand(module)),
                     );
                 }
-                if let Some(error) =
-                    self.initializer_statement_error(module, &parsed, &model, stmt, &imports)
+                if let Some(error) = self
+                    .initializer_statement_error(module, &parsed, &model, stmt, &imports, resident)
                 {
                     return Some(error.with_path(path));
                 }
@@ -181,6 +203,7 @@ impl Session {
         &self,
         stmt: &Stmt,
         model: &SemanticModel<'_>,
+        entry: usize,
         application_module: &impl Fn(&str) -> Option<(usize, &'a Path)>,
     ) -> Option<(usize, &'a Path)> {
         let name = match stmt {
@@ -192,13 +215,17 @@ impl Session {
             }
             _ => return None,
         };
+        let (id, path) = application_module(name)?;
+        // The launcher name can also reimport the same source in a new namespace.
+        if id == entry {
+            return (name == "__main__").then_some((id, path));
+        }
         // A package can execute parent initialization. A preloaded provider may already
         // occupy sys.modules even when search-path discovery found a Python file.
         if name.contains('.') || !unambiguous_file_module(name) {
             return None;
         }
         let owner = model.resolve_module(Some(name), 0)?.file(&self.db)?;
-        let (id, path) = application_module(name)?;
         (self.files[id] == owner
             && path.extension().is_some_and(|ext| ext == "py")
             && path.file_stem().is_some_and(|s| s == name))
@@ -211,7 +238,8 @@ impl Session {
         parsed: &ruff_db::parsed::ParsedModuleRef,
         model: &SemanticModel<'_>,
         stmt: &Stmt,
-        imports: &[(TextRange, File)],
+        imports: &[(TextRange, usize)],
+        resident: (usize, TextSize),
     ) -> Option<Diagnostic> {
         let file = self.files[module];
         let call = statement_call(stmt, |name| {
@@ -245,7 +273,7 @@ impl Session {
         };
         let def = if let Some((site, name)) = member {
             let owner = imports.iter().find(|(r, _)| *r == site)?.1;
-            self.initialized_function(owner, name)?
+            self.initialized_function(owner, name, resident)?
         } else {
             binding
         };
@@ -283,7 +311,21 @@ impl Session {
         None
     }
 
-    fn initialized_function(&self, owner: File, name: &str) -> Option<Definition<'_>> {
+    fn initialized_function(
+        &self,
+        module: usize,
+        name: &str,
+        resident: (usize, TextSize),
+    ) -> Option<Definition<'_>> {
+        // Exact modules return ordinary fields directly. Known ModuleType methods
+        // are non-data descriptors; other special attributes need runtime lookup.
+        if module == resident.0
+            && name.starts_with("__")
+            && !imre_ast::providers::MODULE_METHODS.contains(&name)
+        {
+            return None;
+        }
+        let owner = self.files[module];
         let global = FileScopeId::global();
         let index = ty_python_core::semantic_index(&self.db, self.db.program_file(owner));
         let symbol = index.place_table(global).symbol_id(name)?;
@@ -299,6 +341,9 @@ impl Session {
         };
         let parsed = self.parsed(owner);
         let range = function.node(&parsed).range();
+        if module == resident.0 && range.end() > resident.1 {
+            return None;
+        }
         parsed
             .suite()
             .iter()
