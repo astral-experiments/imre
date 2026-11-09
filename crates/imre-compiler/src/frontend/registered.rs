@@ -931,11 +931,28 @@ impl SourceScope<'_> {
         }
     }
 
-    fn ordinary_operand(&self, expr: &ast::Expr) -> Option<Expr> {
-        values::registered_value(expr, self.source)
+    fn ordinary_operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
+        let value = if let ast::Expr::Named(named) = expr {
+            let target = named.target.as_name_expr()?;
+            let value = self.ordinary_operand(&named.value)?;
+            Expr {
+                ty: value.ty,
+                kind: ExprKind::Bind(self.slot(&target.id), Box::new(value)),
+            }
+        } else {
+            values::operation(
+                expr,
+                self.source,
+                None,
+                |_| true,
+                |child| self.ordinary_operand(child).ok_or(()),
+            )
+            .ok()??
+        };
+        Some(self.source.located(expr, value))
     }
 
-    fn operand(&self, expr: &ast::Expr) -> Option<Expr> {
+    fn operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
         // The current loop cursor lives in this native activation; a suspension
         // across a pull needs a persisted cursor in the generator frame.
         if self.loop_depth == 0
@@ -1155,6 +1172,51 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn nested_walruses_share_the_checked_method_and_packed_call() {
+        let graph =
+            SourceGraph::single("(outer := (inner := obj.method(callback(*args, **kw))))\n").unwrap();
+        let entry = &graph.modules[graph.entry];
+        let source = values::ModuleSource::new(entry);
+        let suite = registered_suite(
+            &entry.parsed.syntax().body,
+            RegisteredScope::Module,
+            source.context(&entry.source),
+        )
+        .unwrap();
+        let mut binds = Vec::new();
+        let mut calls = Vec::new();
+        ir::walk_expressions(&suite.function.body, &mut |expr| match &expr.kind {
+            ExprKind::Bind(slot, rhs) => {
+                assert_eq!(expr.ty, rhs.ty);
+                binds.push(suite.local_names[slot].name.as_str());
+            }
+            ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
+                match &call.target {
+                    ir::RegisteredCallTarget::Method { name, .. } => {
+                        assert_eq!(call.arguments, ir::RegisteredArguments::Positional);
+                        assert_eq!(operands.len(), 2);
+                        calls.push(name.as_str());
+                    }
+                    ir::RegisteredCallTarget::Callable { .. } => {
+                        assert_eq!(operands.len(), 3);
+                        assert_eq!(
+                            call.arguments,
+                            ir::RegisteredArguments::Packed(ir::PackedArguments {
+                                starred: vec![true],
+                                keywords: vec![None],
+                            })
+                        );
+                        calls.push("packed");
+                    }
+                }
+            }
+            _ => {}
+        });
+        assert_eq!(binds, ["outer", "inner"]);
+        assert_eq!(calls, ["method", "packed"]);
     }
 
     #[test]

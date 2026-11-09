@@ -329,6 +329,17 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 }
                 Entry::Registered(frame) => CheckedValue::handle(frame.lookup_local(*slot)),
             },
+            ExprKind::Bind(slot, rhs) => match &mut self.0 {
+                Entry::Native(emitter) => {
+                    CheckedValue::owned(emitter.bind_value(*slot, rhs, Ownership::Owned))
+                }
+                Entry::Registered(frame) => {
+                    let mark = frame.mark();
+                    let handle = frame.evaluate_handle(rhs);
+                    frame.bind_expression(*slot, &mark, &handle);
+                    CheckedValue::handle(handle)
+                }
+            },
             ExprKind::Conditional(test, yes, no) => match &mut self.0 {
                 Entry::Native(emitter) => CheckedValue::owned(emitter.conditional(test, yes, no)),
                 Entry::Registered(frame) => frame.select(test, yes, no),
@@ -484,6 +495,42 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
 }
 
 impl Emitter<'_, '_> {
+    /// An immediate consumer may borrow the new binding. Other consumers own the RHS
+    /// independently of any conversion or subsequent replacement of the stored value.
+    pub(super) fn bind_value(&mut self, slot: usize, rhs: &Expr, ownership: Ownership) -> Value {
+        let value = self.expr(rhs);
+        if matches!(ownership, Ownership::Owned) {
+            self.retain(&value);
+        }
+        let storage = self.locals[slot];
+        let stored = if storage == value.ty {
+            value.clone()
+        } else if value.ty == Type::None {
+            Value {
+                ty: storage,
+                operand: "0".into(),
+                small_integer: false,
+            }
+        } else if matches!(
+            self.module.types.payload(storage).unwrap_or(storage),
+            Type::Union(_)
+        ) && matches!(
+            self.module.types.payload(value.ty).unwrap_or(value.ty),
+            Type::Str
+                | Type::Bytes
+                | Type::List(_)
+                | Type::Class(_)
+                | Type::Exception
+                | Type::NamedException(_)
+        ) {
+            self.union_inject(value.clone(), storage)
+        } else {
+            self.present(value.clone(), storage)
+        };
+        self.store(slot, &stored);
+        value
+    }
+
     fn prepare_assignment(&mut self, slot: usize, expression: &Expr) -> Option<bool> {
         if let Some(cursor) = self.forward_cursors.get(&slot).cloned() {
             self.assign_forward_cursor(slot, expression, cursor);

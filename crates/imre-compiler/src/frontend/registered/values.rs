@@ -315,7 +315,7 @@ pub(in crate::frontend) fn call_with_target<E>(
 }
 
 /// Select one registered-frame operation before requesting its operands in source order.
-fn operation<E>(
+pub(super) fn operation<E>(
     node: &ast::Expr,
     source: RegisteredSource<'_>,
     local: Option<Expr>,

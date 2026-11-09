@@ -3114,40 +3114,10 @@ impl Emitter<'_, '_> {
             | ExprKind::Bool(_)
             | ExprKind::None
             | ExprKind::Local(_)
+            | ExprKind::Bind(..)
             | ExprKind::Binary(..)
             | ExprKind::Conditional(..)
             | ExprKind::Builtin(..) => unreachable!("shared IR expression"),
-            ExprKind::Bind(slot, expression) => {
-                let value = self.expr(expression);
-                self.retain(&value);
-                let storage = self.locals[*slot];
-                let stored = if storage == value.ty {
-                    value.clone()
-                } else if value.ty == Type::None {
-                    Value {
-                        ty: storage,
-                        operand: "0".into(),
-                        small_integer: false,
-                    }
-                } else if matches!(
-                    self.module.types.payload(storage).unwrap_or(storage),
-                    Type::Union(_)
-                ) && matches!(
-                    self.module.types.payload(value.ty).unwrap_or(value.ty),
-                    Type::Str
-                        | Type::Bytes
-                        | Type::List(_)
-                        | Type::Class(_)
-                        | Type::Exception
-                        | Type::NamedException(_)
-                ) {
-                    self.union_inject(value.clone(), storage)
-                } else {
-                    self.present(value.clone(), storage)
-                };
-                self.store(*slot, &stored);
-                value
-            }
             ExprKind::List(values) => {
                 let list = if expression.ty == Type::ListInt {
                     self.call("imre_list_new", expression.ty, &[])
@@ -4855,8 +4825,7 @@ impl Emitter<'_, '_> {
             ] = expressions
             && self.locals[*slot] == rhs.ty
         {
-            let value = self.expr(rhs);
-            self.store(*slot, &value);
+            let value = self.bind_value(*slot, rhs, Ownership::Borrowed);
             return self.truth(&value);
         }
         let probe_index = builtin.tuple_probe_index();
