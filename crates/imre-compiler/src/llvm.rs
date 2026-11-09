@@ -3214,6 +3214,8 @@ impl Emitter<'_, '_> {
             ExprKind::Int(_)
             | ExprKind::Bool(_)
             | ExprKind::None
+            | ExprKind::Str(_)
+            | ExprKind::Dict { .. }
             | ExprKind::Local(_)
             | ExprKind::Binary(..)
             | ExprKind::Builtin(..) => unreachable!("shared IR expression"),
@@ -3221,10 +3223,6 @@ impl Emitter<'_, '_> {
                 ty: Type::Float,
                 operand: format!("0x{:016X}", value.to_bits()),
                 small_integer: false,
-            },
-            ExprKind::Str(value) => Value {
-                ty: expression.ty,
-                ..self.pooled_literal(value.as_bytes(), Type::Str)
             },
             ExprKind::Bytes(value) => self.pooled_literal(value, Type::Bytes),
             ExprKind::Bind(slot, expression) => {
@@ -3318,30 +3316,6 @@ impl Emitter<'_, '_> {
                     }
                 }
                 list
-            }
-            ExprKind::Dict {
-                key,
-                value,
-                entries,
-            } => {
-                let dict = Value {
-                    ty: expression.ty,
-                    operand: self.instruction(format!(
-                        "call ptr @imre_dict_new(i32 {}, i32 {})",
-                        representation_kind(*key, &self.module.types),
-                        representation_kind(*value, &self.module.types)
-                    )),
-                    small_integer: false,
-                };
-                let dict = self.owned(dict);
-                for (key, value) in entries {
-                    let key = self.operand(key);
-                    let value = self.operand(value);
-                    self.set_item(&dict, &key.value, &value.value, false);
-                    self.release_operand(&value);
-                    self.release_operand(&key);
-                }
-                dict
             }
             ExprKind::Set { element, values } => {
                 let set = Value {
@@ -5036,7 +5010,8 @@ impl Emitter<'_, '_> {
             })
             .collect::<Vec<_>>();
         let result = match builtin {
-            Builtin::RegisteredStatement(..)
+            Builtin::RegisteredDefinition(_)
+            | Builtin::RegisteredStatement(..)
             | Builtin::RegisteredCall(..)
             | Builtin::RegisteredLocation(_) => {
                 unreachable!("registered operation in fixed calling convention")

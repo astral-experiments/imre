@@ -506,13 +506,7 @@ impl Checker<'_> {
             for arg in &call.arguments.args {
                 operands.push(self.expr(arg)?);
             }
-            return Ok(Expr {
-                ty: Type::PythonObject,
-                kind: ExprKind::Builtin(
-                    Builtin::RegisteredCall(call.range(), call.func.end()),
-                    operands,
-                ),
-            });
+            return Ok(registered::call(call, operands));
         }
         if let Type::WeakProxy(class) = callable.ty {
             return self.weak_proxy_call(call, callable, class);

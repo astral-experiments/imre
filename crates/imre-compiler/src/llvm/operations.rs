@@ -25,6 +25,9 @@ pub(crate) trait Operations: Sized {
 
     fn evaluate(&mut self, expr: &Expr) -> Self::Value;
     fn integer(&mut self, text: &str) -> Self::Value;
+    fn string(&mut self, value: &str, ty: Type) -> Self::Value;
+    fn new_dict(&mut self, key: Type, item: Type, ty: Type) -> Self::Value;
+    fn insert_entry(&mut self, dict: &Self::Value, key: Self::Operand, value: Self::Operand);
     fn boolean(&mut self, value: bool) -> Self::Value;
     fn none(&mut self) -> Self::Value;
     fn local(&mut self, slot: usize, expr: &Expr) -> Self::Value;
@@ -41,6 +44,15 @@ pub(crate) trait Operations: Sized {
     fn emit_value(&mut self, expr: &Expr) -> Self::Value {
         match &expr.kind {
             ExprKind::Int(n) => self.integer(n),
+            ExprKind::Str(text) => self.string(text, expr.ty),
+            ExprKind::Dict { key, value, entries } => {
+                let dict = self.new_dict(*key, *value, expr.ty);
+                for (key, value) in entries {
+                    let (key, value) = self.binary_operands(key, value);
+                    self.insert_entry(&dict, key, value);
+                }
+                dict
+            }
             ExprKind::Bool(b) => self.boolean(*b),
             ExprKind::None => self.none(),
             ExprKind::Local(slot) => self.local(*slot, expr),
@@ -223,6 +235,28 @@ impl Operations for Emitter<'_, '_> {
         } else {
             self.pooled_literal(value.as_bytes(), Type::Int)
         }
+    }
+
+    fn string(&mut self, value: &str, ty: Type) -> Value {
+        Value { ty, ..self.pooled_literal(value.as_bytes(), Type::Str) }
+    }
+
+    fn new_dict(&mut self, key: Type, item: Type, ty: Type) -> Value {
+        let dict = Value {
+            ty,
+            operand: self.instruction(format!(
+                "call ptr @imre_dict_new(i32 {}, i32 {})", super::representation_kind(key, &self.module.types),
+                super::representation_kind(item, &self.module.types)
+            )),
+            small_integer: false,
+        };
+        self.owned(dict)
+    }
+
+    fn insert_entry(&mut self, dict: &Value, key: Self::Operand, value: Self::Operand) {
+        self.set_item(dict, &key.value, &value.value, false);
+        self.release_operand(&value);
+        self.release_operand(&key);
     }
 
     fn boolean(&mut self, value: bool) -> Value {

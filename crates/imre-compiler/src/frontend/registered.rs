@@ -49,6 +49,240 @@ pub(super) fn capture(
     graph.set_registered_functions(registered);
 }
 
+pub(super) fn checkpoint(stmt: &ast::Stmt) -> Statement {
+    Statement::Expr(operation(
+        Builtin::RegisteredStatement(stmt.range(), imre_ast::unhighlighted_call(stmt)),
+        Type::None,
+        vec![],
+    ))
+}
+
+fn operation(op: Builtin, ty: Type, operands: Vec<Expr>) -> Expr {
+    Expr {
+        ty,
+        kind: ExprKind::Builtin(op, operands),
+    }
+}
+
+pub(super) fn located(node: &ast::Expr, value: Expr) -> Expr {
+    operation(
+        Builtin::RegisteredLocation(node.range()),
+        value.ty,
+        vec![value],
+    )
+}
+
+pub(super) fn call(node: &ast::ExprCall, operands: Vec<Expr>) -> Expr {
+    operation(
+        Builtin::RegisteredCall(node.range(), node.func.end()),
+        Type::PythonObject,
+        operands,
+    )
+}
+
+/// Lower a physical suite for an existing Python namespace. Binding indices name entries
+/// in the runtime scope; they never cache a global value across executable statements.
+pub(crate) fn registered_suite(stmts: &[ast::Stmt], module: bool) -> Option<RegisteredFunction> {
+    let mut scope = SourceScope {
+        module,
+        names: HashMap::new(),
+    };
+    let mut body = Vec::new();
+    for stmt in stmts {
+        body.push(checkpoint(stmt));
+        let (lowered, _) =
+            statements::StatementLowering::source_statement(&mut scope, stmt, module).ok()?;
+        body.extend(lowered);
+    }
+    let locals = vec![Type::PythonObject; scope.names.len()];
+    Some(RegisteredFunction {
+        function: ir::Function {
+            params: vec![],
+            returns: Type::PythonObject,
+            locals,
+            body,
+        },
+        local_names: scope
+            .names
+            .into_iter()
+            .map(|(name, slot)| (slot, name))
+            .collect(),
+    })
+}
+
+/// Lower a deferred annotation in its runtime-provided namespace.
+pub(crate) fn registered_operand(node: &ast::Expr) -> Option<(Expr, HashMap<usize, String>)> {
+    let mut scope = SourceScope {
+        module: false,
+        names: HashMap::new(),
+    };
+    let operand = scope.operand(node)?;
+    Some((operand, scope.bindings()))
+}
+
+impl statements::StatementLowering for SourceScope {
+    type Error = ();
+
+    fn assignment(&mut self, assign: &ast::StmtAssign) -> StdResult<Vec<Statement>, ()> {
+        let [ast::Expr::Name(target)] = assign.targets.as_slice() else {
+            return Err(());
+        };
+        let value = self.operand(&assign.value).ok_or(())?;
+        Ok(vec![self.store(target.id.as_str(), value)])
+    }
+
+    fn definition(&mut self, def: &ast::StmtFunctionDef) -> StdResult<Option<Statement>, ()> {
+        if def.is_async || def.type_params.is_some() {
+            return Err(());
+        }
+        let decorators = def.decorator_list.iter().map(|d| &d.expression);
+        let defaults = def
+            .parameters
+            .posonlyargs
+            .iter()
+            .chain(&def.parameters.args)
+            .chain(&def.parameters.kwonlyargs)
+            .filter_map(|p| p.default.as_deref());
+        let header = decorators
+            .chain(defaults)
+            .map(|e| self.operand(e))
+            .collect::<Option<_>>()
+            .ok_or(())?;
+        let function = operation(
+            Builtin::RegisteredDefinition(def.start()),
+            Type::PythonObject,
+            header,
+        );
+        Ok(Some(self.store(def.name.as_str(), function)))
+    }
+
+    fn effect(&mut self, value: &ast::Expr) -> StdResult<(Option<Statement>, bool), ()> {
+        let effect = if value.is_string_literal_expr() {
+            None
+        } else {
+            Some(Statement::Expr(self.operand(value).ok_or(())?))
+        };
+        Ok((effect, true))
+    }
+
+    fn returned(&mut self, ret: &ast::StmtReturn) -> StdResult<Expr, ()> {
+        match ret.value.as_deref() {
+            Some(value) => self.operand(value).ok_or(()),
+            None => Ok(Expr::none()),
+        }
+    }
+
+    fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<statements::Block, ()> {
+        match stmt {
+            ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => Ok((Vec::new(), true)),
+            _ => Err(()),
+        }
+    }
+}
+
+struct SourceScope {
+    module: bool,
+    names: HashMap<String, usize>,
+}
+
+impl SourceScope {
+    fn bindings(self) -> HashMap<usize, String> {
+        self.names
+            .into_iter()
+            .map(|(name, slot)| (slot, name))
+            .collect()
+    }
+
+    fn slot(&mut self, name: &str) -> usize {
+        let next = self.names.len();
+        *self.names.entry(name.to_owned()).or_insert(next)
+    }
+
+    fn store(&mut self, name: &str, value: Expr) -> Statement {
+        let slot = self.slot(name);
+        if self.module {
+            Statement::Expr(operation(Builtin::GlobalSet(slot), Type::None, vec![value]))
+        } else {
+            Statement::Assign(slot, value)
+        }
+    }
+
+    fn operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
+        let value = match expr {
+            ast::Expr::Name(n) => {
+                let slot = self.slot(n.id.as_str());
+                if self.module {
+                    operation(Builtin::GlobalGet(slot), Type::PythonObject, vec![])
+                } else {
+                    Expr::local(slot, Type::PythonObject)
+                }
+            }
+            ast::Expr::StringLiteral(text) => Expr {
+                ty: Type::Str,
+                kind: ExprKind::Str(text.value.to_str().to_owned()),
+            },
+            ast::Expr::Dict(display) => {
+                let mut entries = Vec::with_capacity(display.items.len());
+                for item in &display.items {
+                    // Inserting these exact keys cannot call Python between value operands.
+                    let key = item.key.as_ref()?;
+                    if !matches!(
+                        key,
+                        ast::Expr::StringLiteral(_)
+                            | ast::Expr::NumberLiteral(_)
+                            | ast::Expr::BooleanLiteral(_)
+                            | ast::Expr::NoneLiteral(_)
+                    ) {
+                        return None;
+                    }
+                    entries.push((self.operand(key)?, self.operand(&item.value)?));
+                }
+                Expr {
+                    ty: Type::PythonObject,
+                    kind: ExprKind::Dict {
+                        key: Type::PythonObject,
+                        value: Type::PythonObject,
+                        entries,
+                    },
+                }
+            }
+            ast::Expr::Subscript(item) => operation(
+                Builtin::DictGet,
+                Type::PythonObject,
+                vec![self.operand(&item.value)?, self.operand(&item.slice)?],
+            ),
+            ast::Expr::BinOp(bin) if bin.op == ast::Operator::Add => {
+                let left = self.operand(&bin.left)?;
+                let right = self.operand(&bin.right)?;
+                Expr {
+                    ty: Type::PythonObject,
+                    kind: ExprKind::Binary(Binary::Add, Box::new(left), Box::new(right)),
+                }
+            }
+            ast::Expr::NumberLiteral(n) => {
+                let ast::Number::Int(value) = &n.value else {
+                    return None;
+                };
+                Expr::integer(value)
+            }
+            ast::Expr::BooleanLiteral(b) => Expr::boolean(b.value),
+            ast::Expr::NoneLiteral(_) => Expr::none(),
+            ast::Expr::Call(node)
+                if node.arguments.keywords.is_empty()
+                    && !node.arguments.args.iter().any(ast::Expr::is_starred_expr) =>
+            {
+                let operands = std::iter::once(node.func.as_ref())
+                    .chain(node.arguments.args.iter())
+                    .map(|e| self.operand(e))
+                    .collect::<Option<_>>()?;
+                call(node, operands)
+            }
+            _ => return None,
+        };
+        Some(located(expr, value))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

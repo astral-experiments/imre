@@ -425,36 +425,9 @@ impl Function<'_, '_> {
                         .iter()
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
-                    let generator = code_flags::is_generator(&v.body);
-                    let body = match (v.is_async, generator) {
-                        (false, false) => Body::Statements(&v.body),
-                        (false, true) => Body::GeneratorFunction(&v.body, code_flags::GENERATOR),
-                        (true, false) => Body::GeneratorFunction(&v.body, code_flags::COROUTINE),
-                        (true, true) => {
-                            Body::GeneratorFunction(&v.body, code_flags::ASYNC_GENERATOR)
-                        }
-                    };
-                    // A method's lazy annotations also need its defining class namespace.
-                    let type_params =
-                        if self.class_locals.is_some() && !self.source.string_annotations {
-                            None
-                        } else {
-                            crate::dynamic::boxed_function_type_params(
-                                v,
-                                self.source.string_annotations,
-                                !self.prefix.is_empty(),
-                                Some(&self.source.private_names),
-                            )
-                        };
-                    let function = self.define(
-                        v.decorator_list.first().map_or(v.start(), Ranged::start),
-                        DefinitionName::Binding(&v.name),
-                        Some(&v.parameters),
-                        Some(v),
-                        type_params,
-                        body,
-                    );
-                    self.decorated(&v.name, &decorators, &[], function);
+                    let function = self.function_definition(v, None);
+                    let function = self.apply_decorators(&decorators, &[], function);
+                    self.bind(v.name.as_str(), &function);
                 }
                 ast::Stmt::ClassDef(v) => {
                     let decorators = v
@@ -484,7 +457,8 @@ impl Function<'_, '_> {
                     } else {
                         &[]
                     };
-                    self.decorated(&v.name, &decorators, positions, class);
+                    let class = self.apply_decorators(&decorators, positions, class);
+                    self.bind(v.name.as_str(), &class);
                 }
                 ast::Stmt::Return(v) => {
                     let value = v
@@ -754,15 +728,59 @@ impl Function<'_, '_> {
         self.frame.op(op, &[outer, &names])
     }
 
+    pub(super) fn registered_definition(&mut self, start: TextSize, values: &[String]) -> String {
+        let definition = self.source.definitions.as_ref().expect("registered scope")[&start];
+        let (decorators, defaults) = values.split_at(definition.decorator_list.len());
+        let function = self.function_definition(definition, Some(defaults));
+        self.apply_decorators(decorators, &[], function)
+    }
+
+    fn function_definition(
+        &mut self,
+        v: &ast::StmtFunctionDef,
+        defaults: Option<&[String]>,
+    ) -> String {
+        let generator = code_flags::is_generator(&v.body);
+        let body = match (v.is_async, generator) {
+            (false, false) => Body::Statements(&v.body),
+            (false, true) => Body::GeneratorFunction(&v.body, code_flags::GENERATOR),
+            (true, false) => Body::GeneratorFunction(&v.body, code_flags::COROUTINE),
+            (true, true) => Body::GeneratorFunction(&v.body, code_flags::ASYNC_GENERATOR),
+        };
+        // A method's lazy annotations also need its defining class namespace.
+        let type_params = if self.class_locals.is_some() && !self.source.string_annotations {
+            None
+        } else {
+            crate::dynamic::boxed_function_type_params(
+                v,
+                self.source.string_annotations,
+                !self.prefix.is_empty(),
+                Some(&self.source.private_names),
+            )
+        };
+        self.define(
+            v.decorator_list.first().map_or(v.start(), Ranged::start),
+            DefinitionName::Binding(&v.name),
+            Some(&v.parameters),
+            Some((v, defaults)),
+            type_params,
+            body,
+        )
+    }
+
     pub(super) fn define(
         &mut self,
         start: TextSize,
         name: DefinitionName<'_>,
         params: Option<&ast::Parameters>,
-        function: Option<&ast::StmtFunctionDef>,
+        definition: Option<(&ast::StmtFunctionDef, Option<&[String]>)>,
         type_params: Option<&ast::TypeParams>,
         mut body: Body<'_>,
     ) -> String {
+        let function = definition.map(|(function, _)| function);
+        let mut evaluated_defaults = definition
+            .and_then(|(_, defaults)| defaults)
+            .map(<[_]>::iter);
         let (name, global) = match name {
             DefinitionName::Binding(identifier) => (
                 self.source.private_names.definition(identifier),
@@ -1041,7 +1059,10 @@ impl Function<'_, '_> {
                     }
                     names.push(name);
                     if let Some(default) = &arg.default {
-                        let default = self.expr(default);
+                        let default = match &mut evaluated_defaults {
+                            Some(values) => values.next().expect("lowered default").clone(),
+                            None => self.expr(default),
+                        };
                         let name = self.code_name(name);
                         self.op("put", &[&defaults, &name, &default]);
                     }
@@ -1056,6 +1077,7 @@ impl Function<'_, '_> {
                 }
             }
         }
+        debug_assert!(evaluated_defaults.is_none_or(|mut rest| rest.next().is_none()));
         for group in ["posonly", "positional", "kwonly"] {
             closure_names.locals.extend(
                 signature[group]
@@ -1191,25 +1213,28 @@ impl Function<'_, '_> {
             && self.source.replacements.is_empty()
         {
             self.annotation_text(literal.value.to_str())
+        } else if self.source.definitions.is_some()
+            && let Some((value, names)) = crate::frontend::registered_operand(expression)
+        {
+            self.checked_operand(&value, &names)
         } else {
             self.expr(expression)
         }
     }
 
-    fn decorated(
+    fn apply_decorators(
         &mut self,
-        name: &ast::Identifier,
         decorators: &[String],
         positions: &[ast::Decorator],
         mut value: String,
-    ) {
+    ) -> String {
         for (index, decorator) in decorators.iter().enumerate().rev() {
             if let Some(syntax) = positions.get(index) {
                 self.set_statement_line(self.source.positions.line(syntax.expression.start()));
             }
             value = self.invoke(decorator, &[&value]);
         }
-        self.bind(name.as_str(), &value);
+        value
     }
 
     fn discard_annotation_operand(&mut self, expr: &ast::Expr) {

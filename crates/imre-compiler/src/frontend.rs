@@ -112,13 +112,14 @@ mod record_inputs;
 mod records;
 mod regex;
 mod registered;
-pub(crate) use registered::RegisteredFunction;
+pub(crate) use registered::{RegisteredFunction, registered_operand, registered_suite};
 mod sequences;
 mod shutil;
 mod sign_parameters;
 pub(crate) use sign_parameters::only_compares_zero;
 mod single_dispatch;
 mod socket;
+mod statements;
 mod stdlib;
 pub(crate) use stdlib::literal_replace_mismatch;
 mod string_io;
@@ -4851,16 +4852,7 @@ impl<'a> Checker<'a> {
             }
             if self.registered {
                 // Even a pass has a Python frame checkpoint for pending signals and exceptions.
-                body.push(Statement::Expr(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(
-                        Builtin::RegisteredStatement(
-                            statement.range(),
-                            imre_ast::unhighlighted_call(statement),
-                        ),
-                        vec![],
-                    ),
-                }));
+                body.push(registered::checkpoint(statement));
             } else if !lowered.is_empty() && self.fault_enabled() {
                 body.push(self.fault_line(statement));
             }
@@ -4982,14 +4974,14 @@ impl<'a> Checker<'a> {
         {
             return Ok((vec![self.replace_global(first, statement)?], true));
         }
+        statements::StatementLowering::source_statement(self, statement, self.module_scope)
+    }
+
+    fn specialized_statement(&mut self, statement: &ast::Stmt) -> Result<statements::Block, String> {
         let result = match statement {
             ast::Stmt::ClassDef(class) if !self.module_scope => {
                 self.define_local_class(class)?;
                 None
-            }
-            ast::Stmt::FunctionDef(function) => self.define_local_function(function)?,
-            ast::Stmt::Assign(assign) => {
-                return Ok((self.assignment_statement(assign)?, true));
             }
             ast::Stmt::AnnAssign(assign) => {
                 let ast::Expr::Name(name) = &*assign.target else {
@@ -5141,61 +5133,6 @@ impl<'a> Checker<'a> {
                         statement,
                         "unsupported assignment target",
                     ));
-                }
-            }
-            ast::Stmt::Expr(expression) => {
-                if matches!(&*expression.value, ast::Expr::EllipsisLiteral(_)) {
-                    return Ok((Vec::new(), true));
-                }
-                if let ast::Expr::Yield(yielded) = &*expression.value
-                    && let Some(element) = self.generator_item
-                    && let Some(value) = &yielded.value
-                {
-                    let item = self.expr_expected(value, element)?;
-                    let resume =
-                        contexts::op(ir::ProcessOperation::GeneratorYield, Type::Bool, vec![item]);
-                    return Ok((
-                        vec![Statement::If(
-                            resume,
-                            Vec::new(),
-                            vec![Statement::Return(Expr::none())],
-                        )],
-                        true,
-                    ));
-                }
-                if let ast::Expr::Yield(yielded) = &*expression.value
-                    && yielded.value.is_none()
-                    && self.context_method
-                {
-                    return Ok((
-                        vec![Statement::Expr(contexts::op(
-                            ir::ProcessOperation::ContextYield,
-                            Type::None,
-                            Vec::new(),
-                        ))],
-                        true,
-                    ));
-                }
-                if let ast::Expr::Call(call) = &*expression.value
-                    && self.resolve(&call.func)
-                        == Some(Binding::Intrinsic(Intrinsic::SubprocessRun))
-                    && call.arguments.find_keyword("stdout").is_some()
-                    && !processes::boxed_launch_keywords(call)
-                {
-                    Some(Statement::Expr(self.process_run(call, true)?))
-                } else if let ast::Expr::Call(call) = &*expression.value
-                    && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::AssertNever))
-                {
-                    return Ok((vec![self.assert_never(call, false)?], false));
-                } else if let ast::Expr::Call(call) = &*expression.value
-                    && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::SysExit))
-                {
-                    return Ok((vec![Statement::Expr(self.expr(&expression.value)?)], false));
-                } else {
-                    let value = self.expr(&expression.value)?;
-                    // Only a direct call selects one implementation; a dispatched override may return.
-                    let falls_through = !matches!(&value.kind, ExprKind::Call(id, _) if self.classes.raising_methods.contains(id));
-                    return Ok((vec![Statement::Expr(value)], falls_through));
                 }
             }
             ast::Stmt::Delete(delete) => {
@@ -5366,42 +5303,6 @@ impl<'a> Checker<'a> {
             ast::Stmt::For(loop_) if !loop_.is_async => {
                 return self.iteration(loop_);
             }
-            ast::Stmt::Return(return_) if !self.module_scope => {
-                let value = if let Some(value) = &return_.value {
-                    if let Some(repr) = self.exception_formatter {
-                        let value = self.expr(value)?;
-                        if value.ty == Type::ObjectValue {
-                            Expr {
-                                ty: Type::Str,
-                                kind: ExprKind::Builtin(
-                                    Builtin::ExceptionFormatterResult(repr),
-                                    vec![value],
-                                ),
-                            }
-                        } else {
-                            self.coerce(value, Type::Str, statement)?
-                        }
-                    } else if self.inferred_returns.is_some() {
-                        self.expr(value)?
-                    } else {
-                        self.expr_in_context(
-                            value,
-                            self.returns,
-                            |_, _| false,
-                            Self::coerce_return,
-                        )?
-                    }
-                } else {
-                    Expr::none()
-                };
-                let value = if let Some(types) = &mut self.inferred_returns {
-                    types.push(value.ty);
-                    value
-                } else {
-                    self.coerce_return(value, self.returns, statement)?
-                };
-                return Ok((vec![Statement::Return(value)], false));
-            }
             ast::Stmt::Break(_) | ast::Stmt::Continue(_) if !self.loop_breaks.is_empty() => {
                 if self.reachable && matches!(statement, ast::Stmt::Break(_)) {
                     let mut exits = self.take_breaks();
@@ -5537,7 +5438,6 @@ impl<'a> Checker<'a> {
             {
                 return Err(self.object_runtime_export("a conditional or local import", statement));
             }
-            ast::Stmt::Pass(_) => None,
             _ => {
                 return Err(error(
                     self.source,
@@ -6816,13 +6716,7 @@ impl<'a> Checker<'a> {
             _ => self.non_call_expr(expression),
         }?;
         if self.registered {
-            Ok(Expr {
-                ty: value.ty,
-                kind: ExprKind::Builtin(
-                    Builtin::RegisteredLocation(expression.start()),
-                    vec![value],
-                ),
-            })
+            Ok(registered::located(expression, value))
         } else {
             Ok(value)
         }

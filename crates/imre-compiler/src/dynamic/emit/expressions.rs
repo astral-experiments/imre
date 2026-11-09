@@ -7,8 +7,16 @@ use super::{Body, CallArguments, DefinitionName, Function, permanent};
 
 impl Function<'_, '_> {
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
-        let previous = std::mem::replace(&mut self.current_range, expr.range());
-        let value = self.located_expr(expr);
+        self.with_expression_range(expr.range(), |f| f.located_expr(expr))
+    }
+
+    pub(super) fn with_expression_range(
+        &mut self,
+        range: ruff_text_size::TextRange,
+        emit: impl FnOnce(&mut Self) -> String,
+    ) -> String {
+        let previous = std::mem::replace(&mut self.current_range, range);
+        let value = emit(self);
         self.current_range = previous;
         value
     }

@@ -380,6 +380,7 @@ pub(super) struct PreparedBody<'a> {
     body: ast::Suite,
     source: SourceInfo<'a>,
     expression: bool,
+    lower_definitions: bool,
     keep_docstrings: bool,
 }
 
@@ -487,7 +488,16 @@ impl<'a> PreparedBody<'a> {
         };
         let method_imports = imre_ast::module_imports(&body);
         let private_names = lower_source(path, source, &mut body)?;
+        // Bundled functions opt in only when their own module initializer is admitted.
+        let ordinary = !expression && !has_templates && replacements.is_empty();
+        let initializer = if ordinary {
+            crate::frontend::registered_suite(&body, true)
+        } else {
+            None
+        };
+        let lower_definitions = ordinary && (!bundled || initializer.is_some());
         let source = SourceInfo {
+            initializer,
             checked_functions,
             bundled,
             path,
@@ -511,6 +521,7 @@ impl<'a> PreparedBody<'a> {
             body,
             source,
             expression,
+            lower_definitions,
             keep_docstrings,
         })
     }
@@ -526,6 +537,7 @@ impl<'a> PreparedBody<'a> {
         };
         let location = SourceMap {
             info: &self.source,
+            definitions: self.lower_definitions.then(|| definition_sites(&self.body)),
             unit,
             positions: SourcePositions::new(self.source.text, &code_file),
         };
@@ -590,6 +602,7 @@ enum Body<'a> {
     Namespace(&'a [ast::Stmt], bool),
     ClassParameters(&'a ast::StmtClassDef),
     Statements(&'a [ast::Stmt]),
+    Checked(&'a crate::frontend::RegisteredFunction, &'a [ast::Stmt]),
     /// A suspended suite and its generator, coroutine, or async generator code flag.
     GeneratorFunction(&'a [ast::Stmt], u32),
     ModuleAnnotations(Vec<(&'a str, &'a ast::Expr)>),
@@ -624,8 +637,38 @@ enum Entry {
     Suspended,
 }
 
+/// Collect declaration sites for the registered frame. Executing a definition still
+/// evaluates its header and binds its name at the source statement.
+fn definition_sites(
+    body: &[ast::Stmt],
+) -> HashMap<ruff_text_size::TextSize, &ast::StmtFunctionDef> {
+    use ast::statement_visitor::{StatementVisitor, walk_stmt};
+
+    #[derive(Default)]
+    struct Sites<'a>(HashMap<ruff_text_size::TextSize, &'a ast::StmtFunctionDef>);
+
+    impl<'a> StatementVisitor<'a> for Sites<'a> {
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            match stmt {
+                ast::Stmt::FunctionDef(def) => {
+                    self.0.insert(def.start(), def);
+                    if !def.is_async && def.type_params.is_none() {
+                        self.visit_body(&def.body);
+                    }
+                }
+                ast::Stmt::ClassDef(_) => {}
+                _ => walk_stmt(self, stmt),
+            }
+        }
+    }
+    let mut sites = Sites::default();
+    sites.visit_body(body);
+    sites.0
+}
+
 struct SourceMap<'a> {
     info: &'a SourceInfo<'a>,
+    definitions: Option<HashMap<ruff_text_size::TextSize, &'a ast::StmtFunctionDef>>,
     unit: usize,
     positions: SourcePositions<'a>,
 }
@@ -639,6 +682,7 @@ impl<'a> std::ops::Deref for SourceMap<'a> {
 }
 
 struct SourceInfo<'a> {
+    initializer: Option<crate::frontend::RegisteredFunction>,
     checked_functions: Option<&'a super::CheckedFunctions>,
     bundled: bool,
     path: &'a Path,
@@ -770,6 +814,23 @@ impl Output {
             frame.checked_body(checked);
             frame.finish(false)
         } else {
+            let lowered;
+            let body = match body {
+                Body::Statements(stmts)
+                    if source
+                        .definitions
+                        .as_ref()
+                        .and_then(|defs| defs.get(&start))
+                        .is_some_and(|def| def.type_params.is_none()) =>
+                {
+                    lowered = crate::frontend::registered_suite(stmts, false);
+                    match lowered.as_ref() {
+                        Some(checked) => Body::Checked(checked, stmts),
+                        None => body,
+                    }
+                }
+                _ => body,
+            };
             self.code(source, prefix, body, in_function, suspended)
         };
         writeln!(
@@ -868,7 +929,9 @@ impl Output {
                     f.bind("__doc__", &value);
                 }
                 f.declare_globals(stmts);
-                if f.class_locals.is_some() && !f.source.string_annotations {
+                if module && let Some(checked) = &source.initializer {
+                    f.checked_body(checked);
+                } else if f.class_locals.is_some() && !f.source.string_annotations {
                     f.annotated_class_body(stmts);
                 } else {
                     f.statements(stmts);
@@ -879,6 +942,10 @@ impl Output {
                     f.setup_deferred_module_annotations(&sites);
                     f.jump("module_body");
                 }
+            }
+            Body::Checked(function, stmts) => {
+                f.declare_globals(stmts);
+                f.checked_body(function);
             }
             Body::ClassParameters(class) => f.parameterized_class(class),
             Body::Statements(stmts) | Body::GeneratorFunction(stmts, _) => {

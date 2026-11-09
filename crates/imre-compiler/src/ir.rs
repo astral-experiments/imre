@@ -1599,7 +1599,9 @@ pub(crate) enum Builtin {
     /// An original statement checkpoint and its optional call without a separate highlight.
     RegisteredStatement(ruff_text_size::TextRange, Option<ruff_text_size::TextRange>),
     /// The source position in effect while this registered operand is evaluated.
-    RegisteredLocation(ruff_text_size::TextSize),
+    RegisteredLocation(ruff_text_size::TextRange),
+    /// Construct the native function at this physical definition site from its evaluated header.
+    RegisteredDefinition(ruff_text_size::TextSize),
     /// The loaded callable is followed by its positional arguments in evaluation order.
     RegisteredCall(ruff_text_size::TextRange, ruff_text_size::TextSize),
     GeneratorFrameEnter(String),

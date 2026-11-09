@@ -676,6 +676,7 @@ impl Builtin {
                 Contract::new(true, PreservesOwners)
             }
             Self::ObjectCall(..)
+            | Self::RegisteredDefinition(_)
             | Self::RegisteredStatement(..)
             | Self::RegisteredCall(..)
             | Self::SortByComparator => Contract::new(true, Unknown),
