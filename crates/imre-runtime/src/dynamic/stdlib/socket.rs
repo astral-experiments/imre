@@ -1855,15 +1855,19 @@ pub(super) fn call(
         "send" | "sendall" => {
             let data = argument(args, 0)?;
             ctx.check_buffer_exporter(data)?;
-            let bytes = ctx.native_buffer_bytes(data)?;
+            ctx.native_buffer_bytes(data)?;
             let flags = int_option(ctx, args, kwargs, 1, "flags", 0)?;
             let owner = active_sendfile_owner(ctx, *receiver)?;
             if method == "send" {
-                let sent = if let Some(identity) = owner {
-                    native::sendfile_write(&s, &identity, bytes, flags)?
-                } else {
-                    native::send(&s, bytes, flags)?
-                };
+                let sent = ctx.with_buffer_export(data, |ctx| {
+                    retry(ctx, &s, |ctx, until| {
+                        let bytes = ctx.native_buffer_bytes(data)?;
+                        Ok(native::with_send_fd(&s, owner.as_ref(), |raw| {
+                            native::send_until(raw, bytes, flags, until)
+                                .map_err(crate::objects::errno_error)
+                        })?)
+                    })
+                })?;
                 return Ok(ctx.int(sent as i64));
             }
             ctx.with_buffer_export(data, |ctx| {

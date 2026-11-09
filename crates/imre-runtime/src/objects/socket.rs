@@ -2179,7 +2179,12 @@ pub(crate) fn send_to(
     })
 }
 
-fn send_until(raw: RawFd, bytes: &[u8], flags: i32, until: Option<Deadline>) -> io::Result<usize> {
+pub(crate) fn send_until(
+    raw: RawFd,
+    bytes: &[u8],
+    flags: i32,
+    until: Option<Deadline>,
+) -> io::Result<usize> {
     #[cfg(not(target_vendor = "apple"))]
     let flags = flags | libc::MSG_NOSIGNAL;
     socket_call_interruptible(raw, libc::POLLOUT, until, || {
@@ -2393,19 +2398,6 @@ pub(crate) fn with_send_fd<T>(
     } else {
         write(fd(socket))
     }
-}
-
-/// Use the ordinary timed send on the checked socket description for a delegated file write.
-pub(crate) fn sendfile_write(
-    socket: &Object,
-    identity: &SendfileIdentity,
-    bytes: &[u8],
-    flags: i32,
-) -> Result<usize> {
-    let until = deadline(socket);
-    with_send_fd(socket, Some(identity), |raw| {
-        retry(until, || send_until(raw, bytes, flags, until)).map_err(errno_error)
-    })
 }
 
 /// Duplicate the descriptor and copy the socket's timeout onto the new owner.
