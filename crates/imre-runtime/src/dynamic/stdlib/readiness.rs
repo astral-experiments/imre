@@ -18,7 +18,7 @@ struct Registration {
 }
 
 pub(in crate::dynamic) struct Selector {
-    poll: Option<Poll>,
+    poll: Option<Rc<RefCell<Poll>>>,
     globals: Id,
     keys: Id,
     mapping: Id,
@@ -252,22 +252,15 @@ impl Selector {
             }
             return Ok(ctx.alloc(Value::List(results)));
         }
-        let events = {
-            let mut selector = handle.borrow_mut();
-            let (count, ready) = selector.poll.as_mut().unwrap().ready(timeout)?;
-            let mut events = Vec::new();
-            events
-                .try_reserve(count)
-                .map_err(|_| Error::new("MemoryError", "out of memory"))?;
-            events.extend(ready);
-            events
-        };
+        let poll = handle.borrow().poll.as_ref().unwrap().clone();
+        let events = Poll::ready(&poll, timeout, || ctx.dispatch_signals())?;
         let mut results = Vec::new();
         results
             .try_reserve(events.len())
             .map_err(|_| Error::new("MemoryError", "out of memory"))?;
-        for (fd, flags) in events {
-            let fd = ctx.int(i64::from(fd));
+        for event in events {
+            let flags = event.revents as u16;
+            let fd = ctx.int(i64::from(event.fd));
             let Some(key) = registration(ctx, keys, fd)? else {
                 continue;
             };
@@ -395,7 +388,7 @@ pub(super) fn call(
         };
         let handle = Rc::new(RefCell::new(Selector {
             globals,
-            poll: (name == "PollSelector").then(Poll::default),
+            poll: (name == "PollSelector").then(Rc::default),
             keys: ctx.dict(Vec::new()),
             mapping: NONE,
         }));
@@ -462,8 +455,9 @@ pub(super) fn call(
                     ctx.as_integer(events)?
                 };
                 let events_changed = key.interests != bits;
-                if events_changed && let Some(poll) = &mut handle.borrow_mut().poll {
-                    poll.set(native_fd(ctx, fd)?, poll_mask(bits))
+                if events_changed && let Some(poll) = &handle.borrow().poll {
+                    poll.borrow_mut()
+                        .set(native_fd(ctx, fd)?, poll_mask(bits))
                         .map_err(|_| Error::new("MemoryError", "out of memory"))?;
                 }
                 let unequal = ctx.binary("!=", data, key.data)?;
@@ -484,10 +478,11 @@ pub(super) fn call(
                 let native = native_fd(ctx, fd)?;
                 ctx.set_dictionary_key(keys, fd, entry, None, true)?;
                 if handle
-                    .borrow_mut()
+                    .borrow()
                     .poll
-                    .as_mut()
+                    .as_ref()
                     .unwrap()
+                    .borrow_mut()
                     .set(native, poll_mask(bits))
                     .is_err()
                 {
@@ -523,7 +518,13 @@ pub(super) fn call(
             if handle.borrow().poll.is_some() {
                 let number = ctx.lookup_attr(key, "fd")?;
                 let native = native_fd(ctx, number)?;
-                handle.borrow_mut().poll.as_mut().unwrap().remove(native);
+                handle
+                    .borrow()
+                    .poll
+                    .as_ref()
+                    .unwrap()
+                    .borrow_mut()
+                    .remove(native);
             }
             Ok(key)
         }

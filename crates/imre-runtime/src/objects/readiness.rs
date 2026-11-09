@@ -3,10 +3,11 @@ use super::exceptions::{Error, Kind, Result, finish};
 use super::records::{RecordDescriptor, allocate_record};
 use super::time::Deadline;
 use super::{Int, List, Object, Storage, StorageCell, Words, c_int, errno_error, object};
-use std::{io, ptr, time::Duration};
+use std::{cell::RefCell, io, ptr, time::Duration};
 
 #[derive(Default)]
 pub(crate) struct Poll {
+    running: bool,
     slots: Vec<libc::pollfd>,
     positions: std::collections::HashMap<i32, usize>,
 }
@@ -47,33 +48,42 @@ impl Poll {
         true
     }
 
-    /// Waits on the live descriptors and returns only kernel-reported events.
-    pub(crate) fn ready(
-        &mut self,
+    /// An interrupted poll retries the entry snapshot. Handlers may edit subsequent
+    /// registrations, but only one wait may be active on this poll object.
+    pub(crate) fn ready<E: From<Error>>(
+        handle: &RefCell<Self>,
         timeout: Option<Duration>,
-    ) -> Result<(usize, impl Iterator<Item = (i32, u16)> + '_)> {
-        self.compact();
-        let fds = &mut self.slots;
-        let nfds = fds
+        check_signals: impl FnMut() -> std::result::Result<(), E>,
+    ) -> std::result::Result<Vec<libc::pollfd>, E> {
+        let mut poll = handle.borrow_mut();
+        if poll.running {
+            return Err(Error::new(Kind::RuntimeError, "concurrent poll() invocation").into());
+        }
+        poll.compact();
+        let nfds = poll
+            .slots
             .len()
             .try_into()
             .map_err(|_| Error::new(Kind::OverflowError, "too many file descriptors"))?;
-        let count = wait::<Error>(
-            timeout,
-            || Ok(()),
-            |remaining| {
-                let ms = remaining.map_or(-1, |d| d.as_nanos().div_ceil(1_000_000) as i32);
-                // SAFETY: nfds is the length of this initialized, exclusively borrowed slice.
-                unsafe { libc::poll(fds.as_mut_ptr(), nfds, ms) }
-            },
-        )? as usize;
-        Ok((
-            count,
-            fds.iter()
-                .filter(|p| p.revents != 0)
-                .take(count)
-                .map(|p| (p.fd, p.revents as u16)),
-        ))
+        let mut fds = Vec::new();
+        fds.try_reserve_exact(poll.slots.len())
+            .map_err(|_| Error::allocation())?;
+        fds.extend_from_slice(&poll.slots);
+        poll.running = true;
+        drop(poll);
+
+        let count = wait(timeout, check_signals, |remaining| {
+            let ms = remaining.map_or(-1, |d| d.as_nanos().div_ceil(1_000_000) as i32);
+            // SAFETY: nfds is the length of this owned, initialized snapshot.
+            unsafe { libc::poll(fds.as_mut_ptr(), nfds, ms) }
+        });
+        handle.borrow_mut().running = false;
+        if count? == 0 {
+            fds.clear();
+        } else {
+            fds.retain(|p| p.revents != 0);
+        }
+        Ok(fds)
     }
 
     // Deletion leaves a tombstone so re-registering a number moves it to the end.
@@ -90,7 +100,7 @@ impl Poll {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_poll_new() -> *const Object {
     crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
-        Storage::Poll(Box::default()),
+        Storage::Poll(Default::default()),
     ))))
 }
 
@@ -121,6 +131,7 @@ pub unsafe extern "C" fn imre_poll_update(
                     let Storage::Poll(p) = state else {
                         unreachable!()
                     };
+                    let mut p = p.borrow_mut();
                     if mode == 2 {
                         if !p.remove(fd) {
                             return Err(Error::key(super::words::WordKind::new(2).acquire(word)));
@@ -283,33 +294,40 @@ pub unsafe extern "C" fn imre_poll_wait(
     word: usize,
     pair: *const RecordDescriptor,
 ) -> *const Object {
-    // SAFETY: rooted arguments and the single-threaded syscall have no user callbacks.
-    let result = unsafe {
-        object(owner).0.with_mut(|state| {
+    // SAFETY: the caller roots a poll object. Only the owned handle leaves storage.
+    let handle = unsafe {
+        object(owner).0.with(|state| {
             let Storage::Poll(p) = state else {
                 unreachable!()
             };
-            let timeout = timeout(tag, word, true)?;
-            let (count, events) = p.ready(timeout)?;
-            let mut out = Words::new(6); // owned records
-            out.values
-                .try_reserve(count)
-                .map_err(|_| Error::allocation())?;
-            for (fd, mask) in events {
-                // SAFETY: pair describes two writable tagged integer fields. The result
-                // sequence takes ownership of each fully initialized tuple.
+            p.clone()
+        })
+    };
+    let result = (|| {
+        // SAFETY: the caller roots the tagged timeout and tuple descriptor.
+        let timeout = unsafe { timeout(tag, word, true) }?;
+        let events = Poll::ready(&handle, timeout, super::stdlib::check_interrupt)?;
+        let mut out = Words::new(6); // owned records
+        out.values
+            .try_reserve(events.len())
+            .map_err(|_| Error::allocation())?;
+        for event in events {
+            // SAFETY: pair describes two writable integer fields. The list takes
+            // ownership of the freshly allocated and initialized record.
+            let tuple = unsafe {
                 let tuple = ptr::NonNull::new(allocate_record(pair))
                     .ok_or_else(Error::allocation)?
                     .as_ptr();
-                tuple.write(Int::from_usize(fd as usize).into_raw());
+                tuple.write(Int::from_usize(event.fd as usize).into_raw());
                 tuple
                     .add(1)
-                    .write(Int::from_usize(usize::from(mask)).into_raw());
-                out.values.push(tuple as usize);
-            }
-            Ok(crate::ObjectOwner::into_raw(out.into_object()))
-        })
-    };
+                    .write(Int::from_usize(usize::from(event.revents as u16)).into_raw());
+                tuple
+            };
+            out.values.push(tuple as usize);
+        }
+        Ok(crate::ObjectOwner::into_raw(out.into_object()))
+    })();
     finish(result, ptr::null())
 }
 
