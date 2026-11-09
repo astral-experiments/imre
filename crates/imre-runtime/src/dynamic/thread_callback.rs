@@ -83,8 +83,10 @@ impl Callback {
         kwargs: Option<Id>,
     ) -> Result<Option<(Operation, Vec<Id>)>> {
         // _thread.start_new_thread owns the original argument containers through the call.
-        let mut roots = vec![target, args];
-        roots.extend(kwargs);
+        let roots = match kwargs {
+            Some(kwargs) => super::copy_ids(&[target, args, kwargs]),
+            None => super::copy_ids(&[target, args]),
+        }?;
         Self::capture_checked(ctx, target, roots, pos, kwargs, false)
     }
 
@@ -101,7 +103,7 @@ impl Callback {
         if !matches!(ctx.heap.get(kwargs), Value::Dict(_)) {
             return Err(unsupported());
         }
-        let roots = super::thread_worker::expanded_call_roots(ctx, target, args);
+        let roots = super::thread_worker::expanded_call_roots(ctx, target, args)?;
         Self::capture_checked(ctx, target, roots, pos, Some(kwargs), true)
     }
 
@@ -163,7 +165,7 @@ impl Callback {
             };
             // The lookup is bound before startup returns. The worker owns the native
             // lock and the parent retains the original method and Python lock wrapper.
-            roots.push(operand);
+            super::thread_worker::extend_call_roots(&mut roots, &[operand])?;
             return Ok(Some((
                 Operation::Acquire {
                     lock: Arc::clone(lock),
@@ -198,7 +200,7 @@ impl Callback {
                 Value::HandlerLock(lock) if !high_level => Argument::RLock(Arc::clone(lock)),
                 _ => return Ok(None),
             };
-            roots.push(id);
+            super::thread_worker::extend_call_roots(&mut roots, &[id])?;
             let mut callback = Self::from_code(ctx, code, scope, entry, Vec::new())?;
             callback.receiver = Some((copy_label(name)?, receiver));
             return Ok(Some((Operation::Python(Box::new(callback)), roots)));
@@ -248,7 +250,7 @@ impl Callback {
                 }
                 // The prefix has been consumed when the parent resumes. Only the final
                 // receiver must outlive a subsequent replacement of its closure cell.
-                roots.push(id);
+                super::thread_worker::extend_call_roots(&mut roots, &[id])?;
                 return Ok(Some((
                     Operation::Acquire {
                         lock: Arc::clone(lock),
@@ -333,7 +335,7 @@ impl Callback {
                 }
                 _ => return Err(unsupported()),
             };
-            roots.push(id);
+            super::thread_worker::extend_call_roots(&mut roots, &[id])?;
             values.push(value);
         }
         let callback = Self::from_code(ctx, code, scope, entry, values)?;

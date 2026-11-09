@@ -646,14 +646,23 @@ pub(super) fn start_detached(
 /// Thread.run expands *args and **kwargs before calling the target. A bound method
 /// can keep an exact input tuple during the call. An ordinary function binds its
 /// arguments into a frame and releases the call containers before its body runs.
-pub(super) fn expanded_call_roots(ctx: &Context, target: Id, args: Id) -> Vec<Id> {
+pub(super) fn expanded_call_roots(ctx: &Context, target: Id, args: Id) -> Result<Vec<Id>> {
     if matches!(ctx.heap.get(target), Value::Method { .. })
         && matches!(ctx.heap.get(args), Value::Tuple(_))
     {
-        vec![target, args]
+        super::copy_ids(&[target, args])
     } else {
-        vec![target]
+        super::copy_ids(&[target])
     }
+}
+
+/// Keep worker operands alive before any native thread is created.
+pub(super) fn extend_call_roots(roots: &mut Vec<Id>, operands: &[Id]) -> Result<()> {
+    roots
+        .try_reserve(operands.len())
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    roots.extend_from_slice(operands);
+    Ok(())
 }
 
 // Validate the actual bound method and its operands before starting an OS
@@ -704,8 +713,8 @@ fn worker_target(ctx: &Context, target: Id, args: Id, kwargs: Id) -> Result<(Ope
         };
         if let Some(operation) = operation {
             // The bound call owns its expanded arguments even if the caller clears the list.
-            let mut roots = expanded_call_roots(ctx, target, args);
-            roots.extend_from_slice(pos);
+            let mut roots = expanded_call_roots(ctx, target, args)?;
+            extend_call_roots(&mut roots, pos)?;
             return Ok((operation, roots));
         }
     }
