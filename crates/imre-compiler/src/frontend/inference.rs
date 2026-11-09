@@ -959,6 +959,48 @@ impl Inference {
 }
 
 impl Checker<'_> {
+    /// Check the callable at Python's lookup point, before argument evaluation
+    /// can replace it. Only successfully bound calls record this site.
+    fn observed_entry_call(
+        &self,
+        call: &ast::ExprCall,
+        signature: &Signature,
+    ) -> Option<(TextSize, ruff_text_size::TextRange)> {
+        let seen = self.observed_definition.as_ref()?;
+        if seen.entry_site.is_some()
+            || self.ordinary_entry().is_none()
+            || !self.module_namespace.is_unexposed()
+            || !call.func.is_name_expr()
+            || self.graph.deferred_object_error.borrow().is_some()
+            || self
+                .functions
+                .get(&seen.definition)
+                .is_none_or(|selected| selected.id != signature.id)
+            || self.resolve(&call.func) != Some(Binding::Definition(seen.definition))
+        {
+            return None;
+        }
+        let module = &self.graph.modules[self.module];
+        let mut executable = module.executable.iter().copied().peekable();
+        for (index, statement) in module.parsed.syntax().body.iter().enumerate() {
+            let checked = executable.next_if_eq(&index).is_some();
+            if statement.range().contains_range(call.range()) {
+                return (checked
+                    && self.graph.session.unconditional_module_operand(
+                        self.module,
+                        statement.start(),
+                        call.range(),
+                    ))
+                .then_some((statement.start(), call.range()));
+            }
+            // An earlier initializer can have run Python outside this checked block.
+            if !checked && !crate::analysis::inert_declaration(statement) {
+                return None;
+            }
+        }
+        None
+    }
+
     pub(super) fn source_call(
         &mut self,
         call: &ast::ExprCall,
@@ -973,6 +1015,7 @@ impl Checker<'_> {
                 "cached calls currently require a positional key",
             ));
         }
+        let entry_site = self.observed_entry_call(call, signature);
         let mut scope = calls::ArgumentScope::default();
         let (ty, args) = self.bind_source(
             call,
@@ -986,6 +1029,9 @@ impl Checker<'_> {
                 }))
             .then_some(&mut scope),
         )?;
+        if let (Some(site), Some(seen)) = (entry_site, &mut self.observed_definition) {
+            seen.entry_site.get_or_insert(site);
+        }
         // A successfully bound source call can enter the definition's registered body.
         self.globals
             .missing_bindings
