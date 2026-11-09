@@ -1,6 +1,6 @@
 //! Whole-file text conversion uses the same descriptor, buffering, and close path as binary I/O.
 
-use super::super::codecs::{Codec, option_error};
+use super::super::codecs::{Codec, StrEncoder, option_error};
 use super::super::{Storage, StorageCell};
 use super::{Error, Int, Kind, Object, Result, Str, finish, object, with_path_file};
 use crate::{ObjectOwner, StrOwner};
@@ -47,7 +47,7 @@ fn check_open_strings(
     Ok(())
 }
 
-fn options(encoding: Option<&str>, newline: Option<&str>) -> Result<Codec> {
+fn check_newline(newline: Option<&str>) -> Result<()> {
     if let Some(value) = newline
         && !matches!(value, "" | "\n" | "\r" | "\r\n")
     {
@@ -58,6 +58,11 @@ fn options(encoding: Option<&str>, newline: Option<&str>) -> Result<Codec> {
             "",
         ));
     }
+    Ok(())
+}
+
+fn options(encoding: Option<&str>, newline: Option<&str>) -> Result<Codec> {
+    check_newline(newline)?;
     Codec::lookup(&crate::sys::file_encoding(encoding))
 }
 
@@ -87,7 +92,8 @@ fn open_text_output(
     let policy = errors.as_deref().map_or("strict", Str::as_str);
     let mut state =
         super::open_state_with_encoding(path, mode, false, false, Some((&spelling, policy)))?;
-    let codec = options(Some(&spelling), newline)?;
+    check_newline(newline)?;
+    let codec = StrEncoder::for_stream(&spelling)?;
     let Some(super::Stream::Write(writer)) = state.stream.as_mut() else {
         unreachable!()
     };

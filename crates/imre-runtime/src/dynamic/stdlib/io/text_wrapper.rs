@@ -6,7 +6,7 @@ use std::rc::Rc;
 use super::super::codecs;
 use super::{Context, Error, Id, MemoryStream, NONE, Result, TRUE, Value};
 use crate::dynamic::builtins::boolean;
-use crate::objects::{Codec, DecodeIssue, FixedUnicode};
+use crate::objects::{Codec, DecodeIssue, StrEncoder as StreamCodec};
 
 mod cookie;
 mod reader;
@@ -64,22 +64,6 @@ pub(super) fn property(name: &str) -> bool {
             | "closed"
             | "name"
     )
-}
-
-#[derive(Clone, Copy)]
-pub(in crate::dynamic::stdlib) enum StreamCodec {
-    Registered(Codec),
-    Wide { format: FixedUnicode, bom: bool },
-}
-
-impl StreamCodec {
-    fn lookup(encoding: &str) -> Result<Self> {
-        let key = crate::objects::normalize_codec(encoding)?;
-        Ok(match FixedUnicode::encoding(&key) {
-            Some((format, bom)) => Self::Wide { format, bom },
-            None => Self::Registered(Codec::by_key(&key, encoding)?),
-        })
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -233,7 +217,7 @@ pub(in crate::dynamic::stdlib) fn text_options(
     let string = |id| (id != NONE).then(|| ctx.str_value(id)).transpose();
     let encoding = crate::sys::file_encoding(string(encoding)?).into_owned();
     let newline = string(newline)?.map(validate_newline).transpose()?;
-    let codec = StreamCodec::lookup(&encoding)?;
+    let codec = StreamCodec::for_stream(&encoding)?;
     Ok((encoding, newline, codec))
 }
 
@@ -562,7 +546,10 @@ impl Wrapper {
         };
         let encoder = self.encoder.get();
         let encoded = match encoder.codec {
-            StreamCodec::Wide { format, bom } => {
+            StreamCodec::Wide {
+                format,
+                signature: bom,
+            } => {
                 let errors = ctx.str_value(encoder.errors)?.to_owned();
                 let signature = bom && self.seekable && self.write_start.get();
                 let order = if signature { 0 } else { format.byte_order() };
@@ -764,7 +751,10 @@ fn decode_chunk(
             text
         }
         StreamCodec::Registered(c) => codecs::decode_bytes(ctx, c, raw, Some(errors))?,
-        StreamCodec::Wide { format, bom } => {
+        StreamCodec::Wide {
+            format,
+            signature: bom,
+        } => {
             let errors = ctx.str_value(errors)?.to_owned();
             let requested = if bom { 0 } else { format.byte_order() };
             let (decoded, consumed, order) =
