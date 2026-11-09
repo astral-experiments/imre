@@ -115,7 +115,7 @@ A **paired pass** means that CPython 3.14.5 passed the original test and Imre pa
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
 development branches. Each original test occurrence counts once. Skipped and omitted tests remain
 in the denominator. The [omission decisions](docs/stdlib-omissions.md) cover 118 originals in these 44 families and [eight supplemental Decimal originals](docs/stdlib-omissions.md#decimal).
-The published totals at `58276705` include typed native code, boxed native code that calls the runtime, and earlier runs that loaded Python source during execution. Use the recorded product and launch mode when reproducing a row. [Compiler design](docs/design.md#boxed-compilation)
+The published totals at `58276705` include typed native code, boxed native code that calls the runtime, and earlier runs through the retired Python source evaluator. Use the recorded product and launch mode when reproducing a row. [Compiler design](docs/design.md#boxed-compilation) · [Evaluator removal](https://github.com/astral-experiments/imre/pull/6309)
 
 The [supplemental `test_urllib2` decision](docs/stdlib-omissions.md#test_urllib2) covers the single packaging-specific error in a separate 80-case replay.
 
