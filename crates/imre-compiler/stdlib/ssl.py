@@ -1117,3 +1117,7 @@ def get_server_certificate(addr, ssl_version=PROTOCOL_TLS_CLIENT,
         with context.wrap_socket(sock, server_hostname=host) as tls:
             certificate = tls.getpeercert(True)
     return DER_cert_to_PEM_cert(certificate)
+
+
+def get_protocol_name(protocol_code):
+    return _PROTOCOL_NAMES.get(protocol_code, '<unknown>')
