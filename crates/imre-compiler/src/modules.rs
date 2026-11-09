@@ -3564,6 +3564,36 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
     }
 
+    /// The live namespace supplies the callable for this checked Python call. Its binder
+    /// checks the arguments against that object; nested expressions keep their own checks.
+    pub(crate) fn checked_live_call(&self, module: ModuleId, call: &ast::ExprCall) {
+        let checked = &mut self.checked_diagnostics.borrow_mut()[module];
+        checked.extend([
+            CheckedDiagnostic::NonCallable(call.range()),
+            CheckedDiagnostic::Call(call.range()),
+            CheckedDiagnostic::MissingArgument(call.range()),
+        ]);
+        for arg in &call.arguments.args {
+            checked.push(CheckedDiagnostic::ExcessArgument(arg.range()));
+            checked.push(CheckedDiagnostic::ArgumentType(arg.range()));
+        }
+        let mut names = HashSet::new();
+        for keyword in &call.arguments.keywords {
+            checked.extend([
+                CheckedDiagnostic::Keyword(keyword.range()),
+                CheckedDiagnostic::PositionalKeyword(keyword.range()),
+                CheckedDiagnostic::ArgumentType(keyword.range()),
+                CheckedDiagnostic::ArgumentType(keyword.value.range()),
+            ]);
+            // An explicitly repeated name is invalid regardless of the callable.
+            if let Some(name) = &keyword.arg
+                && names.insert(name.as_str())
+            {
+                checked.push(CheckedDiagnostic::RepeatedKeyword(keyword.range()));
+            }
+        }
+    }
+
     /// Native evaluation of this exact call raises for a known noncallable object.
     pub(crate) fn checked_noncallable(&self, module: ModuleId, call: TextRange) {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::NonCallable(call));

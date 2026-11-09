@@ -41,8 +41,19 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                 !operands.is_empty()
             }
             ExprKind::Builtin(Builtin::RegisteredStatement(..), _) => true,
-            ExprKind::Builtin(Builtin::RegisteredLocation(_), operands) => operands.len() == 1,
-            ExprKind::Builtin(Builtin::RegisteredAttribute(_), operands) => operands.len() == 1,
+            ExprKind::Builtin(Builtin::RegisteredLocation(..), operands) => operands.len() == 1,
+            ExprKind::Builtin(Builtin::RegisteredAttribute { action, .. }, operands) => {
+                use ir::AttributeAction;
+                uses_object_operation |= *action != AttributeAction::Load;
+                operands.len()
+                    == match action {
+                        AttributeAction::Load | AttributeAction::Delete => 1,
+                        AttributeAction::Store | AttributeAction::InPlace(_) => 2,
+                    }
+            }
+            ExprKind::Builtin(Builtin::RegisteredUnary(_), operands) => {
+                matches!(operands.as_slice(), [operand] if operand.ty == Type::PythonObject)
+            }
             ExprKind::Builtin(Builtin::RegisteredSubscript(..), operands) => operands.len() == 2,
             ExprKind::Builtin(
                 Builtin::RegisteredName(_)
@@ -143,7 +154,17 @@ impl Frame<'_, '_, '_> {
             true
         } else if matches!(
             expr.kind,
-            ExprKind::Builtin(Builtin::GlobalSet(_) | Builtin::RegisteredImport(_), _)
+            ExprKind::Builtin(
+                Builtin::GlobalSet(_)
+                    | Builtin::RegisteredImport(_)
+                    | Builtin::RegisteredAttribute {
+                        action: ir::AttributeAction::Store
+                            | ir::AttributeAction::Delete
+                            | ir::AttributeAction::InPlace(_),
+                        ..
+                    },
+                _
+            )
         ) {
             self.evaluate(expr);
             true
@@ -215,9 +236,9 @@ impl Frame<'_, '_, '_> {
                 self.code.linked_string(points.clone())
             }
             (Builtin::RegisteredString(points), []) => self.code.lit(7, points),
-            (Builtin::RegisteredLocation(range), [value]) => {
+            (Builtin::RegisteredLocation(range, position), [value]) => {
                 let previous_range = std::mem::replace(&mut self.code.current_range, *range);
-                let previous_line = self.code.enter_expression(range.start());
+                let previous_line = self.code.enter_expression(*position);
                 let value = self.evaluate(value);
                 self.code.leave_expression(previous_line);
                 self.code.current_range = previous_range;
@@ -239,10 +260,6 @@ impl Frame<'_, '_, '_> {
                 let name = self.names.expect("registered local names")[slot].clone();
                 self.bind(&name, &value);
                 return CheckedValue::handle("0".into());
-            }
-            (Builtin::RegisteredAttribute(name), [base]) => {
-                let base = self.evaluate_handle(base);
-                self.code.attr(&base, name)
             }
             (Builtin::RegisteredSubscript(range, base_end), [base, key]) => {
                 let names = self.names;
@@ -273,20 +290,17 @@ impl Frame<'_, '_, '_> {
         self.code.assign_owned_name(&name, handle);
     }
 
-    pub(crate) fn call_mark(&mut self, callee_name: Option<ruff_text_size::TextRange>) -> String {
-        self.code.begin_positional_call(callee_name)
-    }
-
-    pub(crate) fn call(
-        &mut self,
-        callable: &str,
-        args: &[String],
-        mark: &str,
-        range: ruff_text_size::TextRange,
-        callee_end: ruff_text_size::TextSize,
-    ) -> String {
-        self.code
-            .finish_positional_call(callable, args, mark, range, callee_end)
+    pub(crate) fn object_operation(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
+        let (target, args) = operands
+            .split_first()
+            .expect("checked object operation has a target");
+        let names = self.names;
+        let handle = self
+            .code
+            .object_operation(op, target, args.iter(), |code, expr| {
+                Frame { code, names }.evaluate_handle(expr)
+            });
+        CheckedValue::handle(handle)
     }
 
     pub(crate) fn exact_word(&mut self, handle: &str) -> String {
@@ -410,51 +424,229 @@ impl Function<'_, '_> {
         ))
     }
 
-    pub(super) fn positional_call<T>(
+    pub(super) fn object_operation<'e, T: 'e>(
         &mut self,
-        callee: &T,
-        args: &[T],
-        range: TextRange,
-        callee_end: TextSize,
-        suspended_name: Option<TextRange>,
-        evaluate: impl FnMut(&mut Self, &T) -> String,
+        op: &Builtin,
+        target: &'e T,
+        args: impl Iterator<Item = &'e T>,
+        mut evaluate: impl FnMut(&mut Self, &T) -> String,
     ) -> String {
-        let mark = self.begin_positional_call(suspended_name);
-        let (callee, args) = crate::llvm::operations::call_arguments(self, callee, args, evaluate);
-        self.finish_positional_call(&callee, &args, &mark, range, callee_end)
-    }
-
-    fn begin_positional_call(&mut self, suspended_name: Option<TextRange>) -> String {
-        let mark = self.temporary_mark();
-        if self.native_suspension
-            && let Some(name) = suspended_name
-        {
-            self.suspension_position(name);
+        match op {
+            Builtin::RegisteredCall(call) => self.call_value(call, target, args, None, evaluate),
+            Builtin::RegisteredUnary(op) => self.unary_value(*op, |f| evaluate(f, target)),
+            Builtin::RegisteredAttribute {
+                action,
+                name,
+                range,
+            } => self.attribute_operation(
+                *action,
+                name,
+                *range,
+                std::iter::once(target).chain(args),
+                evaluate,
+            ),
+            _ => unreachable!("selected Python object operation"),
         }
-        mark
     }
 
-    fn finish_positional_call(
+    pub(super) fn unary_value(
         &mut self,
-        callable: &str,
-        args: &[String],
-        mark: &str,
-        range: TextRange,
-        callee_end: TextSize,
+        op: ir::ObjectUnary,
+        evaluate: impl FnOnce(&mut Self) -> String,
     ) -> String {
-        let (array, count) = self.handle_array(args);
-        let span = self.expression_range_span(range, callee_end, b'(');
-        self.call_position(range);
-        self.call_at(
+        let mark = self.temporary_mark();
+        self.unwind_operands(&mark, |f| {
+            let operand = evaluate(f);
+            let name = match op {
+                ir::ObjectUnary::Positive => "pos",
+                ir::ObjectUnary::Negative => "neg",
+                ir::ObjectUnary::Invert => "~",
+                ir::ObjectUnary::Not => "not",
+            };
+            let value = f.op(name, &[&operand]);
+            if op == ir::ObjectUnary::Not {
+                f.discard_truth(&mark);
+            } else {
+                f.keep_operands(&mark, &value, "0");
+            }
+            value
+        })
+    }
+
+    /// Evaluate the callable before its arguments. A lone *iterable is converted
+    /// at invocation, after the keywords; a mixed positional list expands each * in place.
+    pub(super) fn call_value<'e, T: 'e>(
+        &mut self,
+        call: &ir::RegisteredCall,
+        target: &T,
+        args: impl Iterator<Item = &'e T>,
+        partition: Option<(u32, String)>,
+        mut evaluate: impl FnMut(&mut Self, &T) -> String,
+    ) -> String {
+        use ir::{RegisteredArguments, RegisteredCallTarget};
+
+        let mark = self.temporary_mark();
+        let (callable, receiver, callee_end) = match &call.target {
+            RegisteredCallTarget::Callable {
+                end,
+                suspended_name,
+            } => {
+                if self.native_suspension
+                    && let Some(name) = suspended_name
+                {
+                    self.suspension_position(*name);
+                }
+                (evaluate(self, target), None, *end)
+            }
+            RegisteredCallTarget::Method { name, attribute } => self.unwind_operands(&mark, |f| {
+                let receiver = evaluate(f, target);
+                let direct = matches!(call.arguments, RegisteredArguments::Positional);
+                let (callee, bound) = f.method_target(&receiver, name, *attribute, direct);
+                f.keep_operands(&mark, &callee, bound.as_deref().unwrap_or("0"));
+                (callee, bound, attribute.end())
+            }),
+        };
+        let operands = match &call.arguments {
+            RegisteredArguments::Positional => {
+                let receiver_slot = receiver.is_some();
+                let values: Vec<_> = receiver
+                    .into_iter()
+                    .chain(args.map(|a| evaluate(self, a)))
+                    .collect();
+                let (array, count) = self.handle_array(&values);
+                if let Some((index, get_position)) = partition {
+                    debug_assert!(receiver_slot && count == 2);
+                    CallArguments::PartitionField {
+                        array,
+                        index,
+                        get_position,
+                    }
+                } else {
+                    CallArguments::Positional {
+                        array,
+                        count,
+                        receiver_slot,
+                    }
+                }
+            }
+            RegisteredArguments::Keywords { positional, names } => {
+                let values: Vec<_> = args.map(|a| evaluate(self, a)).collect();
+                let (array, _) = self.handle_array(&values);
+                CallArguments::FixedKeywords {
+                    array,
+                    positional: *positional,
+                    keywords: names.len(),
+                    names: self.output.data(names.join("\0").as_bytes()),
+                }
+            }
+            RegisteredArguments::Packed(pack) => self.unwind_operands(&mark, |f| {
+                let (args, kwargs) = f.argument_pack(pack, args, Some(&callable), &mut evaluate);
+                CallArguments::Packed { args, kwargs }
+            }),
+        };
+        let span = self.expression_range_span(call.range, callee_end, b'(');
+        self.call_position(call.range);
+        self.call_at(&callable, operands, &mark, span)
+    }
+
+    /// Python calls convert a lone starred operand after the keywords. Class bases
+    /// and mixed positional operands are expanded before the following operand.
+    pub(super) fn argument_pack<'e, T: 'e>(
+        &mut self,
+        layout: &ir::PackedArguments,
+        mut args: impl Iterator<Item = &'e T>,
+        callable: Option<&str>,
+        evaluate: &mut impl FnMut(&mut Self, &T) -> String,
+    ) -> (String, String) {
+        let (positional, deferred) =
+            if let Some(callee) = callable.filter(|_| layout.starred.as_slice() == [true]) {
+                let mark = self.temporary_mark();
+                let iterable = evaluate(self, args.next().expect("single starred operand"));
+                (iterable, Some((callee, mark)))
+            } else {
+                let values = self.op("list", &[]);
+                self.pack_positionals(
+                    &values,
+                    layout.starred.iter().copied().zip(&mut args),
+                    evaluate,
+                );
+                (values, None)
+            };
+        let kwargs = self.pack_keywords(
+            layout.keywords.iter().map(Option::as_deref).zip(args),
             callable,
-            CallArguments::Positional {
-                array,
-                count,
-                receiver_slot: false,
-            },
-            mark,
-            span,
-        )
+            evaluate,
+        );
+        if let Some((callee, mark)) = deferred {
+            let values = self.pack_operand("spread_arguments", &[&positional, callee]);
+            self.keep_operands(&mark, &values, &kwargs);
+            (values, kwargs)
+        } else {
+            (positional, kwargs)
+        }
+    }
+
+    pub(super) fn pack_positionals<'e, T: 'e>(
+        &mut self,
+        list: &str,
+        args: impl Iterator<Item = (bool, &'e T)>,
+        evaluate: &mut impl FnMut(&mut Self, &T) -> String,
+    ) {
+        for (starred, operand) in args {
+            if starred {
+                self.extend_operand(list, |f| evaluate(f, operand));
+            } else {
+                let value = evaluate(self, operand);
+                self.op("append", &[list, &value]);
+            }
+        }
+    }
+
+    /// Each explicit group after ** is evaluated before merging and checking for duplicates.
+    fn pack_keywords<'n, 'e, T: 'e>(
+        &mut self,
+        keywords: impl Iterator<Item = (Option<&'n str>, &'e T)>,
+        callable: Option<&str>,
+        evaluate: &mut impl FnMut(&mut Self, &T) -> String,
+    ) -> String {
+        let mut keywords = keywords.peekable();
+        if keywords.peek().is_none() {
+            return "0".into();
+        }
+        let (merge, callable) = match callable {
+            Some(callable) => ("keywords", callable),
+            None => ("class_keywords", "0"),
+        };
+        let kwargs = self.op("dict", &[]);
+        let mut unpacked = false;
+        while let Some((name, _)) = keywords.peek() {
+            if name.is_none() {
+                let (_, operand) = keywords.next().unwrap();
+                let mark = self.temporary_mark();
+                self.unwind_operands(&mark, |f| {
+                    let value = evaluate(f, operand);
+                    f.pack_operand(merge, &[&kwargs, &value, callable]);
+                    // The merged dictionary now owns the keyword values.
+                    f.discard_truth(&mark);
+                });
+                unpacked = true;
+            } else {
+                let group = if unpacked {
+                    self.op("dict", &[])
+                } else {
+                    kwargs.clone()
+                };
+                while let Some((Some(name), operand)) = keywords.next_if(|(name, _)| name.is_some())
+                {
+                    let value = evaluate(self, operand);
+                    self.named_op("keyword", &group, name, &value);
+                }
+                if unpacked {
+                    self.pack_operand(merge, &[&kwargs, &group, callable]);
+                }
+            }
+        }
+        kwargs
     }
 
     pub(super) fn subscript<T>(

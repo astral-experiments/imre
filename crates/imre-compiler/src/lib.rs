@@ -1299,6 +1299,32 @@ print(values)
     }
 
     #[test]
+    fn a_replaced_callable_can_supply_an_operand_to_print() {
+        let root = tempfile::tempdir().unwrap();
+        let entry = root.path().join("app.py");
+        let source = r#"def add(a: int, b: int) -> int:
+    return a + b
+
+def retire(self):
+    globals()["call"] = add
+
+previous = type("Previous", (), {"__del__": retire})
+globals()["call"] = previous()
+call = add
+print("result", call(b=2, a=1))
+"#;
+        std::fs::write(&entry, source).unwrap();
+        super::check_file(&entry, None).unwrap();
+        let invalid = source.replace("a=1))", "a=1), invalid=True)");
+        std::fs::write(&entry, invalid).unwrap();
+        let error = super::check_file(&entry, None).unwrap_err();
+        assert!(
+            error.contains("keyword arguments are unsupported for this builtin"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn a_namespace_store_can_run_a_finalizer_after_installing_the_new_value() {
         let root = tempfile::tempdir().unwrap();
         let entry = root.path().join("app.py");
@@ -1311,6 +1337,21 @@ print(values)
             std::fs::write(&entry, source.replace(install, statement)).unwrap();
             super::check_file(&entry, None).unwrap();
         }
+        for call in [
+            "values.append(value=True)",
+            "values.append(*[True])",
+            "values.append(**{'value': True})",
+        ] {
+            std::fs::write(&entry, source.replace("values.append(True)", call)).unwrap();
+            super::check_file(&entry, None).unwrap();
+        }
+        let nested = format!(
+            "def take(value: int) -> int:\n    return value\n\n{}",
+            source.replace("values.append(True)", "values.append(value=take('x'))")
+        );
+        std::fs::write(&entry, nested).unwrap();
+        let error = super::check_file(&entry, None).unwrap_err();
+        assert!(error.contains("expected int, got str"), "{error}");
         for statement in ["", &format!("if False:\n    {install}")] {
             std::fs::write(&entry, source.replace(install, statement)).unwrap();
             let error = super::check_file(&entry, None).unwrap_err();

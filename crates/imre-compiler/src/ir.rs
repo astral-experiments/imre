@@ -1064,11 +1064,69 @@ pub(crate) fn required_object_call(
     executable_text.or(socket_sendfile)
 }
 
+/// Unary protocol to invoke on a materialized Python object.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ObjectUnary {
+    Positive,
+    Negative,
+    Invert,
+    Not,
+}
+
+/// Python descriptor operation on a named attribute in the live frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AttributeAction {
+    Load,
+    Store,
+    Delete,
+    InPlace(&'static str),
+}
+
 /// Operand layout of one entry in a registered Python dictionary display.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum DictEntryKind {
     Pair,
     Unpack,
+}
+
+/// The first operand evaluates the callable or method receiver; all remaining
+/// operands are evaluated by the Python argument binder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RegisteredCall {
+    pub(crate) range: ruff_text_size::TextRange,
+    pub(crate) target: RegisteredCallTarget,
+    pub(crate) arguments: RegisteredArguments,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum RegisteredCallTarget {
+    Callable {
+        end: ruff_text_size::TextSize,
+        suspended_name: Option<ruff_text_size::TextRange>,
+    },
+    Method {
+        name: String,
+        attribute: ruff_text_size::TextRange,
+    },
+}
+
+/// Positional values precede keyword values in Python call evaluation order.
+/// Packed entries distinguish each `*` iterable and each `**` mapping.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum RegisteredArguments {
+    Positional,
+    Keywords {
+        positional: usize,
+        names: Vec<String>,
+    },
+    Packed(PackedArguments),
+}
+
+/// Source order of the positional items, starred iterables, named keywords and mappings.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PackedArguments {
+    pub(crate) starred: Vec<bool>,
+    pub(crate) keywords: Vec<Option<String>>,
 }
 
 /// A statically named import that executes in a live Python namespace.
@@ -1633,21 +1691,21 @@ pub(crate) enum Builtin {
     /// An original statement checkpoint and its optional call without a separate highlight.
     RegisteredStatement(ruff_text_size::TextRange, Option<ruff_text_size::TextRange>),
     /// The source position in effect while this registered operand is evaluated.
-    RegisteredLocation(ruff_text_size::TextRange),
+    RegisteredLocation(ruff_text_size::TextRange, ruff_text_size::TextSize),
     /// Construct the native function at this physical definition site from its evaluated header.
     RegisteredDefinition(ruff_text_size::TextSize),
     RegisteredImport(NamespaceImport),
     RegisteredSuspend(SuspendValue, ruff_text_size::TextRange),
-    /// The loaded callable is followed by its positional arguments in evaluation order.
-    RegisteredCall(
-        ruff_text_size::TextRange,
-        ruff_text_size::TextSize,
-        Option<ruff_text_size::TextRange>,
-    ),
+    RegisteredCall(RegisteredCall),
     /// Resolve the code name in the live registered Python scope.
     RegisteredName(String),
-    /// Look up the attribute on its evaluated Python receiver, including descriptor binding.
-    RegisteredAttribute(String),
+    RegisteredUnary(ObjectUnary),
+    /// Store evaluates the RHS before the receiver; in-place retains the receiver across the RHS.
+    RegisteredAttribute {
+        action: AttributeAction,
+        name: String,
+        range: ruff_text_size::TextRange,
+    },
     /// In source order, each pair consumes a key and value, and each unpack one mapping.
     /// The registered frame owns these operands through dictionary construction.
     RegisteredDict(Vec<DictEntryKind>),

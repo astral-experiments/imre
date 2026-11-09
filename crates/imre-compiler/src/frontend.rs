@@ -114,11 +114,12 @@ mod regex;
 mod registered;
 mod retained;
 pub(crate) use registered::values::{
-    literal_replacements, push_codepoints, registered_positional_call, registered_string,
-    registered_value,
+    RegisteredSource, literal_replacements, packed_arguments, positional_elements, push_codepoints,
+    registered_arguments, registered_string, registered_value,
 };
 pub(crate) use registered::{
-    RegisteredFunction, RegisteredScope, registered_class_body, registered_import, registered_suite,
+    RegisteredFunction, RegisteredScope, attribute_effects, delete_targets, registered_class_body,
+    registered_import, registered_suite,
 };
 pub(crate) use retained::RegisteredNative;
 mod sequences;
@@ -982,6 +983,7 @@ fn lower_graph(
         }
     };
     let mut literals = HashMap::new();
+    let mut source_checks = registered::SourceChecks::default();
     if !registered_parameters.is_empty() {
         graph.set_registered_functions(HashMap::new());
         // A checked body or a real function-value read can establish the registered binding.
@@ -1033,14 +1035,20 @@ fn lower_graph(
             &helpers,
             &globals,
         );
-        if registered_parameters.contains_key(&signature.id) {
+        if let Some(original) = registered_parameters.get(&signature.id) {
             let literals = literals
                 .entry(*module_id)
-                .or_insert_with(|| registered::values::Literals::new(module));
+                .or_insert_with(|| registered::values::ModuleSource::new(module));
             match registered::lower_definition(checker, definition, signature, literals) {
-                Ok(body) => {
+                Ok(body) if source_checks.accepts(graph, *module_id, definition) => {
                     graph.register_function(*module_id, definition.start(), body);
                     globals.missing_bindings.borrow_mut().remove(&signature.id);
+                }
+                Ok(_) => {
+                    globals
+                        .missing_bindings
+                        .borrow_mut()
+                        .insert(signature.id, original.clone());
                 }
                 Err(error) if error.is_object() => {}
                 Err(error) => return Err(error.terminal_in(graph, *module_id)),
@@ -9342,10 +9350,16 @@ impl<'a> Checker<'a> {
     }
 
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
-        if registered::values::registered_positional_call(call)
-            && let Some(callee) = self.live_module_binding(&call.func)
-        {
-            return registered::values::positional_call(call, callee, |arg| self.expr(arg));
+        let live = match &*call.func {
+            ast::Expr::Attribute(field) => self
+                .live_module_binding(&field.value)
+                .map(|receiver| registered::values::loaded_attribute(field, receiver)),
+            target => self.live_module_binding(target),
+        };
+        if let Some(callee) = live {
+            let value = registered::values::call_with_target(call, callee, |arg| self.expr(arg))?;
+            self.graph.checked_live_call(self.module, call);
+            return Ok(value);
         }
         if self.module_scope
             && self.globals.registered_initializers
@@ -9354,7 +9368,7 @@ impl<'a> Checker<'a> {
         {
             // A registered initializer already owns the namespace returned by globals().
             self.namespace_calls.insert(call.range());
-            return Ok(registered::values::positional_operands(
+            return Ok(registered::values::object_call(
                 call,
                 vec![registered::values::name_binding("globals")],
             ));
@@ -9981,6 +9995,12 @@ impl<'a> Checker<'a> {
                     Some(value) => value,
                     None => self.expr(&method.value)?,
                 };
+                if object.ty == Type::PythonObject {
+                    let method = registered::values::loaded_attribute(method, object);
+                    return registered::values::call_with_target(call, method, |arg| {
+                        self.expr(arg)
+                    });
+                }
                 if let Type::Class(class)
                 | Type::IntEnum(class)
                 | Type::StrEnum(class)
@@ -11272,20 +11292,9 @@ impl<'a> Checker<'a> {
                 Some(value) => value,
                 None => self.expr(&attribute.value)?,
             };
-            if receiver.ty == Type::PythonObject
-                && registered::values::fixed_positional_arguments(call)
-            {
-                let method = registered::located(
-                    &call.func,
-                    Expr {
-                        ty: Type::PythonObject,
-                        kind: ExprKind::Builtin(
-                            Builtin::RegisteredAttribute(attribute.attr.to_string()),
-                            vec![receiver],
-                        ),
-                    },
-                );
-                return registered::values::positional_call(call, method, |arg| self.expr(arg));
+            if receiver.ty == Type::PythonObject {
+                let method = registered::values::loaded_attribute(attribute, receiver);
+                return registered::values::call_with_target(call, method, |arg| self.expr(arg));
             }
             self.check_namedtuple_asdict(attribute, Some(receiver.ty))?;
             if let Some(result) =
@@ -12867,16 +12876,17 @@ impl<'a> Checker<'a> {
             "set" | "frozenset" if self.unshadowed_builtin(&call.func, name) => {
                 return Err(self.object_builtin_error(name, call));
             }
-            name if annotations::is_builtin_type(name)
-                && self.unshadowed_builtin(&call.func, name)
-                && registered::values::registered_positional_call(call)
-                && args
-                    .iter()
-                    .any(|value| self.types.stores_python_object(value.ty)) =>
+            name if self.unshadowed_builtin(&call.func, name)
+                && registered::values::fixed_positional_arguments(call)
+                && (name == "print" && args.iter().any(|value| value.ty == Type::PythonObject)
+                    || annotations::is_builtin_type(name)
+                        && args
+                            .iter()
+                            .any(|value| self.types.stores_python_object(value.ty))) =>
             {
                 let mut operands = args;
                 operands.insert(0, registered::values::name_binding(name));
-                return Ok(registered::values::positional_operands(call, operands));
+                return Ok(registered::values::object_call(call, operands));
             }
             _ => {
                 let diagnostic = Diagnostic::at(

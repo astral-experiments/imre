@@ -5,7 +5,7 @@ use super::*;
 pub(super) mod values;
 
 pub(super) struct Frame<'a> {
-    pub(super) literals: &'a values::Literals,
+    pub(super) literals: &'a values::ModuleSource,
     pub(super) deferred: std::cell::RefCell<Option<Failure>>,
 }
 
@@ -32,7 +32,7 @@ pub(super) fn lower_definition<'a>(
     mut checker: Checker<'a>,
     definition: &ast::StmtFunctionDef,
     signature: &Signature,
-    literals: &'a values::Literals,
+    literals: &'a values::ModuleSource,
 ) -> Result<RegisteredFunction, String> {
     checker.registered = Some(Frame {
         literals,
@@ -66,6 +66,35 @@ pub(super) fn lower_definition<'a>(
     Ok(function)
 }
 
+/// A registered body can supply an unresolved calling convention only if its other
+/// operations satisfy the first-party source contract. Cache the check per physical module.
+#[derive(Default)]
+pub(super) struct SourceChecks {
+    session: std::cell::OnceCell<Option<crate::analysis::Session>>,
+    errors: HashMap<ModuleId, Vec<TextRange>>,
+}
+
+impl SourceChecks {
+    pub(super) fn accepts(
+        &mut self,
+        graph: &SourceGraph,
+        module: ModuleId,
+        definition: &ast::StmtFunctionDef,
+    ) -> bool {
+        let Some(session) = self
+            .session
+            .get_or_init(|| graph.session.registered_body_checks().ok())
+        else {
+            return false;
+        };
+        self.errors
+            .entry(module)
+            .or_insert_with(|| session.source_error_ranges(module))
+            .iter()
+            .all(|range| !definition.range().contains_range(*range))
+    }
+}
+
 pub(super) fn capture(
     graph: &SourceGraph,
     signatures: &HashMap<DefinitionId, Signature>,
@@ -76,7 +105,8 @@ pub(super) fn capture(
     retain_live_parameters: bool,
 ) {
     let mut registered = HashMap::<ModuleId, HashMap<TextSize, RegisteredFunction>>::new();
-    let mut literals = HashMap::new();
+    let mut sources = HashMap::new();
+    let mut checks = SourceChecks::default();
     for (&owner, signature) in signatures {
         let id = owner.module;
         let module = &graph.modules[id];
@@ -102,10 +132,13 @@ pub(super) fn capture(
         }
         let helpers = Helpers::new(inference.len());
         let checker = Checker::new(graph, id, signatures, classes, types, &helpers, globals);
-        let literals = literals
+        let literals = sources
             .entry(id)
-            .or_insert_with(|| values::Literals::new(module));
+            .or_insert_with(|| values::ModuleSource::new(module));
         if let Ok(body) = lower_definition(checker, function, &signature, literals) {
+            if !checks.accepts(graph, id, function) {
+                continue;
+            }
             registered
                 .entry(id)
                 .or_default()
@@ -132,16 +165,10 @@ fn operation(op: Builtin, ty: Type, operands: Vec<Expr>) -> Expr {
     }
 }
 
-pub(super) fn located(node: &ast::Expr, value: Expr) -> Expr {
-    operation(
-        Builtin::RegisteredLocation(node.range()),
-        value.ty,
-        vec![value],
-    )
-}
-
-/// Preserve the requested module separately from the names bound in the current namespace.
-pub(crate) fn registered_import(stmt: &ast::Stmt, private_names: &imre_ast::Names) -> Option<Expr> {
+pub(crate) fn registered_import(
+    stmt: &ast::Stmt,
+    private_names: Option<&imre_ast::Names>,
+) -> Option<Expr> {
     let import = match stmt {
         ast::Stmt::Import(import) => ir::NamespaceImport::Modules(
             import
@@ -158,7 +185,7 @@ pub(crate) fn registered_import(stmt: &ast::Stmt, private_names: &imre_ast::Name
                             .map_or(root, ast::Identifier::as_str)
                             .to_owned(),
                         bind_leaf: alias.asname.is_some()
-                            && !private_names.imports_root(&alias.name),
+                            && !private_names.is_some_and(|names| names.imports_root(&alias.name)),
                     }
                 })
                 .collect(),
@@ -202,16 +229,12 @@ pub(crate) enum RegisteredScope {
 pub(crate) fn registered_suite(
     stmts: &[ast::Stmt],
     kind: RegisteredScope,
-    private_names: &imre_ast::Names,
-    replacements: &HashMap<TextRange, Vec<u32>>,
-    has_templates: bool,
+    source: values::RegisteredSource<'_>,
 ) -> Option<RegisteredFunction> {
     let module = matches!(kind, RegisteredScope::Module);
     let mut scope = SourceScope {
         kind,
-        private_names,
-        replacements,
-        has_templates,
+        source,
         names: HashMap::new(),
     };
     let mut body = Vec::new();
@@ -244,9 +267,7 @@ fn plain_class_header(class: &ast::StmtClassDef) -> bool {
 /// Keep the real class namespace for suites with ordinary bindings and no annotation setup.
 pub(crate) fn registered_class_body(
     class: &ast::StmtClassDef,
-    private_names: &imre_ast::Names,
-    replacements: &HashMap<TextRange, Vec<u32>>,
-    has_templates: bool,
+    source: values::RegisteredSource<'_>,
 ) -> Option<RegisteredFunction> {
     if !plain_class_header(class)
         || !class.body.iter().all(|stmt| {
@@ -258,17 +279,116 @@ pub(crate) fn registered_class_body(
     {
         return None;
     }
-    registered_suite(
-        &class.body,
-        RegisteredScope::Class,
-        private_names,
-        replacements,
-        has_templates,
-    )
+    registered_suite(&class.body, RegisteredScope::Class, source)
+}
+
+/// A target's Python expression inputs in evaluation order. The receiver is evaluated
+/// once, including for an in-place operation that both reads and writes its descriptor.
+pub(crate) struct AttributeEffect<'a> {
+    pub(crate) action: ir::AttributeAction,
+    pub(crate) field: &'a ast::ExprAttribute,
+    value: Option<&'a ast::Expr>,
+}
+
+impl<'a> AttributeEffect<'a> {
+    pub(crate) fn operands(&self) -> impl Iterator<Item = &'a ast::Expr> {
+        let receiver = Some(self.field.value.as_ref());
+        if self.action == ir::AttributeAction::Store {
+            [self.value, receiver]
+        } else {
+            [receiver, self.value]
+        }
+        .into_iter()
+        .flatten()
+    }
+
+    pub(super) fn lower(&self, values: Vec<Expr>) -> Statement {
+        Statement::Expr(operation(
+            Builtin::RegisteredAttribute {
+                action: self.action,
+                name: self.field.attr.to_string(),
+                range: self.field.range(),
+            },
+            Type::None,
+            values,
+        ))
+    }
+}
+
+/// Deletion groups evaluate their leaves from left to right without constructing a tuple or list.
+pub(crate) fn delete_targets(delete: &ast::StmtDelete) -> Vec<&ast::Expr> {
+    let mut remaining: Vec<_> = delete.targets.iter().rev().collect();
+    let mut leaves = Vec::new();
+    while let Some(target) = remaining.pop() {
+        match target {
+            ast::Expr::Tuple(group) => remaining.extend(group.elts.iter().rev()),
+            ast::Expr::List(group) => remaining.extend(group.elts.iter().rev()),
+            _ => leaves.push(target),
+        }
+    }
+    leaves
+}
+
+pub(crate) fn attribute_effects(stmt: &ast::Stmt) -> Option<Vec<AttributeEffect<'_>>> {
+    use ir::AttributeAction::{Delete, InPlace, Store};
+    let (target, action, value) = match stmt {
+        ast::Stmt::Assign(assign) => {
+            let [target] = assign.targets.as_slice() else {
+                return None;
+            };
+            (target, Store, Some(assign.value.as_ref()))
+        }
+        ast::Stmt::AnnAssign(assign) => (
+            assign.target.as_ref(),
+            Store,
+            Some(assign.value.as_deref()?),
+        ),
+        ast::Stmt::AugAssign(assign) => (
+            assign.target.as_ref(),
+            InPlace(assign.op.as_str()),
+            Some(assign.value.as_ref()),
+        ),
+        ast::Stmt::Delete(delete) => {
+            return delete_targets(delete)
+                .into_iter()
+                .map(|target| {
+                    Some(AttributeEffect {
+                        action: Delete,
+                        field: target.as_attribute_expr()?,
+                        value: None,
+                    })
+                })
+                .collect();
+        }
+        _ => return None,
+    };
+    Some(vec![AttributeEffect {
+        action,
+        field: target.as_attribute_expr()?,
+        value,
+    }])
 }
 
 impl statements::StatementLowering for SourceScope<'_> {
     type Error = ();
+
+    fn attribute_statements(&mut self, stmt: &ast::Stmt) -> StdResult<Option<Vec<Statement>>, ()> {
+        let Some(effects) = attribute_effects(stmt) else {
+            return Ok(None);
+        };
+        effects
+            .iter()
+            .map(|effect| {
+                let values = effect
+                    .operands()
+                    .map(|node| self.ordinary_operand(node))
+                    .collect::<Option<_>>()
+                    .ok_or(())?;
+                Ok(effect.lower(values))
+            })
+            .collect::<StdResult<Vec<_>, _>>()
+            .map(Some)
+    }
 
     fn assignment(&mut self, assign: &ast::StmtAssign) -> StdResult<Vec<Statement>, ()> {
         let [ast::Expr::Name(target)] = assign.targets.as_slice() else {
@@ -336,7 +456,7 @@ impl statements::StatementLowering for SourceScope<'_> {
                 Ok((vec![self.store(class.name.as_str(), value)], true))
             }
             ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => Ok((Vec::new(), true)),
-            _ => registered_import(stmt, self.private_names)
+            _ => registered_import(stmt, self.source.private_names)
                 .map(|import| (vec![Statement::Expr(import)], true))
                 .ok_or(()),
         }
@@ -345,9 +465,7 @@ impl statements::StatementLowering for SourceScope<'_> {
 
 struct SourceScope<'a> {
     kind: RegisteredScope,
-    private_names: &'a imre_ast::Names,
-    replacements: &'a HashMap<TextRange, Vec<u32>>,
-    has_templates: bool,
+    source: values::RegisteredSource<'a>,
     names: HashMap<String, usize>,
 }
 
@@ -367,7 +485,7 @@ impl SourceScope<'_> {
     }
 
     fn ordinary_operand(&self, expr: &ast::Expr) -> Option<Expr> {
-        values::registered_value(expr, self.replacements, self.has_templates)
+        values::registered_value(expr, self.source)
     }
 
     fn operand(&self, expr: &ast::Expr) -> Option<Expr> {
@@ -384,7 +502,7 @@ impl SourceScope<'_> {
                 Some(value) => self.ordinary_operand(value)?,
                 None => Expr::none(),
             };
-            return Some(located(
+            return Some(self.source.located(
                 expr,
                 operation(
                     Builtin::RegisteredSuspend(kind, expr.range()),
@@ -421,7 +539,7 @@ mod tests {
             .body;
         let names = imre_ast::lower(&mut body);
         let class = body[0].as_class_def_stmt().unwrap();
-        let import = registered_import(&class.body[0], &names).unwrap();
+        let import = registered_import(&class.body[0], Some(&names)).unwrap();
         let ExprKind::Builtin(Builtin::RegisteredImport(ir::NamespaceImport::Modules(modules)), _) =
             import.kind
         else {
@@ -436,20 +554,35 @@ mod tests {
     }
 
     #[test]
+    fn a_registered_callback_does_not_certify_an_invalid_sibling_statement() {
+        for invalid in ["n[0]", "undefined_name", "n.bit_length(1)"] {
+            for callback in ["sink(obj.bit_length())", "sink(n)"] {
+                let source =
+                    format!("def act(n: int, obj, sink):\n    {invalid}\n    {callback}\n");
+                let graph = SourceGraph::single(&source).unwrap();
+                let _ = super::super::lower(&graph);
+                assert!(
+                    graph.registered_functions().is_empty(),
+                    "{invalid}; {callback}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn module_and_function_stores_share_the_registered_dictionary_operand() {
         let graph = SourceGraph::single("out = {key: callback(arg), **more}[index]\n").unwrap();
-        let source = &graph.modules[graph.entry].parsed.syntax().body;
+        let entry = &graph.modules[graph.entry];
+        let source = values::ModuleSource::new(entry);
         for module in [false, true] {
             let suite = registered_suite(
-                source,
+                &entry.parsed.syntax().body,
                 if module {
                     RegisteredScope::Module
                 } else {
                     RegisteredScope::Function { is_async: false }
                 },
-                &Default::default(),
-                &HashMap::new(),
-                false,
+                source.context(&entry.source),
             )
             .unwrap();
             assert_eq!(suite.local_names, HashMap::from([(0, "out".to_owned())]));
@@ -467,7 +600,7 @@ mod tests {
                 ) => &operands[0],
                 _ => panic!("expected the destination's namespace store"),
             };
-            let ExprKind::Builtin(Builtin::RegisteredLocation(site), operands) = &operand.kind
+            let ExprKind::Builtin(Builtin::RegisteredLocation(site, _), operands) = &operand.kind
             else {
                 panic!("expected the subscript's original range")
             };
@@ -477,7 +610,7 @@ mod tests {
                 panic!("expected registered subscription")
             };
             assert_eq!(site, index);
-            let ExprKind::Builtin(Builtin::RegisteredLocation(_), display) = &indexed[0].kind
+            let ExprKind::Builtin(Builtin::RegisteredLocation(..), display) = &indexed[0].kind
             else {
                 panic!("expected a located dictionary operand")
             };
@@ -650,15 +783,120 @@ mod tests {
     }
 
     #[test]
-    fn region_boundaries_preserve_specialized_and_packed_operands() {
-        let many = std::iter::repeat_n("1", 65).collect::<Vec<_>>().join(",");
+    fn checked_capture_requires_an_object_receiver_for_late_method_lookup() {
+        for expression in [
+            "n.unknown",
+            "n.unknown()",
+            "n.bit_length(1)",
+            "n.to_bytes('x')",
+            "n.bit_length()",
+        ] {
+            let source = format!("def act(n: int, sink):\n    {expression}\n    sink(n)\n");
+            let graph = SourceGraph::single(&source).unwrap();
+            assert!(super::super::lower(&graph).is_err());
+            assert!(graph.registered_functions().is_empty(), "{expression}");
+        }
+
+        // A generic handle or an unknown type from an invalid expression is insufficient.
+        for body in [
+            "    {'key': n}.unknown()",
+            "    {'key': n}.get('key', n, n)",
+            "    alias = {'key': n}\n    alias.unknown()",
+            "    alias = {'key': n}\n    alias.get('key', n, n)",
+            "    n[0].unknown()",
+            "    undefined_name.unknown()",
+            "    sink = n[0]\n    sink.unknown()",
+            "    alias = sink\n    alias.unknown()",
+        ] {
+            let source = format!("def act(n: int, sink):\n{body}\n    sink(n)\n");
+            let graph = SourceGraph::single(&source).unwrap();
+            assert!(super::super::lower(&graph).is_err());
+            assert!(graph.registered_functions().is_empty(), "{body}");
+        }
+
+        let graph =
+            SourceGraph::single("def act(obj, sink):\n    obj.send(1)\n    sink(obj)\n").unwrap();
+        assert!(super::super::lower(&graph).is_err());
+        let bodies = graph.registered_functions();
+        let body = &bodies[&graph.entry][&TextSize::default()];
+        let mut named = Vec::new();
+        ir::walk_expressions(&body.function.body, &mut |expr| {
+            if let ExprKind::Builtin(
+                Builtin::RegisteredCall(ir::RegisteredCall {
+                    target: ir::RegisteredCallTarget::Method { name, .. },
+                    ..
+                }),
+                _,
+            ) = &expr.kind
+            {
+                named.push(name.as_str());
+            }
+        });
+        assert_eq!(named, ["send"]);
+    }
+
+    fn checked_positive_with_invalid_siblings(positive: &str, invalid: &str) -> SourceGraph {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("callback.py");
+        let combined = format!("{positive}{invalid}");
+        std::fs::write(&path, combined).unwrap();
+        assert!(crate::check_file(&path, None).is_err());
+        std::fs::write(&path, positive).unwrap();
+        crate::check_file(&path, None).unwrap();
+        let graph = SourceGraph::single(positive).unwrap();
+        let selected = super::super::lower_current(&graph, None, &mut HashSet::new());
+        match selected {
+            Ok(crate::CheckedProgram::Registered) => {}
+            Err(error) | Ok(crate::CheckedProgram::Runtime(error)) => {
+                assert!(
+                    matches!(error.kind, Kind::UnresolvedParameter(owner, start)
+                    if owner == graph.entry && start == TextSize::default()),
+                    "{error}"
+                );
+            }
+            _ => panic!("expected a registered Python callable"),
+        }
+        graph
+    }
+
+    #[test]
+    fn unary_protocol_requires_a_materialized_operand_in_a_checked_frame() {
+        let positive =
+            "def run(operand, sink):\n    sink(+operand, -operand, ~operand, not operand)\n";
+        let invalid = concat!(
+            "def call_result(make, sink):\n",
+            "    sink(-make())\n",
+            "def dormant(text: str, sink):\n",
+            "    sink(-text)\n",
+            "def literal(n: int, sink):\n",
+            "    sink(-{'x': n})\n",
+            "def alias(n: int, sink):\n",
+            "    data = {'x': n}\n",
+            "    sink(-data)\n",
+        );
+        let graph = checked_positive_with_invalid_siblings(positive, invalid);
+        let bodies = graph.registered_functions();
+        let functions = &bodies[&graph.entry];
+        assert_eq!(functions.len(), 1);
+        let mut ops = Vec::new();
+        ir::walk_expressions(&functions[&TextSize::default()].function.body, &mut |e| {
+            if let ExprKind::Builtin(Builtin::RegisteredUnary(op), args) = &e.kind {
+                assert!(matches!(args.as_slice(), [value] if value.ty == Type::PythonObject));
+                ops.push(*op);
+            }
+        });
+        use ir::ObjectUnary::{Invert, Negative, Not, Positive};
+        assert_eq!(ops, [Positive, Negative, Invert, Not]);
+    }
+
+    #[test]
+    fn partial_regions_preserve_specialized_and_unsupported_operands() {
         for source in [
             "s.partition('-')[1]",
             "s[:2]",
-            "f(*items)",
-            "f(k=v)",
-            "{'key': recv.method()}",
-            &format!("f({many})"),
+            "f(*(x for x in items))",
+            "f(k=lambda: value)",
+            "{'key': recv.method(*args[:1])}",
         ] {
             let graph = SourceGraph::single(source).unwrap();
             let ast::Stmt::Expr(statement) = &graph.modules[graph.entry].parsed.syntax().body[0]
@@ -666,10 +904,46 @@ mod tests {
                 panic!("expected an expression")
             };
             assert!(
-                values::registered_value(&statement.value, &HashMap::new(), false).is_none(),
+                values::registered_value(
+                    &statement.value,
+                    values::ModuleSource::new(&graph.modules[graph.entry]).context(source)
+                )
+                .is_none(),
                 "{source}"
             );
         }
+    }
+
+    #[test]
+    fn a_packed_callback_retains_the_checked_body_contract() {
+        let positive = "def forward(call, args, kwargs):\n    call(*args, **kwargs)\n";
+        let invalid = concat!(
+            "def bad(n: int, call, kwargs):\n",
+            "    n[0]\n",
+            "    call(**kwargs)\n",
+            "def noncallable(n: int, kwargs):\n",
+            "    n(**kwargs)\n",
+        );
+        let graph = checked_positive_with_invalid_siblings(positive, invalid);
+        let bodies = graph.registered_functions();
+        let functions = &bodies[&graph.entry];
+        assert_eq!(functions.len(), 1);
+        let mut calls = Vec::new();
+        ir::walk_expressions(
+            &functions[&TextSize::default()].function.body,
+            &mut |expr| {
+                if let ExprKind::Builtin(Builtin::RegisteredCall(call), _) = &expr.kind {
+                    calls.push(&call.arguments);
+                }
+            },
+        );
+        assert_eq!(
+            calls,
+            [&ir::RegisteredArguments::Packed(ir::PackedArguments {
+                starred: vec![true],
+                keywords: vec![None],
+            })]
+        );
     }
 
     #[test]

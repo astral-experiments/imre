@@ -207,26 +207,6 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             Entry::Registered(frame) => CheckedValue::frame_integer(value, frame),
         }
     }
-    fn registered_call(
-        &mut self,
-        operands: &[Expr],
-        range: ruff_text_size::TextRange,
-        callee_end: ruff_text_size::TextSize,
-        callee_name: Option<ruff_text_size::TextRange>,
-    ) -> CheckedValue {
-        let mark = self.python().call_mark(callee_name);
-        let (callee, args) = operands.split_first().expect("checked call has a callee");
-        let (callable, values) = call_arguments(self, callee, args, Self::operand);
-        let callable = self.python().materialize(&callable);
-        let args = values
-            .iter()
-            .map(|value| self.python().materialize(value))
-            .collect::<Vec<_>>();
-        CheckedValue::handle(
-            self.python()
-                .call(&callable, &args, &mark, range, callee_end),
-        )
-    }
     fn integer_operand(&mut self, value: &CheckedValue) -> (String, bool) {
         match value {
             CheckedValue::Native(v, _) => (v.value.operand.clone(), false),
@@ -366,9 +346,12 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 Entry::Registered(frame) => frame.select(test, yes, no),
             },
             ExprKind::Binary(op, left, right) => self.binary_expression(*op, left, right, expr),
-            ExprKind::Builtin(Builtin::RegisteredCall(range, callee_end, callee_name), args) => {
-                self.registered_call(args, *range, *callee_end, *callee_name)
-            }
+            ExprKind::Builtin(
+                op @ (Builtin::RegisteredCall(_)
+                | Builtin::RegisteredAttribute { .. }
+                | Builtin::RegisteredUnary(_)),
+                args,
+            ) => self.python().object_operation(op, args),
             ExprKind::Builtin(op, args) => match &mut self.0 {
                 Entry::Native(emitter) => CheckedValue::owned(emitter.builtin(op, args, expr.ty)),
                 Entry::Registered(frame) => frame.builtin(op, args),

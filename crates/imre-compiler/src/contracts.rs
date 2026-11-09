@@ -595,7 +595,7 @@ impl Builtin {
             | Self::SysContextAwareWarnings
             | Self::FaultFrame { .. }
             | Self::FaultLine(_)
-            | Self::RegisteredLocation(_)
+            | Self::RegisteredLocation(..)
             | Self::GeneratorFrameLeave
             | Self::IntExtremum { .. }
             | Self::IntBitCount
@@ -681,8 +681,9 @@ impl Builtin {
             | Self::RegisteredDefinition(_)
             | Self::RegisteredStatement(..)
             | Self::RegisteredName(_)
+            | Self::RegisteredUnary(_)
+            | Self::RegisteredAttribute { .. }
             | Self::RegisteredDict(_)
-            | Self::RegisteredAttribute(_)
             | Self::RegisteredSubscript(..)
             | Self::RegisteredEllipsis
             | Self::RegisteredComplex(..)

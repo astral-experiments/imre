@@ -1,17 +1,17 @@
 use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
+use super::CheckedValue;
 use super::boolean::{Context as BooleanContext, Flow, Target};
-use super::{Body, CallArguments, CheckedValue, DefinitionName, Function, permanent};
+use super::{Body, DefinitionName, Function, permanent};
+use crate::ir;
 
 impl Function<'_, '_> {
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
         self.with_expression_range(expr.range(), |code| {
-            if let Some(value) = crate::frontend::registered_value(
-                expr,
-                &code.source.replacements,
-                code.source.has_templates,
-            ) {
+            if let Some(value) =
+                crate::frontend::registered_value(expr, code.source.registered_source())
+            {
                 code.registered_value(&value)
             } else {
                 code.located_expr(expr)
@@ -30,13 +30,147 @@ impl Function<'_, '_> {
         value
     }
 
-    /// Evaluate the receiver before attributing a descriptor lookup to the attribute.
-    fn attribute_receiver(&mut self, field: &ast::ExprAttribute) -> String {
-        let receiver = self.expr(&field.value);
+    fn attribute_position(&mut self, range: ruff_text_size::TextRange) {
         if self.native_suspension {
-            self.suspension_position(field.range());
+            self.suspension_position(range);
         }
-        receiver
+    }
+
+    pub(super) fn attribute_value(
+        &mut self,
+        receiver: &str,
+        name: &str,
+        range: ruff_text_size::TextRange,
+    ) -> String {
+        self.attribute_position(range);
+        self.attr(receiver, name)
+    }
+
+    /// Execute a descriptor operation at the original target, using the same live receiver
+    /// for both halves of augmented assignment. A mutation releases its operand window on
+    /// success and unwinds it before transferring an exception to the handler.
+    pub(super) fn attribute_operation<'e, T: 'e>(
+        &mut self,
+        action: ir::AttributeAction,
+        name: &str,
+        range: ruff_text_size::TextRange,
+        mut operands: impl Iterator<Item = &'e T>,
+        mut evaluate: impl FnMut(&mut Self, &T) -> String,
+    ) -> String {
+        use ir::AttributeAction;
+        let first = operands.next().expect("attribute operand");
+        let mark = self.temporary_mark();
+        if action == AttributeAction::Load {
+            return self.unwind_operands(&mark, |code| {
+                let receiver = evaluate(code, first);
+                let value = code.attribute_value(&receiver, name, range);
+                code.keep_operands(&mark, &value, "0");
+                value
+            });
+        }
+        self.unwind_operands(&mark, |code| {
+            match action {
+                AttributeAction::Store => {
+                    let value = evaluate(code, first);
+                    code.store_attribute(name, range, &value, |code| {
+                        evaluate(code, operands.next().expect("attribute receiver"))
+                    });
+                }
+                AttributeAction::Delete => {
+                    let receiver = evaluate(code, first);
+                    code.write_attribute(&receiver, name, range, None);
+                }
+                AttributeAction::InPlace(op) => {
+                    let receiver = evaluate(code, first);
+                    let right_mark = code.temporary_mark();
+                    let value = code.unwind_operands(&right_mark, |code| {
+                        let left = code.attribute_value(&receiver, name, range);
+                        let right = evaluate(code, operands.next().expect("in-place RHS"));
+                        let value = code.op(&format!("inplace:{op}"), &[&left, &right]);
+                        // The binary operation consumed both operands before STORE_ATTR.
+                        code.keep_operands(&right_mark, &value, "0");
+                        value
+                    });
+                    // STORE_ATTR consumes its receiver before the value being stored.
+                    let receiver_mark = code.keep_operands(&mark, &value, &receiver);
+                    code.unwind_operands(&receiver_mark, |code| {
+                        code.write_attribute(&receiver, name, range, Some(&value));
+                        code.discard_truth(&receiver_mark);
+                    });
+                }
+                AttributeAction::Load => unreachable!(),
+            }
+            code.discard_truth(&mark);
+        });
+        permanent::NONE.to_string()
+    }
+
+    pub(super) fn store_attribute(
+        &mut self,
+        name: &str,
+        range: ruff_text_size::TextRange,
+        value: &str,
+        receiver: impl FnOnce(&mut Self) -> String,
+    ) {
+        // The RHS is already owned and must outlive evaluation and disposal of the receiver.
+        let mark = self.temporary_mark();
+        self.unwind_operands(&mark, |code| {
+            let receiver = receiver(code);
+            code.write_attribute(&receiver, name, range, Some(value));
+            code.discard_truth(&mark);
+        });
+    }
+
+    fn write_attribute(
+        &mut self,
+        receiver: &str,
+        name: &str,
+        range: ruff_text_size::TextRange,
+        value: Option<&str>,
+    ) -> String {
+        self.attribute_position(range);
+        match value {
+            Some(value) => self.frame.named_op("setattr", receiver, name, value),
+            None => self.frame.named_op("delattr", receiver, name, "0"),
+        }
+    }
+
+    /// Resolve the descriptor before evaluating the call arguments. A direct target
+    /// also supplies its receiver through the frame's reusable scratch slot.
+    pub(super) fn method_target(
+        &mut self,
+        receiver: &str,
+        name: &str,
+        range: ruff_text_size::TextRange,
+        direct: bool,
+    ) -> (String, Option<String>) {
+        self.attribute_position(range);
+        let lookup = if direct && name == "get" {
+            Some(format!(
+                "call i64 @imre_dyn_dict_get_target(ptr %ctx, i64 {receiver}, ptr %live)"
+            ))
+        } else if direct && !name.starts_with('_') && imre_ast::strings::STR_METHODS.contains(&name)
+        {
+            let symbol = self.output.data(format!("str.{name}").as_bytes());
+            Some(format!(
+                "call i64 @imre_dyn_string_method_target(ptr %ctx, i64 {receiver}, ptr {symbol}, ptr %live)"
+            ))
+        } else if direct && !name.starts_with("__") {
+            let symbol = self.output.data(name.as_bytes());
+            Some(format!(
+                "call i64 @imre_dyn_builtin_method_target(ptr %ctx, i64 {receiver}, ptr {symbol}, ptr %live)"
+            ))
+        } else {
+            None
+        };
+        if let Some(lookup) = lookup {
+            let target = self.checked(&lookup);
+            // Nested argument calls can reuse the entry-block scratch space.
+            let bound = self.value("load i64, ptr %live");
+            (target, Some(bound))
+        } else {
+            (self.named_op("method", receiver, name, "0"), None)
+        }
     }
 
     fn located_expr(&mut self, expr: &ast::Expr) -> String {
@@ -46,44 +180,22 @@ impl Function<'_, '_> {
             Some(&self.source.private_names),
         );
         let previous = self.enter_expression(position);
-        let value = self.expr_inner(expr, None);
+        let value = if let Some(operation) = self.source.registered_source().object_operation(expr)
+        {
+            self.object_operation(
+                &operation.opcode,
+                operation.target,
+                operation.arguments(),
+                Self::expr,
+            )
+        } else {
+            self.expr_inner(expr)
+        };
         self.leave_expression(previous);
         value
     }
 
-    /// Select one field from a single-line partition call so both operations retain
-    /// their expression line. Other receivers still dispatch through their methods.
-    fn partition_index(&self, subscript: &ast::ExprSubscript) -> Option<u32> {
-        let ast::Expr::Call(call) = &*subscript.value else {
-            return None;
-        };
-        if self.source.positions.line(subscript.start())
-            != self.source.positions.line(subscript.end())
-        {
-            return None;
-        }
-        let field = imre_ast::direct_method(
-            call,
-            &self.source.method_imports,
-            Some(&self.source.private_names),
-        )?;
-        if !matches!(field.attr.as_str(), "partition" | "rpartition")
-            || !call.arguments.keywords.is_empty()
-            || !matches!(call.arguments.args.as_ref(), [arg] if !matches!(arg, ast::Expr::Starred(_)))
-        {
-            return None;
-        }
-        let ast::Expr::NumberLiteral(literal) = &*subscript.slice else {
-            return None;
-        };
-        let ast::Number::Int(index) = &literal.value else {
-            return None;
-        };
-        let index = u32::try_from(index.as_i64()?).ok()?;
-        (index < 3).then_some(index)
-    }
-
-    fn expr_inner(&mut self, expr: &ast::Expr, partition: Option<(u32, String)>) -> String {
+    fn expr_inner(&mut self, expr: &ast::Expr) -> String {
         if self.native_suspension
             && let Some((kind, value)) = crate::ir::SuspendValue::operand(expr)
         {
@@ -92,16 +204,20 @@ impl Function<'_, '_> {
             });
         }
         match expr {
-            ast::Expr::Attribute(v) => {
-                let base = self.attribute_receiver(v);
-                self.attr(&base, v.attr.as_str())
-            }
             ast::Expr::Subscript(v) => {
-                if let Some(index) = self.partition_index(v) {
+                if let Some(index) = self.source.registered_source().partition_index(v) {
                     let span = self.expression_span(expr, &v.value, b'[');
                     let position =
                         span.map_or_else(|| "null".into(), |span| self.output.position(span));
-                    return self.expr_inner(&v.value, Some((index, position)));
+                    let call = v.value.as_call_expr().expect("selected partition call");
+                    let (site, target) = self.source.registered_source().call(call);
+                    return self.call_value(
+                        &site,
+                        target,
+                        crate::frontend::registered_arguments(&call.arguments),
+                        Some((index, position)),
+                        Self::expr,
+                    );
                 }
                 if let ast::Expr::Slice(slice) = v.slice.as_ref()
                     && slice.step.is_none()
@@ -161,23 +277,6 @@ impl Function<'_, '_> {
                 let right = self.expr(&v.right);
                 self.op(v.op.as_str(), &[&left, &right])
             }
-            ast::Expr::UnaryOp(v) => {
-                let mark = (v.op == ast::UnaryOp::Not).then(|| self.temporary_mark());
-                let operand = self.expr(&v.operand);
-                let result = self.op(
-                    match v.op {
-                        ast::UnaryOp::Invert => "~",
-                        ast::UnaryOp::Not => "not",
-                        ast::UnaryOp::UAdd => "pos",
-                        ast::UnaryOp::USub => "neg",
-                    },
-                    &[&operand],
-                );
-                if let Some(mark) = mark {
-                    self.discard_truth(&mark);
-                }
-                result
-            }
             ast::Expr::BoolOp(_) => self.boolean_value(expr),
             ast::Expr::Compare(v) => self.compare_expr(v, BooleanContext::Value),
             ast::Expr::If(v) => self
@@ -199,116 +298,6 @@ impl Function<'_, '_> {
                     .op("assign_named_target", &[&self.scope.clone(), &name, &value]);
                 self.line(&format!("call void @imre_dyn_named_assignment(ptr %ctx, i64 {mark}, i64 {value}, i64 {replaced})"));
                 value
-            }
-            ast::Expr::Call(v) => {
-                if crate::frontend::registered_positional_call(v) {
-                    // An operand still needs the residual expression emitter.
-                    return self.positional_call(
-                        v.func.as_ref(),
-                        &v.arguments.args,
-                        v.range(),
-                        v.func.end(),
-                        v.func.is_name_expr().then(|| v.func.range()),
-                        Self::expr,
-                    );
-                }
-                let mark = self.temporary_mark();
-                // Cap the fixed entry-block scratch space even for calls in cold branches.
-                let fixed = v.arguments.args.len() + v.arguments.keywords.len() <= 64
-                    && !v
-                        .arguments
-                        .args
-                        .iter()
-                        .any(|value| matches!(value, ast::Expr::Starred(_)))
-                    && v.arguments
-                        .keywords
-                        .iter()
-                        .all(|keyword| keyword.arg.is_some());
-                let direct = fixed && v.arguments.keywords.is_empty();
-                let single_spread = match v.arguments.args.as_ref() {
-                    [ast::Expr::Starred(star)] => Some(star),
-                    _ => None,
-                };
-                let packed = (!fixed && single_spread.is_none()).then(|| self.op("list", &[]));
-                let mut bound_receiver = None;
-                let callable = if let Some(field) = imre_ast::direct_method(
-                    v,
-                    &self.source.method_imports,
-                    Some(&self.source.private_names),
-                ) {
-                    let receiver = self.attribute_receiver(field);
-                    let name = field.attr.as_str();
-                    let lookup = if direct && name == "get" {
-                        Some(format!(
-                            "call i64 @imre_dyn_dict_get_target(ptr %ctx, i64 {receiver}, ptr %live)"
-                        ))
-                    } else if direct
-                        && !name.starts_with('_')
-                        && imre_ast::strings::STR_METHODS.contains(&name)
-                    {
-                        let symbol = self.output.data(format!("str.{name}").as_bytes());
-                        Some(format!(
-                            "call i64 @imre_dyn_string_method_target(ptr %ctx, i64 {receiver}, ptr {symbol}, ptr %live)"
-                        ))
-                    } else if direct && !name.starts_with("__") {
-                        let symbol = self.output.data(name.as_bytes());
-                        Some(format!(
-                            "call i64 @imre_dyn_builtin_method_target(ptr %ctx, i64 {receiver}, ptr {symbol}, ptr %live)"
-                        ))
-                    } else {
-                        None
-                    };
-                    if let Some(lookup) = lookup {
-                        self.output.interned_identifiers.insert(name.to_owned());
-                        self.max_live = self.max_live.max(1);
-                        let target = self.checked(&lookup);
-                        // Nested calls can reuse the entry-block scratch space.
-                        bound_receiver = Some(self.value("load i64, ptr %live"));
-                        target
-                    } else {
-                        self.named_op("method", &receiver, field.attr.as_str(), "0")
-                    }
-                } else {
-                    if self.native_suspension && matches!(&*v.func, ast::Expr::Name(_)) {
-                        self.suspension_position(v.func.range());
-                    }
-                    self.expr(&v.func)
-                };
-                let operands = if let Some(star) = single_spread {
-                    let source = self.expr(&star.value);
-                    let kwargs = self.keyword_arguments(&v.arguments, Some(&callable));
-                    let args = self.pack_operand("spread_arguments", &[&source, &callable]);
-                    CallArguments::Packed { args, kwargs }
-                } else if let Some(args) = packed {
-                    let kwargs = self.arguments(&args, &v.arguments, Some(&callable));
-                    CallArguments::Packed { args, kwargs }
-                } else if !v.arguments.keywords.is_empty() {
-                    self.fixed_keyword_arguments(&v.arguments)
-                } else {
-                    let values: Vec<_> = bound_receiver
-                        .iter()
-                        .cloned()
-                        .chain(v.arguments.args.iter().map(|arg| self.expr(arg)))
-                        .collect();
-                    let (array, count) = self.handle_array(&values);
-                    if let Some((index, get_position)) = partition {
-                        debug_assert!(bound_receiver.is_some() && count == 2);
-                        CallArguments::PartitionField {
-                            array,
-                            index,
-                            get_position,
-                        }
-                    } else {
-                        CallArguments::Positional {
-                            array,
-                            count,
-                            receiver_slot: bound_receiver.is_some(),
-                        }
-                    }
-                };
-                let span = self.expression_span(expr, &v.func, b'(');
-                self.call_position(v.range());
-                self.call_at(&callable, operands, &mark, span)
             }
             ast::Expr::Lambda(v) => self.define(
                 v.start(),
@@ -644,110 +633,31 @@ impl Function<'_, '_> {
 
     fn display(&mut self, kind: &str, elements: &[ast::Expr]) -> String {
         let target = self.op(kind, &[]);
-        for element in elements {
-            if let ast::Expr::Starred(v) = element {
-                self.extend_operand(&target, &v.value);
-            } else {
-                let value = self.expr(element);
-                self.op("append", &[&target, &value]);
-            }
-        }
+        self.pack_positionals(
+            &target,
+            crate::frontend::positional_elements(elements),
+            &mut Self::expr,
+        );
         target
     }
 
-    fn pack_operand(&mut self, operation: &str, args: &[&str]) -> String {
+    pub(super) fn pack_operand(&mut self, operation: &str, args: &[&str]) -> String {
         if self.native_suspension {
             self.suspension_position(self.current_range);
         }
         self.op(operation, args)
     }
 
-    fn extend_operand(&mut self, target: &str, expr: &ast::Expr) {
+    pub(super) fn extend_operand(
+        &mut self,
+        target: &str,
+        evaluate: impl FnOnce(&mut Self) -> String,
+    ) {
         let mark = self.temporary_mark();
-        let value = self.expr(expr);
+        let value = evaluate(self);
         self.pack_operand("extend", &[target, &value]);
         // The target owns the expanded items. Drop the iterable before the next operand.
         self.discard_truth(&mark);
-    }
-
-    pub(super) fn arguments(
-        &mut self,
-        args: &str,
-        syntax: &ast::Arguments,
-        callable: Option<&str>,
-    ) -> String {
-        // Python evaluates starred positional arguments before the keyword arguments.
-        for arg in &syntax.args {
-            if let ast::Expr::Starred(s) = arg {
-                self.extend_operand(args, &s.value);
-            } else {
-                let value = self.expr(arg);
-                self.op("append", &[args, &value]);
-            }
-        }
-        self.keyword_arguments(syntax, callable)
-    }
-
-    /// Evaluate operands in Python order, then publish the handles after nested calls finish.
-    fn fixed_keyword_arguments(&mut self, syntax: &ast::Arguments) -> CallArguments {
-        let mut values: Vec<_> = syntax.args.iter().map(|arg| self.expr(arg)).collect();
-        let positional = values.len();
-        let mut names = Vec::with_capacity(syntax.keywords.len());
-        for keyword in &syntax.keywords {
-            names.push(keyword.arg.as_ref().expect("fixed keyword").as_str());
-            values.push(self.expr(&keyword.value));
-        }
-        let names = self.output.data(names.join("\0").as_bytes());
-        let (array, _) = self.handle_array(&values);
-        CallArguments::FixedKeywords {
-            array,
-            positional,
-            names,
-            keywords: syntax.keywords.len(),
-        }
-    }
-
-    /// Evaluate keyword expressions and merge mappings in source order.
-    fn keyword_arguments(&mut self, syntax: &ast::Arguments, callable: Option<&str>) -> String {
-        let (merge, callable) = match callable {
-            Some(callable) => ("keywords", callable),
-            None => ("class_keywords", "0"),
-        };
-        let kwargs = if syntax.keywords.is_empty() {
-            "0".into()
-        } else {
-            self.op("dict", &[])
-        };
-        let mut keywords = syntax.keywords.iter().peekable();
-        let mut unpacked = false;
-        while let Some(key) = keywords.peek() {
-            if key.arg.is_none() {
-                let value = self.expr(&keywords.next().unwrap().value);
-                self.pack_operand(merge, &[&kwargs, &value, callable]);
-                unpacked = true;
-            } else {
-                // Python builds each group of named arguments before merging it
-                // with earlier **mappings. Even a duplicate evaluates the group.
-                let group = if unpacked {
-                    self.op("dict", &[])
-                } else {
-                    kwargs.clone()
-                };
-                while let Some(key) = keywords.next_if(|key| key.arg.is_some()) {
-                    let value = self.expr(&key.value);
-                    self.named_op(
-                        "keyword",
-                        &group,
-                        key.arg.as_ref().unwrap().as_str(),
-                        &value,
-                    );
-                }
-                if unpacked {
-                    self.pack_operand(merge, &[&kwargs, &group, callable]);
-                }
-            }
-        }
-        kwargs
     }
 
     /// Capture values once, leaving conversion and formatting to the template consumer.

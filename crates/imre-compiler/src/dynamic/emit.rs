@@ -499,13 +499,18 @@ impl<'a> PreparedBody<'a> {
         };
         let method_imports = imre_ast::module_imports(&body);
         let private_names = lower_source(path, source, &mut body)?;
+        let values = crate::frontend::RegisteredSource {
+            text: source,
+            private_names: Some(&private_names),
+            replacements: &replacements,
+            has_templates,
+            method_imports: &method_imports,
+        };
         let initializer = if !expression {
             crate::frontend::registered_suite(
                 &body,
                 crate::frontend::RegisteredScope::Module,
-                &private_names,
-                &replacements,
-                has_templates,
+                values,
             )
         } else {
             None
@@ -526,21 +531,15 @@ impl<'a> PreparedBody<'a> {
                             crate::frontend::RegisteredScope::Function {
                                 is_async: def.is_async,
                             },
-                            &private_names,
-                            &replacements,
-                            has_templates,
+                            values,
                         ) {
                             function_bodies.insert(start, suite);
                         }
                     }
                     DefinitionSite::Class(class) if !bundled || initializer.is_some() => {
                         if let Some(first) = class.body.first()
-                            && let Some(suite) = crate::frontend::registered_class_body(
-                                class,
-                                &private_names,
-                                &replacements,
-                                has_templates,
-                            )
+                            && let Some(suite) =
+                                crate::frontend::registered_class_body(class, values)
                         {
                             class_bodies.insert(first.start(), suite);
                         }
@@ -760,6 +759,18 @@ struct SourceInfo<'a> {
     string_annotations: bool,
     barry_as_flufl: bool,
     text: &'a str,
+}
+
+impl SourceInfo<'_> {
+    fn registered_source(&self) -> crate::frontend::RegisteredSource<'_> {
+        crate::frontend::RegisteredSource {
+            text: self.text,
+            replacements: &self.replacements,
+            has_templates: self.has_templates,
+            method_imports: &self.method_imports,
+            private_names: Some(&self.private_names),
+        }
+    }
 }
 
 impl SourceMap<'_> {
