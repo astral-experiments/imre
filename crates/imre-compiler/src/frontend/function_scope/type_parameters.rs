@@ -1,6 +1,11 @@
 //! Validate nonlocal declarations against the lexical scope of class type parameters.
-use super::{ClosureNames, Visitor, ast, visitor};
+
 use std::collections::BTreeMap;
+
+use ruff_python_ast as ast;
+use ruff_python_ast::visitor::{self, Visitor};
+
+use super::{ClosureNames, class_locals};
 
 #[derive(Clone, Copy)]
 enum Binding {
@@ -9,7 +14,7 @@ enum Binding {
 }
 
 /// Return a source-level error before any effects from the module can execute.
-pub(in super::super) fn check_nonlocals(source: &str, body: &[ast::Stmt]) -> Result<(), String> {
+pub(crate) fn check_nonlocals(source: &str, body: &[ast::Stmt]) -> Result<(), String> {
     struct Check<'s> {
         source: &'s str,
         bindings: BTreeMap<String, Binding>,
@@ -34,7 +39,7 @@ pub(in super::super) fn check_nonlocals(source: &str, body: &[ast::Stmt]) -> Res
                     if !self.bindings.is_empty() {
                         // CPython removes ordinary class-local bindings from its type-parameter
                         // set for nested scopes, but a class still doesn't bind a closure cell.
-                        let locals = super::class_locals(&class.body).locals;
+                        let locals = class_locals(&class.body).locals;
                         self.bindings.retain(|name, binding| {
                             !matches!(binding, Binding::Parameter) || !locals.contains(name)
                         });

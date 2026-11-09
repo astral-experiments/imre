@@ -11,7 +11,6 @@ pub(in crate::dynamic::emit) struct Site {
 #[derive(Default)]
 pub(in crate::dynamic::emit) struct ClassSites {
     sites: BTreeMap<TextSize, Site>,
-    captures: ClosureNames,
     unconditional: BTreeSet<TextSize>,
 }
 
@@ -23,22 +22,20 @@ impl Function<'_, '_> {
             ..Default::default()
         });
         self.statements(statements);
-        let ClassSites {
-            mut sites,
-            mut captures,
-            ..
-        } = self.class_sites.take().unwrap();
+        let ClassSites { mut sites, .. } = self.class_sites.take().unwrap();
         if self.body.terminated || sites.is_empty() {
             return;
         }
 
         let bindings = self.class_locals.take().expect("class body bindings");
-        captures
-            .reads
-            .retain(|name| !bindings.locals.contains(name) && !bindings.globals.contains(name));
-        captures.reads.insert("__classdict__".into());
+        let (mut reads, complete) = self
+            .source
+            .scopes
+            .annotations
+            .class_reads(sites.keys(), &bindings);
+        reads.insert("__classdict__".into());
         let offsets = if sites.values().any(|s| s.conditional.is_some()) {
-            captures.reads.insert("__conditional_annotations__".into());
+            reads.insert("__conditional_annotations__".into());
             let offsets = self.op("list", &[]);
             for (index, (offset, site)) in sites
                 .iter_mut()
@@ -53,10 +50,13 @@ impl Function<'_, '_> {
         } else {
             "0".into()
         };
-        let signature = self.text(&json!({
-            "posonly": ["format"], "scope_complete": !captures.incomplete, "scope_reads": captures.reads,
-            "code_flags": self.source.function_flags(None, self.in_function, false),
-        }).to_string());
+        let signature = self.text(
+            &json!({
+                "posonly": ["format"], "scope_complete": complete, "scope_reads": reads,
+                "code_flags": self.source.function_flags(None, self.in_function, false),
+            })
+            .to_string(),
+        );
         let start = *sites.first_key_value().unwrap().0;
         let body = Body::ClassAnnotations(sites.into_values().collect(), bindings.globals);
         let code = self.frame.output.definition(
@@ -80,7 +80,6 @@ impl Function<'_, '_> {
 
     pub(super) fn remember_annotation(&mut self, assign: &ast::StmtAnnAssign, name: &str) {
         let sites = self.class_sites.as_mut().expect("class annotation site");
-        sites.captures.visit_expr(&assign.annotation);
         let offset = assign.start();
         let conditional = (!sites.unconditional.contains(&offset)).then_some(0);
         sites.sites.insert(

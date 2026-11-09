@@ -66,6 +66,7 @@ mod fractions;
 mod fromkeys;
 mod fspath;
 mod function_caches;
+pub(crate) mod function_scope;
 mod function_text;
 mod functools;
 mod hash_file;
