@@ -863,8 +863,7 @@ impl Function<'_, '_> {
             self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 0, i64 {aqname}, i64 0, i64 0, i1 true)", scope))
         };
         let qualname = self.text(&qualname);
-        let mut signature =
-            json!({"posonly":[],"positional":[],"kwonly":[],"varargs":null,"kwargs":null});
+        let mut signature = json!({});
         if let Some(flags) = flags {
             signature["code_flags"] = json!(flags);
         }
@@ -994,7 +993,6 @@ impl Function<'_, '_> {
             self.op("put", &[&defaults, &format, &value_format]);
         }
         let in_function = self.in_function || !matches!(body, Body::Namespace(..));
-        signature["types"] = json!({});
         // A generator call returns a suspended frame, before it yields or returns a value.
         let scalar = |expr: &ast::Expr| {
             if self.source.python_annotations {
@@ -1004,8 +1002,10 @@ impl Function<'_, '_> {
                 !type_params.is_some_and(|params| params.iter().any(|p| p.name().as_str() == name))
             })
         };
-        if matches!(entry, Entry::Compiled) {
-            signature["return_type"] = json!(returns.and_then(scalar));
+        if matches!(entry, Entry::Compiled)
+            && let Some(ty) = returns.and_then(scalar)
+        {
+            signature["return_type"] = json!(ty);
         }
         let code = self
             .output
@@ -1019,6 +1019,7 @@ impl Function<'_, '_> {
                 ("positional", &p.args),
                 ("kwonly", &p.kwonlyargs),
             ] {
+                let mut names = Vec::with_capacity(args.len());
                 for arg in args {
                     let name = arg.parameter.name.as_str();
                     if let Some(ty) = arg.parameter.annotation.as_deref().and_then(scalar) {
@@ -1030,16 +1031,22 @@ impl Function<'_, '_> {
                             signature["integer_sign_parameters"][name] = json!(true);
                         }
                     }
-                    signature[group].as_array_mut().unwrap().push(json!(name));
+                    names.push(name);
                     if let Some(default) = &arg.default {
                         let default = self.expr(default);
                         let name = self.code_name(name);
                         self.op("put", &[&defaults, &name, &default]);
                     }
                 }
+                if !names.is_empty() {
+                    signature[group] = json!(names);
+                }
             }
-            signature["varargs"] = json!(p.vararg.as_deref().map(|x| x.name.as_str()));
-            signature["kwargs"] = json!(p.kwarg.as_deref().map(|x| x.name.as_str()));
+            for (key, parameter) in [("varargs", &p.vararg), ("kwargs", &p.kwarg)] {
+                if let Some(parameter) = parameter {
+                    signature[key] = json!(parameter.name.as_str());
+                }
+            }
         }
         for group in ["posonly", "positional", "kwonly"] {
             closure_names.locals.extend(
@@ -1065,9 +1072,15 @@ impl Function<'_, '_> {
         } else {
             json!(closure_names.cell_reads)
         };
-        signature["scope_locals"] = json!(closure_names.locals.iter().collect::<Vec<_>>());
-        signature["scope_reads"] = json!(closure_names.reads);
-        signature["scope_nonlocals"] = json!(closure_names.nonlocals);
+        if !closure_names.locals.is_empty() {
+            signature["scope_locals"] = json!(closure_names.locals.iter().collect::<Vec<_>>());
+        }
+        if !closure_names.reads.is_empty() {
+            signature["scope_reads"] = json!(closure_names.reads);
+        }
+        if !closure_names.nonlocals.is_empty() {
+            signature["scope_nonlocals"] = json!(closure_names.nonlocals);
+        }
         signature["scope_complete"] = json!(!closure_names.incomplete);
         signature["scope_locals_complete"] = json!(!closure_names.locals_incomplete);
         let sig = self.text(&signature.to_string());
