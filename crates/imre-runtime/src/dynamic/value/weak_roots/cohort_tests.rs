@@ -664,13 +664,12 @@ fn learns_a_descriptor_added_after_the_ordinary_finalizer_paths() {
     heap.release_temporaries_since(0);
     assert!(heap.learn_finalizer_paths(globals, None));
 
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
-    let fd = std::fs::File::open(path).unwrap().into();
-    let file = stdlib::BinaryFile::from_open(path, NONE, 0, "rb", None, fd)
-        .unwrap()
-        .into_value()
-        .unwrap();
-    let descriptor = heap.alloc_descriptor_owner(file).unwrap();
+    let Ok(socket) = crate::objects::socket::open(libc::AF_UNIX, libc::SOCK_STREAM, 0) else {
+        panic!("could not open a Unix socket");
+    };
+    // Track the new descriptor independently of the ordinary Python finalizer above.
+    let descriptor = heap.alloc_slot(Value::Socket(socket));
+    heap.track_initialized_descriptor(descriptor).unwrap();
     let Value::List(items) = heap.get_mut(owners) else {
         unreachable!()
     };

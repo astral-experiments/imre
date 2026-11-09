@@ -1782,7 +1782,7 @@ impl Value {
     /// Whether releasing this native value can still flush or close a descriptor.
     fn owns_open_descriptor(&self) -> bool {
         match self {
-            Self::File(file) => file.owns_open_descriptor(),
+            Self::File(file) => !file.closed(),
             #[cfg(target_os = "linux")]
             Self::Epoll(epoll) => epoll.fd() >= 0,
             #[cfg(target_os = "linux")]
@@ -1814,9 +1814,7 @@ impl Value {
                 }
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
                 super::stdlib::BinaryFile::Descriptor(_) => "_io.BufferedWriter",
-                super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
-                super::stdlib::BinaryFile::Writer { .. }
-                | super::stdlib::BinaryFile::Standard { .. } => "_io.BufferedWriter",
+                super::stdlib::BinaryFile::Standard { .. } => "_io.BufferedWriter",
             }),
             _ => None,
         }
