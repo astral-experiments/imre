@@ -89,6 +89,10 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                 true
             }
             ExprKind::Builtin(Builtin::RegisteredSpread, args) => args.len() == 1,
+            ExprKind::Builtin(Builtin::RegisteredLambda(_, scoped), operands) => {
+                uses_python_protocol = true;
+                !scoped || !operands.is_empty()
+            }
             ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
                 uses_python_protocol = true;
                 operands.len() > usize::from(call.explicit_scope)
@@ -560,7 +564,8 @@ impl Frame<'_, '_, '_> {
             ) => {
                 let value = self.evaluate_handle(value);
                 let spec = self.evaluate_handle(spec);
-                self.code.interpolation(&value, expression, *conversion, &spec)
+                self.code
+                    .interpolation(&value, expression, *conversion, &spec)
             }
             (Builtin::RegisteredFormatConversion(conversion), [value]) => {
                 let value = self.evaluate_handle(value);
@@ -585,6 +590,25 @@ impl Frame<'_, '_, '_> {
                 self.code.leave_expression(previous_line);
                 self.code.current_range = previous_range;
                 return value;
+            }
+            (Builtin::RegisteredLambda(site, scoped), operands) => {
+                let mut operands = operands.iter();
+                let scope = if *scoped {
+                    self.evaluate_handle(operands.next().expect("explicit lambda scope"))
+                } else {
+                    self.code.scope.clone()
+                };
+                let defaults = operands
+                    .map(|value| self.evaluate_handle(value))
+                    .collect::<Vec<_>>();
+                let lambda = &self.code.source.lambdas[site];
+                let body = lambda.body.as_ref().expect("checked lambda body");
+                self.code.bind_lambda(
+                    *site,
+                    &scope,
+                    &defaults,
+                    super::Body::CheckedExpression(body),
+                )
             }
             (Builtin::RegisteredDefinition(site), header) => {
                 let header = header
@@ -1198,6 +1222,66 @@ impl Function<'_, '_> {
             }
             result.expect("nonempty dictionary display")
         })
+    }
+
+    pub(super) fn bind_lambda(
+        &mut self,
+        site: TextSize,
+        scope: &str,
+        defaults: &[String],
+        body: super::Body<'_>,
+    ) -> String {
+        let lambda = &self.source.lambdas[&site];
+        let metadata = &lambda.metadata;
+        let qualname = format!("{}<lambda>", self.prefix);
+        let existing = self.source.lambda_code.borrow().get(&site).cloned();
+        let code = existing.unwrap_or_else(|| {
+            let entry = if metadata.generator {
+                super::Entry::Suspended
+            } else {
+                super::Entry::Compiled
+            };
+            let code = self.frame.output.definition(
+                self.source,
+                format!("{qualname}.<locals>."),
+                body,
+                site,
+                true,
+                entry,
+            );
+            self.source
+                .lambda_code
+                .borrow_mut()
+                .insert(site, code.clone());
+            code
+        });
+        let mut future_flags = 0;
+        if self.source.string_annotations {
+            future_flags |= imre_ast::code_flags::FUTURE_ANNOTATIONS;
+        }
+        if self.source.barry_as_flufl {
+            future_flags |= imre_ast::code_flags::FUTURE_BARRY_AS_BDFL;
+        }
+        let method = self.class_locals.is_some() && self.annotation_values.is_none();
+        let signature = metadata.signature(self.in_function, method, future_flags);
+        self.output
+            .interned_identifiers
+            .extend(metadata.parameter_names().map(str::to_owned));
+        assert_eq!(metadata.defaults.len(), defaults.len());
+        let defaults = if defaults.is_empty() {
+            "0".to_owned()
+        } else {
+            let dict = self.op("dict", &[]);
+            for (key, value) in metadata.defaults.iter().zip(defaults) {
+                let key = self.code_name(key);
+                self.op("put", &[&dict, &key, value]);
+            }
+            dict
+        };
+        let signature = self.text(&signature.to_string());
+        let name = self.code_name("<lambda>");
+        let qualname = self.text(&qualname);
+        self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {scope}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {qualname}, i64 0, i64 0, i1 false)"))
     }
 
     /// Emit a registered expression whose names are resolved through this live frame.

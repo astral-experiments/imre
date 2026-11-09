@@ -115,15 +115,15 @@ mod regex;
 mod registered;
 mod retained;
 pub(crate) use registered::values::{
-    RegisteredSource, display_elements, literal_replacements, packed_arguments, push_codepoints,
-    registered_arguments, registered_constant_key, registered_index_key, registered_string,
-    registered_value,
+    RegisteredSource, display_elements, lambda_defaults, literal_replacements, packed_arguments,
+    push_codepoints, registered_arguments, registered_constant_key, registered_index_key,
+    registered_string, registered_value,
 };
 pub(crate) use registered::{
-    AnnotationValue, DeferredModuleAnnotation, RegisteredFunction, RegisteredScope, RegisteredSuite,
-    SuitePreparation, annotation_expression, attribute_effects, delete_item, delete_targets,
-    module_annotations, prepare_templates, registered_index_target, registered_sites,
-    template_segments,
+    AnnotationValue, DeferredModuleAnnotation, RegisteredFunction, RegisteredLambda,
+    RegisteredScope, RegisteredSuite, SuitePreparation, annotation_expression, attribute_effects,
+    delete_item, delete_targets, module_annotations, prepare_templates, registered_index_target,
+    registered_sites, template_segments,
 };
 pub(crate) use retained::RegisteredNative;
 mod sequences;

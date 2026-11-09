@@ -284,7 +284,15 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
                 self.first = Some((expression.range(), intrinsic.escape_message()));
                 return;
             }
-            if !matches!(expression, Expr::Lambda(_)) {
+            if let Expr::Lambda(lambda) = expression {
+                if let Some(parameters) = &lambda.parameters {
+                    for parameter in parameters.iter_non_variadic_params() {
+                        if let Some(default) = &parameter.default {
+                            self.visit_expr(default);
+                        }
+                    }
+                }
+            } else {
                 walk_expr(self, expression);
             }
             return;
@@ -314,6 +322,13 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
                 ),
             ));
             return;
+        }
+        if self.first.is_none()
+            && let Some(Expr::Lambda(lambda)) = self.assigned_value(&call.func)
+            && !imre_ast::code_flags::yields_in_expression(&lambda.body)
+            && self.entered.insert(lambda.range())
+        {
+            self.visit_expr(&lambda.body);
         }
         // Enter only a reached ordinary definition in this checked source.
         // Calls producing generators and coroutines return a suspended object.

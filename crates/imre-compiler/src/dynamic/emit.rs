@@ -8,6 +8,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
 use crate::CodegenUnit;
+use crate::frontend::RegisteredLambda;
 use crate::llvm::operations::{CheckedValue, ValueJoin};
 
 mod boolean;
@@ -598,6 +599,9 @@ impl<'a> PreparedBody<'a> {
         };
         let sites = crate::frontend::registered_sites(&body, &private_names);
         let mut operations = sites.operations;
+        let mut scopes =
+            crate::frontend::function_scope::ScopeFacts::prepare(&body, &private_names);
+        let lambdas = RegisteredLambda::collect(&body, values, std::mem::take(&mut scopes.lambdas));
         let module_annotations = crate::frontend::module_annotations(
             &body,
             private_names.string_annotations,
@@ -664,7 +668,8 @@ impl<'a> PreparedBody<'a> {
             }
         }
         let source = SourceInfo {
-            scopes: crate::frontend::function_scope::ScopeFacts::prepare(&body, &private_names),
+            scopes,
+            lambdas,
             thread_entries,
             nested_bodies: prepare.nested,
             namespace_operations: operations,
@@ -711,6 +716,7 @@ impl<'a> PreparedBody<'a> {
         };
         let location = SourceMap {
             info: &self.source,
+            lambda_code: Default::default(),
             definitions: (!self.expression).then(|| definition_sites(&self.body)),
             unit,
             positions: SourcePositions::new(self.source.text, &code_file),
@@ -792,12 +798,11 @@ enum Body<'a> {
 
 impl Body<'_> {
     fn generator_flags(&self) -> u32 {
-        use imre_ast::code_flags::{ASYNC_GENERATOR, GENERATOR, yields_in_expression};
+        use imre_ast::code_flags::{ASYNC_GENERATOR, GENERATOR};
         match self {
             Self::GeneratorFunction(_, flags) => *flags,
             Self::Generator(plan) if plan.body_suspends() => ASYNC_GENERATOR,
             Self::Generator(..) => GENERATOR,
-            Self::Expression(expr) if yields_in_expression(expr) => GENERATOR,
             _ => 0,
         }
     }
@@ -845,6 +850,8 @@ fn definition_sites(body: &[ast::Stmt]) -> HashMap<ruff_text_size::TextSize, Def
 
 struct SourceMap<'a> {
     info: &'a SourceInfo<'a>,
+    /// A duplicated cleanup path still evaluates the same lexical definition.
+    lambda_code: std::cell::RefCell<HashMap<ruff_text_size::TextSize, String>>,
     definitions: Option<HashMap<ruff_text_size::TextSize, DefinitionSite<'a>>>,
     unit: usize,
     positions: SourcePositions<'a>,
@@ -862,6 +869,7 @@ impl<'a> std::ops::Deref for SourceMap<'a> {
 struct SourceInfo<'a> {
     scopes: crate::frontend::function_scope::ScopeFacts,
     thread_entries: HashMap<ruff_text_size::TextSize, imre_ast::ThreadEntry>,
+    lambdas: HashMap<ruff_text_size::TextSize, RegisteredLambda>,
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
     module_annotations:
         HashMap<ruff_text_size::TextSize, crate::frontend::DeferredModuleAnnotation>,
@@ -1170,6 +1178,7 @@ impl Output {
                         };
                         let source = SourceMap {
                             info: &info,
+                            lambda_code: Default::default(),
                             definitions: None,
                             unit: source.unit,
                             positions: SourcePositions::new(&child.text, &file),

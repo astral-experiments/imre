@@ -685,6 +685,7 @@ impl Builtin {
             | Self::RegisteredAnnotationResult
             | Self::RegisteredDeleteName(..)
             | Self::RegisteredDefinition(_)
+            | Self::RegisteredLambda(..)
             | Self::RegisteredStatement(..)
             | Self::RegisteredName(_)
             | Self::RegisteredUnary(_)

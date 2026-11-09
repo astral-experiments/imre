@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod lambdas;
+pub(crate) use lambdas::RegisteredLambda;
 mod templates;
 pub(crate) use templates::{prepare_templates, template_segments};
 pub(super) mod values;
@@ -37,6 +39,23 @@ pub(crate) struct RegisteredFunction {
 }
 
 impl RegisteredFunction {
+    fn expression(range: TextRange, value: Expr) -> Self {
+        let checkpoint = operation(
+            Builtin::RegisteredStatement(range, None),
+            Type::None,
+            vec![],
+        );
+        Self {
+            function: ir::Function {
+                params: vec![],
+                returns: Type::PythonObject,
+                locals: vec![],
+                body: vec![Statement::Expr(checkpoint), Statement::Return(value)],
+            },
+            local_names: HashMap::new(),
+        }
+    }
+
     /// Only IR scopes name compiler-owned storage. User-visible names stay in the Python frame.
     pub(crate) fn private_slots(&self) -> std::collections::BTreeSet<usize> {
         let body = &self.function.body;
@@ -337,26 +356,14 @@ impl AnnotationChild {
             has_templates,
             method_imports: &Default::default(),
             private_names: None,
+            templates: None,
         };
         let value = values::registered_value(expression, source)?;
-        let checkpoint = operation(
-            Builtin::RegisteredStatement(expression.range(), None),
-            Type::None,
-            vec![],
-        );
         Some(Self {
             id,
             text: text.to_owned(),
             has_templates,
-            body: RegisteredFunction {
-                function: ir::Function {
-                    params: vec![],
-                    returns: Type::PythonObject,
-                    locals: vec![],
-                    body: vec![Statement::Expr(checkpoint), Statement::Return(value)],
-                },
-                local_names: HashMap::new(),
-            },
+            body: RegisteredFunction::expression(expression.range(), value),
         })
     }
 }
@@ -398,10 +405,12 @@ impl DeferredModuleAnnotation {
                 })
             }
         } else {
-            values::registered_value(expression, source).map_or_else(
-                || AnnotationValue::Source(expression.clone()),
-                AnnotationValue::Checked,
-            )
+            values::Region::Suite
+                .operand(expression, source)
+                .map_or_else(
+                    || AnnotationValue::Source(expression.clone()),
+                    AnnotationValue::Checked,
+                )
         };
         Self { name, value }
     }
@@ -1079,7 +1088,23 @@ impl SourceScope<'_> {
     }
 
     fn ordinary_operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
-        let value = if let ast::Expr::Named(named) = expr {
+        let value = if let ast::Expr::Lambda(lambda) = expr {
+            let binding = values::checked_binding(lambda, self.source)?;
+            if self.loop_depth != 0 {
+                // A default may suspend while its surrounding iteration cursor is live.
+                let mut suspends = false;
+                ir::walk_operand_expressions(&binding, &mut |child| {
+                    suspends |= matches!(
+                        child.kind,
+                        ExprKind::Builtin(Builtin::RegisteredSuspend(..), _)
+                    );
+                });
+                if suspends {
+                    return None;
+                }
+            }
+            binding
+        } else if let ast::Expr::Named(named) = expr {
             let target = named.target.as_name_expr()?;
             let value = self.ordinary_operand(&named.value)?;
             Expr {
@@ -1169,7 +1194,7 @@ mod tests {
 
     #[test]
     fn annotation_callback_numbers_physical_occurrences_and_keeps_unsupported_values_late() {
-        let text = "first: int\nsecond: list[int]\ncomplex: dict[str, int]\nforward: 'list[int]'\ndeferred: (lambda: int)()\n";
+        let text = "first: int\nsecond: list[int]\ncomplex: dict[str, int]\nforward: 'list[int]'\nprepared: (lambda: int)()\ndeferred: next(t for t in (int,))\n";
         let graph = SourceGraph::single(text).unwrap();
         let module = &graph.modules[graph.entry];
         let stmts = &module.parsed.syntax().body;
@@ -1238,7 +1263,11 @@ mod tests {
                 sites[&stmts[2].start()].value,
                 AnnotationValue::Checked(_)
             ));
-            let unavailable = &sites[&stmts[4].start()];
+            assert!(matches!(
+                sites[&stmts[4].start()].value,
+                AnnotationValue::Checked(_)
+            ));
+            let unavailable = &sites[&stmts[5].start()];
             assert!(matches!(unavailable.value, AnnotationValue::Source(_)));
             let mixed = DeferredModuleAnnotation::prepare_body(&[first, unavailable, second]);
             let [gap] = mixed.residual.as_slice() else {
@@ -1252,8 +1281,7 @@ mod tests {
 
     #[test]
     fn prepared_source_runs_keep_their_order_and_namespace_ownership() {
-        let text =
-            "from . import a\nx: int = a\nif a:\n    del a\ny: int = (lambda: 1)()\nimport z\n";
+        let text = "from . import a\nx: int = a\nif a:\n    del a\ny: int = next(n for n in (1,))\nimport z\n";
         let mut stmts = ruff_python_parser::parse_module(text)
             .unwrap()
             .into_syntax()

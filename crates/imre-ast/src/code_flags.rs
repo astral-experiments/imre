@@ -64,7 +64,16 @@ impl<'a> Visitor<'a> for Yields {
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
         match expr {
             ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => self.0 = true,
-            ast::Expr::Lambda(_) => {}
+            ast::Expr::Lambda(lambda) if !self.0 => {
+                // Defaults run in the enclosing activation. Only the nested body is deferred.
+                if let Some(parameters) = &lambda.parameters {
+                    for parameter in parameters.iter_non_variadic_params() {
+                        if let Some(default) = &parameter.default {
+                            self.visit_expr(default);
+                        }
+                    }
+                }
+            }
             _ if !self.0 => stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
                 visitor::walk_expr(self, expr)
             }),

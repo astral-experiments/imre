@@ -695,11 +695,6 @@ impl Function<'_, '_> {
         if let Some(flags) = flags {
             signature["code_flags"] = json!(flags);
         }
-        if matches!(body, Body::Expression(_))
-            && flags.is_some_and(|flags| flags & code_flags::GENERATOR != 0)
-        {
-            signature["generator_lambda"] = json!(true);
-        }
         if matches!(body, Body::Generator(..)) {
             // generator() binds the implicit .0 argument without calling the step function.
             signature["positional"] = json!([".0"]);
@@ -713,7 +708,6 @@ impl Function<'_, '_> {
         let scopes = &self.source.scopes;
         let scope_facts = match &body {
             Body::Statements(_) | Body::GeneratorFunction(..) => Some(&scopes.functions[&start]),
-            Body::Expression(_) => Some(&scopes.lambdas[&start]),
             Body::Namespace(_) => {
                 let class = &scopes.classes[&start];
                 signature["postponed_annotations"] = json!(class.postponed_annotations);
@@ -732,10 +726,7 @@ impl Function<'_, '_> {
         };
         if let Some(facts) = scope_facts {
             facts.write_signature(&mut signature);
-            let callable = matches!(
-                body,
-                Body::Statements(_) | Body::GeneratorFunction(..) | Body::Expression(_)
-            );
+            let callable = matches!(body, Body::Statements(_) | Body::GeneratorFunction(..));
             if callable && facts.captures_class {
                 signature["class_cell"] = json!(true);
             }
@@ -762,7 +753,9 @@ impl Function<'_, '_> {
                 imre_ast::ThreadEntry::Captured(names) => {
                     signature["thread_captured_locks"] = json!(names);
                 }
-                imre_ast::ThreadEntry::Bound(field) => signature["thread_bound_lock_field"] = json!(field),
+                imre_ast::ThreadEntry::Bound(field) => {
+                    signature["thread_bound_lock_field"] = json!(field)
+                }
             }
         }
         // A type alias thunk has an implicit default for its format parameter.

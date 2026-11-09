@@ -1761,6 +1761,9 @@ pub(crate) enum Builtin {
     RegisteredLocation(ruff_text_size::TextRange, ruff_text_size::TextSize),
     /// Construct the native function at this physical definition site from its evaluated header.
     RegisteredDefinition(ruff_text_size::TextSize),
+    /// Bind the prepared lambda at this site. An explicit lexical scope, when present,
+    /// precedes the default values in Python parameter order.
+    RegisteredLambda(ruff_text_size::TextSize, bool),
     RegisteredImport(NamespaceImport),
     RegisteredSuspend(SuspendValue, ruff_text_size::TextRange),
     /// A module annotation records execution at startup; its provider evaluates values on demand.
