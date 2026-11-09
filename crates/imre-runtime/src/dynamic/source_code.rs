@@ -1,4 +1,4 @@
-//! In-process execution of source received by the boxed Python runtime.
+//! Runtime code metadata, compilation of source objects and Python namespace operations.
 
 mod annotations;
 mod comprehensions;
@@ -17,8 +17,7 @@ use imre_ast::comprehension::{
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
 
-use super::generator_protocol::{DelegateOutcome, GeneratorInput};
-use super::value::{Body, ExecGlobals, ExpressionPosition, Location, TracebackAnchor};
+use super::value::{Body, ExecGlobals};
 use super::*;
 
 #[derive(Clone)]
@@ -28,10 +27,8 @@ struct SourceFilename {
     display: Arc<str>,
 }
 
-pub(super) struct Program {
+struct Program {
     filename: SourceFilename,
-    // All nested code shares a source map.
-    source_lines: Rc<[usize]>,
     // Stop symbol collection at the first invalid binding or misplaced future import.
     syntax_limit: Option<ruff_text_size::TextRange>,
     // An invalid pattern still has a symbol table. Let all its scopes finish checking
@@ -52,62 +49,24 @@ pub(super) struct Program {
     doc: Option<ruff_text_size::TextRange>,
     strip_docstrings: bool,
     literals: HashMap<ruff_text_size::TextRange, Id>,
-    // For each capturing OR alternative, its operand slots in first-alternative binding order.
-    alternative_captures: HashMap<ruff_text_size::TextRange, Vec<usize>>,
-    pub(super) string_roots: Id,
+    string_roots: Id,
     first_line: u32,
     kind: FunctionKind,
     scope_flags: u32,
     unlowered_yield: bool,
     interactive: bool,
     locals: indexmap::IndexSet<String>,
-    cellvars: Vec<String>,
     directives: HashMap<String, (ScopeDirective, ruff_text_size::TextRange)>,
     reads: BTreeSet<String>,
-    method_imports: Rc<std::collections::BTreeSet<String>>,
     private_names: Option<Rc<imre_ast::Names>>,
     template_expressions: Rc<HashMap<ruff_text_size::TextSize, String>>,
-    instructions: Vec<(u32, Instruction)>,
+    items: Vec<(u32, SourceItem)>,
     // Declarations in source lowering order, including nested suites.
     deferred_annotations: Vec<(String, ast::Expr)>,
     // Indices of the class declarations guarded by the private annotation cell.
     conditional_fields: Vec<usize>,
     class_binds_conditional_name: bool,
     expression_functions: HashMap<ruff_text_size::TextRange, (usize, Definition)>,
-    eager_comprehension_targets: HashMap<ruff_text_size::TextRange, HashSet<String>>,
-}
-
-/// The original source expression and line, with no references into the defining heap.
-pub(super) struct CapturedAcquire {
-    line: u32,
-    expression: ast::Expr,
-}
-
-impl CapturedAcquire {
-    pub(super) fn load(
-        self,
-        ctx: &mut Context,
-        scope: Id,
-        name: Id,
-        parameters: Id,
-        qualname: Id,
-        (filename, first_line): (Id, u32),
-    ) -> Result<Id> {
-        let mut program = Program::new(ctx.source_filename(filename)?, ctx.str_value(name)?, false);
-        program.qualname = ctx.str_value(qualname)?.to_owned();
-        program.first_line = first_line;
-        program
-            .instructions
-            .push((self.line, Instruction::Eval(self.expression)));
-        program.prepare_strings(
-            &mut ctx.heap,
-            &mut SharedConstants::default(),
-            &StringReplacements::new(),
-            &|_| self.line,
-        )?;
-        let freevars = ctx.enclosing_freevars(scope, program.reads.iter().map(String::as_str));
-        Ok(ctx.box_source_closure(Rc::new(program), Some(parameters), freevars))
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -147,29 +106,8 @@ enum EnclosingBinding {
     ClassCell,
 }
 
-// A plain if or while needs a single forward destination without a heap allocation.
-type BranchTargets = smallvec::SmallVec<[usize; 1]>;
-
-// CPython's BUILD_SET batches leading operands only within its stack-use guideline.
-fn set_display_prefix(elements: &[ast::Expr]) -> usize {
-    if elements.len() <= 30 {
-        elements
-            .iter()
-            .take_while(|item| !item.is_starred_expr())
-            .count()
-    } else {
-        0
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum BranchUse {
-    Condition,
-    Operand,
-}
-
 /// Suspension sites among the supported operands of one expression. The plan is discarded
-/// after lowering; untouched subtrees stay in the ordinary expression evaluator.
+/// after collecting code metadata; untouched subtrees are visited in place.
 struct OperandPlan {
     sites: smallvec::SmallVec<[ruff_text_size::TextSize; 1]>,
     line: u32,
@@ -260,7 +198,8 @@ impl OperandPlan {
     }
 }
 
-enum Instruction {
+/// Parsed items used to construct and validate code-object metadata.
+enum SourceItem {
     Eval(ast::Expr),
     Discard(ast::Expr),
     AugAssign(ast::StmtAugAssign),
@@ -272,141 +211,34 @@ enum Instruction {
         module: String,
         alias: Option<String>,
     },
-    From(String, u32, Vec<(String, String)>),
+    From(String, Vec<(String, String)>),
     Define(Definition),
     ReturnClass(Definition),
-    CheckAnnotationFormat,
-    Annotations {
-        entries: Vec<(String, ast::Expr)>,
-        scope: annotations::AnnotationScope,
-    },
+    Annotations(Vec<(String, ast::Expr)>),
     ModuleAnnotations(Option<Rc<Program>>),
-    ModuleDoc(ruff_text_size::TextRange, String),
-    MarkAnnotation(usize),
+    ModuleDoc(TextRange, String),
     StringAnnotation(String, ast::Expr),
     ClassAnnotator(Rc<Program>),
-    ClassStart,
-    ClassEnd,
-    Yield(Option<ast::Expr>, TextRange),
-    YieldResult(TextRange),
     MakeGenerator(ast::Expr),
     Return(Option<ast::Expr>),
-    ReturnSent,
     Raise(ast::StmtRaise),
     Assert(ast::StmtAssert),
-    Unless(ast::Expr, usize),
     Match {
         subject: ast::Expr,
         cases: Vec<SourceCase>,
-        end: usize,
     },
-    Iter(Option<ast::Expr>, bool),
-    EnterComprehension {
-        kind: &'static str,
-        targets: HashSet<String>,
-        end: usize,
-    },
-    CollectItem {
-        value: Option<ast::Expr>,
-        keyed: bool,
-    },
+    EnterComprehension(HashSet<String>),
     LeaveComprehension,
-    AsyncNext,
-    BindAsyncItem(Option<ast::Expr>),
-    UnpackTarget {
-        count: usize,
-        star: Option<usize>,
-    },
-    BindOperand(ast::Expr),
-    StoreAttribute(ast::Identifier),
-    StoreSubscript,
-    EndAsyncFor,
-    Await(Option<ast::Expr>, TextRange),
-    SaveOperand(Option<ast::Expr>),
-    BuildSequence {
-        tuple: bool,
-        count: usize,
-    },
-    BuildSlice([bool; 3]),
-    StoreNamed(ast::Identifier),
-    StartDict,
-    StartSet(usize),
-    InsertDict {
-        unpack: bool,
-    },
-    InsertSet {
-        unpack: bool,
-    },
-    FinishDisplay,
-    Binary(&'static str, TextRange, TracebackAnchor, bool),
-    NextComparison {
-        end: usize,
-        condition: bool,
-    },
-    Branch {
-        value: Option<ast::Expr>,
-        when: bool,
-        usage: BranchUse,
-        end: usize,
-    },
-    LoadResult(ast::Expr),
-    Unary(ast::UnaryOp),
-    Attribute {
-        range: TextRange,
-        name: ast::Identifier,
-        method: bool,
-    },
-    JumpResult(usize),
-    SaveCallMethod(ast::ExprAttribute),
-    CallSaved {
-        anchor: TracebackAnchor,
-        positional: usize,
-        keywords: Vec<ast::Identifier>,
-        position: value::ExpressionPosition,
-    },
-    Next(Option<ast::Expr>, usize),
-    Jump(usize),
-    Break(usize),
-    EnterFinally {
-        handler: usize,
-        end: usize,
-        annotation_count: usize,
-    },
-    EnterWith {
-        item: ast::WithItem,
-        handler: usize,
-    },
-    AsyncWithMethods(Option<ast::Expr>),
-    CallAsyncEnter,
-    AwaitWithResult(&'static str),
-    EnterAsyncWith {
-        target: Option<Box<ast::Expr>>,
-        handler: usize,
-        end: usize,
-    },
-    ExitWith,
-    CallAsyncExit,
-    TestAsyncExit,
-    FinishAsyncExit,
-    EnterExcept {
-        handler: usize,
-        end: usize,
-    },
-    ExceptMatch(ast::Expr, usize),
-    BindException(String),
-    ClearException(String),
-    StartFinally,
-    EndFinally,
-    Delegate(Option<TextRange>),
+    Name(ast::Identifier),
+    Keywords(Vec<ast::Identifier>),
+    EnterWith(ast::WithItem),
     BindSent(Vec<ast::Expr>),
 }
 
 struct SourceCase {
     pattern: ast::Pattern,
     captures: Vec<String>,
-    line_offset: u32,
-    guard: Option<(u32, Box<ast::Expr>)>,
-    body: usize,
+    guard: Option<Box<ast::Expr>>,
 }
 
 struct Definition {
@@ -422,12 +254,9 @@ enum DefinitionKind {
     Function {
         parameters: Box<ast::Parameters>,
         type_params: Option<Box<ast::TypeParams>>,
-        captured_locks: Option<Box<[String]>>,
     },
     Class {
         arguments: Option<Box<ast::Arguments>>,
-        parameterized: bool,
-        needs_enclosing_frame: bool,
     },
     ClassParameters(Box<ast::TypeParams>),
 }
@@ -603,112 +432,6 @@ impl NamedBindings {
     }
 }
 
-/// Pending exits of the innermost loop body being lowered.
-struct LoopJumps {
-    head: usize,
-    has_iterator: bool,
-    breaks: Vec<usize>,
-}
-
-/// Execution state shared by ordinary and resumed runtime-source instructions.
-struct SourceCursor<'a> {
-    ip: usize,
-    iterators: &'a mut Vec<Id>,
-    protected: &'a mut Vec<FinallyBlock>,
-    advanced: Option<Result<DelegateOutcome>>,
-    nested_resume: bool,
-    comprehension: Option<(Id, usize)>,
-    sent: Id,
-    thrown: Option<(Error, Vec<Id>)>,
-}
-
-impl<'a> SourceCursor<'a> {
-    fn active_comprehension(blocks: &[FinallyBlock]) -> Option<(Id, usize)> {
-        blocks.iter().rev().find_map(|b| match b.kind {
-            HandlerKind::Comprehension(scope) => Some((scope, b.depth)),
-            _ => None,
-        })
-    }
-
-    /// Resume the source frame with its live iterators, protected blocks and pending input.
-    fn new(
-        ip: usize,
-        iterators: &'a mut Vec<Id>,
-        protected: &'a mut Vec<FinallyBlock>,
-        advanced: Option<Result<DelegateOutcome>>,
-        input: GeneratorInput,
-    ) -> Self {
-        let (sent, thrown) = match input {
-            GeneratorInput::Send(sent) => (sent, None),
-            GeneratorInput::Throw { error, args } => (NONE, Some((error, args))),
-        };
-        let comprehension = Self::active_comprehension(protected);
-        Self {
-            ip,
-            comprehension,
-            iterators,
-            protected,
-            advanced,
-            nested_resume: false,
-            sent,
-            thrown,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-enum Transfer {
-    Jump { destination: usize, pop_iter: bool },
-    Return(Id),
-    Raise(Id),
-}
-
-#[derive(Clone, Copy)]
-enum HandlerKind {
-    Finally(usize),
-    Except,
-    With(Id),
-    Comprehension(Id),
-}
-
-/// A protected source region survives yields, including yields in its cleanup.
-#[derive(Clone)]
-pub(super) struct FinallyBlock {
-    start: usize,
-    handler: usize,
-    end: usize,
-    depth: usize,
-    pending: Option<Transfer>,
-    kind: HandlerKind,
-}
-
-impl FinallyBlock {
-    pub(super) const ROOT_SLOTS: usize = 2;
-
-    pub(super) fn roots(&self) -> impl Iterator<Item = Id> {
-        self.root_slots().into_iter().flatten()
-    }
-
-    pub(super) fn root_slots(&self) -> [Option<Id>; Self::ROOT_SLOTS] {
-        let exit = match self.kind {
-            HandlerKind::With(root) | HandlerKind::Comprehension(root) => Some(root),
-            _ => None,
-        };
-        let transfer = match self.pending {
-            Some(Transfer::Raise(id) | Transfer::Return(id)) => Some(id),
-            _ => None,
-        };
-        [exit, transfer]
-    }
-}
-
-enum Step {
-    Yield(Id, usize),
-    Return(Id),
-    Advance(Id, usize, Id),
-    Rejected(Error, usize),
-}
-
 fn unsupported(what: impl std::fmt::Display) -> Error {
     Error::new("NotImplementedError", format!("runtime source: {what}"))
 }
@@ -770,7 +493,6 @@ struct CompiledStrings<'a, 'ctx> {
     pending: Vec<ScopedExpression<'a>>,
     bound: Option<Rc<HashSet<String>>>,
     comprehension_reads: BTreeSet<String>,
-    eager_comprehension_targets: &'ctx mut HashMap<ruff_text_size::TextRange, HashSet<String>>,
     reads: &'ctx mut BTreeSet<String>,
     directives: &'ctx HashMap<String, (ScopeDirective, ruff_text_size::TextRange)>,
     exhausted: bool,
@@ -1082,10 +804,6 @@ impl<'a> CompiledStrings<'a, '_> {
                 expr if let Some(plan) = Plan::from_expr(expr) => {
                     self.visit_expr(plan.outer);
                     let mut names = plan.try_target_names().map_err(invalid_target)?;
-                    if !plan.suspends() {
-                        self.eager_comprehension_targets
-                            .insert(expr.range(), names.clone());
-                    }
                     if let Some(enclosing) = &self.bound {
                         names.extend(enclosing.iter().cloned());
                     }
@@ -1341,36 +1059,6 @@ fn check_single_input(body: &[ast::Stmt], tokens: &ast::token::Tokens) -> Result
 }
 
 impl Program {
-    /// A worker may replay one direct acquire on its one captured receiver.
-    pub(super) fn captured_acquire(&self, freevar: &str) -> Option<CapturedAcquire> {
-        let [(line, Instruction::Eval(expression))] = self.instructions.as_slice() else {
-            return None;
-        };
-        let call = expression.as_call_expr()?;
-        // Imported receiver spellings use ordinary attribute evaluation instead.
-        let field =
-            imre_ast::direct_method(call, &self.method_imports, self.private_names.as_deref())?;
-        if field.attr.as_str() != "acquire"
-            || field.value.as_name_expr()?.id.as_str() != freevar
-            || !call.arguments.is_empty()
-            || self.kind != FunctionKind::Plain
-            || self.interactive
-            || self.nested_global
-            || self.class_attributes.is_some()
-            || self.class_cell
-            || !self.locals.is_empty()
-            || !self.directives.is_empty()
-            || self.doc.is_some()
-            || self.string_roots != NONE
-        {
-            return None;
-        }
-        Some(CapturedAcquire {
-            line: *line,
-            expression: expression.clone(),
-        })
-    }
-
     /// Keep each code object's constants alive, including constants owned by unexecuted children.
     fn prepare_strings<'a>(
         &'a mut self,
@@ -1407,24 +1095,23 @@ impl Program {
             pending: Vec::new(),
             bound: None,
             comprehension_reads: BTreeSet::new(),
-            eager_comprehension_targets: &mut self.eager_comprehension_targets,
             exhausted: false,
         };
         let mut enclosing_bindings = Vec::new();
         let mut prepared_generators = Vec::new();
-        for (_, op) in &mut self.instructions {
+        for (_, op) in &mut self.items {
             match op {
-                Instruction::EnterComprehension { targets, .. } => {
+                SourceItem::EnterComprehension(targets) => {
                     let mut bound = targets.clone();
                     if let Some(parent) = &strings.bound {
                         bound.extend(parent.iter().cloned());
                     }
                     enclosing_bindings.push(strings.bound.replace(Rc::new(bound)));
                 }
-                Instruction::LeaveComprehension => {
+                SourceItem::LeaveComprehension => {
                     strings.bound = enclosing_bindings.pop().expect("comprehension bindings");
                 }
-                Instruction::Eval(ast::Expr::StringLiteral(doc))
+                SourceItem::Eval(ast::Expr::StringLiteral(doc))
                     if self.scope_flags & code_flags::HAS_DOCSTRING != 0
                         && self.doc == Some(doc.range()) =>
                 {
@@ -1432,96 +1119,68 @@ impl Program {
                     let id = strings.text(text.into())?;
                     strings.constant(doc.range(), id)?;
                 }
-                Instruction::Eval(e)
-                | Instruction::Discard(e)
-                | Instruction::Unless(e, _)
-                | Instruction::Branch { value: Some(e), .. }
-                | Instruction::LoadResult(e)
-                | Instruction::Iter(Some(e), _)
-                | Instruction::CollectItem { value: Some(e), .. }
-                | Instruction::ExceptMatch(e, _)
-                | Instruction::Await(Some(e), _)
-                | Instruction::SaveOperand(Some(e)) => strings.visit_expr(e),
-                Instruction::Attribute { name, .. } | Instruction::StoreNamed(name) => {
+                SourceItem::Eval(e) | SourceItem::Discard(e) => strings.visit_expr(e),
+                SourceItem::Name(name) => {
                     strings.heap.code_name(name.as_str());
                 }
-                Instruction::SaveCallMethod(field) => {
-                    strings.heap.code_name(field.attr.as_str());
-                    strings.visit_expr(&field.value);
-                }
-                Instruction::CallSaved { keywords, .. } => {
-                    for name in keywords {
+                SourceItem::Keywords(names) => {
+                    for name in names {
                         strings.heap.code_name(name.as_str());
                     }
                 }
-                Instruction::Match { subject, cases, .. } => {
+                SourceItem::Match { subject, cases, .. } => {
                     strings.visit_expr(subject);
                     for case in cases {
                         strings.visit_pattern(&case.pattern);
                         for name in &case.captures {
                             strings.heap.code_name(name);
                         }
-                        if let Some((_, guard)) = &case.guard {
+                        if let Some(guard) = &case.guard {
                             strings.visit_expr(guard);
                         }
                     }
                 }
-                Instruction::BindAsyncItem(Some(target)) | Instruction::BindOperand(target) => {
-                    strings.visit_expr(target);
-                }
-                // The instructions before this site already acquired the outer
-                // operand, so do not scan its yield a second time as unlowered.
-                Instruction::MakeGenerator(expr) => {
+                SourceItem::MakeGenerator(expr) => {
                     prepared_generators.push((&*expr, strings.bound.clone()));
                 }
-                Instruction::StoreAttribute(attr) => {
-                    strings.heap.code_name(attr.as_str());
-                }
-                Instruction::AsyncWithMethods(Some(context)) => strings.visit_expr(context),
-                Instruction::EnterAsyncWith {
-                    target: Some(target),
-                    ..
-                } => strings.visit_expr(target),
-                Instruction::EnterWith { item, .. } => {
+                SourceItem::EnterWith(item) => {
                     strings.visit_expr(&item.context_expr);
                     if let Some(target) = &item.optional_vars {
                         strings.visit_expr(target);
                     }
                 }
-                Instruction::DeleteName(name)
-                | Instruction::BindException(name)
-                | Instruction::ClearException(name) => {
+                SourceItem::DeleteName(name) => {
                     strings.heap.code_name(name);
                 }
-                Instruction::DeleteItem(item) => {
+                SourceItem::DeleteItem(item) => {
                     strings.visit_expr(&item.value);
                     strings.visit_expr(&item.slice);
                 }
-                Instruction::DeleteAttr(attr) => {
+                SourceItem::DeleteAttr(attr) => {
                     strings.visit_expr(&attr.value);
                     strings.heap.code_name(attr.attr.as_str());
                 }
-                Instruction::Assert(stmt) => {
+                SourceItem::Assert(stmt) => {
                     strings.visit_expr(&stmt.test);
                     if let Some(message) = &stmt.msg {
                         strings.visit_expr(message);
                     }
                 }
-                Instruction::AugAssign(stmt) => {
+                SourceItem::AugAssign(stmt) => {
                     strings.visit_expr(&stmt.target);
                     strings.visit_expr(&stmt.value);
                 }
-                Instruction::ModuleDoc(range, text) => {
+                SourceItem::ModuleDoc(range, text) => {
                     let id = strings.text(text.as_str().into())?;
                     strings.constant(*range, id)?;
                 }
-                Instruction::Assign(targets, e) => {
+                SourceItem::Assign(targets, e) => {
                     for target in targets {
                         strings.visit_expr(target);
                     }
                     strings.visit_expr(e);
                 }
-                Instruction::Import { module, alias } => {
+                SourceItem::Import { module, alias } => {
                     for part in module.split('.') {
                         strings.heap.code_name(part);
                     }
@@ -1529,23 +1188,21 @@ impl Program {
                         strings.heap.code_name(alias);
                     }
                 }
-                Instruction::From(module, _, bindings) => {
+                SourceItem::From(module, bindings) => {
                     strings.heap.code_name(module);
                     for (name, alias) in bindings {
                         strings.heap.code_name(name);
                         strings.heap.code_name(alias);
                     }
                 }
-                Instruction::Annotations { entries, .. } => {
+                SourceItem::Annotations(entries) => {
                     for (name, expr) in entries {
                         strings.annotation(name, expr, stringized)?;
                     }
                 }
-                Instruction::StringAnnotation(name, expr) => {
-                    strings.annotation(name, expr, true)?
-                }
-                Instruction::ClassAnnotator(provider)
-                | Instruction::ModuleAnnotations(Some(provider)) => {
+                SourceItem::StringAnnotation(name, expr) => strings.annotation(name, expr, true)?,
+                SourceItem::ClassAnnotator(provider)
+                | SourceItem::ModuleAnnotations(Some(provider)) => {
                     nested_reads.extend(
                         strings
                             .annotation_code(provider, class_locals, line_at)?
@@ -1553,7 +1210,7 @@ impl Program {
                             .cloned(),
                     );
                 }
-                Instruction::Define(definition) | Instruction::ReturnClass(definition) => {
+                SourceItem::Define(definition) | SourceItem::ReturnClass(definition) => {
                     let params = definition.kind.type_params();
                     let mut inherit_reads = |reads: &BTreeSet<String>| {
                         nested_reads.extend(
@@ -1598,17 +1255,13 @@ impl Program {
                         _ => {}
                     }
                 }
-                Instruction::ModuleAnnotations(None)
-                | Instruction::MarkAnnotation(_)
-                | Instruction::ClassStart
-                | Instruction::ClassEnd
-                | Instruction::CheckAnnotationFormat => {}
-                Instruction::Yield(e, _) | Instruction::Return(e) | Instruction::Next(e, _) => {
+                SourceItem::ModuleAnnotations(None) => {}
+                SourceItem::Return(e) => {
                     if let Some(e) = e {
                         strings.visit_expr(e);
                     }
                 }
-                Instruction::Raise(statement) => {
+                SourceItem::Raise(statement) => {
                     if let Some(e) = &statement.exc {
                         strings.visit_expr(e);
                     }
@@ -1616,49 +1269,11 @@ impl Program {
                         strings.visit_expr(e);
                     }
                 }
-                Instruction::BindSent(targets) => {
+                SourceItem::BindSent(targets) => {
                     for target in targets {
                         strings.visit_expr(target);
                     }
                 }
-                Instruction::ReturnSent
-                | Instruction::YieldResult(_)
-                | Instruction::Await(None, _)
-                | Instruction::SaveOperand(None)
-                | Instruction::BuildSequence { .. }
-                | Instruction::BuildSlice(_)
-                | Instruction::StartDict
-                | Instruction::StartSet(_)
-                | Instruction::InsertDict { .. }
-                | Instruction::InsertSet { .. }
-                | Instruction::FinishDisplay
-                | Instruction::Binary(_, _, _, _)
-                | Instruction::NextComparison { .. }
-                | Instruction::Branch { value: None, .. }
-                | Instruction::Unary(_)
-                | Instruction::JumpResult(_)
-                | Instruction::Jump(_)
-                | Instruction::Break(_)
-                | Instruction::EnterFinally { .. }
-                | Instruction::AsyncWithMethods(None)
-                | Instruction::Iter(None, _)
-                | Instruction::CollectItem { value: None, .. }
-                | Instruction::AsyncNext
-                | Instruction::EndAsyncFor
-                | Instruction::BindAsyncItem(None)
-                | Instruction::UnpackTarget { .. }
-                | Instruction::StoreSubscript
-                | Instruction::EnterAsyncWith { target: None, .. }
-                | Instruction::ExitWith
-                | Instruction::CallAsyncExit
-                | Instruction::CallAsyncEnter
-                | Instruction::AwaitWithResult(_)
-                | Instruction::TestAsyncExit
-                | Instruction::FinishAsyncExit
-                | Instruction::EnterExcept { .. }
-                | Instruction::StartFinally
-                | Instruction::EndFinally
-                | Instruction::Delegate(_) => {}
             }
         }
         let (class_cell, mut functions) = strings.scan(&mut self.unlowered_yield)?;
@@ -1681,10 +1296,9 @@ impl Program {
             let mut child = Self::new(self.filename.clone(), name, self.has_named_bindings);
             child.scope_flags = nested_scope_flags;
             child.strip_docstrings = self.strip_docstrings;
-            child.source_lines = self.source_lines.clone();
+
             child.qualname =
                 Self::qualified_name(&self.qualname, self.class_attributes.is_some(), name);
-            child.method_imports = self.method_imports.clone();
             child.template_expressions = self.template_expressions.clone();
             child.private_names = self.private_names.clone();
             child.first_line = line_at(expr.start().to_usize());
@@ -1705,13 +1319,13 @@ impl Program {
                     let params = lambda.parameters.clone().unwrap_or_default();
                     let line = child.first_line;
                     let end = match child.lower_suspension(*lambda.body.clone(), line, true)? {
-                        Some(body) => Instruction::Return(Some(body)),
+                        Some(body) => SourceItem::Return(Some(body)),
                         None => {
                             child.kind = FunctionKind::GeneratorLambda;
-                            Instruction::ReturnSent
+                            SourceItem::Return(None)
                         }
                     };
-                    child.instructions.push((line, end));
+                    child.items.push((line, end));
                     params
                 }
                 ast::Expr::Generator(genexpr) => {
@@ -1758,7 +1372,6 @@ impl Program {
                         kind: DefinitionKind::Function {
                             parameters: params,
                             type_params: None,
-                            captured_locks: None,
                         },
                         annotate: None,
                     },
@@ -1781,14 +1394,6 @@ impl Program {
             if roots != NONE {
                 strings.keep(roots)?;
             }
-        }
-        // Inlined comprehensions read this frame's locals without capturing cells.
-        if self.scope_flags & code_flags::OPTIMIZED != 0 {
-            self.cellvars = nested_reads
-                .iter()
-                .filter(|name| self.locals.contains(name.as_str()))
-                .cloned()
-                .collect();
         }
         nested_reads.append(&mut strings.comprehension_reads);
         self.string_roots = strings.finish();
@@ -1933,8 +1538,8 @@ impl Program {
                 })
             }
         };
-        for (_, op) in &mut self.instructions {
-            if let Instruction::Define(definition) | Instruction::ReturnClass(definition) = op {
+        for (_, op) in &mut self.items {
+            if let SourceItem::Define(definition) | SourceItem::ReturnClass(definition) = op {
                 let child = Rc::get_mut(&mut definition.body).expect("newly lowered child code");
                 if let Some(params) = definition.kind.type_params() {
                     child.resolve_directives(
@@ -1962,40 +1567,12 @@ impl Program {
     }
 
     fn class_parameter_header(&self) -> bool {
-        matches!(
-            self.instructions.first(),
-            Some((_, Instruction::ReturnClass(_)))
-        )
-    }
-
-    pub(super) fn expression_range(&self, range: ruff_text_size::TextRange) -> Option<[u32; 4]> {
-        if self.source_lines.is_empty() {
-            return None;
-        }
-        let point = |offset: ruff_text_size::TextSize| {
-            let byte = offset.to_usize();
-            let line = self.source_lines.partition_point(|&start| start <= byte);
-            let column = byte - self.source_lines[line - 1];
-            (line as u32, column as u32)
-        };
-        let (start_line, start_col) = point(range.start());
-        let (end_line, end_col) = point(range.end());
-        Some([start_line, end_line, start_col, end_col])
-    }
-
-    pub(super) fn expression_line(&self, offset: ruff_text_size::TextSize) -> Option<u32> {
-        if self.source_lines.is_empty() {
-            return None;
-        }
-        let line = self
-            .source_lines
-            .partition_point(|&start| start <= offset.to_usize()) as u32;
-        Some(line)
+        matches!(self.items.first(), Some((_, SourceItem::ReturnClass(_))))
     }
 
     fn nested_program(&self, name: &str) -> Self {
         let mut child = Self::new(self.filename.clone(), name, self.has_named_bindings);
-        child.source_lines = self.source_lines.clone();
+
         child.syntax_limit = self.syntax_limit;
         child.deferred_pattern.clone_from(&self.deferred_pattern);
         child.strip_docstrings = self.strip_docstrings;
@@ -2018,7 +1595,7 @@ impl Program {
     fn new(filename: SourceFilename, name: &str, has_named_bindings: bool) -> Self {
         Self {
             filename,
-            source_lines: Rc::default(),
+
             syntax_limit: None,
             deferred_pattern: None,
             name: name.to_owned(),
@@ -2035,7 +1612,6 @@ impl Program {
             doc: None,
             strip_docstrings: false,
             literals: HashMap::new(),
-            alternative_captures: HashMap::new(),
             string_roots: NONE,
             first_line: 1,
             kind: FunctionKind::Plain,
@@ -2043,80 +1619,19 @@ impl Program {
             unlowered_yield: false,
             interactive: false,
             locals: indexmap::IndexSet::new(),
-            cellvars: Vec::new(),
             directives: HashMap::new(),
             reads: BTreeSet::new(),
-            method_imports: Rc::default(),
+
             private_names: None,
             template_expressions: Rc::default(),
-            instructions: Vec::new(),
+            items: Vec::new(),
             deferred_annotations: Vec::new(),
             conditional_fields: Vec::new(),
             class_binds_conditional_name: false,
             expression_functions: HashMap::new(),
-            eager_comprehension_targets: HashMap::new(),
         }
     }
 
-    fn lower_awaited_call(&mut self, call: ast::ExprCall, plan: &OperandPlan) -> Result<()> {
-        let line = plan.line;
-        let method =
-            imre_ast::direct_method(&call, &self.method_imports, self.private_names.as_deref());
-        let anchor = TracebackAnchor::delimiter(call.range(), call.func.end(), b'(');
-        let position = value::ExpressionPosition::Source {
-            offset: method.map_or_else(|| call.start(), |field| field.attr.start()),
-            range: call.range(),
-        };
-        let callable = if method.is_some() {
-            let ast::Expr::Attribute(field) = *call.func else {
-                unreachable!()
-            };
-            if plan.suspends(&field.value) {
-                self.lower_result(*field.value, plan)?;
-                self.instructions.push((
-                    line,
-                    Instruction::Attribute {
-                        range: field.range,
-                        name: field.attr,
-                        method: true,
-                    },
-                ));
-                Instruction::SaveOperand(None)
-            } else {
-                Instruction::SaveCallMethod(field)
-            }
-        } else {
-            Instruction::SaveOperand(self.lower_operand(*call.func, plan)?)
-        };
-        self.instructions.push((line, callable));
-        let positional = call.arguments.args.len();
-        let keywords = call
-            .arguments
-            .keywords
-            .iter()
-            .map(|kw| kw.arg.clone().expect("fixed keyword"))
-            .collect();
-        let operands = call
-            .arguments
-            .args
-            .into_iter()
-            .chain(call.arguments.keywords.into_iter().map(|kw| kw.value));
-        for expr in operands {
-            self.save_operand(expr, plan)?;
-        }
-        self.instructions.push((
-            line,
-            Instruction::CallSaved {
-                anchor,
-                positional,
-                keywords,
-                position,
-            },
-        ));
-        Ok(())
-    }
-
-    // A suspended expression supplies its result when execution resumes.
     fn lower_suspension(
         &mut self,
         expr: ast::Expr,
@@ -2152,11 +1667,9 @@ impl Program {
                 line,
                 plan.function,
             )? {
-                self.instructions
-                    .push((line, Instruction::LoadResult(outer)));
+                self.items.push((line, SourceItem::Discard(outer)));
             }
-            self.instructions
-                .push((line, Instruction::MakeGenerator(expr)));
+            self.items.push((line, SourceItem::MakeGenerator(expr)));
             return Ok(None);
         }
         if let Some(comp) = Plan::from_expr(&expr) {
@@ -2165,380 +1678,100 @@ impl Program {
         }
         match expr {
             ast::Expr::Yield(y) => {
-                let op = match y.value {
-                    None => Instruction::Yield(None, y.range),
-                    Some(value) => match self.lower_operand(*value, plan)? {
-                        Some(expr) => Instruction::Yield(Some(expr), y.range),
-                        None => Instruction::YieldResult(y.range),
-                    },
-                };
-                self.instructions.push((line, op));
+                if let Some(value) = y.value {
+                    self.record_operand(*value, plan)?;
+                }
             }
-            ast::Expr::YieldFrom(y) => {
-                let iterable = self.lower_operand(*y.value, plan)?;
-                self.instructions
-                    .push((line, Instruction::Iter(iterable, false)));
-                self.instructions
-                    .push((line, Instruction::Delegate(Some(y.range))));
+            ast::Expr::YieldFrom(y) => self.record_operand(*y.value, plan)?,
+            ast::Expr::Await(a) => self.record_operand(*a.value, plan)?,
+            ast::Expr::Call(call) => {
+                self.record_operand(*call.func, plan)?;
+                for arg in call.arguments.args {
+                    self.record_operand(arg, plan)?;
+                }
+                let mut keywords = Vec::new();
+                for kw in call.arguments.keywords {
+                    keywords.push(kw.arg.expect("fixed keyword"));
+                    self.record_operand(kw.value, plan)?;
+                }
+                self.items.push((line, SourceItem::Keywords(keywords)));
             }
-            ast::Expr::Await(a) => {
-                let value = self.lower_operand(*a.value, plan)?;
-                self.instructions
-                    .push((line, Instruction::Await(value, a.range)));
-                self.instructions
-                    .push((line, Instruction::Delegate(Some(a.range))));
+            ast::Expr::Tuple(ast::ExprTuple { elts, .. })
+            | ast::Expr::List(ast::ExprList { elts, .. })
+            | ast::Expr::Set(ast::ExprSet { elts, .. }) => {
+                for item in elts {
+                    match item {
+                        ast::Expr::Starred(star) => self.record_operand(*star.value, plan)?,
+                        item => self.record_operand(item, plan)?,
+                    }
+                }
             }
-            ast::Expr::Call(call) => self.lower_awaited_call(call, plan)?,
-            ast::Expr::Tuple(tuple) => self.lower_sequence(tuple.elts, true, plan)?,
-            ast::Expr::List(list) => self.lower_sequence(list.elts, false, plan)?,
             ast::Expr::Subscript(item) => {
-                let anchor = TracebackAnchor::delimiter(item.range, item.value.end(), b'[');
-                self.save_operand(*item.value, plan)?;
-                self.save_operand(*item.slice, plan)?;
-                self.instructions
-                    .push((line, Instruction::Binary("get", item.range, anchor, false)));
+                self.record_operand(*item.value, plan)?;
+                self.record_operand(*item.slice, plan)?;
             }
             ast::Expr::Slice(slice) => {
-                let parts = [slice.lower, slice.upper, slice.step];
-                let present = parts.each_ref().map(Option::is_some);
-                for part in parts.into_iter().flatten() {
-                    self.save_operand(*part, plan)?;
+                for part in [slice.lower, slice.upper, slice.step].into_iter().flatten() {
+                    self.record_operand(*part, plan)?;
                 }
-                self.instructions
-                    .push((line, Instruction::BuildSlice(present)));
             }
             ast::Expr::Named(named) => {
                 let ast::Expr::Name(name) = *named.target else {
                     return Err(unsupported("assignment expression target"));
                 };
-                self.lower_result(*named.value, plan)?;
-                self.instructions.push((
+                self.record_operand(*named.value, plan)?;
+                self.items.push((
                     line,
-                    Instruction::StoreNamed(ast::Identifier::new(name.id, name.range)),
+                    SourceItem::Name(ast::Identifier::new(name.id, name.range)),
                 ));
             }
             ast::Expr::Dict(dict) => {
-                self.instructions.push((line, Instruction::StartDict));
                 for item in dict.items {
-                    let unpack = item.key.is_none();
                     if let Some(key) = item.key {
-                        self.save_operand(key, plan)?;
+                        self.record_operand(key, plan)?;
                     }
-                    self.lower_result(item.value, plan)?;
-                    self.instructions
-                        .push((line, Instruction::InsertDict { unpack }));
+                    self.record_operand(item.value, plan)?;
                 }
-                self.instructions.push((line, Instruction::FinishDisplay));
             }
-            ast::Expr::Set(set) => {
-                let prefix = set_display_prefix(&set.elts);
-                let mut items = set.elts.into_iter();
-                for item in items.by_ref().take(prefix) {
-                    self.save_operand(item, plan)?;
-                }
-                self.instructions
-                    .push((line, Instruction::StartSet(prefix)));
-                for item in items {
-                    let unpack = item.is_starred_expr();
-                    let value = match item {
-                        ast::Expr::Starred(star) => *star.value,
-                        value => value,
-                    };
-                    self.lower_result(value, plan)?;
-                    self.instructions
-                        .push((line, Instruction::InsertSet { unpack }));
-                }
-                self.instructions.push((line, Instruction::FinishDisplay));
+            ast::Expr::BinOp(b) => {
+                self.record_operand(*b.left, plan)?;
+                self.record_operand(*b.right, plan)?;
             }
-            ast::Expr::BinOp(binary) => {
-                for operand in [*binary.left, *binary.right] {
-                    self.save_operand(operand, plan)?;
+            ast::Expr::Compare(c) => {
+                for expr in c.operands.into_vec() {
+                    self.record_operand(expr, plan)?;
                 }
-                self.instructions.push((
-                    line,
-                    Instruction::Binary(
-                        binary.op.as_str(),
-                        binary.range,
-                        TracebackAnchor::Hidden,
-                        false,
-                    ),
-                ));
             }
-            ast::Expr::Compare(c) => self.lower_comparison(c, plan, false)?,
             ast::Expr::BoolOp(b) => {
-                let mut operands = b.values;
-                let last = operands.pop().expect("boolean expression has operands");
-                let mut done = BranchTargets::new();
-                for expr in operands {
-                    self.branch_on(
-                        expr,
-                        b.op == ast::BoolOp::Or,
-                        BranchUse::Operand,
-                        plan,
-                        &mut done,
-                    )?;
+                for expr in b.values {
+                    self.record_operand(expr, plan)?;
                 }
-                self.lower_result(last, plan)?;
-                self.finish_branches(done);
             }
-            ast::Expr::UnaryOp(u) => {
-                self.lower_result(*u.operand, plan)?;
-                self.instructions.push((line, Instruction::Unary(u.op)));
-            }
+            ast::Expr::UnaryOp(u) => self.record_operand(*u.operand, plan)?,
             ast::Expr::Attribute(a) => {
-                self.lower_result(*a.value, plan)?;
-                self.instructions.push((
-                    line,
-                    Instruction::Attribute {
-                        range: a.range,
-                        name: a.attr,
-                        method: false,
-                    },
-                ));
+                self.record_operand(*a.value, plan)?;
+                self.items.push((line, SourceItem::Name(a.attr)));
             }
             ast::Expr::If(b) => {
-                self.lower_choice(b, plan, Instruction::JumpResult(0), |program, arm, _| {
-                    program.lower_result(arm, plan)
-                })?;
+                for expr in [b.test, b.body, b.orelse] {
+                    self.record_operand(*expr, plan)?;
+                }
             }
             _ => unreachable!("operand with a supported suspension"),
         }
         Ok(None)
     }
 
-    /// Only the async pull and its await are protected by END_ASYNC_FOR.
-    fn lower_async_next(&mut self, line: u32, target: Option<ast::Expr>) {
-        self.instructions.push((line, Instruction::AsyncNext));
-        self.instructions.push((line, Instruction::Delegate(None)));
-        self.instructions
-            .push((line, Instruction::BindAsyncItem(target)));
-    }
-
-    fn finish_iterator_loop(&mut self, head: usize, line: u32) {
-        let after = self.instructions.len();
-        match &mut self.instructions[head].1 {
-            Instruction::Next(_, end) => *end = after,
-            Instruction::EnterExcept { handler, end } => {
-                *handler = after;
-                *end = after + 1;
-                self.instructions.push((line, Instruction::EndAsyncFor));
-            }
-            _ => unreachable!("iterator loop guard"),
-        }
-    }
-
-    fn lower_sequence(
-        &mut self,
-        items: Vec<ast::Expr>,
-        tuple: bool,
-        plan: &OperandPlan,
-    ) -> Result<()> {
-        let count = items.len();
-        for item in items {
-            self.save_operand(item, plan)?;
-        }
-        self.instructions
-            .push((plan.line, Instruction::BuildSequence { tuple, count }));
-        Ok(())
-    }
-
-    fn save_operand(&mut self, expr: ast::Expr, plan: &OperandPlan) -> Result<()> {
-        let line = plan.line;
-        let value = self.lower_operand(expr, plan)?;
-        self.instructions
-            .push((line, Instruction::SaveOperand(value)));
-        Ok(())
-    }
-
-    fn lower_result(&mut self, expr: ast::Expr, plan: &OperandPlan) -> Result<()> {
-        let line = plan.line;
+    fn record_operand(&mut self, expr: ast::Expr, plan: &OperandPlan) -> Result<()> {
         if let Some(expr) = self.lower_operand(expr, plan)? {
-            self.instructions
-                .push((line, Instruction::LoadResult(expr)));
+            self.items.push((plan.line, SourceItem::Discard(expr)));
         }
         Ok(())
     }
 
-    /// Save the middle operand of a chain across comparison hooks and subsequent awaits.
-    fn lower_comparison(
-        &mut self,
-        c: ast::ExprCompare,
-        plan: &OperandPlan,
-        condition: bool,
-    ) -> Result<()> {
-        let line = plan.line;
-        let mut operands = c.operands.into_vec().into_iter();
-        self.save_operand(operands.next().expect("left operand"), plan)?;
-        let mut done = BranchTargets::new();
-        let length = c.ops.len();
-        for (i, (op, operand)) in c.ops.into_vec().into_iter().zip(operands).enumerate() {
-            self.save_operand(operand, plan)?;
-            let more = i + 1 < length;
-            self.instructions.push((
-                line,
-                Instruction::Binary(op.as_str(), c.range, TracebackAnchor::Hidden, more),
-            ));
-            if more {
-                done.push(self.instructions.len());
-                self.instructions
-                    .push((line, Instruction::NextComparison { end: 0, condition }));
-            }
-        }
-        self.finish_branches(done);
-        Ok(())
-    }
-
-    /// A condition consumes a comparison chain's known truth. In an and/or value expression
-    /// the chain yields its Python result and the enclosing operand tests it, even on an
-    /// opposite branch that will discard the result. Nested boolean branches share exits.
-    fn branch_on(
-        &mut self,
-        expr: ast::Expr,
-        when: bool,
-        usage: BranchUse,
-        plan: &OperandPlan,
-        exits: &mut BranchTargets,
-    ) -> Result<()> {
-        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
-            self.emit_branch(expr, when, usage, plan, exits)
-        })
-    }
-
-    fn emit_branch(
-        &mut self,
-        expr: ast::Expr,
-        when: bool,
-        usage: BranchUse,
-        plan: &OperandPlan,
-        exits: &mut BranchTargets,
-    ) -> Result<()> {
-        let line = plan.line;
-        let value = if plan.suspends(&expr) {
-            match expr {
-                ast::Expr::BoolOp(b) => {
-                    let stop = b.op == ast::BoolOp::Or;
-                    let mut operands = b.values;
-                    let last = operands.pop().expect("boolean expression has operands");
-                    let mut opposite = BranchTargets::new();
-                    for expr in operands {
-                        if stop == when {
-                            self.branch_on(expr, when, usage, plan, exits)?;
-                        } else {
-                            self.branch_on(expr, stop, usage, plan, &mut opposite)?;
-                        }
-                    }
-                    self.branch_on(last, when, usage, plan, exits)?;
-                    self.finish_branches(opposite);
-                    return Ok(());
-                }
-                ast::Expr::UnaryOp(u)
-                    if usage == BranchUse::Condition && u.op == ast::UnaryOp::Not =>
-                {
-                    return self.branch_on(*u.operand, !when, usage, plan, exits);
-                }
-                ast::Expr::Compare(c) => {
-                    self.lower_comparison(c, plan, usage == BranchUse::Condition)?;
-                    None
-                }
-                ast::Expr::If(b) => {
-                    self.lower_choice(
-                        b,
-                        plan,
-                        Instruction::Jump(0),
-                        |program, arm, fallthrough| {
-                            if usage == BranchUse::Operand && !fallthrough {
-                                // The body jumps over the else arm with a materialized value.
-                                program.lower_result(arm, plan)?;
-                                program.emit_truth_branch(None, when, usage, line, exits);
-                                Ok(())
-                            } else {
-                                program.branch_on(arm, when, usage, plan, exits)
-                            }
-                        },
-                    )?;
-                    return Ok(());
-                }
-                value => self.lower_operand(value, plan)?,
-            }
-        } else {
-            Some(expr)
-        };
-        self.emit_truth_branch(value, when, usage, line, exits);
-        Ok(())
-    }
-
-    fn lower_choice(
-        &mut self,
-        choice: ast::ExprIf,
-        plan: &OperandPlan,
-        join: Instruction,
-        mut arm: impl FnMut(&mut Self, ast::Expr, bool) -> Result<()>,
-    ) -> Result<()> {
-        let mut otherwise = BranchTargets::new();
-        self.branch_on(
-            *choice.test,
-            false,
-            BranchUse::Condition,
-            plan,
-            &mut otherwise,
-        )?;
-        arm(self, *choice.body, false)?;
-        let done = self.instructions.len();
-        self.instructions.push((plan.line, join));
-        self.finish_branches(otherwise);
-        arm(self, *choice.orelse, true)?;
-        self.finish_branches([done]);
-        Ok(())
-    }
-
-    fn emit_truth_branch(
-        &mut self,
-        value: Option<ast::Expr>,
-        when: bool,
-        usage: BranchUse,
-        line: u32,
-        exits: &mut BranchTargets,
-    ) {
-        exits.push(self.instructions.len());
-        let branch = match value {
-            Some(expr) if !when && usage == BranchUse::Condition => Instruction::Unless(expr, 0),
-            value => Instruction::Branch {
-                value,
-                when,
-                usage,
-                end: 0,
-            },
-        };
-        self.instructions.push((line, branch));
-    }
-
-    fn false_branches(
-        &mut self,
-        test: ast::Expr,
-        line: u32,
-        function: bool,
-    ) -> Result<BranchTargets> {
-        let plan = OperandPlan::new(&test, self.kind, line, function);
-        let mut exits = BranchTargets::new();
-        self.branch_on(test, false, BranchUse::Condition, &plan, &mut exits)?;
-        Ok(exits)
-    }
-
-    fn finish_branches(&mut self, exits: impl IntoIterator<Item = usize>) {
-        self.resolve_branches(exits, self.instructions.len());
-    }
-
-    fn resolve_branches(&mut self, exits: impl IntoIterator<Item = usize>, end: usize) {
-        for index in exits {
-            match &mut self.instructions[index].1 {
-                Instruction::Branch { end: target, .. }
-                | Instruction::NextComparison { end: target, .. }
-                | Instruction::JumpResult(target)
-                | Instruction::Jump(target)
-                | Instruction::Unless(_, target) => *target = end,
-                _ => unreachable!("branch destination"),
-            }
-        }
+    fn record_expression(&mut self, expr: ast::Expr, line: u32, function: bool) -> Result<()> {
+        let plan = OperandPlan::new(&expr, self.kind, line, function);
+        self.record_operand(expr, &plan)
     }
 
     fn qualified_name(parent: &str, class: bool, name: &str) -> String {
@@ -2599,7 +1832,6 @@ impl Program {
             child.qualname =
                 Self::qualified_name(&self.qualname, self.class_attributes.is_some(), original);
         }
-        child.method_imports = self.method_imports.clone();
         child.private_names = self.private_names.clone();
         child.template_expressions = self.template_expressions.clone();
         child.first_line = decorators.first().map_or(line, |d| {
@@ -2622,8 +1854,8 @@ impl Program {
     ) -> Result<()> {
         let class = self.class_attributes.is_some();
         if !function && !class && imre_ast::annotations::has_variable_annotation(&body) {
-            self.instructions
-                .push((self.first_line, Instruction::ModuleAnnotations(None)));
+            self.items
+                .push((self.first_line, SourceItem::ModuleAnnotations(None)));
         }
         if !self.interactive
             && let Some(ast::Stmt::Expr(first)) = body.first()
@@ -2639,8 +1871,8 @@ impl Program {
             } else {
                 let line = lines.partition_point(|n| *n <= first.start().to_usize()) as u32;
                 let text = imre_ast::strings::clean_doc(doc.value.to_str());
-                self.instructions
-                    .push((line, Instruction::ModuleDoc(doc.range(), text)));
+                self.items
+                    .push((line, SourceItem::ModuleDoc(doc.range(), text)));
                 body.remove(0);
             }
         }
@@ -2662,10 +1894,10 @@ impl Program {
                 fields,
             );
             if class {
-                self.instructions
-                    .push((self.first_line, Instruction::ClassAnnotator(provider)));
+                self.items
+                    .push((self.first_line, SourceItem::ClassAnnotator(provider)));
             } else {
-                self.instructions[0].1 = Instruction::ModuleAnnotations(Some(provider));
+                self.items[0].1 = SourceItem::ModuleAnnotations(Some(provider));
             }
         }
         Ok(())
@@ -2676,7 +1908,7 @@ impl Program {
         body: ast::Suite,
         lines: &[usize],
         function: bool,
-        active: Option<&mut LoopJumps>,
+        active: Option<&mut usize>,
     ) -> Result<()> {
         self.lower_block(body, lines, function, active, false)
     }
@@ -2686,7 +1918,7 @@ impl Program {
         mut body: ast::Suite,
         lines: &[usize],
         function: bool,
-        active: Option<&mut LoopJumps>,
+        active: Option<&mut usize>,
         class_top_level: bool,
     ) -> Result<()> {
         stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
@@ -2715,7 +1947,7 @@ impl Program {
         body: ast::Suite,
         lines: &[usize],
         function: bool,
-        mut active: Option<&mut LoopJumps>,
+        mut active: Option<&mut usize>,
         class_top_level: bool,
     ) -> Result<()> {
         use ast::Stmt;
@@ -2745,7 +1977,7 @@ impl Program {
                     continue;
                 }
                 Stmt::Expr(s) => match self.lower_suspension(*s.value, line, function)? {
-                    Some(expr) => Instruction::Eval(expr),
+                    Some(expr) => SourceItem::Eval(expr),
                     None => continue,
                 },
                 Stmt::Assign(s) => {
@@ -2753,8 +1985,8 @@ impl Program {
                         self.declare_target(target)?;
                     }
                     match self.lower_suspension(*s.value, line, function)? {
-                        Some(value) => Instruction::Assign(s.targets, value),
-                        None => Instruction::BindSent(s.targets),
+                        Some(value) => SourceItem::Assign(s.targets, value),
+                        None => SourceItem::BindSent(s.targets),
                     }
                 }
                 Stmt::AnnAssign(s) => {
@@ -2785,10 +2017,10 @@ impl Program {
                     annotations::validate(&s.annotation, name.is_some())?;
                     if let Some(value) = s.value {
                         let op = match self.lower_suspension(*value, line, function)? {
-                            Some(value) => Instruction::Assign(vec![*s.target], value),
-                            None => Instruction::BindSent(vec![*s.target]),
+                            Some(value) => SourceItem::Assign(vec![*s.target], value),
+                            None => SourceItem::BindSent(vec![*s.target]),
                         };
-                        self.instructions.push((line, op));
+                        self.items.push((line, op));
                     } else {
                         match *s.target {
                             ast::Expr::Attribute(attr) => {
@@ -2808,7 +2040,7 @@ impl Program {
                     }
                     let name = name.expect("simple annotated name");
                     if self.string_annotations() {
-                        Instruction::StringAnnotation(
+                        SourceItem::StringAnnotation(
                             name,
                             annotations::string_literal(&s.annotation),
                         )
@@ -2820,10 +2052,8 @@ impl Program {
                         }
                         if self.class_attributes.is_some() {
                             self.conditional_fields.push(index);
-                            Instruction::MarkAnnotation(self.conditional_fields.len() - 1)
-                        } else {
-                            Instruction::MarkAnnotation(index)
                         }
+                        continue;
                     }
                 }
                 Stmt::Delete(s) => {
@@ -2832,16 +2062,13 @@ impl Program {
                             ast::Expr::Name(name) => {
                                 let name = name.id.to_string();
                                 self.locals.insert(name.clone());
-                                self.instructions
-                                    .push((line, Instruction::DeleteName(name)));
+                                self.items.push((line, SourceItem::DeleteName(name)));
                             }
                             ast::Expr::Subscript(item) => {
-                                self.instructions
-                                    .push((line, Instruction::DeleteItem(item)));
+                                self.items.push((line, SourceItem::DeleteItem(item)));
                             }
                             ast::Expr::Attribute(attr) => {
-                                self.instructions
-                                    .push((line, Instruction::DeleteAttr(attr)));
+                                self.items.push((line, SourceItem::DeleteAttr(attr)));
                             }
                             _ => return Err(unsupported("deletion target")),
                         }
@@ -2850,22 +2077,22 @@ impl Program {
                 }
                 Stmt::AugAssign(s) => {
                     self.declare_target(&s.target)?;
-                    Instruction::AugAssign(s)
+                    SourceItem::AugAssign(s)
                 }
                 Stmt::Return(s) => {
                     if !function {
                         self.invalid_transfer(s.range(), "'return' outside function")?;
                     }
                     let Some(value) = s.value else {
-                        self.instructions.push((line, Instruction::Return(None)));
+                        self.items.push((line, SourceItem::Return(None)));
                         continue;
                     };
                     match self.lower_suspension(*value, line, function)? {
-                        Some(value) => Instruction::Return(Some(value)),
-                        None => Instruction::ReturnSent,
+                        Some(value) => SourceItem::Return(Some(value)),
+                        None => continue,
                     }
                 }
-                Stmt::Raise(s) => Instruction::Raise(s),
+                Stmt::Raise(s) => SourceItem::Raise(s),
                 Stmt::Import(s) if !s.is_lazy => {
                     for name in &s.names {
                         let module = name.name.to_string();
@@ -2874,12 +2101,12 @@ impl Program {
                             .as_deref()
                             .unwrap_or_else(|| module.split('.').next().unwrap());
                         self.locals.insert(local.to_owned());
-                        self.instructions
-                            .push((line, Instruction::Import { module, alias }));
+                        self.items
+                            .push((line, SourceItem::Import { module, alias }));
                     }
                     continue;
                 }
-                Stmt::Assert(s) => Instruction::Assert(s),
+                Stmt::Assert(s) => SourceItem::Assert(s),
                 Stmt::ImportFrom(s) if !s.is_lazy => {
                     let module = s.module.as_ref().map_or("", |module| module.as_str());
                     let mut names = vec![];
@@ -2897,7 +2124,7 @@ impl Program {
                         }
                         names.push((alias.name.to_string(), local));
                     }
-                    Instruction::From(module.to_owned(), s.level, names)
+                    SourceItem::From(module.to_owned(), names)
                 }
                 Stmt::TypeAlias(s)
                     if self.class_attributes.is_none()
@@ -2917,16 +2144,13 @@ impl Program {
                     let name = ast::Identifier::new(name.id, name.range);
                     let mut child = self.definition_body(&name, &[], line, lines);
                     child.locals.insert(".format".to_owned());
-                    child
-                        .instructions
-                        .push((line, Instruction::CheckAnnotationFormat));
                     let rhs_line =
                         lines.partition_point(|n| *n <= s.value.start().to_usize()) as u32;
                     child
-                        .instructions
-                        .push((rhs_line, Instruction::Return(Some(*s.value))));
+                        .items
+                        .push((rhs_line, SourceItem::Return(Some(*s.value))));
                     self.locals.insert(name.to_string());
-                    Instruction::Define(Definition {
+                    SourceItem::Define(Definition {
                         binding: name.to_string(),
                         decorators: Vec::new(),
                         body: Rc::new(child),
@@ -2951,13 +2175,6 @@ impl Program {
                         s.type_params.is_some(),
                         self.class_attributes.is_some() && s.type_params.is_none(),
                     );
-                    let captured_locks =
-                        if s.is_async || s.returns.is_some() || s.type_params.is_some() {
-                            None
-                        } else {
-                            imre_ast::captured_thread_locks(&s.body, &s.parameters)
-                                .map(|names| names.into_iter().map(str::to_owned).collect())
-                        };
                     let annotate = self.annotation_program(&mut s, &child, line)?;
                     if s.is_async {
                         child.kind = if imre_ast::code_flags::is_generator(&s.body) {
@@ -2978,14 +2195,13 @@ impl Program {
                         child.locals.insert(name.to_owned());
                     }
                     self.locals.insert(s.name.to_string());
-                    Instruction::Define(Definition {
+                    SourceItem::Define(Definition {
                         binding: s.name.to_string(),
                         decorators: s.decorator_list.into_iter().collect(),
                         body: Rc::new(child),
                         kind: DefinitionKind::Function {
                             parameters: s.parameters,
                             type_params: s.type_params,
-                            captured_locks,
                         },
                         annotate,
                     })
@@ -3013,15 +2229,7 @@ impl Program {
                     child.class_attributes = Some(imre_ast::class_attributes::static_attributes(
                         &s.body, spellings,
                     ));
-                    // Method-only classes can use the lexical reads collected for their methods.
-                    let needs_enclosing_frame = s.type_params.is_some()
-                        || !s
-                            .body
-                            .iter()
-                            .all(|stmt| matches!(stmt, Stmt::Pass(_) | Stmt::FunctionDef(_)));
-                    child.instructions.push((line, Instruction::ClassStart));
                     child.lower_namespace(s.body, lines, false)?;
-                    child.instructions.push((line, Instruction::ClassEnd));
                     self.locals.insert(s.name.to_string());
                     let mut definition = Definition {
                         binding: s.name.to_string(),
@@ -3029,8 +2237,6 @@ impl Program {
                         body: Rc::new(child),
                         kind: DefinitionKind::Class {
                             arguments: s.arguments,
-                            parameterized: s.type_params.is_some(),
-                            needs_enclosing_frame,
                         },
                         annotate: None,
                     };
@@ -3050,8 +2256,8 @@ impl Program {
                         header.private_names = definition.body.private_names.clone();
                         let decorators = std::mem::take(&mut definition.decorators);
                         header
-                            .instructions
-                            .push((line, Instruction::ReturnClass(definition)));
+                            .items
+                            .push((line, SourceItem::ReturnClass(definition)));
                         definition = Definition {
                             binding: s.name.to_string(),
                             decorators,
@@ -3060,26 +2266,23 @@ impl Program {
                             annotate: None,
                         };
                     }
-                    Instruction::Define(definition)
+                    SourceItem::Define(definition)
                 }
-                Stmt::Break(s) => {
-                    let Some(current) = active.as_deref_mut() else {
-                        self.invalid_transfer(s.range(), "'break' outside loop")?;
-                        continue;
-                    };
-                    current.breaks.push(self.instructions.len());
-                    Instruction::Jump(0)
-                }
-                Stmt::Continue(s) => {
-                    let Some(current) = active.as_deref() else {
-                        self.invalid_transfer(s.range(), "'continue' not properly in loop")?;
-                        continue;
-                    };
-                    Instruction::Jump(current.head)
+                Stmt::Break(_) | Stmt::Continue(_) => {
+                    if let Some(exits) = active.as_deref_mut() {
+                        *exits += 1;
+                    } else {
+                        let reason = if matches!(stmt, Stmt::Break(_)) {
+                            "'break' outside loop"
+                        } else {
+                            "'continue' not properly in loop"
+                        };
+                        self.invalid_transfer(stmt.range(), reason)?;
+                    }
+                    continue;
                 }
                 Stmt::For(_) | Stmt::While(_) => {
-                    let mut async_target = None;
-                    let (body, orelse, guard) = match stmt {
+                    let (body, orelse) = match stmt {
                         Stmt::For(s) => {
                             self.declare_target(&s.target)?;
                             if s.is_async && !self.kind.is_async() {
@@ -3088,52 +2291,18 @@ impl Program {
                                     "'async for' outside async function",
                                 ));
                             }
-                            let iterable = self.lower_suspension(*s.iter, line, function)?;
-                            self.instructions
-                                .push((line, Instruction::Iter(iterable, s.is_async)));
-                            let guard = if s.is_async {
-                                async_target = Some(*s.target);
-                                Instruction::EnterExcept { handler: 0, end: 0 }
-                            } else {
-                                Instruction::Next(Some(*s.target), 0)
-                            };
-                            (s.body, s.orelse, guard)
+                            self.record_expression(*s.iter, line, function)?;
+                            self.items.push((line, SourceItem::Discard(*s.target)));
+                            (s.body, s.orelse)
                         }
-                        Stmt::While(s) => (s.body, s.orelse, Instruction::Unless(*s.test, 0)),
-                        _ => unreachable!("loop statement"),
+                        Stmt::While(s) => {
+                            self.record_expression(*s.test, line, function)?;
+                            (s.body, s.orelse)
+                        }
+                        _ => unreachable!(),
                     };
-                    let head = self.instructions.len();
-                    let mut current = LoopJumps {
-                        head,
-                        has_iterator: async_target.is_some()
-                            || matches!(guard, Instruction::Next(..)),
-                        breaks: Vec::new(),
-                    };
-                    let skip = if let Instruction::Unless(test, _) = guard {
-                        self.false_branches(test, line, function)?
-                    } else {
-                        self.instructions.push((line, guard));
-                        BranchTargets::new()
-                    };
-                    if let Some(target) = async_target {
-                        self.lower_async_next(line, Some(target));
-                    }
-                    self.lower(body, lines, function, Some(&mut current))?;
-                    self.instructions.push((line, Instruction::Jump(head)));
-                    if !skip.is_empty() {
-                        self.finish_branches(skip);
-                    } else {
-                        self.finish_iterator_loop(head, line);
-                    }
+                    self.lower(body, lines, function, Some(&mut 0))?;
                     self.lower(orelse, lines, function, active.as_deref_mut())?;
-                    let end = self.instructions.len();
-                    for jump in current.breaks {
-                        self.instructions[jump].1 = if current.has_iterator {
-                            Instruction::Break(end)
-                        } else {
-                            Instruction::Jump(end)
-                        };
-                    }
                     continue;
                 }
                 Stmt::With(s) => {
@@ -3143,56 +2312,20 @@ impl Program {
                             "'async with' outside async function",
                         ));
                     }
-                    let mut entered = Vec::new();
                     for item in s.items {
                         if let Some(target) = &item.optional_vars {
                             self.declare_target(target)?;
                         }
-                        let entry = if s.is_async {
-                            let context =
-                                self.lower_suspension(item.context_expr, line, function)?;
-                            self.instructions
-                                .push((line, Instruction::AsyncWithMethods(context)));
-                            self.instructions.push((line, Instruction::CallAsyncEnter));
-                            self.instructions
-                                .push((line, Instruction::AwaitWithResult("__aenter__")));
-                            self.instructions.push((line, Instruction::Delegate(None)));
-                            Instruction::EnterAsyncWith {
-                                target: item.optional_vars,
-                                handler: 0,
-                                end: 0,
+                        if s.is_async {
+                            self.record_expression(item.context_expr, line, function)?;
+                            if let Some(target) = item.optional_vars {
+                                self.items.push((line, SourceItem::Discard(*target)));
                             }
                         } else {
-                            Instruction::EnterWith { item, handler: 0 }
-                        };
-                        entered.push(self.instructions.len());
-                        self.instructions.push((line, entry));
+                            self.items.push((line, SourceItem::EnterWith(item)));
+                        }
                     }
                     self.lower(s.body, lines, function, active.as_deref_mut())?;
-                    for i in entered.into_iter().rev() {
-                        self.instructions.push((line, Instruction::StartFinally));
-                        let cleanup = self.instructions.len();
-                        if s.is_async {
-                            self.instructions.push((line, Instruction::CallAsyncExit));
-                            self.instructions
-                                .push((line, Instruction::AwaitWithResult("__aexit__")));
-                            self.instructions.push((line, Instruction::Delegate(None)));
-                            self.instructions.push((line, Instruction::TestAsyncExit));
-                            self.instructions.push((line, Instruction::FinishAsyncExit));
-                        } else {
-                            self.instructions.push((line, Instruction::ExitWith));
-                        }
-                        self.instructions.push((line, Instruction::EndFinally));
-                        let after = self.instructions.len();
-                        match &mut self.instructions[i].1 {
-                            Instruction::EnterWith { handler, .. } => *handler = cleanup,
-                            Instruction::EnterAsyncWith { handler, end, .. } => {
-                                *handler = cleanup;
-                                *end = after;
-                            }
-                            _ => unreachable!("context manager entry"),
-                        }
-                    }
                     continue;
                 }
                 Stmt::Try(s)
@@ -3207,93 +2340,33 @@ impl Program {
                     return Err(unsupported("deferred module annotations in try suites"));
                 }
                 Stmt::Try(s) if !s.is_star && !s.handlers.is_empty() && s.finalbody.is_empty() => {
-                    let entry = self.instructions.len();
-                    self.instructions
-                        .push((line, Instruction::EnterExcept { handler: 0, end: 0 }));
                     self.lower(s.body, lines, function, active.as_deref_mut())?;
-                    // On fallthrough, leave the protected body before running the else suite.
-                    self.instructions.push((line, Instruction::StartFinally));
-                    let handler = self.instructions.len();
                     let before_handlers = self.deferred_annotations.len();
-                    let mut handled = Vec::new();
                     for ast::ExceptHandler::ExceptHandler(h) in s.handlers {
                         let handler_line =
                             lines.partition_point(|n| *n <= h.start().to_usize()) as u32;
-                        let check = h.type_.map(|class| {
-                            let i = self.instructions.len();
-                            self.instructions
-                                .push((handler_line, Instruction::ExceptMatch(*class, 0)));
-                            i
-                        });
-                        let cleanup = h.name.map(|name| {
-                            let name = name.to_string();
-                            self.locals.insert(name.clone());
-                            self.instructions
-                                .push((handler_line, Instruction::BindException(name.clone())));
-                            let entry = self.instructions.len();
-                            self.instructions.push((handler_line, Instruction::Jump(0)));
-                            (entry, name)
-                        });
+                        if let Some(class) = h.type_ {
+                            self.items.push((handler_line, SourceItem::Discard(*class)));
+                        }
+                        if let Some(name) = h.name {
+                            self.locals.insert(name.to_string());
+                            self.items.push((handler_line, SourceItem::Name(name)));
+                        }
                         self.lower(h.body, lines, function, active.as_deref_mut())?;
-                        if let Some((entry, name)) = cleanup {
-                            // The implicit finally clears the target on fallthrough, unwind and generator close.
-                            self.instructions
-                                .push((handler_line, Instruction::StartFinally));
-                            let handler = self.instructions.len();
-                            self.instructions
-                                .push((handler_line, Instruction::ClearException(name)));
-                            self.instructions
-                                .push((handler_line, Instruction::EndFinally));
-                            let end = self.instructions.len();
-                            self.instructions[entry].1 = Instruction::EnterFinally {
-                                handler,
-                                end,
-                                annotation_count: 0,
-                            };
-                        }
-                        handled.push(self.instructions.len());
-                        self.instructions.push((handler_line, Instruction::Jump(0)));
-                        if let Some(i) = check {
-                            let next = self.instructions.len();
-                            let Instruction::ExceptMatch(_, next_handler) =
-                                &mut self.instructions[i].1
-                            else {
-                                unreachable!()
-                            };
-                            *next_handler = next;
-                        }
                     }
-                    self.instructions.push((line, Instruction::EndFinally));
-                    let end = self.instructions.len();
-                    self.instructions[entry].1 = Instruction::EnterExcept { handler, end };
                     let before_else = self.deferred_annotations.len();
                     self.lower(s.orelse, lines, function, active.as_deref_mut())?;
-                    // The interpreter lays out handlers first, but the annotation provider
-                    // visits the else suite first, even if both paths ran in different iterations.
+                    // CPython emits annotations from else before annotations from handlers.
                     let handler_count = before_else - before_handlers;
                     let else_count = self.deferred_annotations.len() - before_else;
                     if handler_count != 0 && else_count != 0 {
                         self.deferred_annotations[before_handlers..].rotate_left(handler_count);
-                        for (i, (_, op)) in self.instructions[handler..].iter_mut().enumerate() {
-                            if let Instruction::MarkAnnotation(index) = op {
-                                if i < end - handler {
-                                    *index += else_count;
-                                } else {
-                                    *index -= handler_count;
-                                }
-                            }
-                        }
-                    }
-                    let done = self.instructions.len();
-                    for i in handled {
-                        self.instructions[i].1 = Instruction::Jump(done);
                     }
                     continue;
                 }
                 Stmt::Try(mut s) if !s.is_star && !s.finalbody.is_empty() => {
                     let finalbody = std::mem::take(&mut s.finalbody);
-                    let enter = self.instructions.len();
-                    self.instructions.push((line, Instruction::Jump(0)));
+                    let exits_before = active.as_deref().copied();
                     // The finally surrounds the handlers and else suite as well as the try body.
                     let protected = if s.handlers.is_empty() {
                         s.body
@@ -3301,23 +2374,18 @@ impl Program {
                         std::iter::once(Stmt::Try(s)).collect()
                     };
                     self.lower(protected, lines, function, active.as_deref_mut())?;
-                    self.instructions.push((line, Instruction::StartFinally));
-                    let handler = self.instructions.len();
+                    let exits_after = active.as_deref().copied();
                     let first = self.deferred_annotations.len();
                     self.lower(finalbody, lines, function, active.as_deref_mut())?;
                     let annotation_count = self.deferred_annotations.len() - first;
                     if annotation_count != 0 {
                         // A break or continue crossing this finally has its own inlined
                         // annotation sites at the jump, before the fallthrough copy.
-                        if active.is_some()
-                            && self.instructions[enter + 1..handler].iter().any(|(_, op)| {
-                                matches!(op, Instruction::Jump(target) if *target <= enter)
-                            })
-                        {
+                        if exits_after != exits_before {
                             return Err(unsupported("loop exit across an annotated finally"));
                         }
                         // CPython emits another copy of finally for exception unwinding.
-                        // Share its executable suite, but keep the two deferred site ranges.
+                        // Keep both ranges of deferred annotation sites.
                         let exceptional = self.deferred_annotations.len();
                         self.deferred_annotations.extend_from_within(first..);
                         if self.class_attributes.is_some() {
@@ -3325,82 +2393,41 @@ impl Program {
                                 .extend(exceptional..exceptional + annotation_count);
                         }
                     }
-                    self.instructions.push((line, Instruction::EndFinally));
-                    let end = self.instructions.len();
-                    self.instructions[enter].1 = Instruction::EnterFinally {
-                        handler,
-                        end,
-                        annotation_count,
-                    };
                     continue;
                 }
                 Stmt::Match(s) => {
-                    let dispatch = self.instructions.len();
-                    self.instructions.push((line, Instruction::Jump(0)));
+                    let dispatch = self.items.len();
                     let mut cases = Vec::new();
-                    let mut ends = Vec::new();
-                    let line_offset = |offset: ruff_text_size::TextSize| {
-                        lines.partition_point(|n| *n <= offset.to_usize()) as u32 - line
-                    };
                     let count = s.cases.len();
                     for (i, case) in s.cases.into_iter().enumerate() {
-                        let case_line = line_offset(case.pattern.start());
                         let captures = self.case_captures(&case, i + 1 < count)?;
                         cases.push(SourceCase {
                             pattern: case.pattern,
                             captures,
-                            line_offset: case_line,
-                            guard: case.guard.map(|expr| (line_offset(expr.start()), expr)),
-                            body: self.instructions.len(),
+                            guard: case.guard,
                         });
                         self.lower(case.body, lines, function, active.as_deref_mut())?;
-                        ends.push(self.instructions.len());
-                        self.instructions.push((line, Instruction::Jump(0)));
                     }
-                    let end = self.instructions.len();
-                    self.instructions[dispatch].1 = Instruction::Match {
-                        subject: *s.subject,
-                        cases,
-                        end,
-                    };
-                    for i in ends {
-                        self.instructions[i].1 = Instruction::Jump(end);
-                    }
+                    self.items.insert(
+                        dispatch,
+                        (
+                            line,
+                            SourceItem::Match {
+                                subject: *s.subject,
+                                cases,
+                            },
+                        ),
+                    );
                     continue;
                 }
                 Stmt::If(s) => {
-                    let mut ends = Vec::new();
-                    let mut arm = Some((*s.test, s.body));
+                    self.record_expression(*s.test, line, function)?;
+                    self.lower(s.body, lines, function, active.as_deref_mut())?;
                     for clause in s.elif_else_clauses {
-                        if let Some((test, body)) = arm.take() {
-                            ends.push(self.arm(
-                                test,
-                                body,
-                                line,
-                                lines,
-                                function,
-                                active.as_deref_mut(),
-                            )?);
-                        }
                         if let Some(test) = clause.test {
-                            arm = Some((test, clause.body));
-                        } else {
-                            self.lower(clause.body, lines, function, active.as_deref_mut())?;
+                            self.record_expression(test, line, function)?;
                         }
-                    }
-                    if let Some((test, body)) = arm {
-                        ends.push(self.arm(
-                            test,
-                            body,
-                            line,
-                            lines,
-                            function,
-                            active.as_deref_mut(),
-                        )?);
-                    }
-                    let end = self.instructions.len();
-                    for i in ends {
-                        self.instructions[i].1 = Instruction::Jump(end);
+                        self.lower(clause.body, lines, function, active.as_deref_mut())?;
                     }
                     continue;
                 }
@@ -3411,7 +2438,7 @@ impl Program {
                     )));
                 }
             };
-            self.instructions.push((line, op));
+            self.items.push((line, op));
         }
         Ok(())
     }
@@ -3473,7 +2500,7 @@ impl Program {
             case,
             has_next,
             self.private_names.as_deref(),
-            &mut self.alternative_captures,
+            &mut HashMap::new(),
         )
         .map_err(|(range, message)| {
             match message.render(crate::integer_text::check_decimal) {
@@ -3486,23 +2513,6 @@ impl Program {
     /// Declare every local name in a loop or unpacking target.
     fn declare_target(&mut self, target: &ast::Expr) -> Result<()> {
         try_collect_target_names(target, &mut self.locals).map_err(invalid_target)
-    }
-
-    fn arm(
-        &mut self,
-        test: ast::Expr,
-        body: ast::Suite,
-        line: u32,
-        lines: &[usize],
-        function: bool,
-        active: Option<&mut LoopJumps>,
-    ) -> Result<usize> {
-        let skip = self.false_branches(test, line, function)?;
-        self.lower(body, lines, function, active)?;
-        let end = self.instructions.len();
-        self.instructions.push((line, Instruction::Jump(0)));
-        self.finish_branches(skip);
-        Ok(end)
     }
 }
 
@@ -3587,21 +2597,69 @@ impl Context {
         filename: Id,
         lines: &[usize],
     ) -> Result<Error> {
+        let (SyntaxSpan::InArgs(range) | SyntaxSpan::InFields(range)) = span else {
+            return self.syntax_error_at(message, filename, [-1, -1, 0, 0], true);
+        };
         let position = |offset: ruff_text_size::TextSize| {
             let offset = offset.to_usize();
             let line = lines.partition_point(|start| *start <= offset);
             (line as i64, (offset - lines[line - 1] + 1) as i64)
         };
-        let ((line, column), (end_line, end_column), text) = match span {
-            SyntaxSpan::InArgs(range) | SyntaxSpan::InFields(range) => {
-                let start = position(range.start());
-                let text = self
-                    .syntax_program_line(filename, start.0 as usize)
-                    .unwrap_or(NONE);
-                (start, position(range.end()), text)
-            }
-            SyntaxSpan::Artificial => ((-1, 0), (-1, 0), NONE),
+        let (line, column) = position(range.start());
+        let (end_line, end_column) = position(range.end());
+        self.syntax_error_at(
+            message,
+            filename,
+            [line, end_line, column, end_column],
+            matches!(span, SyntaxSpan::InArgs(_)),
+        )
+    }
+
+    pub(super) fn parser_syntax_error(
+        &mut self,
+        filename: Id,
+        display: &str,
+        detail: &str,
+        prefix_filename: bool,
+        [row, end_row, column, end_column]: [i64; 4],
+        text: String,
+    ) -> Result<Error> {
+        let msg = self.text(detail);
+        let (msg, message) = if prefix_filename {
+            (
+                self.concat_strings(filename, msg)?,
+                format!("{display}{detail}"),
+            )
+        } else {
+            (msg, detail.to_owned())
         };
+        let details = vec![
+            filename,
+            self.int(row),
+            self.int(column),
+            self.text(text),
+            self.int(end_row),
+            self.int(end_column),
+        ];
+        let location = self.alloc(Value::Tuple(details));
+        let args = [msg, location];
+        let mut error = self.exception("SyntaxError", &args);
+        error.message = message;
+        self.retain_syntax_fields(&mut error, self.syntax_fields(&args))?;
+        Ok(error)
+    }
+
+    pub(super) fn syntax_error_at(
+        &mut self,
+        message: &str,
+        filename: Id,
+        [line, end_line, column, end_column]: [i64; 4],
+        in_args: bool,
+    ) -> Result<Error> {
+        let text = usize::try_from(line)
+            .ok()
+            .and_then(|line| self.syntax_program_line(filename, line))
+            .unwrap_or(NONE);
         let msg = self.text(message);
         let line = self.int(line);
         let location = [
@@ -3612,16 +2670,13 @@ impl Context {
             self.int(end_line),
             self.int(end_column),
         ];
-        let mut error = match span {
-            SyntaxSpan::InArgs(_) | SyntaxSpan::Artificial => {
-                let details = self.alloc(Value::Tuple(location.to_vec()));
-                self.exception("SyntaxError", &[msg, details])
-            }
-            SyntaxSpan::InFields(_) => {
-                let mut error = self.exception("SyntaxError", &[msg]);
-                error.message.push_str(&self.syntax_suffix(filename, line)?);
-                error
-            }
+        let mut error = if in_args {
+            let details = self.alloc(Value::Tuple(location.to_vec()));
+            self.exception("SyntaxError", &[msg, details])
+        } else {
+            let mut error = self.exception("SyntaxError", &[msg]);
+            error.message.push_str(&self.syntax_suffix(filename, line)?);
+            error
         };
         let mut fields = self.syntax_fields(&[msg]);
         fields[1..7].copy_from_slice(&location);
@@ -3752,13 +2807,22 @@ impl Context {
         mode: Id,
         strip_indent: bool,
     ) -> Result<Id> {
-        let inherited = match self.heap.get(self.heap.current_code()) {
+        self.compile_source_with_flags(
+            source,
+            filename,
+            mode,
+            strip_indent,
+            self.inherited_compile_flags(),
+        )
+    }
+
+    pub(super) fn inherited_compile_flags(&self) -> u32 {
+        match self.heap.get(self.heap.current_code()) {
             Value::Code(caller) => {
                 caller.flags & (code_flags::FUTURE_ANNOTATIONS | code_flags::FUTURE_BARRY_AS_BDFL)
             }
             _ => 0,
-        };
-        self.compile_source_with_flags(source, filename, mode, strip_indent, inherited)
+        }
     }
 
     fn source_filename(&self, object: Id) -> Result<SourceFilename> {
@@ -3868,29 +2932,14 @@ impl Context {
             if mode == "exec" && !text.ends_with('\n') {
                 text.push('\n');
             }
-            let msg = self.text(&detail);
-            let (msg, message) = if prefix_filename {
-                (
-                    self.concat_strings(filename_id, msg)?,
-                    format!("{}{detail}", filename.display),
-                )
-            } else {
-                (msg, detail)
-            };
-            let details = vec![
+            return Err(self.parser_syntax_error(
                 filename_id,
-                self.int(row as i64),
-                self.int(column as i64),
-                self.text(text),
-                self.int(end_row as i64),
-                self.int(end_column as i64),
-            ];
-            let location = self.alloc(Value::Tuple(details));
-            let args = [msg, location];
-            let mut error = self.exception("SyntaxError", &args);
-            error.message = message;
-            self.retain_syntax_fields(&mut error, self.syntax_fields(&args))?;
-            return Err(error);
+                &filename.display,
+                &detail,
+                prefix_filename,
+                [row as i64, end_row as i64, column as i64, end_column as i64],
+                text,
+            )?);
         }
         if interactive && let ast::Mod::Module(module) = parsed.syntax() {
             check_single_input(&module.body, parsed.tokens())?;
@@ -3976,7 +3025,6 @@ impl Context {
             Ok(None)
         };
         code.scope_flags = inherited;
-        code.source_lines = lines.clone();
         code.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
         code.interactive = interactive;
         code.template_expressions = Rc::new(imre_ast::strings::template_expressions(
@@ -3992,15 +3040,14 @@ impl Context {
                     named.visit_expr(&expression.body);
                     named.declare(&mut code)?;
                 }
-                code.instructions
-                    .push((1, Instruction::Return(Some(*expression.body))));
+                code.items
+                    .push((1, SourceItem::Return(Some(*expression.body))));
             }
             ast::Mod::Module(module) => {
                 let mut body = module.body;
                 if !code.strip_docstrings && !spellings.is_empty() {
                     self.check_source_docstrings(&body, !interactive, &spellings)?;
                 }
-                code.method_imports = Rc::new(imre_ast::module_imports(&body));
                 if imre_ast::future_import(&body, "barry_as_FLUFL") {
                     code.scope_flags |= code_flags::FUTURE_BARRY_AS_BDFL;
                 }
@@ -4053,7 +3100,7 @@ impl Context {
         if let Some(issue) = pending_syntax(self, &code)? {
             return Err(issue);
         }
-        Ok(self.box_source_code(Rc::new(code), None))
+        Ok(self.box_source_code(code))
     }
 
     /// Attach the filename after tokenization, just as compile does for string input.
@@ -4118,16 +3165,7 @@ impl Context {
         }
     }
 
-    fn box_source_code(&mut self, program: Rc<Program>, parameters: Option<Id>) -> Id {
-        self.box_source_closure(program, parameters, None)
-    }
-
-    fn box_source_closure(
-        &mut self,
-        program: Rc<Program>,
-        parameters: Option<Id>,
-        freevars: Option<Vec<String>>,
-    ) -> Id {
+    fn box_source_code(&mut self, program: Program) -> Id {
         let name = self.heap.code_name(&program.name);
         let qualname = self.heap.code_name(&program.qualname);
         let filename = program.filename.object;
@@ -4154,14 +3192,16 @@ impl Context {
                     FunctionKind::AsyncGenerator => imre_ast::code_flags::ASYNC_GENERATOR,
                     FunctionKind::Plain => 0,
                 },
-            generator_lambda: program.kind == FunctionKind::GeneratorLambda,
             flags_complete: program.scope_flags & code_flags::OPTIMIZED != 0
                 && !program.unlowered_yield,
-            body: Body::Source(program),
-            parameters: parameters.unwrap_or(NONE),
+            generator_lambda: program.kind == FunctionKind::GeneratorLambda,
+            body: Body::Parsed {
+                constants: program.string_roots,
+            },
+            parameters: NONE,
             nested: Vec::new(),
-            closure_supported: freevars.is_some(),
-            freevars: freevars.unwrap_or_default(),
+            closure_supported: false,
+            freevars: Vec::new(),
         }))
     }
 
@@ -4421,7 +3461,7 @@ impl Context {
                 ModuleInitializer::Native(entry),
                 std::path::Path::new("<string>"),
             )?;
-            return self.run_in_namespace(code, globals, Some(locals), None, "eval", None);
+            return self.execute_namespace_code(code, globals, Some(locals), None, "eval", None);
         }
         if crate::objects::python_isidentifier(source)
             && !ruff_python_stdlib::keyword::is_keyword(source)
@@ -4452,7 +3492,7 @@ impl Context {
                 return Err(error);
             }
         };
-        self.run_in_namespace(code, globals, Some(locals), None, "eval", None)
+        self.execute_namespace_code(code, globals, Some(locals), None, "eval", None)
     }
 
     /// Run eval or exec with explicit namespaces or the active Python frame.
@@ -4493,7 +3533,7 @@ impl Context {
             Some(globals) => globals,
             None => self.module_globals(scope)?,
         };
-        let value = self.run_in_namespace(source, globals, locals, None, name, closure)?;
+        let value = self.execute_namespace_code(source, globals, locals, None, name, closure)?;
         Ok(if name == "exec" { NONE } else { value })
     }
 
@@ -4619,11 +3659,31 @@ impl Context {
         locals: Option<Id>,
         function: Option<Id>,
     ) -> Result<Id> {
-        self.run_in_namespace(source, globals, locals, function, "exec", None)
+        self.execute_namespace_code(source, globals, locals, function, "exec", None)
             .map(|_| NONE)
     }
 
-    fn run_in_namespace(
+    pub(super) fn namespace_builtins(&mut self, globals: Id, function: Option<Id>) -> Result<Id> {
+        let builtins = if let Some(function) = function
+            && let Value::Function { scope, .. } = *self.heap.get(function)
+        {
+            self.function_builtins(scope)?
+        } else if let Some(builtins) = self.dict_named_item(globals, "__builtins__") {
+            self.definition_builtins(builtins)?
+        } else {
+            let builtins = self.caller_builtins()?;
+            let key = self.text("__builtins__");
+            self.put_item(
+                self.dict_storage(globals).expect("exec dictionary"),
+                key,
+                builtins,
+            )?;
+            builtins
+        };
+        Ok(builtins)
+    }
+
+    fn execute_namespace_code(
         &mut self,
         source: Id,
         globals: Id,
@@ -4666,22 +3726,7 @@ impl Context {
                 ),
             ));
         }
-        let builtins = if let Some(function) = function
-            && let Value::Function { scope, .. } = *self.heap.get(function)
-        {
-            self.function_builtins(scope)?
-        } else if let Some(builtins) = self.dict_named_item(globals, "__builtins__") {
-            self.definition_builtins(builtins)?
-        } else {
-            let builtins = self.caller_builtins()?;
-            let key = self.text("__builtins__");
-            self.put_item(
-                self.dict_storage(globals).expect("exec dictionary"),
-                key,
-                builtins,
-            )?;
-            builtins
-        };
+        let builtins = self.namespace_builtins(globals, function)?;
         let code_id = match self.heap.get(self.scalar_value(source)) {
             Value::Code(code) if mode == "eval" && !code.freevars.is_empty() => {
                 return Err(Error::new(
@@ -4697,7 +3742,7 @@ impl Context {
                         .iter()
                         .all(|&id| matches!(self.heap.get(id), Value::Cell(_)))
                 {
-                    if !matches!(code.body, Body::Native(_) | Body::Suspended(_)) {
+                    if !matches!(code.body, Body::Native(..) | Body::Suspended(_)) {
                         return Err(unsupported("exec with an explicit closure"));
                     }
                     source
@@ -4772,537 +3817,19 @@ impl Context {
         }
     }
 
-    pub(super) fn call_source(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {
-        let Body::Source(program) = &self.code_object(code).body else {
-            unreachable!("source function")
-        };
-        if program.kind != FunctionKind::Plain {
-            self.new_suspended(code, scope, owner)
-        } else {
-            match self.run_source(
-                code,
-                scope,
-                owner,
-                SourceCursor::new(
-                    0,
-                    &mut Vec::new(),
-                    &mut Vec::new(),
-                    None,
-                    GeneratorInput::Send(NONE),
-                ),
-            )? {
-                Step::Return(v) => Ok(v),
-                Step::Yield(..) | Step::Advance(..) | Step::Rejected(..) => {
-                    unreachable!("classified generator")
-                }
-            }
-        }
+    pub(super) fn missing_compiled_body<T>(&self, code: Id) -> Result<T> {
+        let info = self.code_object(code);
+        Err(Error::new(
+            "NotImplementedError",
+            format!(
+                "no compiled Python body for {} ({}:{})",
+                self.str_value(info.qualname)?,
+                self.filename_display(info.filename)?,
+                info.first_line
+            ),
+        ))
     }
 
-    pub(super) fn resume_source(&mut self, id: Id, sent: Id) -> Result<Option<Id>> {
-        self.resume_source_input(id, id, GeneratorInput::Send(sent))
-    }
-
-    pub(super) fn resume_source_input(
-        &mut self,
-        mut id: Id,
-        finalizer: Id,
-        mut input: GeneratorInput,
-    ) -> Result<Option<Id>> {
-        let initial = id;
-        let mut parents = Vec::new();
-        let mut advanced = None;
-        loop {
-            let step = self.resume_source_frame(
-                id,
-                if id == initial { finalizer } else { id },
-                advanced.take(),
-                std::mem::replace(&mut input, GeneratorInput::Send(NONE)),
-                !parents.is_empty(),
-            );
-            let result = match step {
-                Ok(Step::Advance(child, _, sent)) => {
-                    if parents.try_reserve(1).is_err() {
-                        advanced = Some(Err(crate::Error::allocation().into()));
-                        continue;
-                    }
-                    parents.push(id);
-                    id = child;
-                    input = GeneratorInput::Send(sent);
-                    continue;
-                }
-                Ok(Step::Yield(value, _)) => Ok(DelegateOutcome::Yield(value)),
-                Ok(Step::Return(value)) => Ok(DelegateOutcome::Done(value)),
-                Ok(Step::Rejected(error, _)) => Ok(DelegateOutcome::LookupFailed(error)),
-                Err(error) => Err(error),
-            };
-            let Some(parent) = parents.pop() else {
-                return match result? {
-                    DelegateOutcome::Yield(value) => Ok(Some(value)),
-                    DelegateOutcome::Done(NONE) => Ok(None),
-                    DelegateOutcome::Done(value) => Err(self.exception("StopIteration", &[value])),
-                    DelegateOutcome::LookupFailed(error) => Err(error),
-                };
-            };
-            id = parent;
-            advanced = Some(result);
-        }
-    }
-
-    /// Resume one frame, retaining its running state while a delegated child executes.
-    fn resume_source_frame(
-        &mut self,
-        id: Id,
-        finalizer: Id,
-        advanced: Option<Result<DelegateOutcome>>,
-        input: GeneratorInput,
-        nested_resume: bool,
-    ) -> Result<Step> {
-        if advanced.is_none() {
-            input.keep(&mut self.heap, finalizer)?;
-        }
-        let Value::Generator {
-            code,
-            scope,
-            iterators,
-            protected,
-            running,
-            offset,
-            ..
-        } = self.heap.get_mut(id)
-        else {
-            unreachable!()
-        };
-        if *running && advanced.is_none() {
-            return Err(Error::new("ValueError", "generator already executing"));
-        }
-        let Some(ip) = offset.take() else {
-            return match input {
-                GeneratorInput::Throw { error, .. } => Err(error),
-                GeneratorInput::Send(_) => Ok(Step::Return(NONE)),
-            };
-        };
-        *running = true;
-        let (code, frame_scope) = (*code, *scope);
-        let mut active = std::mem::take(iterators);
-        let mut blocks = std::mem::take(protected);
-        self.heap.disarm_finalizer(finalizer);
-        let mut cursor = SourceCursor::new(ip, &mut active, &mut blocks, advanced, input);
-        cursor.nested_resume = nested_resume
-            && ip != 0
-            && cursor.advanced.is_none()
-            && cursor.sent == NONE
-            && cursor.thrown.is_none();
-        let result = self
-            .run_source(code, frame_scope, FrameOwner::Generator(id), cursor)
-            .map_err(|error| self.frame_error(error, code));
-        // The public async-generator object owns its first-iteration/finalization hooks.
-        let async_generator =
-            self.code_object(code).flags & imre_ast::code_flags::ASYNC_GENERATOR != 0;
-        // These built-in iterators have no close hook. A suspended outer
-        // try/finally still needs its own finalizer below.
-        let delegate_needs_close = matches!(&result, Ok(Step::Yield(_, ip))
-        if matches!(&self.code_object(code).body, Body::Source(program)
-            if matches!(program.instructions.get(*ip), Some((_, Instruction::Delegate(_)))))
-        && active.last().is_none_or(|&iter| {
-            !matches!(
-                self.heap.get(iter),
-                Value::Iterator { .. } | Value::RangeIterator(_) | Value::Repeat(_)
-            )
-        }));
-        let Value::Generator {
-            running,
-            offset,
-            scope,
-            owner,
-            frame,
-            iterators,
-            protected,
-            ..
-        } = self.heap.get_mut(id)
-        else {
-            unreachable!()
-        };
-        *running = matches!(result, Ok(Step::Advance(..)));
-        let completed = match result {
-            Ok(step @ (Step::Yield(_, ip) | Step::Advance(_, ip, _) | Step::Rejected(_, ip))) => {
-                // A failed lookup of the delegate's throw method leaves it suspended.
-                let needs_finalizer = matches!(step, Step::Rejected(..))
-                    || (matches!(step, Step::Yield(..))
-                        && (!blocks.is_empty() || delegate_needs_close));
-                *offset = Some(ip);
-                *iterators = active;
-                *protected = blocks;
-                if needs_finalizer && !async_generator {
-                    self.heap.register_finalizer(finalizer);
-                }
-                return Ok(step);
-            }
-            Ok(Step::Return(value)) => Ok(value),
-            Err(error) => Err(error),
-        };
-        *scope = NONE;
-        *frame = None;
-        *owner = FrameOwner::Module(NONE);
-        self.heap.disarm_finalizer(finalizer);
-        if self.heap.tracks_finalizers()
-            && (!active.is_empty()
-                || !self.scope_data(frame_scope).closure.cells.is_empty()
-                || self
-                    .scope_data(frame_scope)
-                    .names
-                    .values()
-                    .any(|&value| self.heap.could_own_finalizer(value, true)))
-            && self.heap.has_unbound_finalizer(NONE)
-        {
-            self.heap.release_scope_temporary(frame_scope);
-            match &completed {
-                Ok(value) => self.heap.keep(*value),
-                Err(error) => {
-                    for root in error.roots() {
-                        self.heap.keep(root);
-                    }
-                }
-            }
-            if !self.can_skip_finalizer_sweep(self.heap.temporary_mark()) {
-                self.collect_unreachable();
-            }
-        }
-        completed.map(Step::Return)
-    }
-
-    /// Run pending cleanups from the inside out. A transfer inside a cleanup replaces
-    /// its prior destination, while a jump staying in the same region leaves it intact.
-    fn source_transfer(
-        &mut self,
-        cursor: &mut SourceCursor<'_>,
-        transfer: Transfer,
-    ) -> Result<Option<Step>> {
-        while let Some(block) = cursor.protected.last_mut() {
-            if let Transfer::Jump { destination, .. } = transfer {
-                let region = if block.pending.is_some() {
-                    block.handler..block.end
-                } else {
-                    block.start..block.handler
-                };
-                if region.contains(&destination) {
-                    break;
-                }
-            }
-            while cursor.iterators.len() > block.depth {
-                let iter = cursor.iterators.pop().expect("inner iterator");
-                self.release_loop_iterator(iter);
-            }
-            if matches!(block.kind, HandlerKind::Comprehension(_)) {
-                cursor.protected.pop();
-                cursor.comprehension = SourceCursor::active_comprehension(cursor.protected);
-                continue;
-            }
-            if block.pending.is_none()
-                && (!matches!(block.kind, HandlerKind::Except)
-                    || matches!(transfer, Transfer::Raise(_)))
-            {
-                block.pending = Some(transfer);
-                cursor.ip = block.handler;
-                return Ok(None);
-            }
-            cursor.protected.pop();
-        }
-        match transfer {
-            Transfer::Jump {
-                destination,
-                pop_iter,
-            } => {
-                if pop_iter {
-                    let iter = cursor.iterators.pop().expect("active source loop");
-                    self.release_loop_iterator(iter);
-                }
-                cursor.ip = destination;
-                Ok(None)
-            }
-            Transfer::Return(value) => Ok(Some(Step::Return(value))),
-            Transfer::Raise(exception) => {
-                let Value::Raised(error) = self.heap.get(exception) else {
-                    unreachable!("pending generator exception")
-                };
-                let mut error = error.clone();
-                error.tracing().instance = Some(exception);
-                Err(error)
-            }
-        }
-    }
-
-    fn run_source(
-        &mut self,
-        owner: Id,
-        scope: Id,
-        frame_owner: FrameOwner,
-        mut cursor: SourceCursor<'_>,
-    ) -> Result<Step> {
-        let Body::Source(code) = self.code_object(owner).body.clone() else {
-            unreachable!("source frame")
-        };
-        if cursor.ip == 0 && !code.directives.is_empty() {
-            // A class body's own cell belongs to its methods. The body closes over its defining cell.
-            let class_cell = match frame_owner {
-                FrameOwner::Function(function) => match self.heap.get(function) {
-                    Value::Function { class_cell, .. } => *class_cell,
-                    _ => None,
-                },
-                _ => self.scope_data(scope).class_cell,
-            };
-            let Value::Scope(frame) = self.heap.get_mut(scope) else {
-                unreachable!()
-            };
-            for (name, (kind, _)) in &code.directives {
-                if code.class_nonlocal && name == "__class__" {
-                    let cell = class_cell
-                        .ok_or_else(|| Error::new("NameError", "empty __class__ cell"))?;
-                    frame.closure.cells.insert(name.clone(), cell);
-                    continue;
-                }
-                let names = match kind {
-                    ScopeDirective::Global => &mut frame.globals,
-                    ScopeDirective::Nonlocal => &mut frame.closure.nonlocals,
-                };
-                names.insert(name.clone());
-            }
-        }
-        if cursor.advanced.is_none() {
-            self.heap.reserve_temporaries(2)?;
-            self.heap.keep(owner);
-            self.heap.enter(scope, owner, frame_owner);
-        }
-        let mut live = Vec::new();
-        let result = (|| {
-            loop {
-                // Inject at the suspended yield, even when there is no following statement.
-                let index = cursor.ip;
-                let op = code.instructions.get(index);
-                if !matches!(
-                    op,
-                    Some((
-                        _,
-                        Instruction::BindSent(_)
-                            | Instruction::ReturnSent
-                            | Instruction::YieldResult(_)
-                            | Instruction::MakeGenerator(_)
-                            | Instruction::StoreNamed(_)
-                            | Instruction::InsertDict { .. }
-                            | Instruction::InsertSet { .. }
-                            | Instruction::Delegate(_)
-                            | Instruction::Await(None, _)
-                            | Instruction::SaveOperand(None)
-                            | Instruction::Branch { value: None, .. }
-                            | Instruction::NextComparison { .. }
-                            | Instruction::JumpResult(_)
-                            | Instruction::Unary(_)
-                            | Instruction::Attribute { .. }
-                            | Instruction::AsyncWithMethods(None)
-                            | Instruction::Iter(None, _)
-                            | Instruction::CollectItem { value: None, .. }
-                            | Instruction::BindAsyncItem(_)
-                            | Instruction::CallAsyncEnter
-                            | Instruction::AwaitWithResult(_)
-                            | Instruction::EnterAsyncWith { .. }
-                            | Instruction::TestAsyncExit
-                            | Instruction::FinishAsyncExit
-                    ))
-                ) {
-                    cursor.sent = NONE;
-                }
-                let inject =
-                    cursor.thrown.is_some() && !matches!(op, Some((_, Instruction::Delegate(_))));
-                let site = if inject {
-                    index.saturating_sub(1)
-                } else {
-                    index
-                };
-                let line = code
-                    .instructions
-                    .get(site)
-                    .map_or(code.first_line, |(line, _)| *line);
-                if cursor.advanced.is_none() {
-                    let caught = cursor
-                        .protected
-                        .iter()
-                        .rev()
-                        .find_map(|block| match block.pending {
-                            Some(Transfer::Raise(error)) => Some(error),
-                            _ => None,
-                        })
-                        .unwrap_or(NONE);
-                    let extra = !cursor.protected.is_empty()
-                        || cursor.sent != NONE
-                        || cursor.thrown.is_some();
-                    let roots = if extra {
-                        live.clear();
-                        live.extend_from_slice(cursor.iterators);
-                        live.extend(cursor.protected.iter().flat_map(FinallyBlock::roots));
-                        live.push(cursor.sent);
-                        if let Some((error, args)) = &cursor.thrown {
-                            live.extend(error.roots());
-                            live.extend_from_slice(args);
-                        }
-                        &live[..]
-                    } else {
-                        &cursor.iterators[..]
-                    };
-                    let location = Location {
-                        file: code.filename.display.clone(),
-                        line,
-                        span: None,
-                    };
-                    if std::mem::take(&mut cursor.nested_resume)
-                        && matches!(op, Some((_, Instruction::Delegate(_))))
-                        && !self.heap.collection_requested()
-                    {
-                        // The parent already checked for unreachable objects. Resuming its
-                        // suspended delegate only adds live roots before the next Python step.
-                        self.heap.publish_statement(roots, location, caught);
-                    } else {
-                        self.checkpoint(roots, location, caught);
-                    }
-                }
-                #[cfg(unix)]
-                let interrupt = if inject {
-                    None
-                } else {
-                    self.dispatch_signals().err()
-                };
-                #[cfg(not(unix))]
-                let interrupt: Option<Error> = None;
-                let raised = if inject {
-                    cursor.thrown.take().map(|(error, _)| error)
-                } else {
-                    interrupt
-                };
-                let transfer = if let Some(mut error) = raised {
-                    if inject
-                        && index != 0
-                        && let Some((
-                            _,
-                            Instruction::Yield(_, range) | Instruction::YieldResult(range),
-                        )) = code.instructions.get(site)
-                    {
-                        error = self.source_failure(
-                            error,
-                            ExpressionPosition::at(*range),
-                            TracebackAnchor::Uniform,
-                        );
-                    }
-                    self.record_exception_frame(&mut error, None);
-                    if cursor.protected.is_empty() {
-                        return Err(error);
-                    }
-                    Transfer::Raise(self.raised_instance(error))
-                } else if let Some((_, op)) = op {
-                    cursor.ip += 1;
-                    match op {
-                        Instruction::EnterFinally { handler, end, .. }
-                        | Instruction::EnterExcept { handler, end } => {
-                            cursor.protected.push(FinallyBlock {
-                                start: cursor.ip,
-                                handler: *handler,
-                                end: *end,
-                                depth: cursor.iterators.len(),
-                                pending: None,
-                                kind: if let Instruction::EnterFinally {
-                                    annotation_count, ..
-                                } = op
-                                {
-                                    HandlerKind::Finally(*annotation_count)
-                                } else {
-                                    HandlerKind::Except
-                                },
-                            });
-                            continue;
-                        }
-                        Instruction::StartFinally => {
-                            let end = cursor.protected.last().expect("active try").end;
-                            Transfer::Jump {
-                                destination: end,
-                                pop_iter: false,
-                            }
-                        }
-                        Instruction::EndAsyncFor => {
-                            let block = cursor.protected.pop().expect("async for guard");
-                            let Some(Transfer::Raise(exception)) = block.pending else {
-                                unreachable!("async for exception handler");
-                            };
-                            let iter = cursor.iterators.pop().expect("async iterator");
-                            self.release_loop_iterator(iter);
-                            self.heap.weak_edge_removed(iter);
-                            let Value::Raised(error) = self.heap.get(exception) else {
-                                unreachable!("raised iteration error");
-                            };
-                            if self.is_builtin_error(error, "StopAsyncIteration") {
-                                continue;
-                            }
-                            Transfer::Raise(exception)
-                        }
-                        Instruction::EndFinally => cursor
-                            .protected
-                            .pop()
-                            .expect("active finally")
-                            .pending
-                            .expect("pending transfer"),
-                        Instruction::Break(destination) | Instruction::Jump(destination) => {
-                            Transfer::Jump {
-                                destination: *destination,
-                                pop_iter: matches!(op, Instruction::Break(_)),
-                            }
-                        }
-                        _ => match self.source_step(
-                            &code,
-                            owner,
-                            cursor.comprehension.map_or(scope, |(scope, _)| scope),
-                            op,
-                            &mut cursor,
-                        ) {
-                            Ok(Some(Step::Return(value))) => Transfer::Return(value),
-                            Ok(Some(step)) => return Ok(step),
-                            Ok(None) => continue,
-                            Err(mut error) => {
-                                let reraising = matches!(op, Instruction::Raise(s) if s.exc.is_none())
-                                    && self.heap.active_exception() != NONE;
-                                if !reraising {
-                                    if let Instruction::Delegate(Some(range)) = op {
-                                        error = self.source_failure(
-                                            error,
-                                            ExpressionPosition::at(*range),
-                                            TracebackAnchor::Uniform,
-                                        );
-                                    }
-                                    self.record_exception_frame(&mut error, None);
-                                }
-                                if cursor.protected.is_empty() {
-                                    return Err(error);
-                                }
-                                Transfer::Raise(self.raised_instance(error))
-                            }
-                        },
-                    }
-                } else {
-                    Transfer::Return(NONE)
-                };
-                if let Some(step) = self.source_transfer(&mut cursor, transfer)? {
-                    return Ok(step);
-                }
-            }
-        })();
-        let (value, returning) = match &result {
-            Ok(Step::Return(v)) => (*v, true),
-            Ok(Step::Yield(v, _)) => (*v, false),
-            // The parent remains visible while an iterated source child executes.
-            Ok(Step::Advance(..)) => return result,
-            Ok(Step::Rejected(..)) | Err(_) => (NONE, false),
-        };
-        self.leave_frame(value, returning);
-        result
-    }
-
-    /// Release the old binding before the next generator target or instruction can observe it.
     pub(super) fn bind_source_name(&mut self, scope: Id, name: &str, value: Id) -> Result<()> {
         if self.store_source_name(scope, name, value)? && self.heap.has_unbound_finalizer(NONE) {
             self.finish_binding_release();
@@ -5356,26 +3883,7 @@ impl Context {
         Err(Error::new("TypeError", indices))
     }
 
-    /// Materialize the import operands recorded by the source compiler.
-    fn import_source_module(
-        &mut self,
-        owner: Id,
-        scope: Id,
-        module: &str,
-        names: Option<&[(String, String)]>,
-        level: u32,
-    ) -> Result<Id> {
-        let modname = self.text(module);
-        let fromlist = if let Some(names) = names {
-            let names = names.iter().map(|(name, _)| self.text(name)).collect();
-            self.alloc(Value::Tuple(names))
-        } else {
-            NONE
-        };
-        self.import_in_scope(owner, scope, modname, fromlist, level)
-    }
-
-    /// Import through the active globals and the selected `__import__` callable.
+    /// Return the imported object and the hook that processed its fromlist.
     pub(super) fn import_in_scope(
         &mut self,
         owner: Id,
@@ -5415,7 +3923,6 @@ impl Context {
         )
     }
 
-    /// Keep the iterator's backing sequence available when the final pull drops it.
     fn source_loop_owner(&mut self, iterator: Id) -> Id {
         if !self.heap.tracks_finalizers() {
             return iterator;
@@ -5446,1871 +3953,5 @@ impl Context {
     pub(super) fn release_loop_iterator(&mut self, iterator: Id) {
         let owner = self.source_loop_owner(iterator);
         self.release_source_loop_owner(owner);
-    }
-
-    fn source_step(
-        &mut self,
-        code: &Program,
-        owner: Id,
-        scope: Id,
-        op: &Instruction,
-        cursor: &mut SourceCursor<'_>,
-    ) -> Result<Option<Step>> {
-        let SourceCursor {
-            ip,
-            iterators,
-            advanced,
-            sent,
-            thrown,
-            ..
-        } = cursor;
-        let eval = |ctx: &mut Self, e: &ast::Expr| ctx.source_expr(code, scope, e);
-        match op {
-            Instruction::Annotations {
-                entries,
-                scope: annotation_scope,
-            } => {
-                let values = self.source_annotations(code, scope, entries, *annotation_scope)?;
-                return Ok(Some(Step::Return(values)));
-            }
-            Instruction::ReturnSent => return Ok(Some(Step::Return(*sent))),
-            Instruction::BindSent(targets) => {
-                for target in targets {
-                    self.bind_target(code, scope, target, *sent)?;
-                }
-                *sent = NONE;
-            }
-            Instruction::Eval(e) | Instruction::Discard(e) => {
-                let value = eval(self, e)?;
-                if code.interactive && matches!(op, Instruction::Eval(_)) {
-                    self.display_expression(value)?;
-                }
-                self.heap.note_discarded_coroutine(value);
-            }
-            Instruction::Assert(stmt) => {
-                if !self.source_condition(code, scope, &stmt.test)? {
-                    let class = self.builtin("AssertionError");
-                    let args = match &stmt.msg {
-                        Some(message) => vec![eval(self, message)?],
-                        None => Vec::new(),
-                    };
-                    let error = self.call(class, args, Vec::new())?;
-                    self.op("raise", error, NONE, FALSE)?;
-                }
-            }
-            Instruction::Raise(s) => {
-                let (op, exception) = match &s.exc {
-                    Some(exc) => ("raise", eval(self, exc)?),
-                    None => ("reraise", NONE),
-                };
-                let (cause, explicit) = match &s.cause {
-                    Some(cause) => (eval(self, cause)?, TRUE),
-                    None => (NONE, FALSE),
-                };
-                self.op(op, exception, cause, explicit)?;
-            }
-            Instruction::Assign(targets, e) => {
-                let value = eval(self, e)?;
-                for target in targets {
-                    self.bind_target(code, scope, target, value)?;
-                }
-            }
-            Instruction::DeleteName(name) => {
-                self.check_source_local(code, scope, name)?;
-                let key = self.heap.code_name(name);
-                self.op("delname", scope, key, NONE)?;
-            }
-            Instruction::DeleteItem(item) => {
-                let object = eval(self, &item.value)?;
-                let key = eval(self, &item.slice)?;
-                self.delete_item(object, key)?;
-            }
-            Instruction::DeleteAttr(attr) => {
-                let object = eval(self, &attr.value)?;
-                self.delete_attr(object, attr.attr.as_str())?;
-            }
-            Instruction::AugAssign(stmt) => {
-                let update = |ctx: &mut Self, left: Id| -> Result<Id> {
-                    ctx.heap.keep(left);
-                    let right = eval(ctx, &stmt.value)?;
-                    let value = ctx.inplace(stmt.op.as_str(), left, right)?;
-                    ctx.heap.keep(value);
-                    Ok(value)
-                };
-                match &*stmt.target {
-                    ast::Expr::Name(name) => {
-                        let left = eval(self, &stmt.target)?;
-                        let value = update(self, left)?;
-                        self.bind_source_name(scope, name.id.as_str(), value)?;
-                    }
-                    ast::Expr::Attribute(field) => {
-                        let object = eval(self, &field.value)?;
-                        let left = self.lookup_attr(object, field.attr.as_str())?;
-                        let value = update(self, left)?;
-                        self.set_attr(object, field.attr.as_str(), value)?;
-                    }
-                    ast::Expr::Subscript(item) => {
-                        let object = eval(self, &item.value)?;
-                        let key = eval(self, &item.slice)?;
-                        let left = self.get_item(object, key)?;
-                        let value = update(self, left)?;
-                        self.put_item(object, key, value)?;
-                    }
-                    _ => unreachable!("validated augmented assignment target"),
-                }
-            }
-            Instruction::Match {
-                subject,
-                cases,
-                end,
-            } => {
-                let match_line = code.instructions[*ip - 1].0;
-                let mark = self.heap.temporary_mark();
-                let subject = eval(self, subject)?;
-                self.discard_temporaries(mark, Some(subject));
-                let subject_mark = self.heap.temporary_mark();
-                let mut target = *end;
-                // CPython compiles a single trailing wildcard as the default suite.
-                let default = cases
-                    .last()
-                    .is_some_and(|case| imre_ast::wildcard_pattern(&case.pattern));
-                let subject_cases = cases.len() - usize::from(default);
-                for (index, case) in cases.iter().enumerate() {
-                    self.heap.set_statement_line(match_line + case.line_offset);
-                    // Keep a separate subject only if a later case still needs it.
-                    let live = if index + 1 < subject_cases {
-                        subject_mark
-                    } else {
-                        mark
-                    };
-                    let operand = if index < subject_cases { subject } else { NONE };
-                    self.heap.reserve_temporaries(case.captures.len() + 1)?;
-                    let captures = std::iter::repeat_n(NONE, case.captures.len());
-                    self.discard_temporaries(live, captures.chain([operand]));
-                    if self.match_source_attempt(
-                        code,
-                        scope,
-                        &case.pattern,
-                        operand,
-                        live..live + case.captures.len(),
-                    )? {
-                        // A failed guard retains bindings from a successful pattern.
-                        for (slot, name) in case.captures.iter().enumerate() {
-                            let value = *self.heap.temporary_root(live + slot);
-                            self.bind_source_name(scope, name, value)?;
-                        }
-                        self.discard_truth(live);
-                        if let Some((offset, guard)) = &case.guard {
-                            self.heap.set_statement_line(match_line + *offset);
-                            if !self.source_condition(code, scope, guard)? {
-                                continue;
-                            }
-                        }
-                        target = case.body;
-                        break;
-                    }
-                }
-                self.discard_truth(mark);
-                *ip = target;
-            }
-            Instruction::Unless(e, destination) => {
-                if !self.source_condition(code, scope, e)? {
-                    *ip = *destination;
-                }
-            }
-            Instruction::AsyncWithMethods(context) => {
-                cursor
-                    .protected
-                    .try_reserve(1)
-                    .map_err(|_| crate::Error::allocation())?;
-                iterators
-                    .try_reserve(2)
-                    .map_err(|_| crate::Error::allocation())?;
-                let manager = match context {
-                    Some(expr) => eval(self, expr)?,
-                    None => *sent,
-                };
-                let exit = self.context_method(manager, "__aexit__")?;
-                self.heap.keep(exit);
-                *sent = self.context_method(manager, "__aenter__")?;
-                // Keep the bound exit below the delegate while __aenter__ is suspended.
-                iterators.push(exit);
-                self.heap.weak_edge_removed(manager);
-                self.heap.release_unbound_finalizers();
-            }
-            Instruction::CallAsyncEnter => {
-                let enter = *sent;
-                *sent = self.call(enter, Vec::new(), Vec::new())?;
-                self.heap.weak_edge_removed(enter);
-                self.heap.release_unbound_finalizers();
-            }
-            Instruction::AwaitWithResult(method) => {
-                let value = std::mem::replace(sent, NONE);
-                iterators.push(self.await_iterator(value, Some(method))?);
-                self.heap.weak_edge_removed(value);
-                self.heap.release_unbound_finalizers();
-            }
-            Instruction::EnterAsyncWith {
-                target,
-                handler,
-                end,
-            } => {
-                let exit = iterators.pop().expect("saved asynchronous context exit");
-                cursor.protected.push(FinallyBlock {
-                    start: *ip,
-                    handler: *handler,
-                    end: *end,
-                    depth: iterators.len(),
-                    pending: None,
-                    kind: HandlerKind::With(exit),
-                });
-                if let Some(target) = target {
-                    self.bind_target(code, scope, target, *sent)?;
-                }
-            }
-            Instruction::EnterWith { item, handler } => {
-                cursor
-                    .protected
-                    .try_reserve(1)
-                    .map_err(|_| crate::Error::allocation())?;
-                let manager = eval(self, &item.context_expr)?;
-                let exit = self.context_method(manager, "__exit__")?;
-                self.heap.keep(exit);
-                let enter = self.context_method(manager, "__enter__")?;
-                let value = self.call(enter, Vec::new(), Vec::new())?;
-                // Binding belongs to the protected suite: a failed unpack must invoke __exit__.
-                cursor.protected.push(FinallyBlock {
-                    start: *ip,
-                    handler: *handler,
-                    end: handler + 2,
-                    depth: iterators.len(),
-                    pending: None,
-                    kind: HandlerKind::With(exit),
-                });
-                if let Some(target) = &item.optional_vars {
-                    self.bind_target(code, scope, target, value)?;
-                }
-            }
-            Instruction::ExitWith
-            | Instruction::CallAsyncExit
-            | Instruction::TestAsyncExit
-            | Instruction::FinishAsyncExit => {
-                let block = cursor.protected.last_mut().expect("active context manager");
-                let HandlerKind::With(exit) = block.kind else {
-                    unreachable!("context manager exit");
-                };
-                let exception = match block.pending {
-                    Some(Transfer::Raise(error)) => error,
-                    _ => NONE,
-                };
-                let suppress = match op {
-                    Instruction::CallAsyncExit => {
-                        *sent = self.call_context_exit(exit, exception)?;
-                        if exception == NONE {
-                            // Only exceptional cleanup retains its callable during the await and truth test.
-                            block.kind = HandlerKind::With(NONE);
-                            self.heap.weak_edge_removed(exit);
-                            self.heap.release_unbound_finalizers();
-                        }
-                        return Ok(None);
-                    }
-                    Instruction::TestAsyncExit => {
-                        let result = *sent;
-                        *sent = if exception != NONE && self.truth(result)? {
-                            TRUE
-                        } else {
-                            FALSE
-                        };
-                        // Release the result while a raised body exception is still active.
-                        self.heap.weak_edge_removed(result);
-                        self.heap.release_unbound_finalizers();
-                        return Ok(None);
-                    }
-                    Instruction::FinishAsyncExit => *sent == TRUE,
-                    _ => {
-                        let active = self.heap.active_exception();
-                        let result = self.op("exit_context", exit, exception, active)?;
-                        exception != NONE && result == TRUE
-                    }
-                };
-                if suppress {
-                    block.pending = Some(Transfer::Jump {
-                        destination: block.end,
-                        pop_iter: false,
-                    });
-                }
-            }
-            Instruction::BindException(name) => {
-                self.bind_source_name(scope, name, self.heap.active_exception())?;
-            }
-            Instruction::ClearException(name) => {
-                self.bind_source_name(scope, name, NONE)?;
-                let key = self.heap.code_name(name);
-                self.op("delname", scope, key, NONE)?;
-            }
-            Instruction::ExceptMatch(class, next_handler) => {
-                let class = eval(self, class)?;
-                let base = self.builtin("BaseException");
-                let items = self.tuple_items(class)?;
-                let classes = items.as_deref().unwrap_or(std::slice::from_ref(&class));
-                if !classes
-                    .iter()
-                    .all(|&target| self.direct_subclass(target, base))
-                {
-                    return Err(Error::new(
-                        "TypeError",
-                        "catching classes that do not inherit from BaseException is not allowed",
-                    ));
-                }
-                let Value::Raised(error) = self.heap.get(self.heap.active_exception()) else {
-                    unreachable!("matching an active exception")
-                };
-                // Python except clauses use the actual inheritance chain, ignoring ABC registration.
-                if !classes.iter().any(|&target| match error.class() {
-                    Some(actual) => self.direct_subclass(actual, target),
-                    None => self.raised_error_matches(error, target),
-                }) {
-                    *ip = *next_handler;
-                }
-            }
-            Instruction::EnterFinally { .. }
-            | Instruction::EnterExcept { .. }
-            | Instruction::StartFinally
-            | Instruction::EndFinally
-            | Instruction::EndAsyncFor
-            | Instruction::Jump(_)
-            | Instruction::Break(_) => unreachable!("source control instruction"),
-            Instruction::Iter(expr, is_async) => {
-                let iterable = match expr {
-                    Some(expr) => eval(self, expr)?,
-                    None => std::mem::replace(sent, NONE),
-                };
-                iterators.push(if *is_async {
-                    self.async_for_iter(iterable)?
-                } else {
-                    self.iterator(iterable)?
-                });
-            }
-            Instruction::EnterComprehension { kind, targets, end } => {
-                let first = iterators.pop().expect("outer iterator");
-                let collection = self.op(kind, NONE, NONE, NONE)?;
-                let child = self.comprehension_scope_with_targets(scope, targets.clone());
-                let depth = iterators.len();
-                iterators.extend([collection, first]);
-                cursor.protected.push(FinallyBlock {
-                    start: *ip,
-                    handler: *end,
-                    end: *end,
-                    depth,
-                    pending: None,
-                    kind: HandlerKind::Comprehension(child),
-                });
-                cursor.comprehension = Some((child, depth));
-            }
-            Instruction::CollectItem { value, keyed } => {
-                let (_, depth) = cursor.comprehension.expect("active comprehension");
-                let collection = iterators[depth];
-                let item = match value {
-                    Some(expr) => eval(self, expr)?,
-                    None => *sent,
-                };
-                if *keyed {
-                    let key = iterators.pop().expect("dictionary key");
-                    self.put_item(collection, key, item)?;
-                } else {
-                    self.op("append", collection, item, NONE)?;
-                }
-            }
-            Instruction::LeaveComprehension => {
-                *sent = iterators.pop().expect("comprehension result");
-                cursor.protected.pop().expect("comprehension scope");
-                cursor.comprehension = SourceCursor::active_comprehension(cursor.protected);
-            }
-            Instruction::AsyncNext => {
-                let iter = *iterators.last().expect("async iterator");
-                iterators.push(self.async_for_next(iter)?);
-            }
-            Instruction::BindAsyncItem(target) => {
-                cursor.protected.pop().expect("completed async for pull");
-                if let Some(target) = target {
-                    self.bind_target(code, scope, target, *sent)?;
-                }
-            }
-            Instruction::BindOperand(target) => {
-                let value = iterators.pop().expect("target value");
-                self.bind_target(code, scope, target, value)?;
-            }
-            Instruction::UnpackTarget { count, star } => {
-                let value = iterators.pop().expect("target value");
-                let items = self.unpack_items(value, *count, *star)?;
-                iterators.extend(items.into_iter().rev());
-            }
-            Instruction::StoreAttribute(attr) => {
-                let object = iterators.pop().expect("attribute receiver");
-                let value = iterators.pop().expect("target value");
-                self.set_attr(object, attr.as_str(), value)?;
-            }
-            Instruction::StoreSubscript => {
-                let key = iterators.pop().expect("subscript key");
-                let object = iterators.pop().expect("subscript receiver");
-                let value = iterators.pop().expect("target value");
-                self.put_item(object, key, value)?;
-            }
-            Instruction::Await(expr, range) => {
-                let value = match expr {
-                    Some(expr) => eval(self, expr)?,
-                    None => std::mem::replace(sent, NONE),
-                };
-                let iter = self.at_source_position(
-                    ExpressionPosition::at(*range),
-                    TracebackAnchor::Uniform,
-                    |ctx| ctx.await_iterator(value, None),
-                )?;
-                iterators.push(iter);
-            }
-            Instruction::SaveOperand(expr) => {
-                let value = match expr {
-                    Some(expr) => eval(self, expr)?,
-                    None => *sent,
-                };
-                iterators.push(value);
-            }
-            Instruction::BuildSequence { tuple, count } => {
-                let items = iterators.split_off(iterators.len() - count);
-                *sent = self.alloc(if *tuple {
-                    Value::Tuple(items)
-                } else {
-                    Value::List(items)
-                });
-            }
-            Instruction::LoadResult(expr) => *sent = eval(self, expr)?,
-            Instruction::StoreNamed(name) => {
-                let mark = self.heap.temporary_mark();
-                self.store_named_result(scope, name.as_str(), *sent, mark)?;
-            }
-            Instruction::BuildSlice(present) => {
-                let mut parts = [NONE; 3];
-                for (part, exists) in parts.iter_mut().zip(present).rev() {
-                    if *exists {
-                        *part = iterators.pop().expect("saved slice bound");
-                    }
-                }
-                *sent = self.alloc(Value::Slice(parts));
-            }
-            Instruction::StartDict => iterators.push(self.dict(Vec::new())),
-            Instruction::StartSet(count) => {
-                let keys = iterators.split_off(iterators.len() - count);
-                let mark = self.heap.temporary_mark();
-                let set = self.build_source_set(mark, keys)?;
-                iterators.push(set);
-            }
-            Instruction::InsertDict { unpack } => {
-                if *unpack {
-                    let dict = *iterators.last().expect("active dict display");
-                    self.merge_mapping(dict, *sent, calls::MappingOperation::Unpack)?;
-                } else {
-                    let key = iterators.pop().expect("saved dictionary key");
-                    let dict = *iterators.last().expect("active dict display");
-                    self.put_item(dict, key, *sent)?;
-                }
-            }
-            Instruction::InsertSet { unpack } => {
-                let set = *iterators.last().expect("active set display");
-                if *unpack {
-                    builtins::update_set(self, set, *sent)?;
-                } else {
-                    builtins::set_add(self, set, *sent)?;
-                }
-            }
-            Instruction::FinishDisplay => *sent = iterators.pop().expect("active display"),
-            Instruction::Unary(op) => *sent = self.source_unary(*op, *sent)?,
-            Instruction::Attribute {
-                range,
-                name,
-                method,
-            } => {
-                *sent = self.at_source_position(
-                    ExpressionPosition::Source {
-                        offset: name.start(),
-                        range: *range,
-                    },
-                    TracebackAnchor::Uniform,
-                    |ctx| {
-                        if *method {
-                            ctx.source_method(*sent, name.as_str())
-                        } else {
-                            ctx.lookup_attr(*sent, name.as_str())
-                        }
-                    },
-                )?;
-            }
-            Instruction::JumpResult(end) => *ip = *end,
-            Instruction::Branch {
-                value,
-                when,
-                usage,
-                end,
-            } => {
-                let truth = match value {
-                    Some(expr) if *usage == BranchUse::Operand => {
-                        let (value, known) = self.source_bool_operand(code, scope, expr)?;
-                        *sent = value;
-                        known.map_or_else(|| self.truth(value), Ok)?
-                    }
-                    Some(expr) => self.source_condition(code, scope, expr)?,
-                    None => self.truth(*sent)?,
-                };
-                if truth == *when {
-                    *ip = *end;
-                }
-            }
-            Instruction::NextComparison { end, condition } => {
-                if !self.truth(*sent)? {
-                    let right = iterators.pop().expect("middle operand");
-                    self.heap.weak_edge_removed(right);
-                    self.heap.release_unbound_finalizers();
-                    if *condition {
-                        *sent = FALSE;
-                    }
-                    *ip = *end;
-                }
-            }
-            Instruction::Binary(op, range, anchor, keep_right) => {
-                let right = iterators.pop().expect("saved right operand");
-                let left = iterators.pop().expect("saved left operand");
-                let result =
-                    self.at_source_position(ExpressionPosition::at(*range), *anchor, |ctx| {
-                        ctx.op(op, left, right, NONE)
-                    });
-                if *keep_right && result.is_ok() {
-                    iterators.push(right);
-                } else {
-                    self.heap.weak_edge_removed(right);
-                }
-                self.heap.weak_edge_removed(left);
-                self.heap.release_unbound_finalizers();
-                *sent = result?;
-            }
-            Instruction::SaveCallMethod(field) => {
-                let method = self.source_call_method(code, scope, field)?;
-                iterators.push(method);
-            }
-            Instruction::CallSaved {
-                anchor,
-                positional,
-                keywords,
-                position,
-            } => {
-                let start = iterators.len() - (1 + positional + keywords.len());
-                let (pos, named) = iterators[start + 1..].split_at(*positional);
-                let kwargs = keywords
-                    .iter()
-                    .map(ToString::to_string)
-                    .zip(named.iter().copied())
-                    .collect();
-                let result = self.at_source_position(*position, *anchor, |ctx| {
-                    ctx.call_in_scope(scope, iterators[start], pos.to_vec(), kwargs)
-                });
-                for operand in iterators.drain(start..).rev() {
-                    self.heap.weak_edge_removed(operand);
-                }
-                self.heap.release_unbound_finalizers();
-                *sent = self.check_call_return(result?)?;
-            }
-            Instruction::Next(_, _) | Instruction::Delegate(_) => {
-                let delegated = matches!(op, Instruction::Delegate(_));
-                let iter = *iterators.last().expect("active source iterator");
-                let owner = self.source_loop_owner(iter);
-                let item = if let Some(outcome) = advanced.take() {
-                    outcome?
-                } else if thrown.is_none()
-                    && code.kind != FunctionKind::Plain
-                    && let Value::Generator { code, .. } = self.heap.get(iter)
-                    && !matches!(
-                        self.code_object(*code).body,
-                        Body::Native(_) | Body::Suspended(_)
-                    )
-                {
-                    return Ok(Some(Step::Advance(
-                        iter,
-                        *ip - 1,
-                        if delegated { *sent } else { NONE },
-                    )));
-                } else if delegated {
-                    let input = match thrown.take() {
-                        Some((error, args)) => GeneratorInput::Throw { error, args },
-                        None => GeneratorInput::Send(*sent),
-                    };
-                    self.advance_delegate(iter, input)?
-                } else {
-                    match self.next_item(iter)? {
-                        Some(value) => DelegateOutcome::Yield(value),
-                        None => DelegateOutcome::Done(NONE),
-                    }
-                };
-                match item {
-                    DelegateOutcome::Yield(value) => match op {
-                        Instruction::Next(Some(target), _) => {
-                            self.bind_target(code, scope, target, value)?
-                        }
-                        Instruction::Next(None, _) => *sent = value,
-                        _ => return Ok(Some(Step::Yield(value, *ip - 1))),
-                    },
-                    DelegateOutcome::Done(value) => {
-                        iterators.pop();
-                        self.release_source_loop_owner(owner);
-                        if let Instruction::Next(_, end) = op {
-                            *ip = *end;
-                        } else {
-                            *sent = value;
-                        }
-                    }
-                    DelegateOutcome::LookupFailed(error) => {
-                        return Ok(Some(Step::Rejected(error, *ip - 1)));
-                    }
-                }
-            }
-            Instruction::MakeGenerator(expr) => {
-                *sent = self.source_genexpr(code, scope, expr, Some(*sent))?;
-            }
-            Instruction::YieldResult(_) => {
-                let value = if code.kind == FunctionKind::AsyncGenerator {
-                    self.wrap_async_generator_yield(*sent)
-                } else {
-                    *sent
-                };
-                return Ok(Some(Step::Yield(value, *ip)));
-            }
-            Instruction::Yield(e, _) | Instruction::Return(e) => {
-                let v = e
-                    .as_ref()
-                    .map(|e| eval(self, e))
-                    .transpose()?
-                    .unwrap_or(NONE);
-                return Ok(Some(if matches!(op, Instruction::Yield(_, _)) {
-                    // An await suspends through Delegate. Only a value explicitly yielded by
-                    // the async generator completes its pending __anext__ or asend operation.
-                    let item = if code.kind == FunctionKind::AsyncGenerator {
-                        self.wrap_async_generator_yield(v)
-                    } else {
-                        v
-                    };
-                    Step::Yield(item, *ip)
-                } else {
-                    Step::Return(v)
-                }));
-            }
-            Instruction::Import { module, alias } => {
-                let mut imported = self.import_source_module(owner, scope, module, None, 0)?;
-                let mut parts = module.split('.');
-                let first = parts.next().expect("nonempty module name");
-                if alias.is_some() {
-                    for part in parts {
-                        let part = self.text(part);
-                        imported = self.op("from", imported, part, NONE)?;
-                    }
-                }
-                self.bind_source_name(scope, alias.as_deref().unwrap_or(first), imported)?;
-            }
-            Instruction::From(module, level, names) => {
-                let m = self.import_source_module(owner, scope, module, Some(names), *level)?;
-                for (name, local) in names {
-                    if name == "*" {
-                        self.import_star(scope, m)?;
-                        continue;
-                    }
-                    let name = self.text(name);
-                    let v = self.op("from", m, name, NONE)?;
-                    self.bind_source_name(scope, local, v)?;
-                }
-            }
-            Instruction::StringAnnotation(name, expression) => {
-                let key = self.heap.code_name(name);
-                let spelling = self.source_expr(code, scope, expression)?;
-                // LOAD_NAME for this implicit store skips enclosing function locals.
-                let annotations = if code.class_attributes.is_some() {
-                    self.lookup_class_local(scope, "__annotations__")?
-                } else {
-                    self.module_annotation_name(scope, "__annotations__")?
-                };
-                self.put_item(annotations, key, spelling)?;
-            }
-            Instruction::ModuleDoc(range, _) => {
-                self.bind_source_name(scope, "__doc__", code.literals[range])?;
-            }
-            Instruction::ModuleAnnotations(provider) => {
-                self.start_module_annotations(code, owner, scope, provider.as_ref())?;
-            }
-            Instruction::MarkAnnotation(index) => {
-                let active = if code.class_attributes.is_some() {
-                    let cell = self.source_conditional_cell(scope)?;
-                    match self.heap.get(cell) {
-                        Value::Cell(Some(active)) => *active,
-                        _ => {
-                            return Err(self.missing_binding(scope, scope, CONDITIONAL));
-                        }
-                    }
-                } else {
-                    self.module_annotation_name(scope, CONDITIONAL)?
-                };
-                let mut index = *index;
-                for block in cursor.protected.iter() {
-                    if let (HandlerKind::Finally(annotation_count), Some(Transfer::Raise(_))) =
-                        (block.kind, block.pending)
-                    {
-                        index += annotation_count;
-                    }
-                }
-                let index = self.int(index as i64);
-                self.mark_annotation(active, index)?;
-            }
-            Instruction::ClassAnnotator(provider) => {
-                let annotate = self.source_annotator(provider, owner, scope, scope)?;
-                self.bind_source_name(scope, "__annotate_func__", annotate)?;
-            }
-            Instruction::CheckAnnotationFormat => {
-                let format = self.lookup(scope, ".format")?;
-                self.op("annotation_format", format, NONE, NONE)?;
-            }
-            Instruction::ClassStart => {
-                self.enable_class_annotation_provider(scope);
-                // Only postponed annotations need a visible mapping from the start of the suite.
-                if !code.postponed_annotations
-                    && self.scope_data(scope).class_body_mapping().is_none()
-                {
-                    let key = self.heap.code_name("__annotations__");
-                    self.remove_binding(scope, "__annotations__", key)?;
-                }
-                let first = self.int(i64::from(code.first_line));
-                self.store_class_metadata(scope, "__firstlineno__", first)?;
-                if let Some(doc) = code.doc {
-                    self.store_class_metadata(scope, "__doc__", code.literals[&doc])?;
-                }
-            }
-            Instruction::ClassEnd => {
-                let names = code
-                    .class_attributes
-                    .as_ref()
-                    .expect("class body")
-                    .iter()
-                    .map(|name| self.heap.code_name(name))
-                    .collect();
-                let attrs = self.alloc(Value::Tuple(names));
-                self.bind_source_name(scope, "__static_attributes__", attrs)?;
-            }
-            Instruction::Define(definition) | Instruction::ReturnClass(definition) => {
-                let value = self.source_definition(code, owner, scope, *ip - 1, definition)?;
-                if matches!(op, Instruction::ReturnClass(_)) {
-                    return Ok(Some(Step::Return(value)));
-                }
-                self.bind_source_name(scope, &definition.binding, value)?;
-            }
-        }
-        Ok(None)
-    }
-
-    /// Bind fresh PEP 695 parameters under their lexical (possibly mangled) names.
-    fn source_parameter_scope(
-        &mut self,
-        child: &Program,
-        outer: Id,
-        params: &ast::TypeParams,
-        class: bool,
-    ) -> Result<Id> {
-        let entries = params
-            .iter()
-            .map(|param| {
-                let binding = self.heap.code_name(param.name().as_str());
-                let name = self.heap.code_name(child.definition_spelling(param.name()));
-                let declaration = match param {
-                    ast::TypeParam::TypeVar(_) => name,
-                    ast::TypeParam::TypeVarTuple(_) => super::typing::declared_pack(self, name),
-                    ast::TypeParam::ParamSpec(_) => super::paramspec::declared(self, name),
-                };
-                (binding, declaration)
-            })
-            .collect();
-        let names = self.dict(entries);
-        super::typing::parameter_scope(self, outer, names, class)
-    }
-
-    /// Evaluate a definition's defaults and reuse its code object at this lexical site.
-    fn source_definition(
-        &mut self,
-        code: &Program,
-        owner: Id,
-        scope: Id,
-        site: usize,
-        definition: &Definition,
-    ) -> Result<Id> {
-        let eval = |ctx: &mut Self, e: &ast::Expr| ctx.source_expr(code, scope, e);
-        let mut decorators = Vec::new();
-        for decorator in &definition.decorators {
-            let value = eval(self, &decorator.expression)?;
-            self.heap.keep(value);
-            decorators.push(value);
-        }
-        let child = &definition.body;
-        let defaults = self.dict(vec![]);
-        let frame = self.scope_data(scope);
-        let mut defining_scope = if frame.exec_locals.is_some() {
-            frame.parent.expect("exec locals have a global frame")
-        } else {
-            scope
-        };
-        let mut type_params = NONE;
-        let mut bases = None;
-        let sig = match &definition.kind {
-            DefinitionKind::TypeAlias(params) => {
-                if let Some(params) = params {
-                    defining_scope =
-                        self.source_parameter_scope(child, defining_scope, params, false)?;
-                    type_params = self.lookup(defining_scope, ".type_params")?;
-                }
-                let format = self.text(".format");
-                let value_format = self.int(1);
-                self.put_item(defaults, format, value_format)?;
-                serde_json::json!({
-                    "posonly": [".format"],
-                    "scope_locals": [".format"],
-                    "scope_locals_complete": true,
-                })
-            }
-            DefinitionKind::ClassParameters(_) => serde_json::json!({}),
-            DefinitionKind::Class {
-                arguments: args,
-                parameterized,
-                ..
-            } => {
-                let mut values = Vec::new();
-                let mut keywords = Vec::new();
-                if let Some(args) = args {
-                    values = self.source_sequence_items(code, scope, &args.args)?;
-                    if !args.keywords.is_empty() {
-                        let mapping =
-                            self.source_keyword_mapping(code, scope, None, &args.keywords)?;
-                        keywords = self.keyword_args(mapping)?;
-                    }
-                }
-                if *parameterized {
-                    values.push(self.lookup(defining_scope, ".generic_base")?);
-                }
-                bases = Some((self.alloc(Value::List(values)), keywords, *parameterized));
-                let declared = |kind| {
-                    child
-                        .directives
-                        .iter()
-                        .filter_map(|(name, (directive, _))| (*directive == kind).then_some(name))
-                        .collect::<BTreeSet<_>>()
-                };
-                serde_json::json!({
-                    "class_globals": declared(ScopeDirective::Global),
-                    "class_frame_reads": child.reads,
-                    "scope_nonlocals": declared(ScopeDirective::Nonlocal),
-                    "needs_class_cell": child.needs_class_cell,
-                    "needs_dict_cell": child.needs_dict_cell,
-                    "postponed_annotations": child.postponed_annotations,
-                })
-            }
-            DefinitionKind::Function {
-                parameters: p,
-                type_params: params,
-                captured_locks,
-            } => {
-                let mut sig = serde_json::json!({"posonly":[],"positional":[],"kwonly":[],"varargs":p.vararg.as_ref().map(|x|x.name.as_str()),"kwargs":p.kwarg.as_ref().map(|x|x.name.as_str())});
-                if let Some(locks) = captured_locks {
-                    sig["thread_captured_locks"] = serde_json::json!(locks);
-                }
-                for (group, args) in [
-                    ("posonly", &p.posonlyargs),
-                    ("positional", &p.args),
-                    ("kwonly", &p.kwonlyargs),
-                ] {
-                    for arg in args {
-                        let n = arg.parameter.name.as_str();
-                        sig[group].as_array_mut().unwrap().push(n.into());
-                        if let Some(default) = &arg.default {
-                            let v = eval(self, default)?;
-                            let k = self.text(n);
-                            self.put_item(defaults, k, v)?;
-                        }
-                    }
-                }
-                // Defaults are evaluated above, before entering the type-parameter scope.
-                if let Some(params) = params {
-                    let class_cell = self.scope_data(defining_scope).class_cell;
-                    defining_scope =
-                        self.source_parameter_scope(child, defining_scope, params, false)?;
-                    // The nearest __class__ binding also supplies zero-argument super().
-                    let class_cell = if params
-                        .iter()
-                        .any(|param| param.name().as_str() == "__class__")
-                    {
-                        Some(self.capture_free_cell(defining_scope, "__class__"))
-                    } else {
-                        class_cell
-                    };
-                    let Value::Scope(frame) = self.heap.get_mut(defining_scope) else {
-                        unreachable!()
-                    };
-                    frame.class_cell = class_cell;
-                    type_params = self.lookup(defining_scope, ".type_params")?;
-                }
-                // A method that names the compiler's private cell shares it with the
-                // class annotator, even if the prepared namespace has a homonymous entry.
-                if self.scope_data(scope).class_body.is_some()
-                    && self.source_captures_conditional(scope, defining_scope, child)
-                {
-                    let class_cell = self.scope_data(defining_scope).class_cell;
-                    let parent = if defining_scope == scope {
-                        self.scope_data(scope)
-                            .parent
-                            .expect("class definition scope")
-                    } else {
-                        defining_scope
-                    };
-                    let cell = self.source_conditional_cell(scope)?;
-                    let mut names = vec![CONDITIONAL.into()];
-                    let mut cells = vec![cell];
-                    if child.method_class_cell.is_none()
-                        && child.class_cell
-                        && let Some(class_cell) = class_cell
-                    {
-                        names.push("__class__".into());
-                        cells.push(class_cell);
-                    }
-                    defining_scope = self.closure_environment(parent, names, &cells);
-                    let Value::Scope(frame) = self.heap.get_mut(defining_scope) else {
-                        unreachable!()
-                    };
-                    frame.class_cell = class_cell;
-                }
-                if let Some(captures_class) = child.method_class_cell {
-                    sig["method_class_cell"] = captures_class.into();
-                }
-                sig["class_cell"] = child.method_class_cell.unwrap_or(child.class_cell).into();
-                sig["scope_locals"] = serde_json::json!(child.locals.iter().collect::<Vec<_>>());
-                sig["scope_cellvars"] = serde_json::json!(child.cellvars);
-                sig["scope_locals_complete"] = true.into();
-                sig
-            }
-        };
-        let code = if let Some((_, existing)) = self
-            .code_object(owner)
-            .nested
-            .iter()
-            .find(|(i, _)| *i == site)
-        {
-            *existing
-        } else {
-            let parameters = self.text(sig.to_string());
-            let freevars = if let Some(captures_class) = child.method_class_cell {
-                let enclosing = if defining_scope == scope {
-                    self.scope_data(scope).parent
-                } else {
-                    Some(defining_scope)
-                };
-                self.method_freevars(
-                    enclosing,
-                    child.reads.iter().map(String::as_str),
-                    captures_class,
-                )
-            } else if type_params != NONE
-                || (defining_scope != scope && self.scope_data(scope).class_body.is_some())
-            {
-                self.enclosing_freevars(defining_scope, child.reads.iter().map(String::as_str))
-            } else if (code.name != "<module>" || self.scope_data(scope).comprehension.is_some())
-                && !matches!(
-                    definition.kind,
-                    DefinitionKind::Class {
-                        needs_enclosing_frame: true,
-                        ..
-                    }
-                )
-                && !child.class_cell
-            {
-                // A function defined in a class captures an enclosing function's cells.
-                let enclosing = if code.class_attributes.is_some()
-                    && self.scope_data(scope).comprehension.is_none()
-                {
-                    self.scope_data(scope).parent.unwrap_or(scope)
-                } else {
-                    scope
-                };
-                self.enclosing_freevars(enclosing, child.reads.iter().map(String::as_str))
-            } else {
-                None
-            };
-            let id = self.box_source_closure(child.clone(), Some(parameters), freevars);
-            let Value::Code(parent) = self.heap.get_mut(owner) else {
-                unreachable!()
-            };
-            parent.nested.push((site, id));
-            id
-        };
-        let mut value = self.source_function(code, defining_scope, defaults)?;
-        if matches!(definition.kind, DefinitionKind::TypeAlias(_)) {
-            let name = self.code_object(code).name;
-            return self.op("type_alias", name, value, type_params);
-        }
-        if type_params != NONE {
-            self.set_function_attr(value, "__type_params__", type_params)?;
-        }
-        if let Some(provider) = &definition.annotate {
-            let annotate = self.source_annotator(provider, code, scope, defining_scope)?;
-            self.set_function_attr(value, "__annotate__", annotate)?;
-        }
-        if let DefinitionKind::ClassParameters(params) = &definition.kind {
-            let parameters = self.source_parameter_scope(child, defining_scope, params, true)?;
-            if self.scope_data(scope).class_body.is_some() {
-                let namespace = self.active_class_namespace(scope);
-                self.bind(parameters, "__classdict__", namespace);
-            }
-            value = self.execute(code, parameters, FrameOwner::Function(value))?;
-        }
-        if let Some((bases, keywords, parameterized)) = bases {
-            value = self.class(bases, value, keywords, parameterized)?;
-        }
-        for decorator in decorators.into_iter().rev() {
-            value = self.call(decorator, vec![value], Vec::new())?;
-        }
-        Ok(value)
-    }
-
-    /// Unpack each level before binding its component targets from left to right.
-    fn bind_target(
-        &mut self,
-        code: &Program,
-        scope: Id,
-        target: &ast::Expr,
-        value: Id,
-    ) -> Result<()> {
-        match target {
-            ast::Expr::Name(n) => self.bind_source_name(scope, n.id.as_str(), value)?,
-            ast::Expr::Attribute(field) => {
-                let object = self.source_expr(code, scope, &field.value)?;
-                self.set_attr(object, field.attr.as_str(), value)?;
-            }
-            ast::Expr::Subscript(item) => {
-                let object = self.source_expr(code, scope, &item.value)?;
-                let key = self.source_expr(code, scope, &item.slice)?;
-                self.put_item(object, key, value)?;
-            }
-            ast::Expr::Starred(star) => self.bind_target(code, scope, &star.value, value)?,
-            ast::Expr::Tuple(ast::ExprTuple { elts, .. })
-            | ast::Expr::List(ast::ExprList { elts, .. }) => {
-                let count = elts.len();
-                let star = elts
-                    .iter()
-                    .position(|item| matches!(item, ast::Expr::Starred(_)));
-                let unpacked = self.unpack_items(value, count, star)?;
-                for (element, item) in elts.iter().zip(unpacked) {
-                    self.bind_target(code, scope, element, item)?;
-                }
-            }
-            _ => unreachable!("validated unpacking target"),
-        }
-        Ok(())
-    }
-
-    fn source_call_method(
-        &mut self,
-        code: &Program,
-        scope: Id,
-        field: &ast::ExprAttribute,
-    ) -> Result<Id> {
-        let receiver = self.source_expr(code, scope, &field.value)?;
-        self.at_source_position(
-            ExpressionPosition::Source {
-                offset: field.attr.start(),
-                range: field.range,
-            },
-            TracebackAnchor::Uniform,
-            |ctx| ctx.source_method(receiver, field.attr.as_str()),
-        )
-    }
-
-    fn source_unary(&mut self, op: ast::UnaryOp, value: Id) -> Result<Id> {
-        let name = match op {
-            ast::UnaryOp::UAdd => "pos",
-            ast::UnaryOp::USub => "neg",
-            op => op.as_str(),
-        };
-        self.op(name, value, NONE, NONE)
-    }
-
-    fn source_method(&mut self, receiver: Id, name: &str) -> Result<Id> {
-        let method = self.lookup_method(receiver, name)?;
-        // Evaluating an argument can delete the receiver's reference to the callable.
-        self.heap.reserve_temporaries(1)?;
-        self.heap.keep(method);
-        Ok(method)
-    }
-
-    fn source_expr(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
-        let offset = imre_ast::expression_position(
-            expr,
-            &code.method_imports,
-            code.private_names.as_deref(),
-        );
-        let previous = self.heap.replace_expression(ExpressionPosition::Source {
-            offset,
-            range: expr.range(),
-        });
-        let result = stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
-            self.source_expr_inner(code, scope, expr)
-        });
-        let result = if matches!(expr, ast::Expr::Name(_)) {
-            self.source_result(result, TracebackAnchor::Uniform)
-        } else {
-            result
-        };
-        self.heap.replace_expression(previous);
-        let value = result?;
-        self.heap.keep(value);
-        Ok(value)
-    }
-
-    /// Preserve the selected operand and any truth test that short-circuited a nested expression.
-    fn source_bool_operand(
-        &mut self,
-        code: &Program,
-        scope: Id,
-        expr: &ast::Expr,
-    ) -> Result<(Id, Option<bool>)> {
-        if let ast::Expr::If(branch) = expr {
-            return if self.source_condition(code, scope, &branch.test)? {
-                Ok((self.source_expr(code, scope, &branch.body)?, None))
-            } else {
-                self.source_bool_operand(code, scope, &branch.orelse)
-            };
-        }
-        let ast::Expr::BoolOp(op) = expr else {
-            return Ok((self.source_expr(code, scope, expr)?, None));
-        };
-        let (last, operands) = op
-            .values
-            .split_last()
-            .expect("boolean expression has operands");
-        let stop = op.op == ast::BoolOp::Or;
-        for operand in operands {
-            let mark = self.heap.temporary_mark();
-            let (value, known) = self.source_bool_operand(code, scope, operand)?;
-            if known.map_or_else(|| self.truth(value), Ok)? == stop {
-                return Ok((value, Some(stop)));
-            }
-            self.discard_truth(mark);
-        }
-        self.source_bool_operand(code, scope, last)
-    }
-
-    /// Return the comparison result and whether an earlier comparison already tested false.
-    fn source_comparison(
-        &mut self,
-        code: &Program,
-        scope: Id,
-        comparison: &ast::ExprCompare,
-    ) -> Result<(Id, bool)> {
-        let mut left = self.source_expr(code, scope, &comparison.operands[0])?;
-        for (index, (op, right)) in comparison
-            .ops
-            .iter()
-            .zip(&comparison.operands[1..])
-            .enumerate()
-        {
-            let right = self.source_expr(code, scope, right)?;
-            let result = self.op(op.as_str(), left, right, NONE)?;
-            if index + 1 == comparison.ops.len() {
-                return Ok((result, false));
-            }
-            if !self.truth(result)? {
-                return Ok((result, true));
-            }
-            left = right;
-        }
-        unreachable!("comparison has at least one operator")
-    }
-
-    /// Try a case or OR alternative with its own tentative capture slots.
-    fn match_source_attempt(
-        &mut self,
-        code: &Program,
-        scope: Id,
-        pattern: &ast::Pattern,
-        subject: Id,
-        mut tentative: std::ops::Range<usize>,
-    ) -> Result<bool> {
-        let mark = tentative.start;
-        let matched = self.match_source_pattern(code, scope, pattern, subject, &mut tentative);
-        if matches!(matched, Ok(true)) {
-            return matched;
-        }
-        // Unread operands unwind from the top, before tentative bindings in
-        // traversal order. Each release can run Python or a weakref callback.
-        let error = matched.as_ref().err();
-        let pending = self.heap.temporary_mark();
-        if self.heap.tracks_finalizers() || self.heap.has_weak_values {
-            for root in error.into_iter().flat_map(|e| e.roots()) {
-                self.heap.keep(root);
-            }
-            let top = self.heap.temporary_mark();
-            for slot in (tentative.end..pending).rev().chain(mark..tentative.start) {
-                let value = std::mem::replace(self.heap.temporary_root(slot), NONE);
-                self.heap.keep(value);
-                self.discard_truth(top);
-            }
-        }
-        self.discard_temporaries(mark, error.into_iter().flat_map(|e| e.roots()));
-        matched
-    }
-
-    fn match_source_pattern(
-        &mut self,
-        code: &Program,
-        scope: Id,
-        pattern: &ast::Pattern,
-        subject: Id,
-        slots: &mut std::ops::Range<usize>,
-    ) -> Result<bool> {
-        match pattern {
-            ast::Pattern::MatchSingleton(p) => {
-                let singleton = match p.value {
-                    ast::Singleton::None => NONE,
-                    ast::Singleton::False => FALSE,
-                    ast::Singleton::True => TRUE,
-                };
-                Ok(subject == singleton)
-            }
-            ast::Pattern::MatchValue(p) => {
-                let operand = self.heap.temporary_mark() - 1;
-                let value = self.source_expr(code, scope, &p.value)?;
-                let comparison = self.binary("==", subject, value);
-                let comparison = self.release_with_result(operand, comparison)?;
-                self.truth(comparison)
-            }
-            ast::Pattern::MatchOr(p) => {
-                // Each attempt gets its own operand and tentative captures. Dropping a failed
-                // attempt can run finalizers before the next alternative evaluates any Python.
-                let mark = self.heap.temporary_mark();
-                for arm in &p.patterns {
-                    let order = code
-                        .alternative_captures
-                        .get(&arm.range())
-                        .map(Vec::as_slice)
-                        .unwrap_or_default();
-                    self.heap.reserve_temporaries(order.len() + 1)?;
-                    for _ in order {
-                        self.heap.keep(NONE);
-                    }
-                    self.heap.keep(subject);
-                    if self.match_source_attempt(
-                        code,
-                        scope,
-                        arm,
-                        subject,
-                        mark..mark + order.len(),
-                    )? {
-                        for index in order {
-                            let value = *self.heap.temporary_root(mark + index);
-                            let slot = slots.next().expect("validated OR capture");
-                            *self.heap.temporary_root(slot) = value;
-                        }
-                        self.discard_truth(mark);
-                        return Ok(true);
-                    }
-                }
-                Ok(false)
-            }
-            ast::Pattern::MatchClass(p) => {
-                let class = self.source_expr(code, scope, &p.cls)?;
-                self.class_pattern_matches(subject, class)
-            }
-            ast::Pattern::MatchSequence(p) => {
-                let patterns = &p.patterns;
-                let operand = self.heap.temporary_mark() - 1;
-                if !self
-                    .pattern_flags(subject)
-                    .has(collection_pattern::PatternFlags::SEQUENCE)
-                {
-                    return Ok(false);
-                }
-                let plan = imre_ast::sequence_pattern_plan(patterns);
-                if let Some((op, required)) = plan.length {
-                    let length = self.sequence_len(subject)?;
-                    if length < required || (op == ast::CmpOp::Eq && length != required) {
-                        return Ok(false);
-                    }
-                }
-                let star = match plan.items {
-                    imre_ast::SequencePatternItems::Ignore => return Ok(true),
-                    imre_ast::SequencePatternItems::IndexAround(star) => {
-                        // A starred wildcard indexes only the inspected elements. Each suffix
-                        // sees the length after any earlier comparison or item lookup.
-                        let mark = operand + 1;
-                        for (i, child) in patterns
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, p)| !imre_ast::wildcard_pattern(p))
-                        {
-                            let index = if i < star {
-                                i as i64
-                            } else {
-                                self.sequence_len(subject)? as i64 - (patterns.len() - i) as i64
-                            };
-                            let index = self.int(index);
-                            let item = self.get_item(subject, index);
-                            let item = self.release_with_result(mark, item)?;
-                            let matched =
-                                self.match_source_pattern(code, scope, child, item, slots)?;
-                            self.discard_truth(mark);
-                            if !matched {
-                                return Ok(false);
-                            }
-                        }
-                        return Ok(true);
-                    }
-                    imre_ast::SequencePatternItems::Unpack(star) => star,
-                };
-                let items = self.unpack_items(subject, patterns.len(), star)?;
-                // Unpacking consumes this subject. Keep the next subpattern's operand on top.
-                self.discard_temporaries(operand, items.iter().rev().copied());
-                for (pattern, item) in patterns.iter().zip(items) {
-                    let operand = self.heap.temporary_mark() - 1;
-                    let matched = self.match_source_pattern(code, scope, pattern, item, slots)?;
-                    self.discard_truth(operand);
-                    if !matched {
-                        return Ok(false);
-                    }
-                }
-                Ok(true)
-            }
-            ast::Pattern::MatchAs(ast::PatternMatchAs { name, .. })
-            | ast::Pattern::MatchStar(ast::PatternMatchStar { name, .. }) => {
-                if let ast::Pattern::MatchAs(p) = pattern
-                    && let Some(inner) = &p.pattern
-                {
-                    // The alias retains the subject while its inner pattern consumes a copy.
-                    self.heap.keep(subject);
-                    if !self.match_source_pattern(code, scope, inner, subject, slots)? {
-                        return Ok(false);
-                    }
-                }
-                if name.is_some() {
-                    // Validation records captures in the same left-to-right, inner-before-alias order.
-                    let slot = slots.next().expect("validated capture");
-                    *self.heap.temporary_root(slot) = subject;
-                }
-                Ok(true)
-            }
-            _ => unreachable!("validated runtime source pattern"),
-        }
-    }
-
-    /// Evaluate a branch condition without testing a short-circuited operand twice.
-    fn source_condition(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<bool> {
-        if let ast::Expr::UnaryOp(op) = expr
-            && op.op == ast::UnaryOp::Not
-        {
-            return Ok(!self.source_condition(code, scope, &op.operand)?);
-        }
-        if let ast::Expr::BoolOp(op) = expr {
-            let stop = op.op == ast::BoolOp::Or;
-            for operand in &op.values {
-                if self.source_condition(code, scope, operand)? == stop {
-                    return Ok(stop);
-                }
-            }
-            return Ok(!stop);
-        }
-        if let ast::Expr::If(branch) = expr {
-            let arm = if self.source_condition(code, scope, &branch.test)? {
-                &branch.body
-            } else {
-                &branch.orelse
-            };
-            return self.source_condition(code, scope, arm);
-        }
-        let mark = self.heap.temporary_mark();
-        let truth = if let ast::Expr::Compare(comparison) = expr {
-            let (value, stopped) = self.source_comparison(code, scope, comparison)?;
-            !stopped && self.truth(value)?
-        } else {
-            let value = self.source_expr(code, scope, expr)?;
-            self.truth(value)?
-        };
-        self.discard_truth(mark);
-        Ok(truth)
-    }
-
-    /// A function-local read or deletion must not fall back to a same-named global.
-    fn check_source_local(&self, code: &Program, scope: Id, name: &str) -> Result<()> {
-        if code.class_attributes.is_none()
-            && code.name != "<module>"
-            && code.locals.contains(name)
-            && self.scope_name(scope, name).is_none()
-        {
-            return Err(Error::new(
-                "UnboundLocalError",
-                format!(
-                    "cannot access local variable '{name}' where it is not associated with a value"
-                ),
-            ));
-        }
-        Ok(())
-    }
-
-    /// Retain only an expression's result and the roots that preceded its evaluation.
-    fn keep_source_result(&mut self, mark: usize, value: Id) -> Result<Id> {
-        let collect = self.heap.discard_truth_operands(mark, self.modules);
-        self.heap.reserve_temporaries(1)?;
-        self.heap.keep(value);
-        if collect {
-            self.collect_unreachable();
-        }
-        Ok(value)
-    }
-
-    fn join_source_format(&mut self, parts: Vec<Id>) -> Result<Id> {
-        // A lone field preserves the exact object returned by __format__.
-        if let [part] = parts.as_slice() {
-            return Ok(*part);
-        }
-        let empty = self.text("");
-        let items = self.alloc(Value::List(parts));
-        builtins::call(self, "str.join", &[empty, items], &[])
-    }
-
-    fn source_format_text(
-        &mut self,
-        code: &Program,
-        range: ruff_text_size::TextRange,
-        text: &str,
-    ) -> Id {
-        code.literals
-            .get(&range)
-            .copied()
-            .unwrap_or_else(|| self.text(text))
-    }
-
-    fn source_format_elements(
-        &mut self,
-        code: &Program,
-        scope: Id,
-        elements: &[ast::InterpolatedStringElement],
-        parts: &mut Vec<Id>,
-    ) -> Result<()> {
-        for element in elements {
-            let part = match element {
-                ast::InterpolatedStringElement::Literal(lit) if lit.value.is_empty() => continue,
-                ast::InterpolatedStringElement::Literal(lit) => {
-                    self.source_format_text(code, lit.range(), &lit.value)
-                }
-                ast::InterpolatedStringElement::Interpolation(field) => {
-                    if let Some(debug) = &field.debug_text {
-                        parts.push(self.text(debug.as_str()));
-                    }
-                    let mark = self.heap.temporary_mark();
-                    let mut value = self.source_expr(code, scope, &field.expression)?;
-                    let conversion = field.conversion.to_char().or_else(|| {
-                        (field.debug_text.is_some() && field.format_spec.is_none()).then_some('r')
-                    });
-                    if let Some(conversion) = conversion {
-                        value = builtins::format_conversion(self, value, conversion)?;
-                        self.keep_source_result(mark, value)?;
-                    }
-                    let spec = if let Some(spec) = &field.format_spec {
-                        let spec_mark = self.heap.temporary_mark();
-                        let mut nested = Vec::new();
-                        self.source_format_elements(code, scope, &spec.elements, &mut nested)?;
-                        let spec = self.join_source_format(nested)?;
-                        Some(self.keep_source_result(spec_mark, spec)?)
-                    } else {
-                        None
-                    };
-                    let rendered = builtins::format_value(self, value, spec)?;
-                    self.keep_source_result(mark, rendered)?
-                }
-            };
-            parts.push(part);
-        }
-        Ok(())
-    }
-
-    fn source_keyword_mapping(
-        &mut self,
-        code: &Program,
-        scope: Id,
-        callable: Option<Id>,
-        keywords: &[ast::Keyword],
-    ) -> Result<Id> {
-        let merged = self.dict(Vec::new());
-        self.heap.keep(merged);
-        // Merge each ** mapping immediately, but evaluate adjacent named arguments as a group.
-        for group in keywords.chunk_by(|left, right| left.arg.is_some() && right.arg.is_some()) {
-            let mapping = if group[0].arg.is_none() {
-                self.source_expr(code, scope, &group[0].value)?
-            } else {
-                let named = self.dict(Vec::new());
-                self.heap.keep(named);
-                for item in group {
-                    let key = self
-                        .heap
-                        .code_name(item.arg.as_ref().expect("named keyword").as_str());
-                    let value = self.source_expr(code, scope, &item.value)?;
-                    self.put_item(named, key, value)?;
-                }
-                named
-            };
-            self.merge_mapping(
-                merged,
-                mapping,
-                super::calls::MappingOperation::Keywords(callable),
-            )?;
-        }
-        Ok(merged)
-    }
-
-    fn source_sequence_items(
-        &mut self,
-        code: &Program,
-        scope: Id,
-        elements: &[ast::Expr],
-    ) -> Result<Vec<Id>> {
-        let mut items = Vec::with_capacity(elements.len());
-        for item in elements {
-            if let ast::Expr::Starred(star) = item {
-                let mark = self.heap.temporary_mark();
-                let first = items.len();
-                let expanded = self
-                    .source_expr(code, scope, &star.value)
-                    .and_then(|iterable| self.expand_positional_items(&mut items, iterable, None));
-                // Only yielded values outlive this operand. Release the iterator before
-                // evaluating the next element or dispatching a weakref callback.
-                let collect = self.heap.discard_truth_operands(mark, self.modules);
-                match &expanded {
-                    Ok(()) => {
-                        for &value in &items[first..] {
-                            self.heap.keep(value);
-                        }
-                    }
-                    Err(error) => {
-                        for root in error.roots() {
-                            self.heap.keep(root);
-                        }
-                    }
-                }
-                if collect {
-                    self.collect_unreachable();
-                }
-                expanded?;
-            } else {
-                items.push(self.source_expr(code, scope, item)?);
-            }
-        }
-        Ok(items)
-    }
-
-    fn source_set_display(
-        &mut self,
-        code: &Program,
-        scope: Id,
-        elements: &[ast::Expr],
-    ) -> Result<Id> {
-        let prefix_len = set_display_prefix(elements);
-        let (prefix, rest) = elements.split_at(prefix_len);
-        let mark = self.heap.temporary_mark();
-        let mut keys = Vec::with_capacity(prefix_len);
-        for expr in prefix {
-            let operand = self.heap.temporary_mark();
-            let key = self.source_expr(code, scope, expr)?;
-            keys.push(self.keep_source_result(operand, key)?);
-        }
-        let result = self.build_source_set(mark, keys)?;
-        for expr in rest {
-            let operand = self.heap.temporary_mark();
-            if let ast::Expr::Starred(star) = expr {
-                let iterable = self.source_expr(code, scope, &star.value)?;
-                builtins::update_set(self, result, iterable)?;
-            } else {
-                let key = self.source_expr(code, scope, expr)?;
-                builtins::set_add(self, result, key)?;
-            }
-            self.discard_truth(operand);
-        }
-        Ok(result)
-    }
-
-    fn build_source_set(&mut self, mark: usize, keys: Vec<Id>) -> Result<Id> {
-        let result = self.alloc(Value::Set {
-            entries: Default::default(),
-            frozen: false,
-        });
-        // Pop keys in insertion order. A rejected duplicate may finalize before the next hash.
-        self.heap.release_temporaries_since(mark);
-        self.heap.keep(result);
-        for &key in keys.iter().rev() {
-            self.heap.keep(key);
-        }
-        let count = keys.len();
-        for (index, key) in keys.into_iter().enumerate() {
-            builtins::set_add(self, result, key)?;
-            self.discard_truth(mark + count - index);
-        }
-        Ok(result)
-    }
-
-    fn store_named_result(&mut self, scope: Id, name: &str, value: Id, mark: usize) -> Result<()> {
-        if self.store_source_name(self.named_expression_scope(scope, name), name, value)?
-            && self.heap.named_assignment(mark, value)
-        {
-            self.finish_binding_release();
-        }
-        Ok(())
-    }
-
-    fn source_expr_inner(&mut self, code: &Program, scope: Id, expr: &ast::Expr) -> Result<Id> {
-        use ast::Expr;
-        let eval = |ctx: &mut Self, e: &Expr| ctx.source_expr(code, scope, e);
-        match expr {
-            Expr::Lambda(_) if code.expression_functions.contains_key(&expr.range()) => {
-                let (site, definition) = &code.expression_functions[&expr.range()];
-                self.source_definition(
-                    code,
-                    self.heap.current_code(),
-                    scope,
-                    code.instructions.len() + site,
-                    definition,
-                )
-            }
-            Expr::Generator(_) if code.expression_functions.contains_key(&expr.range()) => {
-                self.source_genexpr(code, scope, expr, None)
-            }
-            Expr::Name(n) => {
-                let name = n.id.as_str();
-                let mut enclosing = scope;
-                while self.scope_data(enclosing).comprehension.is_some() {
-                    let frame = self.scope_data(enclosing);
-                    if frame.closure.declared.contains(name) {
-                        return self.lookup(enclosing, name);
-                    }
-                    enclosing = frame.parent.expect("enclosing comprehension scope");
-                }
-                if scope == enclosing
-                    && code.class_parameter_header()
-                    && !code.locals.contains(name)
-                    && let Some(namespace) = self.scope_name(scope, "__classdict__")
-                {
-                    match self.load_exec_name(namespace, name) {
-                        Err(error) if self.is_builtin_error(&error, "KeyError") => {}
-                        value => return value,
-                    }
-                }
-                if scope == enclosing
-                    && code.class_attributes.is_some()
-                    && code.locals.contains(name)
-                {
-                    return self.lookup_class_local(scope, name);
-                }
-                // An explicitly class-local annotation name falls back to globals. The
-                // separate private cell is still used to guard which expressions run.
-                if name == CONDITIONAL
-                    && code.class_binds_conditional_name
-                    && self.scope_data(scope).exec_locals.is_some()
-                {
-                    return self.module_annotation_name(scope, name);
-                }
-                self.check_source_local(code, enclosing, name)?;
-                self.lookup(scope, name)
-            }
-            Expr::Named(named) if code.has_named_bindings => {
-                let Expr::Name(name) = named.target.as_ref() else {
-                    return Err(unsupported("assignment expression target"));
-                };
-                let mark = self.heap.temporary_mark();
-                let value = eval(self, &named.value)?;
-                self.store_named_result(scope, name.id.as_str(), value, mark)?;
-                Ok(value)
-            }
-            Expr::StringLiteral(_) | Expr::BytesLiteral(_) | Expr::NumberLiteral(_) => {
-                Ok(code.literals[&expr.range()])
-            }
-            Expr::FString(fstring) => {
-                let mark = self.heap.temporary_mark();
-                let mut parts = Vec::new();
-                for part in fstring.value.iter() {
-                    match part {
-                        ast::FStringPartRef::Literal(lit) if !lit.value.is_empty() => {
-                            parts.push(self.source_format_text(code, lit.range(), &lit.value));
-                        }
-                        ast::FStringPartRef::Literal(_) => {}
-                        ast::FStringPartRef::FString(part) => {
-                            self.source_format_elements(code, scope, &part.elements, &mut parts)?;
-                        }
-                    }
-                }
-                let result = self.join_source_format(parts)?;
-                self.keep_source_result(mark, result)
-            }
-            Expr::TString(template) => {
-                let strings = code.literals[&expr.range()];
-                let mut interpolations = Vec::new();
-                for field in template
-                    .value
-                    .iter()
-                    .flat_map(|s| s.elements.interpolations())
-                {
-                    let spec =
-                        imre_ast::strings::template_format_spec(field).map_err(unsupported)?;
-                    let spelling = code
-                        .template_expressions
-                        .get(&field.start())
-                        .ok_or_else(|| unsupported("t-string expression spelling"))?;
-                    let value = eval(self, &field.expression)?;
-                    let expression = self.text(spelling);
-                    let conversion = field
-                        .conversion
-                        .to_char()
-                        .map_or(NONE, |c| self.text(c.to_string()));
-                    let spec = match spec {
-                        Some(lit) => code.literals[&lit.range()],
-                        None => self.text(""),
-                    };
-                    interpolations
-                        .push(self.template_interpolation(value, expression, conversion, spec)?);
-                }
-                Ok(self.template_from_literal(strings, interpolations))
-            }
-            Expr::NoneLiteral(_) => Ok(NONE),
-            Expr::EllipsisLiteral(_) => Ok(value::ELLIPSIS),
-            Expr::BooleanLiteral(v) => Ok(if v.value { TRUE } else { FALSE }),
-            Expr::List(v) => {
-                let items = self.source_sequence_items(code, scope, &v.elts)?;
-                Ok(self.alloc(Value::List(items)))
-            }
-            Expr::Tuple(v) => {
-                if let Some(&id) = code.literals.get(&v.range()) {
-                    return Ok(id);
-                }
-                let items = self.source_sequence_items(code, scope, &v.elts)?;
-                Ok(self
-                    .heap
-                    .packed_tuple(items, v.elts.iter().all(imre_ast::literal_tuple_element)))
-            }
-            expr if let Some(targets) = code.eager_comprehension_targets.get(&expr.range())
-                && let Some(comp) = Plan::from_expr(expr) =>
-            {
-                self.source_eager_comprehension(code, scope, &comp, targets)
-            }
-            Expr::Set(display) => self.source_set_display(code, scope, &display.elts),
-            Expr::Dict(v) => {
-                let result = self.dict(vec![]);
-                for item in &v.items {
-                    if let Some(key) = &item.key {
-                        let key = eval(self, key)?;
-                        let value = eval(self, &item.value)?;
-                        self.put_item(result, key, value)?;
-                    } else {
-                        let mapping = eval(self, &item.value)?;
-                        self.merge_mapping(result, mapping, calls::MappingOperation::Unpack)?;
-                    }
-                }
-                Ok(result)
-            }
-            Expr::Attribute(v) => {
-                let base = eval(self, &v.value)?;
-                let result = self.lookup_attr(base, v.attr.as_str());
-                self.source_result(result, TracebackAnchor::Uniform)
-            }
-            Expr::Slice(v) => {
-                let mut parts = [NONE; 3];
-                for (part, expr) in parts.iter_mut().zip([&v.lower, &v.upper, &v.step]) {
-                    if let Some(expr) = expr {
-                        *part = eval(self, expr)?;
-                    }
-                }
-                Ok(self.alloc(Value::Slice(parts)))
-            }
-            Expr::Subscript(v) => {
-                let base = eval(self, &v.value)?;
-                let k = eval(self, &v.slice)?;
-                let result = self.get_item(base, k);
-                self.source_result(
-                    result,
-                    TracebackAnchor::delimiter(v.range, v.value.end(), b'['),
-                )
-            }
-            Expr::BoolOp(_) => Ok(self.source_bool_operand(code, scope, expr)?.0),
-            Expr::BinOp(v) => {
-                let a = eval(self, &v.left)?;
-                let b = eval(self, &v.right)?;
-                let result = self.op(v.op.as_str(), a, b, NONE);
-                self.source_result(result, TracebackAnchor::Hidden)
-            }
-            Expr::UnaryOp(v) => {
-                let value = eval(self, &v.operand)?;
-                self.source_unary(v.op, value)
-            }
-            Expr::Compare(v) => Ok(self.source_comparison(code, scope, v)?.0),
-            Expr::If(v) => {
-                let branch = if self.source_condition(code, scope, &v.test)? {
-                    &v.body
-                } else {
-                    &v.orelse
-                };
-                eval(self, branch)
-            }
-            Expr::Call(v) => {
-                let mark = self.heap.temporary_mark();
-                let f = if let Some(field) =
-                    imre_ast::direct_method(v, &code.method_imports, code.private_names.as_deref())
-                {
-                    self.source_call_method(code, scope, field)?
-                } else {
-                    eval(self, &v.func)?
-                };
-                let mut args = Vec::new();
-                let mut sole_star = None;
-                for arg in &v.arguments.args {
-                    if let Expr::Starred(star) = arg {
-                        let value = eval(self, &star.value)?;
-                        if v.arguments.args.len() == 1 {
-                            // CALL_FUNCTION_EX consumes a sole iterable after evaluating keywords.
-                            sole_star = Some(value);
-                        } else {
-                            self.expand_positional_items(&mut args, value, None)?;
-                        }
-                    } else {
-                        args.push(eval(self, arg)?);
-                    }
-                }
-                let keywords = &v.arguments.keywords;
-                let mut kwargs = Vec::new();
-                let mapping = if keywords.iter().any(|item| item.arg.is_none()) {
-                    Some(self.source_keyword_mapping(code, scope, Some(f), keywords)?)
-                } else {
-                    for item in keywords {
-                        let key = item.arg.as_ref().expect("named keyword");
-                        kwargs.push((key.to_string(), eval(self, &item.value)?));
-                    }
-                    None
-                };
-                if let Some(value) = sole_star {
-                    self.expand_positional_items(&mut args, value, Some(f))?;
-                }
-                let result = if let Some(mapping) = mapping {
-                    self.call_with_keyword_dict(scope, f, args, mapping)
-                } else {
-                    self.call_in_scope(scope, f, args, kwargs)
-                };
-                let anchor = TracebackAnchor::delimiter(v.range(), v.func.end(), b'(');
-                let result = self.source_result(result, anchor)?;
-                self.finish_call_operands(mark, result);
-                self.check_call_return(result)
-            }
-            _ => Err(unsupported(format!(
-                "{:?}",
-                ast::AnyNodeRef::from(expr).kind()
-            ))),
-        }
     }
 }

@@ -65,32 +65,6 @@ struct FrameLine<'a> {
     span: Option<TracebackSpan>,
 }
 
-/// Match the simple-call exception in CPython's single-line caret formatter.
-fn unhighlighted_call(raw: &str, start: usize, end: usize) -> bool {
-    let text = raw.trim_start();
-    let indent = raw.len() - text.len();
-    let (Some(prefix), Some(through)) = (raw.get(indent..start), raw.get(indent..end)) else {
-        return false;
-    };
-    if prefix.is_empty() {
-        return false;
-    }
-    let Ok(parsed) = ruff_python_parser::parse_module(text) else {
-        return false;
-    };
-    let Some(range) = parsed
-        .syntax()
-        .body
-        .first()
-        .and_then(imre_ast::unhighlighted_call)
-    else {
-        return false;
-    };
-    // traceback compares the AST's offsets with character offsets in the dedented display.
-    range.start().to_usize() == prefix.chars().count()
-        && range.end().to_usize() == through.chars().count()
-}
-
 fn display_width(text: &str) -> usize {
     if text.is_ascii() {
         return text.len();
@@ -117,7 +91,7 @@ impl<'a> FrameLine<'a> {
         // Only native code has the original embedded source at this position.
         let embedded_source = if !matches!(
             code.body,
-            crate::dynamic::value::Body::Native(_) | crate::dynamic::value::Body::Suspended(_)
+            crate::dynamic::value::Body::Native(..) | crate::dynamic::value::Body::Suspended(_)
         ) {
             None
         } else if matches!(&file, TraceText::Scalar(text) if text == "<string>") {
@@ -171,19 +145,6 @@ impl<'a> FrameLine<'a> {
                     TracebackAnchor::Uniform => s.start as usize,
                     TracebackAnchor::Column(column) => column as usize,
                     TracebackAnchor::Hidden => return None,
-                    TracebackAnchor::DelimiterAfter(_, b'(')
-                        if unhighlighted_call(raw, s.start as usize, end) =>
-                    {
-                        return None;
-                    }
-                    TracebackAnchor::DelimiterAfter(prefix, opener) => {
-                        imre_ast::traceback_delimiter(
-                            raw.as_bytes(),
-                            (s.start + prefix) as usize,
-                            end,
-                            opener,
-                        )?
-                    }
                 };
                 Some([s.start as usize, split, end])
             })

@@ -115,6 +115,19 @@ impl Saved {
             .is_some_and(|(_, frame)| frame.roots().take(limit).any(predicate))
     }
 
+    /// Number of strong edges owned by the parked native frame.
+    pub(super) fn root_count(&self) -> usize {
+        self.0
+            .borrow()
+            .as_ref()
+            .map_or(0, |(_, frame)| frame.roots().count())
+    }
+
+    /// Recheck one parked root while discovering or validating a bounded ownership path.
+    pub(super) fn root_at(&self, index: usize) -> Option<Id> {
+        self.0.borrow().as_ref()?.1.roots().nth(index)
+    }
+
     pub(super) fn visit(&self, visitor: &mut impl VisitReferences) {
         if let Some((_, activation)) = self.0.borrow().as_ref() {
             activation.visit(visitor);
@@ -123,22 +136,6 @@ impl Saved {
 }
 
 impl Context {
-    pub(super) fn resume_generator_input(
-        &mut self,
-        generator: Id,
-        owner: Id,
-        input: GeneratorInput,
-    ) -> Result<Option<Id>> {
-        let Value::Generator { code, .. } = *self.heap.get(generator) else {
-            unreachable!()
-        };
-        if matches!(self.code_object(code).body, Body::Suspended(_)) {
-            self.resume_native(generator, owner, input)
-        } else {
-            self.resume_source_input(generator, owner, input)
-        }
-    }
-
     pub(super) fn resume_native(
         &mut self,
         generator: Id,

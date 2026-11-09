@@ -1,5 +1,4 @@
 use super::{CycleSet, END, FindReferences, Heap, Id, MarkMode, Scope, UNMARKED, Value};
-use crate::dynamic::source_code::FinallyBlock;
 use crate::dynamic::stdlib::{BinaryFile, io::MemoryStream};
 use indexmap::IndexMap;
 use std::collections::{HashSet, VecDeque};
@@ -183,7 +182,7 @@ struct Links<'a> {
 enum Members<'a> {
     None,
     Sequence(&'a [Id]),
-    Generator(&'a [Id], &'a [FinallyBlock]),
+    Generator(&'a crate::dynamic::native_suspension::Saved),
     Names(&'a IndexMap<String, Id>, Option<Id>),
     Scope(&'a Scope),
     Keys(&'a [(Id, Id)]),
@@ -219,13 +218,9 @@ impl<'a> Links<'a> {
             Value::Coroutine { .. } | Value::CoroutineWrapper(_) => {
                 ([value.suspended_owner(), None], Members::None)
             }
-            Value::Generator {
-                iterators,
-                protected,
-                ..
-            } => (
+            Value::Generator { native, .. } => (
                 [value.suspended_owner(), None],
-                Members::Generator(iterators, protected),
+                native.as_ref().map_or(Members::None, Members::Generator),
             ),
             Value::Method {
                 receiver, callable, ..
@@ -279,9 +274,7 @@ impl<'a> Links<'a> {
             + match self.members {
                 Members::None => 0,
                 Members::Sequence(items) => items.len(),
-                Members::Generator(iterators, protected) => {
-                    iterators.len() + protected.len() * FinallyBlock::ROOT_SLOTS
-                }
+                Members::Generator(frame) => frame.root_count(),
                 Members::Scope(scope) => scope.names.len() + scope.closure.cells.len(),
                 Members::Names(names, extra) => names.len() + usize::from(extra.is_some()),
                 Members::Keys(entries) | Members::Values(entries) => entries.len(),
@@ -304,15 +297,7 @@ impl<'a> Links<'a> {
         match self.members {
             Members::None => None,
             Members::Sequence(items) => items.get(index).copied(),
-            Members::Generator(iterators, protected) => {
-                if let Some(&id) = iterators.get(index) {
-                    return Some(id);
-                }
-                let index = index - iterators.len();
-                protected
-                    .get(index / FinallyBlock::ROOT_SLOTS)?
-                    .root_slots()[index % FinallyBlock::ROOT_SLOTS]
-            }
+            Members::Generator(frame) => frame.root_at(index),
             Members::Scope(scope) => {
                 if index < scope.names.len() {
                     scope.names.get_index(index).map(|(_, id)| *id)

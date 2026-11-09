@@ -1,7 +1,6 @@
 //! Move executable code and lock ownership into a fresh boxed context.
 //! Only the compiler can certify that the function needs no surrounding heap.
 
-use super::source_code::CapturedAcquire;
 use super::thread_worker::Operation;
 use super::value::{Body, Code, CodeObject};
 use super::{Context, Error, Id, NONE, Result, Value, copy_label, ffi};
@@ -16,13 +15,8 @@ enum Argument {
     Builtin(&'static str),
 }
 
-enum Entry {
-    Native(Code),
-    Source(CapturedAcquire),
-}
-
 pub(super) struct Callback {
-    entry: Entry,
+    entry: Code,
     module: String,
     name: String,
     qualname: String,
@@ -135,14 +129,18 @@ impl Callback {
             return Ok(None);
         };
         let code = ctx.code_object(code);
-        if code.is_coroutine() || !code.closure_supported {
+        // Heap-local code operands do not cross the isolated worker interpreter.
+        if matches!(code.body, Body::Native(_, operands) if operands != NONE)
+            || code.is_coroutine()
+            || !code.closure_supported
+        {
             return Ok(None);
         }
         let signature = ctx.str_value(code.parameters)?;
         let meta: serde_json::Value = serde_json::from_str(signature)
             .map_err(|e| Error::new("SystemError", e.to_string()))?;
         if let Some(receiver) = receiver {
-            if !matches!(code.body, Body::Native(_)) {
+            if !matches!(code.body, Body::Native(_, NONE)) {
                 return Ok(None);
             }
             let Some(field) = meta["thread_bound_lock_field"].as_str() else {
@@ -188,17 +186,9 @@ impl Callback {
             && let Value::Cell(Some(id)) = *ctx.heap.get(*cell)
         {
             let entry = match &code.body {
-                Body::Native(entry) if meta["thread_captured_locks"].as_array().is_some_and(|names|
+                Body::Native(entry, NONE) if meta["thread_captured_locks"].as_array().is_some_and(|names|
                     matches!(names.as_slice(), [one] if one.as_str() == Some(name.as_str()))) =>
-                    Entry::Native(*entry),
-                Body::Source(program) if ["posonly", "positional", "kwonly"].iter().all(|key|
-                    meta[*key].as_array().is_some_and(Vec::is_empty))
-                    && meta["varargs"].is_null() && meta["kwargs"].is_null() => {
-                    let Some(original) = program.captured_acquire(name) else {
-                        return Ok(None);
-                    };
-                    Entry::Source(original)
-                }
+                    *entry,
                 _ => return Ok(None),
             };
             let receiver = match ctx.heap.get(id) {
@@ -239,7 +229,7 @@ impl Callback {
                 // Source calls without transferable operands still fall through to normal
                 // target admission. Keep the existing diagnostic for certified native code.
                 let unavailable = || match code.body {
-                    Body::Native(_) => Err(unsupported()),
+                    Body::Native(..) => Err(unsupported()),
                     _ => Ok(None),
                 };
                 let [first, last] = names.as_slice() else {
@@ -268,7 +258,7 @@ impl Callback {
             }
             return Ok(None);
         }
-        let Body::Native(entry) = code.body else {
+        let Body::Native(entry, NONE) = code.body else {
             return Ok(None);
         };
         if closure != NONE
@@ -345,7 +335,7 @@ impl Callback {
             roots.push(id);
             values.push(value);
         }
-        let callback = Self::from_code(ctx, code, scope, Entry::Native(entry), values)?;
+        let callback = Self::from_code(ctx, code, scope, entry, values)?;
         Ok(Some((Operation::Python(Box::new(callback)), roots)))
     }
 
@@ -353,7 +343,7 @@ impl Callback {
         ctx: &Context,
         code: &CodeObject,
         scope: Id,
-        entry: Entry,
+        entry: Code,
         values: Vec<Argument>,
     ) -> Result<Self> {
         Ok(Self {
@@ -402,19 +392,14 @@ impl Callback {
         let signature = ctx.text(self.signature);
         let filename = ctx.text_codepoints(self.filename);
         let location = (filename, self.first_line);
-        let code = match self.entry {
-            Entry::Native(entry) => ctx.prelinked_code(
-                Body::Native(entry),
-                scope,
-                name,
-                signature,
-                (qualname, NONE),
-                location,
-            ),
-            Entry::Source(original) => {
-                original.load(&mut ctx, scope, name, signature, qualname, location)?
-            }
-        };
+        let code = ctx.prelinked_code(
+            Body::Native(self.entry, NONE),
+            scope,
+            name,
+            signature,
+            (qualname, NONE),
+            location,
+        );
         let defaults = ctx.dict(Vec::new());
         let function =
             ctx.define_function(code, scope, name, defaults, qualname, NONE, NONE, false)?;

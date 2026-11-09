@@ -7371,6 +7371,13 @@ impl<'a> Checker<'a> {
                     {
                         return Err(self.scoped_builtin_error(name, expression));
                     }
+                    if let Some(Binding::Definition(_)) = self.resolve(expression) {
+                        return Err(self.classified_error(
+                            Kind::ScopedObject,
+                            expression,
+                            "using this definition as a value requires object dispatch",
+                        ));
+                    }
                     return Err(error(
                         self.source,
                         expression,
@@ -9223,6 +9230,29 @@ impl<'a> Checker<'a> {
         }
 
         if let Some(name) = self.boxed_builtin_callable(&call.func) {
+            if name == "exec"
+                && self
+                    .graph
+                    .session
+                    .is_stdlib_function(self.module, &call.func, "builtins", name)
+                && call.arguments.keywords.is_empty()
+                && let [operand] = call.arguments.args.as_ref()
+                && self.graph.session.scalar_type(self.module, operand) == Some(Type::Str)
+            {
+                match self.expr(operand) {
+                    Ok(source) if source.ty == Type::Str => {
+                        return Ok(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::Builtin(
+                                Builtin::ExecText(self.module, operand.range()),
+                                vec![source],
+                            ),
+                        });
+                    }
+                    Err(error) if !error.is_object() => return Err(error),
+                    _ => {}
+                }
+            }
             return Err(self.scoped_builtin_error(name, call));
         }
         if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii)) {
@@ -12643,11 +12673,23 @@ impl<'a> Checker<'a> {
                 return Err(self.object_builtin_error(name, call));
             }
             _ => {
-                return Err(error(
+                let diagnostic = Diagnostic::at(
                     self.source,
                     call,
-                    "unknown function or unsupported builtin arguments",
-                ));
+                    "unknown function or unsupported builtin arguments".to_owned(),
+                );
+                return Err(if matches!(name, "exec" | "eval")
+                    && self.graph.session.is_stdlib_function(
+                        self.module,
+                        &call.func,
+                        "builtins",
+                        name,
+                    ) {
+                    diagnostic.classified(Kind::ExecutionOperand(self.module))
+                } else {
+                    diagnostic
+                }
+                .into());
             }
         };
         Ok(Expr {

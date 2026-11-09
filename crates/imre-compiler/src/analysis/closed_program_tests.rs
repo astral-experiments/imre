@@ -81,6 +81,7 @@ fn registered_parameter_changes_recheck_the_unchanged_caller() {
             root,
             &[],
             sources.iter().map(|s| RegisteredSource::new(s, true, None)),
+            None,
             Some(&graph),
         )
     };
@@ -105,6 +106,7 @@ fn registered_parameter_changes_recheck_the_unchanged_caller() {
             .iter()
             .enumerate()
             .map(|(i, s)| RegisteredSource::new(s, i == 0, None)),
+        None,
         Some(&graph),
     )
     .unwrap_err();
@@ -135,6 +137,7 @@ fn new_registration_checks_dormant_bodies_against_registered_declarations() {
             .enumerate()
             .map(|(i, s)| RegisteredSource::new(s, i == 1, None)),
         None,
+        None,
     )
     .unwrap_err();
     assert!(
@@ -149,6 +152,7 @@ fn new_registration_checks_dormant_bodies_against_registered_declarations() {
             .iter()
             .enumerate()
             .map(|(i, s)| RegisteredSource::new(s, i == 1, None)),
+        None,
         None,
     )
     .unwrap();
@@ -180,6 +184,7 @@ fn registered_python_shadow_provides_the_call_signature() {
                 .enumerate()
                 .map(|(i, s)| RegisteredSource::new(s, i == 1, None)),
             None,
+            None,
         )
     };
     verify(&sources).unwrap();
@@ -197,6 +202,57 @@ fn resolved_bundled_source_keeps_its_declaration() {
     let main = project.path().join("main.py");
     fs::write(&main, "from http import HTTPStatus\n\ndef label(value: HTTPStatus) -> str:\n    return 'ok'\n\nprint(label(HTTPStatus.OK))\n").unwrap();
     crate::check_file(&main, None).unwrap();
+}
+
+#[test]
+fn functions_selected_from_a_mapping_keep_python_argument_binding() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    fs::write(
+        &entry,
+        r#"import sys
+
+def plus(value):
+    return value + 1
+
+def twice(value):
+    return value * 2
+
+operations = {"a": plus, "b": twice}
+class Hooks:
+    pass
+setattr(Hooks, sys.argv[1], staticmethod(operations[sys.argv[2]]))
+print(getattr(Hooks, sys.argv[1])(7))
+"#,
+    )
+    .unwrap();
+    crate::check_file(&entry, None).unwrap();
+}
+
+#[test]
+fn computed_factory_preserves_dormant_declared_calls() {
+    let tmp = tempdir().unwrap();
+    let source = tmp.path().join("main.py");
+    let scores = tmp.path().join("scores.py");
+    fs::write(&source, "import scores\nfrom dataclasses import dataclass, field\ndef one(): return 1\nf = {0: one}[0]\n@dataclass\nclass Result:\n    n: int = field(default_factory=f)\nprint(Result().n)\n").unwrap();
+    fs::write(
+        &scores,
+        "def take(n: int) -> int: return n\nif False:\n    take('x')\n",
+    )
+    .unwrap();
+    let error = crate::check_file(&source, None).unwrap_err();
+    assert!(
+        error.contains("scores.py:3:10") && error.contains("expected int, got str"),
+        "{error}"
+    );
+    fs::write(
+        &scores,
+        "def take(n: int) -> int: return n\nif False:\n    take(1)\n",
+    )
+    .unwrap();
+    crate::check_file(&source, None).unwrap();
+    fs::write(&scores, "from typing import TypeVar\nT = TypeVar('T')\ndef take(n: T) -> T: return n\nif False:\n    take('x')\n").unwrap();
+    crate::check_file(&source, None).unwrap();
 }
 
 #[test]
@@ -371,4 +427,141 @@ fn retained_native_candidate_registers_its_original_source_owner() {
         error.contains("package initializer appeared during compilation"),
         "{error}"
     );
+}
+
+#[test]
+fn run_path_checks_the_bound_filename_and_linked_body() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    let report = project.path().join("report.py");
+    fs::write(&report, "print(__name__)\n").unwrap();
+    let options = crate::CompileOptions {
+        include_modules: ["report".to_owned()].into(),
+        ..Default::default()
+    };
+    let check = |source| {
+        fs::write(&entry, source).unwrap();
+        crate::check_file_with_options(&entry, None, &options)
+    };
+    let prefix = "from runpy import run_path as run\nimport sys\n";
+    check(format!(
+        "{prefix}run(run_name='report', path_name={:?})",
+        report.to_str().unwrap()
+    ))
+    .unwrap();
+    let error = check(format!(
+        "{prefix}run(run_name='report', path_name=sys.argv[1])"
+    ))
+    .unwrap_err();
+    assert!(
+        error.contains("main.py:3:34") && error.contains("handlers[key]()"),
+        "{error}"
+    );
+    check(format!("{prefix}saved = run\nprint(saved.__name__)")).unwrap();
+    check(
+        "import runpy, sys\nprint(sys.modules['runpy'].__name__, runpy.run_path.__name__)"
+            .to_string(),
+    )
+    .unwrap();
+    let error = check(format!("{prefix}saved = run\nsaved(sys.argv[1])")).unwrap_err();
+    assert!(
+        error.contains("main.py:4:7") && error.contains("open executable"),
+        "{error}"
+    );
+}
+
+#[test]
+fn run_path_selected_from_mixed_bindings_requires_a_rewrite() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    fs::write(&entry, "from runpy import run_path as go\nimport sys\ndef other(path): print(path)\nif sys.argv[1]: go = other\ngo(sys.argv[2])\n").unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(
+        error.contains("main.py:5:1") && error.contains("selected callable"),
+        "{error}"
+    );
+}
+
+#[test]
+fn external_caller_checks_the_execution_operand() {
+    let project = tempdir().unwrap();
+    let other = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    fs::write(&entry, "import invoice\ninvoice.run()\n").unwrap();
+    fs::write(
+        other.path().join("invoice.py"),
+        "from runpy import run_path\nimport sys\ndef run(): run_path(sys.argv[1])\n",
+    )
+    .unwrap();
+    let options = crate::CompileOptions {
+        module_entry: Some("invoice".to_owned()),
+        extension_paths: vec![other.path().to_owned()],
+        ..Default::default()
+    };
+    let error = crate::check_file_with_options(&entry, None, &options).unwrap_err();
+    assert!(
+        error.contains("invoice.py:3:21") && error.contains("open executable filename"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_script_named_runpy_does_not_own_the_imported_sdk_function() {
+    let project = tempdir().unwrap();
+    let root = project.path();
+    let sources = [
+        (
+            "__main__".into(),
+            root.join("runpy.py"),
+            "def run_path(path): return path\nrun_path(input())\n".into(),
+        ),
+        (
+            "worker".into(),
+            root.join("worker.py"),
+            "from runpy import run_path\nimport sys\nrun_path(sys.argv[1])\n".into(),
+        ),
+    ];
+    let error = super::check_registered_project(
+        root,
+        &[],
+        sources.iter().map(|s| RegisteredSource::new(s, true, None)),
+        Some(&|_| false),
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("worker.py:3:10") && error.contains("open executable filename"),
+        "{error}"
+    );
+}
+
+#[test]
+fn registered_program_reports_both_execution_boundaries() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    fs::write(
+        &entry,
+        "import runpy, sys\noperations = {'run': exec}\noperations['run'](input())\nrunpy.run_path(sys.argv[1])\n",
+    ).unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(
+        error.contains("builtins.exec")
+            && error.contains("main.py:4:16")
+            && error.contains("open executable filename"),
+        "{error}"
+    );
+}
+
+#[test]
+fn native_lowering_keeps_the_unregistered_eval_operand_diagnostic() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("job.py");
+    fs::write(
+        &entry,
+        "import subprocess\nimport sys\ndef run(command):\n    return subprocess.run(command, capture_output=True, text=True, check=True).stdout\nprint(eval(run(['/usr/bin/printf', '%s', sys.argv[1]])))\n",
+    ).unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(error.contains("job.py:5:12"), "{error}");
+    assert!(error.contains("builtins.eval"), "{error}");
+    assert!(error.contains("select one by name"), "{error}");
 }

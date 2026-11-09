@@ -59,16 +59,23 @@ def check_slots(function):
     assert inner.__code__.co_varnames == ()
 
 
+def compiled_slots():
+    from types import FunctionType
+
+    check_slots(local_slots)
+    method = Views().get
+    assert FunctionType.__get__(Views.get, method.__self__).__func__ is Views.get
+    assert FunctionType.__code__.__get__(method.__func__) is method.__code__
+    capture = lambda value: ((cell := value), lambda: cell)[1]
+    assert capture.__code__.co_varnames == ("value",)
+    assert capture.__code__.co_cellvars == ("cell",) and capture(6)() == 6
+
+
 def current():
     from inspect import isasyncgenfunction, isgeneratorfunction
     from types import FunctionType, GeneratorType, coroutine
 
-    check_slots(local_slots)
-    loaded = {}
-    exec("def f(captured, /, ordinary, *args, key, **kwargs):\n"
-         "    z = ordinary\n    a = key\n    stash = args\n    cache = kwargs\n"
-         "    def inner(): return captured, stash, cache\n    return z, a, inner", loaded)
-    check_slots(loaded["f"])
+    compiled_slots()
 
     def values():
         yield 1
@@ -147,11 +154,6 @@ def cleanup():
 
     saved = view.__code__
     method = Views().get
-    assert FunctionType.__get__(Views.get, method.__self__).__func__ is Views.get
-    assert FunctionType.__code__.__get__(method.__func__) is method.__code__
-    capture = lambda value: ((cell := value), lambda: cell)[1]
-    assert capture.__code__.co_varnames == ("value",)
-    assert capture.__code__.co_cellvars == ("cell",) and capture(6)() == 6
     assert mixed.__code__.co_argcount == 3 and variadic.__code__.co_argcount == 0
     assert mixed.__code__.co_posonlyargcount == mixed.__code__.co_kwonlyargcount == 1
     assert variadic.__code__.co_posonlyargcount == variadic.__code__.co_kwonlyargcount == 0

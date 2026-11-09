@@ -43,7 +43,7 @@ const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--ex
 Build options:
   --module-root DIRECTORY  --runtime LIBRARY.a  --emit-llvm FILE.ll
   --reachable-only         Compile definitions reachable from program entry and module initialization
-  --extension-path DIRECTORY  Search a directory for Python modules and Imre extensions (repeatable)
+  --extension-path PATH       Search a directory or ZIP for Python modules, or a directory for Imre extensions (repeatable)
   --include-module MODULE    Link a source module for runtime import (repeatable)
   --clang CLANG  --opt-level 0|1|2|3  --sanitize  --no-cache  --whole-program
   -q, --quiet              Suppress build status

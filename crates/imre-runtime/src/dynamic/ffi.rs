@@ -934,7 +934,7 @@ pub(super) unsafe extern "C" fn imre_dyn_register_source(
     unsafe { register_compiled(ctx, name, file, text, len, ModuleInitializer::Native(code)) }
 }
 
-/// Register an initializer compiled from a filesystem source input.
+/// Accept older physical file registrations that do not carry compiler flags.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_register_file_source(
     ctx: *mut Context,
@@ -959,7 +959,53 @@ pub(super) unsafe extern "C" fn imre_dyn_register_file_source(
             file,
             std::ptr::null(),
             0,
-            ModuleInitializer::File(code, digest),
+            ModuleInitializer::File(code, digest, None),
+        )
+    }
+}
+
+/// Register a physical file's checked bytes, future flags and compiled initializer.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_file_code(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    digest: *const [u8; 32],
+    flags: u32,
+    code: Code,
+) {
+    // SAFETY: the compiler supplies a static digest, names and module entry point.
+    unsafe {
+        register_compiled(
+            ctx,
+            name,
+            file,
+            std::ptr::null(),
+            0,
+            ModuleInitializer::File(code, Some(&*digest), Some(flags)),
+        );
+    }
+}
+
+/// Register the compiled body for a ZIP member without adding a directory finder.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_zip_source(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    digest: *const [u8; 32],
+    flags: u32,
+    code: Code,
+) {
+    // SAFETY: native registration supplies static names, digest and entry point.
+    unsafe {
+        register_compiled(
+            ctx,
+            name,
+            file,
+            std::ptr::null(),
+            0,
+            ModuleInitializer::Zip(code, &*digest, flags),
         )
     }
 }
@@ -994,32 +1040,45 @@ unsafe fn register_compiled(
     register_source(ctx, name, file, initializer, bundled_text);
 }
 
-/// Register a bundled Python module whose loader compiles its source on request.
+/// Register a discovery-time error and preserve the source for loader inspection.
 #[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_register_bundled_source(
+pub(super) unsafe extern "C" fn imre_dyn_register_module_error(
     ctx: *mut Context,
     name: *const c_char,
     file: *const c_char,
     text: *const u8,
     len: u64,
+    message: *const c_char,
+    position: *const [u32; 4],
+    details: u8,
+    archive_digest: *const [u8; 32],
 ) {
-    // SAFETY: the compiler supplies static UTF-8 source and module names.
-    let (ctx, name, file, bytes) = unsafe {
-        (
-            &mut *ctx,
-            cstr(name),
-            native_path(file),
-            std::slice::from_raw_parts(text, len as usize),
-        )
-    };
-    let source = std::str::from_utf8(bytes).expect("compiler-emitted Python is UTF-8");
-    register_source(
-        ctx,
-        name,
-        file,
-        ModuleInitializer::Source(source),
-        Some(bytes),
-    );
+    // SAFETY: the compiler emits all strings and the position as static constants.
+    unsafe {
+        let position = position.as_ref();
+        let parser_line = (details == 2).then(|| {
+            let source = std::str::from_utf8(std::slice::from_raw_parts(text, len as usize))
+                .expect("compiler emitted UTF-8");
+            source
+                .split_inclusive('\n')
+                .nth(position.expect("parser error position")[0] as usize - 1)
+                .unwrap_or("")
+        });
+        register_compiled(
+            ctx,
+            name,
+            file,
+            text,
+            len,
+            ModuleInitializer::Invalid {
+                message: cstr(message),
+                position,
+                in_args: details != 0,
+                parser_line,
+                archive_digest: archive_digest.as_ref(),
+            },
+        );
+    }
 }
 
 /// Bind an emitted expression to its actual annotation string. Equal runtime
@@ -2022,7 +2081,7 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
         // SAFETY: the emitter initializes the union with the function ABI selected by the tag.
         let body = unsafe {
             match definition.tag {
-                0 => value::Body::Native(definition.entry.native),
+                0 => value::Body::Native(definition.entry.native, NONE),
                 value::NATIVE_SUSPENDED_BODY => value::Body::Suspended(definition.entry.suspended),
                 _ => {
                     return finish(
@@ -2498,31 +2557,37 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
 ) {
     // SAFETY: the emitter supplies its current frame's explicitly live temporaries.
     let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
-    // SAFETY: the emitter passes the same static filename constant at each statement in a source.
-    let file = match unsafe { ctx.native_filename_label(file) } {
-        Ok(label) => label,
-        Err(error) => {
-            finish(ctx, Err(error));
-            return;
-        }
-    };
-    ctx.checkpoint(
-        live,
-        value::Location {
-            file,
-            line,
-            span: None,
-        },
-        caught,
-    );
-    #[cfg(unix)]
-    if let Err(mut error) = ctx.dispatch_signals() {
-        ctx.record_exception_frame(&mut error, None);
-        ctx.pending = Some(error);
+    // SAFETY: emitted filenames are static native strings for the life of the executable.
+    if let Err(error) = unsafe { ctx.native_statement(live, file, line, caught) } {
+        finish(ctx, Err(error));
     }
 }
 
 impl Context {
+    /// Publish a native statement. Its caller records a failure once at the frame boundary.
+    pub(super) unsafe fn native_statement(
+        &mut self,
+        live: &[Id],
+        file: *const c_char,
+        line: u32,
+        caught: Id,
+    ) -> Result<()> {
+        // SAFETY: both the emitted ABI and native providers pass a static native filename.
+        let file = unsafe { self.native_filename_label(file) }?;
+        self.checkpoint(
+            live,
+            value::Location {
+                file,
+                line,
+                span: None,
+            },
+            caught,
+        );
+        #[cfg(unix)]
+        self.dispatch_signals()?;
+        Ok(())
+    }
+
     /// Decode a static, NUL-terminated native filename once for statement diagnostics.
     unsafe fn native_filename_label(&mut self, file: *const c_char) -> Result<Arc<str>> {
         if let Some(label) = self.native_filename_labels.get(&file.addr()) {
@@ -2926,13 +2991,30 @@ mod tests {
 
     #[test]
     fn native_function_construction_uses_interpreter_builtins_without_mutating_globals() {
+        unsafe extern "C" fn size(raw: *mut Context, scope: Id) -> Id {
+            // SAFETY: the native function ABI supplies the active, exclusively borrowed Context.
+            let ctx = unsafe { &mut *raw };
+            let result = ctx.lookup(scope, "len").and_then(|callee| {
+                let text = ctx.text("abc");
+                ctx.call(callee, vec![text], Vec::new())
+            });
+            finish(ctx, result)
+        }
+
         let mut ctx = new_context(serde_json::json!({"paths": []}), ["imre"]);
-        let namespace = ctx.dict(Vec::new());
-        let source = ctx.text("def size(): return len('abc')");
-        ctx.exec_source(source, namespace, None, None).unwrap();
-        let builtins = ctx.dict_named_item(namespace, "__builtins__").unwrap();
-        let original = ctx.dict_named_item(namespace, "size").unwrap();
-        let code = ctx.lookup_attr(original, "__code__").unwrap();
+        let builtins = ctx.default_source_builtins().unwrap();
+        let scope = ctx.scope("example", None);
+        let name = ctx.text("size");
+        let parameters = ctx.text(r#"{"scope_complete":true,"scope_reads":["len"]}"#);
+        let filename = ctx.text("example.py");
+        let code = ctx.prelinked_code(
+            value::Body::Native(size, NONE),
+            scope,
+            name,
+            parameters,
+            (name, NONE),
+            (filename, 1),
+        );
         let globals = ctx.dict(Vec::new());
         let function = ctx.construct_function(&[code, globals], &[]).unwrap();
         assert_eq!(ctx.lookup_attr(function, "__builtins__").unwrap(), builtins);
@@ -3148,7 +3230,7 @@ mod tests {
         };
         let filename = ctx.text(location.file.as_ref());
         let code = ctx.prelinked_code(
-            value::Body::Native(read),
+            value::Body::Native(read, NONE),
             outer,
             name,
             signature,

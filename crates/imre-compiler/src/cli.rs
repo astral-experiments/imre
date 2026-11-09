@@ -91,12 +91,6 @@ impl BuildOptions {
         if !flags.ignore_environment
             && let Some(paths) = env::var_os("PYTHONPATH").filter(|value| !value.is_empty())
         {
-            let search_archives = match &invocation {
-                Invocation::Command(_) | Invocation::Module { .. } => true,
-                Invocation::Script { path, .. } => {
-                    path.is_file() && !imre_compiler::is_zip_path(path)
-                }
-            };
             for path in env::split_paths(&paths) {
                 let path = if path.as_os_str().is_empty() {
                     PathBuf::from(".")
@@ -104,7 +98,7 @@ impl BuildOptions {
                     path
                 };
                 if !path.is_dir() {
-                    if !search_archives || !imre_compiler::is_zip_path(&path) {
+                    if !imre_compiler::is_zip_path(&path) {
                         continue;
                     }
                     options
@@ -262,7 +256,15 @@ impl BuildOptions {
                 }
                 Some("--reachable-only") => self.compile.reachable_only = true,
                 Some("--module-root") => self.module_root = Some(value()?.into()),
-                Some("--extension-path") => self.compile.extension_paths.push(value()?.into()),
+                Some("--extension-path") => {
+                    let path: PathBuf = value()?.into();
+                    if imre_compiler::is_zip_path(&path) {
+                        self.compile
+                            .python_archive_indices
+                            .push(self.compile.extension_paths.len());
+                    }
+                    self.compile.extension_paths.push(path);
+                }
                 Some("--include-module") => {
                     let name = value()?
                         .into_string()

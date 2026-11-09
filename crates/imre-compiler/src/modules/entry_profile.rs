@@ -164,10 +164,9 @@ def choose(debug: bool) -> str:
         let graph = super::super::SourceGraph::load_with(
             &entry,
             None,
-            &[],
+            &options,
             Default::default(),
-            true,
-            Some(&profile),
+            &mut None,
         )
         .unwrap();
         let (module, service) = graph

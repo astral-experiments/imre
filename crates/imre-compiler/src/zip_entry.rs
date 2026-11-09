@@ -1,4 +1,4 @@
-//! Discover imports of a ZIP application while leaving execution to zipimport and runpy.
+//! Resolve ZIP member snapshots for native lowering and Python's ZIP loader.
 
 use std::fs::File;
 use std::io::{BufReader, Cursor, Read, Seek};
@@ -8,26 +8,36 @@ use zip::ZipArchive;
 
 use crate::watch::FileSystem;
 
+pub(crate) struct Member {
+    pub(crate) path: PathBuf,
+    pub(crate) source: String,
+    pub(crate) package: bool,
+    pub(crate) digest: [u8; 32],
+}
+
 /// Locate the archive for a Python CLI operand, including a path inside an archive.
-fn archive_path<'a>(path: &'a Path, filesystem: &mut FileSystem<'_>) -> Option<&'a Path> {
-    let path = path.components().as_path();
-    let archive = path.ancestors().find(|part| filesystem.exists(part))?;
-    filesystem.is_file(archive).then_some(archive)
+fn archive_path<'a>(
+    path: &'a Path,
+    filesystem: &mut FileSystem<'_>,
+    mut inputs: Option<&mut crate::SourceInputs>,
+) -> Option<&'a Path> {
+    for part in path.components().as_path().ancestors() {
+        let is_file = filesystem.is_file(part);
+        if let Some(inputs) = inputs.as_deref_mut() {
+            inputs.file_checks.insert(part.to_owned(), is_file);
+        }
+        if is_file || filesystem.exists(part) {
+            return is_file.then_some(part);
+        }
+    }
+    None
 }
 
 /// Test the archive directory itself, so executable stubs and arbitrary suffixes work.
 pub fn is_zip_path(path: &Path) -> bool {
-    archive_path(path, &mut FileSystem::default())
+    archive_path(path, &mut FileSystem::default(), None)
         .and_then(|path| File::open(path).ok())
         .is_some_and(|file| ZipArchive::new(BufReader::new(file)).is_ok())
-}
-
-/// Match parsed import names against the same member list used to package the stdlib.
-pub(crate) fn installed_member(name: &str) -> Option<&'static str> {
-    module_member(
-        name,
-        include_str!("../stdlib/installed-sources.txt").lines(),
-    )
 }
 
 /// Find an imported module in the SDK archive's existing build-time member index.
@@ -70,8 +80,21 @@ pub(crate) fn installed_source(member: &str) -> Result<String, String> {
 }
 
 pub(crate) struct ZipSources {
+    path: PathBuf,
     archive: ZipArchive<BufReader<File>>,
     prefix: String,
+}
+
+/// Return the dotted import name for a Python member relative to its search root.
+pub(crate) fn python_module_name(relative: &str) -> Option<String> {
+    let stem = relative
+        .strip_suffix("/__init__.py")
+        .or_else(|| relative.strip_suffix(".py"))?;
+    if stem.contains('.') {
+        return None;
+    }
+    let name = stem.replace('/', ".");
+    crate::modules::valid_module_operand(&name).then_some(name)
 }
 
 impl ZipSources {
@@ -80,17 +103,29 @@ impl ZipSources {
         inputs: &mut crate::SourceInputs,
         filesystem: &mut FileSystem<'_>,
     ) -> Result<Self, String> {
-        let archive = archive_path(path, filesystem)
-            .ok_or_else(|| format!("{}: archive not found", path.display()))?;
-        let identity = filesystem.canonicalize(archive);
-        let (mut file, digest) = filesystem.open_hashed(archive).map_err(|e| e.to_string())?;
+        Self::discover(path, inputs, filesystem)?
+            .ok_or_else(|| format!("{}: no readable ZIP archive", path.display()))
+    }
+
+    pub(crate) fn discover(
+        path: &Path,
+        inputs: &mut crate::SourceInputs,
+        filesystem: &mut FileSystem<'_>,
+    ) -> Result<Option<Self>, String> {
+        let Some(archive) = archive_path(path, filesystem, Some(inputs)) else {
+            return Ok(None);
+        };
+        let (Ok(identity), Ok((mut file, digest))) = (
+            filesystem.canonicalize(archive),
+            filesystem.open_hashed(archive),
+        ) else {
+            // A sys.path entry that the finder cannot open supplies no modules.
+            // Revisit this lookup before an executable cache hit if the file becomes readable.
+            inputs.missing.push(archive.to_owned());
+            return Ok(None);
+        };
         file.rewind().map_err(|e| e.to_string())?;
-        let reader = ZipArchive::new(BufReader::new(file)).map_err(|e| e.to_string())?;
-        let input = (
-            archive.to_owned(),
-            identity.map_err(|e| e.to_string())?,
-            digest.to_hex().to_string(),
-        );
+        let input = (archive.to_owned(), identity, digest.to_hex().to_string());
         if let Some(previous) = inputs.files.iter().find(|(path, _, _)| path == archive) {
             if previous != &input {
                 return Err(format!(
@@ -102,15 +137,19 @@ impl ZipSources {
             // Multiple declared search directories can belong to the same archive file.
             inputs.files.push(input);
         }
+        let Ok(reader) = ZipArchive::new(BufReader::new(file)) else {
+            return Ok(None);
+        };
         let prefix = path
             .strip_prefix(archive)
             .map_err(|e| e.to_string())?
             .to_str()
             .ok_or("ZIP entry path is not UTF-8")?;
-        Ok(Self {
+        Ok(Some(Self {
+            path: archive.to_owned(),
             archive: reader,
             prefix: prefix.to_owned(),
-        })
+        }))
     }
 
     fn stem(&self, name: &str) -> String {
@@ -120,6 +159,25 @@ impl ZipSources {
         } else {
             format!("{}/{stem}", self.prefix)
         }
+    }
+
+    /// Enumerate only Python module spellings exposed under this declared ZIP search root.
+    pub(crate) fn modules(&self) -> impl Iterator<Item = String> {
+        let prefix = self.prefix.as_str();
+        self.archive.file_names().filter_map(move |member| {
+            let relative = if prefix.is_empty() {
+                member
+            } else {
+                member.strip_prefix(prefix)?.strip_prefix('/')?
+            };
+            let name = python_module_name(relative)?;
+            // A resource directory without a package or a ZIP directory entry is not a finder path.
+            let parents_are_importable = name.match_indices('.').all(|(end, _)| {
+                let parent = &name[..end];
+                self.package(parent) == Some(true) || self.contains_namespace(parent)
+            });
+            parents_are_importable.then_some(name)
+        })
     }
 
     /// Follow zipimport's package-before-module and bytecode-before-source search.
@@ -150,13 +208,29 @@ impl ZipSources {
         self.archive.index_for_name(&directory).is_some()
     }
 
-    /// Only collect import hints. The launch-time loader reports source and bytecode errors.
-    pub(crate) fn module(&mut self, name: &str) -> Option<(PathBuf, String, bool)> {
+    /// Retain the origin and raw fingerprint used by zipimport.get_code.
+    pub(crate) fn module(&mut self, name: &str) -> Option<Member> {
+        use sha2::{Digest, Sha256};
         let (member, package) = self.module_member(name)?;
         if member.ends_with(".pyc") {
             return None;
         }
-        let source = read_source(&mut self.archive, &member)?;
-        Some((member.into(), source, package))
+        let path = self.path.join(&member);
+        let mut bytes = Vec::new();
+        self.archive
+            .by_name(&member)
+            .ok()?
+            .read_to_end(&mut bytes)
+            .ok()?;
+        let digest = Sha256::digest(&bytes).into();
+        let source =
+            imre_ast::source_encoding::decode_compile_source(&bytes, |_, error| error.to_string())
+                .ok()?;
+        Some(Member {
+            path,
+            source,
+            package,
+            digest,
+        })
     }
 }

@@ -108,3 +108,29 @@ try:
     assert calls == ["index"]
 finally:
     method.__kwdefaults__ = defaults
+
+
+# A selected compiler may delegate the exact bytes it received to the ordinary builtin.
+def compile_original(data, filename, mode, *, dont_inherit, optimize):
+    calls.append((data, filename, mode, dont_inherit, optimize))
+    return compile(data, filename, mode)
+
+
+convert = FunctionType(method.__code__, dict(method.__globals__, compile=compile_original))
+convert.__kwdefaults__ = method.__kwdefaults__
+calls.clear()
+namespace = {}
+exec(convert(loader, original, origin), namespace)
+assert calls == [(original, origin, "exec", True, -1)]
+assert namespace["value"] == 41
+
+
+# The filename still identifies the loaded file when the caller supplies different bytes.
+changed = compile(b"value = 42\n", origin, "exec")
+assert changed.co_filename == origin
+try:
+    exec(changed, namespace)
+except NotImplementedError as error:
+    assert linked and "no compiled Python body" in str(error)
+else:
+    assert namespace["value"] == 42

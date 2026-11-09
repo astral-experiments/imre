@@ -26,6 +26,7 @@ enum Fact {
     Identity(Result<PathBuf, String>),
     Content(Result<blake3::Hash, String>),
     Bytes(Result<blake3::Hash, String>),
+    WheelRecords(Vec<PathBuf>),
 }
 
 fn outcome<T, U>(result: &io::Result<T>, map: impl FnOnce(&T) -> U) -> Result<U, String> {
@@ -75,6 +76,12 @@ impl FileSystem<'_> {
         if let Some(inputs) = &mut self.0 {
             inputs.0.push((path.to_owned(), fact()));
         }
+    }
+
+    pub(crate) fn wheel_records(&mut self, path: &Path) -> Vec<PathBuf> {
+        let records = crate::installed_wheels::records(path);
+        self.record(path, || Fact::WheelRecords(records.clone()));
+        records
     }
 
     pub(crate) fn is_file(&mut self, path: &Path) -> bool {
@@ -141,6 +148,7 @@ impl FileSystem<'_> {
 impl Inputs {
     fn fresh(&self) -> bool {
         self.0.iter().all(|(path, fact)| match fact {
+            Fact::WheelRecords(value) => crate::installed_wheels::records(path) == *value,
             Fact::File(value) => path.is_file() == *value,
             Fact::Directory(value) => path.is_dir() == *value,
             Fact::Exists(value) => path.exists() == *value,
@@ -200,6 +208,15 @@ impl WatchPaths {
             }
         }
 
+        for (root, fact) in &inputs.0 {
+            if matches!(fact, Fact::WheelRecords(_))
+                && let Ok(real) = root.canonicalize()
+                && real.is_dir()
+            {
+                names.insert(real.clone());
+                directories.insert(real);
+            }
+        }
         Ok(Self { directories, names })
     }
 }
@@ -233,11 +250,11 @@ impl Subscription {
                             _ => {}
                         }
                         let names = watched_names.lock().unwrap();
-                        if !event
-                            .paths
-                            .iter()
-                            .any(|p| names.iter().any(|name| name.starts_with(p)))
-                        {
+                        if !event.paths.iter().any(|p| {
+                            names.iter().any(|name| name.starts_with(p))
+                                || (p.extension().is_some_and(|e| e == "dist-info")
+                                    && p.parent().is_some_and(|parent| names.contains(parent)))
+                        }) {
                             return;
                         }
                         let structural = matches!(

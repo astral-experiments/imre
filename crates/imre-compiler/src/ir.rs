@@ -1028,6 +1028,23 @@ impl CharacterFilter {
     }
 }
 
+/// Unknown executable text can change the active namespace. Keep its ordinary object dispatch.
+pub(crate) fn text_execution(module: &Module) -> Option<(usize, ruff_text_size::TextRange)> {
+    let mut first = None;
+    for function in module.functions.iter().chain([&module.entry]) {
+        walk_expressions(&function.body, &mut |expr| {
+            if let ExprKind::Builtin(Builtin::ExecText(module, span), _) = &expr.kind
+                && first.is_none_or(|(id, range): (usize, ruff_text_size::TextRange)| {
+                    (*module, span.start()) < (id, range.start())
+                })
+            {
+                first = Some((*module, *span));
+            }
+        });
+    }
+    first
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
     ByteArrayNew,
@@ -1220,6 +1237,8 @@ pub(crate) enum Builtin {
     LogRecord(LogRecordOperation),
     Formatter(FormatterOperation),
     Input,
+    /// The selected builtin exec on a checked string operand.
+    ExecText(usize, ruff_text_size::TextRange),
     InputSelectStdout,
     InputFinish,
     Chr,

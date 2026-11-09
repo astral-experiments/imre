@@ -20,6 +20,7 @@ mod class_bases;
 mod code_locals;
 mod collection_pattern;
 mod complex;
+mod dataclass_init;
 mod defaultdict;
 mod deque;
 mod dictionary;
@@ -98,15 +99,37 @@ enum LinkedSource {
 #[derive(Clone, Copy)]
 enum ModuleInitializer {
     Native(Code),
-    File(Code, Option<&'static [u8; 32]>),
+    File(Code, Option<&'static [u8; 32]>, Option<u32>),
+    Zip(Code, &'static [u8; 32], u32),
     Builtin(Code),
-    Source(&'static str),
+    Invalid {
+        message: &'static str,
+        position: Option<&'static [u32; 4]>,
+        in_args: bool,
+        parser_line: Option<&'static str>,
+        archive_digest: Option<&'static [u8; 32]>,
+    },
 }
 
 struct SourceModule {
     path: PathBuf,
     code: ModuleInitializer,
     bundled_text: Option<&'static [u8]>,
+}
+
+impl SourceModule {
+    /// Only directory-backed registrations can supply a SourceFileLoader.
+    fn in_file_finder(&self) -> bool {
+        !matches!(
+            self.code,
+            ModuleInitializer::Builtin(_)
+                | ModuleInitializer::Zip(..)
+                | ModuleInitializer::Invalid {
+                    archive_digest: Some(_),
+                    ..
+                }
+        )
+    }
 }
 
 enum IteratorSlice<'a> {
@@ -1766,13 +1789,13 @@ impl Context {
                 // Delegated generators resume their children on the native stack.
                 return stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
                     match self.code_object(code).body {
-                        value::Body::Native(_) => self.next_generator_item(id),
+                        value::Body::Native(..) => self.next_generator_item(id),
                         value::Body::Suspended(_) => self.resume_native(
                             id,
                             id,
                             generator_protocol::GeneratorInput::Send(NONE),
                         ),
-                        value::Body::Source(_) => self.resume_source(id, NONE),
+                        value::Body::Parsed { .. } => self.missing_compiled_body(code),
                     }
                 });
             }
@@ -3375,11 +3398,9 @@ impl Context {
     }
     fn execute(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {
         let entry = match &self.code_object(code).body {
-            value::Body::Native(entry) => *entry,
+            value::Body::Native(entry, _) => *entry,
             value::Body::Suspended(_) => return self.new_suspended(code, scope, owner),
-            value::Body::Source(_) => {
-                return self.call_source(code, scope, owner);
-            }
+            value::Body::Parsed { .. } => return self.missing_compiled_body(code),
         };
         self.heap.enter(scope, code, owner);
         // SAFETY: a compiler-generated initializer or function uses this ABI and

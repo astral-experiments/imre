@@ -3,9 +3,11 @@
 mod class_cell;
 #[cfg(test)]
 mod closed_program_tests;
+mod execution;
 #[cfg(test)]
 mod incremental_tests;
 mod inferred_shapes;
+mod run_path;
 mod tuple_displays;
 
 use std::cell::Cell;
@@ -63,6 +65,7 @@ struct Database {
 pub(crate) struct Session {
     db: Database,
     files: Vec<File>,
+    external_loader_declarations: File,
     tuple_spreads: Vec<HashMap<TextSize, usize>>,
     rules: Arc<RuleSelection>,
     pub(crate) root: PathBuf,
@@ -70,6 +73,36 @@ pub(crate) struct Session {
     hint_reads: Cell<usize>,
     /// Explicit checks can report conversions that executables perform at runtime.
     pub(crate) explicit_check: bool,
+}
+
+/// Resolve a declared positional or keyword parameter at a concrete Python call.
+fn bound_argument<'a>(
+    arguments: &'a ruff_python_ast::Arguments,
+    parameters: &ruff_python_ast::Parameters,
+    name: &str,
+) -> Option<&'a Expr> {
+    let pos = parameters
+        .posonlyargs
+        .iter()
+        .chain(&parameters.args)
+        .position(|p| p.name().as_str() == name);
+    let keyword = parameters
+        .args
+        .iter()
+        .chain(&parameters.kwonlyargs)
+        .any(|p| p.name().as_str() == name);
+    keyword
+        .then(|| arguments.find_keyword(name))
+        .flatten()
+        .map(|k| &k.value)
+        .or_else(|| {
+            pos.and_then(|i| {
+                arguments
+                    .args
+                    .get(i)
+                    .filter(|_| !arguments.args[..=i].iter().any(Expr::is_starred_expr))
+            })
+        })
 }
 
 /// Source ownership used by the same diagnostics for checked graphs and object registrations.
@@ -103,6 +136,7 @@ pub(crate) fn check_registered_project<'a>(
         Item = crate::dynamic::RegisteredSource<'a>,
         IntoIter: ExactSizeIterator + Clone,
     >,
+    has_file_body: Option<&dyn Fn(&str) -> bool>,
     checked: Option<&crate::modules::SourceGraph>,
 ) -> Result<(), String> {
     let sources = sources.into_iter();
@@ -141,7 +175,11 @@ pub(crate) fn check_registered_project<'a>(
                     || matched.contains(&id)
             })
         {
-            return result.clone();
+            result.clone()?;
+            return graph.session.check_registered_execution(
+                sources.map(|s| (s.checked_module.unwrap(), s)),
+                has_file_body,
+            );
         }
     }
 
@@ -163,24 +201,48 @@ pub(crate) fn check_registered_project<'a>(
             }
         }
     }
-    for winner in sources {
+    let first_winner = paths.len();
+    for winner in sources.clone() {
         let crate::dynamic::RegisteredSource {
             path,
             source,
             is_program,
+            kind,
             ..
         } = winner;
-        let (path, kind) = if path == Path::new("<string>") {
-            (root.join("<string>.py"), crate::SourceKind::Command)
+        let path = if kind == crate::SourceKind::Command {
+            root.join("<string>.py")
         } else {
-            (path.to_owned(), crate::SourceKind::File)
+            path.to_owned()
         };
         let source = crate::normalize_source(source, kind)
             .map_err(|error| format!("{}: {error}", path.display()))?;
         session.add(&path, &source, kind)?;
         paths.push((path, is_program));
     }
-    session.check_closed_program(&paths, None, &[], None)
+    session.check_closed_program(&paths, None, &[], None)?;
+    session.check_registered_execution((first_winner..).zip(sources), has_file_body)
+}
+
+impl Session {
+    /// Check both execution boundaries against the winners of the same registered program.
+    fn check_registered_execution<'a>(
+        &self,
+        sources: impl Iterator<Item = (usize, crate::dynamic::RegisteredSource<'a>)> + Clone,
+        has_file_body: Option<&dyn Fn(&str) -> bool>,
+    ) -> Result<(), String> {
+        let ordinary = self.check_execution_escapes(
+            sources
+                .clone()
+                .filter(|(_, source)| source.check_execution)
+                .map(|(id, source)| (id, source.path)),
+        );
+        let files = self.check_run_path_callers(sources, has_file_body);
+        match (ordinary, files) {
+            (Err(ordinary), Err(files)) => Err(format!("{ordinary}\n{files}")),
+            (result, Ok(())) | (Ok(()), result) => result,
+        }
+    }
 }
 
 /// Validate each native initializer at its own origin. Text retained for a
@@ -190,14 +252,10 @@ pub(crate) fn check_native_syntax<'a>(
     checked: Option<&crate::modules::SourceGraph>,
     modules: impl Iterator<Item = &'a (String, PathBuf, String)>,
     is_alternative: impl Fn(&Path) -> bool,
-    contextual: &HashMap<PathBuf, crate::frontend::phase::Diagnostic>,
-    source_only: &mut std::collections::HashSet<PathBuf>,
+    module_errors: &mut HashMap<PathBuf, Box<crate::dynamic::ModuleSyntaxError>>,
 ) -> Result<(), String> {
     let mut scratch = None;
     for (name, path, source) in modules {
-        if source_only.contains(path) {
-            continue;
-        }
         let input = imre_ast::indentation::prepare(source);
         let cached = checked.and_then(|graph| {
             let id = if name == "__main__" {
@@ -228,22 +286,69 @@ pub(crate) fn check_native_syntax<'a>(
             file.sync(&mut session.db);
             (&*session, file)
         };
-        let error = session
-            .semantic_syntax_error(file)
-            .map(|error| {
-                Diagnostic::invalid_syntax(file, &error, &error)
+        if let Some(prior) = module_errors.get_mut(path) {
+            if prior.validate_at_origin && !is_alternative(path) {
+                if let Some(error) = session.semantic_syntax_error(file) {
+                    return Err(Diagnostic::invalid_syntax(file, &error, &error)
+                        .display(
+                            &(&session.db as &dyn ruff_db::Db),
+                            &DisplayDiagnosticConfig::new("imre"),
+                        )
+                        .to_string());
+                }
+                return Err(crate::frontend::phase::Diagnostic::at(
+                    &input.text,
+                    &prior.range,
+                    format!("SyntaxError: {}", prior.message),
+                )
+                .with_path(path)
+                .to_string());
+            }
+            if !prior.parse_error
+                && let Some((range, message)) =
+                    session.module_binding_error(file, prior.range.start())
+            {
+                **prior =
+                    crate::dynamic::ModuleSyntaxError::new(&input.text, range, message, false);
+            }
+            continue;
+        }
+        if let Some(error) = session.semantic_syntax_error(file) {
+            if is_alternative(path) {
+                use ruff_python_parser::semantic_errors::SemanticSyntaxErrorKind;
+                let (range, message) = session
+                    .module_binding_error(file, TextSize::new(u32::MAX))
+                    .filter(|(range, _)| range.start() <= error.range.end())
+                    .unwrap_or_else(|| {
+                        (
+                            error.range,
+                            match &error.kind {
+                                SemanticSyntaxErrorKind::GlobalParameter(name) => {
+                                    format!("name '{name}' is parameter and global")
+                                }
+                                SemanticSyntaxErrorKind::NonlocalParameter(name) => {
+                                    format!("name '{name}' is parameter and nonlocal")
+                                }
+                                _ => error.to_string(),
+                            },
+                        )
+                    });
+                module_errors.insert(
+                    path.clone(),
+                    Box::new(crate::dynamic::ModuleSyntaxError::new(
+                        &input.text,
+                        range,
+                        message,
+                        false,
+                    )),
+                );
+            } else {
+                return Err(Diagnostic::invalid_syntax(file, &error, &error)
                     .display(
                         &(&session.db as &dyn ruff_db::Db),
                         &DisplayDiagnosticConfig::new("imre"),
                     )
-                    .to_string()
-            })
-            .or_else(|| contextual.get(path).map(ToString::to_string));
-        if let Some(error) = error {
-            if is_alternative(path) {
-                source_only.insert(path.clone());
-            } else {
-                return Err(error);
+                    .to_string());
             }
         }
     }
@@ -380,12 +485,13 @@ impl Session {
             )
             .map_err(|error| error.to_string())?;
         let vendored = ty_vendored::file_system().clone();
+        let external_loader_declarations = stdlib_stubs.join("_frozen_importlib_external.pyi");
         // Based on ty_vendored 0.0.15 (licenses/typeshed.txt). Retain the cache
         // helpers' object parameters when importing updated typeshed declarations.
         system
             .fs()
             .write_file_all(
-                stdlib_stubs.join("_frozen_importlib_external.pyi"),
+                &external_loader_declarations,
                 include_str!("stubs/_frozen_importlib_external.pyi"),
             )
             .map_err(|e| e.to_string())?;
@@ -462,9 +568,12 @@ impl Session {
         // Lowering queries types with lints disabled. Tracking the rules invalidates
         // these cached queries when the full check enables diagnostics.
         DiagnosticRules::new(&db, Arc::default());
+        let external_loader_declarations = system_path_to_file(&db, &external_loader_declarations)
+            .map_err(|error| error.to_string())?;
         Ok(Self {
             db,
             files: Vec::new(),
+            external_loader_declarations,
             tuple_spreads: Vec::new(),
             rules: Arc::new(rules),
             root: PathBuf::from(root),
@@ -495,7 +604,7 @@ impl Session {
         check_scope_syntax(source, parsed.syntax()).map_err(|error| format!("{path}:{error}"))?;
         check_handler_count(parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
         // Source files additionally restrict form feeds in suite and replacement-field indentation.
-        if kind == crate::SourceKind::File {
+        if kind != crate::SourceKind::Command {
             check_form_feeds(source, parsed.tokens())
                 .map_err(|error| format!("{path}: {error}"))?;
         }
@@ -543,6 +652,117 @@ impl Session {
 
     pub(crate) fn has_valid_semantic_syntax(&self, module: usize) -> bool {
         self.semantic_syntax_error(self.files[module]).is_none()
+    }
+
+    /// Binding errors can precede a misplaced future import or an unreachable pattern.
+    /// Ask the symbol table which declaration conflicts with an earlier use.
+    fn module_binding_error(&self, file: File, before: TextSize) -> Option<(TextRange, String)> {
+        use ruff_python_ast::find_node::covering_node;
+        use ruff_python_parser::semantic_errors::SemanticSyntaxErrorKind;
+
+        let parsed = self.parsed(file);
+        let root = parsed.syntax().into();
+        let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
+        index
+            .semantic_syntax_errors()
+            .iter()
+            .filter_map(|error| {
+                let (name, start, directive) = match &error.kind {
+                    SemanticSyntaxErrorKind::LoadBeforeGlobalDeclaration { name, start } => {
+                        (name, *start, "global")
+                    }
+                    SemanticSyntaxErrorKind::LoadBeforeNonlocalDeclaration { name, start } => {
+                        (name, *start, "nonlocal")
+                    }
+                    SemanticSyntaxErrorKind::AwaitOutsideAsyncFunction(
+                        ruff_python_parser::semantic_errors::AwaitOutsideAsyncFunctionKind::Await,
+                    ) if error.range.start() < before => {
+                        let enclosed = covering_node(root, error.range)
+                            .find_first(|node| {
+                                matches!(node, ruff_python_ast::AnyNodeRef::StmtFunctionDef(_))
+                            })
+                            .is_ok();
+                        return Some((
+                            error.range,
+                            if enclosed {
+                                "'await' outside async function"
+                            } else {
+                                "'await' outside function"
+                            }
+                            .to_owned(),
+                        ));
+                    }
+                    SemanticSyntaxErrorKind::GlobalParameter(name)
+                    | SemanticSyntaxErrorKind::NonlocalParameter(name)
+                        if error.range.start() < before =>
+                    {
+                        let statement = covering_node(root, error.range)
+                            .find_first(|node| {
+                                matches!(
+                                    node,
+                                    ruff_python_ast::AnyNodeRef::StmtGlobal(_)
+                                        | ruff_python_ast::AnyNodeRef::StmtNonlocal(_)
+                                )
+                            })
+                            .ok()?
+                            .node();
+                        let directive =
+                            if matches!(statement, ruff_python_ast::AnyNodeRef::StmtGlobal(_)) {
+                                "global"
+                            } else {
+                                "nonlocal"
+                            };
+                        return Some((
+                            statement.range(),
+                            format!("name '{name}' is parameter and {directive}"),
+                        ));
+                    }
+                    SemanticSyntaxErrorKind::YieldOutsideFunction(kind)
+                        if error.range.start() < before =>
+                    {
+                        return Some((error.range, format!("'{kind}' outside function")));
+                    }
+                    _ => return None,
+                };
+                if start >= before {
+                    return None;
+                }
+                let declaration = covering_node(root, TextRange::empty(start))
+                    .find_first(|node| {
+                        matches!(
+                            node,
+                            ruff_python_ast::AnyNodeRef::StmtGlobal(_)
+                                | ruff_python_ast::AnyNodeRef::StmtNonlocal(_)
+                        )
+                    })
+                    .ok()?
+                    .node();
+                let names = match declaration {
+                    ruff_python_ast::AnyNodeRef::StmtGlobal(stmt) => &stmt.names,
+                    ruff_python_ast::AnyNodeRef::StmtNonlocal(stmt) => &stmt.names,
+                    _ => return None,
+                };
+                let identifier = names.iter().find(|n| n.start() == start)?;
+                let scope = index.expression_scope_id(identifier);
+                let place = index.place_table(scope).symbol_id(name)?.into();
+                let bound = index
+                    .use_def_map(scope)
+                    .definitions_with_usage()
+                    .any(|(_, def, _)| {
+                        def.place(&self.db) == place
+                            && def.focus_range(&self.db, &parsed).start() < start
+                    });
+                let use_kind = if bound {
+                    "assigned to before"
+                } else {
+                    "used prior to"
+                };
+                Some((
+                    declaration.range(),
+                    format!("name '{name}' is {use_kind} {directive} declaration"),
+                ))
+            })
+            .min_by_key(|(range, _)| range.start())
     }
 
     /// Width proved before ty expands the display's field types.
@@ -598,11 +818,15 @@ impl Session {
     /// Start diagnostics with independent rules and Salsa storage. Every file has already
     /// passed the loader's preflight in this snapshot.
     pub(crate) fn diagnostic_copy(&self) -> Result<Self, String> {
+        self.copy_for_diagnostics(None)
+    }
+
+    fn copy_for_diagnostics(&self, script_entry: Option<File>) -> Result<Self, String> {
         let mut copy = Self::with_storage(
             &self.root,
             &self.extension_roots,
             salsa::Storage::default(),
-            false,
+            script_entry.is_some(),
         )?;
         copy.explicit_check = self.explicit_check;
         for &file in &self.files {
@@ -611,7 +835,12 @@ impl Session {
                 .as_system_path()
                 .expect("first-party source");
             let source = ruff_db::source::source_text(&self.db, file);
-            let file = copy.write_file(path.as_str(), source.as_str())?;
+            let file = if Some(file) == script_entry {
+                let entry = path.parent().unwrap().join("<__main__>.py");
+                copy.write_file(entry.as_str(), source.as_str())?
+            } else {
+                copy.write_file(path.as_str(), source.as_str())?
+            };
             copy.files.push(file);
         }
         Ok(copy)
@@ -1137,6 +1366,97 @@ impl Session {
         self.closed_program_errors(modules, skipped, overloads, native)
     }
 
+    /// ty omits diagnostics in unreachable statements. A direct call can still
+    /// name a single declared function there, even when its callee type is Never.
+    fn dormant_call_errors(
+        &self,
+        module: usize,
+        path: &Path,
+        declarations: DeclaredSignatures<'_>,
+        errors: &mut Vec<String>,
+    ) {
+        use ty_python_semantic::types::ide_support::{
+            ImportAliasResolution, ResolvedDefinition, definitions_for_name, unreachable_ranges,
+        };
+        let db = &self.db;
+        let file = self.files[module];
+        let source = db.program_file(file);
+        let ranges = unreachable_ranges(db, source);
+        if ranges.is_empty() {
+            return;
+        }
+        let parsed = self.parsed(file);
+        let model = SemanticModel::new(db, source);
+        let env = model.program_environment();
+        let mut check = |call: &ruff_python_ast::ExprCall| -> Option<()> {
+            let name = call.func.as_name_expr()?;
+            if !ranges.iter().any(|r| r.range.contains_range(call.range()))
+                || call.func.inferred_type(&model)? != ty_python_semantic::types::Type::Never
+            {
+                return None;
+            }
+            let bindings = definitions_for_name(
+                &model,
+                name.id.as_str(),
+                name.into(),
+                ImportAliasResolution::ResolveAliases,
+            );
+            let [ResolvedDefinition::Definition(definition)] = bindings.as_slice() else {
+                return None;
+            };
+            let ty_python_core::definition::DefinitionKind::Function(function) =
+                definition.kind(db)
+            else {
+                return None;
+            };
+            let owner = definition.file(db);
+            let body = self.parsed(owner);
+            let function = function.node(&body);
+            // Decorators can replace the callable and its Python binding convention.
+            if !function.decorator_list.is_empty() || function.type_params.is_some() {
+                return None;
+            }
+            let owner_model = SemanticModel::new(db, db.program_file(owner));
+            for declared in function.parameters.iter_non_variadic_params() {
+                let param = &declared.parameter;
+                if declarations
+                    .parameters(db)
+                    .contains(&(owner, declared.range()))
+                    && let Some(value) =
+                        bound_argument(&call.arguments, &function.parameters, param.name.as_str())
+                    && let (Some(expected), Some(actual)) = (
+                        param.inferred_type(&owner_model),
+                        value.inferred_type(&model),
+                    )
+                    // A type variable needs the live call binder to infer a specialization.
+                    && concrete_scalar(db, &env, expected)
+                    && !actual.is_assignable_to(db, &env, expected)
+                {
+                    let actual = self
+                        .scalar_type(module, value)
+                        .map_or_else(|| actual.display(db, &env).to_string(), |t| t.to_string());
+                    let message = format!(
+                        "expected {}, got {actual}; annotations are enforced contracts",
+                        expected.display(db, &env)
+                    );
+                    let text = ruff_db::source::source_text(db, file);
+                    errors.push(
+                        crate::frontend::phase::Diagnostic::at(text.as_str(), value, message)
+                            .with_path(path)
+                            .to_string(),
+                    );
+                }
+            }
+            Some(())
+        };
+        ruff_python_ast::helpers::any_over_body(&parsed.syntax().body, |expr| {
+            if let Expr::Call(call) = expr {
+                check(call);
+            }
+            false
+        });
+    }
+
     fn closed_program_errors(
         &self,
         modules: &[impl ClosedSource],
@@ -1194,6 +1514,7 @@ impl Session {
             if path.extension().is_some_and(|ext| ext == "pyi") {
                 continue;
             }
+            self.dormant_call_errors(index, path, declarations, &mut errors);
             let checked = CheckedFile::new(
                 &self.db,
                 file,
@@ -1565,7 +1886,7 @@ fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedEr
 /// Literal initializers of scalar names are independent of the operation that required boxing.
 fn scalar_initializer(db: &dyn Db, file: File, range: TextRange) -> bool {
     use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
-    use ty_python_semantic::types::{KnownClass, Type, UnionType};
+    use ty_python_semantic::types::Type;
 
     let file = db.program_file(file);
     let parsed = ruff_db::parsed::parsed_module(db, file.python_file(db)).load(db);
@@ -1635,11 +1956,20 @@ fn scalar_initializer(db: &dyn Db, file: File, range: TextRange) -> bool {
         }
         declared = rhs;
     }
-    let scalar = |class: KnownClass| class.to_instance(db, &env);
+    concrete_scalar(db, &env, declared)
+}
+
+fn concrete_scalar<'db>(
+    db: &'db dyn Db,
+    env: &ty_python_semantic::types::ProgramEnvironment<'db>,
+    declared: ty_python_semantic::types::Type<'db>,
+) -> bool {
+    use ty_python_semantic::types::{KnownClass, UnionType};
+    let scalar = |class: KnownClass| class.to_instance(db, env);
     [KnownClass::Int, KnownClass::Bool, KnownClass::Float, KnownClass::Str, KnownClass::Bytes]
         .into_iter().any(|class| declared == scalar(class))
         // ty widens a float annotation to float | int.
-        || declared == UnionType::from_two_elements(db, &env, scalar(KnownClass::Float), scalar(KnownClass::Int))
+        || declared == UnionType::from_two_elements(db, env, scalar(KnownClass::Float), scalar(KnownClass::Int))
 }
 
 fn primary_range(diagnostic: &Diagnostic, file: File) -> Option<TextRange> {
@@ -1805,11 +2135,22 @@ fn resolves_to_stdlib_function(
     owner: &str,
     name: &str,
 ) -> bool {
+    expression
+        .inferred_type(model)
+        .is_some_and(|ty| is_stdlib_function_type(model, ty, owner, name))
+}
+
+fn is_stdlib_function_type<'db>(
+    model: &SemanticModel<'db>,
+    ty: ty_python_semantic::types::Type<'db>,
+    owner: &str,
+    name: &str,
+) -> bool {
     use ty_python_semantic::types::{Type, TypeDefinition};
     let db = model.db();
-    let Some(ty @ Type::FunctionLiteral(_)) = expression.inferred_type(model) else {
+    if !matches!(ty, Type::FunctionLiteral(_)) {
         return false;
-    };
+    }
     let Some(TypeDefinition::Function(def)) = ty.definition(db, &model.program_environment())
     else {
         return false;

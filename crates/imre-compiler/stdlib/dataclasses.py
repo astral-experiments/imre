@@ -1,4 +1,5 @@
 from _imre_dataclasses import (
+    bind_initializer as _bind_initializer,
     is_defaultdict as _is_defaultdict,
     loaded_module as _loaded_module,
     members as _members,
@@ -265,11 +266,13 @@ def _initializer(owner_class, data, positional, qualname, frozen, slots):
     constants = [_HAS_DEFAULT_FACTORY, object.__setattr__]
     def capture(value):
         constants.append(value)
-        return f'{constants_name}[{len(constants) - 1}]'
+        return len(constants) - 1
 
     parameters = {}
-    body = []
+    defaults = {}
+    stores = []
     initvars = []
+    needs_cell = False
     for name, f in zip(spellings, data.values()):
         if not name.isidentifier() or iskeyword(name):
             raise SyntaxError(f'invalid field name {name!r}')
@@ -280,47 +283,48 @@ def _initializer(owner_class, data, positional, qualname, frozen, slots):
             if symbol in bound:
                 raise SyntaxError(f'duplicate argument {symbol!r} in function definition')
             bound.add(symbol)
-        parameter = name
-        value = name
+        argument = symbol
+        index = None
+        factory = False
         if f.default_factory is not MISSING:
-            factory = capture(f.default_factory)
-            value = f'{factory}()'
+            index = capture(f.default_factory)
+            factory = True
             if f.init:
-                marker = f'{constants_name}[0]'
-                parameter += '=' + marker
-                value = f'{value} if {name} is {marker} else {name}'
+                defaults[symbol] = _HAS_DEFAULT_FACTORY
+            else:
+                argument = None
         elif f.default is not MISSING:
             if f.init:
-                parameter += '=' + capture(f.default)
+                default = f.default
+                capture(default)
+                defaults[symbol] = default
             elif slots:
-                value = capture(f.default)
+                argument = None
+                index = capture(f.default)
         if f.init:
-            parameters[name] = parameter
+            parameters[name] = symbol
         if f._field_type is _FIELD_INITVAR:
-            initvars.append(name)
+            initvars.append(symbol)
         elif f.init or f.default_factory is not MISSING or (slots and f.default is not MISSING):
             if frozen:
-                body.append(f'{constants_name}[1]({receiver}, {name!r}, {value})')
+                target, sealed = name, True
             else:
                 if symbol == '__debug__':
                     raise SyntaxError('cannot assign to __debug__')
-                body.append(f'{receiver}.{name} = {value}')
+                target, sealed = symbol, False
+            stores.append((target, argument, index, factory, sealed))
+            needs_cell = needs_cell or sealed or index is not None
 
     args = [receiver] + [parameters[f.name] for f in positional]
     kw_only = [parameters[f.name] for f in data.values() if f.init and f.kw_only]
-    if kw_only:
-        args += ['*'] + kw_only
-    if hasattr(cls, '__post_init__'):
-        body.append(f'{receiver}.__post_init__({", ".join(initvars)})')
-    lines = [f'def build({constants_name}):', f' def __init__({", ".join(args)}):']
-    lines.extend('  ' + line for line in (body or ['pass']))
-    lines.append(' return __init__')
+    post_init = tuple(initvars) if hasattr(cls, '__post_init__') else None
     owner = _loaded_module(cls.__module__)
     # The lazy annotation function keeps this frame after the slots class replaces cls.
     del cls
-    namespace = {}
-    exec('\n'.join(lines), owner.__dict__ if owner is not None else {}, namespace)
-    init = namespace['build'](tuple(constants))
+    init = _bind_initializer(
+        owner.__dict__ if owner is not None else {}, args, kw_only, defaults,
+        (receiver, tuple(stores), post_init), constants_name if needs_cell else None, tuple(constants),
+    )
 
     names = tuple(f.name for f in data.values() if f.init)
     def annotate(format, /):
