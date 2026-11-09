@@ -259,4 +259,22 @@ with raw, other:
     else:
         raise AssertionError("last stream did not release the socket")
 
+# A silent TLS peer must time out during certificate retrieval and see the client close.
+with socket.socket() as listener:
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    listener.settimeout(2)
+    try:
+        ssl.get_server_certificate(listener.getsockname(), timeout=0.05)
+    except TimeoutError:
+        pass
+    else:
+        raise AssertionError("retrieved a certificate from a silent peer")
+    peer, _ = listener.accept()
+    with peer:
+        peer.settimeout(2)
+        assert peer.recv(1) == b"\x16"
+        while peer.recv(4096):
+            pass
+
 print("deferred socket handshake ok")

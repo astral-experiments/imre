@@ -8,6 +8,7 @@ import socket as _socket
 import sys
 import warnings as _warnings
 from operator import index as _index
+from socket import _GLOBAL_DEFAULT_TIMEOUT, create_connection
 from _weakref import ref as _ref
 from _ssl import MemoryBIO
 from _ssl import OPENSSL_VERSION, OPENSSL_VERSION_INFO, OPENSSL_VERSION_NUMBER
@@ -1104,3 +1105,15 @@ def PEM_cert_to_DER_cert(pem_cert_string):
                          % PEM_FOOTER)
     d = pem_cert_string.strip()[len(PEM_HEADER):-len(PEM_FOOTER)]
     return base64.decodebytes(d.encode('ASCII', 'strict'))
+
+
+def get_server_certificate(addr, ssl_version=PROTOCOL_TLS_CLIENT,
+                           ca_certs=None, timeout=_GLOBAL_DEFAULT_TIMEOUT):
+    """Fetch the server's PEM certificate, validating its chain if ca_certs is supplied."""
+    host, port = addr
+    cert_reqs = CERT_REQUIRED if ca_certs is not None else CERT_NONE
+    context = _create_stdlib_context(ssl_version, cert_reqs=cert_reqs, cafile=ca_certs)
+    with create_connection(addr, timeout=timeout) as sock:
+        with context.wrap_socket(sock, server_hostname=host) as tls:
+            certificate = tls.getpeercert(True)
+    return DER_cert_to_PEM_cert(certificate)
