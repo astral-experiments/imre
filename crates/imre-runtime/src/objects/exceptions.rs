@@ -188,6 +188,15 @@ impl GroupMember {
 }
 
 impl Exception {
+    /// Retain the code before releasing the exception storage. An omitted argument stays absent.
+    fn exit_code_snapshot(&self) -> std::result::Result<Option<OwnedWord>, Kind> {
+        match &self.payload {
+            Payload::Exit(code) => Ok(code.clone()),
+            Payload::ExitArguments(args) => Ok(Some(args.0.clone())),
+            _ => Err(self.kind),
+        }
+    }
+
     /// Own every argument before invoking a formatter that can reinitialize the exception.
     fn display_snapshot(&self) -> Result<Self> {
         fn boxed<T>(value: T) -> Result<Box<T>> {
@@ -1696,21 +1705,31 @@ pub unsafe extern "C" fn imre_system_exit_new(kind: u32, word: usize) -> *const 
 /// `value` is a rooted builtin exception.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_code(value: *const Object) -> *const Object {
-    // SAFETY: the caller roots the immutable exception.
-    let kind = unsafe { (*value).0.with(|s| s.exception().kind) };
-    if kind != Kind::SystemExit {
-        return Error::new(
-            Kind::AttributeError,
-            format!("'{}' object has no attribute 'code'", kind.name()),
-        )
-        .returning(std::ptr::null());
-    }
-    // SAFETY: the returned owner keeps the original exception and code alive.
-    crate::ObjectOwner::into_raw(unsafe { crate::ObjectOwner::acquire_word(value as usize) })
+    // SAFETY: the caller roots the exception. Only an owned code or a copied kind escapes.
+    let snapshot = unsafe {
+        (*value)
+            .0
+            .with(|storage| storage.exception().exit_code_snapshot())
+    };
+    let code = match snapshot {
+        Ok(code) => code,
+        Err(kind) => {
+            return Error::new(
+                Kind::AttributeError,
+                format!("'{}' object has no attribute 'code'", kind.name()),
+            )
+            .returning(std::ptr::null());
+        }
+    };
+    let (kind, word) = code
+        .as_ref()
+        .map_or((0, 0), |code| (code.kind.raw(), code.word));
+    // SAFETY: the snapshot roots the word while boxing inspects its concrete storage.
+    unsafe { super::boxed_values::imre_box_value(kind, word) }
 }
 
 pub(super) unsafe fn exit_word(value: *const Object) -> (WordKind, usize) {
-    // SAFETY: the caller roots the expected boxed or exception value.
+    // SAFETY: the caller roots the boxed value or scalar module member.
     unsafe {
         (*value)
             .0
@@ -1719,17 +1738,11 @@ pub(super) unsafe fn exit_word(value: *const Object) -> (WordKind, usize) {
     }
 }
 
-/// Borrow the concrete Python value from a box, scalar module member or exit-code view.
+/// Borrow the Python value held by a boxed view or a scalar module member.
 pub(super) fn projected_word(storage: &Storage) -> Option<(WordKind, usize)> {
     match storage {
         Storage::ObjectValue(v) => Some((v.kind, v.word)),
         Storage::ModuleMember(m) => m.scalar().map(|(k, w)| (WordKind::new(k), w)),
-        Storage::Exception(e) => match &e.payload {
-            Payload::Exit(Some(code)) => Some((code.kind, code.word)),
-            Payload::ExitArguments(args) => Some((args.0.kind, args.0.word)),
-            Payload::Exit(None) => Some((WordKind::new(0), 0)),
-            _ => None,
-        },
         _ => None,
     }
 }
@@ -2555,11 +2568,7 @@ fn report_unhandled() -> UnhandledExit {
     let code = unsafe {
         pending
             .0
-            .with(|storage| match &storage.exception().payload {
-                Payload::Exit(code) => Some(code.clone()),
-                Payload::ExitArguments(args) => Some(Some(args.0.clone())),
-                _ => None,
-            })
+            .with(|storage| storage.exception().exit_code_snapshot().ok())
     };
     let exit = code.map(|code| match code.as_ref() {
         None => (0, None),
