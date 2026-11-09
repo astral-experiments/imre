@@ -364,7 +364,7 @@ fn emit_program(
     let mut uses_cache_paths = false;
     let mut uses_builtins_last = false;
     let mut changes_stdout = false;
-    let mut executable_text = false;
+    let mut object_call = None;
     for function in module.functions.iter().chain([&module.entry]) {
         let mut owners = Vec::new();
         crate::ir::walk_expressions(&function.body, &mut |expr| {
@@ -372,7 +372,11 @@ fn emit_program(
                 return;
             };
             match builtin {
-                Builtin::ExecText(_, _) => executable_text = true,
+                Builtin::ObjectCall(kind, ..)
+                    if object_call.is_none() || matches!(kind, ir::ObjectCall::ExecText) =>
+                {
+                    object_call = Some(*kind);
+                }
                 Builtin::RegexCapture {
                     operation: RegexCapture::Start | RegexCapture::End,
                     ..
@@ -438,8 +442,13 @@ fn emit_program(
             "Imre: wrapper links require a callable signature with known native functions or source methods",
         ));
     }
-    if executable_text {
-        return Err(Unsupported("Imre: native execution requires linked code"));
+    if let Some(call) = object_call {
+        return Err(Unsupported(match call {
+            ir::ObjectCall::ExecText => "Imre: native execution requires linked code",
+            ir::ObjectCall::SocketSendfile => {
+                "Imre: socket.sendfile requires native Python object operations"
+            }
+        }));
     }
     if mixed_link_owners
         .iter()
@@ -6436,9 +6445,7 @@ impl Emitter<'_, '_> {
                 small_integer: false,
             },
             Builtin::Bool => self.truth(&args[0].value),
-            Builtin::ExecText(_, _) => unreachable!(
-                "emit_program rejects unlinked executable source before code generation"
-            ),
+            Builtin::ObjectCall(..) => unreachable!("emit_program checks object-only operations"),
             Builtin::Input => self.call("imre_input", Type::Str, &[]),
             Builtin::InputSelectStdout => self.call("imre_input_select_stdout", Type::TextIO, &[]),
             Builtin::InputFinish => self.call(

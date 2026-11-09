@@ -1028,21 +1028,37 @@ impl CharacterFilter {
     }
 }
 
-/// Unknown executable text can change the active namespace. Keep its ordinary object dispatch.
-pub(crate) fn text_execution(module: &Module) -> Option<(usize, ruff_text_size::TextRange)> {
-    let mut first = None;
+/// Calls whose implementation is owned by the Python object runtime. Keep their
+/// operands and result types in checked IR until the whole graph has been checked.
+#[derive(Clone, Copy)]
+pub(crate) enum ObjectCall {
+    ExecText,
+    SocketSendfile,
+}
+
+pub(crate) fn required_object_call(
+    module: &Module,
+) -> Option<(usize, ruff_text_size::TextRange, ObjectCall)> {
+    let mut executable_text = None;
+    let mut socket_sendfile = None;
     for function in module.functions.iter().chain([&module.entry]) {
         walk_expressions(&function.body, &mut |expr| {
-            if let ExprKind::Builtin(Builtin::ExecText(module, span), _) = &expr.kind
-                && first.is_none_or(|(id, range): (usize, ruff_text_size::TextRange)| {
+            if let ExprKind::Builtin(Builtin::ObjectCall(call, module, span), _) = &expr.kind {
+                let first = match call {
+                    ObjectCall::ExecText => &mut executable_text,
+                    ObjectCall::SocketSendfile => &mut socket_sendfile,
+                };
+                if first.is_none_or(|(id, range, _): (_, ruff_text_size::TextRange, _)| {
                     (*module, span.start()) < (id, range.start())
-                })
-            {
-                first = Some((*module, *span));
+                }) {
+                    *first = Some((*module, *span, *call));
+                }
             }
         });
     }
-    first
+    // Unknown executable text independently requires the object runtime. A socket
+    // call can use that runtime when it is already required elsewhere in the graph.
+    executable_text.or(socket_sendfile)
 }
 
 #[derive(Clone)]
@@ -1237,8 +1253,7 @@ pub(crate) enum Builtin {
     LogRecord(LogRecordOperation),
     Formatter(FormatterOperation),
     Input,
-    /// The selected builtin exec on a checked string operand.
-    ExecText(usize, ruff_text_size::TextRange),
+    ObjectCall(ObjectCall, usize, ruff_text_size::TextRange),
     InputSelectStdout,
     InputFinish,
     Chr,

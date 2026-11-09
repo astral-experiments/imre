@@ -464,15 +464,7 @@ fn object_fallback(
             }
             CheckedProgram::Native(ir) if !boxed_startup => {
                 let (mut module, mut owners) = *ir;
-                if let Some((id, operand)) = ir::text_execution(&module) {
-                    let source = &graph.modules[id];
-                    let object = LoweringDiagnostic::at(
-                        &source.source,
-                        &operand,
-                        "exec requires native Python object operations".to_owned(),
-                    )
-                    .with_path(&source.path)
-                    .classified(LoweringKind::ScopedObject);
+                if let Some(object) = required_object_diagnostic(&graph, &module) {
                     break (object, Some(graph), false);
                 }
                 if checking {
@@ -936,8 +928,37 @@ impl CheckedProgram {
     }
 }
 
+fn required_object_diagnostic(
+    graph: &modules::SourceGraph,
+    module: &ir::Module,
+) -> Option<LoweringDiagnostic> {
+    let (id, operand, call) = ir::required_object_call(module)?;
+    let (name, kind) = match call {
+        ir::ObjectCall::ExecText => ("exec", LoweringKind::ScopedObject),
+        ir::ObjectCall::SocketSendfile => ("socket.sendfile", LoweringKind::Object),
+    };
+    let source = &graph.modules[id];
+    Some(
+        LoweringDiagnostic::at(
+            &source.source,
+            &operand,
+            format!("{name} requires native Python object operations"),
+        )
+        .with_path(&source.path)
+        .classified(kind),
+    )
+}
+
 fn checked_lower(graph: &mut modules::SourceGraph) -> Result<CheckedProgram, String> {
-    checked_lower_with(graph, None, false)
+    let program = checked_lower_with(graph, None, false)?;
+    if let CheckedProgram::Native(ir) = &program
+        && let Some(error) = required_object_diagnostic(graph, &ir.0)
+        && error.kind == LoweringKind::Object
+    {
+        // In-memory checking and compilation have no file loader to supply a socket body.
+        return Ok(CheckedProgram::Runtime(error));
+    }
+    Ok(program)
 }
 
 fn checked_lower_with(

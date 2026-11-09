@@ -9238,7 +9238,11 @@ impl<'a> Checker<'a> {
                         return Ok(Expr {
                             ty: Type::None,
                             kind: ExprKind::Builtin(
-                                Builtin::ExecText(self.module, operand.range()),
+                                Builtin::ObjectCall(
+                                    ir::ObjectCall::ExecText,
+                                    self.module,
+                                    operand.range(),
+                                ),
                                 vec![source],
                             ),
                         });

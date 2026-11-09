@@ -133,7 +133,23 @@ impl Checker<'_> {
             ),
             "connect_ex" => return Err(self.scoped_builtin_error("socket.connect_ex", call)),
             "sendfile" => {
-                return Err(self.object_builtin_error_with_checked_calls("socket.sendfile", call));
+                let mut args = vec![receiver];
+                for supplied in call.arguments.iter_source_order() {
+                    let value = supplied.value();
+                    let value = value.as_starred_expr().map_or(value, |star| &star.value);
+                    args.push(self.evaluated_argument(value)?);
+                }
+                return Ok(Expr {
+                    ty: Type::Int,
+                    kind: ExprKind::Builtin(
+                        Builtin::ObjectCall(
+                            ir::ObjectCall::SocketSendfile,
+                            self.module,
+                            call.range(),
+                        ),
+                        args,
+                    ),
+                });
             }
             "detach" => return Err(self.object_builtin_error("socket.detach", call)),
             _ => return Err(error(self.source, call, "unsupported socket method")),
