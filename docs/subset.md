@@ -600,6 +600,15 @@ A file entry runs as `__main__`. When its object code imports a missing runtime 
 
 Use `--include-module myproject.plugins.csv` to link a Python source module that the program may select by name at runtime. Repeat the option to declare other modules. The usual import paths determine which source is linked, and importing it runs its initializer. A fully typed entry has no runtime module loader and rejects this option.
 
+For `-m unittest`, declare the modules that contain the tests. The standard unittest loader selects classes and methods from those modules.
+
+```sh
+IMREFLAGS='--include-module tests.test_rates' imre -m unittest -v tests.test_rates
+IMREFLAGS='--include-module tests.test_rates' imre -m unittest discover -s tests -t . -p 'test_rates.py'
+```
+
+For a larger suite, repeat `--include-module` for each module that discovery will import by name. Declaring a package links its initializer. Its ordinary imports follow the usual dependency rules.
+
 Use `--extension-path DIRECTORY` to add an import root to `imre check` or `imre build`. For example, if `build/site` contains `packaging/__init__.py` and `packaging/version.py`, build a caller of `packaging.version` with:
 
 ```sh
