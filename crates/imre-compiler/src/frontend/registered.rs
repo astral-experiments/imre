@@ -6,7 +6,33 @@ mod lambdas;
 pub(crate) use lambdas::RegisteredLambda;
 mod templates;
 pub(crate) use templates::{prepare_templates, template_segments};
+pub(super) mod type_alias;
 pub(super) mod values;
+
+/// Prepare the bindings installed by the existing type-parameter frame constructor.
+pub(crate) fn registered_type_parameters(
+    params: &ast::TypeParams,
+    private_names: &imre_ast::Names,
+) -> Vec<ir::RegisteredTypeParameter> {
+    params
+        .iter()
+        .map(|param| {
+            let kind = match param {
+                ast::TypeParam::TypeVar(_) => ir::TypeParameterKind::TypeVar,
+                ast::TypeParam::TypeVarTuple(_) => ir::TypeParameterKind::TypeVarTuple,
+                ast::TypeParam::ParamSpec(_) => ir::TypeParameterKind::ParamSpec,
+            };
+            let binding = param.name();
+            ir::RegisteredTypeParameter {
+                binding: binding.to_string(),
+                name: private_names.definition(binding).to_owned(),
+                kind,
+                has_bound_or_default: param.default().is_some()
+                    || matches!(param, ast::TypeParam::TypeVar(v) if v.bound.is_some()),
+            }
+        })
+        .collect()
+}
 
 pub(super) struct Frame<'a> {
     pub(super) literals: &'a values::ModuleSource,
@@ -40,17 +66,28 @@ pub(crate) struct RegisteredFunction {
 
 impl RegisteredFunction {
     fn expression(range: TextRange, value: Expr) -> Self {
+        Self::expression_with_prologue(range, value, None)
+    }
+
+    fn expression_with_prologue(
+        range: TextRange,
+        value: Expr,
+        prologue: Option<Statement>,
+    ) -> Self {
         let checkpoint = operation(
             Builtin::RegisteredStatement(range, None),
             Type::None,
             vec![],
         );
+        let mut body = vec![Statement::Expr(checkpoint)];
+        body.extend(prologue);
+        body.push(Statement::Return(value));
         Self {
             function: ir::Function {
                 params: vec![],
                 returns: Type::PythonObject,
                 locals: vec![],
-                body: vec![Statement::Expr(checkpoint), Statement::Return(value)],
+                body,
             },
             local_names: HashMap::new(),
         }
@@ -215,6 +252,14 @@ fn operation(op: Builtin, ty: Type, operands: Vec<Expr>) -> Expr {
         ty,
         kind: ExprKind::Builtin(op, operands),
     }
+}
+
+pub(crate) fn registered_type_alias(site: TextSize) -> Expr {
+    operation(
+        Builtin::RegisteredTypeAlias(site),
+        Type::PythonObject,
+        vec![],
+    )
 }
 
 /// Preserve the requested module separately from the names bound in the current namespace.
@@ -913,6 +958,11 @@ impl statements::StatementLowering for SourceScope<'_> {
                     )],
                     true,
                 ))
+            }
+            ast::Stmt::TypeAlias(alias) => {
+                let value = self.operations.get(&stmt.range()).ok_or(())?.clone();
+                let name = alias.name.as_name_expr().ok_or(())?;
+                Ok((vec![self.store(name.id.as_str(), value)], true))
             }
             ast::Stmt::ClassDef(class) if plain_class_header(class) => {
                 let decorators = class

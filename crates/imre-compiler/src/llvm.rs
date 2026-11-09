@@ -4833,12 +4833,14 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredSuspend(..)
             | Builtin::RegisteredModuleAnnotation(_)
             | Builtin::RegisteredAnnotationStart
+            | Builtin::RegisteredAnnotationFormat
             | Builtin::RegisteredAnnotationInsert { .. }
             | Builtin::BindAnnotationExpression(_)
             | Builtin::RegisteredAnnotationResult
             | Builtin::RegisteredDeleteName(..)
             | Builtin::RegisteredDefinition(_)
             | Builtin::RegisteredLambda(..)
+            | Builtin::RegisteredTypeAlias(_)
             | Builtin::RegisteredStatement(..)
             | Builtin::RegisteredNamespace(_)
             | Builtin::RegisteredUnpack { .. }
