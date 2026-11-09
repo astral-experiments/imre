@@ -2080,27 +2080,15 @@ pub(crate) fn compile(
             .and_then(provider_archive::symbols)
             .unwrap_or_default();
         let config = config.to_string();
-        let emit = |split| {
-            emit::emit(
-                modules,
-                &config,
-                keep_docstrings,
-                Path::new(bundled_root),
-                &providers,
-                split,
-                (&module_errors, &registrations),
-            )
-        };
-        let (mut units, mut used_archive) = emit(!matches!(layout, crate::BoxedLayout::Whole))?;
-        if let crate::BoxedLayout::WholeWithUnits(native) = layout
-            && units.len() > 1
-        {
-            // Both representations use the same resolved source and registration order.
-            let (whole, archived) = emit(false)?;
-            *native = std::mem::replace(&mut units, whole);
-            used_archive |= archived;
-        }
-        (units, used_archive)
+        emit::emit(
+            modules,
+            &config,
+            keep_docstrings,
+            Path::new(bundled_root),
+            &providers,
+            layout,
+            (&module_errors, &registrations),
+        )?
     };
     // Nested search roots can register one identical input snapshot under multiple names.
     inputs.files.sort_unstable();

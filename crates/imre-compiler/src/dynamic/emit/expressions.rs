@@ -239,8 +239,7 @@ impl Function<'_, '_> {
                 self.subscript(
                     v.value.as_ref(),
                     v.slice.as_ref(),
-                    v.range(),
-                    v.value.end(),
+                    Some((v.range(), v.value.end())),
                     Self::expr,
                 )
             }
@@ -296,7 +295,7 @@ impl Function<'_, '_> {
                 let replaced = self
                     .frame
                     .op("assign_named_target", &[&self.scope.clone(), &name, &value]);
-                self.line(&format!("call void @imre_dyn_named_assignment(ptr %ctx, i64 {mark}, i64 {value}, i64 {replaced})"));
+                self.release_replaced(&replaced, Some((&mark, &value)));
                 value
             }
             ast::Expr::Lambda(v) => self.define(
@@ -442,14 +441,6 @@ impl Function<'_, '_> {
         self.value(&format!("phi i64 {}", incoming.join(", ")))
     }
 
-    /// Keep just the live stack operands when Python may observe their release.
-    pub(super) fn keep_operands(&mut self, mark: &str, first: &str, second: &str) -> String {
-        self.value(&format!(
-            "call i64 @imre_dyn_keep_operands(ptr %ctx, i64 {mark}, i64 {first}, i64 {second})"
-        ))
-    }
-
-    /// Unwind this operand window before propagating its pending exception.
     pub(super) fn unwind_operands<T>(
         &mut self,
         mark: &str,

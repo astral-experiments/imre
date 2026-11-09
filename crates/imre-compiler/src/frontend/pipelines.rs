@@ -67,6 +67,42 @@ pub(super) struct EagerList {
 }
 
 impl Prepared {
+    pub(super) fn cursor(
+        cursor: Expr,
+        element: Type,
+        mut hidden: impl FnMut(Type) -> usize,
+    ) -> Self {
+        let kind = match cursor.kind {
+            ExprKind::Builtin(Builtin::SplitByteIter(_) | Builtin::SortedSplitByteIter(_), _) => {
+                crate::ir::IterNextKind::SplitField
+            }
+            _ => crate::ir::IterNextKind::Generic,
+        };
+        let iterator = hidden(cursor.ty);
+        let value = hidden(element);
+        let ready = hidden(Type::Bool);
+        Prepared {
+            evaluate: vec![Statement::Assign(iterator, cursor)],
+            acquire: Vec::new(),
+            next: vec![
+                Statement::Clear(value),
+                Statement::IterNext {
+                    kind,
+                    iterator,
+                    key: value,
+                    value: None,
+                    ready,
+                },
+            ],
+            value,
+            ready,
+            elementless: false,
+            eager_list: None,
+            writes: HashSet::new(),
+            clear: vec![iterator, value, ready],
+        }
+    }
+
     /// An enclosing adapter has its own iteration semantics even if it reuses this state.
     pub(super) fn eager_list_at(&self, source: &impl Ranged) -> Option<EagerList> {
         self.eager_list
@@ -81,6 +117,40 @@ impl Prepared {
             reads |= matches!(expr.kind, ExprKind::Local(read) if read == slot);
         });
         reads
+    }
+
+    /// Execute one pull per iteration and release the cursor before running the exhaustion suite.
+    pub(super) fn for_suite(
+        mut self,
+        binding: Vec<Statement>,
+        body: Vec<Statement>,
+        mut otherwise: Vec<Statement>,
+        before_iteration: Vec<Statement>,
+    ) -> Vec<Statement> {
+        Self::bind_next(
+            &mut self.next,
+            Expr::local(self.ready, Type::Bool),
+            self.value,
+            binding,
+        );
+        self.next.extend(body);
+        if !otherwise.is_empty() {
+            otherwise = self
+                .clear
+                .iter()
+                .copied()
+                .map(Statement::Clear)
+                .chain(otherwise)
+                .collect();
+        }
+        self.evaluate.append(&mut self.acquire);
+        self.evaluate.extend(before_iteration);
+        self.evaluate
+            .push(Statement::While(Expr::boolean(true), self.next, otherwise));
+        vec![Statement::Scope {
+            body: self.evaluate,
+            clear: self.clear,
+        }]
     }
 
     /// Pulls and binds one owned item, or exits the source loop on exhaustion.
@@ -1222,35 +1292,7 @@ impl Checker<'_> {
     }
 
     pub(super) fn prepare_cursor(&mut self, cursor: Expr, element: Type) -> Prepared {
-        let kind = match cursor.kind {
-            ExprKind::Builtin(Builtin::SplitByteIter(_) | Builtin::SortedSplitByteIter(_), _) => {
-                crate::ir::IterNextKind::SplitField
-            }
-            _ => crate::ir::IterNextKind::Generic,
-        };
-        let iterator = self.hidden(cursor.ty);
-        let value = self.hidden(element);
-        let ready = self.hidden(Type::Bool);
-        Prepared {
-            evaluate: vec![Statement::Assign(iterator, cursor)],
-            acquire: Vec::new(),
-            next: vec![
-                Statement::Clear(value),
-                Statement::IterNext {
-                    kind,
-                    iterator,
-                    key: value,
-                    value: None,
-                    ready,
-                },
-            ],
-            value,
-            ready,
-            elementless: false,
-            eager_list: None,
-            writes: HashSet::new(),
-            clear: vec![iterator, value, ready],
-        }
+        Prepared::cursor(cursor, element, |ty| self.hidden(ty))
     }
 
     pub(super) fn prepare_csv_reader(&mut self, reader: Expr) -> Prepared {
@@ -1713,25 +1755,11 @@ impl Checker<'_> {
                 clear: vec![source, value, ready],
             });
         }
-        let tuple_element = fields.as_ref().and_then(|fields| {
-            let first = *fields.first()?;
-            if fields.iter().all(|ty| *ty == first) {
-                return Some(first);
-            }
-            let non_none = *fields.iter().find(|&&ty| ty != Type::None)?;
-            let payload = self.types.payload(non_none).unwrap_or(non_none);
-            fields
-                .iter()
-                .all(|&ty| ty == Type::None || self.types.payload(ty).unwrap_or(ty) == payload)
-                .then(|| self.types.optional(payload))
-        });
-        let element = self.types.element(iterable.ty).or_else(|| self.types.var_tuple_element(iterable.ty))
-            .or(set_element)
-            .or_else(|| self.types.deque_element(iterable.ty))
-            .or((iterable.ty == Type::Str).then_some(Type::Str))
-            .or((iterable.ty == Type::Bytes).then_some(Type::Int))
+        let tuple_element = fields
+            .as_deref()
+            .and_then(|fields| self.types.tuple_iteration_element(fields));
+        let element = self.types.iteration_element(iterable.ty, items)
             .or(tuple_element)
-            .or_else(|| mapping.map(|(key, value)| if items { self.types.tuple(vec![key, value]) } else { key }))
             .ok_or_else(|| error(self.source, node, "iteration requires a concrete container, homogeneous tuple, string, bytes, or range"))?;
         if reverse && (mapping.is_some() || set_element.is_some() || items) {
             return Err(error(
@@ -2785,7 +2813,7 @@ impl Checker<'_> {
     pub(super) fn lower_prepared_iteration(
         &mut self,
         target: &ast::Expr,
-        mut input: Prepared,
+        input: Prepared,
         orelse: &[ast::Stmt],
         before_iteration: Vec<Statement>,
         lower_body: impl FnOnce(&mut Self) -> Result<Vec<Statement>, String>,
@@ -2805,33 +2833,14 @@ impl Checker<'_> {
                 facts.remove_mut(slot);
             }
         }
-        let mut body = input.next;
-        Prepared::bind_next(&mut body, self.local(input.ready), input.value, binding);
         self.loop_breaks.push(None);
-        body.extend(lower_body(self)?);
+        let body = lower_body(self)?;
         let breaks = self.loop_breaks.pop().unwrap();
         self.assigned = before;
         self.narrowed = facts;
-        let (mut orelse, falls) = self.loop_else(orelse, breaks, true)?;
-        if !orelse.is_empty() {
-            orelse = input
-                .clear
-                .iter()
-                .copied()
-                .map(Statement::Clear)
-                .chain(orelse)
-                .collect();
-        }
-        input.evaluate.append(&mut input.acquire);
-        input.evaluate.extend(before_iteration);
-        input
-            .evaluate
-            .push(Statement::While(Expr::boolean(true), body, orelse));
+        let (orelse, falls) = self.loop_else(orelse, breaks, true)?;
         Ok((
-            vec![Statement::Scope {
-                body: input.evaluate,
-                clear: input.clear,
-            }],
+            input.for_suite(binding, body, orelse, before_iteration),
             falls,
         ))
     }

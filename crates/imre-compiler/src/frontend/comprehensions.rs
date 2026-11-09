@@ -325,17 +325,29 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let display = Plan::from_expr(expression)
             .ok_or_else(|| error(self.source, expression, "unsupported comprehension display"))?;
+        self.lower_display(expression, &display, expected)
+    }
+
+    pub(super) fn lower_display(
+        &mut self,
+        expression: &ast::Expr,
+        display: &Plan<'_>,
+        expected: Option<Type>,
+    ) -> Result<Expr, String> {
+        if self.registered.is_some() {
+            return self.comprehension_display(expression, display, Collector::Display(expected));
+        }
         let filtered = match display.output {
-            Output::Set(_) => self.character_set_filter(&display, expected)?,
+            Output::Set(_) => self.character_set_filter(display, expected)?,
             Output::List(_) => {
-                self.string_list_filter(&display, expected.and_then(|ty| self.types.element(ty)))?
+                self.string_list_filter(display, expected.and_then(|ty| self.types.element(ty)))?
             }
             _ => None,
         };
         if let Some(filtered) = filtered {
             return Ok(filtered);
         }
-        self.comprehension_display(expression, &display, Collector::Display(expected))
+        self.comprehension_display(expression, display, Collector::Display(expected))
     }
 
     /// A dict can consume an exact two-column zip in the same order as a
@@ -739,11 +751,58 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let first_private = self.locals.len();
         let writes = narrowing::expression_assignments(expression);
-        let scope = self.enter_comprehension(display.target_names());
+        // Acquire the outer iterator before declaring the comprehension's shadowing names.
+        let mut input = input;
+        let mut prefix = Vec::new();
+        let enclosing = self.namespace;
+        let targets = display.target_names();
+        if self.registered.is_some() {
+            let Iteration::Prepared(cursor) = &mut input else {
+                unreachable!("Python iterables have an explicit acquisition")
+            };
+            prefix.append(&mut cursor.evaluate);
+            prefix.append(&mut cursor.acquire);
+            let slot = self.hidden(Type::PythonObject);
+            let mut declared: Vec<_> = targets.iter().cloned().collect();
+            declared.sort();
+            prefix.push(Statement::Assign(
+                slot,
+                Expr {
+                    ty: Type::PythonObject,
+                    kind: ExprKind::Builtin(
+                        Builtin::RegisteredNamespace(declared),
+                        enclosing
+                            .map(|parent| self.local(parent))
+                            .into_iter()
+                            .collect(),
+                    ),
+                },
+            ));
+            self.namespace = Some(slot);
+        }
+        let scope = self.enter_comprehension(targets.clone());
         let result = self.hidden(Type::None);
         let body = self.comprehension_body(display, input, collector, result);
+        if let Some(namespace) = self.namespace {
+            for name in &targets {
+                if let Some(&slot) = self.names.get(name) {
+                    self.namespace_bindings.insert(
+                        slot,
+                        registered::LocalBinding {
+                            name: name.clone(),
+                            namespace: Some(namespace),
+                        },
+                    );
+                }
+            }
+        }
+        self.namespace = enclosing;
         self.leave_comprehension(scope);
-        let (ty, body) = body?;
+        let (ty, mut body) = body?;
+        if !prefix.is_empty() {
+            prefix.append(&mut body);
+            body = prefix;
+        }
         for name in writes {
             if let Some(slot) = self.names.get(&name) {
                 self.narrowed.remove_mut(slot);
@@ -913,7 +972,7 @@ impl Checker<'_> {
                     }
                 });
                 let value = self.guarded_element(expression, element, guarded)?;
-                if is_set && !self.types.hashable_key(value.ty) {
+                if is_set && !self.comprehension_key(value.ty) {
                     return Err(error(
                         self.source,
                         expression,
@@ -940,7 +999,7 @@ impl Checker<'_> {
             (Collector::Display(expected), Output::Dict(key, value)) => {
                 let expected = expected.and_then(|ty| self.types.mapping(ty));
                 let key_value = self.guarded_element(key, expected.map(|(ty, _)| ty), guarded)?;
-                if !self.types.hashable_key(key_value.ty) {
+                if !self.comprehension_key(key_value.ty) {
                     return Err(error(
                         self.source,
                         key,
@@ -961,6 +1020,10 @@ impl Checker<'_> {
             }
             _ => unreachable!("invalid eager comprehension collector"),
         }
+    }
+
+    fn comprehension_key(&self, ty: Type) -> bool {
+        self.types.hashable_key(ty) || self.registered.is_some() && ty == Type::PythonObject
     }
 
     fn guarded_element(

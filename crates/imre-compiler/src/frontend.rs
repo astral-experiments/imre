@@ -118,8 +118,9 @@ pub(crate) use registered::values::{
     registered_arguments, registered_string, registered_value,
 };
 pub(crate) use registered::{
-    RegisteredFunction, RegisteredScope, attribute_effects, delete_targets, registered_class_body,
-    registered_import, registered_suite,
+    AnnotationValue, DeferredModuleAnnotation, RegisteredFunction, RegisteredScope,
+    RegisteredSuite, SuitePreparation, annotation_expression, module_annotations,
+    attribute_effects, delete_targets, namespace_operations,
 };
 pub(crate) use retained::RegisteredNative;
 mod sequences;
@@ -1430,7 +1431,7 @@ fn lower_function(
     mut checker: Checker<'_>,
     definition: &ast::StmtFunctionDef,
     signature: &Signature,
-    registered_locals: Option<&mut HashMap<usize, String>>,
+    registered_locals: Option<&mut HashMap<usize, registered::LocalBinding>>,
 ) -> BodyResult {
     debug_assert_eq!(
         checker.registered.is_some(),
@@ -1552,7 +1553,16 @@ fn lower_function(
         return Err(error);
     }
     if let Some(names) = registered_locals {
-        names.extend(checker.names.into_iter().map(|(name, slot)| (slot, name)));
+        names.extend(checker.namespace_bindings);
+        names.extend(checker.names.into_iter().map(|(name, slot)| {
+            (
+                slot,
+                registered::LocalBinding {
+                    name,
+                    namespace: None,
+                },
+            )
+        }));
     } else if module.archive.is_none() {
         checker.fault_frame(&mut body, definition.name.as_str(), definition.start());
     }
@@ -2613,9 +2623,12 @@ struct Checker<'a> {
     /// Locals in this body are bound in an existing Python activation.
     registered: Option<registered::Frame<'a>>,
     namespace_calls: HashSet<ruff_text_size::TextRange>,
-    namespace: assignments::ModuleNamespace,
+    module_namespace: assignments::ModuleNamespace,
     /// Keep source checkpoints while lowering the ordinary fixed-layout operations.
     native_activation: bool,
+    /// The actual namespace supplied to Python calls in the current lexical region.
+    namespace: Option<usize>,
+    namespace_bindings: HashMap<usize, registered::LocalBinding>,
     /// Doctest prompts share an exec-style namespace until the case ends.
     interactive_names: bool,
     /// A later local assignment shadows builtin iter throughout a function.
@@ -2695,8 +2708,10 @@ impl<'a> Checker<'a> {
         Self {
             registered: None,
             namespace_calls: HashSet::new(),
-            namespace: Default::default(),
+            module_namespace: Default::default(),
             native_activation: false,
+            namespace: None,
+            namespace_bindings: HashMap::new(),
             interactive_names: false,
             local_iter: false,
             positional_pack: None,
@@ -4263,6 +4278,37 @@ impl<'a> Checker<'a> {
         expression: &ast::Expr,
         split_needle: Option<&str>,
     ) -> Result<Iteration, String> {
+        if self.registered.is_some() {
+            // The Python frame supplies the actual object, including subclass overrides.
+            // Prepare the same pull/bind/cleanup IR used by the fixed-layout iterators.
+            let value = self.expr(expression)?;
+            // A Python handle still carries any established element contract. Only an
+            // unknown object defers the validity of iteration to its live protocol.
+            let element = if value.ty == Type::PythonObject {
+                Type::PythonObject
+            } else {
+                self.types
+                    .iteration_element(value.ty, false)
+                    .or_else(|| self.types.cursor_element(value.ty))
+                    .or_else(|| {
+                        self.types
+                            .fields(value.ty)
+                            .and_then(|fields| self.types.tuple_iteration_element(&fields))
+                    })
+                    .ok_or_else(|| {
+                        error(
+                            self.source,
+                            expression,
+                            "iteration requires an iterable value",
+                        )
+                    })?
+            };
+            let cursor = Expr {
+                ty: Type::PythonObject,
+                kind: ExprKind::Builtin(Builtin::RegisteredIter, vec![value]),
+            };
+            return Ok(Iteration::Prepared(self.prepare_cursor(cursor, element)));
+        }
         if let Some(input) = self.pipeline_input(expression, None, split_needle)? {
             return Ok(input);
         }
@@ -4310,12 +4356,15 @@ impl<'a> Checker<'a> {
 
     /// Keeps the original container rooted and owns each item before user code runs.
     fn iteration(&mut self, loop_: &ast::StmtFor) -> Result<(Vec<Statement>, bool), String> {
-        if let ast::Expr::Call(call) = loop_.iter.as_ref()
+        if self.registered.is_none()
+            && let ast::Expr::Call(call) = loop_.iter.as_ref()
             && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::GroupBy))
         {
             return self.groupby_iteration(loop_, call);
         }
-        let mut input = if let Some(fields) = self.prepared_split_iteration(&loop_.iter)? {
+        let mut input = if self.registered.is_some() {
+            self.iteration_input(&loop_.iter, None)?
+        } else if let Some(fields) = self.prepared_split_iteration(&loop_.iter)? {
             fields
         } else if let Some(items) = self.environ_items_loop(&loop_.iter)? {
             items
@@ -4582,21 +4631,7 @@ impl<'a> Checker<'a> {
         let bytes = iterable.ty == Type::Bytes;
         let element = self
             .types
-            .element(iterable.ty)
-            .or_else(|| self.types.var_tuple_element(iterable.ty))
-            .or(set_element)
-            .or_else(|| self.types.deque_element(iterable.ty))
-            .or(string.then_some(Type::Str))
-            .or(bytes.then_some(Type::Int))
-            .or_else(|| {
-                mapping.map(|(key, value)| {
-                    if items {
-                        self.types.tuple(vec![key, value])
-                    } else {
-                        key
-                    }
-                })
-            })
+            .iteration_element(iterable.ty, items)
             .ok_or_else(|| {
                 error(
                     self.source,
@@ -5056,8 +5091,15 @@ impl<'a> Checker<'a> {
             let supported = match statement {
                 ast::Stmt::Assign(assign) => {
                     assign.targets.iter().all(ast::Expr::is_name_expr)
-                        || matches!(assign.targets.as_slice(), [ast::Expr::Subscript(_)])
+                        || matches!(
+                            assign.targets.as_slice(),
+                            [ast::Expr::Subscript(_) | ast::Expr::Tuple(_) | ast::Expr::List(_)]
+                        )
                 }
+                ast::Stmt::For(loop_) => !loop_.is_async,
+                ast::Stmt::While(_) => true,
+                ast::Stmt::If(branch) => branch.elif_else_clauses.is_empty(),
+                ast::Stmt::Break(_) | ast::Stmt::Continue(_) => true,
                 ast::Stmt::Return(_) | ast::Stmt::Expr(_) | ast::Stmt::Pass(_) => true,
                 _ => false,
             };
@@ -5442,7 +5484,7 @@ impl<'a> Checker<'a> {
                     }) => Some(n.as_i64() != Some(0)),
                     _ => None,
                 };
-                let namespace = self.namespace.clone();
+                let namespace = self.module_namespace.clone();
                 let facts = self.narrowed.clone();
                 let before = self.assigned.clone();
                 self.apply_facts(&loop_.test, true);
@@ -5453,16 +5495,13 @@ impl<'a> Checker<'a> {
                 self.narrowed = facts;
                 self.apply_facts(&loop_.test, false);
                 if entered == Some(false) {
-                    self.namespace = namespace;
+                    self.module_namespace = namespace;
                 } else {
-                    self.namespace.join(&namespace);
+                    self.module_namespace.join(&namespace);
                 }
                 let can_exhaust = entered != Some(true);
                 let (orelse, falls) = self.loop_else(&loop_.orelse, breaks, can_exhaust)?;
                 return Ok((vec![Statement::While(test, body, orelse)], falls));
-            }
-            ast::Stmt::For(loop_) if !loop_.is_async => {
-                return self.iteration(loop_);
             }
             ast::Stmt::Break(_) | ast::Stmt::Continue(_) if !self.loop_breaks.is_empty() => {
                 if self.reachable && matches!(statement, ast::Stmt::Break(_)) {

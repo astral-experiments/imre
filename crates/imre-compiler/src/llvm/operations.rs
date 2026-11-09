@@ -1,5 +1,7 @@
 //! Emit checked operations using the storage and ownership of each operand.
 
+mod iteration;
+pub(crate) use iteration::LoopEdges;
 mod join;
 pub(crate) use join::ValueJoin;
 
@@ -20,20 +22,6 @@ pub(crate) fn call_arguments<C, E, V>(
     let callable = evaluate(context, callee);
     let values = args.iter().map(|arg| evaluate(context, arg)).collect();
     (callable, values)
-}
-
-/// A subscript assignment evaluates the RHS before its receiver and index.
-pub(crate) fn assignment_operands<C, V>(
-    context: &mut C,
-    receiver: &Expr,
-    index: &Expr,
-    value: &Expr,
-    mut evaluate: impl FnMut(&mut C, &Expr) -> V,
-) -> (V, V, V) {
-    let value = evaluate(context, value);
-    let receiver = evaluate(context, receiver);
-    let index = evaluate(context, index);
-    (receiver, index, value)
 }
 
 /// A checked expression keeps the representation selected by its producer.
@@ -352,6 +340,33 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 | Builtin::RegisteredUnary(_)),
                 args,
             ) => self.python().object_operation(op, args),
+            ExprKind::Scope { body, value, clear } => self.scoped_expression(body, value, clear),
+            ExprKind::Not(value) if matches!(self.0, Entry::Registered(_)) => {
+                self.python().object_operation(
+                    &Builtin::RegisteredUnary(crate::ir::ObjectUnary::Not),
+                    std::slice::from_ref(value.as_ref()),
+                )
+            }
+            ExprKind::Dict { .. } | ExprKind::Set { .. } | ExprKind::List(_)
+                if matches!(self.0, Entry::Registered(_)) =>
+            {
+                let op = match expr.kind {
+                    ExprKind::List(_) => "list",
+                    ExprKind::Set { .. } => "set",
+                    _ => "dict",
+                };
+                CheckedValue::handle(self.python().op(op, &[]))
+            }
+            ExprKind::Builtin(
+                op @ (Builtin::RegisteredIter
+                | Builtin::RegisteredNamespace(_)
+                | Builtin::RegisteredUnpack { .. }
+                | Builtin::Bool
+                | Builtin::Append
+                | Builtin::SetAdd
+                | Builtin::ListGet),
+                args,
+            ) if matches!(self.0, Entry::Registered(_)) => self.iteration_operation(op, args),
             ExprKind::Builtin(op, args) => match &mut self.0 {
                 Entry::Native(emitter) => CheckedValue::owned(emitter.builtin(op, args, expr.ty)),
                 Entry::Registered(frame) => frame.builtin(op, args),
@@ -378,10 +393,6 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     Entry::Registered(frame) => frame.assign(*slot, value),
                 }
             }
-            Statement::SetItem(receiver, index, value) => match &mut self.0 {
-                Entry::Native(emitter) => emitter.assign_item(receiver, index, value),
-                Entry::Registered(frame) => frame.assign_item(receiver, index, value),
-            },
             Statement::Expr(expr) => {
                 let consumed = match &mut self.0 {
                     Entry::Native(emitter) => emitter.consume_expression(expr),
@@ -402,6 +413,21 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     Entry::Registered(frame) => frame.return_result(value),
                 }
             }
+            Statement::Clear(slot) => self.clear_iteration_slots(&[*slot]),
+            Statement::Scope { body, clear } => self.scoped_suite(body, clear),
+            Statement::While(test, body, otherwise) => {
+                self.while_suite(stmt, test, body, otherwise)
+            }
+            Statement::If(test, yes, no) => self.conditional_suite(stmt, test, yes, no),
+            Statement::SetItem(table, key, value) => self.store_item(table, key, value),
+            Statement::IterNext {
+                iterator,
+                key,
+                value,
+                ready,
+                kind,
+            } => self.pull(*iterator, *key, *value, *ready, *kind),
+            Statement::Break | Statement::Continue | Statement::Exhaust => self.loop_transfer(stmt),
             _ => self.fixed().other_statement(stmt),
         }
     }
@@ -424,7 +450,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         self.emit_block(statements);
     }
 
-    pub(super) fn emit_block(&mut self, mut remaining: &[Statement]) {
+    pub(crate) fn emit_block(&mut self, mut remaining: &[Statement]) {
         let incoming = match &self.0 {
             Entry::Native(emitter) => Some(emitter.temporaries.clone()),
             Entry::Registered(_) => None,
@@ -458,44 +484,6 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
 }
 
 impl Emitter<'_, '_> {
-    fn assign_item(&mut self, list: &Expr, index: &Expr, expression: &Expr) {
-        if self.copy_item(list, index, expression) {
-            return;
-        }
-        let nonnegative = self.nonnegative_index(index);
-        let fixed_slot = match list.kind {
-            ExprKind::Local(slot)
-                if self.fixed_int_lists[slot] && self.int_buffers.contains_key(&slot) =>
-            {
-                Some(slot)
-            }
-            _ => None,
-        };
-        let (list, index, value) =
-            assignment_operands(self, list, index, expression, Self::operand);
-        if let Some(slot) = fixed_slot {
-            self.fixed_int_set(slot, &index.value, &value.value);
-        } else {
-            self.set_item(&list.value, &index.value, &value.value, nonnegative);
-        }
-        if self.module.types.mapping(list.value.ty).is_some()
-            && self
-                .module
-                .types
-                .may_own_file(value.value.ty, &self.module.class_fields, true)
-        {
-            // The assignment's stack keeps the RHS alive while the
-            // temporary dictionary releases its remaining entries.
-            self.release_operand(&list);
-            self.release_operand(&index);
-            self.release_operand(&value);
-        } else {
-            self.release_operand(&value);
-            self.release_operand(&index);
-            self.release_operand(&list);
-        }
-    }
-
     fn prepare_assignment(&mut self, slot: usize, expression: &Expr) -> Option<bool> {
         if let Some(cursor) = self.forward_cursors.get(&slot).cloned() {
             self.assign_forward_cursor(slot, expression, cursor);

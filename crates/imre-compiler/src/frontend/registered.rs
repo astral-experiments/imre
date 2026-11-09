@@ -24,7 +24,14 @@ impl Frame<'_> {
 
 pub(crate) struct RegisteredFunction {
     pub(crate) function: ir::Function,
-    pub(crate) local_names: HashMap<usize, String>,
+    pub(crate) local_names: HashMap<usize, LocalBinding>,
+}
+
+/// Storage in the function frame or in a lexically nested Python namespace.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct LocalBinding {
+    pub(crate) name: String,
+    pub(crate) namespace: Option<usize>,
 }
 
 /// Lower a definition whose binder supplies Python object handles in its normal function scope.
@@ -165,10 +172,8 @@ fn operation(op: Builtin, ty: Type, operands: Vec<Expr>) -> Expr {
     }
 }
 
-pub(crate) fn registered_import(
-    stmt: &ast::Stmt,
-    private_names: Option<&imre_ast::Names>,
-) -> Option<Expr> {
+/// Preserve the requested module separately from the names bound in the current namespace.
+fn registered_import(stmt: &ast::Stmt, private_names: &imre_ast::Names) -> Option<Expr> {
     let import = match stmt {
         ast::Stmt::Import(import) => ir::NamespaceImport::Modules(
             import
@@ -185,7 +190,7 @@ pub(crate) fn registered_import(
                             .map_or(root, ast::Identifier::as_str)
                             .to_owned(),
                         bind_leaf: alias.asname.is_some()
-                            && !private_names.is_some_and(|names| names.imports_root(&alias.name)),
+                            && !private_names.imports_root(&alias.name),
                     }
                 })
                 .collect(),
@@ -224,62 +229,361 @@ pub(crate) enum RegisteredScope {
     Function { is_async: bool },
 }
 
-/// Lower a physical suite for an existing Python namespace. Binding indices name entries
-/// in the runtime scope; they never cache a global value across executable statements.
-pub(crate) fn registered_suite(
+/// Each recorded operand belongs to a physical statement or deletion target in this source.
+pub(crate) fn namespace_operations(
     stmts: &[ast::Stmt],
-    kind: RegisteredScope,
-    source: values::RegisteredSource<'_>,
-) -> Option<RegisteredFunction> {
-    let module = matches!(kind, RegisteredScope::Module);
-    let mut scope = SourceScope {
-        kind,
-        source,
-        names: HashMap::new(),
-    };
-    let mut body = Vec::new();
-    for stmt in stmts {
-        body.push(checkpoint(stmt));
-        let (lowered, _) =
-            statements::StatementLowering::source_statement(&mut scope, stmt, module).ok()?;
-        body.extend(lowered);
+    private_names: &imre_ast::Names,
+) -> HashMap<TextRange, Expr> {
+    use ast::statement_visitor::{StatementVisitor, walk_stmt};
+    struct Operations<'a> {
+        private_names: &'a imre_ast::Names,
+        by_range: HashMap<TextRange, Expr>,
     }
-    let locals = vec![Type::PythonObject; scope.names.len()];
-    Some(RegisteredFunction {
-        function: ir::Function {
-            params: vec![],
-            returns: Type::PythonObject,
-            locals,
-            body,
-        },
-        local_names: scope
-            .names
-            .into_iter()
-            .map(|(name, slot)| (slot, name))
-            .collect(),
-    })
+    impl<'a> StatementVisitor<'a> for Operations<'_> {
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            if let Some(import) = registered_import(stmt, self.private_names) {
+                self.by_range.insert(stmt.range(), import);
+            } else if let ast::Stmt::Delete(delete) = stmt {
+                for target in delete_targets(delete) {
+                    if let Some(binding) = registered_delete_name(target) {
+                        self.by_range.insert(target.range(), binding);
+                    }
+                }
+            }
+            walk_stmt(self, stmt);
+        }
+    }
+    let mut operations = Operations {
+        private_names,
+        by_range: HashMap::new(),
+    };
+    operations.visit_body(stmts);
+    operations.by_range
+}
+
+pub(crate) struct DeferredModuleAnnotation {
+    pub(crate) name: String,
+    pub(crate) value: AnnotationValue,
+}
+
+pub(crate) enum AnnotationValue {
+    Checked(Expr),
+    Forward {
+        text: String,
+        parsed: Box<ruff_python_parser::Parsed<ast::ModExpression>>,
+    },
+    Source(ast::Expr),
+}
+
+/// Only compound, valid strings outside the bundled library get a separately bound
+/// expression. A literal or name retains exactly the ordinary Python str.
+pub(crate) fn annotation_expression(
+    text: &str,
+) -> Option<ruff_python_parser::Parsed<ast::ModExpression>> {
+    let parsed = imre_ast::forward_refs::parse(text).ok()?;
+    imre_ast::forward_refs::validate(&parsed).ok()?;
+    let expr = &parsed.syntax().body;
+    (!expr.is_name_expr() && !expr.is_literal_expr()).then_some(parsed)
+}
+
+impl DeferredModuleAnnotation {
+    fn new(
+        name: String,
+        expression: &ast::Expr,
+        source: values::RegisteredSource<'_>,
+        bundled: bool,
+    ) -> Self {
+        let value = if let ast::Expr::StringLiteral(literal) = expression
+            && !source.has_templates
+            && source.replacements.is_empty()
+        {
+            let text = literal.value.to_str();
+            if !bundled && let Some(parsed) = annotation_expression(text) {
+                AnnotationValue::Forward {
+                    text: text.to_owned(),
+                    parsed: Box::new(parsed),
+                }
+            } else {
+                // annotation_text returns an unpositioned normal str on this path.
+                AnnotationValue::Checked(Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Str(text.to_owned()),
+                })
+            }
+        } else {
+            values::registered_value(expression, source).map_or_else(
+                || AnnotationValue::Source(expression.clone()),
+                AnnotationValue::Checked,
+            )
+        };
+        Self { name, value }
+    }
+
+    /// Number already-checked operands in physical marker order, including repeated finally edges.
+    pub(crate) fn prepare_body(entries: &[&Self]) -> RegisteredSuite {
+        let mut residual = Vec::new();
+        let mut body = vec![Statement::Expr(operation(
+            Builtin::RegisteredAnnotationStart,
+            Type::None,
+            vec![],
+        ))];
+        for (index, entry) in entries.iter().enumerate() {
+            let value = match &entry.value {
+                AnnotationValue::Checked(value) => value.clone(),
+                AnnotationValue::Forward { .. } | AnnotationValue::Source(_) => {
+                    SourceRun::record(&mut residual, index, body.len());
+                    continue;
+                }
+            };
+            body.push(Statement::Expr(operation(
+                Builtin::RegisteredAnnotationInsert {
+                    index,
+                    name: entry.name.clone(),
+                },
+                Type::None,
+                vec![value],
+            )));
+        }
+        body.push(Statement::Return(operation(
+            Builtin::RegisteredAnnotationResult,
+            Type::PythonObject,
+            vec![],
+        )));
+        RegisteredSuite {
+            checked: RegisteredFunction {
+                function: ir::Function {
+                    params: vec![],
+                    returns: Type::PythonObject,
+                    locals: vec![],
+                    body,
+                },
+                local_names: HashMap::new(),
+            },
+            residual,
+        }
+    }
+}
+
+/// Prepare module markers and the delayed operands of their native annotation callback.
+pub(crate) fn module_annotations(
+    body: &[ast::Stmt],
+    string_annotations: bool,
+    operations: &mut HashMap<TextRange, Expr>,
+    source: values::RegisteredSource<'_>,
+    bundled: bool,
+) -> HashMap<TextSize, DeferredModuleAnnotation> {
+    use ast::statement_visitor::{StatementVisitor, walk_stmt};
+    struct Annotations<'a> {
+        string_annotations: bool,
+        operations: &'a mut HashMap<TextRange, Expr>,
+        deferred: HashMap<TextSize, DeferredModuleAnnotation>,
+        source: values::RegisteredSource<'a>,
+        bundled: bool,
+    }
+    impl<'a> StatementVisitor<'a> for Annotations<'_> {
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            match stmt {
+                ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => {}
+                ast::Stmt::AnnAssign(ann) => {
+                    if ann.simple
+                        && let Some(name) = ann.target.as_name_expr()
+                    {
+                        let name = name.id.to_string();
+                        let annotation = if self.string_annotations {
+                            ir::ModuleAnnotation::String {
+                                name,
+                                spelling: super::annotation_spelling(&ann.annotation),
+                            }
+                        } else {
+                            let site = DeferredModuleAnnotation::new(
+                                name,
+                                &ann.annotation,
+                                self.source,
+                                self.bundled,
+                            );
+                            self.deferred.insert(ann.start(), site);
+                            ir::ModuleAnnotation::Deferred(ann.start())
+                        };
+                        self.operations.insert(
+                            ann.target.range(),
+                            operation(
+                                Builtin::RegisteredModuleAnnotation(annotation),
+                                Type::None,
+                                vec![],
+                            ),
+                        );
+                    }
+                }
+                _ => walk_stmt(self, stmt),
+            }
+        }
+    }
+    let mut annotations = Annotations {
+        string_annotations,
+        operations,
+        deferred: HashMap::new(),
+        source,
+        bundled,
+    };
+    annotations.visit_body(body);
+    annotations.deferred
+}
+
+/// Checked instructions retain their canonical function layout. Source runs are owned
+/// by the physical suite and identify the remaining gaps between checked statements.
+pub(crate) struct SourceRun {
+    pub(crate) at: usize,
+    pub(crate) statements: std::ops::Range<usize>,
+}
+
+impl SourceRun {
+    fn record(runs: &mut Vec<Self>, source_index: usize, checked_offset: usize) {
+        if let Some(run) = runs.last_mut()
+            && run.statements.end == source_index
+        {
+            run.statements.end += 1;
+        } else {
+            runs.push(Self {
+                at: checked_offset,
+                statements: source_index..source_index + 1,
+            });
+        }
+    }
+}
+
+pub(crate) struct RegisteredSuite {
+    pub(crate) checked: RegisteredFunction,
+    pub(crate) residual: Vec<SourceRun>,
+}
+
+impl RegisteredSuite {
+    pub(crate) fn fully_checked(&self) -> bool {
+        self.residual.is_empty()
+    }
 }
 
 fn plain_class_header(class: &ast::StmtClassDef) -> bool {
     class.type_params.is_none() && class.arguments.as_ref().is_none_or(|args| args.is_empty())
 }
 
-/// Keep the real class namespace for suites with ordinary bindings and no annotation setup.
-pub(crate) fn registered_class_body(
-    class: &ast::StmtClassDef,
-    source: values::RegisteredSource<'_>,
-) -> Option<RegisteredFunction> {
-    if !plain_class_header(class)
-        || !class.body.iter().all(|stmt| {
-            matches!(
-                stmt,
-                ast::Stmt::Assign(_) | ast::Stmt::Expr(_) | ast::Stmt::Pass(_)
-            )
-        })
-    {
-        return None;
+/// Prepare ordered suites while the source tree and its namespace operands are available.
+pub(crate) struct SuitePreparation<'a> {
+    operations: &'a HashMap<TextRange, Expr>,
+    source: values::RegisteredSource<'a>,
+    pub(crate) nested: HashMap<TextSize, RegisteredSuite>,
+}
+
+impl<'a> SuitePreparation<'a> {
+    pub(crate) fn new(
+        operations: &'a HashMap<TextRange, Expr>,
+        source: values::RegisteredSource<'a>,
+    ) -> Self {
+        Self {
+            operations,
+            source,
+            nested: HashMap::new(),
+        }
     }
-    registered_suite(&class.body, RegisteredScope::Class, source)
+
+    pub(crate) fn suite(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope) -> RegisteredSuite {
+        use ast::statement_visitor::{StatementVisitor, walk_stmt};
+        let plan = self.lower(stmts, kind);
+        struct Children<'p, 's> {
+            prepare: &'p mut SuitePreparation<'s>,
+            kind: RegisteredScope,
+        }
+        impl<'a> StatementVisitor<'a> for Children<'_, '_> {
+            fn visit_body(&mut self, stmts: &'a [ast::Stmt]) {
+                if let Some(first) = stmts.first() {
+                    let plan = self.prepare.suite(stmts, self.kind);
+                    self.prepare.nested.insert(first.start(), plan);
+                }
+            }
+        }
+        let mut children = Children {
+            prepare: self,
+            kind,
+        };
+        for run in &plan.residual {
+            for stmt in &stmts[run.statements.clone()] {
+                // A declaration opens a separate activation with its own scope and admission.
+                if !matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)) {
+                    walk_stmt(&mut children, stmt);
+                }
+            }
+        }
+        plan
+    }
+
+    fn lower(&self, stmts: &[ast::Stmt], kind: RegisteredScope) -> RegisteredSuite {
+        let module = matches!(kind, RegisteredScope::Module);
+        let mut scope = SourceScope {
+            kind,
+            operations: self.operations,
+            source: self.source,
+            names: HashMap::new(),
+            locals: Vec::new(),
+            loop_depth: 0,
+        };
+        let mut body = Vec::new();
+        let mut residual: Vec<SourceRun> = Vec::new();
+        for (i, stmt) in stmts.iter().enumerate() {
+            let slots_before = scope.locals.len();
+            if let Ok((lowered, _)) =
+                statements::StatementLowering::source_statement(&mut scope, stmt, module)
+            {
+                body.push(checkpoint(stmt));
+                body.extend(lowered);
+            } else {
+                // A partially lowered target can allocate slots before a later operand fails.
+                if scope.locals.len() != slots_before {
+                    scope.locals.truncate(slots_before);
+                    scope.names.retain(|_, slot| *slot < slots_before);
+                }
+                SourceRun::record(&mut residual, i, body.len());
+            }
+        }
+        let locals = scope.locals;
+        RegisteredSuite {
+            checked: RegisteredFunction {
+                function: ir::Function {
+                    params: Vec::new(),
+                    returns: Type::PythonObject,
+                    locals,
+                    body,
+                },
+                local_names: scope
+                    .names
+                    .into_iter()
+                    .map(|(name, slot)| (slot, LocalBinding { name, namespace: None }))
+                    .collect(),
+            },
+            residual,
+        }
+    }
+
+    pub(crate) fn complete(
+        &self,
+        stmts: &[ast::Stmt],
+        kind: RegisteredScope,
+    ) -> Option<RegisteredSuite> {
+        let plan = self.lower(stmts, kind);
+        plan.fully_checked().then_some(plan)
+    }
+
+    pub(crate) fn class_body(&self, class: &ast::StmtClassDef) -> Option<RegisteredSuite> {
+        if !plain_class_header(class)
+            || !class.body.iter().all(|stmt| {
+                matches!(
+                    stmt,
+                    ast::Stmt::Assign(_) | ast::Stmt::Expr(_) | ast::Stmt::Pass(_)
+                )
+            })
+        {
+            return None;
+        }
+        self.complete(&class.body, RegisteredScope::Class)
+    }
 }
 
 /// A target's Python expression inputs in evaluation order. The receiver is evaluated
@@ -301,18 +605,22 @@ impl<'a> AttributeEffect<'a> {
         .into_iter()
         .flatten()
     }
+}
 
-    pub(super) fn lower(&self, values: Vec<Expr>) -> Statement {
-        Statement::Expr(operation(
-            Builtin::RegisteredAttribute {
-                action: self.action,
-                name: self.field.attr.to_string(),
-                range: self.field.range(),
-            },
-            Type::None,
-            values,
-        ))
-    }
+pub(super) fn attribute_statement(
+    action: ir::AttributeAction,
+    field: &ast::ExprAttribute,
+    values: Vec<Expr>,
+) -> Statement {
+    Statement::Expr(operation(
+        Builtin::RegisteredAttribute {
+            action,
+            name: field.attr.to_string(),
+            range: field.range(),
+        },
+        Type::None,
+        values,
+    ))
 }
 
 /// Deletion groups evaluate their leaves from left to right without constructing a tuple or list.
@@ -384,18 +692,25 @@ impl statements::StatementLowering for SourceScope<'_> {
                     .map(|node| self.ordinary_operand(node))
                     .collect::<Option<_>>()
                     .ok_or(())?;
-                Ok(effect.lower(values))
+                Ok(attribute_statement(effect.action, effect.field, values))
             })
             .collect::<StdResult<Vec<_>, _>>()
             .map(Some)
     }
 
     fn assignment(&mut self, assign: &ast::StmtAssign) -> StdResult<Vec<Statement>, ()> {
-        let [ast::Expr::Name(target)] = assign.targets.as_slice() else {
+        let [target @ (ast::Expr::Name(_) | ast::Expr::Tuple(_) | ast::Expr::List(_))] =
+            assign.targets.as_slice()
+        else {
             return Err(());
         };
-        let value = self.operand(&assign.value).ok_or(())?;
-        Ok(vec![self.store(target.id.as_str(), value)])
+        let value = if target.is_name_expr() {
+            self.operand(&assign.value)
+        } else {
+            self.ordinary_operand(&assign.value)
+        }
+        .ok_or(())?;
+        unpacking::bind_targets(self, target, value, None)
     }
 
     fn definition(&mut self, def: &ast::StmtFunctionDef) -> StdResult<Option<Statement>, ()> {
@@ -439,6 +754,21 @@ impl statements::StatementLowering for SourceScope<'_> {
         }
     }
 
+    fn for_loop(&mut self, loop_: &ast::StmtFor) -> StdResult<statements::Block, ()> {
+        let source = self.ordinary_operand(&loop_.iter).ok_or(())?;
+        let cursor = operation(Builtin::RegisteredIter, Type::PythonObject, vec![source]);
+        let input = pipelines::Prepared::cursor(cursor, Type::PythonObject, |ty| self.hidden(ty));
+        let binding = unpacking::bind_targets(
+            self,
+            &loop_.target,
+            Expr::local(input.value, Type::PythonObject),
+            None,
+        )?;
+        let body = self.loop_body(&loop_.body)?;
+        let otherwise = self.suite(&loop_.orelse)?;
+        Ok((input.for_suite(binding, body, otherwise, Vec::new()), true))
+    }
+
     fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<statements::Block, ()> {
         match stmt {
             ast::Stmt::ClassDef(class) if plain_class_header(class) => {
@@ -455,24 +785,141 @@ impl statements::StatementLowering for SourceScope<'_> {
                 );
                 Ok((vec![self.store(class.name.as_str(), value)], true))
             }
+            ast::Stmt::While(loop_) => {
+                let condition = self.ordinary_operand(&loop_.test).ok_or(())?;
+                let body = self.loop_body(&loop_.body)?;
+                let otherwise = self.suite(&loop_.orelse)?;
+                Ok((vec![Statement::While(condition, body, otherwise)], true))
+            }
+            ast::Stmt::Break(_) if self.loop_depth != 0 => Ok((vec![Statement::Break], false)),
+            ast::Stmt::Continue(_) if self.loop_depth != 0 => {
+                Ok((vec![Statement::Continue], false))
+            }
             ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => Ok((Vec::new(), true)),
-            _ => registered_import(stmt, self.source.private_names)
+            ast::Stmt::AnnAssign(ann) if matches!(self.kind, RegisteredScope::Module) => {
+                let marker = self.operations.get(&ann.target.range()).ok_or(())?.clone();
+                let mut body = Vec::new();
+                if let Some(value) = &ann.value {
+                    let name = ann.target.as_name_expr().ok_or(())?;
+                    let value = self.operand(value).ok_or(())?;
+                    body.push(self.store(name.id.as_str(), value));
+                }
+                body.push(Statement::Expr(marker));
+                Ok((body, true))
+            }
+            ast::Stmt::Delete(delete) => {
+                let body = delete_targets(delete)
+                    .into_iter()
+                    .map(|target| {
+                        if let Some(op) = self.operations.get(&target.range()) {
+                            return Some(Statement::Expr(op.clone()));
+                        }
+                        let field = target.as_attribute_expr()?;
+                        let receiver = self.ordinary_operand(&field.value)?;
+                        Some(attribute_statement(ir::AttributeAction::Delete, field, vec![receiver]))
+                    })
+                    .collect::<Option<_>>()
+                    .ok_or(())?;
+                Ok((body, true))
+            }
+            _ => self
+                .operations
+                .get(&stmt.range())
+                .cloned()
                 .map(|import| (vec![Statement::Expr(import)], true))
                 .ok_or(()),
         }
     }
 }
 
+/// Attribute and subscript targets retain their ordinary receiver evaluation.
+fn registered_delete_name(target: &ast::Expr) -> Option<Expr> {
+    let name = target.as_name_expr()?;
+    Some(operation(
+        Builtin::RegisteredDeleteName(name.id.to_string(), name.range()),
+        Type::None,
+        vec![],
+    ))
+}
+
 struct SourceScope<'a> {
     kind: RegisteredScope,
+    operations: &'a HashMap<TextRange, Expr>,
     source: values::RegisteredSource<'a>,
     names: HashMap<String, usize>,
+    locals: Vec<Type>,
+    loop_depth: usize,
+}
+
+impl unpacking::PatternBinder for SourceScope<'_> {
+    type Error = ();
+
+    fn pattern_hidden(&mut self, ty: Type) -> usize {
+        self.hidden(ty)
+    }
+
+    fn pattern_local(&self, slot: usize) -> Expr {
+        Expr::local(slot, self.locals[slot])
+    }
+
+    fn pattern_store(&mut self, target: &ast::Expr, value: Expr) -> StdResult<Statement, ()> {
+        match target {
+            ast::Expr::Name(name) => Ok(self.store(name.id.as_str(), value)),
+            ast::Expr::Attribute(attr) => {
+                let receiver = self.ordinary_operand(&attr.value).ok_or(())?;
+                Ok(attribute_statement(
+                    ir::AttributeAction::Store,
+                    attr,
+                    vec![value, receiver],
+                ))
+            }
+            ast::Expr::Subscript(sub) => {
+                let receiver = self.ordinary_operand(&sub.value).ok_or(())?;
+                let key = self.ordinary_operand(&sub.slice).ok_or(())?;
+                Ok(Statement::SetItem(receiver, key, value))
+            }
+            _ => Err(()),
+        }
+    }
+
+    fn multiple_stars(&self, _: &ast::Expr) {}
 }
 
 impl SourceScope<'_> {
+    fn suite(&mut self, stmts: &[ast::Stmt]) -> StdResult<Vec<Statement>, ()> {
+        let mut body = Vec::new();
+        for stmt in stmts {
+            body.push(checkpoint(stmt));
+            let (lowered, _) = statements::StatementLowering::source_statement(
+                self,
+                stmt,
+                matches!(self.kind, RegisteredScope::Module),
+            )?;
+            body.extend(lowered);
+        }
+        Ok(body)
+    }
+
+    fn loop_body(&mut self, statements: &[ast::Stmt]) -> StdResult<Vec<Statement>, ()> {
+        self.loop_depth += 1;
+        let body = self.suite(statements);
+        self.loop_depth -= 1;
+        body
+    }
+
+    fn hidden(&mut self, ty: Type) -> usize {
+        let slot = self.locals.len();
+        self.locals.push(ty);
+        slot
+    }
+
     fn slot(&mut self, name: &str) -> usize {
-        let next = self.names.len();
-        *self.names.entry(name.to_owned()).or_insert(next)
+        if let Some(slot) = self.names.get(name) {
+            return *slot;
+        }
+        let slot = self.hidden(Type::PythonObject);
+        self.names.insert(name.to_owned(), slot);
+        slot
     }
 
     fn store(&mut self, name: &str, value: Expr) -> Statement {
@@ -489,7 +936,10 @@ impl SourceScope<'_> {
     }
 
     fn operand(&self, expr: &ast::Expr) -> Option<Expr> {
-        if let RegisteredScope::Function { is_async } = self.kind
+        // The current loop cursor lives in this native activation; a suspension
+        // across a pull needs a persisted cursor in the generator frame.
+        if self.loop_depth == 0
+            && let RegisteredScope::Function { is_async } = self.kind
             && let Some((kind, value)) = ir::SuspendValue::operand(expr)
             && !matches!(
                 (kind, is_async),
@@ -531,6 +981,144 @@ impl ir::SuspendValue {
 mod tests {
     use super::*;
 
+    fn registered_suite(
+        stmts: &[ast::Stmt],
+        kind: RegisteredScope,
+        source: values::RegisteredSource<'_>,
+    ) -> Option<RegisteredFunction> {
+        let default_names = imre_ast::Names::default();
+        let names = source.private_names.unwrap_or(&default_names);
+        let mut operations = namespace_operations(stmts, names);
+        if matches!(kind, RegisteredScope::Module) {
+            module_annotations(stmts, names.string_annotations, &mut operations, source, false);
+        }
+        SuitePreparation::new(&operations, source)
+            .complete(stmts, kind)
+            .map(|plan| plan.checked)
+    }
+
+    #[test]
+    fn annotation_callback_numbers_physical_occurrences_and_keeps_unsupported_values_late() {
+        let text = "first: int\nsecond: list[int]\ncomplex: dict[str, int]\nforward: 'list[int]'\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let stmts = &module.parsed.syntax().body;
+        let literals = values::ModuleSource::new(module);
+        let source = literals.context(text);
+        let sites = module_annotations(
+            stmts,
+            false,
+            &mut HashMap::new(),
+            source,
+            false,
+        );
+        let first = &sites[&stmts[0].start()];
+        let second = &sites[&stmts[1].start()];
+        let whole = DeferredModuleAnnotation::prepare_body(&[first, second, first]);
+        assert!(whole.fully_checked());
+        let checked = &whole.checked;
+        let [
+            Statement::Expr(start),
+            members @ ..,
+            Statement::Return(result),
+        ] = checked.function.body.as_slice()
+        else {
+            panic!("expected a single callback body")
+        };
+        assert!(matches!(
+            start.kind,
+            ExprKind::Builtin(Builtin::RegisteredAnnotationStart, _)
+        ));
+        assert!(matches!(
+            result.kind,
+            ExprKind::Builtin(Builtin::RegisteredAnnotationResult, _)
+        ));
+        let numbered: Vec<_> =
+            members
+                .iter()
+                .map(|stmt| {
+                    let Statement::Expr(Expr {
+                        kind:
+                            ExprKind::Builtin(
+                                Builtin::RegisteredAnnotationInsert { index, name },
+                                operands,
+                            ),
+                        ..
+                    }) = stmt
+                    else {
+                        panic!("expected a guarded annotation insertion")
+                    };
+                    assert_eq!(operands.len(), 1);
+                    (*index, name.as_str())
+                })
+                .collect();
+        assert_eq!(numbered, [(0, "first"), (1, "second"), (2, "first")]);
+        let bundled_sites = module_annotations(
+            stmts,
+            false,
+            &mut HashMap::new(),
+            source,
+            true,
+        );
+        let quoted_site = stmts[3].start();
+        assert!(
+            matches!(&sites[&quoted_site].value, AnnotationValue::Forward {text, ..} if text == "list[int]")
+        );
+        assert!(
+            matches!(&bundled_sites[&quoted_site].value, AnnotationValue::Checked(Expr {kind: ExprKind::Str(text), ..}) if text == "list[int]")
+        );
+        let forward = DeferredModuleAnnotation::prepare_body(&[&sites[&quoted_site]]);
+        let [quoted] = forward.residual.as_slice() else {
+            panic!("the quoted expression still uses the source compiler")
+        };
+        assert_eq!(quoted.statements, 0..1);
+        {
+            let unavailable = &sites[&stmts[2].start()];
+            assert!(matches!(unavailable.value, AnnotationValue::Source(_)));
+            let mixed = DeferredModuleAnnotation::prepare_body(&[first, unavailable, second]);
+            let [gap] = mixed.residual.as_slice() else {
+                panic!("expected one unprepared operand")
+            };
+            assert_eq!(gap.at, 2);
+            assert_eq!(gap.statements, 1..2);
+            assert_eq!(mixed.checked.function.body.len(), 4);
+        }
+    }
+
+    #[test]
+    fn prepared_source_runs_keep_their_order_and_namespace_ownership() {
+        let text = "from . import a\nx: int = a\nif a:\n    del a\ny: int = []\nimport z\n";
+        let mut stmts = ruff_python_parser::parse_module(text).unwrap().into_syntax().body;
+        let names = imre_ast::lower(&mut stmts);
+        let mut ops = namespace_operations(&stmts, &names);
+        let replacements = HashMap::new();
+        let imports = imre_ast::module_imports(&stmts);
+        let source = RegisteredSource {
+            text,
+            private_names: Some(&names),
+            replacements: &replacements,
+            has_templates: false,
+            method_imports: &imports,
+        };
+        let annotations = module_annotations(
+            &stmts,
+            names.string_annotations,
+            &mut ops,
+            source,
+            false,
+        );
+        assert_eq!(annotations.len(), 2);
+        let mut prepare = SuitePreparation::new(&ops, source);
+        let plan = prepare.suite(&stmts, RegisteredScope::Module);
+        let [run] = &plan.residual[..] else {
+            panic!("expected one source range")
+        };
+        assert_eq!(run.statements, 2..4);
+        assert_eq!(run.at, 5);
+        assert_eq!(plan.checked.function.body.len(), 7);
+        assert!(prepare.nested.values().all(RegisteredSuite::fully_checked));
+    }
+
     #[test]
     fn private_dotted_import_keeps_the_root_binding_in_checked_ir() {
         let mut body = ruff_python_parser::parse_module("class C:\n    import __pkg.child\n")
@@ -539,7 +1127,7 @@ mod tests {
             .body;
         let names = imre_ast::lower(&mut body);
         let class = body[0].as_class_def_stmt().unwrap();
-        let import = registered_import(&class.body[0], Some(&names)).unwrap();
+        let import = registered_import(&class.body[0], &names).unwrap();
         let ExprKind::Builtin(Builtin::RegisteredImport(ir::NamespaceImport::Modules(modules)), _) =
             import.kind
         else {
@@ -585,7 +1173,16 @@ mod tests {
                 source.context(&entry.source),
             )
             .unwrap();
-            assert_eq!(suite.local_names, HashMap::from([(0, "out".to_owned())]));
+            assert_eq!(
+                suite.local_names,
+                HashMap::from([(
+                    0,
+                    LocalBinding {
+                        name: "out".into(),
+                        namespace: None
+                    }
+                )])
+            );
             let [Statement::Expr(_), store] = suite.function.body.as_slice() else {
                 panic!("expected one checkpoint followed by one store")
             };
@@ -915,6 +1512,226 @@ mod tests {
     }
 
     #[test]
+    fn grouped_deletion_interleaves_names_and_attributes_in_source_order() {
+        let text = "del (first, [obj.field, last]), obj.tail\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let source = values::ModuleSource::new(module);
+        let suite = registered_suite(
+            &module.parsed.syntax().body,
+            RegisteredScope::Module,
+            source.context(text),
+        )
+        .unwrap();
+        let sites: Vec<_> = suite.function.body.iter().filter_map(|statement| {
+            let Statement::Expr(Expr { kind: ExprKind::Builtin(op, _), .. }) = statement else {
+                return None;
+            };
+            match op {
+                Builtin::RegisteredDeleteName(_, range)
+                | Builtin::RegisteredAttribute { action: ir::AttributeAction::Delete, range, .. } => Some(&text[*range]),
+                _ => None,
+            }
+        }).collect();
+        assert_eq!(sites, ["first", "obj.field", "last", "obj.tail"]);
+    }
+
+    #[test]
+    fn prepared_namespace_assignments_and_loops_stage_the_same_targets() {
+        for source in [
+            "owners[0], (sink.field, *rest) = row\n",
+            "for owners[0], (sink.field, *rest) in rows:\n    publish(rest)\n",
+        ] {
+            let graph = SourceGraph::single(source).unwrap();
+            let suite = &graph.modules[graph.entry].parsed.syntax().body;
+            for module in [false, true] {
+                let body = registered_suite(
+                    suite,
+                    if module {
+                        RegisteredScope::Module
+                    } else {
+                        RegisteredScope::Function { is_async: false }
+                    },
+                    values::ModuleSource::new(&graph.modules[graph.entry])
+                        .context(&graph.modules[graph.entry].source),
+                )
+                .unwrap();
+                let mut snapshots = Vec::new();
+                let mut attrs = 0;
+                let mut items = 0;
+                ir::walk_expressions(&body.function.body, &mut |expr| match &expr.kind {
+                    ExprKind::Builtin(Builtin::RegisteredUnpack { count, star }, _) => {
+                        snapshots.push((*count, *star))
+                    }
+                    ExprKind::Builtin(Builtin::RegisteredAttribute { action: ir::AttributeAction::Store, name, .. }, _) if name == "field" => {
+                        attrs += 1
+                    }
+                    _ => {}
+                });
+                ir::walk_statements(&body.function.body, &mut |stmt| {
+                    items += usize::from(matches!(stmt, Statement::SetItem(..)));
+                });
+                assert_eq!(snapshots, [(2, None), (2, Some(1))]);
+                assert_eq!((items, attrs), (1, 1));
+            }
+        }
+    }
+
+    #[test]
+    fn suspending_loop_keeps_its_resumable_generator_body() {
+        let graph =
+            SourceGraph::single("def sales(rows):\n    for row in rows:\n        yield row\n")
+                .unwrap();
+        let definition = graph.modules[graph.entry].parsed.syntax().body[0]
+            .as_function_def_stmt()
+            .unwrap();
+        assert!(
+            registered_suite(
+                &definition.body,
+                RegisteredScope::Function { is_async: false },
+                values::ModuleSource::new(&graph.modules[graph.entry])
+                    .context(&graph.modules[graph.entry].source)
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn ordinary_and_iteration_targets_share_unpack_and_store_order() {
+        for source in [
+            "def post(row, book, read):\n    book[0], book[read()] = row\n",
+            "def post(rows, book, read):\n    for book[0], book[read()] in rows:\n        pass\n",
+        ] {
+            let graph = SourceGraph::single(source).unwrap();
+            let _ = super::super::lower(&graph);
+            let registered = graph.registered_functions();
+            let function = &registered[&graph.entry][&TextSize::default()].function;
+            let mut unpacks = 0;
+            let mut stores = 0;
+            ir::walk_expressions(&function.body, &mut |expr| {
+                if matches!(
+                    expr.kind,
+                    ExprKind::Builtin(
+                        Builtin::RegisteredUnpack {
+                            count: 2,
+                            star: None
+                        },
+                        _
+                    )
+                ) {
+                    unpacks += 1;
+                }
+            });
+            ir::walk_statements(&function.body, &mut |stmt| {
+                stores += usize::from(matches!(stmt, Statement::SetItem(..)));
+            });
+            assert_eq!((unpacks, stores), (1, 2), "{source}");
+        }
+    }
+
+    #[test]
+    fn prepared_namespace_suite_uses_the_same_pull_and_exhaustion() {
+        let graph = SourceGraph::single("for entry in rows:\n    emit(entry)\nelse:\n    done()\n")
+            .unwrap();
+        let source = &graph.modules[graph.entry].parsed.syntax().body;
+        for module in [true, false] {
+            let suite = registered_suite(
+                source,
+                if module {
+                    RegisteredScope::Module
+                } else {
+                    RegisteredScope::Function { is_async: false }
+                },
+                values::ModuleSource::new(&graph.modules[graph.entry])
+                    .context(&graph.modules[graph.entry].source),
+            )
+            .unwrap();
+            let mut pulls = 0;
+            let mut exits = 0;
+            ir::walk_statements(&suite.function.body, &mut |stmt| match stmt {
+                Statement::IterNext { .. } => pulls += 1,
+                Statement::Exhaust => exits += 1,
+                _ => {}
+            });
+            assert_eq!((pulls, exits), (1, 1));
+            let entry = suite
+                .local_names
+                .values()
+                .find(|v| v.name == "entry")
+                .unwrap();
+            assert!(entry.namespace.is_none());
+        }
+    }
+
+    #[test]
+    fn registered_for_uses_the_prepared_iterator_and_its_exhaustion_edge() {
+        let graph = SourceGraph::single(concat!(
+            "def deliver(items, emit, exhausted):\n",
+            "    for item in items:\n",
+            "        emit(item)\n",
+            "    else:\n",
+            "        exhausted()\n",
+        ))
+        .unwrap();
+        let _ = super::super::lower(&graph);
+        let bodies = graph.registered_functions();
+        let function = &bodies[&graph.entry][&TextSize::default()].function;
+        let mut opens = 0;
+        let mut calls = 0;
+        ir::walk_expressions(&function.body, &mut |expr| match &expr.kind {
+            ExprKind::Builtin(Builtin::RegisteredIter, _) => opens += 1,
+            ExprKind::Builtin(Builtin::RegisteredCall(..), _) => calls += 1,
+            _ => {}
+        });
+        let mut pulls = 0;
+        let mut exhausts = 0;
+        ir::walk_statements(&function.body, &mut |stmt| match stmt {
+            Statement::IterNext { iterator, key, .. } => {
+                assert_eq!(function.locals[*iterator], Type::PythonObject);
+                assert_eq!(function.locals[*key], Type::PythonObject);
+                pulls += 1;
+            }
+            Statement::Exhaust => exhausts += 1,
+            _ => {}
+        });
+        assert_eq!((opens, pulls, exhausts, calls), (1, 1, 1, 2));
+    }
+
+    #[test]
+    fn eager_displays_use_the_same_pull_and_capture_the_lexical_namespace() {
+        let graph = SourceGraph::single(concat!(
+            "def collect(rows, project, accept, sink):\n",
+            "    sink([project(rows) for rows in rows if accept(rows)])\n",
+            "    sink({project(x) for x in rows})\n",
+            "    sink({project(x): project(x) for x in rows})\n",
+        ))
+        .unwrap();
+        let _ = super::super::lower(&graph);
+        let bodies = graph.registered_functions();
+        let checked = &bodies[&graph.entry][&TextSize::default()];
+        let mut namespaces = 0;
+        let mut scoped_calls = 0;
+        let mut pulls = 0;
+        ir::walk_expressions(&checked.function.body, &mut |expr| match &expr.kind {
+            ExprKind::Builtin(Builtin::RegisteredNamespace(_), _) => namespaces += 1,
+            ExprKind::Builtin(Builtin::RegisteredCall(call), _) if call.explicit_scope => scoped_calls += 1,
+            _ => {}
+        });
+        ir::walk_statements(&checked.function.body, &mut |stmt| {
+            pulls += usize::from(matches!(stmt, Statement::IterNext { .. }));
+        });
+        assert_eq!((namespaces, scoped_calls, pulls), (3, 5, 3));
+        assert_eq!(
+            checked
+                .local_names
+                .values()
+                .filter(|binding| binding.namespace.is_some())
+                .count(),
+            3
+        );
+    }
+
+    #[test]
     fn a_packed_callback_retains_the_checked_body_contract() {
         let positive = "def forward(call, args, kwargs):\n    call(*args, **kwargs)\n";
         let invalid = concat!(
@@ -944,6 +1761,20 @@ mod tests {
                 keywords: vec![None],
             })]
         );
+    }
+
+    #[test]
+    fn registered_iteration_preserves_known_operand_contracts() {
+        for source in [
+            "def post(batches: tuple[int, int], sink):\n    for batch in batches:\n        for item in batch:\n            sink(item)\n",
+            "def f(sink):\n    for value in 42:\n        sink(value)\n",
+            "def f(sink):\n    sink([x for x in None])\n",
+            "def f(rows, key: list[int], sink):\n    sink({key: x for x in rows})\n",
+        ] {
+            let graph = SourceGraph::single(source).unwrap();
+            assert!(super::super::lower(&graph).is_err());
+            assert!(graph.registered_functions().is_empty(), "{source}");
+        }
     }
 
     #[test]

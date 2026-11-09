@@ -2822,9 +2822,17 @@ impl Emitter<'_, '_> {
     fn other_statement(&mut self, statement: &Statement) {
         match statement {
             Statement::Assign(..)
-            | Statement::SetItem(..)
             | Statement::Expr(_)
-            | Statement::Return(_) => {
+            | Statement::Return(_)
+            | Statement::Scope { .. }
+            | Statement::Clear(_)
+            | Statement::SetItem(..)
+            | Statement::If(..)
+            | Statement::While(..)
+            | Statement::IterNext { .. }
+            | Statement::Break
+            | Statement::Continue
+            | Statement::Exhaust => {
                 unreachable!("shared IR statement")
             }
             Statement::Move(target, source) => {
@@ -2848,15 +2856,6 @@ impl Emitter<'_, '_> {
                 let value = self.take_slot(*source);
                 self.store(*target, &value);
             }
-            Statement::Clear(slot) => self.clear_slots(&[*slot]),
-            Statement::Scope { body, clear } => {
-                self.cleanups.push(Cleanup::Slots(clear.clone()));
-                self.block(body);
-                self.cleanups.pop();
-                if !self.body.terminated {
-                    self.clear_slots(clear);
-                }
-            }
             Statement::Try {
                 body,
                 handlers,
@@ -2874,15 +2873,6 @@ impl Emitter<'_, '_> {
                 // Both runtime helpers always set an error; their success edge
                 // is unreachable, but uses the same immediate-check protocol.
                 self.body.end("unreachable");
-            }
-            Statement::IterNext {
-                iterator,
-                key,
-                value,
-                ready,
-                kind,
-            } => {
-                self.iter_next(*iterator, *key, *value, *ready, *kind);
             }
             Statement::AugmentItem(list, index, op, expression) => {
                 // Augmented assignment instead roots the target and old item first.
@@ -2972,153 +2962,6 @@ impl Emitter<'_, '_> {
                 self.release_operand(&right);
                 self.release_operand(&old);
                 self.release_operand(&receiver);
-            }
-            Statement::If(test, yes, no) => {
-                let mut bounded = false;
-                if crate::list_specialization::is_window_range_guard(test)
-                    && let [Statement::While(_, body, _)] = yes.as_slice()
-                {
-                    crate::ir::walk_expressions(body, &mut |value| {
-                        bounded |= matches!(
-                            value.kind,
-                            ExprKind::Builtin(Builtin::GetBoundedInAppendWindow { .. }, _)
-                        );
-                    });
-                }
-                let slots = if bounded {
-                    self.ranges
-                        .checked_small_slots(yes, &self.locals, &self.small_locals)
-                } else {
-                    Vec::new()
-                };
-                let reserve = bounded
-                    .then(|| crate::list_specialization::reserved_append_window(yes))
-                    .flatten();
-                let reserve = reserve.and_then(|(slot, cursor)| {
-                    self.forward_cursors
-                        .get(&cursor)
-                        .cloned()
-                        .map(|c| (slot, c))
-                });
-                let previous = self.reserved_append_window.clone();
-                let carried = reserve
-                    .as_ref()
-                    .map(|(slot, _)| (*slot, self.entry_alloca("i64")));
-                if carried.is_some() {
-                    self.reserved_append_window.clone_from(&carried);
-                }
-                let condition = self.expr(test);
-                self.reserved_append_window.clone_from(&previous);
-                let (yes_label, no_label, end) = (self.label(), self.label(), self.label());
-                let mut guard = condition.operand;
-                let unknown = slots
-                    .iter()
-                    .copied()
-                    .filter(|slot| !self.ranges.starts_small(statement, *slot))
-                    .collect::<Vec<_>>();
-                if let Some((first, rest)) = unknown.split_first() {
-                    let mut words = self.borrow_slot(*first).operand;
-                    for slot in rest {
-                        let word = self.borrow_slot(*slot).operand;
-                        words = self.instruction(format!("and i64 {words}, {word}"));
-                    }
-                    let tagged = self.instruction(format!("trunc i64 {words} to i1"));
-                    guard = self.instruction(format!("and i1 {guard}, {tagged}"));
-                }
-                if let Some((slot, cursor)) = reserve {
-                    let check = self.label();
-                    self.branch(&guard, &check, &no_label);
-                    self.start(&check);
-                    let bytes = self.remaining_cursor_bytes(&cursor);
-                    let list = self.borrow_slot(slot).operand;
-                    let window = self.append_window(slot);
-                    let success = self.instruction(format!(
-                        "call i32 @imre_list_try_open_append_window(ptr {list}, i64 {bytes}, ptr {window})"
-                    ));
-                    let opened = self.instruction(format!("icmp ne i32 {success}, 0"));
-                    self.branch(&opened, &yes_label, &no_label);
-                    self.reserved_append_window.clone_from(&carried);
-                } else {
-                    self.branch(&guard, &yes_label, &no_label);
-                }
-                self.start(&yes_label);
-                if let Some((slot, tail)) = carried {
-                    // Opening the reserved window proves the list has an immediate tail.
-                    let window = self.append_window(slot);
-                    let cursor = self.instruction(format!(
-                        "getelementptr [3 x ptr], ptr {window}, i32 0, i32 1"
-                    ));
-                    let next = self.instruction(format!("load ptr, ptr {cursor}"));
-                    let last = self.instruction(format!("getelementptr i64, ptr {next}, i64 -1"));
-                    let word = self.instruction(format!("load i64, ptr {last}"));
-                    self.line(format!("store i64 {word}, ptr {tail}"));
-                }
-                let prior = self.guarded_integer_lists.len();
-                self.borrow_guarded_integer_lists(test);
-                for slot in &slots {
-                    self.small_locals[*slot] = true;
-                }
-                self.block(yes);
-                self.reserved_append_window = previous;
-                for slot in slots {
-                    self.small_locals[slot] = false;
-                }
-                self.guarded_integer_lists.truncate(prior);
-                let yes_ends = self.body.terminated;
-                if !yes_ends {
-                    self.jump(&end);
-                }
-                self.start(&no_label);
-                self.block(no);
-                let no_ends = self.body.terminated;
-                if !no_ends {
-                    self.jump(&end);
-                }
-                self.start(&end);
-                if yes_ends && no_ends {
-                    self.body.end("unreachable");
-                }
-            }
-            Statement::While(test, body, orelse) => {
-                let previous_lengths = self.snapshot_loop_lengths(statement);
-                let previous_buffers = self.int_buffer_loop(statement);
-                let raw_subtotal = self.raw_subtotal(body);
-                let (condition, body_label, end) = (self.label(), self.label(), self.label());
-                let exhausted = if orelse.is_empty() {
-                    end.clone()
-                } else {
-                    self.label()
-                };
-                if !self.struct_run_loop(test, body, &condition, &exhausted) {
-                    self.jump(&condition);
-                }
-                self.start(&condition);
-                self.check_interrupt();
-                let test = self.while_condition(test, raw_subtotal.is_some());
-                self.branch(&test, &body_label, &exhausted);
-                self.start(&body_label);
-                self.loops.push(LoopTarget {
-                    end: end.clone(),
-                    exhausted: exhausted.clone(),
-                    next: condition.clone(),
-                    cleanup_depth: self.cleanups.len(),
-                    raw_subtotal,
-                });
-                self.block(body);
-                self.loops.pop();
-                if !self.body.terminated {
-                    self.jump(&condition);
-                }
-                if !orelse.is_empty() {
-                    self.start(&exhausted);
-                    self.block(orelse);
-                    if !self.body.terminated {
-                        self.jump(&end);
-                    }
-                }
-                self.start(&end);
-                self.length_snapshots = previous_lengths;
-                self.int_buffers = previous_buffers;
             }
             Statement::For {
                 target,
@@ -3226,17 +3069,6 @@ impl Emitter<'_, '_> {
                 }
                 self.start(&end);
             }
-            Statement::Break | Statement::Continue | Statement::Exhaust => {
-                let target = self.loops.last().unwrap();
-                self.route(Completion::Jump {
-                    label: match statement {
-                        Statement::Break => target.end.clone(),
-                        Statement::Exhaust => target.exhausted.clone(),
-                        _ => target.next.clone(),
-                    },
-                    depth: target.cleanup_depth,
-                });
-            }
             Statement::Assert(test) => {
                 let test = self.expr(test);
                 let (success, fail) = (self.label(), self.label());
@@ -3274,7 +3106,8 @@ impl Emitter<'_, '_> {
 
     fn other_expression(&mut self, expression: &Expr) -> Value {
         match &expression.kind {
-            ExprKind::Int(_)
+            ExprKind::Scope { .. }
+            | ExprKind::Int(_)
             | ExprKind::Float(_)
             | ExprKind::Str(_)
             | ExprKind::Bytes(_)
@@ -3313,23 +3146,6 @@ impl Emitter<'_, '_> {
                     self.present(value.clone(), storage)
                 };
                 self.store(*slot, &stored);
-                value
-            }
-            ExprKind::Scope { body, value, clear } => {
-                self.cleanups.push(Cleanup::Slots(clear.clone()));
-                self.block(body);
-                // Unpacking returns a captured item and clears its slot before
-                // evaluating the next target. Hand its owner to the result.
-                if let ExprKind::Local(slot) = value.kind
-                    && clear.as_slice() == [slot]
-                    && self.owns_slot(slot)
-                {
-                    self.cleanups.pop();
-                    return self.take_slot(slot);
-                }
-                let value = self.expr(value);
-                self.cleanups.pop();
-                self.clear_slots(clear);
                 value
             }
             ExprKind::List(values) => {
@@ -5102,8 +4918,16 @@ impl Emitter<'_, '_> {
             }
             Builtin::RegisteredImport(_)
             | Builtin::RegisteredSuspend(..)
+            | Builtin::RegisteredModuleAnnotation(_)
+            | Builtin::RegisteredAnnotationStart
+            | Builtin::RegisteredAnnotationInsert { .. }
+            | Builtin::RegisteredAnnotationResult
+            | Builtin::RegisteredDeleteName(..)
             | Builtin::RegisteredDefinition(_)
             | Builtin::RegisteredStatement(..)
+            | Builtin::RegisteredNamespace(_)
+            | Builtin::RegisteredUnpack { .. }
+            | Builtin::RegisteredIter
             | Builtin::RegisteredCall(..)
             | Builtin::RegisteredName(_)
             | Builtin::RegisteredUnary(_)
@@ -9899,20 +9723,17 @@ impl Emitter<'_, '_> {
             small_integer: false,
         };
         self.store(ready, &ready_value);
-        let (success, end) = (self.label(), self.label());
-        self.branch(&ready_value.operand, &success, &end);
-        self.start(&success);
-        let word =
-            direct_key.unwrap_or_else(|| self.instruction("load i64, ptr %mapping_key_word"));
-        let key_value = self.unpack_word(word, self.locals[key]);
-        self.store(key, &key_value);
-        if let Some(value) = value {
-            let word = self.instruction("load i64, ptr %mapping_value_word");
-            let value_result = self.unpack_word(word, self.locals[value]);
-            self.store(value, &value_result);
-        }
-        self.jump(&end);
-        self.start(&end);
+        self.when(&ready_value.operand, |emitter| {
+            let word = direct_key
+                .unwrap_or_else(|| emitter.instruction("load i64, ptr %mapping_key_word"));
+            let key_value = emitter.unpack_word(word, emitter.locals[key]);
+            emitter.store(key, &key_value);
+            if let Some(value) = value {
+                let word = emitter.instruction("load i64, ptr %mapping_value_word");
+                let value_result = emitter.unpack_word(word, emitter.locals[value]);
+                emitter.store(value, &value_result);
+            }
+        });
     }
 
     /// Converts a typed value to the runtime's word representation without

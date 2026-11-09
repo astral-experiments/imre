@@ -84,6 +84,11 @@ fn close(
     checker.native_activation = true;
     let mut local_names = HashMap::new();
     let (body, sums) = lower_function(checker, function, signature, Some(&mut local_names)).ok()?;
+    // A fixed-layout activation owns its parameter bindings in the function frame.
+    let local_names: HashMap<_, _> = local_names
+        .into_iter()
+        .map(|(slot, binding)| (slot, binding.name))
+        .collect();
     if !body.class_reads.is_empty() || !body.calls.iter().all(|&id| id >= first_helper) {
         return None;
     }

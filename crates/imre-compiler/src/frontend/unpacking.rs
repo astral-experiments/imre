@@ -46,6 +46,133 @@ fn unpack_error(message: Expr) -> Statement {
     }))
 }
 
+/// Target traversal and operand lifetimes are shared by checked and namespace suites.
+/// A checked sequence can specialize its arity checks and element projections.
+pub(super) trait PatternBinder {
+    type Error;
+
+    fn pattern_hidden(&mut self, ty: Type) -> usize;
+    fn pattern_local(&self, slot: usize) -> Expr;
+    fn pattern_store(
+        &mut self,
+        target: &ast::Expr,
+        value: Expr,
+    ) -> StdResult<Statement, Self::Error>;
+    fn multiple_stars(&self, target: &ast::Expr) -> Self::Error;
+
+    fn pattern_snapshot(
+        &mut self,
+        _target: &ast::Expr,
+        elements: &[ast::Expr],
+        star: Option<usize>,
+        value: Expr,
+        _stable: Option<usize>,
+    ) -> StdResult<PatternSnapshot, Self::Error> {
+        Ok(protocol_snapshot(
+            self,
+            elements.len(),
+            star,
+            value,
+            Type::PythonObject,
+        ))
+    }
+}
+
+pub(super) struct PatternSnapshot {
+    root: usize,
+    body: Vec<Statement>,
+    clear: Vec<usize>,
+    items: Vec<usize>,
+}
+
+impl PatternSnapshot {
+    fn capture(&mut self, binder: &mut (impl PatternBinder + ?Sized), item: Expr) {
+        let slot = binder.pattern_hidden(item.ty);
+        self.body.push(Statement::Assign(slot, item));
+        self.clear.push(slot);
+        self.items.push(slot);
+    }
+}
+
+fn protocol_snapshot(
+    binder: &mut (impl PatternBinder + ?Sized),
+    count: usize,
+    star: Option<usize>,
+    value: Expr,
+    sequence_type: Type,
+) -> PatternSnapshot {
+    let sequence = builtin(
+        sequence_type,
+        Builtin::RegisteredUnpack { count, star },
+        vec![value],
+    );
+    let root = binder.pattern_hidden(sequence.ty);
+    let mut snapshot = PatternSnapshot {
+        root,
+        body: vec![Statement::Assign(root, sequence)],
+        clear: vec![root],
+        items: Vec::with_capacity(count),
+    };
+    for index in 0..count {
+        let item = builtin(
+            Type::PythonObject,
+            Builtin::ListGet,
+            vec![binder.pattern_local(root), Expr::integer(index)],
+        );
+        snapshot.capture(binder, item);
+    }
+    snapshot
+}
+
+fn take_pattern_temporary(value: Expr, slot: usize) -> Expr {
+    Expr {
+        ty: value.ty,
+        kind: ExprKind::Scope {
+            body: Vec::new(),
+            value: Box::new(value),
+            clear: vec![slot],
+        },
+    }
+}
+
+/// Capture a sequence level before its first store. A nested level is unpacked
+/// when its target is reached, after the preceding sibling's stores and callbacks.
+pub(super) fn bind_targets<B: PatternBinder>(
+    binder: &mut B,
+    target: &ast::Expr,
+    value: Expr,
+    stable: Option<usize>,
+) -> StdResult<Vec<Statement>, B::Error> {
+    let Some(targets) = pattern_elements(target) else {
+        return Ok(vec![binder.pattern_store(target, value)?]);
+    };
+    let mut stars = targets
+        .iter()
+        .enumerate()
+        .filter(|(_, target)| matches!(target, ast::Expr::Starred(_)));
+    let star = stars.next().map(|(index, _)| index);
+    if stars.next().is_some() {
+        return Err(binder.multiple_stars(target));
+    }
+    let PatternSnapshot {
+        root,
+        mut body,
+        clear,
+        items,
+    } = binder.pattern_snapshot(target, targets, star, value, stable)?;
+    body.push(Statement::Clear(root));
+    for (target, item) in targets.iter().zip(items) {
+        let target = if let ast::Expr::Starred(starred) = target {
+            &starred.value
+        } else {
+            target
+        };
+        let value = take_pattern_temporary(binder.pattern_local(item), item);
+        body.extend(bind_targets(binder, target, value, None)?);
+    }
+    Ok(vec![Statement::Scope { body, clear }])
+}
+
 impl Checker<'_> {
     /// Finds a target's storage without executing its receiver or index.
     fn target_context(&self, target: &ast::Expr, rhs: Option<&ast::Expr>) -> Option<Type> {
@@ -60,14 +187,7 @@ impl Checker<'_> {
 
     /// Yields the captured value and clears its slot before evaluating the next target.
     fn take_temporary(&self, slot: usize) -> Expr {
-        Expr {
-            ty: self.locals[slot],
-            kind: ExprKind::Scope {
-                body: Vec::new(),
-                value: Box::new(self.local(slot)),
-                clear: vec![slot],
-            },
-        }
+        take_pattern_temporary(self.local(slot), slot)
     }
 
     /// A chain shares one RHS object and visits targets in source order. A later
@@ -320,6 +440,21 @@ impl Checker<'_> {
                 Ok(Statement::SetItem(receiver, index, value))
             }
             ast::Expr::Attribute(attribute) => {
+                if self.registered.is_some() {
+                    let receiver = self.expr(&attribute.value)?;
+                    if receiver.ty != Type::PythonObject {
+                        return Err(error(
+                            self.source,
+                            attribute,
+                            "expected a Python object target",
+                        ));
+                    }
+                    return Ok(registered::attribute_statement(
+                        ir::AttributeAction::Store,
+                        attribute,
+                        vec![value, receiver],
+                    ));
+                }
                 if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::PopenSelector)) {
                     let value = self.coerce(value, Type::ProcessSelectorClass, target)?;
                     return Ok(Statement::Expr(Expr {
@@ -749,7 +884,7 @@ impl Checker<'_> {
         target: &ast::Expr,
         value: Expr,
     ) -> Result<Vec<Statement>, String> {
-        self.bind_pattern_with_root(target, value, None)
+        bind_targets(self, target, value, None)
     }
 
     /// An iterator's private fixed tuple cannot be rebound by source targets.
@@ -761,30 +896,50 @@ impl Checker<'_> {
         source: usize,
     ) -> Result<Vec<Statement>, String> {
         let stable = matches!(self.locals[source], Type::Tuple(_)).then_some(source);
-        self.bind_pattern_with_root(target, self.local(source), stable)
+        bind_targets(self, target, self.local(source), stable)
     }
+}
 
-    /// A supplied root belongs exclusively to compiler iteration state; ordinary
-    /// source assignments retain a separate snapshot through target effects.
-    fn bind_pattern_with_root(
+impl PatternBinder for Checker<'_> {
+    type Error = Failure<String>;
+
+    fn pattern_hidden(&mut self, ty: Type) -> usize {
+        self.hidden(ty)
+    }
+    fn pattern_local(&self, slot: usize) -> Expr {
+        self.local(slot)
+    }
+    fn pattern_store(
         &mut self,
         target: &ast::Expr,
         value: Expr,
+    ) -> StdResult<Statement, Self::Error> {
+        self.assign_value(target, value)
+    }
+    fn multiple_stars(&self, target: &ast::Expr) -> Self::Error {
+        error(
+            self.source,
+            target,
+            "an unpacking target may contain only one starred target",
+        )
+    }
+
+    fn pattern_snapshot(
+        &mut self,
+        target: &ast::Expr,
+        targets: &[ast::Expr],
+        star: Option<usize>,
+        value: Expr,
         stable: Option<usize>,
-    ) -> Result<Vec<Statement>, String> {
-        let Some(targets) = pattern_elements(target) else {
-            return Ok(vec![self.assign_value(target, value)?]);
-        };
-        let mut stars = targets
-            .iter()
-            .enumerate()
-            .filter(|(_, target)| matches!(target, ast::Expr::Starred(_)));
-        let star = stars.next().map(|(index, _)| index);
-        if stars.next().is_some() {
-            return Err(error(
-                self.source,
-                target,
-                "an unpacking target may contain only one starred target",
+    ) -> StdResult<PatternSnapshot, Self::Error> {
+        if self.registered.is_some() && value.ty == Type::PythonObject {
+            let sequence = self.types.list(Type::PythonObject);
+            return Ok(protocol_snapshot(
+                self,
+                targets.len(),
+                star,
+                value,
+                sequence,
             ));
         }
         let fixed = targets.len() - usize::from(star.is_some());
@@ -855,7 +1010,12 @@ impl Checker<'_> {
                 ));
             }
         }
-        let mut items = Vec::with_capacity(targets.len());
+        let mut snapshot = PatternSnapshot {
+            root: captured,
+            body,
+            clear,
+            items: Vec::with_capacity(targets.len()),
+        };
         for (index, target) in targets.iter().enumerate() {
             let item = if let ast::Expr::Starred(starred) = target {
                 let suffix = targets.len() - index - 1;
@@ -897,23 +1057,13 @@ impl Checker<'_> {
                     vec![self.local(captured), Expr::integer(position)],
                 )
             };
-            let slot = self.hidden(item.ty);
-            body.push(Statement::Assign(slot, item));
-            clear.push(slot);
-            items.push(slot);
+            snapshot.capture(self, item);
         }
-        body.push(Statement::Clear(captured));
-        for (target, item) in targets.iter().zip(items) {
-            let target = if let ast::Expr::Starred(starred) = target {
-                &starred.value
-            } else {
-                target
-            };
-            body.extend(self.bind_pattern(target, self.take_temporary(item))?);
-        }
-        Ok(vec![Statement::Scope { body, clear }])
+        Ok(snapshot)
     }
+}
 
+impl Checker<'_> {
     /// A tuple remainder has one concrete element layout, including optional
     /// promotion. Empty remainders inherit a declared destination list type.
     fn tuple_rest(
