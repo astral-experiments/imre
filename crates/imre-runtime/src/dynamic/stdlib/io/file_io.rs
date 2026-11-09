@@ -364,17 +364,6 @@ fn descriptor_from_argument(ctx: &mut Context, file: Id) -> Option<RawFd> {
         .and_then(|n| RawFd::try_from(n).ok())
 }
 
-/// FileIO encodes path spellings that the UTF-8 buffered-file shortcut cannot use.
-fn needs_encoded_path(ctx: &Context, path: Id) -> Result<bool> {
-    Ok(match ctx.heap.get(ctx.scalar_value(path)) {
-        Value::Bytes(_) | Value::SurrogateStr(_) => true,
-        Value::Str(text) if !text.is_ascii() => {
-            crate::sys::filesystem_encoding()?.as_str() != "utf-8"
-        }
-        _ => false,
-    })
-}
-
 /// Pass FileIO only its operation and optional update marker, in that order.
 fn raw_open_mode(mode: &str) -> String {
     let mut raw: String = mode.chars().filter(|c| "rwax".contains(*c)).collect();
@@ -478,9 +467,6 @@ pub(in crate::dynamic) fn open(
         return open_raw(ctx, class, raw_arg, raw_mode, binary, owns, opener);
     }
     let update = mode_text.contains('+');
-    let sized_reader = !numeric && buffering > 1 && matches!(mode_text, "rb" | "br");
-    let text_input = matches!(mode_text, "r" | "rt" | "tr");
-    let text_output = !binary && !update && mode_text.contains(['w', 'a', 'x']);
     if binary && buffering == 1 {
         ctx.emit_builtin_warning(
             crate::objects::exceptions::Kind::RuntimeWarning,
@@ -488,49 +474,38 @@ pub(in crate::dynamic) fn open(
             1,
         )?;
     }
-    // Sealed binary handles do not dispatch ResourceWarning from a Python finalizer.
     let warning_options = ctx.config["warnoptions"]
         .as_array()
         .is_some_and(|options| !options.is_empty());
     let fd = descriptor_from_argument(ctx, raw_arg);
-    if fresh.is_some()
-        || opener.is_some()
-        || numeric
-        || fd.is_some()
-        || text_output
-        || text_input
-        || sized_reader
-        || update
-        || (binary && (buffering == 1 || warning_options))
-        || (binary && !numeric && needs_encoded_path(ctx, raw_arg)?)
-    {
-        if fd.is_some_and(|fd| fd < 0) {
-            return Err(Error::new("ValueError", "negative file descriptor"));
-        }
-        let mode_text = mode.map(|v| ctx.str_value(v)).transpose()?.unwrap_or("r");
-        let reading = mode_text.contains('r');
-        let raw_mode = raw_open_mode(mode_text);
-        let types = open_types(ctx, fresh)?;
-        let raw = ctx.instance(types.file, None);
-        initialize_file(
-            ctx,
-            raw,
-            raw_arg,
-            &raw_mode,
-            owns,
-            DescriptorLookup::Resolved(fd),
-            opener,
-            None,
-        )?;
-        let handle = state(ctx, raw).expect("initialized FileIO");
-        let capacity = if buffering > 1 {
-            buffering as usize
-        } else {
-            crate::text_output::binary_capacity(handle.blksize.get().into())
-        };
-        let line_buffering =
-            buffering == 1 || (!binary && buffering < 0 && handle.fd.get().is_some_and(os::isatty));
-        let buffer = if fresh.is_some() || (reading && !update) || (binary && warning_options) {
+    if fd.is_some_and(|fd| fd < 0) {
+        return Err(Error::new("ValueError", "negative file descriptor"));
+    }
+    let mode_text = mode.map(|v| ctx.str_value(v)).transpose()?.unwrap_or("r");
+    let reading = mode_text.contains('r');
+    let raw_mode = raw_open_mode(mode_text);
+    let types = open_types(ctx, fresh)?;
+    let raw = ctx.instance(types.file, None);
+    initialize_file(
+        ctx,
+        raw,
+        raw_arg,
+        &raw_mode,
+        owns,
+        DescriptorLookup::Resolved(fd),
+        opener,
+        None,
+    )?;
+    let handle = state(ctx, raw).expect("initialized FileIO");
+    let capacity = if buffering > 1 {
+        buffering as usize
+    } else {
+        crate::text_output::binary_capacity(handle.blksize.get().into())
+    };
+    let line_buffering =
+        buffering == 1 || (!binary && buffering < 0 && handle.fd.get().is_some_and(os::isatty));
+    let buffer =
+        if fresh.is_some() || (!update && (binary || reading)) || (binary && warning_options) {
             let class = if update {
                 types.random
             } else if reading {
@@ -549,94 +524,32 @@ pub(in crate::dynamic) fn open(
             buffer.and_then(|buffer| allocate_buffer(ctx, buffer))
         }
         .map_err(|error| close_on_error(ctx, raw, error))?;
-        if binary {
-            return Ok(buffer);
-        }
-        let stream = ctx
-            .call(
-                types.wrapper,
-                vec![
-                    buffer,
-                    encoding.unwrap_or(NONE),
-                    errors.unwrap_or(NONE),
-                    newline.unwrap_or(NONE),
-                    builtins::boolean(line_buffering),
-                ],
-                Vec::new(),
-            )
-            .map_err(|error| close_on_error(ctx, buffer, error))?;
-        // open() gives TextIOWrapper a new exact str preserving the caller's spelling.
-        let spelling = mode
-            .map(|id| ctx.str_value(id))
-            .transpose()?
-            .unwrap_or("r")
-            .to_owned();
-        let mode = ctx.text(spelling);
-        ctx.set_attr(stream, "mode", mode)
-            .map_err(|error| close_on_error(ctx, stream, error))?;
-        return Ok(stream);
+    if binary {
+        return Ok(buffer);
     }
-    let mode = mode.map(|v| ctx.str_value(v)).transpose()?.unwrap_or("r");
-    let writer_capacity = match (buffering, mode) {
-        (2.., "wb" | "ab" | "xb" | "bw" | "ba" | "bx") => Some(buffering as usize),
-        (1.., _) => {
-            return Err(Error::new(
-                "ValueError",
-                "explicit buffer sizes are unsupported",
-            ));
-        }
-        _ => None,
-    };
-    if errors
-        .map(|v| ctx.str_value(v))
+    let stream = ctx
+        .call(
+            types.wrapper,
+            vec![
+                buffer,
+                encoding.unwrap_or(NONE),
+                errors.unwrap_or(NONE),
+                newline.unwrap_or(NONE),
+                builtins::boolean(line_buffering),
+            ],
+            Vec::new(),
+        )
+        .map_err(|error| close_on_error(ctx, buffer, error))?;
+    // open() gives TextIOWrapper a new exact str preserving the caller's spelling.
+    let spelling = mode
+        .map(|id| ctx.str_value(id))
         .transpose()?
-        .is_some_and(|v| v != "strict")
-        || newline.is_some()
-    {
-        return Err(Error::new(
-            "NotImplementedError",
-            "non-default text errors or newline are unsupported",
-        ));
-    }
-    let encoding = encoding.map(|v| ctx.str_value(v)).transpose()?;
-    if !matches!(
-        crate::objects::Codec::for_stream(encoding)?,
-        crate::objects::Codec::Utf8 { signature: false }
-    ) {
-        return Err(Error::new(
-            "ValueError",
-            "text files require UTF-8 encoding",
-        ));
-    }
-    let (access, mode) = match mode {
-        "rb" => (0, "rb"),
-        "wb" | "bw" => (1, "wb"),
-        "ab" | "ba" => (2, "ab"),
-        "xb" | "bx" => (3, "xb"),
-        _ => {
-            return Err(Error::new(
-                "ValueError",
-                "unsupported mode for dynamic files",
-            ));
-        }
-    };
-    let pathname = super::super::os::c_path(ctx, raw_arg, "embedded null byte")?;
-    let flags = crate::objects::file_flags(access, false);
-    audit_open(ctx, raw_arg, &mode[..1], flags)?;
-    if !owns {
-        return Err(Error::new(
-            "ValueError",
-            "Cannot use closefd=False with file name",
-        ));
-    }
-    let fd = super::super::os::open_path(ctx, raw_arg, &pathname, flags, 0o666, libc::AT_FDCWD)?;
-    let path = ctx.str_value(raw_arg)?;
-    let file = files::BinaryFile::from_open(path, raw_arg, access, mode, writer_capacity, fd)
-        .and_then(files::BinaryFile::into_value);
-    match file {
-        Ok(file) => ctx.heap.alloc_descriptor_owner(file),
-        Err(error) => Err(ctx.with_open_filename(error, raw_arg)?),
-    }
+        .unwrap_or("r")
+        .to_owned();
+    let mode = ctx.text(spelling);
+    ctx.set_attr(stream, "mode", mode)
+        .map_err(|error| close_on_error(ctx, stream, error))?;
+    Ok(stream)
 }
 
 fn open_raw(

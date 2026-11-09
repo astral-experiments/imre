@@ -157,8 +157,7 @@ pub(crate) use zipfile::Archive as ZipArchive;
 
 pub(crate) use errno::{DOC as ERRNO_DOC, platform_entries as errno_entries};
 pub(crate) use files::{
-    FileState, GzipDecoder, Memory, Random, errno_error, errno_with_filename, file_flags,
-    os_error as gzip_read_error, prepare_file,
+    FileState, GzipDecoder, Memory, Random, errno_error, file_flags, os_error as gzip_read_error,
 };
 
 use super::{

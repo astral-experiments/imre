@@ -101,24 +101,6 @@ impl Drop for FileState {
 }
 
 impl FileState {
-    /// Wrap an open binary writer with the same buffering and ownership as typed files.
-    pub(crate) fn binary_writer(
-        path: &str,
-        mode: u32,
-        capacity: Option<usize>,
-        opened: (File, std::fs::Metadata),
-    ) -> Result<Self> {
-        state_from_file(
-            &super::text::try_owned_string(path)?,
-            mode,
-            true,
-            false,
-            None,
-            capacity,
-            opened,
-        )
-    }
-
     /// Opens an anonymous binary update stream, buffered against its own POSIX descriptor.
     pub(crate) fn temporary(directory: Option<&str>) -> Result<Self> {
         let file = super::tempdirs::anonymous_file(directory)?;
@@ -194,15 +176,6 @@ impl FileState {
 
     pub(crate) fn close(&mut self) -> io::Result<()> {
         self.stream.take().map_or(Ok(()), Stream::close)
-    }
-
-    /// Explicit BufferedWriter.close has already called its overridable flush.
-    pub(crate) fn close_binary_after_flush(&mut self) -> io::Result<()> {
-        match self.stream.take() {
-            Some(Stream::Write(writer)) => close_file(writer.into_file()),
-            None => Ok(()),
-            _ => unreachable!("expected a binary writer"),
-        }
     }
 
     pub(super) fn close_standard_buffer(&mut self) -> Result<()> {
