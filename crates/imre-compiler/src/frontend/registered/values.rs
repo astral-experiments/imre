@@ -632,20 +632,88 @@ pub(crate) fn registered_index_key(key: &ast::Expr, source: RegisteredSource<'_>
     index_key(key, &mut |e| registered_value(e, source).ok_or(())).ok()
 }
 
+pub(crate) fn lambda_defaults(lambda: &ast::ExprLambda) -> impl Iterator<Item = &ast::Expr> {
+    lambda.parameters.iter().flat_map(|parameters| {
+        parameters
+            .iter_non_variadic_params()
+            .filter_map(|p| p.default.as_deref())
+    })
+}
+
+fn lambda_binding<E>(
+    lambda: &ast::ExprLambda,
+    operand: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
+) -> StdResult<Expr, E> {
+    let defaults = lambda_defaults(lambda)
+        .map(operand)
+        .collect::<StdResult<_, _>>()?;
+    Ok(super::operation(
+        Builtin::RegisteredLambda(lambda.start(), false),
+        Type::PythonObject,
+        defaults,
+    ))
+}
+
+/// A checked instruction can bind only a wholly prepared function. This also checks
+/// each nested lambda before its binding can appear in a default or return.
+pub(super) fn checked_binding(
+    lambda: &ast::ExprLambda,
+    source: RegisteredSource<'_>,
+) -> Option<Expr> {
+    Region::Lambda.operand(&lambda.body, source)?;
+    lambda_binding(lambda, |default| {
+        Region::Lambda.operand(default, source).ok_or(())
+    })
+    .ok()
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum Region {
+    /// Residual expressions encounter a prepared lambda binding at the source site.
+    Residual,
+    Suite,
+    /// Suspensions within a lambda's body or defaults use the enclosing native activation.
+    Lambda,
+}
+
+impl Region {
+    pub(super) fn operand(self, node: &ast::Expr, source: RegisteredSource<'_>) -> Option<Expr> {
+        if node.is_slice_expr() {
+            return index_key(node, &mut |child| self.operand(child, source).ok_or(())).ok();
+        }
+        let value = match node {
+            ast::Expr::Lambda(lambda) if !matches!(self, Self::Residual) => {
+                checked_binding(lambda, source)?
+            }
+            node if matches!(self, Self::Lambda)
+                && let Some((kind, value)) = ir::SuspendValue::operand(node) =>
+            {
+                let value = match value {
+                    Some(value) => self.operand(value, source)?,
+                    None => Expr::none(),
+                };
+                super::operation(
+                    Builtin::RegisteredSuspend(kind, node.range()),
+                    Type::PythonObject,
+                    vec![value],
+                )
+            }
+            _ => operation(
+                node,
+                source,
+                None,
+                |_| true,
+                |child| self.operand(child, source).ok_or(()),
+            )
+            .ok()??,
+        };
+        Some(source.located(node, value))
+    }
+}
+
 /// Build a complete expression region; an unsupported child keeps its original lowering.
 pub(crate) fn registered_value(node: &ast::Expr, source: RegisteredSource<'_>) -> Option<Expr> {
-    if node.is_slice_expr() {
-        return registered_index_key(node, source);
-    }
-    operation(
-        node,
-        source,
-        None,
-        |_| true,
-        |child| registered_value(child, source).ok_or(()),
-    )
-    .ok()?
-    .map(|value| source.located(node, value))
+    Region::Residual.operand(node, source)
 }
 
 impl Checker<'_> {
@@ -707,6 +775,20 @@ impl Checker<'_> {
         module: &ModuleSource,
     ) -> Result<Option<Expr>, String> {
         let source = module.context(self.source);
+        if let ast::Expr::Lambda(lambda) = node {
+            if checked_binding(lambda, source).is_none() {
+                return Ok(None);
+            }
+            let mut value = lambda_binding(lambda, |default| self.expr(default))?;
+            if let Some(slot) = self.namespace
+                && let ExprKind::Builtin(Builtin::RegisteredLambda(_, scoped), args) =
+                    &mut value.kind
+            {
+                args.insert(0, self.local(slot));
+                *scoped = true;
+            }
+            return Ok(Some(source.located(node, value)));
+        }
         if matches!(
             node,
             ast::Expr::ListComp(_) | ast::Expr::DictComp(_) | ast::Expr::SetComp(_)

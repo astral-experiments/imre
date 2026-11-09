@@ -48,7 +48,6 @@ REJECTED = {
     "callable_tuple": IMPORT + "def use(values: tuple[Callable[[int], int], int]) -> None:\n    pass\n",
     "callable_dictionary": IMPORT + "def use(values: dict[str, Callable[[int], int]]) -> None:\n    pass\n",
     "optional_without_guard": IMPORT + "def use(fn: Callable[[int], int] | None) -> int:\n    return fn(1)\n",
-    "untyped_lambda": "def run() -> None:\n    fn = lambda value: value + 1\nrun()\n",
     "lambda_default": IMPORT + "def run() -> None:\n    fn: Callable[[int], int] = lambda value=1: value\nrun()\n",
     "indirect_cycle": IMPORT + "def apply(fn: Callable[[int], int], value: int) -> int:\n    return fn(value)\ndef again(value: int) -> int:\n    return apply(again, value)\nprint(apply(again, 1))\n",
     "map_wrong_input": FUNCTION + 'print(sum(map(identity, ["1"])))\n',

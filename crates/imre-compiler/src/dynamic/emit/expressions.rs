@@ -3,7 +3,7 @@ use ruff_text_size::Ranged;
 
 use super::CheckedValue;
 use super::boolean::{Context as BooleanContext, Flow, Target};
-use super::{Body, DefinitionName, Function, permanent};
+use super::{Body, Function, permanent};
 use crate::ir;
 
 impl Function<'_, '_> {
@@ -17,6 +17,28 @@ impl Function<'_, '_> {
                 code.located_expr(expr)
             }
         })
+    }
+
+    fn source_lambda(&mut self, lambda: &ast::ExprLambda) -> String {
+        let site = lambda.start();
+        let plan = &self.source.lambdas[&site];
+        let source_defaults = std::cell::LazyCell::new(|| {
+            crate::frontend::lambda_defaults(lambda).collect::<Vec<_>>()
+        });
+        let defaults = plan
+            .defaults
+            .iter()
+            .enumerate()
+            .map(|(index, checked)| match checked {
+                Some(value) => self.registered_value(value),
+                None => self.expr(source_defaults[index]),
+            })
+            .collect::<Vec<_>>();
+        let body = match &plan.body {
+            Some(body) => Body::CheckedExpression(body),
+            None => Body::Expression(&lambda.body),
+        };
+        self.bind_lambda(site, &self.scope.clone(), &defaults, body)
     }
 
     pub(super) fn with_expression_range(
@@ -274,14 +296,7 @@ impl Function<'_, '_> {
                 self.assign_expression_name(&scope, &name, &value, &mark);
                 value
             }
-            ast::Expr::Lambda(v) => self.define(
-                v.start(),
-                DefinitionName::Plain("<lambda>"),
-                v.parameters.as_deref(),
-                None,
-                None,
-                Body::Expression(&v.body),
-            ),
+            ast::Expr::Lambda(lambda) => self.source_lambda(lambda),
             ast::Expr::TString(template) => self.residual_template(template),
             ast::Expr::FString(v) => {
                 let mut parts = Vec::new();
@@ -602,7 +617,11 @@ impl Function<'_, '_> {
         };
         let strings = self.emit_string_tuple(segments);
         let parts = self.op("list", &[]);
-        for field in template.value.iter().flat_map(|t| t.elements.interpolations()) {
+        for field in template
+            .value
+            .iter()
+            .flat_map(|t| t.elements.interpolations())
+        {
             let spec = match imre_ast::strings::template_format_spec(field) {
                 Ok(Some(literal)) => self.format_literal(literal),
                 Ok(None) => self.text(""),

@@ -359,6 +359,12 @@ impl Checker<'_> {
         if matches!(*lambda.body, ast::Expr::Yield(_)) {
             return Err(self.object_builtin_error("generator lambda", lambda));
         }
+        // A declared result still needs the fixed Callable type checks.
+        let layout = if returns.is_some() {
+            Kind::Ordinary
+        } else {
+            Kind::ScopedObject
+        };
         let declared = lambda.parameters.as_deref();
         if declared.is_some_and(|parameters| {
             parameters.vararg.is_some()
@@ -368,10 +374,10 @@ impl Checker<'_> {
                     .iter_non_variadic_params()
                     .any(|parameter| parameter.default.is_some())
         }) {
-            return Err(error(
-                self.source,
+            return Err(self.classified_error(
+                layout,
                 lambda,
-                "lambdas require positional parameters without defaults or variadics",
+                "lambda defaults and variadic parameters require the registered binder",
             ));
         }
         let names = declared
@@ -381,10 +387,10 @@ impl Checker<'_> {
         let parameters = parameters
             .or_else(|| names.is_empty().then(Vec::new))
             .ok_or_else(|| {
-                error(
-                    self.source,
+                self.classified_error(
+                    Kind::ScopedObject,
                     lambda,
-                    "lambda parameters require an exact Callable context or a map/filter input",
+                    "lambda parameter layouts require the registered binder",
                 )
             })?;
         if parameters.len() != names.len() {
@@ -401,10 +407,10 @@ impl Checker<'_> {
             .filter_map(|name| self.names.get(&name).map(|&slot| (slot, name)))
             .collect::<Vec<_>>();
         if !pull && !captures.is_empty() {
-            return Err(error(
-                self.source,
+            return Err(self.classified_error(
+                layout,
                 lambda,
-                "capturing lambdas are unsupported; only parameters and fixed module bindings may be read",
+                "an escaping lambda requires closure cells in its registered frame",
             ));
         }
         let id = self.helpers.reserve();
