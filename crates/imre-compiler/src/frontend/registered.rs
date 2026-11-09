@@ -140,16 +140,76 @@ pub(super) fn located(node: &ast::Expr, value: Expr) -> Expr {
     )
 }
 
+/// Preserve the requested module separately from the names bound in the current namespace.
+pub(crate) fn registered_import(stmt: &ast::Stmt, private_names: &imre_ast::Names) -> Option<Expr> {
+    let import = match stmt {
+        ast::Stmt::Import(import) => ir::NamespaceImport::Modules(
+            import
+                .names
+                .iter()
+                .map(|alias| {
+                    let name = alias.name.as_str();
+                    let root = name.split('.').next().unwrap_or(name);
+                    ir::ModuleImport {
+                        name: name.to_owned(),
+                        binding: alias
+                            .asname
+                            .as_ref()
+                            .map_or(root, ast::Identifier::as_str)
+                            .to_owned(),
+                        bind_leaf: alias.asname.is_some()
+                            && !private_names.imports_root(&alias.name),
+                    }
+                })
+                .collect(),
+        ),
+        ast::Stmt::ImportFrom(import) => ir::NamespaceImport::From {
+            module: import
+                .module
+                .as_ref()
+                .map_or("", ast::Identifier::as_str)
+                .to_owned(),
+            level: import.level,
+            names: import
+                .names
+                .iter()
+                .map(|alias| {
+                    (
+                        alias.name.to_string(),
+                        alias.asname.as_ref().unwrap_or(&alias.name).to_string(),
+                    )
+                })
+                .collect(),
+        },
+        _ => return None,
+    };
+    Some(operation(
+        Builtin::RegisteredImport(import),
+        Type::None,
+        vec![],
+    ))
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum RegisteredScope {
+    Module,
+    Class,
+    Function { is_async: bool },
+}
+
 /// Lower a physical suite for an existing Python namespace. Binding indices name entries
 /// in the runtime scope; they never cache a global value across executable statements.
 pub(crate) fn registered_suite(
     stmts: &[ast::Stmt],
-    module: bool,
+    kind: RegisteredScope,
+    private_names: &imre_ast::Names,
     replacements: &HashMap<TextRange, Vec<u32>>,
     has_templates: bool,
 ) -> Option<RegisteredFunction> {
+    let module = matches!(kind, RegisteredScope::Module);
     let mut scope = SourceScope {
-        module,
+        kind,
+        private_names,
         replacements,
         has_templates,
         names: HashMap::new(),
@@ -177,6 +237,36 @@ pub(crate) fn registered_suite(
     })
 }
 
+fn plain_class_header(class: &ast::StmtClassDef) -> bool {
+    class.type_params.is_none() && class.arguments.as_ref().is_none_or(|args| args.is_empty())
+}
+
+/// Keep the real class namespace for suites with ordinary bindings and no annotation setup.
+pub(crate) fn registered_class_body(
+    class: &ast::StmtClassDef,
+    private_names: &imre_ast::Names,
+    replacements: &HashMap<TextRange, Vec<u32>>,
+    has_templates: bool,
+) -> Option<RegisteredFunction> {
+    if !plain_class_header(class)
+        || !class.body.iter().all(|stmt| {
+            matches!(
+                stmt,
+                ast::Stmt::Assign(_) | ast::Stmt::Expr(_) | ast::Stmt::Pass(_)
+            )
+        })
+    {
+        return None;
+    }
+    registered_suite(
+        &class.body,
+        RegisteredScope::Class,
+        private_names,
+        replacements,
+        has_templates,
+    )
+}
+
 impl statements::StatementLowering for SourceScope<'_> {
     type Error = ();
 
@@ -189,7 +279,7 @@ impl statements::StatementLowering for SourceScope<'_> {
     }
 
     fn definition(&mut self, def: &ast::StmtFunctionDef) -> StdResult<Option<Statement>, ()> {
-        if def.is_async || def.type_params.is_some() {
+        if def.type_params.is_some() {
             return Err(());
         }
         let decorators = def.decorator_list.iter().map(|d| &d.expression);
@@ -202,7 +292,7 @@ impl statements::StatementLowering for SourceScope<'_> {
             .filter_map(|p| p.default.as_deref());
         let header = decorators
             .chain(defaults)
-            .map(|e| self.operand(e))
+            .map(|e| self.ordinary_operand(e))
             .collect::<Option<_>>()
             .ok_or(())?;
         let function = operation(
@@ -231,14 +321,31 @@ impl statements::StatementLowering for SourceScope<'_> {
 
     fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<statements::Block, ()> {
         match stmt {
+            ast::Stmt::ClassDef(class) if plain_class_header(class) => {
+                let decorators = class
+                    .decorator_list
+                    .iter()
+                    .map(|d| self.ordinary_operand(&d.expression))
+                    .collect::<Option<_>>()
+                    .ok_or(())?;
+                let value = operation(
+                    Builtin::RegisteredDefinition(class.start()),
+                    Type::PythonObject,
+                    decorators,
+                );
+                Ok((vec![self.store(class.name.as_str(), value)], true))
+            }
             ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => Ok((Vec::new(), true)),
-            _ => Err(()),
+            _ => registered_import(stmt, self.private_names)
+                .map(|import| (vec![Statement::Expr(import)], true))
+                .ok_or(()),
         }
     }
 }
 
 struct SourceScope<'a> {
-    module: bool,
+    kind: RegisteredScope,
+    private_names: &'a imre_ast::Names,
     replacements: &'a HashMap<TextRange, Vec<u32>>,
     has_templates: bool,
     names: HashMap<String, usize>,
@@ -252,15 +359,53 @@ impl SourceScope<'_> {
 
     fn store(&mut self, name: &str, value: Expr) -> Statement {
         let slot = self.slot(name);
-        if self.module {
+        if matches!(self.kind, RegisteredScope::Module) {
             Statement::Expr(operation(Builtin::GlobalSet(slot), Type::None, vec![value]))
         } else {
             Statement::Assign(slot, value)
         }
     }
 
-    fn operand(&self, expr: &ast::Expr) -> Option<Expr> {
+    fn ordinary_operand(&self, expr: &ast::Expr) -> Option<Expr> {
         values::registered_value(expr, self.replacements, self.has_templates)
+    }
+
+    fn operand(&self, expr: &ast::Expr) -> Option<Expr> {
+        if let RegisteredScope::Function { is_async } = self.kind
+            && let Some((kind, value)) = ir::SuspendValue::operand(expr)
+            && !matches!(
+                (kind, is_async),
+                (ir::SuspendValue::Await, false) | (ir::SuspendValue::Delegate, true)
+            )
+        {
+            // Admit a suspension only at this whole-expression boundary. All previous
+            // statements have committed their owners to the observable frame.
+            let value = match value {
+                Some(value) => self.ordinary_operand(value)?,
+                None => Expr::none(),
+            };
+            return Some(located(
+                expr,
+                operation(
+                    Builtin::RegisteredSuspend(kind, expr.range()),
+                    Type::PythonObject,
+                    vec![value],
+                ),
+            ));
+        }
+        self.ordinary_operand(expr)
+    }
+}
+
+impl ir::SuspendValue {
+    /// Preserve the original suspension kind and the optional operand of a bare yield.
+    pub(crate) fn operand(expr: &ast::Expr) -> Option<(Self, Option<&ast::Expr>)> {
+        match expr {
+            ast::Expr::Await(expr) => Some((Self::Await, Some(&expr.value))),
+            ast::Expr::Yield(expr) => Some((Self::Yield, expr.value.as_deref())),
+            ast::Expr::YieldFrom(expr) => Some((Self::Delegate, Some(&expr.value))),
+            _ => None,
+        }
     }
 }
 
@@ -269,11 +414,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn private_dotted_import_keeps_the_root_binding_in_checked_ir() {
+        let mut body = ruff_python_parser::parse_module("class C:\n    import __pkg.child\n")
+            .unwrap()
+            .into_syntax()
+            .body;
+        let names = imre_ast::lower(&mut body);
+        let class = body[0].as_class_def_stmt().unwrap();
+        let import = registered_import(&class.body[0], &names).unwrap();
+        let ExprKind::Builtin(Builtin::RegisteredImport(ir::NamespaceImport::Modules(modules)), _) =
+            import.kind
+        else {
+            panic!("expected an import operation");
+        };
+        let [module] = modules.as_slice() else {
+            panic!("expected one module")
+        };
+        assert_eq!(module.name, "__pkg.child");
+        assert_eq!(module.binding, "_C__pkg");
+        assert!(!module.bind_leaf);
+    }
+
+    #[test]
     fn module_and_function_stores_share_the_registered_dictionary_operand() {
         let graph = SourceGraph::single("out = {key: callback(arg), **more}[index]\n").unwrap();
         let source = &graph.modules[graph.entry].parsed.syntax().body;
         for module in [false, true] {
-            let suite = registered_suite(source, module, &HashMap::new(), false).unwrap();
+            let suite = registered_suite(
+                source,
+                if module {
+                    RegisteredScope::Module
+                } else {
+                    RegisteredScope::Function { is_async: false }
+                },
+                &Default::default(),
+                &HashMap::new(),
+                false,
+            )
+            .unwrap();
             assert_eq!(suite.local_names, HashMap::from([(0, "out".to_owned())]));
             let [Statement::Expr(_), store] = suite.function.body.as_slice() else {
                 panic!("expected one checkpoint followed by one store")
@@ -348,6 +526,58 @@ mod tests {
         });
         assert_eq!(checkpoints, ["answer = x + y", "pass", "sink(answer)"]);
         assert_eq!((checked_adds, object_calls), (1, 1));
+    }
+
+    #[test]
+    fn callback_result_uses_python_addition_in_the_checked_body() {
+        let graph = SourceGraph::single(
+            "def report(x: int, sink, y: int):\n    first = x + y\n    reply = sink(first)\n    sink(reply + y)\n",
+        ).unwrap();
+        assert!(super::super::lower(&graph).is_err());
+        let functions = graph.registered_functions();
+        let checked = &functions[&graph.entry][&TextSize::default()];
+        assert!(crate::dynamic::supports_registered_function(checked));
+        let mut additions = Vec::new();
+        ir::walk_expressions(&checked.function.body, &mut |expr| {
+            if let ExprKind::Binary(Binary::Add, ref left, ref right) = expr.kind {
+                additions.push((left.ty, right.ty, expr.ty));
+            }
+        });
+        assert_eq!(
+            additions,
+            [
+                (Type::Int, Type::Int, Type::Int),
+                (Type::PythonObject, Type::Int, Type::PythonObject),
+            ]
+        );
+    }
+
+    #[test]
+    fn registered_conditional_keeps_the_object_test_and_mixed_arm_types() {
+        let graph = SourceGraph::single(concat!(
+            "def report(flag, x: int, y: int, sink):\n",
+            "    sink(((x + y) if flag else sink(x)) + y)\n",
+        ))
+        .unwrap();
+        assert!(super::super::lower(&graph).is_err());
+        let bodies = graph.registered_functions();
+        let checked = &bodies[&graph.entry][&TextSize::default()];
+        assert!(crate::dynamic::supports_registered_function(checked));
+        let mut branches = Vec::new();
+        ir::walk_expressions(&checked.function.body, &mut |expr| {
+            if let ExprKind::Conditional(test, yes, no) = &expr.kind {
+                branches.push((test.ty, yes.ty, no.ty, expr.ty));
+            }
+        });
+        assert_eq!(
+            branches,
+            [(
+                Type::PythonObject,
+                Type::Int,
+                Type::PythonObject,
+                Type::PythonObject
+            )]
+        );
     }
 
     #[test]
@@ -482,7 +712,7 @@ mod tests {
             "    answer = x + y\n",
             "    sink(answer)\n",
             "def echo(value):\n    print(value)\n",
-            "def pair(value):\n    print(value, value)\n",
+            "def pair(value):\n    print(value + value, value + 1)\n",
             "choices = {'a': echo, 'b': pair}\n",
             "report(int(input()), choices[input()], int(input()))\n",
         );
@@ -490,15 +720,52 @@ mod tests {
         crate::check_file(&path, None).unwrap();
         let compilation =
             crate::compile_file(&path, None, &crate::CompileOptions::default()).unwrap();
-        let mixed = compilation
-            .llvm_ir
-            .split("define ")
-            .filter(|definition| {
-                let body = definition.split('}').next().unwrap();
-                body.contains("call i64 @int_add(")
-                    && body.contains("call i64 @imre_dyn_positional_call_at(")
+        let ir = &compilation.llvm_ir;
+        let filename = ir
+            .lines()
+            .find_map(|line| {
+                let (symbol, data) = line.split_once(" = private unnamed_addr constant ")?;
+                data.ends_with(r#"report.py\00""#).then_some(symbol)
             })
-            .count();
-        assert_eq!(mixed, 1);
+            .expect("report.py source filename");
+        let body_at = |line: usize| {
+            let location = format!("ptr {filename}, i32 {line}, i64 0)");
+            let mut matches = ir
+                .split("\ndefine ")
+                .filter_map(|definition| definition.split_once("\n}").map(|(body, _)| body))
+                .filter(|body| {
+                    body.lines().any(|line| {
+                        line.contains("call void @imre_dyn_statement_with_exception(")
+                            && line.ends_with(&location)
+                    })
+                });
+            let body = matches.next().expect("compiled source body");
+            assert!(matches.next().is_none(), "source body emitted twice");
+            body
+        };
+        let report = body_at(2);
+        let add = "call i64 @int_add(";
+        let callback = "call i64 @imre_dyn_positional_call_at(";
+        assert_eq!(report.matches(add).count(), 1);
+        assert_eq!(report.matches(callback).count(), 1);
+        assert!(report.find(add).unwrap() < report.find(callback).unwrap());
+        let pair = body_at(7);
+        assert!(
+            !pair.contains("call i64 @imre_dyn_exact_int_word("),
+            "{pair}"
+        );
+        assert!(!pair.contains(add));
+        let plus = ir
+            .lines()
+            .find_map(|line| {
+                let (symbol, data) = line.split_once(" = private unnamed_addr constant ")?;
+                data.ends_with(r#"c"+\00""#).then_some(symbol)
+            })
+            .expect("Python addition protocol name");
+        assert_eq!(
+            pair.matches(&format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {plus},"))
+                .count(),
+            2
+        );
     }
 }

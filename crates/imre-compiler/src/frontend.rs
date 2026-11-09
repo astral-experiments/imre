@@ -117,7 +117,9 @@ pub(crate) use registered::values::{
     literal_replacements, push_codepoints, registered_positional_call, registered_string,
     registered_value,
 };
-pub(crate) use registered::{RegisteredFunction, registered_suite};
+pub(crate) use registered::{
+    RegisteredFunction, RegisteredScope, registered_class_body, registered_import, registered_suite,
+};
 pub(crate) use retained::RegisteredNative;
 mod sequences;
 mod shutil;

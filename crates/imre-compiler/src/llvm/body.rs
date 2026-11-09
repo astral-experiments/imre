@@ -51,6 +51,15 @@ impl FunctionBody {
         value
     }
 
+    /// Both ABIs call the same tagged arithmetic helper after obtaining exact integers.
+    pub(crate) fn add_int(&mut self, left: &str, right: &str) -> super::Value {
+        super::Value {
+            ty: super::Type::Int,
+            operand: self.instruction(format!("call i64 @int_add(i64 {left}, i64 {right})")),
+            small_integer: false,
+        }
+    }
+
     pub(crate) fn start(&mut self, label: &str) {
         writeln!(self.code, "{label}:").unwrap();
         self.current = label.into();

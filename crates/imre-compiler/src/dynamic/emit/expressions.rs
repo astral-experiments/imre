@@ -2,8 +2,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
 use super::boolean::{Context as BooleanContext, Flow, Target};
-use super::suspension::Suspension;
-use super::{Body, CallArguments, DefinitionName, Function, permanent};
+use super::{Body, CallArguments, CheckedValue, DefinitionName, Function, permanent};
 
 impl Function<'_, '_> {
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
@@ -85,36 +84,14 @@ impl Function<'_, '_> {
     }
 
     fn expr_inner(&mut self, expr: &ast::Expr, partition: Option<(u32, String)>) -> String {
+        if self.native_suspension
+            && let Some((kind, value)) = crate::ir::SuspendValue::operand(expr)
+        {
+            return self.suspend_value(kind, expr.range(), |code| {
+                value.map_or_else(|| permanent::NONE.to_string(), |value| code.expr(value))
+            });
+        }
         match expr {
-            ast::Expr::Await(expr) if self.native_suspension => {
-                let mark = self.temporary_mark();
-                self.unwind_operands(&mark, |f| {
-                    let value = f.expr(&expr.value);
-                    f.await_at(&value, "0", expr.range, &mark)
-                })
-            }
-            ast::Expr::Yield(yielded) if self.native_suspension => {
-                let mark = self.temporary_mark();
-                self.unwind_operands(&mark, |f| {
-                    let value = yielded
-                        .value
-                        .as_deref()
-                        .map_or_else(|| permanent::NONE.to_string(), |value| f.expr(value));
-                    let kind = if f.async_generator {
-                        Suspension::AsyncYield
-                    } else {
-                        Suspension::Yield
-                    };
-                    f.suspend_at(&value, kind, yielded.range, &mark)
-                })
-            }
-            ast::Expr::YieldFrom(delegation) if self.native_suspension => {
-                let mark = self.temporary_mark();
-                self.unwind_operands(&mark, |f| {
-                    let iterable = f.expr(&delegation.value);
-                    f.suspend_at(&iterable, Suspension::Delegate, delegation.range, &mark)
-                })
-            }
             ast::Expr::Attribute(v) => {
                 let base = self.attribute_receiver(v);
                 self.attr(&base, v.attr.as_str())
@@ -203,7 +180,13 @@ impl Function<'_, '_> {
             }
             ast::Expr::BoolOp(_) => self.boolean_value(expr),
             ast::Expr::Compare(v) => self.compare_expr(v, BooleanContext::Value),
-            ast::Expr::If(v) => self.select(&v.test, |f| f.expr(&v.body), |f| f.expr(&v.orelse)),
+            ast::Expr::If(v) => self
+                .select(
+                    |f, yes, no| f.branch_expr(&v.test, yes, no),
+                    |f| CheckedValue::handle(f.expr(&v.body)),
+                    |f| CheckedValue::handle(f.expr(&v.orelse)),
+                )
+                .into_handle(),
             ast::Expr::Named(v) => {
                 let ast::Expr::Name(target) = &*v.target else {
                     return self.unsupported("assignment expression target");
@@ -380,13 +363,22 @@ impl Function<'_, '_> {
     }
 
     fn test_operand(&mut self, expr: &ast::Expr) -> String {
+        self.test_with_temporaries(|f| {
+            if let ast::Expr::Compare(comparison) = expr {
+                f.compare_expr(comparison, BooleanContext::Condition)
+            } else {
+                let value = f.expr(expr);
+                f.truth(&value)
+            }
+        })
+    }
+
+    pub(super) fn test_with_temporaries(
+        &mut self,
+        test: impl FnOnce(&mut Self) -> String,
+    ) -> String {
         let mark = self.temporary_mark();
-        let condition = if let ast::Expr::Compare(comparison) = expr {
-            self.compare_expr(comparison, BooleanContext::Condition)
-        } else {
-            let value = self.expr(expr);
-            self.truth(&value)
-        };
+        let condition = test(self);
         self.discard_truth(&mark);
         condition
     }

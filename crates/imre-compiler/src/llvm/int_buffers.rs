@@ -114,7 +114,7 @@ impl Emitter<'_, '_> {
     /// After the last resize or call, root each incoming list once for a
     /// scalar loop and its surrounding reads and writes. Parameters may alias:
     /// the view caches addresses and bounds, never element values.
-    pub(super) fn int_buffer_body(&mut self, f: &Function) {
+    pub(super) fn int_buffer_region(&self, f: &Function) -> Option<(usize, BTreeSet<usize>)> {
         fn fixed_region(s: &Statement, types: &[Type]) -> bool {
             match s {
                 Statement::Assign(slot, value) => {
@@ -143,7 +143,7 @@ impl Emitter<'_, '_> {
         let mut has_loop = false;
         ir::walk_statements(tail, &mut |s| has_loop |= matches!(s, Statement::While(..)));
         if !has_loop {
-            return self.block(&f.body);
+            return None;
         }
         let mut slots = BTreeSet::new();
         ir::walk_expressions(tail, &mut |e| {
@@ -154,19 +154,15 @@ impl Emitter<'_, '_> {
                 slots.insert(slot);
             }
         });
-        if slots.is_empty() {
-            return self.block(&f.body);
-        }
-        self.block(&f.body[..start]);
-        if self.body.terminated {
-            return;
-        }
+        (!slots.is_empty()).then_some((start, slots))
+    }
+
+    pub(super) fn enter_int_buffer_region(&mut self, slots: BTreeSet<usize>) {
         for slot in slots {
             let list = self.borrow_slot(slot);
             self.remember_int_buffer(slot, &list);
             self.fixed_int_lists[slot] = true;
         }
-        self.block(tail);
     }
 
     pub(super) fn remember_int_buffer(&mut self, slot: usize, list: &Value) {

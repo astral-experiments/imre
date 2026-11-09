@@ -676,6 +676,8 @@ impl Builtin {
                 Contract::new(true, PreservesOwners)
             }
             Self::ObjectCall(..)
+            | Self::RegisteredImport(_)
+            | Self::RegisteredSuspend(..)
             | Self::RegisteredDefinition(_)
             | Self::RegisteredStatement(..)
             | Self::RegisteredName(_)

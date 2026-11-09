@@ -48,10 +48,7 @@ start:
   call void @imre_dyn_coro_open(ptr %context_slot, ptr %handle, ptr @imre_boxed_drive)
 "#;
 
-pub(super) const EPILOGUE: &str = r#"failed:
-  call void @imre_dyn_suspend_return(ptr %context_slot, i64 0)
-  br label %complete
-complete:
+pub(super) const EPILOGUE: &str = r#"complete:
   %final_save = call token @llvm.coro.save(ptr %handle)
   %final = call i8 @llvm.coro.suspend(token %final_save, i1 true)
   switch i8 %final, label %parked [ i8 0, label %invalid_resume
@@ -75,6 +72,32 @@ pub(super) enum Suspension {
 }
 
 impl Function<'_, '_> {
+    pub(super) fn suspend_value(
+        &mut self,
+        kind: crate::ir::SuspendValue,
+        range: TextRange,
+        evaluate: impl FnOnce(&mut Self) -> String,
+    ) -> String {
+        let mark = self.temporary_mark();
+        self.unwind_operands(&mark, |code| {
+            let value = evaluate(code);
+            match kind {
+                crate::ir::SuspendValue::Await => code.await_at(&value, "0", range, &mark),
+                crate::ir::SuspendValue::Delegate => {
+                    code.suspend_at(&value, Suspension::Delegate, range, &mark)
+                }
+                crate::ir::SuspendValue::Yield => {
+                    let mode = if code.async_generator {
+                        Suspension::AsyncYield
+                    } else {
+                        Suspension::Yield
+                    };
+                    code.suspend_at(&value, mode, range, &mark)
+                }
+            }
+        })
+    }
+
     pub(super) fn suspension_position(&mut self, range: TextRange) {
         let (line, col) = self.source.positions.line_and_column(range.start());
         let (end_line, end_col) = self.source.positions.line_and_column(range.end());

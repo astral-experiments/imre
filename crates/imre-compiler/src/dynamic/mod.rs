@@ -715,7 +715,7 @@ pub(crate) fn is_permanent_integer(value: i64) -> bool {
     emit::permanent::small_integer_id(value).is_some()
 }
 
-pub(crate) use emit::checked::supports as supports_registered_function;
+pub(crate) use emit::checked::{Frame as CheckedFrame, supports as supports_registered_function};
 pub(crate) type CheckedFunctions =
     HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredFunction>;
 

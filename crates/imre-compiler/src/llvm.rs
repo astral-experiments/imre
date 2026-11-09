@@ -47,7 +47,7 @@ mod truthiness;
 mod unions;
 mod units;
 
-use operations::Operations;
+use operations::CheckedBody;
 use units::Output;
 pub(crate) use units::emit_units;
 
@@ -229,22 +229,33 @@ impl Type {
 }
 
 #[derive(Clone)]
-struct Value {
+pub(crate) struct Value {
     ty: Type,
     operand: String,
     small_integer: bool,
 }
 
 #[derive(Clone, Copy)]
-enum Ownership {
+pub(crate) enum Ownership {
     Owned,
     Borrowed,
 }
 
 /// A call or operator input may borrow a local root instead of acquiring a temporary.
-struct Operand {
+pub(crate) struct Operand {
     value: Value,
     ownership: Ownership,
+}
+
+impl Operand {
+    pub(crate) fn int_word(&self, protected: bool) -> (&str, bool) {
+        assert_eq!(self.value.ty, Type::Int, "expected the native integer ABI");
+        assert!(
+            protected || matches!(self.ownership, Ownership::Borrowed),
+            "a registered native owner must survive a failing conversion"
+        );
+        (&self.value.operand, self.value.small_integer)
+    }
 }
 
 #[derive(Clone)]
@@ -2557,7 +2568,7 @@ impl Emitter<'_, '_> {
             Some(ir::SourceFrame::Depth) => Some(self.enter_frame(None)),
             None => None,
         };
-        self.int_buffer_body(function);
+        CheckedBody::native(self).emit_function(function);
         if !self.body.terminated {
             self.jump(&self.return_exit.clone());
         }
@@ -2700,17 +2711,7 @@ impl Emitter<'_, '_> {
     }
 
     fn block(&mut self, statements: &[Statement]) {
-        let incoming = self.temporaries.clone();
-        self.emit_block(statements, |emitter| {
-            debug_assert!(
-                emitter
-                    .temporaries
-                    .iter()
-                    .map(|value| (&value.operand, value.ty))
-                    .eq(incoming.iter().map(|value| (&value.operand, value.ty))),
-                "statement changed its enclosing expression owners"
-            );
-        });
+        CheckedBody::native(self).emit_block(statements);
     }
 
     /// A copy immediately followed by clearing its private source transfers one owner.
@@ -2722,7 +2723,7 @@ impl Emitter<'_, '_> {
             && self.owns_slot(source)
             && self.owns_slot(*target)
         {
-            self.emit_statement(&Statement::Move(*target, source));
+            CheckedBody::native(self).emit_statement(&Statement::Move(*target, source));
             return true;
         }
         false
@@ -2820,7 +2821,10 @@ impl Emitter<'_, '_> {
 
     fn other_statement(&mut self, statement: &Statement) {
         match statement {
-            Statement::Assign(..) | Statement::Expr(_) | Statement::Return(_) => {
+            Statement::Assign(..)
+            | Statement::SetItem(..)
+            | Statement::Expr(_)
+            | Statement::Return(_) => {
                 unreachable!("shared IR statement")
             }
             Statement::Move(target, source) => {
@@ -2879,46 +2883,6 @@ impl Emitter<'_, '_> {
                 kind,
             } => {
                 self.iter_next(*iterator, *key, *value, *ready, *kind);
-            }
-            Statement::SetItem(list, index, expression) => {
-                if self.copy_item(list, index, expression) {
-                    return;
-                }
-                // Python evaluates an assignment's RHS before its target expressions.
-                let nonnegative = self.nonnegative_index(index);
-                let fixed_slot = match list.kind {
-                    ExprKind::Local(slot)
-                        if self.fixed_int_lists[slot] && self.int_buffers.contains_key(&slot) =>
-                    {
-                        Some(slot)
-                    }
-                    _ => None,
-                };
-                let value = self.operand(expression);
-                let list = self.operand(list);
-                let index = self.operand(index);
-                if let Some(slot) = fixed_slot {
-                    self.fixed_int_set(slot, &index.value, &value.value);
-                } else {
-                    self.set_item(&list.value, &index.value, &value.value, nonnegative);
-                }
-                if self.module.types.mapping(list.value.ty).is_some()
-                    && self.module.types.may_own_file(
-                        value.value.ty,
-                        &self.module.class_fields,
-                        true,
-                    )
-                {
-                    // The assignment's stack keeps the RHS alive while the
-                    // temporary dictionary releases its remaining entries.
-                    self.release_operand(&list);
-                    self.release_operand(&index);
-                    self.release_operand(&value);
-                } else {
-                    self.release_operand(&value);
-                    self.release_operand(&index);
-                    self.release_operand(&list);
-                }
             }
             Statement::AugmentItem(list, index, op, expression) => {
                 // Augmented assignment instead roots the target and old item first.
@@ -3299,7 +3263,10 @@ impl Emitter<'_, '_> {
             self.retain(&value);
             value
         } else {
-            self.emit_value(expression)
+            CheckedBody::native(self)
+                .emit_value(expression)
+                .into_native()
+                .value
         };
         value.small_integer |= self.ranges.integer(expression).is_some();
         self.owned(value)
@@ -3315,6 +3282,7 @@ impl Emitter<'_, '_> {
             | ExprKind::None
             | ExprKind::Local(_)
             | ExprKind::Binary(..)
+            | ExprKind::Conditional(..)
             | ExprKind::Builtin(..) => unreachable!("shared IR expression"),
             ExprKind::Bind(slot, expression) => {
                 let value = self.expr(expression);
@@ -3510,7 +3478,6 @@ impl Emitter<'_, '_> {
             ExprKind::BooleanValue(and, left, right) => {
                 self.boolean_value(*and, left, right, expression.ty)
             }
-            ExprKind::Conditional(test, yes, no) => self.conditional(test, yes, no),
             ExprKind::Compare(values, ops) => self.comparisons(values, ops),
             ExprKind::Call(id, args) => {
                 if let [arg] = args.values.as_slice()
@@ -3971,7 +3938,10 @@ impl Emitter<'_, '_> {
                 left.ty,
                 &[left, right],
             ),
-            Binary::Add => self.call("int_add", Type::Int, &[left, right]),
+            Binary::Add => {
+                let result = self.body.add_int(&left.operand, &right.operand);
+                self.owned(result)
+            }
             Binary::Subtract => self.call("int_sub", Type::Int, &[left, right]),
             Binary::Multiply => self.call("int_mul", Type::Int, &[left, right]),
             Binary::Divide => self.call("imre_int_true_divide", Type::Float, &[left, right]),
@@ -4905,29 +4875,21 @@ impl Emitter<'_, '_> {
             return result;
         }
         let test = self.expr(test);
-        let (yes_label, no_label, end) = (self.label(), self.label(), self.label());
-        self.branch(&test.operand, &yes_label, &no_label);
-        self.start(&yes_label);
-        let yes = self.expr(yes);
-        self.forget(&yes);
-        let yes_end = self.body.current.clone();
-        self.jump(&end);
-        self.start(&no_label);
-        let no = self.expr(no);
-        self.forget(&no);
-        let no_end = self.body.current.clone();
-        self.jump(&end);
-        self.start(&end);
-        Value {
-            ty: yes.ty,
-            operand: self.instruction(format!(
-                "phi {} [ {}, %{yes_end} ], [ {}, %{no_end} ]",
-                yes.ty.llvm(),
-                yes.operand,
-                no.operand
-            )),
-            small_integer: yes.small_integer && no.small_integer,
-        }
+        let arm = |code: &mut Self, expr| {
+            let result = code.expr(expr);
+            code.forget(&result);
+            operations::CheckedValue::owned(result)
+        };
+        operations::ValueJoin::select(
+            self,
+            |code| &mut code.body,
+            |code, yes, no| code.branch(&test.operand, yes, no),
+            |code| arm(code, yes),
+            |code| arm(code, no),
+        )
+        .expect("value-producing native conditional")
+        .into_native()
+        .value
     }
 
     fn boolean(&mut self, and: bool, values: &[Expr]) -> Value {
@@ -5006,10 +4968,13 @@ impl Emitter<'_, '_> {
                 ty: Type::Tuple(*layout),
                 kind: ExprKind::Builtin(Builtin::RecordView, expressions.to_vec()),
             };
-            return self.emit_value(&Expr {
-                ty: returns,
-                kind: ExprKind::Field(Box::new(frame), 0),
-            });
+            return CheckedBody::native(self)
+                .emit_value(&Expr {
+                    ty: returns,
+                    kind: ExprKind::Field(Box::new(frame), 0),
+                })
+                .into_native()
+                .value;
         }
         if let Builtin::BoxAnnotation(layout) = builtin {
             return Value {
@@ -5028,10 +4993,13 @@ impl Emitter<'_, '_> {
                 ty: Type::Tuple(id),
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![reference.clone()]),
             };
-            return self.emit_value(&Expr {
-                ty: returns,
-                kind: ExprKind::Field(Box::new(frame), *index),
-            });
+            return CheckedBody::native(self)
+                .emit_value(&Expr {
+                    ty: returns,
+                    kind: ExprKind::Field(Box::new(frame), *index),
+                })
+                .into_native()
+                .value;
         }
         if matches!(builtin, Builtin::NewForwardRef) {
             let Type::ForwardRef(id) = returns else {
@@ -5132,7 +5100,9 @@ impl Emitter<'_, '_> {
                 self.check_failed(&failed);
                 none()
             }
-            Builtin::RegisteredDefinition(_)
+            Builtin::RegisteredImport(_)
+            | Builtin::RegisteredSuspend(..)
+            | Builtin::RegisteredDefinition(_)
             | Builtin::RegisteredStatement(..)
             | Builtin::RegisteredCall(..)
             | Builtin::RegisteredName(_)
