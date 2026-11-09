@@ -396,7 +396,6 @@ impl AnnotationChild {
         // An eval expression has its own source positions and looks up names in
         // the namespace supplied by its eventual caller.
         let source = values::RegisteredSource {
-            templates: None,
             text,
             replacements: &replacements,
             has_templates,
