@@ -1051,8 +1051,7 @@ pub(crate) fn compile(
             entry.insert(archive);
         }
     }
-    let has_archive_roots = !archives.is_empty();
-    let mut archive_modules = has_archive_roots.then(|| {
+    let mut archive_modules = (!archives.is_empty()).then(|| {
         roots
             .iter()
             .filter_map(|root| archives.get(root))
@@ -1110,6 +1109,8 @@ pub(crate) fn compile(
     let mut named_registrations = None;
     let mut ordinary_registrations = None;
     let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
+    let mut shadowed_imports = VecDeque::new();
+    let mut file_origins = Vec::new();
     let mut frozen_files: Vec<String> = Vec::new();
     let mut searched_frozen_files = HashSet::new();
     let mut selected_work =
@@ -1211,10 +1212,13 @@ pub(crate) fn compile(
             if imports.names.is_empty() {
                 // A file loader or a runtime change of finder can still select physical
                 // alternatives. Collect their closures after all ordinary import winners.
-                if frozen_files.is_empty() || ordinary_registrations.is_some() {
+                if (frozen_files.is_empty() && shadowed_imports.is_empty())
+                    || ordinary_registrations.is_some()
+                {
                     break;
                 }
                 ordinary_registrations = Some(selected_sources.len());
+                work.append(&mut shadowed_imports);
                 bundled_only = false;
                 for name in frozen_files.drain(..) {
                     let top = name.split('.').next().unwrap_or(&name);
@@ -1491,7 +1495,7 @@ pub(crate) fn compile(
                                 )
                             {
                                 if !initial[..path0_len].contains(root) {
-                                    registrations.python_providers.insert(member.path.clone());
+                                    registrations.python_providers.insert(sources.len());
                                 }
                                 registrations.archive_members.insert(
                                     member.path.clone(),
@@ -1591,7 +1595,10 @@ pub(crate) fn compile(
                     {
                         continue;
                     }
-                    let file_alternatives = file_alternatives || wheel_origins.is_some();
+                    // A -m program can reorder its search paths before importing this name.
+                    let shadowed = module_entry.is_some() && !winner;
+                    let file_alternatives =
+                        file_alternatives || wheel_origins.is_some() || shadowed;
                     let identity = if let Some((identity, _)) = checked_slot {
                         identity.clone()
                     } else {
@@ -1710,6 +1717,9 @@ pub(crate) fn compile(
                         } else {
                             let queue = if winner && select_member && filesystem_import {
                                 &mut selected_work
+                            } else if shadowed && ordinary_registrations.is_none() {
+                                // A dependency unique to a shadow must not veto the winning graph.
+                                &mut shadowed_imports
                             } else {
                                 &mut work
                             };
@@ -1718,9 +1728,7 @@ pub(crate) fn compile(
                                 ImportOrigin::file(winner && filesystem_import),
                             ));
                         }
-                        if !initial[..path0_len].contains(root) {
-                            registrations.python_providers.insert(path.clone());
-                        }
+                        file_origins.push((sources.len(), root));
                         let registration = (prefix.clone(), path, src);
                         if winner {
                             // Only path zero belongs to the program. With safe path
@@ -1735,9 +1743,6 @@ pub(crate) fn compile(
                             ));
                         }
                         sources.push(registration);
-                    }
-                    if module_entry.is_some() && !has_archive_roots && wheel_origins.is_none() {
-                        break;
                     }
                 }
                 if let Some(member) = installed {
@@ -1775,8 +1780,8 @@ pub(crate) fn compile(
                     else {
                         continue;
                     };
+                    registrations.python_providers.insert(sources.len());
                     if let Some(digest) = digest {
-                        registrations.python_providers.insert(path.clone());
                         registrations
                             .archive_members
                             .insert(path.clone(), (digest, imports.module_flags));
@@ -1835,6 +1840,18 @@ pub(crate) fn compile(
             &mut filesystem,
         )
     });
+    // A runtime path change can select any linked file. Bind its functions using the
+    // file's own search root and wheel membership, including for shadowed sources.
+    for (id, root) in file_origins {
+        let (_, path, _) = &sources[id];
+        let application = entry_owner
+            .as_ref()
+            .and_then(|owner| owner.is_program(root, path))
+            .unwrap_or_else(|| initial[..path0_len].contains(root));
+        if !application {
+            registrations.python_providers.insert(id);
+        }
+    }
     // The bundle lives in the launcher. This absolute, non-directory path can neither
     // expose the working directory under -I nor collide with an explicit source root.
     let bundle_entry = startup
@@ -1905,17 +1922,7 @@ pub(crate) fn compile(
         .into_iter()
         .enumerate()
         .map(|(index, (id, program, module))| {
-            let (name, path, _) = &sources[id];
-            let application = entry_sources
-                .get(name)
-                .filter(|_| index < ordinary_registrations.unwrap_or(usize::MAX))
-                .and_then(|(root, _)| entry_owner.as_ref()?.is_program(root, path))
-                .unwrap_or(program);
-            if application {
-                registrations.python_providers.remove(path);
-            } else {
-                registrations.python_providers.insert(path.clone());
-            }
+            let application = !registrations.python_providers.contains(&id);
             // Emit the selected application's signature. Preserve the existing checker
             // scope: owning a declaration does not prove that a call will reach it.
             let mut registration =
@@ -2043,6 +2050,9 @@ pub(crate) fn compile(
         }
         (units, used_archive)
     };
+    // Nested search roots can register one identical input snapshot under multiple names.
+    inputs.files.sort_unstable();
+    inputs.files.dedup();
     inputs.boxed_imports = true;
     Ok(Some(UnitCompilation {
         units,
