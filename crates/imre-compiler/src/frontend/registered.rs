@@ -292,11 +292,59 @@ pub(crate) struct DeferredModuleAnnotation {
 
 pub(crate) enum AnnotationValue {
     Checked(Expr),
-    Forward {
-        text: String,
-        parsed: Box<ruff_python_parser::Parsed<ast::ModExpression>>,
-    },
+    Bound(Box<AnnotationChild>),
     Source(ast::Expr),
+}
+
+pub(crate) struct AnnotationChild {
+    pub(crate) id: ir::AnnotationCodeId,
+    pub(crate) text: String,
+    pub(crate) body: RegisteredFunction,
+    pub(crate) has_templates: bool,
+}
+
+impl AnnotationChild {
+    fn new(
+        id: ir::AnnotationCodeId,
+        text: &str,
+        parsed: &ruff_python_parser::Parsed<ast::ModExpression>,
+    ) -> Option<Self> {
+        let expression = &parsed.syntax().body;
+        let tokens = parsed.tokens();
+        let replacements = values::literal_replacements(text, tokens);
+        let has_templates = tokens
+            .iter()
+            .any(|token| token.kind() == ast::token::TokenKind::TStringStart);
+        // An eval expression has its own source positions and looks up names in
+        // the namespace supplied by its eventual caller.
+        let source = values::RegisteredSource {
+            text,
+            replacements: &replacements,
+            has_templates,
+            method_imports: &Default::default(),
+            private_names: None,
+        };
+        let value = values::registered_value(expression, source)?;
+        let checkpoint = operation(
+            Builtin::RegisteredStatement(expression.range(), None),
+            Type::None,
+            vec![],
+        );
+        Some(Self {
+            id,
+            text: text.to_owned(),
+            has_templates,
+            body: RegisteredFunction {
+                function: ir::Function {
+                    params: vec![],
+                    returns: Type::PythonObject,
+                    locals: vec![],
+                    body: vec![Statement::Expr(checkpoint), Statement::Return(value)],
+                },
+                local_names: HashMap::new(),
+            },
+        })
+    }
 }
 
 /// Only compound, valid strings outside the bundled library get a separately bound
@@ -312,6 +360,7 @@ pub(crate) fn annotation_expression(
 
 impl DeferredModuleAnnotation {
     fn new(
+        id: ir::AnnotationCodeId,
         name: String,
         expression: &ast::Expr,
         source: values::RegisteredSource<'_>,
@@ -323,10 +372,10 @@ impl DeferredModuleAnnotation {
         {
             let text = literal.value.to_str();
             if !bundled && let Some(parsed) = annotation_expression(text) {
-                AnnotationValue::Forward {
-                    text: text.to_owned(),
-                    parsed: Box::new(parsed),
-                }
+                AnnotationChild::new(id, text, &parsed).map_or_else(
+                    || AnnotationValue::Source(expression.clone()),
+                    |child| AnnotationValue::Bound(Box::new(child)),
+                )
             } else {
                 // annotation_text returns an unpositioned normal str on this path.
                 AnnotationValue::Checked(Expr {
@@ -354,7 +403,15 @@ impl DeferredModuleAnnotation {
         for (index, entry) in entries.iter().enumerate() {
             let value = match &entry.value {
                 AnnotationValue::Checked(value) => value.clone(),
-                AnnotationValue::Forward { .. } | AnnotationValue::Source(_) => {
+                AnnotationValue::Bound(child) => operation(
+                    Builtin::BindAnnotationExpression(child.id),
+                    Type::Str,
+                    vec![Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Str(child.text.clone()),
+                    }],
+                ),
+                AnnotationValue::Source(_) => {
                     SourceRun::record(&mut residual, index, body.len());
                     continue;
                 }
@@ -414,12 +471,15 @@ pub(crate) fn module_annotations(
                     {
                         let name = name.id.to_string();
                         let annotation = if self.string_annotations {
-                            ir::ModuleAnnotation::String {
-                                name,
-                                spelling: super::annotation_spelling(&ann.annotation),
+                            let spelling = super::annotation_spelling(&ann.annotation);
+                            if !self.bundled && annotation_expression(&spelling).is_some() {
+                                // The source statement still binds an evaluable string to its native code.
+                                return;
                             }
+                            ir::ModuleAnnotation::String { name, spelling }
                         } else {
                             let site = DeferredModuleAnnotation::new(
+                                ir::AnnotationCodeId(self.deferred.len()),
                                 name,
                                 &ann.annotation,
                                 self.source,
@@ -1109,16 +1169,19 @@ mod tests {
         let bundled_sites = module_annotations(stmts, false, &mut HashMap::new(), source, true);
         let quoted_site = stmts[3].start();
         assert!(
-            matches!(&sites[&quoted_site].value, AnnotationValue::Forward {text, ..} if text == "list[int]")
+            matches!(&sites[&quoted_site].value, AnnotationValue::Bound(child) if child.text == "list[int]")
         );
         assert!(
             matches!(&bundled_sites[&quoted_site].value, AnnotationValue::Checked(Expr {kind: ExprKind::Str(text), ..}) if text == "list[int]")
         );
         let forward = DeferredModuleAnnotation::prepare_body(&[&sites[&quoted_site]]);
-        let [quoted] = forward.residual.as_slice() else {
-            panic!("the quoted expression still uses the source compiler")
-        };
-        assert_eq!(quoted.statements, 0..1);
+        assert!(forward.fully_checked());
+        assert!(matches!(&forward.checked.function.body[1],
+            Statement::Expr(Expr { kind: ExprKind::Builtin(
+                Builtin::RegisteredAnnotationInsert { index: 0, .. }, values), .. })
+                if matches!(values.as_slice(), [Expr { kind: ExprKind::Builtin(
+                    Builtin::BindAnnotationExpression(id), args), .. }] if *id == ir::AnnotationCodeId(3) &&
+                    matches!(args.as_slice(), [Expr { kind: ExprKind::Str(text), .. }] if text == "list[int]"))));
         {
             assert!(matches!(sites[&stmts[2].start()].value, AnnotationValue::Checked(_)));
             let unavailable = &sites[&stmts[4].start()];

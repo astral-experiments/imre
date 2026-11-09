@@ -212,7 +212,8 @@ impl Function<'_, '_> {
                         self.registered_value(marker);
                     } else if let ast::Expr::Name(name) = &*v.target
                         && v.simple
-                        && self.class_locals.is_some()
+                        && (self.class_locals.is_some()
+                            || self.module && self.source.string_annotations)
                     {
                         let key = self.code_name(name.id.as_str());
                         if !self.source.string_annotations {
@@ -846,7 +847,7 @@ impl Function<'_, '_> {
             }
             crate::ir::ModuleAnnotation::String { name, spelling } => {
                 let name = self.code_name(name);
-                let value = self.annotation_text(spelling);
+                let value = self.text(spelling);
                 self.frame
                     .op("annotate", &[&self.scope.clone(), &name, &value]);
             }
@@ -936,12 +937,11 @@ impl Function<'_, '_> {
         index: usize,
         entry: &crate::frontend::DeferredModuleAnnotation,
     ) {
-        use crate::frontend::AnnotationValue;
-
-        self.insert_annotation(Some(index), &entry.name, |code| match &entry.value {
-            AnnotationValue::Source(expression) => code.source_annotation_value(expression),
-            AnnotationValue::Forward { text, parsed } => code.preparsed_annotation_text(text, parsed),
-            AnnotationValue::Checked(_) => unreachable!("checked annotation outside its prepared run"),
+        let crate::frontend::AnnotationValue::Source(expression) = &entry.value else {
+            unreachable!("checked annotation outside its prepared run")
+        };
+        self.insert_annotation(Some(index), &entry.name, |code| {
+            code.source_annotation_value(expression)
         });
     }
 

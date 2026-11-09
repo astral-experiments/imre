@@ -554,6 +554,12 @@ impl Frame<'_, '_, '_> {
                 });
                 "0".to_owned()
             }
+            (Builtin::BindAnnotationExpression(id), [text]) => {
+                let text = self.evaluate_handle(text);
+                let child = self.code.annotation_children[id].clone();
+                self.code.bind_annotation_expression(&text, &child);
+                text
+            }
             (Builtin::RegisteredAnnotationResult, []) => self.code.take_annotation_result(),
             (Builtin::RegisteredModuleAnnotation(annotation), []) => {
                 self.code.registered_module_annotation(annotation);
