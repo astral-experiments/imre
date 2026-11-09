@@ -50,7 +50,7 @@ pub(super) fn call(
                 .collect::<Result<_>>()?;
             Ok(ctx.alloc(Value::List(names)))
         }
-        "dedent" => Ok(ctx.text(crate::objects::dedent(text).to_string())),
+        "dedent" => Ok(ctx.text(crate::objects::dedent(text))),
         _ => unreachable!(),
     }
 }
