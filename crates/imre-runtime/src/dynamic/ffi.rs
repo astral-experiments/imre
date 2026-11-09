@@ -838,6 +838,7 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         threads: Default::default(),
         workers: Default::default(),
         socket_default_timeout: Default::default(),
+        sendfile_writes: Vec::new(),
         config,
         executable,
         helper_executable,

@@ -712,6 +712,26 @@ fn unsigned(ctx: &mut Context, id: Id, max: u64, kind: &str) -> Result<u64> {
     })
 }
 
+#[cfg(target_os = "linux")]
+pub(super) fn sendfile_to<F: std::os::fd::AsRawFd>(
+    ctx: &mut Context,
+    out_fd: impl FnMut() -> crate::objects::exceptions::Result<F>,
+    in_fd: Id,
+    offset: Id,
+    count: Id,
+) -> Result<Id> {
+    let in_fd = c_int(ctx, in_fd)?;
+    // Argument Clinic converts count before sendfile converts an explicit offset.
+    let count = ssize_t(ctx, count)?;
+    let offset = if offset == NONE {
+        None
+    } else {
+        Some(file_offset(ctx, offset)?)
+    };
+    let sent = native::sendfile(out_fd, in_fd, offset, count, || ctx.dispatch_signals())?;
+    Ok(ctx.int(sent as i64))
+}
+
 pub(super) fn c_int(ctx: &mut Context, value: Id) -> Result<i32> {
     ctx.index_integer(value)?
         .to_i64()
@@ -1294,16 +1314,7 @@ pub(super) fn descriptor(
             unreachable!("sendfile requires both descriptors, offset and count")
         };
         let out_fd = c_int(ctx, out_fd)?;
-        let in_fd = c_int(ctx, in_fd)?;
-        // Argument Clinic converts count before sendfile converts an explicit offset.
-        let count = ssize_t(ctx, count)?;
-        let offset = if offset == NONE {
-            None
-        } else {
-            Some(file_offset(ctx, offset)?)
-        };
-        let sent = native::sendfile(out_fd, in_fd, offset, count, || ctx.dispatch_signals())?;
-        return Ok(ctx.int(sent as i64));
+        return sendfile_to(ctx, || Ok(out_fd), in_fd, offset, count);
     }
     if name == "dup2" {
         let [Some(fd), Some(fd2), inheritable] = builtins::bind_builtin_arguments(

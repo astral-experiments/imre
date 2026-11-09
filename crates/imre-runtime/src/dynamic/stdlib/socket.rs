@@ -10,6 +10,11 @@ pub(in super::super) const CLASS_METHODS: &[&str] = &[
     "__del__",
     "__init__",
     "_accept",
+    "_sendfile_owner",
+    "_sendfile_write",
+    "_check_sendfile_owner",
+    #[cfg(target_os = "linux")]
+    "_sendfile_block",
     "bind",
     "close",
     "connect",
@@ -1411,6 +1416,25 @@ pub(super) fn endpoint_method(
     }
 }
 
+fn active_sendfile_owner(ctx: &Context, receiver: Id) -> Option<[u8; 16]> {
+    ctx.sendfile_writes
+        .iter()
+        .find(|(target, _)| *target == receiver)
+        .map(|(_, key)| *key)
+}
+
+fn sendfile_identity(ctx: &Context, id: Id) -> Result<[u8; 16]> {
+    if id == NONE {
+        return Ok([0; 16]);
+    }
+    if let Value::Bytes(bytes) = ctx.heap.get(id)
+        && let Ok(identity) = bytes.as_slice().try_into()
+    {
+        return Ok(identity);
+    }
+    Err(Error::new("TypeError", "invalid socket transfer identity"))
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -1584,6 +1608,62 @@ pub(super) fn call(
     if is_message {
         return message::call(ctx, &s, *receiver, method, args, kwargs);
     }
+    if method == "_sendfile_owner" {
+        check_args(method, args, kwargs, 0, &[])?;
+        let raw = native::fd(&s);
+        if let Some(expected) = active_sendfile_owner(ctx, *receiver) {
+            native::check_sendfile_owner(raw, &expected)?;
+        }
+        return if raw < 0 {
+            Ok(NONE)
+        } else {
+            let identity = native::sendfile_identity(raw)?;
+            Ok(ctx.alloc(Value::Bytes(identity.to_vec())))
+        };
+    }
+    if method == "_sendfile_write" {
+        let [owner, send, data] = *args else {
+            return Err(Error::new(
+                "TypeError",
+                "_sendfile_write requires three arguments",
+            ));
+        };
+        check_args(method, args, kwargs, 3, &[])?;
+        let identity = sendfile_identity(ctx, owner)?;
+        native::check_sendfile_owner(native::fd(&s), &identity)?;
+        ctx.sendfile_writes
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        ctx.heap.keep(*receiver);
+        ctx.sendfile_writes.push((*receiver, identity));
+        let result = ctx.call(send, vec![data], Vec::new());
+        ctx.sendfile_writes.pop();
+        return result;
+    }
+    if method == "_check_sendfile_owner" {
+        let owner = super::super::builtins::one_positional_arg(name, args, kwargs)?;
+        let identity = sendfile_identity(ctx, owner)?;
+        native::check_sendfile_owner(native::fd(&s), &identity)?;
+        return Ok(NONE);
+    }
+    #[cfg(target_os = "linux")]
+    if method == "_sendfile_block" {
+        let [owner, file, offset, count] = *args else {
+            return Err(Error::new(
+                "TypeError",
+                "_sendfile_block requires four arguments",
+            ));
+        };
+        check_args(method, args, kwargs, 4, &[])?;
+        let identity = sendfile_identity(ctx, owner)?;
+        return super::os::sendfile_to(
+            ctx,
+            || native::sendfile_destination(&s, &identity),
+            file,
+            offset,
+            count,
+        );
+    }
     if method == "_accept" {
         use std::os::fd::{AsRawFd, IntoRawFd};
 
@@ -1662,6 +1742,7 @@ pub(super) fn call(
                 ctx.native_buffer_bytes(data)?,
                 flags,
                 &addr,
+                active_sendfile_owner(ctx, *receiver).as_ref(),
             )?)
         })?;
         return Ok(ctx.int(count as i64));
@@ -1739,10 +1820,18 @@ pub(super) fn call(
             ctx.check_buffer_exporter(data)?;
             let bytes = ctx.native_buffer_bytes(data)?;
             let flags = int_option(ctx, args, kwargs, 1, "flags", 0)?;
+            let owner = active_sendfile_owner(ctx, *receiver);
             if method == "send" {
-                return Ok(ctx.int(native::send(&s, bytes, flags)? as i64));
+                let sent = if let Some(identity) = owner {
+                    native::sendfile_write(&s, &identity, bytes, flags)?
+                } else {
+                    native::send(&s, bytes, flags)?
+                };
+                return Ok(ctx.int(sent as i64));
             }
-            ctx.with_buffer_export(data, |ctx| send_all_exported(ctx, &s, data, flags))?;
+            ctx.with_buffer_export(data, |ctx| {
+                send_all_exported(ctx, &s, data, flags, owner.as_ref())
+            })?;
         }
         _ => {
             return Err(Error::new(
@@ -1760,9 +1849,11 @@ pub(super) fn send_all_exported(
     socket: &crate::objects::Object,
     data: Id,
     flags: i32,
+    owner: Option<&[u8; 16]>,
 ) -> Result<()> {
     native::SendAll::run(socket, flags, |send| {
-        let done = send.step(ctx.native_buffer_bytes(data)?)?;
+        let bytes = ctx.native_buffer_bytes(data)?;
+        let done = native::with_send_fd(socket, owner, |raw| send.step_on(raw, bytes))?;
         ctx.dispatch_signals()?;
         Ok(done)
     })

@@ -237,19 +237,22 @@ fn send(ctx: &mut Context, socket: &Object, receiver: Id, args: &[Id], flags: i3
             let mut control = native::message::Control::from_items(&ancillary)?;
             drop(ancillary);
             let n = retry(ctx, socket, |ctx, until| {
+                let owner = super::active_sendfile_owner(ctx, receiver);
                 let mut scratch = IoVectors::new(streams.spans.len())?;
                 let iov = scratch.resolve(ctx, &streams.spans, false)?;
-                // SAFETY: the exports pin all ranges. The pointers expire before dispatch.
-                Ok(unsafe {
-                    native::message::send(
-                        socket,
-                        iov,
-                        &mut control,
-                        flags,
-                        destination.as_ref(),
-                        until,
-                    )
-                }?)
+                Ok(native::with_send_fd(socket, owner.as_ref(), |raw| {
+                    // SAFETY: the exports pin all ranges. The pointers expire before dispatch.
+                    unsafe {
+                        native::message::send(
+                            raw,
+                            iov,
+                            &mut control,
+                            flags,
+                            destination.as_ref(),
+                            until,
+                        )
+                    }
+                })?)
             })?;
             Ok(ctx.int(n as i64))
         })();

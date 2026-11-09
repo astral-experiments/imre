@@ -174,6 +174,8 @@ type SocketDefaultTimeout = std::sync::Arc<std::sync::Mutex<Option<std::time::Du
 
 pub(crate) struct Context {
     socket_default_timeout: SocketDefaultTimeout,
+    // Active calls to an overridable socket.send from sendfile. Receivers stay rooted by the call.
+    sendfile_writes: Vec<(Id, [u8; 16])>,
     threads: lowlevel_threads::Workers,
     workers: thread_worker::Registry,
     heap: Heap,

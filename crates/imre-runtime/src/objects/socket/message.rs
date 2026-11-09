@@ -221,7 +221,7 @@ impl Drop for ReceivedControl {
 /// # Safety
 /// All iovec pointers must remain readable for their lengths until this call returns.
 pub(crate) unsafe fn send(
-    socket: &Object,
+    raw: std::os::fd::RawFd,
     iov: &mut [libc::iovec],
     control: &mut Control,
     flags: i32,
@@ -241,7 +241,6 @@ pub(crate) unsafe fn send(
         as _;
     msg.msg_control = control.data();
     msg.msg_controllen = control.len as _;
-    let raw = fd(socket);
     socket_call_interruptible(raw, libc::POLLOUT, until, || {
         // SAFETY: control, address and all caller-owned iovec ranges live through retries.
         usize::try_from(unsafe { libc::sendmsg(raw, &msg, flags) })
@@ -330,7 +329,7 @@ mod tests {
             .unwrap();
         // SAFETY: the single iovec is live and accessible for both synchronous calls.
         unsafe {
-            send(&tx, &mut iov, &mut outgoing, 0, None, None)
+            send(super::fd(&tx), &mut iov, &mut outgoing, 0, None, None)
                 .ok()
                 .expect("sendmsg");
             recv(&rx, &mut iov, &mut control, 0, None)

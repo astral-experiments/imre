@@ -2156,18 +2156,20 @@ pub(crate) fn send_to(
     bytes: &[u8],
     flags: i32,
     address: &SocketAddress,
+    owner: Option<&[u8; 16]>,
 ) -> Result<usize> {
     #[cfg(not(target_vendor = "apple"))]
     let flags = flags | libc::MSG_NOSIGNAL;
-    let raw = fd(s);
     let (addr, len) = address.raw_parts();
-    socket_call(raw, libc::POLLOUT, deadline(s), || {
-        // SAFETY: the source slice and address live through each synchronous sendto.
-        let count =
-            unsafe { libc::sendto(raw, bytes.as_ptr().cast(), bytes.len(), flags, addr, len) };
-        usize::try_from(count).map_err(|_| io::Error::last_os_error())
+    with_send_fd(s, owner, |raw| {
+        socket_call(raw, libc::POLLOUT, deadline(s), || {
+            // SAFETY: the source slice and address live through each synchronous sendto.
+            let count =
+                unsafe { libc::sendto(raw, bytes.as_ptr().cast(), bytes.len(), flags, addr, len) };
+            usize::try_from(count).map_err(|_| io::Error::last_os_error())
+        })
+        .map_err(errno_error)
     })
-    .map_err(errno_error)
 }
 
 fn send_until(raw: RawFd, bytes: &[u8], flags: i32, until: Option<Deadline>) -> io::Result<usize> {
@@ -2234,11 +2236,16 @@ impl<'a> SendAll<'a> {
 
     /// The caller checks signals after every successful send (even a partial one) or EINTR.
     pub(crate) fn step(&mut self, data: &[u8]) -> Result<bool> {
+        self.step_on(fd(self.socket), data)
+    }
+
+    /// Continue a sendall on the checked description using its original deadline and byte count.
+    pub(crate) fn step_on(&mut self, raw: RawFd, data: &[u8]) -> Result<bool> {
         // The buffer remains exported, but a handler can change its contents or close the socket.
         let remaining = data
             .get(self.sent..)
             .ok_or_else(|| Error::new(Kind::SystemError, "exported socket buffer shrank"))?;
-        match send_until(fd(self.socket), remaining, self.flags, self.until) {
+        match send_until(raw, remaining, self.flags, self.until) {
             Ok(0) if !remaining.is_empty() => {
                 Err(errno_error(io::Error::from_raw_os_error(libc::EPIPE)))
             }
@@ -2323,6 +2330,64 @@ fn duplicate_fd(raw: RawFd) -> io::Result<OwnedFd> {
     let copy = checked(unsafe { libc::fcntl(raw, libc::F_DUPFD_CLOEXEC, 0) })?;
     // SAFETY: the successful duplication transferred ownership of copy.
     Ok(unsafe { OwnedFd::from_raw_fd(copy) })
+}
+
+/// Identify the initiating socket without occupying a caller-visible fd across callbacks.
+pub(crate) fn sendfile_identity(raw: RawFd) -> Result<[u8; 16]> {
+    let mut identity = [0; 16];
+    #[cfg(target_os = "linux")]
+    get_option_into(raw, libc::SOL_SOCKET, libc::SO_COOKIE, &mut identity[..8])?;
+    #[cfg(not(target_os = "linux"))]
+    {
+        let (device, inode) = socket_file(raw).map_err(errno_error)?;
+        if inode == 0 {
+            return Err(errno_error(io::Error::from_raw_os_error(libc::ENOTSUP)));
+        }
+        identity[..8].copy_from_slice(&(device as u64).to_ne_bytes());
+        identity[8..].copy_from_slice(&(inode as u64).to_ne_bytes());
+    }
+    Ok(identity)
+}
+
+pub(crate) fn check_sendfile_owner(raw: RawFd, expected: &[u8; 16]) -> Result<()> {
+    if raw < 0 || &sendfile_identity(raw)? != expected {
+        return Err(errno_error(io::Error::from_raw_os_error(libc::EBADF)));
+    }
+    Ok(())
+}
+
+/// Keep the checked description live only inside one kernel call. Drop it before dispatching signals.
+pub(crate) fn sendfile_destination(socket: &Object, expected: &[u8; 16]) -> Result<OwnedFd> {
+    let owned = duplicate_fd(fd(socket)).map_err(errno_error)?;
+    check_sendfile_owner(owned.as_raw_fd(), expected)?;
+    Ok(owned)
+}
+
+/// Borrow the current socket, or pin the initiating description for this single write attempt.
+pub(crate) fn with_send_fd<T>(
+    socket: &Object,
+    owner: Option<&[u8; 16]>,
+    write: impl FnOnce(RawFd) -> Result<T>,
+) -> Result<T> {
+    if let Some(identity) = owner {
+        let output = sendfile_destination(socket, identity)?;
+        write(output.as_raw_fd())
+    } else {
+        write(fd(socket))
+    }
+}
+
+/// Use the ordinary timed send on the checked socket description for a delegated file write.
+pub(crate) fn sendfile_write(
+    socket: &Object,
+    identity: &[u8; 16],
+    bytes: &[u8],
+    flags: i32,
+) -> Result<usize> {
+    let until = deadline(socket);
+    with_send_fd(socket, Some(identity), |raw| {
+        retry(until, || send_until(raw, bytes, flags, until)).map_err(errno_error)
+    })
 }
 
 /// Duplicate the descriptor and copy the socket's timeout onto the new owner.
