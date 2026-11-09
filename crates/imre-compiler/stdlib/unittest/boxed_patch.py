@@ -153,17 +153,8 @@ class _patch:
             replacement.return_value = factory(_new_parent=replacement, _new_name='()', **options)
         return replacement
 
-    def __enter__(self):
-        if self.is_started:
-            raise RuntimeError("Patch is already started")
+    def get_original(self):
         target = self.getter()
-        spec = None if self.spec is False else self.spec
-        spec_set = None if self.spec_set is False else self.spec_set
-        autospec = None if self.autospec is False else self.autospec
-        if spec is not None and autospec is not None:
-            raise TypeError("Can't specify spec and autospec")
-        if (spec is not None or autospec is not None) and spec_set not in (True, None):
-            raise TypeError("Can't provide explicit spec_set *and* spec or autospec")
         name = self.attribute
         try:
             original = target.__dict__[name]
@@ -175,6 +166,21 @@ class _patch:
             self.create = True
         if original is DEFAULT and not self.create:
             raise AttributeError(f"{target} does not have the attribute {name!r}")
+        return original, local
+
+    def __enter__(self):
+        if self.is_started:
+            raise RuntimeError("Patch is already started")
+        self.target = self.getter()
+        spec = None if self.spec is False else self.spec
+        spec_set = None if self.spec_set is False else self.spec_set
+        autospec = None if self.autospec is False else self.autospec
+        if spec is not None and autospec is not None:
+            raise TypeError("Can't specify spec and autospec")
+        if (spec is not None or autospec is not None) and spec_set not in (True, None):
+            raise TypeError("Can't provide explicit spec_set *and* spec or autospec")
+        original, local = self.get_original()
+        name = self.attribute
         replacement = self.new
         if autospec is not None:
             if replacement is not DEFAULT:
@@ -183,13 +189,13 @@ class _patch:
                 raise TypeError("Can't use 'autospec' with create=True")
             if autospec is True:
                 autospec = original
-            if _is_instance_mock(target):
+            if _is_instance_mock(self.target):
                 raise InvalidSpecError(f"Cannot autospec attr {name!r} as the patch target has already "
-                                       f"been mocked out. [target={target!r}, attr={autospec!r}]")
+                                       f"been mocked out. [target={self.target!r}, attr={autospec!r}]")
             if _is_instance_mock(autospec):
-                target_name = getattr(target, '__name__', target)
+                target_name = getattr(self.target, '__name__', self.target)
                 raise InvalidSpecError(f"Cannot autospec attr {name!r} from target {target_name!r} as it "
-                                       f"has already been mocked out. [target={target!r}, attr={autospec!r}]")
+                                       f"has already been mocked out. [target={self.target!r}, attr={autospec!r}]")
             options = {'name': name}
             options.update(self.mock_kwargs)
             replacement = create_autospec(autospec, spec_set=bool(spec_set), **options)
@@ -197,13 +203,12 @@ class _patch:
             replacement = self._new_mock(original, spec, spec_set)
         elif self.mock_kwargs:
             raise TypeError("Can't pass kwargs to a mock we aren't creating")
-        self.target = target
-        self.original = original
-        self.local = local
+        self.temp_original = original
+        self.is_local = local
         self._exit_stack = ExitStack()
         self.is_started = True
         try:
-            setattr(target, name, replacement)
+            setattr(self.target, name, replacement)
             if self.attribute_name is None:
                 return replacement
             replacements = {}
@@ -220,8 +225,8 @@ class _patch:
 
     def __exit__(self, *exc_info):
         if self.is_started:
-            if self.local:
-                setattr(self.target, self.attribute, self.original)
+            if self.is_local and self.temp_original is not DEFAULT:
+                setattr(self.target, self.attribute, self.temp_original)
             else:
                 delattr(self.target, self.attribute)
                 # Deleting function metadata can reset the slot to a readable default.
@@ -230,9 +235,10 @@ class _patch:
                     or self.attribute in ('__doc__', '__module__', '__defaults__',
                                           '__annotations__', '__kwdefaults__')
                 ):
-                    setattr(self.target, self.attribute, self.original)
+                    setattr(self.target, self.attribute, self.temp_original)
             del self.target
-            del self.original
+            del self.temp_original
+            del self.is_local
             self.is_started = False
             stack = self._exit_stack
             del self._exit_stack
