@@ -688,10 +688,10 @@ class SSLSocket(_socket.socket):
             try:
                 peer.getpeername()
             except OSError as exc:
-                if exc.errno != _errno.ENOTCONN or not server_side:
+                if exc.errno != _errno.ENOTCONN:
                     raise
                 connected = False
-                # Reject cleartext queued before wrapping a disconnected server endpoint.
+                # Reject cleartext queued before wrapping a disconnected endpoint.
                 blocking = peer.getblocking()
                 peer.setblocking(False)
                 try:
@@ -757,14 +757,38 @@ class SSLSocket(_socket.socket):
         finally:
             self.settimeout(timeout)
 
-    def connect(self, addr):
+    def _real_connect(self, addr, connect_ex):
         if self.server_side:
             raise ValueError("can't connect in server-side mode")
-        # Client sockets admitted by _create are already connected and wrapped.
-        raise ValueError("attempt to connect already-connected SSLSocket!")
+        pending = self._session
+        if self._connected or _imre_ssl.is_session(pending):
+            raise ValueError("attempt to connect already-connected SSLSocket!")
+        context = self.context
+        result = _call(_imre_ssl.wrap, context._ctx, self, self.server_hostname,
+                       False, True, context, _ref(self))
+        self._session = _tls_result(result)
+        try:
+            if connect_ex:
+                rc = super().connect_ex(addr)
+            else:
+                super().connect(addr)
+                rc = None
+            if not rc:
+                self._connected = True
+                if self.do_handshake_on_connect:
+                    self.do_handshake()
+            return rc
+        except (OSError, ValueError):
+            # A failed handshake may leave TCP connected. Restore the guarded
+            # endpoint so subsequent socket I/O cannot send plaintext.
+            self._session = pending
+            raise
+
+    def connect(self, addr):
+        self._real_connect(addr, False)
 
     def connect_ex(self, addr):
-        return SSLSocket.connect(self, addr)
+        return self._real_connect(addr, True)
 
     def accept(self):
         child, address = super().accept()
@@ -854,6 +878,7 @@ class SSLSocket(_socket.socket):
             count = _call(_imre_ssl.recv, session, nbytes, flags, buffer)
             if count is not None:
                 return count
+            _imre_ssl.check_pending_client(session)
         if flags is not _NO_FLAGS and _imre_ssl.nonzero_flags(flags):
             raise ValueError("non-zero flags not allowed in calls to recv_into() on %s" % self.__class__)
         return self.read(nbytes, buffer)
@@ -861,19 +886,22 @@ class SSLSocket(_socket.socket):
     def dup(self):
         raise NotImplementedError("Can't dup() %s instances" % self.__class__.__name__)
 
+    def _check_datagram_operation(self, name):
+        session = self._session
+        if session is not None:
+            _imre_ssl.check_pending_client(session)
+            raise ValueError("%s not allowed on instances of %s" % (name, self.__class__))
+
     def sendto(self, data, *args):
-        if self._session is not None:
-            raise ValueError("sendto not allowed on instances of %s" % self.__class__)
+        SSLSocket._check_datagram_operation(self, "sendto")
         return super().sendto(data, *args)
 
     def recvfrom(self, *args):
-        if self._session is not None:
-            raise ValueError("recvfrom not allowed on instances of %s" % self.__class__)
+        SSLSocket._check_datagram_operation(self, "recvfrom")
         return super().recvfrom(*args)
 
     def recvfrom_into(self, *args):
-        if self._session is not None:
-            raise ValueError("recvfrom_into not allowed on instances of %s" % self.__class__)
+        SSLSocket._check_datagram_operation(self, "recvfrom_into")
         return super().recvfrom_into(*args)
 
     def sendmsg(self, *args, **kwargs):

@@ -1338,7 +1338,7 @@ impl Session {
         server: bool,
     ) -> Result<Self, bio::BioFailure> {
         let api = ctx.api;
-        let endpoint = socket::TlsEndpoint::new(socket).map_err(Failure::Io)?;
+        let endpoint = socket::TlsEndpoint::new(socket, false).map_err(Failure::Io)?;
         let transport = endpoint.transport().expect("new TLS registration");
         let handle = ctx.new_connection(server)?;
         let mut session = Self {
