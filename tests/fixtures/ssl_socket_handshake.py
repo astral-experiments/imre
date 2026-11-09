@@ -1,3 +1,4 @@
+import errno
 import gc
 import os
 import socket
@@ -63,6 +64,19 @@ def want_read(call):
     else:
         raise AssertionError("expected a nonblocking TLS read retry")
 
+
+# A pending TCP connect must already guard the first application write with TLS.
+with socket.socket() as listener, socket.socket() as raw:
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    raw.setblocking(False)
+    with client_ctx.wrap_socket(raw, server_hostname="localhost", do_handshake_on_connect=False) as client:
+        assert not client.getblocking() and raw.fileno() == -1
+        assert client.connect_ex(listener.getsockname()) in (0, errno.EINPROGRESS, errno.EWOULDBLOCK)
+        with listener.accept()[0] as peer:
+            want_read(lambda: client.send(b"secret before handshake"))
+            hello = peer.recv(16384)
+            assert hello.startswith(b"\x16\x03") and b"secret before handshake" not in hello
 
 # First I/O must verify the certificate even if do_handshake() was never called.
 client, server = connect("wrong.invalid")
