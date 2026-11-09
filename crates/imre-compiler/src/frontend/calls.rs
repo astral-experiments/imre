@@ -503,7 +503,7 @@ impl Checker<'_> {
             receiver,
             Some(scope),
             None,
-            |checker, index, argument| {
+            &mut |checker, index, argument| {
                 argument.checked(checker, params[index].ty, params[index].sign_only)
             },
         )
@@ -524,7 +524,7 @@ impl Checker<'_> {
             receiver,
             None,
             None,
-            |checker, index, argument| {
+            &mut |checker, index, argument| {
                 let Supplied::Source(node) = argument else {
                     unreachable!("only source calls expand tuples")
                 };
@@ -533,6 +533,7 @@ impl Checker<'_> {
         )
     }
 
+    /// Keep one native binder for the different operand-lowering callbacks.
     pub(super) fn bind_supplied(
         &mut self,
         call: &ast::ExprCall,
@@ -540,7 +541,7 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         mut scope: Option<&mut ArgumentScope>,
         default_owner: Option<(usize, usize)>,
-        mut check: impl FnMut(&mut Self, usize, Supplied<'_>) -> Result<Expr, String>,
+        check: &mut dyn FnMut(&mut Self, usize, Supplied<'_>) -> Result<Expr, String>,
     ) -> Result<ir::CallArgs, String> {
         let offset = usize::from(receiver.is_some());
         let mut values = Vec::new();
