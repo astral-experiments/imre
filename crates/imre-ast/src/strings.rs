@@ -1,4 +1,5 @@
 //! Recover string spellings and code points that the decoded AST does not retain.
+use compact_str::CompactString;
 use ruff_python_ast::{
     self as ast, StringFlags,
     token::{Token, TokenKind, Tokens},
@@ -203,6 +204,46 @@ pub fn template_format_spec(
         Some([ast::InterpolatedStringElement::Literal(literal)]) => Ok(Some(literal)),
         _ => Err("nested t-string format spec"),
     }
+}
+
+/// Python also treats the four ASCII information separators as whitespace.
+pub fn python_whitespace(value: char) -> bool {
+    value.is_whitespace() || matches!(value, '\u{001c}'..='\u{001f}')
+}
+
+/// Length of the common literal space/tab prefix of the supplied nonblank lines.
+pub fn common_indent<'a>(mut lines: impl Iterator<Item = &'a str>) -> usize {
+    let first = lines.next().unwrap_or("");
+    let mut margin = &first.as_bytes()[..first.len() - first.trim_start_matches([' ', '\t']).len()];
+    for line in lines {
+        if margin.is_empty() {
+            break;
+        }
+        let common = margin
+            .iter()
+            .zip(line.as_bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
+        margin = &margin[..common];
+    }
+    margin.len()
+}
+
+/// Apply textwrap.dedent to an ordinary Unicode scalar string.
+pub fn dedent(text: &str) -> CompactString {
+    let blank = |line: &str| line.chars().all(python_whitespace);
+    let margin = common_indent(text.split('\n').filter(|line| !blank(line)));
+    // Indentation and blank lines can account for nearly the entire input.
+    let mut result = CompactString::default();
+    for (index, line) in text.split('\n').enumerate() {
+        if index != 0 {
+            result.push('\n');
+        }
+        if !blank(line) {
+            result.push_str(&line[margin..]);
+        }
+    }
+    result
 }
 
 /// CPython expands tabs at eight-character stops, then removes the common
