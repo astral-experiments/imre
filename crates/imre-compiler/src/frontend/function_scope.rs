@@ -167,7 +167,23 @@ impl<'a> Visitor<'a> for ClosureNames {
                     }
                 }
             }
-            ast::Stmt::Match(_) | ast::Stmt::TypeAlias(_) => {
+            ast::Stmt::TypeAlias(alias) => {
+                self.visit_expr(&alias.name);
+                if self.include_nested_reads {
+                    // The delayed callable closes over its own parameters before this frame.
+                    let mut reads = self.child_reads(None, |child| child.visit_expr(&alias.value));
+                    if let Some(params) = &alias.type_params {
+                        for param in params.iter() {
+                            reads.remove(param.name().as_str());
+                        }
+                    }
+                    self.cell_reads.extend(reads.iter().cloned());
+                    self.reads.extend(reads);
+                } else {
+                    self.incomplete = true;
+                }
+            }
+            ast::Stmt::Match(_) => {
                 self.incomplete = true;
                 self.locals_incomplete = true;
                 visitor::walk_stmt(self, stmt);
@@ -347,12 +363,17 @@ pub(crate) struct ScopeFacts {
 }
 
 impl ScopeFacts {
-    pub(crate) fn prepare(body: &[ast::Stmt], names: &imre_ast::Names) -> Self {
+    pub(crate) fn prepare(
+        body: &[ast::Stmt],
+        names: &imre_ast::Names,
+        alias_site: impl FnMut(&ast::StmtTypeAlias),
+    ) -> Self {
         let mut scopes = Self::default();
         Collector {
             scopes: &mut scopes,
             names,
             scope: Scope::Module,
+            alias_site,
         }
         .visit_body(body);
         scopes
@@ -366,13 +387,14 @@ enum Scope {
     Function,
 }
 
-struct Collector<'a> {
+struct Collector<'a, A> {
     scopes: &'a mut ScopeFacts,
     names: &'a imre_ast::Names,
     scope: Scope,
+    alias_site: A,
 }
 
-impl<'a> Visitor<'a> for Collector<'_> {
+impl<'a, A: FnMut(&ast::StmtTypeAlias)> Visitor<'a> for Collector<'_, A> {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         let strings = self.names.string_annotations;
         let parent = self.scope;
@@ -399,6 +421,9 @@ impl<'a> Visitor<'a> for Collector<'_> {
                 self.scope = Scope::Class;
             }
             ast::Stmt::TypeAlias(alias) => {
+                if self.scope != Scope::Class {
+                    (self.alias_site)(alias);
+                }
                 let mut names = ClosureNames {
                     string_annotations: strings,
                     ..Default::default()

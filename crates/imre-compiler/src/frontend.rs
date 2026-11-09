@@ -114,6 +114,7 @@ mod records;
 mod regex;
 mod registered;
 mod retained;
+pub(crate) use registered::type_alias::type_alias_body;
 pub(crate) use registered::values::{
     RegisteredSource, display_elements, lambda_defaults, literal_replacements, packed_arguments,
     push_codepoints, registered_arguments, registered_constant_key, registered_index_key,
@@ -123,7 +124,7 @@ pub(crate) use registered::{
     AnnotationValue, DeferredModuleAnnotation, RegisteredFunction, RegisteredLambda,
     RegisteredScope, RegisteredSuite, SuitePreparation, annotation_expression, attribute_effects,
     delete_item, delete_targets, module_annotations, prepare_templates, registered_index_target,
-    registered_sites, template_segments,
+    registered_sites, registered_type_alias, registered_type_parameters, template_segments,
 };
 pub(crate) use retained::RegisteredNative;
 mod sequences;
@@ -5704,6 +5705,9 @@ impl<'a> Checker<'a> {
                 if self.graph.command_startup.is_some() =>
             {
                 return Err(self.object_runtime_export("a conditional or local import", statement));
+            }
+            ast::Stmt::TypeAlias(_) => {
+                return Err(self.scoped_builtin_error("type alias declaration", statement));
             }
             _ => {
                 return Err(error(

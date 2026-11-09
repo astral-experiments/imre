@@ -466,6 +466,7 @@ impl Frame<'_, '_, '_> {
                     | Builtin::RegisteredDeleteName(..)
                     | Builtin::RegisteredModuleAnnotation(_)
                     | Builtin::RegisteredAnnotationStart
+                    | Builtin::RegisteredAnnotationFormat
                     | Builtin::RegisteredAnnotationInsert { .. }
                     | Builtin::RegisteredAttribute {
                         action: ir::AttributeAction::Delete | ir::AttributeAction::InPlace(_),
@@ -617,9 +618,14 @@ impl Frame<'_, '_, '_> {
                     .collect::<Vec<_>>();
                 self.code.registered_definition(*site, &header)
             }
+            (Builtin::RegisteredTypeAlias(site), []) => self.code.registered_type_alias(*site),
             (Builtin::RegisteredImport(import), []) => {
                 self.code.namespace_import(import);
                 "0".to_owned()
+            }
+            (Builtin::RegisteredAnnotationFormat, [format]) => {
+                let format = self.evaluate_handle(format);
+                self.code.op("annotation_format", &[&format])
             }
             (Builtin::RegisteredAnnotationStart, []) => {
                 self.code.begin_annotations(None);

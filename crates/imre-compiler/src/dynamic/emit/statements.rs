@@ -89,8 +89,15 @@ impl Function<'_, '_> {
             }
             self.checkpoint(stmt);
             self.simple_call = imre_ast::unhighlighted_call(stmt);
-            if let Some(import) = self.source.namespace_operations.get(&stmt.range()) {
-                self.registered_value(import);
+            if let Some(operation) = self.source.namespace_operations.get(&stmt.range()) {
+                let value = self.registered_value(operation);
+                if let crate::ir::ExprKind::Builtin(
+                    crate::ir::Builtin::RegisteredTypeAlias(site),
+                    _,
+                ) = &operation.kind
+                {
+                    self.bind(&self.source.type_aliases[site].name, &value);
+                }
                 continue;
             }
             if let Some(effects) = crate::frontend::attribute_effects(stmt) {
@@ -115,30 +122,11 @@ impl Function<'_, '_> {
                     }
                 }
                 ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => {}
-                ast::Stmt::TypeAlias(v)
-                    if self.class_locals.is_none()
-                        && let Some(name) = v.name.as_name_expr() =>
-                {
-                    let outer = self.scope.clone();
-                    let params = if let Some(params) = v.type_params.as_deref() {
-                        self.scope = self.parameter_scope(&outer, params, false);
-                        let key = self.code_name(".type_params");
-                        self.frame.op("lookup", &[&self.scope.clone(), &key])
-                    } else {
-                        "0".into()
-                    };
-                    let evaluator = self.define(
-                        v.start(),
-                        DefinitionName::Plain(name.id.as_str()),
-                        None,
-                        None,
-                        None,
-                        Body::TypeAlias(&v.value),
-                    );
-                    let label = self.code_name(name.id.as_str());
-                    let alias = self.op("type_alias", &[&label, &evaluator, &params]);
-                    self.scope = outer;
-                    self.bind(name.id.as_str(), &alias);
+                ast::Stmt::TypeAlias(v) if self.class_locals.is_none() => {
+                    let alias = &self.source.type_aliases[&v.start()];
+                    debug_assert!(alias.body.is_none());
+                    let value = self.type_alias(v.start(), super::AliasValue::Residual(&v.value));
+                    self.bind(&alias.name, &value);
                 }
                 ast::Stmt::Assign(v) => {
                     if let [target] = v.targets.as_slice()
@@ -495,21 +483,29 @@ impl Function<'_, '_> {
     }
 
     fn parameter_scope(&mut self, outer: &str, params: &ast::TypeParams, class: bool) -> String {
+        let params =
+            crate::frontend::registered_type_parameters(params, &self.source.private_names);
+        self.checked_parameter_scope(outer, &params, class)
+    }
+
+    fn checked_parameter_scope(
+        &mut self,
+        outer: &str,
+        params: &[crate::ir::RegisteredTypeParameter],
+        class: bool,
+    ) -> String {
+        use crate::ir::TypeParameterKind;
         let names = self.op("dict", &[]);
         for param in params {
-            if param.default().is_some()
-                || matches!(param, ast::TypeParam::TypeVar(v) if v.bound.is_some())
-            {
+            if param.has_bound_or_default {
                 self.unsupported("class type parameter bounds and defaults");
             }
-            let binding = self.code_name(param.name().as_str());
-            let name = self
-                .frame
-                .code_name(self.source.private_names.definition(param.name()));
-            let declaration = match param {
-                ast::TypeParam::TypeVar(_) => name,
-                ast::TypeParam::TypeVarTuple(_) => self.op("class_typevartuple", &[&name]),
-                ast::TypeParam::ParamSpec(_) => self.op("class_paramspec", &[&name]),
+            let binding = self.code_name(&param.binding);
+            let name = self.code_name(&param.name);
+            let declaration = match param.kind {
+                TypeParameterKind::TypeVar => name,
+                TypeParameterKind::TypeVarTuple => self.op("class_typevartuple", &[&name]),
+                TypeParameterKind::ParamSpec => self.op("class_paramspec", &[&name]),
             };
             self.op("put", &[&names, &binding, &declaration]);
         }
@@ -518,7 +514,38 @@ impl Function<'_, '_> {
         } else {
             "function_parameter_scope"
         };
-        self.frame.op(op, &[outer, &names])
+        self.op(op, &[outer, &names])
+    }
+
+    pub(super) fn registered_type_alias(&mut self, start: TextSize) -> String {
+        let body = self.source.type_aliases[&start]
+            .body
+            .as_ref()
+            .expect("checked alias value");
+        self.type_alias(start, super::AliasValue::Checked(body))
+    }
+
+    fn type_alias(&mut self, start: TextSize, value: super::AliasValue<'_>) -> String {
+        let alias = &self.source.type_aliases[&start];
+        let outer = self.scope.clone();
+        let parameters = if let Some(parameters) = &alias.parameters {
+            self.scope = self.checked_parameter_scope(&outer, parameters, false);
+            let key = self.code_name(".type_params");
+            self.frame.op("lookup", &[&self.scope.clone(), &key])
+        } else {
+            "0".into()
+        };
+        let evaluator = self.define(
+            start,
+            DefinitionName::Plain(&alias.name),
+            None,
+            None,
+            None,
+            Body::AliasEvaluator(value),
+        );
+        self.scope = outer;
+        let name = self.code_name(&alias.name);
+        self.op("type_alias", &[&name, &evaluator, &parameters])
     }
 
     pub(super) fn registered_definition(&mut self, start: TextSize, values: &[String]) -> String {
@@ -720,7 +747,7 @@ impl Function<'_, '_> {
                 }
                 Some(&class.namespace)
             }
-            Body::TypeAlias(_) => Some(&scopes.aliases[&start]),
+            Body::AliasEvaluator(_) => Some(&scopes.aliases[&start]),
             Body::Generator(_) => Some(&scopes.generators[&start]),
             _ => None,
         };
@@ -759,7 +786,7 @@ impl Function<'_, '_> {
             }
         }
         // A type alias thunk has an implicit default for its format parameter.
-        let defaults = if matches!(body, Body::TypeAlias(_))
+        let defaults = if matches!(body, Body::AliasEvaluator(_))
             || params.is_some_and(|p| {
                 p.iter_non_variadic_params()
                     .any(|arg| arg.default.is_some())
@@ -768,7 +795,7 @@ impl Function<'_, '_> {
         } else {
             "0".into()
         };
-        if matches!(body, Body::TypeAlias(_)) {
+        if matches!(body, Body::AliasEvaluator(_)) {
             signature["posonly"] = json!([".format"]);
             let format = self.text(".format");
             let value_format = self.integer(1);

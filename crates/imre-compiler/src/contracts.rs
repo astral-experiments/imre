@@ -680,12 +680,14 @@ impl Builtin {
             | Self::RegisteredSuspend(..)
             | Self::RegisteredModuleAnnotation(_)
             | Self::RegisteredAnnotationStart
+            | Self::RegisteredAnnotationFormat
             | Self::RegisteredAnnotationInsert { .. }
             | Self::BindAnnotationExpression(_)
             | Self::RegisteredAnnotationResult
             | Self::RegisteredDeleteName(..)
             | Self::RegisteredDefinition(_)
             | Self::RegisteredLambda(..)
+            | Self::RegisteredTypeAlias(_)
             | Self::RegisteredStatement(..)
             | Self::RegisteredName(_)
             | Self::RegisteredUnary(_)

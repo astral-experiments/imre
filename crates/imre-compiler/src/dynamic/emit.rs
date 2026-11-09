@@ -599,8 +599,31 @@ impl<'a> PreparedBody<'a> {
         };
         let sites = crate::frontend::registered_sites(&body, &private_names);
         let mut operations = sites.operations;
+        let mut type_aliases = HashMap::new();
         let mut scopes =
-            crate::frontend::function_scope::ScopeFacts::prepare(&body, &private_names);
+            crate::frontend::function_scope::ScopeFacts::prepare(&body, &private_names, |alias| {
+                let Some(name) = alias.name.as_name_expr() else {
+                    return;
+                };
+                let body = crate::frontend::type_alias_body(alias, values);
+                let parameters = alias.type_params.as_deref().map(|params| {
+                    crate::frontend::registered_type_parameters(params, &private_names)
+                });
+                if body.is_some() {
+                    operations.insert(
+                        alias.range(),
+                        crate::frontend::registered_type_alias(alias.start()),
+                    );
+                }
+                type_aliases.insert(
+                    alias.start(),
+                    TypeAliasDefinition {
+                        name: name.id.to_string(),
+                        body,
+                        parameters,
+                    },
+                );
+            });
         let lambdas = RegisteredLambda::collect(&body, values, std::mem::take(&mut scopes.lambdas));
         let module_annotations = crate::frontend::module_annotations(
             &body,
@@ -673,6 +696,7 @@ impl<'a> PreparedBody<'a> {
             thread_entries,
             nested_bodies: prepare.nested,
             namespace_operations: operations,
+            type_aliases,
             module_annotations,
             function_bodies,
             class_bodies,
@@ -792,7 +816,7 @@ enum Body<'a> {
     ),
     CheckedExpression(&'a crate::frontend::RegisteredFunction),
     Expression(&'a ast::Expr),
-    TypeAlias(&'a ast::Expr),
+    AliasEvaluator(AliasValue<'a>),
     Generator(&'a imre_ast::comprehension::Plan<'a>),
 }
 
@@ -865,11 +889,23 @@ impl<'a> std::ops::Deref for SourceMap<'a> {
     }
 }
 
+enum AliasValue<'a> {
+    Checked(&'a crate::frontend::RegisteredFunction),
+    Residual(&'a ast::Expr),
+}
+
+struct TypeAliasDefinition {
+    name: String,
+    body: Option<crate::frontend::RegisteredFunction>,
+    parameters: Option<Vec<crate::ir::RegisteredTypeParameter>>,
+}
+
 #[derive(Default)]
 struct SourceInfo<'a> {
     scopes: crate::frontend::function_scope::ScopeFacts,
     thread_entries: HashMap<ruff_text_size::TextSize, imre_ast::ThreadEntry>,
     lambdas: HashMap<ruff_text_size::TextSize, RegisteredLambda>,
+    type_aliases: HashMap<ruff_text_size::TextSize, TypeAliasDefinition>,
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
     module_annotations:
         HashMap<ruff_text_size::TextSize, crate::frontend::DeferredModuleAnnotation>,
@@ -1201,12 +1237,16 @@ impl Output {
             }
             Body::CheckedExpression(checked) => f.checked_body(checked),
             Body::Generator(plan) => f.generator_step(plan),
-            Body::Expression(expr) | Body::TypeAlias(expr) => {
+            Body::AliasEvaluator(AliasValue::Checked(body)) => f.checked_body(body),
+            Body::AliasEvaluator(AliasValue::Residual(expr)) => {
                 f.checkpoint(expr);
-                if matches!(body, Body::TypeAlias(_)) {
-                    let format = f.lookup(".format");
-                    f.op("annotation_format", &[&format]);
-                }
+                let format = f.lookup(".format");
+                f.op("annotation_format", &[&format]);
+                let value = f.expr(expr);
+                f.return_value(&value);
+            }
+            Body::Expression(expr) => {
+                f.checkpoint(expr);
                 let value = f.expr(expr);
                 f.return_value(&value);
             }
@@ -1616,6 +1656,122 @@ second = t'{client.lookup(*args)}{v * 2}'",
             });
             assert_eq!(methods, vec!["acquire"; calls]);
         }
+    }
+
+    #[test]
+    fn type_alias_uses_the_shared_operand_for_each_rhs() {
+        let prepared = PreparedBody::module(
+            "editor",
+            Path::new("editor.py"),
+            "type Callback = Callable[[], object]\n\
+             type CharBuffer = list[str]\n\
+             type Completer = Callable[[str, int], str | None]\n\
+             type PlatformTripleKey = tuple[str, str, str]\n",
+            true,
+            ModuleOrigin::Program(ProgramBodies::default()),
+        )
+        .unwrap();
+        for alias in prepared
+            .body
+            .iter()
+            .filter_map(ast::Stmt::as_type_alias_stmt)
+        {
+            let shared = crate::frontend::registered_value(
+                &alias.value,
+                prepared.source.registered_source(),
+            );
+            let checked = prepared.source.type_aliases[&alias.start()].body.is_some();
+            let name = alias.name.as_name_expr().unwrap().id.as_str();
+            assert_eq!(checked, shared.is_some(), "{name}");
+            if name != "Completer" {
+                assert!(checked, "expected checked operands for {name}");
+            }
+            assert_eq!(
+                checked,
+                prepared
+                    .source
+                    .namespace_operations
+                    .contains_key(&alias.range())
+            );
+        }
+        prepared.standalone().unwrap().expect("native initializer");
+    }
+
+    #[test]
+    fn type_alias_returns_a_registered_lambda_with_a_prepared_template_body() {
+        use crate::ir::{Builtin, ExprKind};
+
+        let prepared = PreparedBody::module(
+            "editor",
+            Path::new("editor.py"),
+            "type Factory = lambda item: t'{item}'\n",
+            true,
+            ModuleOrigin::Program(ProgramBodies::default()),
+        )
+        .unwrap();
+        let alias = &prepared.source.type_aliases[&prepared.body[0].start()];
+        let body = &alias.body.as_ref().expect("checked alias value").function.body;
+        let mut sites = Vec::new();
+        crate::ir::walk_expressions(body, &mut |expr| {
+            if let ExprKind::Builtin(Builtin::RegisteredLambda(site, _), _) = &expr.kind {
+                sites.push(*site);
+            }
+        });
+        let [site] = sites.as_slice() else {
+            panic!("expected one checked lambda binding in the alias evaluator");
+        };
+        assert!(prepared.source.lambdas[site].body.is_some());
+    }
+
+    #[test]
+    fn type_alias_binds_a_checked_callback_with_lazy_name_lookups() {
+        use crate::ir::{self, Builtin, ExprKind, Statement};
+
+        let prepared = PreparedBody::module(
+            "editor",
+            Path::new("editor.py"),
+            "type CharBuffer = list[str]\n",
+            true,
+            ModuleOrigin::Program(ProgramBodies::default()),
+        )
+        .unwrap();
+        let initializer = prepared.source.initializer.as_ref().unwrap();
+        assert!(initializer.fully_checked());
+        let [_, Statement::Expr(binding)] = initializer.checked.function.body.as_slice() else {
+            panic!("expected one declaration after the statement marker");
+        };
+        let ExprKind::Builtin(Builtin::GlobalSet(slot), operands) = &binding.kind else {
+            panic!("expected the alias binding");
+        };
+        assert_eq!(initializer.checked.local_names[slot].name, "CharBuffer");
+        let [alias] = operands.as_slice() else {
+            panic!("expected one lazy alias");
+        };
+        let ExprKind::Builtin(Builtin::RegisteredTypeAlias(site), args) = &alias.kind else {
+            panic!("expected the prepared alias site");
+        };
+        assert!(args.is_empty());
+        let callback = &prepared.source.type_aliases[site]
+            .body
+            .as_ref()
+            .unwrap()
+            .function
+            .body;
+        let [_, Statement::Expr(format), Statement::Return(value)] = callback.as_slice() else {
+            panic!("expected the format check before the alias value");
+        };
+        assert!(
+            matches!(&format.kind, ExprKind::Builtin(Builtin::RegisteredAnnotationFormat, args)
+            if matches!(args.as_slice(), [arg] if matches!(&arg.kind,
+                ExprKind::Builtin(Builtin::RegisteredName(name), _) if name == ".format")))
+        );
+        let mut names = Vec::new();
+        ir::walk_operand_expressions(value, &mut |expr| {
+            if let ExprKind::Builtin(Builtin::RegisteredName(name), _) = &expr.kind {
+                names.push(name.as_str());
+            }
+        });
+        assert_eq!(names, ["list", "str"]);
     }
 
     #[test]

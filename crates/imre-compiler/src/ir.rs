@@ -1096,6 +1096,22 @@ pub(crate) enum DictEntryKind {
     Unpack,
 }
 
+/// Binding name and public name of a type parameter in a registered Python scope.
+#[derive(Clone, Debug)]
+pub(crate) struct RegisteredTypeParameter {
+    pub(crate) binding: String,
+    pub(crate) name: String,
+    pub(crate) kind: TypeParameterKind,
+    pub(crate) has_bound_or_default: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum TypeParameterKind {
+    TypeVar,
+    TypeVarTuple,
+    ParamSpec,
+}
+
 /// The source declaration or future spelling of one simple module annotation.
 #[derive(Clone)]
 pub(crate) enum ModuleAnnotation {
@@ -1764,11 +1780,14 @@ pub(crate) enum Builtin {
     /// Bind the prepared lambda at this site. An explicit lexical scope, when present,
     /// precedes the default values in Python parameter order.
     RegisteredLambda(ruff_text_size::TextSize, bool),
+    /// Construct a lazy alias whose value callable was checked at this declaration site.
+    RegisteredTypeAlias(ruff_text_size::TextSize),
     RegisteredImport(NamespaceImport),
     RegisteredSuspend(SuspendValue, ruff_text_size::TextRange),
     /// A module annotation records execution at startup; its provider evaluates values on demand.
     RegisteredModuleAnnotation(ModuleAnnotation),
     RegisteredAnnotationStart,
+    RegisteredAnnotationFormat,
     RegisteredAnnotationInsert {
         index: usize,
         name: String,
