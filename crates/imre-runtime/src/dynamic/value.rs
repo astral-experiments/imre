@@ -3117,6 +3117,12 @@ pub(super) trait VisitReferences {
     }
 }
 
+impl<F: FnMut(Id)> VisitReferences for F {
+    fn push(&mut self, id: Id) {
+        self(id);
+    }
+}
+
 /// Reusable edges from the context roots supplied to a full collection.
 #[derive(Default)]
 struct RootTrace {
@@ -3599,6 +3605,7 @@ pub(super) struct Heap {
     pub(super) gc_schedule: GcSchedule,
     weak: HashMap<Id, Vec<Id>>,
     weak_roots: weak_roots::RootPaths,
+    retained_paths: weak_roots::RetainedPaths,
     finalizer_roots: weak_roots::RootPaths,
     cyclic_finalizers: weak_roots::CycleRetention,
     // Callback rollback can borrow a handle without extending the object's lifetime.
@@ -3836,6 +3843,7 @@ impl Heap {
             gc_schedule: GcSchedule::default(),
             weak: HashMap::new(),
             weak_roots: Default::default(),
+            retained_paths: Default::default(),
             finalizer_roots: Default::default(),
             cyclic_finalizers: Default::default(),
             borrowed_hooks: Vec::new(),
@@ -5877,6 +5885,19 @@ impl Heap {
         {
             return Ok(None);
         }
+        let mut roots = roots.peekable();
+        let mut context_roots = Vec::new();
+        if self.has_finalizer_cohort() {
+            // Preserve the original root walk, including its remaining suffix if allocation fails.
+            while roots.peek().is_some() && context_roots.try_reserve(1).is_ok() {
+                context_roots.extend(roots.next());
+            }
+            if roots.peek().is_none()
+                && self.retained_paths_keep_owners(context_roots.iter().copied(), false)
+            {
+                return Ok(None);
+            }
+        }
         // A verified cycle retains its owners even when an unrelated owner needs the
         // root walk. Count only pending owners that the walk still has to find.
         let cyclic = self.cyclic_finalizers.verified_owners(self);
@@ -5902,7 +5923,7 @@ impl Heap {
             // Scalar leaves cannot retain a finalizer or participate in a cycle.
             mode: MarkMode::CycleEdges,
         };
-        self.mark_roots(roots, &mut pending);
+        self.mark_roots(context_roots.into_iter().chain(roots), &mut pending);
         while remaining != 0
             && let Some(id) = pending.pop()
         {

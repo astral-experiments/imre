@@ -216,7 +216,7 @@ fn search_keeps_proven_paths_when_the_node_budget_runs_out() {
             &mut wanted,
             &mut nodes_left,
             &mut edges_left,
-            true,
+            super::Search::Indexed,
         )
         .unwrap();
 
@@ -234,7 +234,7 @@ fn search_keeps_proven_paths_when_the_node_budget_runs_out() {
             &mut wanted,
             &mut nodes_left,
             &mut edges_left,
-            true,
+            super::Search::Indexed,
         )
         .unwrap();
     assert!(wanted.is_empty());
@@ -688,4 +688,120 @@ fn learns_a_descriptor_added_after_the_ordinary_finalizer_paths() {
     };
     items.pop();
     assert!(!heap.cached_finalizers_kept(globals, None, Some(0)));
+}
+
+#[test]
+fn rechecks_surviving_operands_after_a_release() {
+    let mut heap = super::super::Heap::new();
+    let owner = heap.alloc(Value::List(Vec::new()));
+    heap.register_finalizer(owner);
+    let inner = heap.alloc(Value::List(vec![owner]));
+    let outer = heap.alloc(Value::Tuple(vec![inner]));
+    heap.release_temporaries_since(0);
+    heap.keep(outer);
+    assert!(heap.retained_paths_keep_owners([].into_iter(), true));
+    heap.release_temporaries_since(0);
+    heap.keep(inner);
+    assert!(heap.retained_paths_keep_owners([].into_iter(), true));
+    assert!(heap.retained_paths_keep_owners([inner].into_iter(), false));
+    heap.release_temporaries_since(0);
+    assert!(!heap.retained_paths_keep_owners([].into_iter(), true));
+}
+
+#[test]
+fn finalizer_drain_and_operand_release_require_different_live_owners() {
+    let mut heap = super::super::Heap::new();
+    let owner = heap.alloc(Value::List(Vec::new()));
+    heap.register_finalizer(owner);
+    let target = heap.alloc(Value::List(Vec::new()));
+    let reference = heap
+        .new_weak_reference(target, NONE, weakref::Kind::Reference, None)
+        .unwrap();
+    let root = heap.alloc(Value::List(vec![owner, target, reference]));
+    heap.release_temporaries_since(0);
+    assert!(heap.retained_paths_keep_owners([root].into_iter(), true));
+    let Value::List(items) = heap.get_mut(root) else {
+        unreachable!()
+    };
+    items.remove(1);
+    assert!(heap.retained_paths_keep_owners([root].into_iter(), false));
+    assert!(!heap.retained_paths_keep_owners([root].into_iter(), true));
+    let Value::List(items) = heap.get_mut(root) else {
+        unreachable!()
+    };
+    items.clear();
+    assert!(!heap.retained_paths_keep_owners([root].into_iter(), false));
+}
+
+#[test]
+fn a_reused_slot_does_not_keep_the_old_path_alive() {
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let callback = ctx.builtin("print");
+    let heap = &mut ctx.heap;
+    let owner = heap.alloc(Value::List(Vec::new()));
+    heap.register_finalizer(owner);
+    let old_edge = heap.alloc(Value::List(vec![owner]));
+    let reference = heap
+        .new_weak_reference(old_edge, callback, weakref::Kind::Reference, None)
+        .unwrap();
+    let root = heap.alloc(Value::List(vec![old_edge, reference]));
+    heap.release_temporaries_since(0);
+    assert!(heap.retained_paths_keep_owners([root].into_iter(), true));
+
+    let Value::List(children) = heap.get_mut(root) else {
+        unreachable!()
+    };
+    children.remove(0);
+    // Keep the endpoint alive across actual collection, without keeping its old parent.
+    assert_eq!(
+        heap.collect([root, owner].into_iter()),
+        Some(vec![(callback, reference)])
+    );
+    assert!(heap.slots[old_edge as usize].value.is_none());
+    let new_edge = (0..=heap.free_count)
+        .map(|_| heap.alloc(Value::List(Vec::new())))
+        .find(|&slot| slot == old_edge)
+        .expect("the free slot must actually be reused");
+    assert_eq!(
+        old_edge, new_edge,
+        "the recorded slot must have been reused"
+    );
+    let Value::List(children) = heap.get_mut(root) else {
+        unreachable!()
+    };
+    children.insert(0, new_edge);
+    heap.release_temporaries_since(0);
+    assert!(!heap.retained_paths_keep_owners([root].into_iter(), true));
+}
+
+#[test]
+fn an_unavailable_native_edge_cannot_keep_a_finalizer_alive() {
+    let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+    let owner = ctx.alloc(Value::List(Vec::new()));
+    ctx.heap.register_finalizer(owner);
+    let native = stdlib::call(&mut ctx, "_bz2.BZ2Decompressor", &[], &[]).unwrap();
+    let Value::Bz2Decompressor(state) = ctx.heap.get(native) else {
+        unreachable!()
+    };
+    let state = state.clone();
+    state.borrow_mut().unused_data = owner;
+    ctx.heap.release_temporaries_since(0);
+    assert!(
+        ctx.heap
+            .retained_paths_keep_owners([native].into_iter(), true)
+    );
+    let mut busy = state.borrow_mut();
+    let unavailable = ctx
+        .heap
+        .retained_paths_keep_owners([native].into_iter(), true);
+    assert!(
+        !unavailable,
+        "an inaccessible only edge must not authorize the skip"
+    );
+    busy.unused_data = NONE;
+    drop(busy);
+    assert!(
+        !ctx.heap
+            .retained_paths_keep_owners([native].into_iter(), true)
+    );
 }

@@ -2506,7 +2506,7 @@ pub(super) unsafe extern "C" fn imre_dyn_assignment_target(
     if ctx.heap.assignment_target(live, replaced == TRUE)
         && !ctx.can_skip_finalizer_sweep(ctx.heap.temporary_mark())
     {
-        ctx.collect_unreachable();
+        ctx.collect_after_release();
     }
 }
 
@@ -2716,7 +2716,9 @@ impl Context {
         }
         let finalizers = self.heap.take_finalizer_check();
         if self.heap.take_sweep_request()
-            || (finalizers && !self.can_skip_finalizer_sweep(self.heap.temporary_mark()))
+            || (finalizers
+                && !self.can_skip_finalizer_sweep(self.heap.temporary_mark())
+                && !self.surviving_release_roots())
         {
             let (heap, roots) = self.heap_and_roots();
             if let Some(callbacks) = heap.collect(roots) {
@@ -2741,7 +2743,7 @@ impl Context {
             {
                 return;
             }
-            self.collect_unreachable();
+            self.collect_after_release();
         }
     }
 
@@ -2804,7 +2806,7 @@ impl Context {
             self.heap.keep(result);
         }
         if collect {
-            self.collect_unreachable();
+            self.collect_after_release();
         }
     }
 
@@ -2820,7 +2822,7 @@ impl Context {
             }
         }
         if collect {
-            self.collect_unreachable();
+            self.collect_after_release();
         }
         result
     }
@@ -2831,6 +2833,23 @@ impl Context {
             self.modules,
             self.builtins.get(MODULE_REF).copied().unwrap_or(NONE),
         ]
+    }
+
+    /// The caller already discarded its dead operands and found a possible observable release.
+    fn surviving_release_roots(&mut self) -> bool {
+        if !self.heap.has_finalizer_cohort() {
+            return false;
+        }
+        let (heap, roots) = self.heap_and_roots();
+        heap.retained_paths_keep_owners(roots, true)
+    }
+
+    fn collect_after_release(&mut self) {
+        if self.surviving_release_roots() {
+            self.learn_release_paths();
+        } else {
+            self.collect_unreachable();
+        }
     }
 
     /// Skip the sweep only while surviving roots keep every finalizer and weak edge alive.
@@ -2880,14 +2899,14 @@ impl Context {
             {
                 return;
             }
-            self.collect_unreachable();
+            self.collect_after_release();
         }
     }
 
     /// Finish an assignment that dropped a possible finalizer owner.
     pub(super) fn finish_binding_release(&mut self) {
         if !self.can_skip_finalizer_sweep(self.heap.temporary_mark()) {
-            self.collect_unreachable();
+            self.collect_after_release();
         }
         self.heap.release_unbound_finalizers();
     }
@@ -2910,6 +2929,10 @@ impl Context {
             self.run_weak_callbacks(callbacks);
         }
         let _ = self.drain_scheduled_coroutines();
+        self.learn_release_paths();
+    }
+
+    fn learn_release_paths(&mut self) {
         let [modules, reference] = self.finalizer_path_roots();
         self.heap.learn_weak_roots(modules, reference);
         let streams = super::stdlib::io::rooted_standard_streams(self);
