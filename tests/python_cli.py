@@ -3890,7 +3890,7 @@ def report(text):
             "boxed_threading_condition_event.py", "boxed_threading_timer.py",
             "boxed_thread_captured_lock.py",
             "boxed_thread_bound_lock.py", "boxed_thread_argument_lifetime.py",
-            "boxed_thread_captured_acquire.py",
+            "boxed_thread_captured_acquire.py", "boxed_thread_method_closure.py",
             "boxed_thread_finalization.py",
             "boxed_thread_hash_update.py",
         ):
