@@ -9,7 +9,14 @@ pub(super) struct Frame<'a> {
     pub(super) deferred: std::cell::RefCell<Option<Failure>>,
 }
 
-impl Frame<'_> {
+impl<'a> Frame<'a> {
+    pub(super) fn new(literals: &'a values::ModuleSource) -> Self {
+        Self {
+            literals,
+            deferred: Default::default(),
+        }
+    }
+
     pub(super) fn require_object(&self, source: &str, site: &impl Ranged) {
         self.deferred.borrow_mut().get_or_insert_with(|| {
             error(
@@ -61,10 +68,7 @@ pub(super) fn lower_definition<'a>(
     signature: &Signature,
     literals: &'a values::ModuleSource,
 ) -> Result<RegisteredFunction, String> {
-    checker.registered = Some(Frame {
-        literals,
-        deferred: Default::default(),
-    });
+    checker.registered = Some(Frame::new(literals));
     let source = checker.source;
     let helpers = checker.helpers;
     let first_helper = helpers.len();
@@ -1315,6 +1319,32 @@ mod tests {
             });
             assert_eq!(names, ["key", "callback", "arg", "more", "index"]);
         }
+    }
+
+    #[test]
+    fn an_imported_checked_callback_keeps_its_registered_body() {
+        let project = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/registered_imported_callback");
+        let entry = project.join("callable_effect.py");
+        let mut graph = SourceGraph::load(&entry, Some(&project), &[]).unwrap();
+        let result = crate::checked_lower_with(&mut graph, None, false).unwrap();
+        if let crate::CheckedProgram::Runtime(reason) = result {
+            panic!("{reason}");
+        }
+        let provider = graph.python_file("publish").unwrap();
+        let site = graph.modules[provider].parsed.syntax().body[0].start();
+        let registered = graph.registered_functions();
+        let body = &registered[&provider][&site].function;
+        let params: Vec<_> = body.params.iter().map(|&slot| body.locals[slot]).collect();
+        assert_eq!(params, [Type::Int, Type::Int, Type::PythonObject]);
+        let mut adds = 0;
+        let mut callbacks = 0;
+        ir::walk_expressions(&body.body, &mut |expr| match expr.kind {
+            ExprKind::Binary(Binary::Add, ..) => adds += 1,
+            ExprKind::Builtin(Builtin::RegisteredCall(..), _) => callbacks += 1,
+            _ => {}
+        });
+        assert_eq!((adds, callbacks), (1, 1));
     }
 
     #[test]

@@ -177,6 +177,16 @@ struct Signature {
     method: Option<records::MethodContext>,
 }
 
+impl Signature {
+    fn registered_frame(&self) -> bool {
+        self.method.is_none()
+            && self
+                .params
+                .iter()
+                .any(|param| param.ty == Type::PythonObject)
+    }
+}
+
 struct ClassInfo {
     parsers: argparse::Parsers,
     declarations: Classes,
@@ -1037,7 +1047,12 @@ fn lower_graph(
             &helpers,
             &globals,
         );
-        if let Some(original) = registered_parameters.get(&signature.id) {
+        let original = registered_parameters.get(&signature.id);
+        if original.is_some()
+            || (!registered_parameters.is_empty()
+                && signature.registered_frame()
+                && source_checks.accepts(graph, *module_id, definition))
+        {
             let literals = literals
                 .entry(*module_id)
                 .or_insert_with(|| registered::values::ModuleSource::new(module));
@@ -1047,10 +1062,12 @@ fn lower_graph(
                     globals.missing_bindings.borrow_mut().remove(&signature.id);
                 }
                 Ok(_) => {
-                    globals
-                        .missing_bindings
-                        .borrow_mut()
-                        .insert(signature.id, original.clone());
+                    if let Some(original) = original {
+                        globals
+                            .missing_bindings
+                            .borrow_mut()
+                            .insert(signature.id, original.clone());
+                    }
                 }
                 Err(error) if error.is_object() => {}
                 Err(error) => return Err(error.terminal_in(graph, *module_id)),
@@ -7095,7 +7112,7 @@ impl<'a> Checker<'a> {
         {
             // A registered definition lives in its Python namespace. Its value can be
             // stored in a container without inventing a fixed callable signature.
-            if self.inference.is_none()
+            if (self.inference.is_none() || self.globals.registered_initializers)
                 && signature.params.iter().any(|p| p.ty == Type::PythonObject)
             {
                 if let ast::Expr::Name(name) = expression {
