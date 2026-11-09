@@ -422,7 +422,7 @@ pub(super) fn lower_source(
 ) -> Result<imre_ast::Names, String> {
     let private_names = imre_ast::lower(body);
     if source.contains("nonlocal") {
-        statements::type_parameters::check_nonlocals(source, body)
+        crate::frontend::function_scope::check_nonlocals(source, body)
             .map_err(|error| format!("{}:{error}", path.display()))?;
     }
     if let Some((range, reason)) = imre_ast::annotation_scope_error(body) {
@@ -628,6 +628,7 @@ impl<'a> PreparedBody<'a> {
             }
         }
         let source = SourceInfo {
+            scopes: crate::frontend::function_scope::ScopeFacts::prepare(&body, &private_names),
             nested_bodies: prepare.nested,
             namespace_operations: operations,
             module_annotations,
@@ -682,7 +683,7 @@ impl<'a> PreparedBody<'a> {
             };
             Body::Expression(&statement.value)
         } else {
-            Body::Namespace(&self.body, false)
+            Body::Namespace(&self.body)
         };
         let code = output.code(&location, String::new(), suite, false, None);
         match output.diagnostic.take() {
@@ -735,7 +736,7 @@ enum DefinitionName<'a> {
 }
 
 enum Body<'a> {
-    Namespace(&'a [ast::Stmt], bool),
+    Namespace(&'a [ast::Stmt]),
     ClassParameters(&'a ast::StmtClassDef),
     Statements(&'a [ast::Stmt]),
     /// A suspended suite and its generator, coroutine, or async generator code flag.
@@ -747,14 +748,11 @@ enum Body<'a> {
     ClassAnnotations(Vec<statements::class_annotations::Site>, BTreeSet<String>),
     Annotations(
         Vec<(&'a str, &'a ast::Expr)>,
-        Option<statements::ClassBindings>,
+        Option<crate::frontend::function_scope::ClassBindings>,
     ),
     Expression(&'a ast::Expr),
     TypeAlias(&'a ast::Expr),
-    Generator(
-        &'a imre_ast::comprehension::Plan<'a>,
-        indexmap::IndexSet<String>,
-    ),
+    Generator(&'a imre_ast::comprehension::Plan<'a>),
 }
 
 impl Body<'_> {
@@ -762,7 +760,7 @@ impl Body<'_> {
         use imre_ast::code_flags::{ASYNC_GENERATOR, GENERATOR, yields_in_expression};
         match self {
             Self::GeneratorFunction(_, flags) => *flags,
-            Self::Generator(plan, _) if plan.body_suspends() => ASYNC_GENERATOR,
+            Self::Generator(plan) if plan.body_suspends() => ASYNC_GENERATOR,
             Self::Generator(..) => GENERATOR,
             Self::Expression(expr) if yields_in_expression(expr) => GENERATOR,
             _ => 0,
@@ -826,6 +824,7 @@ impl<'a> std::ops::Deref for SourceMap<'a> {
 }
 
 struct SourceInfo<'a> {
+    scopes: crate::frontend::function_scope::ScopeFacts,
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
     module_annotations:
         HashMap<ruff_text_size::TextSize, crate::frontend::DeferredModuleAnnotation>,
@@ -1028,7 +1027,7 @@ impl Output {
         let module = matches!(body, Body::Namespace(..)) && prefix.is_empty();
         let prepared = match body {
             Body::Namespace(..) if module => source.initializer.as_ref(),
-            Body::Namespace(stmts, _) => stmts
+            Body::Namespace(stmts) => stmts
                 .first()
                 .and_then(|stmt| source.class_bodies.get(&stmt.start())),
             Body::Statements(_) | Body::GeneratorFunction(..) if checked.is_none() => {
@@ -1052,9 +1051,11 @@ impl Output {
             declared_globals: Default::default(),
             annotation_values: None,
             class_locals: match &body {
-                Body::Namespace(stmts, _) if !prefix.is_empty() => {
-                    Some(statements::class_locals(stmts))
-                }
+                Body::Namespace(_) if !prefix.is_empty() => Some(
+                    source.scopes.classes[&start.expect("class definition")]
+                        .bindings
+                        .clone(),
+                ),
                 _ => None,
             },
             prefix,
@@ -1069,7 +1070,7 @@ impl Output {
             f.select_native(native);
         }
         match body {
-            Body::Namespace(stmts, _)
+            Body::Namespace(stmts)
             | Body::Statements(stmts)
             | Body::GeneratorFunction(stmts, _) => {
                 if module && imre_ast::annotations::has_variable_annotation(stmts) {
@@ -1090,7 +1091,16 @@ impl Output {
                     let value = f.text(&doc);
                     f.bind("__doc__", &value);
                 }
-                f.declare_globals(stmts);
+                let globals = if module {
+                    &source.scopes.module_globals
+                } else if matches!(body, Body::Namespace(..)) {
+                    &source.scopes.classes[&start.expect("class definition")]
+                        .bindings
+                        .globals
+                } else {
+                    source.scopes.functions[&start.expect("function definition")].globals()
+                };
+                f.declare_globals(globals);
                 if let Some(checked) = checked {
                     f.checked_body(checked);
                 } else if let Some(prepared) = prepared {
@@ -1115,7 +1125,7 @@ impl Output {
                     code.unprepared_annotation(index, entries[index]);
                 }
             }),
-            Body::Generator(plan, _) => f.generator_step(plan),
+            Body::Generator(plan) => f.generator_step(plan),
             Body::Expression(expr) | Body::TypeAlias(expr) => {
                 f.checkpoint(expr);
                 if matches!(body, Body::TypeAlias(_)) {
@@ -1165,7 +1175,7 @@ struct Function<'a, 'p> {
     module: bool,
     module_annotation_sites: Option<Vec<ruff_text_size::TextSize>>,
     class_sites: Option<statements::class_annotations::ClassSites>,
-    class_locals: Option<statements::ClassBindings>,
+    class_locals: Option<crate::frontend::function_scope::ClassBindings>,
     annotation_values: Option<String>,
     loops: Vec<LoopTarget>,
     iteration: checked::IterationState,

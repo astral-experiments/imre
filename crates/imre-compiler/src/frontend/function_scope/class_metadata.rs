@@ -12,11 +12,17 @@ const GENERATED: [&str; 3] = ["__module__", "__qualname__", "__doc__"];
 /// Collect class frame reads and the implicit metadata stores resolved as nonlocals.
 pub(super) fn capture(
     bindings: &mut ClosureNames,
-    body: &[ast::Stmt],
+    class: &ast::StmtClassDef,
     string_annotations: bool,
-) -> BTreeSet<String> {
+) -> (BTreeSet<String>, Option<BTreeSet<String>>) {
     let mut uses = Uses::new(string_annotations);
-    uses.visit_body(body);
+    uses.visit_body(&class.body);
+    let method_reads = (class.type_params.is_none()
+        && class
+            .body
+            .iter()
+            .all(|stmt| matches!(stmt, ast::Stmt::Pass(_) | ast::Stmt::FunctionDef(_))))
+    .then(|| uses.direct.union(&uses.nested).cloned().collect());
     for name in GENERATED {
         if (uses.direct.contains(name) || uses.nested.contains(name))
             && !bindings.locals.contains(name)
@@ -30,24 +36,7 @@ pub(super) fn capture(
         .retain(|name| !bindings.locals.contains(name) && !bindings.globals.contains(name));
     uses.direct.append(&mut uses.nested);
     uses.direct.extend(bindings.nonlocals.iter().cloned());
-    uses.direct
-}
-
-/// Methods look through the class namespace to read their enclosing cells.
-pub(super) fn method_class_reads(
-    body: &[ast::Stmt],
-    string_annotations: bool,
-) -> Option<BTreeSet<String>> {
-    if !body
-        .iter()
-        .all(|stmt| matches!(stmt, ast::Stmt::Pass(_) | ast::Stmt::FunctionDef(_)))
-    {
-        return None;
-    }
-    let mut uses = Uses::new(string_annotations);
-    uses.visit_body(body);
-    uses.direct.append(&mut uses.nested);
-    Some(uses.direct)
+    (uses.direct, method_reads)
 }
 
 /// Reads in a nested lambda or comprehension bypass the enclosing class's namespace.
@@ -56,19 +45,21 @@ pub(super) fn annotation_reads(
     class: Option<&ClassBindings>,
     string_annotations: bool,
 ) -> BTreeSet<String> {
+    parameter_reads(entries, string_annotations).resolve(class)
+}
+
+pub(super) fn parameter_reads(
+    entries: &[(&str, &ast::Expr)],
+    string_annotations: bool,
+) -> super::annotations::ParameterReads {
     let mut uses = Uses::new(string_annotations);
     for (_, expression) in entries {
         uses.visit_annotation(expression);
     }
-    if let Some(class) = class {
-        if uses.direct.contains("super") || uses.nested.contains("super") {
-            uses.nested.insert("__class__".to_owned());
-        }
-        uses.direct
-            .retain(|name| !class.locals.contains(name) && !class.globals.contains(name));
+    super::annotations::ParameterReads {
+        direct: uses.direct,
+        nested: uses.nested,
     }
-    uses.direct.append(&mut uses.nested);
-    uses.direct
 }
 
 /// Reads that reach the containing function and assignment expressions that bind there.

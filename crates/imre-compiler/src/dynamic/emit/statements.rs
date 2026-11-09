@@ -1,251 +1,13 @@
 pub(super) mod class_annotations;
-mod class_metadata;
-pub(super) mod type_parameters;
+use crate::frontend::function_scope::ClassBindings;
 mod worker;
 
 use imre_ast::code_flags;
 use ruff_python_ast as ast;
-use ruff_python_ast::visitor::{self, Visitor};
 use ruff_text_size::{Ranged, TextSize};
 use serde_json::json;
 
 use super::{Body, Cleanup, ContextExit, DefinitionName, Entry, Function, LoopTarget};
-
-#[derive(Default)]
-struct ClosureNames {
-    locals: indexmap::IndexSet<String>,
-    reads: std::collections::BTreeSet<String>,
-    globals: std::collections::BTreeSet<String>,
-    nonlocals: std::collections::BTreeSet<String>,
-    include_nested_reads: bool,
-    cell_reads: std::collections::BTreeSet<String>,
-    string_annotations: bool,
-    incomplete: bool,
-    locals_incomplete: bool,
-}
-
-#[derive(Clone)]
-pub(super) struct ClassBindings {
-    pub(super) locals: std::collections::BTreeSet<String>,
-    pub(super) globals: std::collections::BTreeSet<String>,
-}
-
-pub(super) fn class_locals(body: &[ast::Stmt]) -> ClassBindings {
-    let mut names = ClosureNames::default();
-    names.visit_body(body);
-    names
-        .locals
-        .retain(|name| !names.globals.contains(name) && !names.nonlocals.contains(name));
-    ClassBindings {
-        locals: names.locals.into_iter().collect(),
-        globals: names.globals,
-    }
-}
-
-impl ClosureNames {
-    fn finish_scope(&mut self) {
-        for name in self.globals.iter().chain(&self.nonlocals) {
-            self.locals.shift_remove(name);
-        }
-        self.reads
-            .retain(|name| !self.locals.contains(name) && !self.globals.contains(name));
-        self.reads.extend(self.nonlocals.iter().cloned());
-    }
-
-    /// A nested function's external reads propagate through its enclosing function.
-    fn child_reads(
-        &mut self,
-        parameters: Option<&ast::Parameters>,
-        visit: impl FnOnce(&mut Self),
-    ) -> std::collections::BTreeSet<String> {
-        let mut child = Self {
-            include_nested_reads: true,
-            string_annotations: self.string_annotations,
-            ..Self::default()
-        };
-        visit(&mut child);
-        self.incomplete |= child.incomplete;
-        if let Some(parameters) = parameters {
-            child
-                .locals
-                .extend(parameters.iter().map(|p| p.name().to_string()));
-        }
-        child.finish_scope();
-        child.reads
-    }
-}
-
-impl<'a> Visitor<'a> for ClosureNames {
-    fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-        match stmt {
-            ast::Stmt::FunctionDef(f) => {
-                self.locals.insert(f.name.to_string());
-                if self.include_nested_reads {
-                    // The child body and its lazy annotations see type parameters. Only
-                    // the body sees the child's parameters and local bindings.
-                    let mut reads =
-                        self.child_reads(Some(&f.parameters), |child| child.visit_body(&f.body));
-                    let mut annotations = if self.string_annotations {
-                        Vec::new()
-                    } else {
-                        crate::frontend::parameter_annotations(&f.parameters, f.returns.as_deref())
-                    };
-                    if let Some(params) = &f.type_params {
-                        for param in params.iter() {
-                            if let ast::TypeParam::TypeVar(v) = param
-                                && let Some(bound) = v.bound.as_deref()
-                            {
-                                annotations.push(("", bound));
-                            }
-                            if let Some(default) = param.default() {
-                                annotations.push(("", default));
-                            }
-                        }
-                    }
-                    reads.extend(class_metadata::annotation_reads(&annotations, None, false));
-                    if let Some(params) = &f.type_params {
-                        for param in params.iter() {
-                            reads.remove(param.name().as_str());
-                        }
-                    }
-                    self.cell_reads.extend(reads.iter().cloned());
-                    self.reads.extend(reads);
-                } else {
-                    self.incomplete = true;
-                }
-                // Decorator expressions run here and can bind names in this frame.
-                for decorator in &f.decorator_list {
-                    self.visit_decorator(decorator);
-                }
-                for param in f.parameters.iter_non_variadic_params() {
-                    if let Some(default) = &param.default {
-                        // Defaults run here. Their expression walk records enclosing bindings.
-                        self.visit_expr(default);
-                    }
-                }
-            }
-            // Local variable annotations never evaluate in a function's scope.
-            ast::Stmt::AnnAssign(a) if self.include_nested_reads => {
-                // A bare parenthesized name with no value has no binding effect.
-                if imre_ast::annotation_visits_target(a) {
-                    self.visit_expr(&a.target);
-                }
-                if let Some(value) = &a.value {
-                    self.visit_expr(value);
-                }
-            }
-            ast::Stmt::ClassDef(c) => {
-                self.locals.insert(c.name.to_string());
-                self.incomplete = true;
-                // Only class header expressions can introduce names in this enclosing function.
-                for decorator in &c.decorator_list {
-                    self.visit_decorator(decorator);
-                }
-                if let Some(args) = &c.arguments {
-                    self.visit_arguments(args);
-                }
-            }
-            ast::Stmt::Global(g) => {
-                self.globals.extend(g.names.iter().map(ToString::to_string));
-            }
-            ast::Stmt::Nonlocal(n) => {
-                self.nonlocals
-                    .extend(n.names.iter().map(ToString::to_string));
-            }
-            ast::Stmt::Import(i) => {
-                for name in &i.names {
-                    self.locals.insert(name.asname.as_ref().map_or_else(
-                        || name.name.as_str().split('.').next().unwrap().to_string(),
-                        ToString::to_string,
-                    ));
-                }
-            }
-            ast::Stmt::ImportFrom(i) => {
-                for name in &i.names {
-                    if name.name.as_str() == "*" {
-                        self.incomplete = true;
-                        self.locals_incomplete = true;
-                    } else {
-                        self.locals
-                            .insert(name.asname.as_ref().unwrap_or(&name.name).to_string());
-                    }
-                }
-            }
-            ast::Stmt::Match(_) | ast::Stmt::TypeAlias(_) => {
-                self.incomplete = true;
-                self.locals_incomplete = true;
-                visitor::walk_stmt(self, stmt);
-            }
-            _ => visitor::walk_stmt(self, stmt),
-        }
-    }
-    fn visit_pattern(&mut self, pattern: &'a ast::Pattern) {
-        let capture = match pattern {
-            ast::Pattern::MatchAs(p) => p.name.as_ref(),
-            ast::Pattern::MatchStar(p) => p.name.as_ref(),
-            ast::Pattern::MatchMapping(p) => p.rest.as_ref(),
-            _ => None,
-        };
-        if let Some(name) = capture {
-            self.locals.insert(name.to_string());
-        }
-        visitor::walk_pattern(self, pattern);
-    }
-
-    fn visit_except_handler(&mut self, handler: &'a ast::ExceptHandler) {
-        let ast::ExceptHandler::ExceptHandler(handler_data) = handler;
-        if let Some(name) = &handler_data.name {
-            self.locals.insert(name.to_string());
-        }
-        visitor::walk_except_handler(self, handler);
-    }
-    fn visit_expr(&mut self, expr: &'a ast::Expr) {
-        match expr {
-            ast::Expr::Name(n) => match n.ctx {
-                ast::ExprContext::Load => {
-                    self.reads.insert(n.id.to_string());
-                }
-                ast::ExprContext::Store | ast::ExprContext::Del => {
-                    self.locals.insert(n.id.to_string());
-                }
-                _ => {}
-            },
-            ast::Expr::Lambda(lambda) => {
-                if self.include_nested_reads {
-                    let reads = self.child_reads(lambda.parameters.as_deref(), |child| {
-                        child.visit_expr(&lambda.body)
-                    });
-                    self.cell_reads.extend(reads.iter().cloned());
-                    self.reads.extend(reads);
-                } else {
-                    self.incomplete = true;
-                }
-                if let Some(parameters) = &lambda.parameters {
-                    for parameter in parameters.iter_non_variadic_params() {
-                        if let Some(default) = &parameter.default {
-                            self.visit_expr(default);
-                        }
-                    }
-                }
-            }
-            ast::Expr::ListComp(_)
-            | ast::Expr::SetComp(_)
-            | ast::Expr::DictComp(_)
-            | ast::Expr::Generator(_) => {
-                let (reads, bindings, captured) =
-                    class_metadata::comprehension_scope(expr, self.string_annotations);
-                self.reads.extend(reads);
-                self.cell_reads.extend(captured);
-                self.locals.extend(bindings);
-                if !self.include_nested_reads {
-                    self.incomplete = true;
-                    self.locals_incomplete = true;
-                }
-            }
-            _ => visitor::walk_expr(self, expr),
-        }
-    }
-}
 
 enum Place {
     Name(String),
@@ -253,28 +15,8 @@ enum Place {
 }
 
 impl Function<'_, '_> {
-    /// A global declaration applies to the entire code block, even in an untaken branch.
-    pub(super) fn declare_globals(&mut self, suite: &[ast::Stmt]) {
-        #[derive(Default)]
-        struct Globals<'a>(std::collections::BTreeSet<&'a str>);
-
-        impl<'a> Visitor<'a> for Globals<'a> {
-            fn visit_stmt(&mut self, statement: &'a ast::Stmt) {
-                match statement {
-                    ast::Stmt::Global(global) => {
-                        self.0.extend(global.names.iter().map(|name| name.as_str()));
-                    }
-                    ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => {}
-                    _ => visitor::walk_stmt(self, statement),
-                }
-            }
-
-            fn visit_expr(&mut self, _: &'a ast::Expr) {}
-        }
-
-        let mut globals = Globals::default();
-        globals.visit_body(suite);
-        for name in globals.0 {
+    pub(super) fn declare_globals(&mut self, globals: &std::collections::BTreeSet<String>) {
+        for name in globals {
             self.declared_globals.insert(name.to_owned());
             let name = self.code_name(name);
             self.frame
@@ -418,7 +160,8 @@ impl Function<'_, '_> {
                 }
                 ast::Stmt::Delete(v) => {
                     for target in crate::frontend::delete_targets(v) {
-                        if let Some(binding) = self.source.namespace_operations.get(&target.range()) {
+                        if let Some(binding) = self.source.namespace_operations.get(&target.range())
+                        {
                             self.registered_value(binding);
                             continue;
                         }
@@ -709,7 +452,7 @@ impl Function<'_, '_> {
             None,
             None,
             None,
-            Body::Namespace(&class.body, generic),
+            Body::Namespace(&class.body),
         );
         let operation = if generic {
             self.class_position(Some(class));
@@ -801,7 +544,7 @@ impl Function<'_, '_> {
         params: Option<&ast::Parameters>,
         definition: Option<(&ast::StmtFunctionDef, Option<&[String]>)>,
         type_params: Option<&ast::TypeParams>,
-        mut body: Body<'_>,
+        body: Body<'_>,
     ) -> String {
         let function = definition.map(|(function, _)| function);
         let mut evaluated_defaults = definition
@@ -876,10 +619,9 @@ impl Function<'_, '_> {
                 .as_ref()
                 .filter(|_| !self.source.string_annotations)
                 .cloned();
-            let reads = class_metadata::annotation_reads(
-                &entries,
+            let reads = self.source.scopes.annotations.parameter_reads(
+                params.expect("annotated function parameters").start(),
                 class.as_ref(),
-                self.source.string_annotations,
             );
             let mut metadata = json!({
                 "posonly": ["format"],
@@ -930,96 +672,52 @@ impl Function<'_, '_> {
             // generator() binds the implicit .0 argument without calling the step function.
             signature["positional"] = json!([".0"]);
         }
-        if let Body::Namespace(stmts, _) = &body {
-            signature["postponed_annotations"] = json!(
-                self.source.string_annotations
-                    && imre_ast::annotations::has_variable_annotation(stmts)
-            );
-            signature["needs_class_cell"] = json!(imre_ast::class_cell::needed(
-                stmts,
-                self.source.string_annotations
-            ));
-            signature["needs_dict_cell"] = json!(imre_ast::class_cell::dict_needed(
-                stmts,
-                self.source.string_annotations
-            ));
-            signature["static_attributes"] = json!(imre_ast::class_attributes::static_attributes(
-                stmts,
-                &self.source.private_names
-            ));
-        }
-        let class_cell = match &body {
-            Body::Statements(body) | Body::GeneratorFunction(body, _) => Some(
-                imre_ast::class_cell::function_needed(body, params, self.source.string_annotations),
-            ),
-            Body::Expression(body) => Some(imre_ast::class_cell::expression_needed(
-                body,
-                params,
-                self.source.string_annotations,
-            )),
-            _ => None,
-        };
-        if let Some(captures_class) = class_cell {
-            if captures_class {
-                signature["class_cell"] = json!(true);
-            }
-            if self.class_locals.is_some()
-                && self.annotation_values.is_none()
-                && type_params.is_none()
-            {
-                signature["method_class_cell"] = json!(captures_class);
-            }
-        }
         // A synchronous generator expression has its own compiled comprehension step.
         let entry = match &body {
-            Body::Generator(plan, _) if !plan.body_suspends() => Entry::Compiled,
+            Body::Generator(plan) if !plan.body_suspends() => Entry::Compiled,
             _ if body.generator_flags() != 0 => Entry::Suspended,
             _ => Entry::Compiled,
         };
-        let mut closure_names = ClosureNames {
-            string_annotations: self.source.string_annotations,
-            include_nested_reads: matches!(
-                &body,
-                Body::Statements(_) | Body::GeneratorFunction(..) | Body::Expression(_)
-            ),
-            ..ClosureNames::default()
+        let scopes = &self.source.scopes;
+        let scope_facts = match &body {
+            Body::Statements(_) | Body::GeneratorFunction(..) => Some(&scopes.functions[&start]),
+            Body::Expression(_) => Some(&scopes.lambdas[&start]),
+            Body::Namespace(_) => {
+                let class = &scopes.classes[&start];
+                signature["postponed_annotations"] = json!(class.postponed_annotations);
+                signature["needs_class_cell"] = json!(class.needs_class_cell);
+                signature["needs_dict_cell"] = json!(class.needs_dict_cell);
+                signature["static_attributes"] = json!(class.static_attributes);
+                signature["class_frame_reads"] = json!(class.frame_reads);
+                if !class.bindings.globals.is_empty() {
+                    signature["class_globals"] = json!(class.bindings.globals);
+                }
+                Some(&class.namespace)
+            }
+            Body::TypeAlias(_) => Some(&scopes.aliases[&start]),
+            Body::Generator(_) => Some(&scopes.generators[&start]),
+            _ => None,
         };
-        match &mut body {
-            Body::Statements(stmts) | Body::GeneratorFunction(stmts, _) => {
-                closure_names.visit_body(stmts)
+        if let Some(facts) = scope_facts {
+            facts.write_signature(&mut signature);
+            let callable = matches!(
+                body,
+                Body::Statements(_) | Body::GeneratorFunction(..) | Body::Expression(_)
+            );
+            if callable && facts.captures_class {
+                signature["class_cell"] = json!(true);
             }
-            Body::Namespace(stmts, generic) => {
-                let mut bindings = ClosureNames::default();
-                bindings.visit_body(stmts);
-                let reads =
-                    class_metadata::capture(&mut bindings, stmts, self.source.string_annotations);
-                signature["class_frame_reads"] = json!(reads);
-                if !bindings.globals.is_empty() {
-                    signature["class_globals"] = json!(bindings.globals);
-                }
-                closure_names.nonlocals = bindings.nonlocals;
-                if !*generic
-                    && let Some(reads) =
-                        class_metadata::method_class_reads(stmts, self.source.string_annotations)
-                {
-                    closure_names.reads = reads;
-                } else {
-                    closure_names.incomplete = true;
-                }
+            if (callable || matches!(body, Body::Generator(_)))
+                && self.class_locals.is_some()
+                && self.annotation_values.is_none()
+                && type_params.is_none()
+            {
+                signature["method_class_cell"] = json!(facts.captures_class);
             }
-            Body::Expression(expr) | Body::TypeAlias(expr) => closure_names.visit_expr(expr),
-            Body::Generator(plan, names) => {
-                closure_names = class_metadata::generator_scope(
-                    plan,
-                    std::mem::take(names),
-                    self.source.string_annotations,
-                );
-                if self.class_locals.is_some() && self.annotation_values.is_none() {
-                    signature["method_class_cell"] =
-                        json!(closure_names.reads.contains("__class__"));
-                }
-            }
-            _ => closure_names.incomplete = true,
+        } else {
+            signature["scope_cellvars"] = serde_json::Value::Null;
+            signature["scope_complete"] = json!(false);
+            signature["scope_locals_complete"] = json!(true);
         }
         if let (Body::Statements(stmts), Some(params), None) = (&body, params, returns) {
             if let Some((names, lock_only)) = worker::parameters(stmts, params) {
@@ -1110,41 +808,6 @@ impl Function<'_, '_> {
             }
         }
         debug_assert!(evaluated_defaults.is_none_or(|mut rest| rest.next().is_none()));
-        for group in ["posonly", "positional", "kwonly"] {
-            closure_names.locals.extend(
-                signature[group]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|v| v.as_str().map(str::to_owned)),
-            );
-        }
-        for group in ["varargs", "kwargs"] {
-            if let Some(name) = signature[group].as_str() {
-                closure_names.locals.insert(name.to_owned());
-            }
-        }
-        closure_names.finish_scope();
-        closure_names
-            .cell_reads
-            .retain(|name| closure_names.locals.contains(name));
-        // An emitted but unresolved layout still identifies a cleared compiled frame.
-        signature["scope_cellvars"] = if closure_names.incomplete {
-            serde_json::Value::Null
-        } else {
-            json!(closure_names.cell_reads)
-        };
-        if !closure_names.locals.is_empty() {
-            signature["scope_locals"] = json!(closure_names.locals.iter().collect::<Vec<_>>());
-        }
-        if !closure_names.reads.is_empty() {
-            signature["scope_reads"] = json!(closure_names.reads);
-        }
-        if !closure_names.nonlocals.is_empty() {
-            signature["scope_nonlocals"] = json!(closure_names.nonlocals);
-        }
-        signature["scope_complete"] = json!(!closure_names.incomplete);
-        signature["scope_locals_complete"] = json!(!closure_names.locals_incomplete);
         let sig = self.text(&signature.to_string());
         let name = self.code_name(name);
         let function = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 {header})", scope));

@@ -4500,6 +4500,7 @@ for name in ("md4", "ripemd160"):
             "boxed_singleton_subclass.py",
             "boxed_function_closure_cells.py",
             "boxed_function_closure_edges.py",
+            "boxed_nested_callable_scope.py",
             "boxed_function_annotation_closure.py",
             "boxed_functiontype.py",
             "boxed_module_function_builtins.py",
@@ -4752,6 +4753,7 @@ for name in ("md4", "ripemd160"):
             if fixture == "boxed_slice_deep_repr.py":
                 check_slice_stack(imre, imports, root, env)
             elif fixture in (
+                "boxed_nested_callable_scope.py",
                 "boxed_codec_registry.py",
                 "boxed_gc_generator_loop.py",
                 "boxed_gc_generator_resurrection.py",

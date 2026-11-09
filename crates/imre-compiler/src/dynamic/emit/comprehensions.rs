@@ -29,9 +29,7 @@ impl Function<'_, '_> {
         } else {
             self.iteration_cursor(plan.outer, plan.outer_async)
         };
-        let names: indexmap::IndexSet<String> = plan.collect_target_names();
-        let declaration: Vec<_> = names.iter().map(String::as_str).collect();
-        let targets = self.text(&declaration.join(" "));
+        let targets = self.text(&self.source.scopes.comprehension_targets[&expr.start()]);
         if let ast::Expr::Generator(generator) = expr {
             let function = self.define(
                 generator.start(),
@@ -39,7 +37,7 @@ impl Function<'_, '_> {
                 None,
                 None,
                 None,
-                Body::Generator(&plan, names),
+                Body::Generator(&plan),
             );
             return self.op("generator", &[&function, &iterator, &targets]);
         }
