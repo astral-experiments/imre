@@ -4204,6 +4204,9 @@ impl Context {
                     return Ok(callable);
                 }
                 _ if explicit || matches!(self.heap.get(callable), Value::Function { .. }) => {
+                    if name == "__init__" {
+                        return self.builtin_attribute(obj, name, lookup);
+                    }
                     return self.lookup_attr(callable, name);
                 }
                 _ => {
@@ -5733,22 +5736,17 @@ impl Context {
             return self.bind_attribute(hook, NONE, class);
         }
         if name == "__init__" {
-            if let Value::Native(owner) = self.heap.get(obj) {
-                match owner.as_str() {
-                    "type" => return Ok(self.builtin("type.__init__")),
-                    "bool" | "int" | "float" | "complex" | "str" | "bytes" => {
-                        return Ok(self.builtin("object.__init__"));
-                    }
-                    _ => {}
-                }
+            let (class, receiver) = if self.is_type_object(obj) {
+                (obj, NONE)
+            } else {
+                (self.exact_type(obj)?, obj)
+            };
+            if class == obj && self.builtins.get("type") == Some(&class) {
+                return Ok(self.builtin("type.__init__"));
             }
-            let tuple = self.builtin("tuple");
-            if self.direct_subclass(obj, tuple) {
-                return Ok(self.builtin("object.__init__"));
-            }
-            if self.instance_of(obj, tuple) {
+            if self.inherits_native_object_init(class) {
                 let init = self.builtin("object.__init__");
-                return self.bind_attribute(init, obj, tuple);
+                return self.bind_attribute(init, receiver, class);
             }
         }
         if name == "__sizeof__" {
@@ -7478,6 +7476,25 @@ impl Context {
                 self.type_name(object)
             ),
         ))
+    }
+
+    /// An intrinsic allocator consumes the constructor arguments only when the MRO
+    /// leaves initialization to object. Some native descriptors are exposed lazily.
+    pub(super) fn inherits_native_object_init(&self, class: Id) -> bool {
+        let Some(layout) = self.allocation_base(class) else {
+            return false;
+        };
+        let Value::Native(owner) = self.heap.get(layout) else {
+            return false;
+        };
+        if self.builtins.get("object") == Some(&layout) || !builtins::owns_native_new(owner) {
+            return false;
+        }
+        match self.class_attr(class, "__init__") {
+            Some(init) => self.builtins.get("object.__init__") == Some(&init),
+            None => wrapper_descriptor::BuiltinDescriptor::lookup(&format!("{owner}.__init__"))
+                .is_none(),
+        }
     }
 
     /// These native layouts inherit object.__new__ for bare instance allocation.

@@ -11,6 +11,40 @@ def current():
         assert bound.__self__ is value
         assert getattr(value, slot.__name__) == bound
 
+    class Owner:
+        def method(self):
+            pass
+
+    method = Owner().method
+    for value in (method.__func__.__code__, method.__func__, method, 42, "abc"):
+        assert type(value).__init__ is object.__init__
+        assert type(value).__init__(value) is None
+        bound = value.__init__
+        assert type(bound) is types.MethodWrapperType
+        assert bound.__self__ is value
+        assert bound() is None
+        assert bound(1, flag=True) is None
+    method.__func__.__init__ = None
+    assert method.__init__.__self__ is method
+    del method.__func__.__init__
+    for cls in (list, dict, type, types.ModuleType, Exception):
+        assert cls.__init__ is not object.__init__
+
+    class code:
+        pass
+
+    class Number(int):
+        pass
+
+    assert Number.__init__ is object.__init__
+    assert object.__init__(Number(2), 3) is None
+    try:
+        object.__init__(code(), 3)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("a Python class name must not select a native allocator")
+
     assert obj.__init__() is None
     assert obj.__str__() == str(obj)
     assert object.__lt__(obj, obj) is NotImplemented
