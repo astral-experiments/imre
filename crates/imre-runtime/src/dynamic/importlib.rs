@@ -474,14 +474,23 @@ impl Context {
 
     pub(super) fn module_code(&mut self, entry: ModuleInitializer, path: &Path) -> Result<Id> {
         let filename = self.import_path_text(path)?;
-        let flags = if let ModuleInitializer::Zip(_, _, flags) = entry {
-            Some(flags)
-        } else {
-            None
+        self.module_code_at(entry, path, filename)
+    }
+
+    fn module_code_at(
+        &mut self,
+        entry: ModuleInitializer,
+        path: &Path,
+        filename: Id,
+    ) -> Result<Id> {
+        let flags = match entry {
+            ModuleInitializer::Zip(_, _, flags) => Some(flags),
+            ModuleInitializer::File(_, _, flags) => flags,
+            _ => None,
         };
         let entry = match entry {
             ModuleInitializer::Native(entry)
-            | ModuleInitializer::File(entry, _)
+            | ModuleInitializer::File(entry, ..)
             | ModuleInitializer::Zip(entry, _, _)
             | ModuleInitializer::Builtin(entry) => entry,
             ModuleInitializer::Invalid {
@@ -537,28 +546,54 @@ impl Context {
 
     /// Resolve bytes read from a physical origin to its compiled module code, preserving
     /// the filename used by nested definitions and leaving namespace creation to exec().
-    pub(super) fn file_code_from_bytes(&mut self, filename: Id, data: Id) -> Result<Option<Id>> {
+    pub(super) fn file_code_from_bytes(
+        &mut self,
+        filename: Id,
+        data: Id,
+        inherited: u32,
+        loader: bool,
+    ) -> Result<Option<Id>> {
         use sha2::{Digest, Sha256};
-        let path = self.import_path(filename)?;
+        let data = self.scalar_value(data);
+        if !matches!(self.heap.get(data), Value::Bytes(_) | Value::ByteArray(_)) {
+            return Ok(None);
+        }
+        let path = match self.import_path(filename) {
+            Ok(path) => path,
+            // compile accepts diagnostic filenames that have no filesystem representation.
+            Err(error) if !loader && error.kind == "UnicodeEncodeError" => return Ok(None),
+            Err(error) => return Err(error),
+        };
         let mut entries = self.sources.values().flatten().filter_map(|source| {
             if source.path.as_os_str() != path.as_os_str() {
                 return None;
             }
             match source.code {
-                code @ (ModuleInitializer::File(entry, Some(digest))
-                | ModuleInitializer::Zip(entry, digest, _)) => Some((code, Some(entry), digest)),
+                code @ ModuleInitializer::File(entry, Some(digest), flags) => {
+                    Some((code, Some(entry), digest, flags))
+                }
+                code @ ModuleInitializer::Zip(entry, digest, flags) => {
+                    Some((code, Some(entry), digest, Some(flags)))
+                }
                 code @ ModuleInitializer::Invalid {
                     archive_digest: Some(digest),
                     ..
-                } => Some((code, None, digest)),
+                } => Some((code, None, digest, None)),
                 _ => None,
             }
         });
-        let Some((code, entry, digest)) = entries.next() else {
+        let Some((code, entry, digest, flags)) = entries.next() else {
             return Ok(None);
         };
-        if entries.any(|(_, other, hash)| {
+        // A source-declared future already applies to its initializer. Additional
+        // inherited flags need different code. Only the loader owns legacy records
+        // without flags and registrations that carry a syntax diagnostic.
+        if inherited & !flags.unwrap_or(0) != 0 || (flags.is_none() && !loader) {
+            return Ok(None);
+        }
+        if entries.any(|(_, other, hash, other_flags)| {
             hash != digest
+                || other_flags != flags
                 || match (entry, other) {
                     (Some(a), Some(b)) => !std::ptr::fn_addr_eq(a, b),
                     (None, None) => false,
@@ -567,13 +602,10 @@ impl Context {
         }) {
             return Ok(None);
         }
-        let Value::Bytes(bytes) = self.heap.get(data) else {
-            return Ok(None);
-        };
-        if Sha256::digest(bytes).as_slice() != digest {
+        if Sha256::digest(self.bytes_like(data)?).as_slice() != digest {
             return Ok(None);
         }
-        self.module_code(code, &path).map(Some)
+        self.module_code_at(code, &path, filename).map(Some)
     }
 
     fn registered_file(&self, name: &str, filename: &Path) -> Option<&super::SourceModule> {

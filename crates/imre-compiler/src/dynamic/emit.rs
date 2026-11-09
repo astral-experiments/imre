@@ -101,11 +101,17 @@ load:
 
 type ModuleSource = (String, PathBuf, String);
 
+#[derive(Clone, Copy, Default)]
+pub(super) struct PhysicalFile {
+    pub(super) digest: Option<[u8; 32]>,
+    pub(super) future_flags: u32,
+}
+
 /// Snapshots and admission facts for the bodies selected by import resolution.
 #[derive(Default)]
 pub(super) struct RegisteredBodies {
     // Decoded installed files retain the fingerprint of their original loader bytes.
-    pub(super) physical_files: HashMap<PathBuf, Option<[u8; 32]>>,
+    pub(super) physical_files: HashMap<PathBuf, PhysicalFile>,
     pub(super) archive_members: HashMap<PathBuf, ([u8; 32], u32)>,
     // These provide declarations to the checked program. Their Python bodies
     // retain Python argument binding, including annotations available to reflection.
@@ -150,7 +156,7 @@ pub(crate) fn emit(
     );
     output
         .functions
-        .push_str("declare void @imre_dyn_register_file_source(ptr, ptr, ptr, ptr, i64, ptr)\n");
+        .push_str("declare void @imre_dyn_register_file_code(ptr, ptr, ptr, ptr, i32, ptr)\n");
     if !archive_members.is_empty() {
         output
             .functions
@@ -199,7 +205,7 @@ pub(crate) fn emit(
         // Python source files use universal newlines, including inside literals.
         // Keep the original physical bytes for registration.
         let physical = !builtin && physical_files.contains_key(path);
-        let file_digest = physical_files.get(path).copied().flatten();
+        let file_digest = physical_files.get(path).and_then(|file| file.digest);
         let code_source = if physical && file_digest.is_none() {
             crate::normalize_source(source, crate::SourceKind::File)?
         } else if file_digest.is_some() || archive_members.contains_key(path) {
@@ -248,26 +254,23 @@ pub(crate) fn emit(
         }
         // Physical code reads keep using the file. Identify its compiled snapshot without
         // embedding the source or exposing stale bytes through SourceFileLoader.get_data().
-        let (register, text, len) = if physical {
+        if physical {
             use sha2::{Digest, Sha256};
             let digest = file_digest.unwrap_or_else(|| Sha256::digest(source.as_bytes()).into());
-            (
-                "imre_dyn_register_file_source",
-                output.data(&digest),
-                digest.len(),
-            )
+            let hash = output.data(&digest);
+            let flags = physical_files[path].future_flags;
+            writeln!(main, "  call void @imre_dyn_register_file_code(ptr %ctx, ptr {module_name}, ptr {file}, ptr {hash}, i32 {flags}, ptr {code})").unwrap();
+            continue;
+        }
+        let (text, len) = if bundled {
+            (output.data(source.as_bytes()), source.len())
         } else {
-            let (text, len) = if bundled {
-                (output.data(source.as_bytes()), source.len())
-            } else {
-                ("null".to_owned(), 0)
-            };
-            let register = if builtin {
-                "imre_dyn_register_builtin_source"
-            } else {
-                "imre_dyn_register_source"
-            };
-            (register, text, len)
+            ("null".to_owned(), 0)
+        };
+        let register = if builtin {
+            "imre_dyn_register_builtin_source"
+        } else {
+            "imre_dyn_register_source"
         };
         writeln!(
             main,
@@ -1547,7 +1550,7 @@ mod tests {
         );
         let symbols = HashSet::from([symbol.clone()]);
         let registrations = RegisteredBodies {
-            physical_files: HashMap::from([(project.1.clone(), None)]),
+            physical_files: HashMap::from([(project.1.clone(), Default::default())]),
             ..Default::default()
         };
         let initializers = (&HashMap::new(), &registrations);
@@ -1569,7 +1572,7 @@ mod tests {
             ir.lines()
                 .filter(|line| {
                     line.contains("call void @imre_dyn_register_source(")
-                        || line.contains("call void @imre_dyn_register_file_source(")
+                        || line.contains("call void @imre_dyn_register_file_code(")
                 })
                 .map(|line| line.ends_with(&format!("@{symbol})")))
                 .collect::<Vec<_>>()
@@ -1622,7 +1625,7 @@ mod tests {
             1
         );
         assert_eq!(
-            ir.matches("call void @imre_dyn_register_file_source(")
+            ir.matches("call void @imre_dyn_register_file_code(")
                 .count(),
             1
         );
@@ -1634,7 +1637,10 @@ mod tests {
             project.2.clone(),
         );
         let registrations = RegisteredBodies {
-            physical_files: HashMap::from([(project.1.clone(), None), (shadow.1.clone(), None)]),
+            physical_files: HashMap::from([
+                (project.1.clone(), Default::default()),
+                (shadow.1.clone(), Default::default()),
+            ]),
             ..Default::default()
         };
         let (units, used) = emit(

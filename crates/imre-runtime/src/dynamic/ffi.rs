@@ -934,7 +934,7 @@ pub(super) unsafe extern "C" fn imre_dyn_register_source(
     unsafe { register_compiled(ctx, name, file, text, len, ModuleInitializer::Native(code)) }
 }
 
-/// Register an initializer compiled from a filesystem source input.
+/// Accept older physical file registrations that do not carry compiler flags.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_register_file_source(
     ctx: *mut Context,
@@ -959,8 +959,31 @@ pub(super) unsafe extern "C" fn imre_dyn_register_file_source(
             file,
             std::ptr::null(),
             0,
-            ModuleInitializer::File(code, digest),
+            ModuleInitializer::File(code, digest, None),
         )
+    }
+}
+
+/// Register a physical file's checked bytes, future flags and compiled initializer.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_file_code(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    digest: *const [u8; 32],
+    flags: u32,
+    code: Code,
+) {
+    // SAFETY: the compiler supplies a static digest, names and module entry point.
+    unsafe {
+        register_compiled(
+            ctx,
+            name,
+            file,
+            std::ptr::null(),
+            0,
+            ModuleInitializer::File(code, Some(&*digest), Some(flags)),
+        );
     }
 }
 

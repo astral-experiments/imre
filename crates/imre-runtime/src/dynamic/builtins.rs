@@ -1679,6 +1679,39 @@ fn new_filter(ctx: &mut Context, class: Id, args: &[Id], kwargs: &[(String, Id)]
     Ok(ctx.with_subclass_storage(class, base, storage))
 }
 
+/// The loader may also use its linked startup body or a stored syntax diagnostic.
+pub(super) fn compile(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+    loader: bool,
+) -> Result<Id> {
+    arity("compile", args, 3, 3)?;
+    let [_, _, _, dont_inherit, optimize] = bind_method_arguments(
+        "compile",
+        args,
+        kwargs,
+        ["source", "filename", "mode", "dont_inherit", "optimize"],
+        3,
+    )?;
+    let (filename, dont_inherit) =
+        super::stdlib::compile_operands(ctx, args[1], dont_inherit, optimize)?;
+    let inherited = if dont_inherit {
+        0
+    } else {
+        ctx.inherited_compile_flags()
+    };
+    // Ordinary native compilation implements Python optimization level zero. The
+    // loader already owns the code registered for this executable's startup options.
+    if (loader || ctx.config["optimize"].as_i64().unwrap_or(0) == 0)
+        && ctx.str_value(args[2])? == "exec"
+        && let Some(code) = ctx.file_code_from_bytes(filename, args[0], inherited, loader)?
+    {
+        return Ok(code);
+    }
+    ctx.compile_source_with_flags(args[0], filename, args[2], false, inherited)
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -2691,23 +2724,7 @@ pub(super) fn call(
             }
             ctx.make_super(args)
         }
-        "compile" => {
-            arity(name, args, 3, 3)?;
-            let [_, _, _, dont_inherit, optimize] = bind_method_arguments(
-                name,
-                args,
-                kwargs,
-                ["source", "filename", "mode", "dont_inherit", "optimize"],
-                3,
-            )?;
-            let (filename, dont_inherit) =
-                super::stdlib::compile_operands(ctx, args[1], dont_inherit, optimize)?;
-            if dont_inherit {
-                ctx.compile_source_with_flags(args[0], filename, args[2], false, 0)
-            } else {
-                ctx.compile_source(args[0], filename, args[2], false)
-            }
-        }
+        "compile" => compile(ctx, args, kwargs, false),
         "eval" | "exec" => ctx.call_eval_exec(ctx.heap.current_scope(), name, args, kwargs),
         "bin" | "hex" | "oct" => {
             let value = one_positional_arg(name, args, kwargs)?;

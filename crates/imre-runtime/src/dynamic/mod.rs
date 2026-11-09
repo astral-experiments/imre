@@ -99,7 +99,7 @@ enum LinkedSource {
 #[derive(Clone, Copy)]
 enum ModuleInitializer {
     Native(Code),
-    File(Code, Option<&'static [u8; 32]>),
+    File(Code, Option<&'static [u8; 32]>, Option<u32>),
     Zip(Code, &'static [u8; 32], u32),
     Builtin(Code),
     Invalid {

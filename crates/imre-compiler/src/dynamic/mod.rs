@@ -1072,6 +1072,11 @@ pub(crate) fn compile(
         src.clone(),
     )];
     if let Some(identity) = entry_identity {
+        registrations
+            .physical_files
+            .entry(sources[0].1.clone())
+            .or_default()
+            .future_flags = first.module_flags;
         let digest = file_entry.map_or_else(
             || blake3::hash(src.as_bytes()).to_hex().to_string(),
             |graph| graph.inputs.files[graph.entry].2.clone(),
@@ -1622,7 +1627,9 @@ pub(crate) fn compile(
                             };
                             registrations
                                 .physical_files
-                                .insert(path.clone(), Some(Sha256::digest(&bytes).into()));
+                                .entry(path.clone())
+                                .or_default()
+                                .digest = Some(Sha256::digest(&bytes).into());
                             text
                         } else {
                             let Ok(text) = String::from_utf8(bytes) else {
@@ -1646,7 +1653,7 @@ pub(crate) fn compile(
                     let kind = if registrations
                         .physical_files
                         .get(&path)
-                        .is_some_and(Option::is_some)
+                        .is_some_and(|file| file.digest.is_some())
                     {
                         SourceKind::DecodedFile
                     } else {
@@ -1657,6 +1664,11 @@ pub(crate) fn compile(
                         Err(_) if file_alternatives => continue,
                         Err(error) => return Err(format!("{}: {error}", path.display())),
                     };
+                    registrations
+                        .physical_files
+                        .entry(path.clone())
+                        .or_default()
+                        .future_flags = imports.module_flags;
                     // Later alternatives remain available to the runtime finder. Only the
                     // winning provider supplies the initial module binding.
                     if winner {
@@ -1861,7 +1873,7 @@ pub(crate) fn compile(
                 || registrations
                     .physical_files
                     .get(registration.path)
-                    .is_some_and(Option::is_some)
+                    .is_some_and(|file| file.digest.is_some())
             {
                 registration.kind = SourceKind::DecodedFile;
             }

@@ -2658,12 +2658,10 @@ pub(super) fn call(
                 return Ok(builtins::boolean(ctx.uses_builtin_compile(*converter)));
             }
             ("compile_file", [compiler, data, filename], options) => {
-                if *compiler == ctx.builtin("compile")
-                    && let Some(code) = ctx.file_code_from_bytes(*filename, *data)?
-                {
-                    return Ok(code);
-                }
                 let mode = ctx.text("exec");
+                if *compiler == ctx.builtin("compile") {
+                    return builtins::compile(ctx, &[*data, *filename, mode], options, true);
+                }
                 return ctx.call(*compiler, vec![*data, *filename, mode], options.to_vec());
             }
             ("get_code", [loader, path], []) => return ctx.registered_code(*loader, *path, None),

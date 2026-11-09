@@ -2807,13 +2807,22 @@ impl Context {
         mode: Id,
         strip_indent: bool,
     ) -> Result<Id> {
-        let inherited = match self.heap.get(self.heap.current_code()) {
+        self.compile_source_with_flags(
+            source,
+            filename,
+            mode,
+            strip_indent,
+            self.inherited_compile_flags(),
+        )
+    }
+
+    pub(super) fn inherited_compile_flags(&self) -> u32 {
+        match self.heap.get(self.heap.current_code()) {
             Value::Code(caller) => {
                 caller.flags & (code_flags::FUTURE_ANNOTATIONS | code_flags::FUTURE_BARRY_AS_BDFL)
             }
             _ => 0,
-        };
-        self.compile_source_with_flags(source, filename, mode, strip_indent, inherited)
+        }
     }
 
     fn source_filename(&self, object: Id) -> Result<SourceFilename> {
