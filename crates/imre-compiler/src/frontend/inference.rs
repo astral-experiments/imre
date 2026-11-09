@@ -913,7 +913,7 @@ impl Checker<'_> {
             receiver,
             scope,
             Some((signature.id, skip)),
-            |checker, index, argument| {
+            &mut |checker, index, argument| {
                 let index = index + skip;
                 let parameter = &signature.params[index];
                 if selector_wait && parameter.name == "timeout" {

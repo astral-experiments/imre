@@ -54,7 +54,7 @@ impl Checker<'_> {
             None,
             Some(&mut scope),
             None,
-            |checker, i, argument| {
+            &mut |checker, i, argument| {
                 let node = argument.site();
                 let value = Self::string_value(argument.value(checker)?);
                 if op == Op::Shuffle {
