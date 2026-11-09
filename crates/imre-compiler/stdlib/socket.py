@@ -240,7 +240,7 @@ class socket(_socket.socket):
         finally:
             if total_sent > 0 and hasattr(file, 'seek'):
                 file.seek(offset)
-    def _sendfile_buffered(self, target, file, offset, count, sock_send):
+    def _sendfile_buffered(self, target, file, offset, count, wrap_send):
         if self.gettimeout() == 0:
             raise ValueError("non-blocking sockets are not supported")
         if offset:
@@ -249,6 +249,9 @@ class socket(_socket.socket):
         total_sent = 0
         # localize variable access to minimize overhead
         file_read = file.read
+        sock_send = self.send
+        if wrap_send is not None:
+            sock_send = wrap_send(sock_send)
         try:
             while True:
                 if count:
@@ -287,7 +290,7 @@ class socket(_socket.socket):
                 raise ValueError(
                     "count must be a positive integer (got {!r})".format(count))
 
-    def _sendfile_transfer(self, file, offset, count, *, kernel, fallback, send=None):
+    def _sendfile_transfer(self, file, offset, count, *, kernel, fallback, wrap_send=None):
         target = _socket.socket._sendfile_owner(self)
         self._check_sendfile_params(file, offset, count)
         if kernel:
@@ -298,8 +301,7 @@ class socket(_socket.socket):
             except _GiveupOnSendfile:
                 if not fallback:
                     raise
-        return self._sendfile_buffered(target, file, offset, count,
-                                       self.send if send is None else send)
+        return self._sendfile_buffered(target, file, offset, count, wrap_send)
 
     def _sendfile_use_sendfile(self, file, offset=0, count=None):
         return self._sendfile_transfer(file, offset, count, kernel=True, fallback=False)

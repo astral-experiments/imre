@@ -836,11 +836,13 @@ class SSLSocket(_socket.socket):
         session = self._session
         if session is not None:
             # Keep the original TLS session across reentrant file reads.
-            def send(data):
-                if self._session is not session:
-                    raise OSError(_errno.EBADF, "TLS session changed during sendfile")
-                return self.send(data)
-            return self._sendfile_transfer(file, offset, count, kernel=False, fallback=True, send=send)
+            def wrap_send(send):
+                def checked(data):
+                    if self._session is not session:
+                        raise OSError(_errno.EBADF, "TLS session changed during sendfile")
+                    return send(data)
+                return checked
+            return self._sendfile_transfer(file, offset, count, kernel=False, fallback=True, wrap_send=wrap_send)
         return super().sendfile(file, offset, count)
 
     def sendall(self, data, flags=_NO_FLAGS):
