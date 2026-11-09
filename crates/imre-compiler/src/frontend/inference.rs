@@ -753,7 +753,7 @@ impl Inference {
             let class_globals = classes.declarations.has_class_values(graph.entry);
             let helpers =
                 Helpers::new(definitions.len() + graph.initializers(class_globals).count());
-            let globals = ModuleValues::default();
+            let globals = ModuleValues::for_initializers(!registered.is_empty());
             let mut available = HashSet::new();
             let mut errors = Vec::new();
             let mut conflicting_returns = None;
@@ -766,6 +766,7 @@ impl Inference {
                     errors.push((module, diagnostic));
                 }
             }
+            let mut literals = HashMap::new();
             for (module, function, signature) in definitions.iter() {
                 if graph.modules[*module].archive.is_some() {
                     continue; // Native declarations must be fully annotated.
@@ -799,6 +800,12 @@ impl Inference {
                 let mut checker = Checker::new(
                     graph, *module, signatures, classes, types, &helpers, &globals,
                 );
+                if globals.registered_initializers && signature.registered_frame() {
+                    let module_literals = literals.entry(*module).or_insert_with(|| {
+                        registered::values::ModuleSource::new(&graph.modules[*module])
+                    });
+                    checker.registered = Some(registered::Frame::new(module_literals));
+                }
                 checker.inference = Some(self);
                 checker.returns = signature.returns;
                 checker.asynchronous = signature.asynchronous;
@@ -912,7 +919,10 @@ impl Inference {
                 }
                 if let Some(owners) = self.use_registered_arguments(graph, signatures) {
                     registered = owners;
-                    break;
+                    // A registered initializer may supply object storage at call sites that
+                    // could not contribute evidence during fixed-layout discovery.
+                    self.widened.set(true);
+                    continue;
                 }
                 let pending = self.pending.borrow();
                 for (module, function, signature) in definitions.iter() {
@@ -1125,7 +1135,28 @@ impl Checker<'_> {
                         };
                         checker.coerce(value, expected, node)?
                     } else {
-                        argument.checked(checker, ty, parameter.sign_only)?
+                        argument.check_with(
+                            checker,
+                            ty,
+                            parameter.sign_only,
+                            |checker, value, expected, site| {
+                                if checker.globals.registered_initializers
+                                    && value.ty == Type::PythonObject
+                                    && expected != Type::PythonObject
+                                    && inference.pending.borrow()[signature.id].inferred_params
+                                        [index]
+                                {
+                                    inference.widen_parameter(
+                                        signature.id,
+                                        index,
+                                        Type::PythonObject,
+                                    );
+                                    Ok(value)
+                                } else {
+                                    checker.direct_value(value, site, expected, parameter.sign_only)
+                                }
+                            },
+                        )?
                     }
                 } else {
                     argument.value(checker)?
