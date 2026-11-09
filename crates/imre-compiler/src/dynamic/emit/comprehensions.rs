@@ -63,7 +63,7 @@ impl Function<'_, '_> {
         self.iteration_result(|f| {
             let value = f.expr(iterable);
             if f.native_suspension {
-                f.suspension_position(iterable.range());
+                f.call_position(iterable.range());
             }
             f.op(operation, &[&value])
         })

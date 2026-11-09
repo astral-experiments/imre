@@ -32,7 +32,7 @@ impl Function<'_, '_> {
 
     fn attribute_position(&mut self, range: ruff_text_size::TextRange) {
         if self.native_suspension {
-            self.suspension_position(range);
+            self.call_position(range);
         }
     }
 
@@ -643,7 +643,7 @@ impl Function<'_, '_> {
 
     pub(super) fn pack_operand(&mut self, operation: &str, args: &[&str]) -> String {
         if self.native_suspension {
-            self.suspension_position(self.current_range);
+            self.frame.call_position(self.current_range);
         }
         self.op(operation, args)
     }
