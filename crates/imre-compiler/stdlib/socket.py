@@ -36,6 +36,10 @@ if hasattr(_socket, "IPV6_V6ONLY"):
 _blocking_errnos = {errno.EAGAIN, errno.EWOULDBLOCK}
 
 
+class _GiveupOnSendfile(Exception):
+    """Retry with the file reader and the socket send method."""
+
+
 class socket(_socket.socket):
 
     """A subclass of _socket.socket adding the makefile() method."""
@@ -168,6 +172,163 @@ class socket(_socket.socket):
         text = io.TextIOWrapper(buffer, encoding, errors, newline)
         text.mode = mode
         return text
+
+    def _sendfile_kernel(self, target, file, offset, count):
+        # Lazy import to improve module import time
+        import selectors
+
+        try:
+            fileno = file.fileno()
+        except (AttributeError, io.UnsupportedOperation) as err:
+            raise _GiveupOnSendfile(err)  # not a regular file
+        try:
+            fsize = os.fstat(fileno).st_size
+        except OSError as err:
+            raise _GiveupOnSendfile(err)  # not a regular file
+        if not fsize:
+            return 0  # empty file
+        # Truncate to 1GiB to avoid OverflowError, see bpo-38319.
+        blocksize = min(count or fsize, 2 ** 30)
+        timeout = self.gettimeout()
+        if timeout == 0:
+            raise ValueError("non-blocking sockets are not supported")
+        # poll/select have the advantage of not requiring any
+        # extra file descriptor, contrarily to epoll/kqueue
+        # (also, they require a single syscall).
+        if hasattr(selectors, 'PollSelector'):
+            selector = selectors.PollSelector()
+        else:
+            selector = selectors.SelectSelector()
+        if target is not None:
+            _socket.socket._check_sendfile_owner(self, target)
+        selector.register(_socket.socket.fileno(self), selectors.EVENT_WRITE)
+
+        total_sent = 0
+        # localize variable access to minimize overhead
+        selector_select = selector.select
+        try:
+            while True:
+                if timeout and not selector_select(timeout):
+                    _socket.socket._check_sendfile_owner(self, target)
+                    raise TimeoutError('timed out')
+                if count:
+                    blocksize = min(count - total_sent, blocksize)
+                    if blocksize <= 0:
+                        break
+                try:
+                    sent = _socket.socket._sendfile_block(self, target, fileno, offset, blocksize)
+                except BlockingIOError:
+                    if not timeout:
+                        # Block until the socket is ready to send some
+                        # data; avoids hogging CPU resources.
+                        selector_select()
+                    continue
+                except OSError as err:
+                    if total_sent == 0:
+                        # We can get here for different reasons, the main
+                        # one being 'file' is not a regular mmap(2)-like
+                        # file, in which case we'll fall back on using
+                        # plain send().
+                        raise _GiveupOnSendfile(err)
+                    raise err from None
+                else:
+                    if sent == 0:
+                        break  # EOF
+                    offset += sent
+                    total_sent += sent
+            return total_sent
+        finally:
+            if total_sent > 0 and hasattr(file, 'seek'):
+                file.seek(offset)
+    def _sendfile_buffered(self, target, file, offset, count, wrap_send):
+        if self.gettimeout() == 0:
+            raise ValueError("non-blocking sockets are not supported")
+        if offset:
+            file.seek(offset)
+        blocksize = min(count, 8192) if count else 8192
+        total_sent = 0
+        # localize variable access to minimize overhead
+        file_read = file.read
+        sock_send = self.send
+        session = None
+        if wrap_send is not None:
+            sock_send, session = wrap_send(sock_send)
+        try:
+            while True:
+                if count:
+                    blocksize = min(count - total_sent, blocksize)
+                    if blocksize <= 0:
+                        break
+                data = memoryview(file_read(blocksize))
+                if not data:
+                    break  # EOF
+                while True:
+                    try:
+                        sent = _socket.socket._sendfile_write(self, target, sock_send, data, session)
+                    except BlockingIOError:
+                        continue
+                    else:
+                        total_sent += sent
+                        if sent < len(data):
+                            data = data[sent:]
+                        else:
+                            break
+            return total_sent
+        finally:
+            if total_sent > 0 and hasattr(file, 'seek'):
+                file.seek(offset + total_sent)
+
+    def _check_sendfile_params(self, file, offset, count):
+        if 'b' not in getattr(file, 'mode', 'b'):
+            raise ValueError("file should be opened in binary mode")
+        if not self.type & SOCK_STREAM:
+            raise ValueError("only SOCK_STREAM type sockets are supported")
+        if count is not None:
+            if not isinstance(count, int):
+                raise TypeError(
+                    "count must be a positive integer (got {!r})".format(count))
+            if count <= 0:
+                raise ValueError(
+                    "count must be a positive integer (got {!r})".format(count))
+
+    def _sendfile_transfer(self, file, offset, count, *, kernel, fallback, wrap_send=None):
+        target = _socket.socket._sendfile_owner(self)
+        self._check_sendfile_params(file, offset, count)
+        if kernel:
+            try:
+                if not hasattr(os, 'sendfile'):
+                    raise _GiveupOnSendfile("os.sendfile() not available on this platform")
+                return self._sendfile_kernel(target, file, offset, count)
+            except _GiveupOnSendfile:
+                if not fallback:
+                    raise
+        return self._sendfile_buffered(target, file, offset, count, wrap_send)
+
+    def _sendfile_use_sendfile(self, file, offset=0, count=None):
+        return self._sendfile_transfer(file, offset, count, kernel=True, fallback=False)
+
+    def _sendfile_use_send(self, file, offset=0, count=None):
+        return self._sendfile_transfer(file, offset, count, kernel=False, fallback=True)
+
+    def sendfile(self, file, offset=0, count=None):
+        """sendfile(file[, offset[, count]]) -> sent
+
+        Send a file until EOF is reached by using high-performance
+        os.sendfile() and return the total number of bytes which
+        were sent.
+        *file* must be a regular file object opened in binary mode.
+        If os.sendfile() is not available (e.g. Windows) or file is
+        not a regular file socket.send() will be used instead.
+        *offset* tells from where to start reading the file.
+        If specified, *count* is the total number of bytes to transmit
+        as opposed to sending the file until EOF is reached.
+        File position is updated on return or also in case of error in
+        which case file.tell() can be used to figure out the number of
+        bytes which were sent.
+        The socket must be of SOCK_STREAM type.
+        Non-blocking sockets are not supported.
+        """
+        return self._sendfile_transfer(file, offset, count, kernel=True, fallback=True)
 
     def _decref_socketios(self):
         if self._io_refs > 0:

@@ -1,9 +1,23 @@
 import _socket
 import array
 import errno
+import io
 import os
 import socket
 from socket import fromfd, socketpair
+
+
+left, right = socketpair()
+with left, right, open(__file__, "rb") as source:
+    source.seek(12)
+    assert left.sendfile(source, offset=1, count=3) == 3
+    assert source.tell() == 4
+    with io.BytesIO(b"buffer") as stream:
+        assert left.sendfile(stream, 1, 2) == 2
+        assert stream.tell() == 3
+    left.shutdown(socket.SHUT_WR)
+    assert right.recv(5, socket.MSG_WAITALL) == b"mpouf"
+    assert right.recv(1) == b""
 
 
 left, right = socketpair()

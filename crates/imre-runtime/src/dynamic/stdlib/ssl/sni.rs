@@ -24,6 +24,10 @@ impl Owner {
         }
     }
 
+    pub(super) fn receiver(&self, ctx: &Context) -> Option<Id> {
+        weak_target(ctx, self.weak)
+    }
+
     pub(in crate::dynamic) fn references(&self) -> [Id; 5] {
         [
             self.handle,

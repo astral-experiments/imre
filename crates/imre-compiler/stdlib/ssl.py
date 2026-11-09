@@ -833,6 +833,19 @@ class SSLSocket(_socket.socket):
             raise ValueError("non-zero flags not allowed in calls to send() on %s" % self.__class__)
         return _tls_result(_call(_imre_ssl.send, session, data, flags))
 
+    def sendfile(self, file, offset=0, count=None):
+        session = self._session
+        if session is not None:
+            # Keep the original TLS session across reentrant file reads.
+            def wrap_send(send):
+                def checked(data):
+                    if self._session is not session:
+                        raise OSError(_errno.EBADF, "TLS session changed during sendfile")
+                    return send(data)
+                return checked, session
+            return self._sendfile_transfer(file, offset, count, kernel=False, fallback=True, wrap_send=wrap_send)
+        return super().sendfile(file, offset, count)
+
     def sendall(self, data, flags=_NO_FLAGS):
         session = self._session
         if session is None:
