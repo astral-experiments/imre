@@ -3474,18 +3474,14 @@ impl MarkQueue<'_> {
         }
     }
 
-    /// Visit ordinary sequence edges directly during a complete reachability trace.
+    /// The strong marker needs only to mark a leaf or enqueue a container.
     fn visit_strong_children(&mut self, value: &Value) {
-        let (Value::List(items) | Value::Tuple(items)) = value else {
-            value.children(self);
-            return;
-        };
-        for &child in items.iter().rev() {
+        value.children(&mut |child: Id| {
             let index = child as usize;
             if self.traces[index].get() == UNMARKED {
                 self.mark_unmarked_strong(index);
             }
-        }
+        });
     }
 
     fn pop(&mut self) -> Option<Id> {
