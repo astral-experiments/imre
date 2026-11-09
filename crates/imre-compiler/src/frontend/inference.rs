@@ -800,7 +800,7 @@ impl Inference {
                 let mut checker = Checker::new(
                     graph, *module, signatures, classes, types, &helpers, &globals,
                 );
-                if globals.registered_initializers && signature.registered_frame() {
+                if signature.registered_frame() {
                     let module_literals = literals.entry(*module).or_insert_with(|| {
                         registered::values::ModuleSource::new(&graph.modules[*module])
                     });
@@ -1140,8 +1140,8 @@ impl Checker<'_> {
                             ty,
                             parameter.sign_only,
                             |checker, value, expected, site| {
-                                if checker.globals.registered_initializers
-                                    && value.ty == Type::PythonObject
+                                // The bound operand supplies storage evidence for this parameter.
+                                if value.ty == Type::PythonObject
                                     && expected != Type::PythonObject
                                     && inference.pending.borrow()[signature.id].inferred_params
                                         [index]

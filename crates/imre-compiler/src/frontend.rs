@@ -972,7 +972,8 @@ fn lower_graph(
             matches!(stmt, ast::Stmt::FunctionDef(def) if inspect::marks_function(graph, graph.entry, def))
         });
     let helpers = Helpers::new(definitions.len() + graph.initializers(entry_declarations).count());
-    let globals = ModuleValues::for_initializers(!registered_parameters.is_empty());
+    let needs_registered_entry = signatures.values().any(Signature::registered_frame);
+    let globals = ModuleValues::for_initializers(needs_registered_entry);
     // Fixed FILE compilations need no secondary body. A registered launch or an
     // actual representation failure can still use functions whose signatures solved.
     let captured = std::cell::Cell::new(false);
@@ -990,13 +991,13 @@ fn lower_graph(
         }
     };
     let capture_on_object = |failure: &Failure| {
-        if failure.is_object() || !registered_parameters.is_empty() {
+        if failure.is_object() || needs_registered_entry {
             capture();
         }
     };
     let mut literals = HashMap::new();
     let mut source_checks = registered::SourceChecks::default();
-    if !registered_parameters.is_empty() {
+    if needs_registered_entry {
         graph.set_registered_functions(HashMap::new());
         // A checked body or a real function-value read can establish the registered binding.
         globals.missing_bindings.borrow_mut().extend(
@@ -1024,7 +1025,7 @@ fn lower_graph(
                 .map_err(|failure| failure.terminal_in(graph, module_id))?,
         );
     }
-    if graph.registered_startup && registered_parameters.is_empty() {
+    if graph.registered_startup && !needs_registered_entry {
         capture();
     }
     if let Some(cache) = cache.as_deref_mut() {
@@ -1048,16 +1049,14 @@ fn lower_graph(
             &globals,
         );
         let original = registered_parameters.get(&signature.id);
-        if original.is_some()
-            || (!registered_parameters.is_empty()
-                && signature.registered_frame()
-                && source_checks.accepts(graph, *module_id, definition))
-        {
+        let accepted =
+            signature.registered_frame() && source_checks.accepts(graph, *module_id, definition);
+        if accepted || original.is_some() {
             let literals = literals
                 .entry(*module_id)
                 .or_insert_with(|| registered::values::ModuleSource::new(module));
             match registered::lower_definition(checker, definition, signature, literals) {
-                Ok(body) if source_checks.accepts(graph, *module_id, definition) => {
+                Ok(body) if accepted => {
                     graph.register_function(*module_id, definition.start(), body);
                     globals.missing_bindings.borrow_mut().remove(&signature.id);
                 }
@@ -1074,7 +1073,7 @@ fn lower_graph(
             }
             continue;
         }
-        if !registered_parameters.is_empty()
+        if needs_registered_entry
             && module.is_program_source()
             && signature.method.is_none()
             && let Some(original) = module.parsed.syntax().body
@@ -1194,7 +1193,7 @@ fn lower_graph(
     if let Some((_, reason)) = globals.missing_bindings.borrow_mut().pop_first() {
         return Err(reason);
     }
-    if !registered_parameters.is_empty() {
+    if needs_registered_entry {
         return Ok(crate::CheckedProgram::Registered);
     }
     if let Some(error) = graph.deferred_object_error.take() {
@@ -7132,9 +7131,7 @@ impl<'a> Checker<'a> {
         {
             // A registered definition lives in its Python namespace. Its value can be
             // stored in a container without inventing a fixed callable signature.
-            if (self.inference.is_none() || self.globals.registered_initializers)
-                && signature.params.iter().any(|p| p.ty == Type::PythonObject)
-            {
+            if signature.registered_frame() {
                 if let ast::Expr::Name(name) = expression {
                     self.globals
                         .missing_bindings
