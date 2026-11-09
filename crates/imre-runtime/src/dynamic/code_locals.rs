@@ -20,7 +20,7 @@ pub(super) fn argument_slots(signature: &Json) -> impl Iterator<Item = &str> {
 }
 
 impl Context {
-    /// CodeType exposes its counts as members and its name tuples as getsets.
+    /// Register the code attributes whose values the runtime can supply.
     pub(super) fn install_code_members(&mut self, class: Id) {
         let mut entries = Vec::new();
         for field in [
@@ -28,11 +28,16 @@ impl Context {
             "co_posonlyargcount",
             "co_kwonlyargcount",
             "co_nlocals",
+            "co_flags",
+            "co_name",
+            "co_qualname",
+            "co_filename",
+            "co_firstlineno",
         ] {
             let descriptor = self.readonly_member("code", field);
             entries.push((self.heap.code_name(field), descriptor));
         }
-        for field in ["co_varnames", "co_cellvars"] {
+        for field in ["co_varnames", "co_cellvars", "co_freevars"] {
             let get = self.builtin(&format!("_code_local.{field}"));
             let descriptor = self.alloc(Value::GetSetDescriptor {
                 owner: "code",
@@ -47,6 +52,26 @@ impl Context {
     }
 
     pub(super) fn code_local_field(&mut self, object: Id, field: &str) -> Result<Id> {
+        if field == "co_freevars" {
+            let code = self.code_object(object);
+            if !code.closure_supported && !code.module_definition {
+                return Err(Error::new(
+                    "NotImplementedError",
+                    "code lacks closure metadata",
+                ));
+            }
+            if code.freevar_names != NONE {
+                return Ok(code.freevar_names);
+            }
+            let names = code.freevars.clone();
+            let names = names.iter().map(|name| self.heap.code_name(name)).collect();
+            let tuple = self.alloc(Value::Tuple(names));
+            let Value::Code(code) = self.heap.get_mut(object) else {
+                unreachable!()
+            };
+            code.freevar_names = tuple;
+            return Ok(tuple);
+        }
         let (locals, cells) = self.code_slot_tuples(object, field)?;
         match field {
             "co_varnames" => Ok(locals),

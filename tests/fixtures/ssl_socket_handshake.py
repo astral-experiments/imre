@@ -1,3 +1,4 @@
+import errno
 import gc
 import os
 import socket
@@ -63,6 +64,19 @@ def want_read(call):
     else:
         raise AssertionError("expected a nonblocking TLS read retry")
 
+
+# A pending TCP connect must already guard the first application write with TLS.
+with socket.socket() as listener, socket.socket() as raw:
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    raw.setblocking(False)
+    with client_ctx.wrap_socket(raw, server_hostname="localhost", do_handshake_on_connect=False) as client:
+        assert not client.getblocking() and raw.fileno() == -1
+        assert client.connect_ex(listener.getsockname()) in (0, errno.EINPROGRESS, errno.EWOULDBLOCK)
+        with listener.accept()[0] as peer:
+            want_read(lambda: client.send(b"secret before handshake"))
+            hello = peer.recv(16384)
+            assert hello.startswith(b"\x16\x03") and b"secret before handshake" not in hello
 
 # First I/O must verify the certificate even if do_handshake() was never called.
 client, server = connect("wrong.invalid")
@@ -244,5 +258,23 @@ with raw, other:
         assert exc.errno == 9
     else:
         raise AssertionError("last stream did not release the socket")
+
+# A silent TLS peer must time out during certificate retrieval and see the client close.
+with socket.socket() as listener:
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    listener.settimeout(2)
+    try:
+        ssl.get_server_certificate(listener.getsockname(), timeout=0.05)
+    except TimeoutError:
+        pass
+    else:
+        raise AssertionError("retrieved a certificate from a silent peer")
+    peer, _ = listener.accept()
+    with peer:
+        peer.settimeout(2)
+        assert peer.recv(1) == b"\x16"
+        while peer.recv(4096):
+            pass
 
 print("deferred socket handshake ok")

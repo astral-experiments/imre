@@ -1,19 +1,12 @@
 use super::{Context, Error, Id, NONE, Result, Value, builtins};
 
 pub(super) const DOC: &str = "Create a module object.\n\nThe name must be a string; the optional doc argument can have any type.";
-pub(super) const METHODS: &[&str] = &[
-    "__new__",
-    "__repr__",
-    "__getattribute__",
-    "__init__",
-    "__dir__",
-];
 
 impl Context {
     /// Publish the module type's own descriptors in type-dictionary order.
     pub(super) fn install_module_namespace(&mut self, class: Id) {
         let mut entries = Vec::new();
-        for &name in METHODS {
+        for &name in imre_ast::providers::MODULE_METHODS {
             let key = self.heap.code_name(name);
             entries.push((key, self.builtin(&format!("module.{name}"))));
         }

@@ -3,6 +3,9 @@ use crate::dynamic::stdlib::{BinaryFile, io::MemoryStream};
 use indexmap::IndexMap;
 use std::collections::{HashSet, VecDeque};
 
+mod retained;
+pub(super) use retained::RetainedPaths;
+
 // Retain the small weak-only search when no finalizer paths have been learned.
 const MAX_WEAK_ENDPOINTS: usize = 16;
 const MAX_NODES: usize = 8192;
@@ -16,12 +19,13 @@ const SEARCH_BACKOFF: u8 = 63;
 enum Root {
     Global(usize),
     Frame(usize),
+    Surviving,
 }
 
 #[derive(Clone, Copy)]
 enum Origin {
     Root(Root),
-    Edge { parent: usize, slot: usize },
+    Edge { parent: usize, slot: Option<usize> },
 }
 
 #[derive(Default)]
@@ -31,7 +35,7 @@ pub(super) struct RootPaths {
     anchors: Vec<(Root, Id)>,
     // Kept sorted between searches for membership checks at collection points.
     nodes: Vec<Id>,
-    edges: Vec<(Id, usize, Id)>,
+    edges: Vec<(Id, Option<usize>, Id)>,
     retry: u8,
     // Dictionary slots must be interpreted the same way during discovery and validation.
     dict_keys: bool,
@@ -132,8 +136,9 @@ impl CycleRetention {
                     }
                 }
             }
-            // One opaque edge may use the full strong-child visitor at validation.
-            if missing > 1 || (missing != 0 && limit < links.len()) {
+            // A cycle can also retain an owner through a path leaving the cycle.
+            // At that junction both edges may need the full strong-child visitor.
+            if missing > 2 || (missing != 0 && limit < links.len()) {
                 return None;
             }
         }
@@ -155,22 +160,30 @@ impl CycleRetention {
             else {
                 return &[];
             };
-            if let Some(slot) = slot {
-                if Links::from(value, true).get(slot) != Some(child) {
-                    return &[];
-                }
-                continue;
-            }
-            let mut edge = FindReferences {
-                targets: [child; 2],
-                found: false,
-            };
-            if value.try_children(&mut edge).is_err() || !edge.found {
+            if !has_strong_edge(value, child, slot, true) {
                 return &[];
             }
         }
         &self.owners
     }
+}
+
+fn has_strong_edge(parent: &Value, child: Id, slot: Option<usize>, dict_keys: bool) -> bool {
+    if let Some(slot) = slot {
+        return Links::from(parent, dict_keys).get(slot) == Some(child);
+    }
+    let mut edges = FindReferences {
+        targets: [child; 2],
+        found: false,
+    };
+    parent.try_children(&mut edges).is_ok() && edges.found
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Search {
+    SkipModules,
+    Indexed,
+    Strong,
 }
 
 /// Strong edges in ordinary containers and namespaces. A missing edge merely loses the proof.
@@ -335,9 +348,10 @@ impl RootPaths {
                     .get(index)
                     .is_some_and(|frame| frame.scope == root),
                 Root::Global(index) => globals[index] == root,
+                Root::Surviving => false, // Rechecked against the surviving operands at release.
             })
             && self.edges.iter().all(|&(parent, slot, child)| {
-                Links::from(heap.get(parent), self.dict_keys).get(slot) == Some(child)
+                has_strong_edge(heap.get(parent), child, slot, self.dict_keys)
             })
     }
 
@@ -393,7 +407,7 @@ impl RootPaths {
                 &mut wanted,
                 &mut nodes_left,
                 &mut edges_left,
-                false,
+                Search::SkipModules,
             )?;
             nodes_left += reserved_nodes;
             edges_left += reserved_edges;
@@ -405,7 +419,7 @@ impl RootPaths {
                 &mut wanted,
                 &mut nodes_left,
                 &mut edges_left,
-                true,
+                Search::Indexed,
             )?;
         }
         paths.covers_endpoints = wanted.is_empty();
@@ -421,7 +435,7 @@ impl RootPaths {
         wanted: &mut HashSet<Id>,
         nodes_left: &mut usize,
         edges_left: &mut usize,
-        follow_modules: bool,
+        search: Search,
     ) -> Option<()> {
         let mut tree = IndexMap::<Id, (Origin, bool)>::new();
         for (root, origin) in roots {
@@ -452,7 +466,40 @@ impl RootPaths {
             };
             let (&parent, _) = tree.get_index(index)?;
             let value = heap.get(parent);
-            if !follow_modules && matches!(value, Value::Module { .. }) {
+            if search == Search::SkipModules && matches!(value, Value::Module { .. }) {
+                continue;
+            }
+            if search == Search::Strong {
+                let mut allocated = true;
+                // A missed edge only reduces coverage. Each retained edge is rechecked below.
+                let _ = value.try_children(&mut |child: Id| {
+                    if !allocated || *edges_left == 0 || *nodes_left == 0 {
+                        return;
+                    }
+                    *edges_left -= 1;
+                    if !heap.slot_shapes[child as usize].is_scalar_leaf()
+                        && !tree.contains_key(&child)
+                    {
+                        if tree.try_reserve(1).is_err() {
+                            allocated = false;
+                            return;
+                        }
+                        *nodes_left -= 1;
+                        tree.insert(
+                            child,
+                            (
+                                Origin::Edge {
+                                    parent: index,
+                                    slot: None,
+                                },
+                                wanted.remove(&child),
+                            ),
+                        );
+                    }
+                });
+                if !allocated {
+                    return None;
+                }
                 continue;
             }
             let links = Links::from(value, self.dict_keys);
@@ -487,7 +534,7 @@ impl RootPaths {
                     (
                         Origin::Edge {
                             parent: index,
-                            slot,
+                            slot: Some(slot),
                         },
                         found,
                     ),
@@ -515,6 +562,10 @@ impl RootPaths {
             match origin {
                 Origin::Edge { parent, slot } => {
                     let (&parent, _) = tree.get_index(parent)?;
+                    let slot = slot.or_else(|| {
+                        let links = Links::from(heap.get(parent), self.dict_keys);
+                        (0..links.len().min(MAX_EDGES)).find(|&i| links.get(i) == Some(id))
+                    });
                     self.edges.try_reserve(1).ok()?;
                     self.edges.push((parent, slot, id));
                 }

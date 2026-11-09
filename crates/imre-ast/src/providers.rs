@@ -7,6 +7,15 @@ pub mod termios;
 pub const SOCKET_LOOPBACK_HOSTS: &[(&str, &str)] =
     &[("_LOCALHOST", "127.0.0.1"), ("_LOCALHOST_V6", "::1")];
 
+/// Non-data methods installed on the exact module type. A module field shadows them.
+pub const MODULE_METHODS: &[&str] = &[
+    "__new__",
+    "__repr__",
+    "__getattribute__",
+    "__init__",
+    "__dir__",
+];
+
 /// Functions installed in the boxed builtins namespace.
 pub const BUILTIN_FUNCTIONS: &[&str] = &[
     "len",

@@ -22,7 +22,7 @@ use std::fmt::Write;
 use std::mem::ManuallyDrop;
 
 use super::exceptions::{Error, Kind, Result, finish};
-use super::{Int, Object, Str, Words, fail, python_whitespace};
+use super::{Int, Object, Str, Words, dedent, fail, python_whitespace};
 
 #[derive(Clone, Copy)]
 pub(crate) enum UrlInput<'a> {
@@ -543,36 +543,6 @@ pub unsafe extern "C" fn imre_str_dedent(text: *const Str) -> *const Str {
     // SAFETY: the input stays live and no user code runs while it is borrowed.
     let text = unsafe { &*text };
     StrOwner::into_raw(StrOwner::new(dedent(text)))
-}
-
-/// Remove common indentation with the same whitespace rules in both runtimes.
-pub(crate) fn dedent(text: &str) -> Str {
-    let blank = |line: &str| line.chars().all(python_whitespace);
-    let mut lines = text.split('\n').filter(|line| !blank(line));
-    let first = lines.next().unwrap_or("");
-    let mut margin = &first.as_bytes()[..first.len() - first.trim_start_matches([' ', '\t']).len()];
-    for line in lines {
-        if margin.is_empty() {
-            break;
-        }
-        let common = margin
-            .iter()
-            .zip(line.as_bytes())
-            .take_while(|(a, b)| a == b)
-            .count();
-        margin = &margin[..common];
-    }
-    // Indentation and blank lines can account for nearly the entire input.
-    let mut result = Str::default();
-    for (index, line) in text.split('\n').enumerate() {
-        if index != 0 {
-            result.push('\n');
-        }
-        if !blank(line) {
-            result.push_str(&line[margin.len()..]);
-        }
-    }
-    result
 }
 
 thread_local! {

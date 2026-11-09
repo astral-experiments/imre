@@ -30,6 +30,8 @@ pub(super) struct CodeObject {
     pub varnames: Id,
     /// Captured parameters in slot order followed by cell-only locals, cached on first read.
     pub cellvars: Id,
+    /// Canonical Python tuple of free variable names, materialized on first access.
+    pub freevar_names: Id,
     /// Decoded argument metadata is shared by calls using this immutable code object.
     pub parsed_parameters: std::cell::OnceCell<std::rc::Rc<super::CallParameters>>,
     pub name: Id,
@@ -156,19 +158,12 @@ pub(super) struct Trace {
     pub pending_syntax: Option<super::source_code::SyntaxSpan>,
     /// Live members belong to the exception instance across traceback clones.
     pub source_syntax: Option<crate::shared::Shared<[std::cell::Cell<Id>; 9]>>,
-    pub import_names: Option<[Id; 3]>,
+    pub import_names: [Option<Id>; 3],
     pub group: Option<GroupData>,
     pub name_error_name: Option<Id>,
     pub dictionary: Option<Id>,
     stop_value: Id,
     head: Id,
-}
-
-#[derive(Debug)]
-pub(super) struct ImportFields {
-    pub name: Option<String>,
-    pub path: Option<String>,
-    pub name_from: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -185,7 +180,6 @@ pub(super) struct Error {
     pub trace: Option<allocator_api2::boxed::Box<Trace>>,
     /// Python object held by the writable SystemExit.code member.
     pub exit_code: Id,
-    pub import: Option<crate::shared::Shared<ImportFields>>,
 }
 
 /// The decoder reuses these writable fields while BaseException.args keeps its first tuple.
@@ -214,7 +208,6 @@ impl Error {
             context: NONE,
             trace: None,
             exit_code: NONE,
-            import: None,
         }
     }
 
@@ -250,22 +243,12 @@ impl Error {
         (self.class != NONE).then_some(self.class)
     }
 
-    /// Attach the module and member names exposed on a Python import exception.
-    pub fn with_import(
-        mut self,
-        name: Option<&str>,
-        path: Option<String>,
-        name_from: Option<&str>,
-    ) -> Self {
-        let fields = ImportFields {
-            name: name.map(str::to_owned),
-            path,
-            name_from: name_from.map(str::to_owned),
-        };
-        let Ok(fields) = crate::shared::Shared::try_new(fields) else {
+    /// Preserve the original Python name supplied by the importer.
+    pub(super) fn with_import_name(mut self, name: Id) -> Self {
+        let Some(trace) = self.try_tracing() else {
             return Self::new("MemoryError", "");
         };
-        self.import = Some(fields);
+        trace.import_names[0] = Some(name);
         self
     }
 
@@ -1776,7 +1759,7 @@ impl Value {
     /// Whether releasing this native value can still flush or close a descriptor.
     fn owns_open_descriptor(&self) -> bool {
         match self {
-            Self::File(file) => file.owns_open_descriptor(),
+            Self::File(file) => !file.closed(),
             #[cfg(target_os = "linux")]
             Self::Epoll(epoll) => epoll.fd() >= 0,
             #[cfg(target_os = "linux")]
@@ -1808,9 +1791,7 @@ impl Value {
                 }
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
                 super::stdlib::BinaryFile::Descriptor(_) => "_io.BufferedWriter",
-                super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
-                super::stdlib::BinaryFile::Writer { .. }
-                | super::stdlib::BinaryFile::Standard { .. } => "_io.BufferedWriter",
+                super::stdlib::BinaryFile::Standard { .. } => "_io.BufferedWriter",
             }),
             _ => None,
         }
@@ -2398,6 +2379,7 @@ impl Value {
                 visit.push(code.parameters);
                 visit.push(code.varnames);
                 visit.push(code.cellvars);
+                visit.push(code.freevar_names);
                 visit.extend(code.nested.iter().map(|&(_, id)| id));
                 match code.body {
                     Body::Native(_, operands) if operands != NONE => visit.push(operands),
@@ -3111,6 +3093,12 @@ pub(super) trait VisitReferences {
     }
 }
 
+impl<F: FnMut(Id)> VisitReferences for F {
+    fn push(&mut self, id: Id) {
+        self(id);
+    }
+}
+
 /// Reusable edges from the context roots supplied to a full collection.
 #[derive(Default)]
 struct RootTrace {
@@ -3593,6 +3581,7 @@ pub(super) struct Heap {
     pub(super) gc_schedule: GcSchedule,
     weak: HashMap<Id, Vec<Id>>,
     weak_roots: weak_roots::RootPaths,
+    retained_paths: weak_roots::RetainedPaths,
     finalizer_roots: weak_roots::RootPaths,
     cyclic_finalizers: weak_roots::CycleRetention,
     // Callback rollback can borrow a handle without extending the object's lifetime.
@@ -3676,6 +3665,19 @@ pub(super) struct Frame {
     has_local_exception: bool,
     // This activation or one of its calls opened a buffered output file.
     created_finalizer: bool,
+}
+
+/// Empty frame storage reserved before a native worker is spawned.
+pub(super) struct WorkerStack(Vec<Frame>);
+
+impl WorkerStack {
+    pub(super) fn reserve() -> Result<Self> {
+        let mut frames = Vec::new();
+        frames
+            .try_reserve_exact(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        Ok(Self(frames))
+    }
 }
 
 impl Frame {
@@ -3782,6 +3784,10 @@ impl Heap {
     }
 
     pub fn new() -> Self {
+        Self::with_worker_stack(None)
+    }
+
+    pub(super) fn with_worker_stack(reserved: Option<WorkerStack>) -> Self {
         let mut slots = vec![
             Slot::new(Value::None),
             Slot::new(Value::Bool(false)),
@@ -3823,7 +3829,11 @@ impl Heap {
             text_position: Cell::default(),
             linked_sources: HashMap::new(),
             spare_frame_roots: Vec::new(),
-            frames: vec![Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE)],
+            frames: {
+                let mut frames = reserved.map_or_else(|| Vec::with_capacity(1), |stack| stack.0);
+                frames.push(Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE));
+                frames
+            },
             fault_generation: Cell::new(None),
             fault_workers: RefCell::new(None),
             next_collection: FIRST_DYNAMIC_SLOT + 4096,
@@ -3832,6 +3842,7 @@ impl Heap {
             gc_schedule: GcSchedule::default(),
             weak: HashMap::new(),
             weak_roots: Default::default(),
+            retained_paths: Default::default(),
             finalizer_roots: Default::default(),
             cyclic_finalizers: Default::default(),
             borrowed_hooks: Vec::new(),
@@ -5902,6 +5913,19 @@ impl Heap {
         {
             return Ok(None);
         }
+        let mut roots = roots.peekable();
+        let mut context_roots = Vec::new();
+        if self.has_finalizer_cohort() {
+            // Preserve the original root walk, including its remaining suffix if allocation fails.
+            while roots.peek().is_some() && context_roots.try_reserve(1).is_ok() {
+                context_roots.extend(roots.next());
+            }
+            if roots.peek().is_none()
+                && self.retained_paths_keep_owners(context_roots.iter().copied(), false)
+            {
+                return Ok(None);
+            }
+        }
         // A verified cycle retains its owners even when an unrelated owner needs the
         // root walk. Count only pending owners that the walk still has to find.
         let cyclic = self.cyclic_finalizers.verified_owners(self);
@@ -5927,7 +5951,7 @@ impl Heap {
             // Scalar leaves cannot retain a finalizer or participate in a cycle.
             mode: MarkMode::CycleEdges,
         };
-        self.mark_roots(roots, &mut pending);
+        self.mark_roots(context_roots.into_iter().chain(roots), &mut pending);
         while remaining != 0
             && let Some(id) = pending.pop()
         {
@@ -7759,6 +7783,39 @@ mod tests {
             heap.released_last_finalizer_ref(child, [].into_iter())
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn prompt_finalizers_recheck_both_unindexed_edges_of_a_cycle() {
+        for break_cycle in [false, true] {
+            let mut heap = Heap::new();
+            let owner = heap.alloc(Value::List(Vec::new()));
+            heap.register_finalizer(owner);
+            let cell = heap.alloc(Value::Cell(None));
+            let mut scope = Scope::new(String::new(), Some(owner));
+            scope.class_cell = Some(cell);
+            let scope = heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(scope)));
+            *heap.get_mut(cell) = Value::Cell(Some(scope));
+            heap.release_temporaries_since(0);
+
+            let check = |heap: &mut Heap| {
+                heap.acyclic_finalizer([NONE; 2], [].into_iter(), None)
+                    .unwrap()
+            };
+            assert_eq!(check(&mut heap), None);
+            assert_eq!(heap.cyclic_finalizers.verified_owners(&heap), &[owner]);
+
+            let Value::Scope(scope) = heap.get_mut(scope) else {
+                unreachable!()
+            };
+            if break_cycle {
+                scope.class_cell = None;
+            } else {
+                scope.parent = None;
+            }
+            assert!(heap.cyclic_finalizers.verified_owners(&heap).is_empty());
+            assert_eq!(check(&mut heap), Some(owner));
+        }
     }
 
     #[test]

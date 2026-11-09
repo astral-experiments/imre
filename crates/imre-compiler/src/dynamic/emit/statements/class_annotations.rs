@@ -55,6 +55,7 @@ impl Function<'_, '_> {
         };
         let signature = self.text(&json!({
             "posonly": ["format"], "scope_complete": !captures.incomplete, "scope_reads": captures.reads,
+            "code_flags": self.source.function_flags(None, self.in_function, false),
         }).to_string());
         let start = *sites.first_key_value().unwrap().0;
         let body = Body::ClassAnnotations(sites.into_values().collect(), bindings.globals);

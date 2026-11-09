@@ -3705,6 +3705,11 @@ impl Context {
         let count = slice_count(start, end, step);
         let positions = slice_positions(start, end, step);
         let result = match self.heap.get(obj) {
+            Value::Str(_) | Value::SurrogateStr(_)
+                if receiver == obj && start == 0 && step == 1 && count == len =>
+            {
+                return Ok(obj);
+            }
             Value::SurrogateStr(points) => {
                 return Ok(self.text_codepoints(sliced_values(points, positions, count)?));
             }

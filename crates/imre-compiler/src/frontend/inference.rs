@@ -169,16 +169,9 @@ impl Checker<'_> {
             };
             let params = &self.functions.get(&definition)?.params;
             params.iter().enumerate().find_map(|(index, param)| {
-                let arg = match param.kind {
-                    ParameterKind::PositionalOnly => call.arguments.find_positional(index),
-                    ParameterKind::PositionalOrKeyword => {
-                        call.arguments.find_argument_value(&param.name, index)
-                    }
-                    ParameterKind::KeywordOnly => {
-                        call.arguments.find_keyword(&param.name).map(|kw| &kw.value)
-                    }
-                    _ => None,
-                }?;
+                let arg = param
+                    .kind
+                    .known_argument(&call.arguments, index, &param.name)?;
                 let ty = self.types.payload(param.ty).unwrap_or(param.ty);
                 (arg.as_name_expr()?.id == local && self.types.signature(ty).is_some())
                     .then_some(ty)
@@ -913,7 +906,7 @@ impl Checker<'_> {
             receiver,
             scope,
             Some((signature.id, skip)),
-            |checker, index, argument| {
+            &mut |checker, index, argument| {
                 let index = index + skip;
                 let parameter = &signature.params[index];
                 if selector_wait && parameter.name == "timeout" {

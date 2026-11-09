@@ -480,7 +480,12 @@ pub(super) const MAPPING_PROXY_SLOTS: &[&str] = &[
 /// Static constructors retain their declaring type as `__self__` even on instances.
 pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     let owner = name.strip_suffix(".__new__")?;
-    (matches!(
+    owns_native_new(owner).then_some(owner)
+}
+
+/// The intrinsic allocation slot, independent of whether its Python entry is exposed.
+pub(super) fn owns_native_new(owner: &str) -> bool {
+    matches!(
         owner,
         "object"
             | "dict"
@@ -492,6 +497,11 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
             | "map"
             | "zip"
             | "function"
+            | "method"
+            | "code"
+            | "complex"
+            | "bool"
+            | "tuple"
             | "cell"
             | "int"
             | "str"
@@ -505,8 +515,7 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
         || super::deque::iterator_class(owner).is_some()
         || is_exception(owner)
         || owner == super::stdlib::fixed_structseq::SCHED_PARAM
-        || crate::objects::HashState::is_provider_class(owner))
-    .then_some(owner)
+        || crate::objects::HashState::is_provider_class(owner)
 }
 
 /// The declaring type stored on standalone builtin method handles.
@@ -2129,11 +2138,6 @@ pub(super) fn call(
         return Ok(NONE);
     }
     if name == "object.__init__" {
-        if let Some(receiver) = args.first()
-            && crate::objects::HashState::is_provider_class(ctx.type_name(*receiver))
-        {
-            return Ok(NONE);
-        }
         if args.len() != 1 || !kwargs.is_empty() {
             if let Some(&receiver) = args.first() {
                 let class = ctx.exact_type(receiver)?;
@@ -2145,10 +2149,10 @@ pub(super) fn call(
                                 Value::StaticMethod { callable, .. } => callable,
                                 _ => slot,
                             });
-                    let tuple = ctx.builtin("tuple");
-                    if ctx.instance_of(receiver, tuple)
-                        || new.is_some_and(|new| Some(&new) != ctx.builtins.get("object.__new__"))
-                    {
+                    if new.map_or_else(
+                        || ctx.inherits_native_object_init(class),
+                        |new| Some(&new) != ctx.builtins.get("object.__new__"),
+                    ) {
                         // The allocator consumed the arguments; the inherited initializer does nothing.
                         return Ok(NONE);
                     }
@@ -3147,9 +3151,8 @@ pub(super) fn call(
                 kwargs,
                 ["name", "globals", "locals", "fromlist", "level"],
             )?;
-            let name = ctx
-                .str_value(module.ok_or_else(|| type_error("__import__ requires a name"))?)?
-                .to_owned();
+            let key = module.ok_or_else(|| type_error("__import__ requires a name"))?;
+            let name = ctx.copy_name(key)?;
             let level = match level {
                 Some(level) => ctx
                     .index_integer(level)?
@@ -3169,7 +3172,7 @@ pub(super) fn call(
             if name.is_empty() {
                 return Err(Error::new("ValueError", "Empty module name"));
             }
-            let result = ctx.module(&name)?;
+            let result = ctx.module_by_key(&name, key)?;
             if let Some(list) = fromlist
                 && ctx.truth(list)?
             {

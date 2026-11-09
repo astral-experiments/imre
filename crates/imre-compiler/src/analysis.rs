@@ -7,6 +7,8 @@ mod execution;
 #[cfg(test)]
 mod incremental_tests;
 mod inferred_shapes;
+mod initializer_calls;
+pub(crate) use initializer_calls::unambiguous_file_module;
 mod run_path;
 mod tuple_displays;
 
@@ -75,36 +77,6 @@ pub(crate) struct Session {
     pub(crate) explicit_check: bool,
 }
 
-/// Resolve a declared positional or keyword parameter at a concrete Python call.
-fn bound_argument<'a>(
-    arguments: &'a ruff_python_ast::Arguments,
-    parameters: &ruff_python_ast::Parameters,
-    name: &str,
-) -> Option<&'a Expr> {
-    let pos = parameters
-        .posonlyargs
-        .iter()
-        .chain(&parameters.args)
-        .position(|p| p.name().as_str() == name);
-    let keyword = parameters
-        .args
-        .iter()
-        .chain(&parameters.kwonlyargs)
-        .any(|p| p.name().as_str() == name);
-    keyword
-        .then(|| arguments.find_keyword(name))
-        .flatten()
-        .map(|k| &k.value)
-        .or_else(|| {
-            pos.and_then(|i| {
-                arguments
-                    .args
-                    .get(i)
-                    .filter(|_| !arguments.args[..=i].iter().any(Expr::is_starred_expr))
-            })
-        })
-}
-
 /// Source ownership used by the same diagnostics for checked graphs and object registrations.
 pub(crate) trait ClosedSource {
     fn project_path(&self) -> Option<&Path>;
@@ -115,7 +87,7 @@ pub(crate) trait ClosedSource {
 
 impl ClosedSource for crate::modules::SourceModule {
     fn project_path(&self) -> Option<&Path> {
-        self.is_program_source().then_some(&self.path)
+        self.checks_source_contracts().then_some(&self.path)
     }
     fn supplies_declarations(&self) -> bool {
         !self.bundled && !self.is_namespace()
@@ -152,7 +124,9 @@ pub(crate) fn check_registered_project<'a>(
             let Some(id) = winner.checked_module else {
                 return false;
             };
-            if winner.is_program != graph.modules[id].is_program_source() || !matched.insert(id) {
+            if winner.is_program != graph.modules[id].checks_source_contracts()
+                || !matched.insert(id)
+            {
                 return false;
             }
             if winner.name == "__main__" {
@@ -175,8 +149,8 @@ pub(crate) fn check_registered_project<'a>(
                     || matched.contains(&id)
             })
         {
-            result.clone()?;
             return graph.session.check_registered_execution(
+                result.clone(),
                 sources.map(|s| (s.checked_module.unwrap(), s)),
                 has_file_body,
             );
@@ -220,17 +194,52 @@ pub(crate) fn check_registered_project<'a>(
         session.add(&path, &source, kind)?;
         paths.push((path, is_program));
     }
-    session.check_closed_program(&paths, None, &[], None)?;
-    session.check_registered_execution((first_winner..).zip(sources), has_file_body)
+    let contracts = session.check_closed_program(&paths, None, &[], None);
+    session.check_registered_execution(contracts, (first_winner..).zip(sources), has_file_body)
 }
 
 impl Session {
     /// Check both execution boundaries against the winners of the same registered program.
     fn check_registered_execution<'a>(
         &self,
+        contracts: Result<(), String>,
         sources: impl Iterator<Item = (usize, crate::dynamic::RegisteredSource<'a>)> + Clone,
         has_file_body: Option<&dyn Fn(&str) -> bool>,
     ) -> Result<(), String> {
+        if let Some((entry, start)) = sources
+            .clone()
+            .find(|(_, source)| source.initial && source.declares_signatures)
+        {
+            // runpy imports the parent package before executing the selected body
+            // as __main__. Only an inert parent can be passed without running code.
+            let (entry, start) = if !start.main_body && self.empty_initializer(entry) {
+                sources
+                    .clone()
+                    .find(|(_, s)| s.main_body && s.declares_signatures)
+                    .unwrap_or((entry, start))
+            } else {
+                (entry, start)
+            };
+            let declarations: HashMap<_, _> = sources
+                .clone()
+                .filter(|(_, source)| source.declares_signatures)
+                .map(|(id, source)| (source.name, (id, source.path)))
+                .collect();
+            if let Some(error) =
+                self.initializer_call_error((entry, start.path), start.main_body, |name| {
+                    declarations.get(name).copied()
+                })
+            {
+                if !matches!(
+                    error.kind,
+                    crate::frontend::phase::Kind::ExecutionOperand(_)
+                ) {
+                    contracts?;
+                }
+                return Err(error.to_string());
+            }
+        }
+        contracts?;
         let ordinary = self.check_execution_escapes(
             sources
                 .clone()
@@ -863,6 +872,14 @@ impl Session {
         expression: &Expr,
     ) -> Option<ty_python_core::definition::Definition<'_>> {
         self.hint_reads.set(self.hint_reads.get() + 1);
+        self.reaching_binding(module, expression)
+    }
+
+    fn reaching_binding(
+        &self,
+        module: usize,
+        expression: &Expr,
+    ) -> Option<ty_python_core::definition::Definition<'_>> {
         let index =
             ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
         let scope = index.try_expression_scope_id(expression)?;
@@ -1387,7 +1404,6 @@ impl Session {
         }
         let parsed = self.parsed(file);
         let model = SemanticModel::new(db, source);
-        let env = model.program_environment();
         let mut check = |call: &ruff_python_ast::ExprCall| -> Option<()> {
             let name = call.func.as_name_expr()?;
             if !ranges.iter().any(|r| r.range.contains_range(call.range()))
@@ -1417,34 +1433,22 @@ impl Session {
                 return None;
             }
             let owner_model = SemanticModel::new(db, db.program_file(owner));
-            for declared in function.parameters.iter_non_variadic_params() {
+            for (index, declared) in function.parameters.iter_non_variadic_params().enumerate() {
                 let param = &declared.parameter;
                 if declarations
                     .parameters(db)
                     .contains(&(owner, declared.range()))
-                    && let Some(value) =
-                        bound_argument(&call.arguments, &function.parameters, param.name.as_str())
-                    && let (Some(expected), Some(actual)) = (
-                        param.inferred_type(&owner_model),
-                        value.inferred_type(&model),
+                    && let Some(value) = crate::frontend::known_declared_argument(
+                        &call.arguments,
+                        &function.parameters,
+                        index,
+                        param.name.as_str(),
                     )
-                    // A type variable needs the live call binder to infer a specialization.
-                    && concrete_scalar(db, &env, expected)
-                    && !actual.is_assignable_to(db, &env, expected)
+                    && let Some(expected) = param.inferred_type(&owner_model)
+                    && let Some(error) =
+                        self.scalar_argument_error(module, &model, expected, value, value)
                 {
-                    let actual = self
-                        .scalar_type(module, value)
-                        .map_or_else(|| actual.display(db, &env).to_string(), |t| t.to_string());
-                    let message = format!(
-                        "expected {}, got {actual}; annotations are enforced contracts",
-                        expected.display(db, &env)
-                    );
-                    let text = ruff_db::source::source_text(db, file);
-                    errors.push(
-                        crate::frontend::phase::Diagnostic::at(text.as_str(), value, message)
-                            .with_path(path)
-                            .to_string(),
-                    );
+                    errors.push(error.with_path(path).to_string());
                 }
             }
             Some(())

@@ -251,6 +251,7 @@ impl Context {
             && matches!(
                 kind.as_str(),
                 stdlib::datetime::TZINFO
+                    | "socket.socket"
                     | super::thread_handle::CLASS
                     | "datetime.timezone"
                     | value::ZSTD_COMPRESS_TYPE
@@ -588,8 +589,29 @@ impl Context {
         Ok(error.trace.as_ref().and_then(|trace| trace.dictionary))
     }
 
-    fn reduce_exception(&mut self, object: Id) -> Result<Id> {
-        let state = self.exception_reduction_state(object)?;
+    fn reduce_exception(&mut self, object: Id, owner: &str) -> Result<Id> {
+        let mut state = self.exception_reduction_state(object)?;
+        if owner == "ImportError"
+            && super::exception_members::import_names(self, object)
+                .iter()
+                .any(Option::is_some)
+        {
+            let dict = if let Some(dict) = state {
+                let storage = self.dict_storage(dict).expect("exception dictionary");
+                builtins::copy_dict(self, dict, storage)?
+            } else {
+                self.dict(Vec::new())
+            };
+            self.heap.keep(dict);
+            // Inserting a key can run Python that mutates the remaining slots.
+            for (index, key) in builtins::IMPORT_KEYWORDS.iter().enumerate() {
+                if let Some(value) = super::exception_members::import_names(self, object)[index] {
+                    let key = self.text(*key);
+                    self.set_dictionary_key(dict, key, value, None, true)?;
+                }
+            }
+            state = Some(dict);
+        }
         let class = self.exact_type(object)?;
         let args = self.exception_reduction_arguments(object)?;
         let mut fields = vec![class, args];
@@ -697,6 +719,9 @@ impl Context {
         );
         // Compiled literal names use the existing inline-field and native-type fast paths.
         // A Python name must run the same descriptor operation even when its spelling was supplied.
+        if !ordinary && matches!(op, ObjectAttribute::Get) {
+            return self.default_attr(obj, name, AttributeLookup::Value);
+        }
         if !ordinary || original.is_none() {
             return self.default_text_attribute(obj, &text, op);
         }
@@ -1819,7 +1844,7 @@ impl Context {
             Value::GetSetDescriptor {
                 owner, name, get, ..
             } => match (owner, name) {
-                ("code", "co_varnames" | "co_cellvars") => None,
+                ("code", _) => None,
                 ("int", "numerator") => Some("the numerator of a rational number in lowest terms"),
                 ("int", "denominator") => {
                     Some("the denominator of a rational number in lowest terms")
@@ -2731,7 +2756,7 @@ impl Context {
             && self.class_attr(class, "__getattr__").is_none()
             && self.class_attr(class, "__getattribute__").is_none_or(|hook| matches!(self.heap.get(hook), Value::Native(symbol) if symbol == "object.__getattribute__"))
         {
-            self.default_attr(obj, name, AttributeLookup::Method(receiver))
+            self.default_attr(obj, AttributeName::Text(name), AttributeLookup::Method(receiver))
         } else {
             self.lookup_attr(obj, name)
         }
@@ -2739,16 +2764,27 @@ impl Context {
 
     /// Base lookup bypasses Python's __getattribute__ and __getattr__ hooks.
     pub(super) fn default_get_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
-        self.default_attr(obj, name, AttributeLookup::Value)
+        self.default_attr(obj, AttributeName::Text(name), AttributeLookup::Value)
     }
 
     /// Resolve a dir-listed member of a class with the default metaclass for no_type_check.
     pub(super) fn no_type_check_member(&mut self, class: Id, name: &str) -> Result<Id> {
-        self.default_attr(class, name, AttributeLookup::ListedClassMember)
+        self.default_attr(
+            class,
+            AttributeName::Text(name),
+            AttributeLookup::ListedClassMember,
+        )
     }
 
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
-    fn default_attr(&mut self, obj: Id, name: &str, mut lookup: AttributeLookup<'_>) -> Result<Id> {
+    fn default_attr(
+        &mut self,
+        obj: Id,
+        attr: AttributeName<'_>,
+        mut lookup: AttributeLookup<'_>,
+    ) -> Result<Id> {
+        let spelling = attr.text(self)?;
+        let name = spelling.as_ref();
         if name == "__dict__"
             && matches!(self.heap.get(obj), Value::Native(symbol) if builtins::exception_kind(symbol).is_some())
         {
@@ -2849,7 +2885,22 @@ impl Context {
                 return self.bind_attribute(member, obj, class);
             }
         }
+        // These native layouts inherit object's attribute reader. A Python mixin can
+        // supply the member earlier in the published MRO.
+        let object_reader = name == "__getattribute__"
+            && self.is_type_object(obj)
+            && self.allocation_base(obj).is_some_and(|base| {
+                matches!(self.heap.get(base), Value::Native(kind)
+                    if matches!(kind.as_str(), "tuple" | "list" | "dict" | "str" | "bytes"
+                        | "bytearray" | "int" | "bool" | "float" | "complex" | "set" | "frozenset"))
+            });
+        let named_reader = object_reader && attr.nonexact_key(self).is_some();
         let metaclass_member = match *self.heap.get(obj) {
+            _ if named_reader => {
+                let meta = self.exact_type(obj)?;
+                self.class_attr_with_name(meta, attr)
+                    .map(|member| (meta, member))
+            }
             Value::Class {
                 metaclass: Some(meta),
                 ..
@@ -2864,6 +2915,27 @@ impl Context {
             && self.readable_data_descriptor(member)
         {
             return self.bind_attribute(member, obj, meta);
+        }
+        if object_reader {
+            let member = if named_reader {
+                self.class_attr_with_name(obj, attr)
+            } else {
+                let object = self.builtin("object");
+                self.base_lineage(obj, true).into_iter().find_map(|base| {
+                    if base == object {
+                        self.raw_object_member(name)
+                    } else {
+                        self.own_class_attr(base, name)
+                    }
+                })
+            };
+            if let Some(member) = member {
+                return self.bind_attribute(member, NONE, obj);
+            }
+            if let Some((meta, member)) = metaclass_member {
+                return self.bind_attribute(member, obj, meta);
+            }
+            return Err(self.missing_attribute(obj, name));
         }
         if name == "__delattr__"
             && self.is_type_object(obj)
@@ -3038,11 +3110,15 @@ impl Context {
                 Value::Native(kind)
                     if matches!(
                         kind.as_str(),
-                        "method" | "builtin_function_or_method" | "method-wrapper"
+                        "method"
+                            | "builtin_function_or_method"
+                            | "method-wrapper"
+                            | "socket.socket"
                     ) =>
                 {
                     Some(obj)
                 }
+                Value::Socket(_) => Some(self.exact_type(obj)?),
                 Value::Method { .. } | Value::Native(_)
                     if matches!(
                         self.builtin_type_name(obj),
@@ -3914,10 +3990,11 @@ impl Context {
             {
                 return Ok(self.builtin(&format!("property.{name}")));
             }
-            Value::Native(ref class) if class == "code" => {
-                if let Some(descriptor) = self.own_class_attr(obj, name) {
-                    return Ok(descriptor);
-                }
+            Value::Native(ref class)
+                if class == "code"
+                    && let Some(descriptor) = self.own_class_attr(obj, name) =>
+            {
+                return Ok(descriptor);
             }
             Value::Code(ref code) => match name {
                 "co_argcount" => {
@@ -3946,7 +4023,7 @@ impl Context {
                     };
                     return Ok(self.int(count as i64));
                 }
-                "co_varnames" | "co_cellvars" | "co_nlocals" => {
+                "co_varnames" | "co_cellvars" | "co_nlocals" | "co_freevars" => {
                     return self.code_local_field(obj, name);
                 }
                 "co_flags" => {
@@ -3962,21 +4039,6 @@ impl Context {
                 "co_qualname" => return Ok(code.qualname),
                 "co_filename" => return Ok(code.filename),
                 "co_firstlineno" => return Ok(self.int(i64::from(code.first_line))),
-                "co_freevars" => {
-                    if !code.closure_supported && !code.module_definition {
-                        return Err(Error::new(
-                            "NotImplementedError",
-                            "code lacks closure metadata",
-                        ));
-                    }
-                    let names = code
-                        .freevars
-                        .clone()
-                        .into_iter()
-                        .map(|name| self.text(name))
-                        .collect();
-                    return Ok(self.alloc(Value::Tuple(names)));
-                }
                 _ => {}
             },
             Value::Cell(contents) if name == "cell_contents" => {
@@ -4204,6 +4266,9 @@ impl Context {
                     return Ok(callable);
                 }
                 _ if explicit || matches!(self.heap.get(callable), Value::Function { .. }) => {
+                    if name == "__init__" {
+                        return self.builtin_attribute(obj, name, lookup);
+                    }
                     return self.lookup_attr(callable, name);
                 }
                 _ => {
@@ -5280,16 +5345,14 @@ impl Context {
                 }
             }
             Value::Native(ref class)
-                if name == "__base__"
-                    && matches!(class.as_str(), defaultdict::CLASS | "NoneType") =>
+                if matches!(name, "__base__" | "__bases__" | "__mro__")
+                    && (builtins::CORE_RUNTIME_TYPES.contains(&class.as_str())
+                        || class == defaultdict::CLASS
+                        || (name != "__base__" && builtins::is_exported_type(class))) =>
             {
-                return Ok(self.builtin(Self::native_base(class).unwrap_or("object")));
-            }
-            Value::Native(ref class)
-                if matches!(name, "__bases__" | "__mro__")
-                    && (builtins::is_exported_type(class)
-                        || matches!(class.as_str(), defaultdict::CLASS | "NoneType")) =>
-            {
+                if name == "__base__" {
+                    return Ok(self.builtin(Self::native_base(class).unwrap_or("object")));
+                }
                 return Ok(self.builtin_hierarchy_tuple(obj, name));
             }
             Value::Native(ref builtin)
@@ -5733,22 +5796,17 @@ impl Context {
             return self.bind_attribute(hook, NONE, class);
         }
         if name == "__init__" {
-            if let Value::Native(owner) = self.heap.get(obj) {
-                match owner.as_str() {
-                    "type" => return Ok(self.builtin("type.__init__")),
-                    "bool" | "int" | "float" | "complex" | "str" | "bytes" => {
-                        return Ok(self.builtin("object.__init__"));
-                    }
-                    _ => {}
-                }
+            let (class, receiver) = if self.is_type_object(obj) {
+                (obj, NONE)
+            } else {
+                (self.exact_type(obj)?, obj)
+            };
+            if class == obj && self.builtins.get("type") == Some(&class) {
+                return Ok(self.builtin("type.__init__"));
             }
-            let tuple = self.builtin("tuple");
-            if self.direct_subclass(obj, tuple) {
-                return Ok(self.builtin("object.__init__"));
-            }
-            if self.instance_of(obj, tuple) {
+            if self.inherits_native_object_init(class) {
                 let init = self.builtin("object.__init__");
-                return self.bind_attribute(init, obj, tuple);
+                return self.bind_attribute(init, receiver, class);
             }
         }
         if name == "__sizeof__" {
@@ -6102,21 +6160,6 @@ impl Context {
                 self.update_dictionary_field(obj, dictionary, name, None)
             }
             Value::Function { fields, .. } => self.delete_function_attr(obj, fields, name),
-            Value::Code(_) if matches!(name, "co_varnames" | "co_cellvars") => {
-                Err(self.readonly_getset_error("code", name, obj))
-            }
-            Value::Code(_)
-                if matches!(
-                    name,
-                    "co_qualname"
-                        | "co_argcount"
-                        | "co_posonlyargcount"
-                        | "co_kwonlyargcount"
-                        | "co_nlocals"
-                ) =>
-            {
-                Err(Error::new("AttributeError", "readonly attribute"))
-            }
             Value::Complex(_) if matches!(name, "real" | "imag") => {
                 Err(Error::new("AttributeError", "readonly attribute"))
             }
@@ -6357,7 +6400,8 @@ impl Context {
         }
         if matches!(
             self.heap.get(obj),
-            Value::LzmaDecompressor(_)
+            Value::Code(_)
+                | Value::LzmaDecompressor(_)
                 | Value::Bz2Decompressor(_)
                 | Value::ThreadHandle(_)
                 | Value::ZstdDecompressor(_)
@@ -7275,25 +7319,6 @@ impl Context {
         }
         let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
-            Value::Code(_) if matches!(name, "co_varnames" | "co_cellvars") => {
-                return Err(self.readonly_getset_error("code", name, obj));
-            }
-            Value::Code(_)
-                if matches!(
-                    name,
-                    "co_name"
-                        | "co_qualname"
-                        | "co_filename"
-                        | "co_firstlineno"
-                        | "co_flags"
-                        | "co_argcount"
-                        | "co_posonlyargcount"
-                        | "co_kwonlyargcount"
-                        | "co_nlocals"
-                ) =>
-            {
-                return Err(Error::new("AttributeError", "readonly attribute"));
-            }
             Value::Property(property) if name == "__doc__" => property.doc = value,
             Value::Complex(_) if matches!(name, "real" | "imag") => {
                 return Err(Error::new("AttributeError", "readonly attribute"));
@@ -7478,6 +7503,25 @@ impl Context {
                 self.type_name(object)
             ),
         ))
+    }
+
+    /// An intrinsic allocator consumes the constructor arguments only when the MRO
+    /// leaves initialization to object. Some native descriptors are exposed lazily.
+    pub(super) fn inherits_native_object_init(&self, class: Id) -> bool {
+        let Some(layout) = self.allocation_base(class) else {
+            return false;
+        };
+        let Value::Native(owner) = self.heap.get(layout) else {
+            return false;
+        };
+        if self.builtins.get("object") == Some(&layout) || !builtins::owns_native_new(owner) {
+            return false;
+        }
+        match self.class_attr(class, "__init__") {
+            Some(init) => self.builtins.get("object.__init__") == Some(&init),
+            None => wrapper_descriptor::BuiltinDescriptor::lookup(&format!("{owner}.__init__"))
+                .is_none(),
+        }
     }
 
     /// These native layouts inherit object.__new__ for bare instance allocation.
@@ -8155,8 +8199,8 @@ impl Context {
             {
                 let object =
                     builtins::noargs_method_receiver(self, owner, "__reduce__", &args, &kwargs)?;
-                if owner == "BaseException" {
-                    self.reduce_exception(object)
+                if matches!(owner, "BaseException" | "ImportError") {
+                    self.reduce_exception(object, owner)
                 } else {
                     // These classes declare reducers for additional native fields.
                     Err(stdlib::pickle::unsupported_reducer(self, object))

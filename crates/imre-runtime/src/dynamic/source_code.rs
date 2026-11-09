@@ -3177,6 +3177,7 @@ impl Context {
             parsed_parameters: Default::default(),
             varnames: NONE,
             cellvars: NONE,
+            freevar_names: NONE,
             name,
             qualname,
             doc,

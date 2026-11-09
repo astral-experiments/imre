@@ -160,34 +160,6 @@ pub(super) fn call(
             ),
         ));
     }
-    if name == "peek" {
-        let BinaryFile::Reader { slot, .. } = handle.as_ref() else {
-            unreachable!("readable receiver")
-        };
-        let mut slot = slot.borrow_mut();
-        let input = slot
-            .as_mut()
-            .ok_or_else(|| Error::new("ValueError", "peek of closed file"))?;
-        return Ok(ctx.alloc(Value::Bytes(crate::objects::peek_bytes(input)?)));
-    }
-    if name == "read1" {
-        let size = args
-            .first()
-            .copied()
-            .map(|n| ssize(ctx, n))
-            .transpose()?
-            .filter(|&n| n >= 0)
-            .unwrap_or(super::DEFAULT_BUFFER_SIZE);
-        let BinaryFile::Reader { slot, .. } = handle.as_ref() else {
-            unreachable!("readable receiver")
-        };
-        let mut slot = slot.borrow_mut();
-        let source = slot
-            .as_mut()
-            .ok_or_else(|| Error::new("ValueError", "read of closed file"))?;
-        let data = descriptor_buffer::read_once(source, size)?;
-        return Ok(ctx.alloc(Value::Bytes(data)));
-    }
     let result = files::binary_method(ctx, buffer, name, args)?;
     Ok(if name == "__enter__" {
         receiver

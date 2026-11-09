@@ -55,6 +55,7 @@ def current():
         value: Later
         category: ClassVar[Later]
 
+    assert Deferred.__annotate__.__code__.co_flags == 19
     init = Deferred.__init__
     assert isinstance(get_annotations(init, format=Format.FORWARDREF)["value"], ForwardRef)
     assert get_annotations(init, format=Format.STRING) == {"value": "Later", "return": "None"}

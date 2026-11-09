@@ -2,7 +2,7 @@
 //! Only the compiler can certify that the function needs no surrounding heap.
 
 use super::thread_worker::Operation;
-use super::value::{Body, Code, CodeObject};
+use super::value::{Body, Code, CodeObject, WorkerStack};
 use super::{Context, Error, Id, NONE, Result, Value, copy_label, ffi};
 use crate::objects::locks::PrimitiveLock;
 use crate::objects::logging::HandlerLock;
@@ -16,6 +16,7 @@ enum Argument {
 }
 
 pub(super) struct Callback {
+    frames: WorkerStack,
     entry: Code,
     module: String,
     name: String,
@@ -347,6 +348,7 @@ impl Callback {
         values: Vec<Argument>,
     ) -> Result<Self> {
         Ok(Self {
+            frames: WorkerStack::reserve()?,
             entry,
             module: copy_label(&ctx.scope_data(scope).module)?,
             name: copy_label(ctx.str_value(code.name)?)?,
@@ -369,7 +371,7 @@ impl Callback {
     }
 
     pub(super) fn load(self) -> Result<(Context, Id, Vec<Id>)> {
-        let mut heap = super::Heap::new();
+        let mut heap = super::Heap::with_worker_stack(Some(self.frames));
         heap.allocation_traces = self.allocation_traces;
         let mut ctx = ffi::new_context_with_heap(self.config, std::iter::empty::<String>(), heap);
         ctx.heap.gc_settings = self.gc_settings;

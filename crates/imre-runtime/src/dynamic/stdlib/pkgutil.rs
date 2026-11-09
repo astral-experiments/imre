@@ -33,10 +33,7 @@ pub(super) fn call(
             let name = text.to_owned();
             Ok(ctx.find_module(&name)?.unwrap_or(NONE))
         }
-        "find_spec" => {
-            let name = text.to_owned();
-            ctx.find_spec(&name, &name, true, None)
-        }
+        "find_spec" => ctx.find_spec(*value, *value, true, None),
         _ => unreachable!(),
     }
 }

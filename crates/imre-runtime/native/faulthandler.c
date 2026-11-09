@@ -33,15 +33,22 @@ typedef struct {
 _Static_assert(__atomic_always_lock_free(sizeof(uintptr_t), 0),
                "signal-time gate ownership must be lock-free");
 typedef _Atomic(uintptr_t) Gate;
+/* The pthread owns one slot. Nested interpreter entries park their publications
+ * on that slot; no Python object or live heap frame crosses this boundary. */
+typedef struct Publication {
+    struct Publication *previous;
+    const void *interpreter;
+    Frame *frames;
+    uint64_t incarnation;
+    size_t depth, capacity;
+} Publication;
 typedef struct {
     Gate busy;
-    Frame *frames;
+    Publication *active, *top;
     pthread_t thread;
-    /* Both numbers belong to the slot and survive the exit of its owner. */
-    uint64_t revision, incarnation;
+    uint64_t revision;  /* Survives slot reuse. */
     pid_t pid;
     char name[32];
-    size_t depth, capacity;
     void *alt_stack;
 } Slot;
 
@@ -58,6 +65,9 @@ static _Thread_local _Atomic(Slot *) local __attribute__((tls_model("initial-exe
 #else
 static _Thread_local _Atomic(Slot *) local;
 #endif
+/* Only normal execution accesses this TLS value, including before the first frame. */
+static _Thread_local const void *current_interpreter;
+typedef struct { Slot *slot; const void *interpreter; } PreviousPublication;
 static pthread_key_t key;
 static pthread_once_t key_once = PTHREAD_ONCE_INIT;
 static int key_ready;
@@ -82,19 +92,28 @@ static int try_gate(Gate *gate, uintptr_t thread) {
 /* Only normal execution waits. The interrupted thread may itself own a gate. */
 static void lock(Slot *s, pthread_t thread) { while (!try_gate(&s->busy, (uintptr_t)thread)) {} }
 
-static void drop_slot(void *value) {
-    Slot *s = value;
-    lock(s, s->thread);
-    Frame *frames = s->frames;
+static void free_publications(Publication *top) {
+    while (top) {
+        Publication *previous = top->previous;
+        free(top->frames);
+        free(top);
+        top = previous;
+    }
+}
+
+static void drop_thread(void *ptr) {
+    Slot *s = ptr;
+    lock(s, pthread_self());
+    Publication *orphan = s->top;
     void *alt = s->alt_stack;
+    s->top = s->active = NULL;
     s->thread = (pthread_t)0;
+    s->pid = 0;
     s->alt_stack = NULL;
-    s->frames = NULL;
-    s->depth = 0;
-    s->capacity = 0;
     atomic_store_explicit(&local, NULL, memory_order_relaxed);
+    current_interpreter = NULL;
     unlock(s);
-    free(frames);
+    free_publications(orphan);
     if (alt) {
         stack_t saved;
         if (sigaltstack(NULL, &saved) != 0) return;
@@ -105,6 +124,44 @@ static void drop_slot(void *value) {
         free(alt);
     }
 }
+PreviousPublication imre_fault_enter(const void *interpreter) {
+    Slot *s = atomic_load_explicit(&local, memory_order_relaxed);
+    PreviousPublication saved = {NULL, current_interpreter};
+    if (s) {
+        lock(s, pthread_self());
+        if (s->active) saved.slot = s;
+        s->active = NULL;
+        unlock(s);
+    }
+    current_interpreter = interpreter;
+    return saved;
+}
+
+static void truncate_frames(Publication *s, size_t depth) {
+    if (depth < s->depth) {
+        /* A later sparse publication must not expose calls that have returned. */
+        size_t end = s->depth < s->capacity ? s->depth : s->capacity;
+        for (size_t i = depth; i < end; i++) s->frames[i].revision = 0;
+        s->depth = depth;
+    }
+}
+
+void imre_fault_leave(const PreviousPublication *saved) {
+    Slot *s = atomic_load_explicit(&local, memory_order_relaxed);
+    if (s) {
+        lock(s, pthread_self());
+        Publication *done = s->active;
+        if (done) s->top = done->previous;
+        s->active = saved->slot == s ? s->top : NULL;
+        unlock(s);
+        if (done) {
+            free(done->frames);
+            free(done);
+        }
+    }
+    current_interpreter = saved->interpreter;
+}
+
 /* The child cannot wait for vanished publishers. A busy foreign slot can be
  * between realloc and publication of the new pointer, so abandon its storage.
  * Quiescent orphans are reclaimed on the next normal claim, outside this hook.
@@ -124,12 +181,12 @@ static void after_fork(void) {
             s->pid = pid;
         } else {
             if (busy && busy != self) {
-                s->frames = NULL;
+                s->top = NULL;
                 s->alt_stack = NULL;
             }
             /* A later child pthread may reuse this old identifier before its own fork. */
             s->thread = (pthread_t)0;
-            s->depth = 0;
+            s->active = NULL;
             s->pid = 0;
         }
         if (busy != self) unlock(s);
@@ -140,7 +197,7 @@ static void after_fork(void) {
     sigprocmask(SIG_SETMASK, &previous, NULL);
 }
 static void make_key(void) {
-    if (pthread_key_create(&key, drop_slot) != 0) return;
+    if (pthread_key_create(&key, drop_thread) != 0) return;
     if (pthread_atfork(NULL, NULL, after_fork) == 0) key_ready = 1;
     else pthread_key_delete(key);
 }
@@ -150,35 +207,42 @@ static Slot *thread_slot(void) {
     if (current) return current;
     pthread_once(&key_once, make_key);
     if (!key_ready) return NULL;
-    Frame *frames = calloc(1, sizeof(Frame));
-    if (!frames) return NULL;
     pthread_t thread = pthread_self();
     for (size_t i = 0; i < MAX_THREADS; i++) {
         Slot *s = &slots[i];
         lock(s, thread);
-        if ((!s->frames || !s->pid) && s->revision != UINT64_MAX &&
-            pthread_setspecific(key, s) == 0) {
-            Frame *orphan = s->frames;
+        if (!s->pid && s->revision != UINT64_MAX && pthread_setspecific(key, s) == 0) {
+            Publication *orphan = s->top;
             void *alt = s->alt_stack;
             s->alt_stack = NULL;
-            s->depth = 0;
-            s->incarnation = next_revision(s);
-            s->frames = frames;
-            s->capacity = 1;
+            s->top = s->active = NULL;
             s->thread = thread;
             s->pid = getpid();
             s->name[0] = 0;
-            pthread_getname_np(s->thread, s->name, sizeof(s->name));
+            pthread_getname_np(thread, s->name, sizeof(s->name));
             atomic_store_explicit(&local, s, memory_order_relaxed);
             unlock(s);
-            if (orphan) free(orphan);
-            if (alt) free(alt);
+            free_publications(orphan);
+            free(alt);
             return s;
         }
         unlock(s);
     }
-    free(frames);
     return NULL;
+}
+
+/* Called only by normal publishers under the physical slot gate. */
+static Publication *active_publication(Slot *s) {
+    if (!s->active && s->revision != UINT64_MAX) {
+        Publication *p = calloc(1, sizeof(*p));
+        if (p) {
+            p->previous = s->top;
+            p->incarnation = next_revision(s);
+            p->interpreter = current_interpreter;
+            s->top = s->active = p;
+        }
+    }
+    return s->active;
 }
 
 /* Both inputs are valid UTF-8. Limit by code points, before escaping. */
@@ -201,19 +265,21 @@ void imre_fault_frame(size_t index, const char *file, size_t file_len,
     if (!s) return;
     lock(s, s->thread);
     s->pid = getpid();
+    Publication *p = active_publication(s);
+    if (!p) { unlock(s); return; }
     /* Keep callers past the report limit. They become visible on unwind. */
-    if (index >= s->depth) s->depth = index + 1;
-    if (index >= s->capacity) {
-        size_t n = s->capacity * 2;
+    if (index >= p->depth) p->depth = index + 1;
+    if (index >= p->capacity) {
+        size_t n = p->capacity * 2;
         if (n <= index) n = index + 1;
         if (n == 0 || n > SIZE_MAX / sizeof(Frame)) { unlock(s); return; }
-        Frame *frames = realloc(s->frames, n * sizeof(Frame));
+        Frame *frames = realloc(p->frames, n * sizeof(Frame));
         if (!frames) { unlock(s); return; }
-        memset(frames + s->capacity, 0, (n - s->capacity) * sizeof(Frame));
-        s->frames = frames;
-        s->capacity = n;
+        memset(frames + p->capacity, 0, (n - p->capacity) * sizeof(Frame));
+        p->frames = frames;
+        p->capacity = n;
     }
-    Frame *f = &s->frames[index];
+    Frame *f = &p->frames[index];
     copy_text(&f->file, file, file_len);
     copy_text(&f->name, name, name_len);
     f->line = line;
@@ -224,8 +290,9 @@ void imre_fault_line(size_t index, uint32_t line) {
     Slot *s = atomic_load_explicit(&local, memory_order_relaxed);
     if (s) {
         lock(s, s->thread);
-        if (index < s->depth && index < s->capacity) {
-            Frame *f = &s->frames[index];
+        Publication *p = s->active;
+        if (p && index < p->depth && index < p->capacity) {
+            Frame *f = &p->frames[index];
             if (f->revision && f->line != line) {
                 f->line = line;
                 f->revision = next_revision(s);
@@ -238,12 +305,7 @@ void imre_fault_truncate(size_t depth) {
     Slot *s = atomic_load_explicit(&local, memory_order_relaxed);
     if (s) {
         lock(s, s->thread);
-        if (depth < s->depth) {
-            /* A later sparse publication must not expose calls that have returned. */
-            size_t end = s->depth < s->capacity ? s->depth : s->capacity;
-            for (size_t i = depth; i < end; i++) s->frames[i].revision = 0;
-            s->depth = depth;
-        }
+        if (s->active) truncate_frames(s->active, depth);
         unlock(s);
     }
 }
@@ -289,22 +351,41 @@ static void thread_header(int fd, pthread_t tid, const char *name, int current) 
     LIT(fd, " (most recent call first):\n");
 }
 
+/* Caller holds the slot gate. Fatal signals inspect only the active record.
+ * An owner-bound dump can also select a parked record on the same pthread. */
+static Publication *select_publication(Slot *s, const void *const *interpreter, uint64_t incarnation) {
+    Publication *p = interpreter ? s->top : s->active;
+    for (; p; p = p->previous) {
+        if ((!interpreter || p->interpreter == *interpreter) &&
+            (!incarnation || p->incarnation == incarnation)) return p;
+        if (!interpreter) break;
+    }
+    return NULL;
+}
+
 /* A single bounded stack copy guards the lifetime of a worker or a frame
  * that is returning on another thread while this report is being written. */
-static int dump_slot(Slot *s, int fd, int all, int preceding, Frame *f, uintptr_t self) {
+static int dump_slot(Slot *s, int fd, int all, int preceding, Frame *f, uintptr_t self,
+                     const void *const *interpreter) {
     if (!try_gate(&s->busy, self)) return 0;
+    int current;
+    uint64_t incarnation;
+    {
+        Publication *p = select_publication(s, interpreter, 0);
 #if defined(__linux__)
-    /* The caller's slot survives fork, even before it publishes its new PID. */
-    int current = s == atomic_load_explicit(&local, memory_order_relaxed);
+        /* The caller's slot survives fork, even before it publishes its new PID. */
+        current = s == atomic_load_explicit(&local, memory_order_relaxed);
 #else
-    /* Darwin may allocate on first TLS access. Keep the fatal path TLS-free. */
-    int current = s->frames && s->pid == getpid() && pthread_equal(s->thread, pthread_self());
+        /* Darwin may allocate on first TLS access. Keep the fatal path TLS-free. */
+        current = s->pid == getpid() && pthread_equal(s->thread, pthread_self());
 #endif
-    if (!s->frames || (!current && (!all || !s->depth || s->pid != getpid()))) {
-        unlock(s);
-        return 0;
+        current = p && p == s->active && current;
+        if (!p || (!current && (!all || !p->depth || s->pid != getpid()))) {
+            unlock(s);
+            return 0;
+        }
+        incarnation = p->incarnation;
     }
-    uint64_t incarnation = s->incarnation;
     pthread_t thread = s->thread;
     char name[sizeof(s->name)];
     memcpy(name, s->name, sizeof(name));
@@ -314,20 +395,28 @@ static int dump_slot(Slot *s, int fd, int all, int preceding, Frame *f, uintptr_
     else LIT(fd, "Stack (most recent call first):\n");
     /* The header write can block. Select the stack now, only for that owner. */
     if (!try_gate(&s->busy, self)) goto unavailable;
-    int same_owner = s->frames && s->incarnation == incarnation;
-    size_t depth = s->depth;
-    uint64_t revision = s->revision;
+    size_t depth;
+    uint64_t revision;
+    {
+        Publication *p = select_publication(s, interpreter, incarnation);
+        if (!p) { unlock(s); goto unavailable; }
+        depth = p->depth;
+        revision = s->revision;
+    }
     unlock(s);
-    if (!same_owner) goto unavailable;
     if (!depth) LIT(fd, "  <no Python frame>\n");
     size_t count = depth > MAX_FRAMES ? MAX_FRAMES : depth;
     for (size_t i = 0; i < count; i++) {
         size_t index = depth-1-i;
         if (!try_gate(&s->busy, self)) goto unavailable;
         /* Only a record still present from the selected stack may be emitted. */
-        int valid = index < s->depth && index < s->capacity &&
-                    s->frames[index].revision && s->frames[index].revision <= revision;
-        if (valid) *f = s->frames[index];
+        int valid;
+        {
+            Publication *p = select_publication(s, interpreter, incarnation);
+            valid = p && index < p->depth && index < p->capacity &&
+                    p->frames[index].revision && p->frames[index].revision <= revision;
+            if (valid) *f = p->frames[index];
+        }
         unlock(s);
         if (!valid) goto unavailable;
         LIT(fd, "  File \""); emit_text(fd, &f->file);
@@ -340,14 +429,14 @@ unavailable:
     LIT(fd, "  ...\n");
     return current ? 2 : 1;
 }
-void imre_fault_dump(int fd, int all_threads) {
+static void dump_threads(int fd, int all_threads, const void *const *interpreter) {
     uintptr_t self = (uintptr_t)pthread_self();
     size_t buf = 0;
     while (buf < MAX_THREADS && !try_gate(&scratch[buf].used, self)) buf++;
     if (buf == MAX_THREADS) { LIT(fd, "  <traceback unavailable>\n"); return; }
     int preceding = 0, current = 0;
     for (size_t i = MAX_THREADS; i; i--) {
-        int which = dump_slot(&slots[i - 1], fd, all_threads, preceding, &scratch[buf].frame, self);
+        int which = dump_slot(&slots[i - 1], fd, all_threads, preceding, &scratch[buf].frame, self, interpreter);
         if (which) preceding = 1;
         if (which == 2) current = 1;
     }
@@ -358,6 +447,11 @@ void imre_fault_dump(int fd, int all_threads) {
         LIT(fd, "  <no Python frame>\n");
     }
     atomic_store_explicit(&scratch[buf].used, 0, memory_order_release);
+}
+
+void imre_fault_dump(int fd, int all_threads) {
+    const void *interpreter = current_interpreter;
+    dump_threads(fd, all_threads, &interpreter);
 }
 
 static void native_stack(int fd, void *context) {
@@ -447,7 +541,7 @@ static void fatal(int sig, siginfo_t *info, void *context) {
     LIT(fd, "Fatal Python error: ");
     emit(fd, signals[i].name, strlen(signals[i].name));
     LIT(fd, "\n\n");
-    imre_fault_dump(fd, (opts >> 32) & 1);
+    dump_threads(fd, (opts >> 32) & 1, NULL);
     if ((opts >> 33) & 1) native_stack(fd, context);
     errno = saved_errno;
     /* SA_NODEFER lets the original disposition receive this signal immediately
@@ -458,7 +552,12 @@ static void alternate_stack(void) {
     stack_t old;
     if (sigaltstack(NULL, &old) != 0 || !(old.ss_flags & SS_DISABLE)) return;
     Slot *s = thread_slot();
-    if (!s || s->alt_stack) return;
+    if (!s) return;
+    /* An enabled thread can have a named empty Python stack before its first frame. */
+    lock(s, pthread_self());
+    int published = active_publication(s) != NULL;
+    unlock(s);
+    if (!published || s->alt_stack) return;
     size_t size = SIGSTKSZ;
     if (size < 65536) size = 65536;
     void *buf = malloc(size);
@@ -599,7 +698,7 @@ static void user_signal(int sig) {
      * Keep that exact action for unregister without redelivering to ourselves. */
     int chain = active->chain && active->previous.sa_handler != user_signal;
     unpin(&slot->readers, &previous);
-    imre_fault_dump(fd, all);
+    dump_threads(fd, all, NULL);
     if (chain) {
         active = read_user(slot, &previous);
         int deliver = active && active->serial == serial;

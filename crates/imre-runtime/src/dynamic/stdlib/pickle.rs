@@ -169,6 +169,15 @@ pub(in crate::dynamic) fn unsupported_reducer(ctx: &Context, obj: Id) -> Error {
     )
 }
 
+/// Identify native layouts whose default object state cannot reconstruct their payload.
+fn stateful_native_layout(ctx: &Context, base: Id) -> Option<&'static str> {
+    if ctx.builtins.get("socket.socket") == Some(&base) {
+        Some("_socket.socket")
+    } else {
+        ctx.itertools_layout(base)
+    }
+}
+
 /// Preserve the native base for legacy reductions and consult constructor hooks for newer protocols.
 fn native_layout_reduce(
     ctx: &mut Context,
@@ -188,7 +197,7 @@ fn native_layout_reduce(
             ctx.builtin("tuple")
         } else {
             ctx.allocation_base(reported_class)
-                .filter(|&base| ctx.itertools_layout(base).is_some())
+                .filter(|&base| stateful_native_layout(ctx, base).is_some())
                 .unwrap_or(NONE)
         };
         return ctx.call(
@@ -230,7 +239,7 @@ fn default_instance_reduce(ctx: &mut Context, receiver: Id, protocol: i32) -> Re
         return Err(unsupported_reducer(ctx, receiver));
     };
     let base = ctx.allocation_base(class);
-    let cursor = base.and_then(|base| ctx.itertools_layout(base).map(|name| (base, name)));
+    let cursor = base.and_then(|base| stateful_native_layout(ctx, base).map(|name| (base, name)));
     if class == ctx.builtin("object")
         || (protocol >= 2 && base == Some(ctx.builtin("int")))
         || (protocol >= 2
@@ -280,7 +289,7 @@ fn reduce_without_newargs(
         && matches!(*ctx.heap.get(getstate), Value::Method { callable, receiver: bound, .. }
             if bound == receiver && ctx.builtins.get("object.__getstate__") == Some(&callable))
     {
-        // The default Python state cannot reconstruct the saved iterator and callable.
+        // The default Python state cannot reconstruct this native payload.
         let name = if class == base {
             name
         } else {
@@ -320,13 +329,18 @@ fn default_reduction(ctx: &mut Context, obj: Id, protocol: i32) -> Result<Id> {
     match value {
         Value::ClassMethod { .. }
         | Value::StaticMethod { .. }
+        | Value::Socket(_)
         | Value::ZstdCompressor(_)
         | Value::ZstdDecompressor(_)
         | Value::Bz2Compressor(_)
         | Value::Bz2Decompressor(_)
         | Value::LzmaCompressor(_)
         | Value::LzmaDecompressor(_) => {
-            let name = ctx.type_name(obj);
+            let name = if matches!(value, Value::Socket(_)) {
+                "_socket.socket"
+            } else {
+                ctx.type_name(obj)
+            };
             // The legacy copyreg reducer uses __name__; newer protocols use the native tp_name.
             let name = if protocol < 2 {
                 name.rsplit('.').next().unwrap_or(name)

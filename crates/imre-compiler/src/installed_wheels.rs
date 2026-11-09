@@ -16,17 +16,104 @@ pub(crate) fn records(root: &Path) -> Vec<PathBuf> {
     paths
 }
 
+/// Application and installed sources on the search entry selected by the module launcher.
+pub(crate) struct ModuleEntryRoot {
+    root: PathBuf,
+    application: bool,
+    installed: HashSet<PathBuf>,
+}
+
+impl ModuleEntryRoot {
+    pub(crate) fn select(
+        root: &Path,
+        entry: &Path,
+        path_zero: bool,
+        records: &mut WheelRecords,
+        options: &crate::CompileOptions,
+        inputs: &mut SourceInputs,
+        fs: &mut FileSystem<'_>,
+    ) -> Option<Self> {
+        if !fs.is_dir(root) {
+            return None;
+        }
+        if !path_zero {
+            if options.pythonpath.is_empty() {
+                return None;
+            }
+            let identity = fs.canonicalize(root).ok()?;
+            let mut matches =
+                |path: &PathBuf| fs.canonicalize(path).ok().as_ref() == Some(&identity);
+            let index = options.extension_paths.iter().position(&mut matches)?;
+            if !options.pythonpath.contains(&index) || options.installed_dirs().any(matches) {
+                return None;
+            }
+        }
+        let installed: HashSet<_> = records
+            .discover(root, inputs, fs)
+            .into_iter()
+            .flat_map(|wheel| wheel.members.into_iter().map(|(path, _)| path))
+            .collect();
+        Some(Self {
+            application: path_zero || !installed.contains(entry),
+            root: root.to_owned(),
+            installed,
+        })
+    }
+
+    pub(crate) fn is_program(&self, root: &Path, path: &Path) -> Option<bool> {
+        (root == self.root).then(|| self.application && !self.installed.contains(path))
+    }
+}
+
 pub(crate) struct InstalledWheel {
     members: Vec<(PathBuf, String)>,
 }
 
-impl InstalledWheel {
+/// The checked resolver and the module registry read the same installed distribution metadata.
+#[derive(Default)]
+pub(crate) struct WheelRecords(HashMap<PathBuf, Record>);
+
+struct Record {
+    digest: String,
+    paths: Vec<PathBuf>,
+}
+
+impl WheelRecords {
+    fn read(&mut self, path: PathBuf, fs: &mut FileSystem<'_>) -> std::io::Result<&Record> {
+        use std::collections::hash_map::Entry;
+        Ok(match self.0.entry(path) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let bytes = fs.read(entry.key())?;
+                let paths = csv::ReaderBuilder::new()
+                    .has_headers(false)
+                    .flexible(true)
+                    .from_reader(bytes.as_slice())
+                    .records()
+                    .filter_map(Result::ok)
+                    .filter(|row| row.len() == 3)
+                    .map(|row| PathBuf::from(&row[0]))
+                    .collect();
+                entry.insert(Record {
+                    digest: blake3::hash(&bytes).to_hex().to_string(),
+                    paths,
+                })
+            }
+        })
+    }
+
     pub(crate) fn discover(
+        &mut self,
         root: &Path,
         inputs: &mut SourceInputs,
         filesystem: &mut FileSystem<'_>,
-    ) -> Vec<Self> {
-        let records = filesystem.wheel_records(root);
+    ) -> Vec<InstalledWheel> {
+        let prior = inputs.wheel_records.iter().find(|(dir, _)| dir == root);
+        let register = prior.is_none();
+        let records = match prior {
+            Some((_, records)) => records.clone(),
+            None => filesystem.wheel_records(root),
+        };
         let canonical_root = filesystem.canonicalize(root).ok();
         let mut wheels = Vec::new();
         for path in &records {
@@ -34,28 +121,23 @@ impl InstalledWheel {
                 inputs.file_checks.insert(path.clone(), false);
                 continue;
             }
-            let (Ok(bytes), Ok(identity)) = (filesystem.read(path), filesystem.canonicalize(path))
-            else {
+            let Ok(identity) = filesystem.canonicalize(path) else {
                 inputs.missing.push(path.clone());
                 continue;
             };
-            inputs.files.push((
-                path.clone(),
-                identity,
-                blake3::hash(&bytes).to_hex().to_string(),
-            ));
-            let mut csv = csv::ReaderBuilder::new()
-                .has_headers(false)
-                .flexible(true)
-                .from_reader(bytes.as_slice());
-            let members = csv
-                .records()
-                .filter_map(Result::ok)
-                .filter_map(|row| {
-                    if row.len() != 3 {
-                        return None;
-                    }
-                    let member = Path::new(row.get(0)?);
+            let Ok(record) = self.read(identity.clone(), filesystem) else {
+                inputs.missing.push(path.clone());
+                continue;
+            };
+            if register {
+                inputs
+                    .files
+                    .push((path.clone(), identity, record.digest.clone()));
+            }
+            let members = record
+                .paths
+                .iter()
+                .filter_map(|member| {
                     let relative = if member.is_absolute() {
                         member
                             .strip_prefix(root)
@@ -68,12 +150,16 @@ impl InstalledWheel {
                     Some((root.join(relative), name))
                 })
                 .collect();
-            wheels.push(Self { members });
+            wheels.push(InstalledWheel { members });
         }
-        inputs.wheel_records.push((root.to_owned(), records));
+        if register {
+            inputs.wheel_records.push((root.to_owned(), records));
+        }
         wheels
     }
+}
 
+impl InstalledWheel {
     pub(crate) fn take_active(
         pending: &mut Vec<Self>,
         sources: &[(String, PathBuf, String)],
@@ -126,7 +212,8 @@ mod tests {
         )
         .unwrap();
         let mut inputs = SourceInputs::default();
-        let mut wheels = InstalledWheel::discover(root, &mut inputs, &mut FileSystem::default());
+        let mut catalog = WheelRecords::default();
+        let mut wheels = catalog.discover(root, &mut inputs, &mut FileSystem::default());
         let mut candidates = HashMap::new();
         assert!(InstalledWheel::take_active(&mut wheels, &[], &mut candidates).is_none());
         let files = vec![(
@@ -146,6 +233,11 @@ mod tests {
         std::fs::remove_dir(root.join("other-1.dist-info")).unwrap();
         std::fs::write(record, "demo/replacement.py,,\n").unwrap();
         assert!(!inputs.fresh());
+        let mut registered = SourceInputs::default();
+        catalog.discover(root, &mut registered, &mut FileSystem::default());
+        catalog.discover(root, &mut registered, &mut FileSystem::default());
+        assert_eq!(registered.files, inputs.files);
+        assert_eq!(registered.wheel_records, inputs.wheel_records);
     }
 
     #[cfg(unix)]
@@ -160,7 +252,8 @@ mod tests {
         let member = root.join("plugins/one.py");
         std::fs::write(info.join("RECORD"), format!("{},,\n", member.display())).unwrap();
         let mut inputs = SourceInputs::default();
-        let mut wheels = InstalledWheel::discover(&alias, &mut inputs, &mut FileSystem::default());
+        let mut wheels =
+            WheelRecords::default().discover(&alias, &mut inputs, &mut FileSystem::default());
         let mut candidates = HashMap::new();
         let sources = vec![("plugins".to_owned(), alias.join("plugins"), String::new())];
         let names = InstalledWheel::take_active(&mut wheels, &sources, &mut candidates).unwrap();

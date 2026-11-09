@@ -447,7 +447,7 @@ impl Function<'_, '_> {
                         v.decorator_list.first().map_or(v.start(), Ranged::start),
                         DefinitionName::Binding(&v.name),
                         Some(&v.parameters),
-                        v.returns.as_deref(),
+                        Some(v),
                         type_params,
                         body,
                     );
@@ -752,7 +752,7 @@ impl Function<'_, '_> {
         start: TextSize,
         name: DefinitionName<'_>,
         params: Option<&ast::Parameters>,
-        returns: Option<&ast::Expr>,
+        function: Option<&ast::StmtFunctionDef>,
         type_params: Option<&ast::TypeParams>,
         mut body: Body<'_>,
     ) -> String {
@@ -768,6 +768,11 @@ impl Function<'_, '_> {
         } else {
             format!("{}{name}", self.prefix)
         };
+        let returns = function.and_then(|f| f.returns.as_deref());
+        // A generic function's immediate lexical parent is its type-parameter scope,
+        // even when lowering does not materialize a separate parameter frame.
+        let generic = function.is_some_and(|f| f.type_params.is_some());
+        let nested = self.in_function || generic;
         let header = matches!(body, Body::ClassParameters(_));
         let prefix = if let Body::ClassParameters(class) = &body {
             if self.declared_globals.contains(class.name.as_str()) {
@@ -790,23 +795,13 @@ impl Function<'_, '_> {
         let flags = match &body {
             Body::Namespace(..) => None,
             _ => {
-                use imre_ast::code_flags::*;
-                let mut flags = function_flags(
+                let mut flags = self.source.function_flags(
                     params,
-                    type_params.is_some() || self.in_function,
-                    !header
-                        && type_params.is_none()
-                        && !self.prefix.is_empty()
-                        && !self.prefix.ends_with(".<locals>."),
+                    nested,
+                    self.class_locals.is_some() && !self.annotation_lookup && !header && !generic,
                 );
-                if self.source.string_annotations {
-                    flags |= FUTURE_ANNOTATIONS;
-                }
-                if self.source.barry_as_flufl {
-                    flags |= FUTURE_BARRY_AS_BDFL;
-                }
                 if doc.is_some() {
-                    flags |= HAS_DOCSTRING;
+                    flags |= code_flags::HAS_DOCSTRING;
                 }
                 Some(flags | body.generator_flags())
             }
@@ -832,20 +827,9 @@ impl Function<'_, '_> {
                 class.as_ref(),
                 self.source.string_annotations,
             );
-            use imre_ast::code_flags::*;
-            let mut annotation_flags = OPTIMIZED | NEWLOCALS;
-            if type_params.is_some() || self.in_function {
-                annotation_flags |= NESTED;
-            }
-            if self.source.string_annotations {
-                annotation_flags |= FUTURE_ANNOTATIONS;
-            }
-            if self.source.barry_as_flufl {
-                annotation_flags |= FUTURE_BARRY_AS_BDFL;
-            }
             let mut metadata = json!({
                 "posonly": ["format"],
-                "code_flags": annotation_flags,
+                "code_flags": self.source.function_flags(None, nested, false),
                 "scope_reads": reads,
                 "scope_complete": true,
                 "scope_locals_complete": true,
@@ -1115,6 +1099,7 @@ impl Function<'_, '_> {
             let signature = self.text(
                 &json!({
                     "posonly": ["format"], "scope_complete": true, "scope_locals_complete": true,
+                    "code_flags": self.source.function_flags(None, false, false),
                 })
                 .to_string(),
             );

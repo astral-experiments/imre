@@ -13,6 +13,9 @@ class ClientContext(ssl.SSLContext):
 client = ClientContext(ssl.PROTOCOL_TLS_CLIENT, minimum_version=ssl.TLSVersion.TLSv1_3)
 assert client.minimum_version == ssl.TLSVersion.TLSv1_3
 assert client.check_hostname and client.verify_mode == ssl.CERT_REQUIRED
+assert ssl.get_protocol_name(client.protocol) == "PROTOCOL_TLS_CLIENT"
+assert ssl.get_protocol_name(int(ssl.PROTOCOL_SSLv23)) == "PROTOCOL_TLS"
+assert ssl.get_protocol_name(-1) == "<unknown>"
 
 
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

@@ -458,33 +458,20 @@ fn operand(
 /// Python 3.14 removes a shared literal space/tab prefix before compiling `-c`.
 /// Lines that contain only those characters do not determine the prefix.
 fn dedent(source: String) -> String {
-    let mut margin: Option<&str> = None;
-    for line in source.split('\n') {
-        let body = line.trim_start_matches([' ', '\t']);
-        if body.is_empty() {
-            continue;
-        }
-        let indent = &line[..line.len() - body.len()];
-        let shared = margin.map_or(indent.len(), |previous| {
-            previous
-                .bytes()
-                .zip(indent.bytes())
-                .take_while(|(a, b)| a == b)
-                .count()
-        });
-        if shared == 0 {
-            return source;
-        }
-        margin = Some(&indent[..shared]);
+    let lines = source
+        .split('\n')
+        .filter(|line| !line.trim_start_matches([' ', '\t']).is_empty());
+    let margin = imre_ast::strings::common_indent(lines);
+    if margin == 0 {
+        return source;
     }
-    let Some(margin) = margin else { return source };
     let mut result = String::new();
     for (i, line) in source.split('\n').enumerate() {
         if i != 0 {
             result.push('\n');
         }
         if !line.trim_start_matches([' ', '\t']).is_empty() {
-            result.push_str(&line[margin.len()..]);
+            result.push_str(&line[margin..]);
         }
     }
     result

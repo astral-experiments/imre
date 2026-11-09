@@ -754,7 +754,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_CallableGenericAlias"
             | "_LiteralGenericAlias",
         ) => ctx.builtin(&format!("typing.{name}")),
-        ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),
         #[cfg(target_os = "linux")]
         ("time", "CLOCK_REALTIME") => ctx.int(i64::from(libc::CLOCK_REALTIME)),
         ("time", "_STRUCT_TM_ITEMS") => ctx.int(11),
@@ -995,10 +994,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_string", "formatter_parser" | "formatter_field_name_split")
         | (
             "inspect",
-            "iscoroutinefunction"
-            | "_frame_position"
+            "_frame_position"
             | "_abstract_flags"
-            | "markcoroutinefunction"
             | "_descriptor_get"
             | "_native_data_descriptor"
             | "_static_member"
@@ -2474,6 +2471,7 @@ pub(super) fn call(
             ));
         }
         let mut marked = original.clone();
+        marked.freevar_names = NONE;
         marked.flags |= imre_ast::code_flags::ITERABLE_COROUTINE;
         let marked = ctx.alloc(Value::Code(marked));
         let func = ctx.weak_proxy_target(func)?;
@@ -2578,12 +2576,10 @@ pub(super) fn call(
                 return Ok(NONE);
             }
             ("native_code", [name, bundled], []) => {
-                let name = ctx.str_value(*name)?.to_owned();
-                return ctx.native_code(&name, *bundled == TRUE);
+                return ctx.native_code(*name, *bundled == TRUE);
             }
             ("native_source", [name, bundled], []) => {
-                let name = ctx.str_value(*name)?.to_owned();
-                return ctx.native_source(&name, *bundled == TRUE);
+                return ctx.native_source(*name, *bundled == TRUE);
             }
             ("native_spec_info", [name, path, bundled], []) => {
                 let name = ctx.str_value(*name)?.to_owned();
@@ -2594,11 +2590,11 @@ pub(super) fn call(
                 return ctx.registered_path_spec(*name, *path);
             }
             ("frozen_info" | "frozen_code", [name], []) => {
-                let name = ctx.str_value(*name)?.to_owned();
                 return if method == "frozen_info" {
+                    let name = ctx.str_value(*name)?.to_owned();
                     Ok(ctx.frozen_info(&name))
                 } else {
-                    ctx.frozen_code(&name)
+                    ctx.frozen_code(*name)
                 };
             }
             ("builtin_names_contains", [sys, key], []) => {
@@ -2631,17 +2627,15 @@ pub(super) fn call(
                 ctx.warn_import(*globals, &message, line, args.get(3).map(|id| *id == TRUE))?;
                 return Ok(NONE);
             }
-            ("import_module", [name] | [name, _], []) => {
-                let name = ctx.str_value(*name)?.to_owned();
+            ("import_module", [key] | [key, _], []) => {
+                let name = ctx.str_value(*key)?.to_owned();
                 let source_globals = args.get(1).copied().unwrap_or(NONE);
                 return ctx
-                    .find_module_from(&name, source_globals)?
-                    .ok_or_else(|| Context::missing_module(&name));
+                    .find_module_from(&name, *key, source_globals)?
+                    .ok_or_else(|| Context::missing_module(&name, *key));
             }
             ("find_spec", [fullname, original, finder], []) => {
-                let fullname = ctx.str_value(*fullname)?.to_owned();
-                let original = ctx.str_value(*original)?.to_owned();
-                return ctx.find_spec(&fullname, &original, false, Some(*finder));
+                return ctx.find_spec(*fullname, *original, false, Some(*finder));
             }
             ("namespace_locations", [name, path], []) => {
                 let name = ctx.str_value(*name)?.to_owned();

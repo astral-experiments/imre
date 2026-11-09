@@ -752,14 +752,16 @@ class _MagicSlot:
 
 class CallableMixin:
     def __call__(self, /, *args, **kwargs):
-        node = self._node
-        signature = getattr(node, "_call_signature", None)
+        signature = getattr(self._node, "_call_signature", None)
         if signature is not None:
             signature.bind(*args, **kwargs)
+        self._increment_mock_call(*args, **kwargs)
+        return self._mock_call(*args, **kwargs)
+
+    def _increment_mock_call(self, /, *args, **kwargs):
+        node = self._node
         node.called = True
-        node.call_args = _new_call(args, kwargs)
-        node.call_args_list.append(node.call_args)
-        node.call_count = len(node.call_args_list)
+        node._store_call(_new_call(args, kwargs))
         self.mock_calls.append(_Call(("", args, kwargs)))
 
         current = node
@@ -784,8 +786,6 @@ class CallableMixin:
                     method_name = parent._mock_name + "." + method_name
             parent.mock_calls.append(_Call((path, args, kwargs)))
             current = parent._node
-
-        return self._mock_call(*args, **kwargs)
 
     def _mock_call(self, /, *args, **kwargs):
         return self._execute_mock_call(*args, **kwargs)

@@ -130,9 +130,8 @@ mod structs;
 mod sumprod;
 pub(crate) mod tempdirs;
 mod text;
-pub(crate) use text::{
-    codepoint_search_window, dedent, hexadecimal, indexed_search_bounds, search_window,
-};
+pub(crate) use imre_ast::strings::{dedent, python_whitespace};
+pub(crate) use text::{codepoint_search_window, hexadecimal, indexed_search_bounds, search_window};
 pub(crate) use text::{translate, zfill};
 pub(crate) mod time;
 pub(crate) use text::{Case, UrlInput, capitalize, case_map, case_map_points, urlquote, urlsplit};
@@ -158,8 +157,7 @@ pub(crate) use zipfile::Archive as ZipArchive;
 
 pub(crate) use errno::{DOC as ERRNO_DOC, platform_entries as errno_entries};
 pub(crate) use files::{
-    FileState, GzipDecoder, Memory, Random, errno_error, errno_with_filename, file_flags,
-    os_error as gzip_read_error, prepare_file,
+    FileState, GzipDecoder, Memory, Random, errno_error, file_flags, os_error as gzip_read_error,
 };
 
 use super::{
@@ -1381,11 +1379,6 @@ unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Result<StrOwne
     // complete UTF-8 fragments preserves UTF-8, including the full-inline case.
     unsafe { result.set_len(length) };
     StrOwner::try_new(result).map_err(|_| Error::allocation())
-}
-
-/// Python also treats the four ASCII information separators as whitespace.
-pub(crate) fn python_whitespace(value: char) -> bool {
-    value.is_whitespace() || matches!(value, '\u{001c}'..='\u{001f}')
 }
 
 /// Removes a trailing set of Unicode scalars, or Python whitespace for null.

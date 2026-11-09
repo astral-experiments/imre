@@ -20,7 +20,7 @@ impl Checker<'_> {
             None,
             Some(&mut scope),
             None,
-            |checker, _, input| input.value(checker),
+            &mut |checker, _, input| input.value(checker),
         )?;
         let arg = |i: usize| args.values[args.order[i]].clone();
         let fd_op = |op, ty, args| Expr {

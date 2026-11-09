@@ -128,6 +128,11 @@ class _Node:
         self._history = []
         self._ancestors = []
 
+    def _store_call(self, received: _Call) -> None:
+        self.call_args = received
+        self.call_args_list.append(received)
+        self.call_count = len(self.call_args_list)
+
     def _reset_state(self, reset_return: bool, reset_effect: bool) -> None:
         self.called = False
         self.call_count = 0
@@ -209,9 +214,7 @@ class Mock:
     def _record(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> Mock:
         received = _new_call(args, kwargs)
         self._node.called = True
-        self._node.call_args = received
-        self._node.call_args_list.append(received)
-        self._node.call_count = len(self._node.call_args_list)
+        self._node._store_call(received)
         self._node._history.append(_format_recorded_call(received, "call"))
         for ancestor in self._node._ancestors:
             ancestor.calls.append(_format_recorded_call(received, ancestor.prefix))

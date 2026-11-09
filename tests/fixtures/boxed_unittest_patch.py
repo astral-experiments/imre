@@ -39,6 +39,23 @@ with pending:
 assert 'value' not in owner.__dict__
 
 
+class BackendRegistry:
+    @property
+    def current(self):
+        return next(backends)
+
+
+primary = Owner()
+primary.value = 1
+secondary = Owner()
+secondary.value = 2
+backends = iter((primary, secondary))
+registry = BackendRegistry()
+with patch('__main__.registry.current.value', 3):
+    assert primary.value == 3 and secondary.value == 2
+assert primary.value == 2
+
+
 @patch('sys.exit')
 def decorated(status, replacement):
     assert replacement is sys.exit
@@ -165,6 +182,12 @@ assert "value" not in owner.__dict__
 with patch.object(owner, "additional", create=True) as created:
     assert owner.additional is created
 assert not hasattr(owner, "additional")
+
+owner.additional = DEFAULT
+with patch.object(owner, "additional", 3, create=True):
+    assert owner.additional == 3
+assert "additional" not in vars(owner)
+
 
 class PatchBase:
     def test_inherited(self):

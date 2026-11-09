@@ -18,6 +18,73 @@ from pathlib import Path
 from fixture_entry import imported_fixture
 
 
+def check_module_search_root(imre, root, run):
+    app = root / "application"
+    app.mkdir()
+    (app / "wheel_module.py").write_text(
+        "def twice(n: int) -> int: return n * 2\n"
+        "def unused() -> int: return twice('x')\n"
+    )
+    distribution = app / "wheel_module-1.dist-info"
+    distribution.mkdir()
+    (distribution / "RECORD").write_text("wheel_module.py,,\n")
+    scores = app / "scores.py"
+    scores.write_text(
+        "def take(n: int, other: int) -> int: return n + other\n"
+        "def later(): raise LookupError('second argument')\n"
+        "try: take('x', later())\n"
+        "except LookupError as error: print(error.args[0])\n"
+    )
+    entry = app / "launch.py"
+    entry.write_text("import scores, wheel_module\nprint(wheel_module.twice(scores.take(1, 2)))\n")
+    result = run(imre, "-B", "-m", "launch", extra={"PYTHONPATH": str(app)})
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"second argument\n6\n", b""), result
+
+    # The entry comes from app even when the ordinary lookup of scores prefers the wheel.
+    wheel = root / "score-wheel"
+    wheel.mkdir()
+    (wheel / "scores.py").write_text("def take(n: int): return n\n")
+    metadata = wheel / "scores-1.dist-info"
+    metadata.mkdir()
+    (metadata / "RECORD").write_text("scores.py,,\n")
+    scores.write_text("def take(n: int): return n\n")
+    entry.write_text(
+        "import sys\nsys.path.insert(0, sys.argv[1])\nfrom scores import take\n"
+        "try: print(take(sys.argv[2]))\nexcept TypeError as error: print(error)\n"
+    )
+    search = {"PYTHONPATH": os.pathsep.join(map(str, (wheel, app)))}
+    for selected, expected in ((app, b'take argument "n" requires int\n'), (wheel, b"x\n")):
+        result = run(imre, "-B", "-m", "launch", str(selected), "x", extra=search)
+        assert (result.returncode, result.stdout, result.stderr) == (0, expected, b""), result
+
+    # Overlapping roots expose the same file as an application module and as a provider.
+    back = app / "back"
+    back.mkdir()
+    (back / "scores.py").write_text("def take(n: int): return n\n")
+    entry.write_text(
+        "import sys\nfrom back import scores as nested\n"
+        "sys.path.insert(0, sys.argv[1])\nimport scores\n"
+        "for module in (nested, scores):\n"
+        "    try: print(module.take(sys.argv[2]))\n"
+        "    except TypeError as error: print(error)\n"
+    )
+    search = {"PYTHONPATH": os.pathsep.join(map(str, (app, back)))}
+    result = run(imre, "-B", "-m", "launch", str(back), "x", extra=search)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b'take argument "n" requires int\nx\n', b""), result
+
+    # runpy imports the parent into its own namespace before entering the body.
+    package = app / "entry_package"
+    package.mkdir()
+    (package / "__init__.py").write_text(
+        "def __getattribute__(n: int): return n\n"
+        "from __main__ import __getattribute__ as loaded\n"
+        "print(loaded('__name__'))\n"
+    )
+    (package / "__main__.py").write_text("print(__spec__.name)\n")
+    result = run(imre, "-B", "-m", "entry_package", extra={"PYTHONPATH": str(app)})
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"__main__\nentry_package.__main__\n", b""), result
+
+
 def check_command_stdin(imre, run):
     source = (
         "import os, sys\n"
@@ -1721,25 +1788,26 @@ def check_unittest_module_main(imre, root, run):
         "        failure_reason = 'deliberate failure'\n"
         "        self.fail(failure_reason)\n"
     )
+    declared = {"IMREFLAGS": f"--include-module {package.name}.sample"}
     passing = "cli_test_package.sample.Passing"
-    ok = run(imre, "-m", "unittest", "-v", passing, passing + ".test_one")
+    ok = run(imre, "-m", "unittest", "-v", passing, passing + ".test_one", extra=declared)
     assert ok.returncode == 0 and ok.stdout == (passing + ".test_one\n").encode() * 2, ok
     assert ok.stderr.count(f"test_one ({passing}.test_one) ... ok".encode()) == 2, ok
     failing = "cli_test_package.sample.Failing.test_one"
-    errors = run(imre, "-m", "unittest", "-v", failing, passing + ".test_missing")
+    errors = run(imre, "-m", "unittest", "-v", failing, passing + ".test_missing", extra=declared)
     assert errors.returncode == 1 and b"Ran 2 tests" in errors.stderr, errors
     assert f"FAIL: test_one ({failing})".encode() in errors.stderr, errors
     assert b"ERROR: test_missing (unittest.loader._FailedTest.test_missing)" in errors.stderr, errors
     assert b"FAILED (failures=1, errors=1)" in errors.stderr, errors
     local_line = b"    failure_reason = 'deliberate failure'"
     assert local_line not in errors.stderr.splitlines(), errors
-    with_locals = run(imre, "-m", "unittest", "--locals", "-v", failing, passing + ".test_missing")
+    with_locals = run(imre, "-m", "unittest", "--locals", "-v", failing, passing + ".test_missing", extra=declared)
     assert with_locals.returncode == 1 and b"FAILED (failures=1, errors=1)" in with_locals.stderr, with_locals
     assert local_line in with_locals.stderr.splitlines(), with_locals
 
     (package / "other.py").write_text("raise AssertionError('outside discovery pattern')\n")
     discovered = run(imre, "-m", "unittest", "discover", "-v", "-s", package.name, "-t", ".",
-                     "-p", "sample.py", "-k", "Passing.test_one")
+                     "-p", "sample.py", "-k", "Passing.test_one", extra=declared)
     assert discovered.returncode == 0 and discovered.stdout == (passing + ".test_one\n").encode(), discovered
     assert f"test_one ({passing}.test_one) ... ok".encode() in discovered.stderr.splitlines(), discovered
     assert b"Ran 1 test in " in discovered.stderr, discovered
@@ -1826,6 +1894,7 @@ def main():
                 timeout=timeout,
             )
 
+        check_module_search_root(imre, root, run)
         check_tracemalloc_startup(imre, run)
         check_registered_run_path(imre, root, run)
         check_frozen_modules_startup(imre, root, run)
@@ -2232,6 +2301,27 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         (namespace_package / "helper.py").write_text("globals()['answer'] = 42\n")
         (namespace_package / "entry.py").write_text("from .helper import answer\nprint(answer)\n")
         compare("-B", "-m", "namespace_plugin.entry")
+
+        # Both namespace portions supply the same module and its relative dependency.
+        roots = [root / "first_portion", root / "second_portion"]
+        for portion in roots:
+            package = portion / "backends"
+            package.mkdir(parents=True)
+            (package / "adapter.py").write_text("from .settings import label\n")
+            (package / "settings.py").write_text(f"label = {portion.name!r}\n")
+        (root / "choose_backend.py").write_text(
+            "import sys\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "from backends.adapter import label\n"
+            "print(label)\n"
+        )
+        search = {"PYTHONPATH": os.pathsep.join(map(str, roots))}
+        for portion in roots:
+            compare("-B", "-m", "choose_backend", str(portion), extra=search)
+
+        (roots[1] / "backends" / "adapter.py").write_text("from . import optional\n")
+        (roots[1] / "backends" / "optional.py").write_text("invalid syntax!\n")
+        compare("-B", "-m", "choose_backend", str(roots[0]), extra=search)
 
         # An ordinary module under the first root wins over a package in a later root.
         (root / "preferred.py").write_text("print('file wins')\n")
@@ -3866,7 +3956,7 @@ def report(text):
             "boxed_threading_condition_event.py", "boxed_threading_timer.py",
             "boxed_thread_captured_lock.py",
             "boxed_thread_bound_lock.py", "boxed_thread_argument_lifetime.py",
-            "boxed_thread_captured_acquire.py",
+            "boxed_thread_captured_acquire.py", "boxed_thread_method_closure.py",
             "boxed_thread_finalization.py",
             "boxed_thread_hash_update.py",
         ):

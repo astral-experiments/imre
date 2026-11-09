@@ -378,7 +378,7 @@ fn retained_native_candidate_registers_its_original_source_owner() {
     fs::write(&external, replacement).unwrap();
     assert!(!graph.inputs.fresh());
     let compilation = crate::dynamic::compile(
-        (&entry, None, Default::default()),
+        (&entry, None, Default::default(), &mut Default::default()),
         &options,
         true,
         Some(crate::dynamic::ObjectOperation::CheckedEntry),
@@ -413,7 +413,7 @@ fn retained_native_candidate_registers_its_original_source_owner() {
     fs::create_dir(&package).unwrap();
     fs::write(package.join("__init__.py"), replacement).unwrap();
     let error = crate::dynamic::compile(
-        (&entry, None, Default::default()),
+        (&entry, None, Default::default(), &mut Default::default()),
         &options,
         true,
         Some(crate::dynamic::ObjectOperation::CheckedEntry),
@@ -564,4 +564,250 @@ fn native_lowering_keeps_the_unregistered_eval_operand_diagnostic() {
     assert!(error.contains("job.py:5:12"), "{error}");
     assert!(error.contains("builtins.eval"), "{error}");
     assert!(error.contains("select one by name"), "{error}");
+}
+
+#[test]
+fn dormant_lexical_checks_keep_known_parameters_of_partial_calls() {
+    let project = tempdir().unwrap();
+    let root = project.path();
+    for (parameters, call) in [
+        ("n: int, *, label: str", "take('x')"),
+        ("n: int, *rest", "take('x', 2)"),
+        ("n: int, *rest", "take('x', *())"),
+        ("n: int, /, **kw", "take('x', n=2)"),
+    ] {
+        let source = (
+            "scores".to_owned(),
+            root.join("scores.py"),
+            format!("def take({parameters}): pass\nif False:\n    {call}\n"),
+        );
+        let error = super::check_registered_project(
+            root,
+            &[],
+            [RegisteredSource::new(&source, true, None)],
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("scores.py:3:10: Imre: expected int, got str"),
+            "{call}: {error}"
+        );
+    }
+}
+
+#[test]
+fn initializer_calls_use_original_bindings_and_all_arguments() {
+    let root = tempdir().unwrap();
+    let paths = [
+        (root.path().join("main.py"), true),
+        (root.path().join("scores.py"), true),
+    ];
+    let number = "def take(value: int, count=0): return value\n";
+    let check = |caller: &str, scores: &str| {
+        let mut session = super::Session::new(root.path(), &[]).unwrap();
+        for ((path, _), source) in paths.iter().zip([caller, scores]) {
+            session.add(path, source, crate::SourceKind::File).unwrap();
+        }
+        session
+            .initializer_call_error((0, &paths[0].0), true, |name| {
+                (name == "scores").then_some((1, &paths[1].0))
+            })
+            .map(|e| e.to_string())
+    };
+    let docstring = "'application setup'\nimport scores\nif False:\n    scores.take('x')\n";
+    assert!(
+        check(docstring, number)
+            .unwrap()
+            .contains("main.py:4:17: Imre: expected int, got str")
+    );
+    let caller = "import scores\nif False:\n    scores.take('x')\n";
+    assert!(
+        check(caller, number)
+            .unwrap()
+            .contains("main.py:3:17: Imre: expected int, got str")
+    );
+    let variable = format!("{number}bad = 'x'\nif False:\n    take(bad)\n");
+    assert!(
+        check("import scores\n", &variable)
+            .unwrap()
+            .contains("scores.py:4:10: Imre: expected int, got str")
+    );
+    let imported = "import scores as selected\nbad = 'x'\nif 1 == 2:\n    selected.take(bad)\n";
+    let inert = format!("{number}if False:\n    take(3)\n");
+    assert!(
+        check(imported, &inert)
+            .unwrap()
+            .contains("main.py:4:19: Imre: expected int, got str")
+    );
+    for expr in ["receipt = scores.take('x')", "print(scores.take('x'))"] {
+        assert!(
+            check(&format!("import scores\nif False:\n    {expr}\n"), number).is_some(),
+            "{expr}"
+        );
+    }
+    for expr in [
+        "missing(scores.take('x'))",
+        "print(observe(), scores.take('x'))",
+    ] {
+        assert!(
+            check(&format!("import scores\nif False:\n    {expr}\n"), number).is_none(),
+            "{expr}"
+        );
+    }
+    assert!(check("install_hook()\nimport scores\n", &variable).is_none());
+    assert!(
+        check(
+            "import scores\n",
+            &format!("token = make()\n{number}token = None\ntake('x')\n")
+        )
+        .is_none()
+    );
+    for expr in [
+        "scores.take('x', later())",
+        "scores.take('x', value=7)",
+        "scores.take('x', missing=0)",
+        "scores.take('x', 0, 1)",
+        "scores.take('x', *())",
+        "scores.take(7)",
+    ] {
+        assert!(
+            check(&format!("import scores\nif False:\n    {expr}\n"), number).is_none(),
+            "{expr}"
+        );
+    }
+    let mixed = "def take(value: int, /, scale: int = 1, *, label: str = '', **more): pass\n";
+    let check_mixed = |args| {
+        check(
+            &format!("import scores\nif False:\n    scores.take({args})\n"),
+            mixed,
+        )
+    };
+    let first = check_mixed("1, label=3, scale='later'").unwrap();
+    assert!(
+        first.contains("main.py:3:26: Imre: expected str, got int"),
+        "{first}"
+    );
+    for args in [
+        "'x', value=2", // The extra positional-only name belongs to **more.
+        "1, 2, scale='x'",
+        "value='x'", // Missing the required positional argument.
+        "1, label=3, scale=observe()",
+        "'x', **{}",
+    ] {
+        assert!(check_mixed(args).is_none(), "{args}");
+    }
+    for prefix in [
+        "setattr(scores, key, replacement)",
+        "import patcher",
+        "observe()",
+    ] {
+        assert!(
+            check(
+                &format!("import scores\n{prefix}\nif False:\n    scores.take('x')\n"),
+                number
+            )
+            .is_none(),
+            "{prefix}"
+        );
+    }
+}
+
+#[test]
+fn a_linked_signature_requires_a_reaching_initializer_call() {
+    let project = tempdir().unwrap();
+    let root = project.path();
+    let check = |main: &str, dependency: &str, declares: bool| {
+        let sources = [
+            ("job".to_owned(), root.join("job.py"), main.to_owned()),
+            (
+                "rules".to_owned(),
+                root.join("rules.py"),
+                dependency.to_owned(),
+            ),
+        ];
+        super::check_registered_project(
+            root,
+            &[],
+            sources.iter().enumerate().map(|(index, source)| {
+                let mut registered = RegisteredSource::new(source, false, None);
+                registered.initial = index == 0;
+                registered.main_body = index == 0;
+                registered.declares_signatures = index == 0 || declares;
+                registered
+            }),
+            None,
+            None,
+        )
+    };
+    let read = "from __main__ import take as use\nif False: use('x')\n";
+    let take = "def take(n: int): return n\n";
+    assert!(
+        check(&format!("{take}import rules\n"), read, true)
+            .unwrap_err()
+            .contains("rules.py:2:15")
+    );
+    check(&format!("import rules\n{take}"), read, true).unwrap();
+    check(
+        "def __class__(n: int): pass\nfrom __main__ import __class__ as cls\ncls('child')\n",
+        "",
+        true,
+    )
+    .unwrap();
+    let bad = "def take(n: int): return n\ntake('x')\n";
+    let error = check("from rules import take\n", bad, true).unwrap_err();
+    assert!(error.contains("rules.py:2:6"), "{error}");
+    let from = "from rules import take as apply\nif False: apply('x')\n";
+    let plain = "def take(n: int): return n\n";
+    assert!(
+        check(from, plain, true)
+            .unwrap_err()
+            .contains("job.py:2:17")
+    );
+    check(
+        from,
+        &format!("{plain}def __getattr__(k): return install_hook(k)\n"),
+        true,
+    )
+    .unwrap();
+    check("import rules\n", bad, false).unwrap();
+    check("install_hook()\nimport rules\n", bad, true).unwrap();
+    check(
+        "import rules\n",
+        "def take(n: int, last): return n\ntake('x', raises())\n",
+        true,
+    )
+    .unwrap();
+}
+
+#[test]
+fn earlier_unlinked_source_precedes_a_later_initializer_argument() {
+    let project = tempdir().unwrap();
+    let main = project.path().join("main.py");
+    let check = |body: &str| {
+        fs::write(&main, format!("def take(n: int): return n\n{body}\n")).unwrap();
+        crate::check_file(&main, None).unwrap_err()
+    };
+    let first = check("exec(input(), globals())\nprint(take('x'))");
+    assert!(
+        first.contains("main.py:2:6") && first.contains("without a linked body"),
+        "{first}"
+    );
+    let dormant = check("if False: exec(input(), globals())\nprint(take('x'))");
+    assert!(dormant.contains("main.py:3:12"), "{dormant}");
+    let rebound = check("def exec(*args): pass\nexec(input(), globals())\nprint(take('x'))");
+    assert!(
+        rebound.contains("main.py:3:15: Imre: unknown function or unsupported builtin arguments"),
+        "{rebound}"
+    );
+    let input =
+        check("def input(): return 'print(99)'\nexec(input(), globals())\nprint(take('x'))");
+    assert!(input.contains("main.py:4:12"), "{input}");
+    let code = check("def harmless(): pass\nexec(harmless.__code__, globals())\nprint(take('x'))");
+    assert!(code.contains("main.py:4:12"), "{code}");
+    let before = check("take('x')\nexec(input(), globals())\nprint(take('y'))");
+    assert!(
+        before.contains("main.py:2:6") && before.contains("expected int"),
+        "{before}"
+    );
 }
