@@ -172,14 +172,13 @@ pub(super) fn call(
     };
     if method == "poll" {
         let timeout = timeout(ctx, args.first(), true)?;
-        let mut poll = handle.borrow_mut();
-        let (n, events) = poll.ready(timeout)?;
+        let events = readiness::Poll::ready(&handle, timeout, || ctx.dispatch_signals())?;
         let mut out = Vec::new();
-        out.try_reserve_exact(n)
+        out.try_reserve_exact(events.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for (fd, flags) in events {
-            let fd = ctx.int(i64::from(fd));
-            let flags = ctx.int(i64::from(flags));
+        for event in events {
+            let fd = ctx.int(i64::from(event.fd));
+            let flags = ctx.int(i64::from(event.revents as u16));
             out.push(ctx.alloc(Value::Tuple(copy_ids(&[fd, flags])?)));
         }
         return Ok(ctx.alloc(Value::List(out)));
