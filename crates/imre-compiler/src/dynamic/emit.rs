@@ -219,13 +219,13 @@ pub(crate) fn emit(
         } else {
             std::borrow::Cow::Borrowed(source.as_str())
         };
+        let initializer = PreparedBody::module(name, path, &code_source, keep_docstrings, origin)?;
         let check_archive = bundled && !providers.is_empty();
         // A standalone initializer can be compiled separately even without a provider pack.
         let separate = split && unit != 0 && !source.is_empty();
         let mut external = None;
         if (check_archive || separate)
-            && let Some((symbol, ir)) =
-                initializer(name, path, &code_source, keep_docstrings, origin)?
+            && let Some((symbol, ir)) = initializer.standalone()?
         {
             let archived = check_archive && providers.contains(&symbol);
             if archived || separate {
@@ -244,14 +244,7 @@ pub(crate) fn emit(
         }
         let code = match external {
             Some(symbol) => symbol,
-            None => output.source_body(
-                unit,
-                name,
-                path,
-                &code_source,
-                &file,
-                SourceBody::Module(origin),
-            )?,
+            None => initializer.emit(&mut output, unit, &file)?,
         };
         if let Some((digest, flags)) = archive_members.get(path) {
             let hash = output.data(digest);
@@ -293,43 +286,6 @@ pub(crate) fn emit(
         },
     );
     Ok((units, used_archive))
-}
-
-/// Emit one standalone initializer with a symbol determined by its source and native body.
-pub(super) fn initializer(
-    name: &str,
-    path: &Path,
-    source: &str,
-    keep_docstrings: bool,
-    origin: ModuleOrigin<'_>,
-) -> Result<Option<(String, String)>, String> {
-    let mut output = Output {
-        keep_docstrings,
-        ..Output::default()
-    };
-    let filename = path.as_os_str().as_encoded_bytes();
-    let file = output.data(filename);
-    let entry = output.source_body(0, name, path, source, &file, SourceBody::Module(origin))?;
-    // These slots are numbered across the whole program and must stay in its codegen unit.
-    if !output.string_constant_slots.is_empty() {
-        return Ok(None);
-    }
-    let mut ir = format!("{ABI}\n{}\n{}", output.constants, output.functions);
-    let mut hash = blake3::Hasher::new();
-    for field in [
-        std::env::consts::ARCH.as_bytes(),
-        name.as_bytes(),
-        filename,
-        source.as_bytes(),
-        ir.as_bytes(),
-    ] {
-        hash.update(&(field.len() as u64).to_le_bytes());
-        hash.update(field);
-    }
-    hash.update(&[u8::from(keep_docstrings)]);
-    let symbol = format!("imre_provider_{}", hash.finalize().to_hex());
-    writeln!(ir, "@{symbol} = alias i64 (ptr, i64), ptr {entry}").unwrap();
-    Ok(Some((symbol, ir)))
 }
 
 struct ParsedSource {
@@ -418,16 +374,39 @@ fn check_source(path: &Path, source: &str, keep_docstrings: bool) -> Result<(), 
     Ok(())
 }
 
-impl Output {
-    fn source_body(
-        &mut self,
-        unit: usize,
-        name: &str,
-        path: &Path,
-        source: &str,
-        file: &str,
-        kind: SourceBody<'_>,
-    ) -> Result<String, String> {
+/// Normalized source and lowered names shared by archive, split, and inline placement.
+pub(super) struct PreparedBody<'a> {
+    name: &'a str,
+    body: ast::Suite,
+    source: SourceInfo<'a>,
+    expression: bool,
+    keep_docstrings: bool,
+}
+
+impl<'a> PreparedBody<'a> {
+    pub(super) fn module(
+        name: &'a str,
+        path: &'a Path,
+        source: &'a str,
+        keep_docstrings: bool,
+        origin: ModuleOrigin<'a>,
+    ) -> Result<Self, String> {
+        Self::new(
+            name,
+            path,
+            source,
+            keep_docstrings,
+            SourceBody::Module(origin),
+        )
+    }
+
+    fn new(
+        name: &'a str,
+        path: &'a Path,
+        source: &'a str,
+        keep_docstrings: bool,
+        kind: SourceBody<'a>,
+    ) -> Result<Self, String> {
         let bundled = matches!(kind, SourceBody::Module(ModuleOrigin::Bundled));
         let provider = matches!(kind, SourceBody::Module(ModuleOrigin::Provider));
         let expression = matches!(&kind, SourceBody::Expression(_));
@@ -442,9 +421,7 @@ impl Output {
             Expression(ast::ModModule, &'a ast::token::Tokens),
         }
         let input = match kind {
-            SourceBody::Module(_) => {
-                Input::Module(parse_source(path, source, self.keep_docstrings)?)
-            }
+            SourceBody::Module(_) => Input::Module(parse_source(path, source, keep_docstrings)?),
             SourceBody::Expression(parsed) => {
                 let expression = parsed.syntax();
                 let stmt = ast::Stmt::Expr(ast::StmtExpr {
@@ -466,7 +443,7 @@ impl Output {
             Input::Module(p) => (p.parsed.syntax(), p.parsed.tokens()),
             Input::Expression(syntax, tokens) => (syntax, *tokens),
         };
-        let docs = if self.keep_docstrings && name == "collections" && bundled {
+        let docs = if keep_docstrings && name == "collections" && bundled {
             crate::modules::doctest::sealed(crate::modules::IntrinsicModule::Collections)
         } else {
             None
@@ -510,15 +487,7 @@ impl Output {
         };
         let method_imports = imre_ast::module_imports(&body);
         let private_names = lower_source(path, source, &mut body)?;
-        // Frozen code exposes its origin independently of the module's registered source path.
-        let code_file = match (bundled, name) {
-            (true, "_frozen_importlib") => self.data(b"<frozen importlib._bootstrap>"),
-            (true, "_frozen_importlib_external") => {
-                self.data(b"<frozen importlib._bootstrap_external>")
-            }
-            _ => file.to_owned(),
-        };
-        let location = SourceMap {
+        let source = SourceInfo {
             checked_functions,
             bundled,
             path,
@@ -528,7 +497,6 @@ impl Output {
             module_start,
             class_keywords,
             docs,
-            unit,
             has_templates,
             template_expressions,
             replacements,
@@ -536,21 +504,75 @@ impl Output {
             barry_as_flufl: imre_ast::future_import(&body, "barry_as_FLUFL"),
             string_annotations: private_names.string_annotations,
             private_names,
-            positions: SourcePositions::new(source, &code_file),
+            text: source,
         };
-        let suite = if expression {
-            let [ast::Stmt::Expr(statement)] = body.as_slice() else {
+        Ok(Self {
+            name,
+            body,
+            source,
+            expression,
+            keep_docstrings,
+        })
+    }
+
+    fn emit(&self, output: &mut Output, unit: usize, file: &str) -> Result<String, String> {
+        // Frozen code exposes its origin independently of the module's registered source path.
+        let code_file = match (self.source.bundled, self.name) {
+            (true, "_frozen_importlib") => output.data(b"<frozen importlib._bootstrap>"),
+            (true, "_frozen_importlib_external") => {
+                output.data(b"<frozen importlib._bootstrap_external>")
+            }
+            _ => file.to_owned(),
+        };
+        let location = SourceMap {
+            info: &self.source,
+            unit,
+            positions: SourcePositions::new(self.source.text, &code_file),
+        };
+        let suite = if self.expression {
+            let [ast::Stmt::Expr(statement)] = self.body.as_slice() else {
                 return Err("expected an annotation expression".into());
             };
             Body::Expression(&statement.value)
         } else {
-            Body::Namespace(&body, false)
+            Body::Namespace(&self.body, false)
         };
-        let code = self.code(&location, String::new(), suite, false, false);
-        match self.diagnostic.take() {
+        let code = output.code(&location, String::new(), suite, false, false);
+        match output.diagnostic.take() {
             Some(diagnostic) => Err(diagnostic),
             None => Ok(code),
         }
+    }
+
+    /// Return independent IR only when all its constant slots can live in this unit.
+    pub(super) fn standalone(&self) -> Result<Option<(String, String)>, String> {
+        let mut output = Output {
+            keep_docstrings: self.keep_docstrings,
+            ..Output::default()
+        };
+        let filename = self.source.path.as_os_str().as_encoded_bytes();
+        let file = output.data(filename);
+        let entry = self.emit(&mut output, 0, &file)?;
+        // These slots are numbered across the whole program and must stay in its codegen unit.
+        if !output.string_constant_slots.is_empty() {
+            return Ok(None);
+        }
+        let mut ir = format!("{ABI}\n{}\n{}", output.constants, output.functions);
+        let mut hash = blake3::Hasher::new();
+        for field in [
+            std::env::consts::ARCH.as_bytes(),
+            self.name.as_bytes(),
+            filename,
+            self.source.text.as_bytes(),
+            ir.as_bytes(),
+        ] {
+            hash.update(&(field.len() as u64).to_le_bytes());
+            hash.update(field);
+        }
+        hash.update(&[u8::from(self.keep_docstrings)]);
+        let symbol = format!("imre_provider_{}", hash.finalize().to_hex());
+        writeln!(ir, "@{symbol} = alias i64 (ptr, i64), ptr {entry}").unwrap();
+        Ok(Some((symbol, ir)))
     }
 }
 
@@ -603,6 +625,20 @@ enum Entry {
 }
 
 struct SourceMap<'a> {
+    info: &'a SourceInfo<'a>,
+    unit: usize,
+    positions: SourcePositions<'a>,
+}
+
+impl<'a> std::ops::Deref for SourceMap<'a> {
+    type Target = SourceInfo<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        self.info
+    }
+}
+
+struct SourceInfo<'a> {
     checked_functions: Option<&'a super::CheckedFunctions>,
     bundled: bool,
     path: &'a Path,
@@ -610,7 +646,6 @@ struct SourceMap<'a> {
     module_start: ruff_text_size::TextSize,
     class_keywords: Vec<ruff_text_size::TextSize>,
     docs: Option<crate::modules::doctest::SealedDocs>,
-    unit: usize,
     has_templates: bool,
     template_expressions: HashMap<ruff_text_size::TextSize, String>,
     replacements: HashMap<ruff_text_size::TextRange, Vec<u32>>,
@@ -618,7 +653,7 @@ struct SourceMap<'a> {
     method_imports: std::collections::BTreeSet<String>,
     string_annotations: bool,
     barry_as_flufl: bool,
-    positions: SourcePositions<'a>,
+    text: &'a str,
 }
 
 impl SourceMap<'_> {
@@ -971,14 +1006,15 @@ impl Function<'_, '_> {
             let unit = self.source.unit;
             let code = self.output.try_native_body(|output| {
                 let file = output.data(b"<string>");
-                match output.source_body(
-                    unit,
+                match PreparedBody::new(
                     "",
                     Path::new("<string>"),
                     value,
-                    &file,
+                    output.keep_docstrings,
                     SourceBody::Expression(&parsed),
-                ) {
+                )
+                .and_then(|body| body.emit(output, unit, &file))
+                {
                     Ok(code) => code,
                     Err(err) => {
                         output.diagnostic = Some(err);
@@ -1126,13 +1162,15 @@ mod tests {
     #[test]
     fn exception_group_handlers_in_nested_generators_have_native_entries() {
         let source = "def supported():\n    yield 1\ndef handled():\n    def nested():\n        yield 2\n    try:\n        yield 3\n    except* ValueError:\n        pass\ndef outer():\n    def inner():\n        try:\n            yield 4\n        except* ValueError:\n            pass\n    yield 5\n";
-        let (_, ir) = initializer(
+        let (_, ir) = PreparedBody::module(
             "sample",
             Path::new("sample.py"),
             source,
             true,
             ModuleOrigin::Program(None),
         )
+        .unwrap()
+        .standalone()
         .unwrap()
         .unwrap();
         let tag = format!(", i32 {} }}", permanent::NATIVE_SUSPENDED_BODY);
@@ -1148,7 +1186,7 @@ mod tests {
     fn suspended_definitions_use_native_entries_in_each_module_origin() {
         let source = "def items(xs):\n    yield 1\n    yield from xs\npark = lambda: (yield 2)\nresume = lambda: 1 + (yield 3)\nasync def more(xs):\n    async for x in xs:\n        yield x\nasync def consume(f):\n    return await f()\n";
         for bundled in [false, true] {
-            let (_, ir) = initializer(
+            let (_, ir) = PreparedBody::module(
                 "example",
                 Path::new("example.py"),
                 source,
@@ -1159,6 +1197,8 @@ mod tests {
                     ModuleOrigin::Program(None)
                 },
             )
+            .unwrap()
+            .standalone()
             .unwrap()
             .unwrap();
             let tag = format!(", i32 {} }}", permanent::NATIVE_SUSPENDED_BODY);
@@ -1175,13 +1215,15 @@ mod tests {
     #[test]
     fn pass_fixed_keywords_directly_and_keep_expanded_calls_packed() {
         let source = "target(1, name=2)\ntarget(1, **options)\n";
-        let (_, ir) = initializer(
+        let (_, ir) = PreparedBody::module(
             "example",
             Path::new("example.py"),
             source,
             true,
             ModuleOrigin::Bundled,
         )
+        .unwrap()
+        .standalone()
         .unwrap()
         .unwrap();
         assert_eq!(ir.matches("call i64 @imre_dyn_keyword_call_at(").count(), 1);
@@ -1193,9 +1235,12 @@ mod tests {
         let path = Path::new("<imre stdlib>/example.py");
         let declare = "declare void @imre_dyn_set_statement_line";
         for (source, expected) in [("value = 1", 0), ("with a, b:\n    pass", 1)] {
-            let (_, ir) = initializer("example", path, source, true, ModuleOrigin::Bundled)
-                .unwrap()
-                .unwrap();
+            let (_, ir) =
+                PreparedBody::module("example", path, source, true, ModuleOrigin::Bundled)
+                    .unwrap()
+                    .standalone()
+                    .unwrap()
+                    .unwrap();
             assert_eq!(ir.matches(declare).count(), expected);
         }
     }
@@ -1206,7 +1251,9 @@ mod tests {
         let path = root.join("example.py");
         let source = "value = 1";
         let compiled = |name, path: &Path, src, docs| {
-            initializer(name, path, src, docs, ModuleOrigin::Bundled)
+            PreparedBody::module(name, path, src, docs, ModuleOrigin::Bundled)
+                .unwrap()
+                .standalone()
                 .unwrap()
                 .unwrap()
                 .0
@@ -1220,13 +1267,15 @@ mod tests {
         assert_ne!(symbol, compiled("example", &path, "value = 2", true));
         assert_ne!(symbol, compiled("example", &path, source, false));
         assert!(
-            initializer(
+            PreparedBody::module(
                 "example",
                 &path,
                 "value = t'{123}'",
                 true,
                 ModuleOrigin::Bundled
             )
+            .unwrap()
+            .standalone()
             .unwrap()
             .is_none()
         );
