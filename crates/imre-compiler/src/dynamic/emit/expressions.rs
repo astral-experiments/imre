@@ -195,7 +195,7 @@ impl Function<'_, '_> {
         }
     }
 
-    fn located_expr(&mut self, expr: &ast::Expr) -> String {
+    pub(super) fn located_expr(&mut self, expr: &ast::Expr) -> String {
         let position = imre_ast::expression_position(
             expr,
             &self.source.method_imports,

@@ -82,6 +82,23 @@ impl Function<'_, '_> {
         }
     }
 
+    fn emit_value_statement(&mut self, output: crate::frontend::ValueStatement<'_>) {
+        use crate::frontend::ValueStatement;
+        match output {
+            ValueStatement::Checked(stmt) => self.checked_statement(&stmt),
+            ValueStatement::ReturnOperand(expr) | ValueStatement::DiscardOperand(expr) => {
+                let handle =
+                    self.with_expression_range(expr.range(), |code| code.located_expr(expr));
+                if matches!(output, ValueStatement::ReturnOperand(_)) {
+                    self.return_from_scope(handle);
+                } else {
+                    self.discard_handle(&handle);
+                }
+            }
+            ValueStatement::Ignore => {}
+        }
+    }
+
     pub(super) fn source_statements(&mut self, suite: &[ast::Stmt]) {
         for stmt in suite {
             if !self.start_statement() {
@@ -98,6 +115,12 @@ impl Function<'_, '_> {
                 .map_or_else(|| stmt.range(), |assertion| assertion.test.range());
             self.checkpoint(&position);
             self.simple_call = imre_ast::unhighlighted_call(stmt);
+            if let Some(output) =
+                crate::frontend::value_statement(stmt, self.source.registered_source())
+            {
+                self.emit_value_statement(output);
+                continue;
+            }
             if let Some(operation) = self.source.namespace_operations.get(&stmt.range()) {
                 let value = self.registered_value(operation);
                 if let crate::ir::ExprKind::Builtin(
@@ -122,14 +145,6 @@ impl Function<'_, '_> {
                 continue;
             }
             match stmt {
-                ast::Stmt::Expr(v) => {
-                    if !matches!(&*v.value, ast::Expr::StringLiteral(_)) {
-                        let value = self.expr(&v.value);
-                        self.line(&format!(
-                            "call void @imre_dyn_discard_expression(ptr %ctx, i64 {value})"
-                        ));
-                    }
-                }
                 ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => {}
                 ast::Stmt::TypeAlias(v) if self.class_locals.is_none() => {
                     let alias = &self.source.type_aliases[&v.start()];
@@ -300,13 +315,6 @@ impl Function<'_, '_> {
                     };
                     let class = self.apply_decorators(&decorators, &v.decorator_list, class);
                     self.bind(v.name.as_str(), &class);
-                }
-                ast::Stmt::Return(v) => {
-                    let value = v
-                        .value
-                        .as_deref()
-                        .map_or_else(|| "0".into(), |e| self.expr(e));
-                    self.return_from_scope(value);
                 }
                 ast::Stmt::Match(v) => self.match_statement(v),
                 ast::Stmt::If(v) => {

@@ -711,6 +711,35 @@ impl Region {
     }
 }
 
+/// An output statement encountered in a source suite. Only a residual operand needs syntax.
+pub(crate) enum ValueStatement<'a> {
+    Checked(Statement),
+    ReturnOperand(&'a ast::Expr),
+    DiscardOperand(&'a ast::Expr),
+    Ignore,
+}
+
+pub(crate) fn value_statement<'a>(
+    stmt: &'a ast::Stmt,
+    source: RegisteredSource<'_>,
+) -> Option<ValueStatement<'a>> {
+    Some(match stmt {
+        ast::Stmt::Return(ret) => match ret.value.as_deref() {
+            None => ValueStatement::Checked(Statement::Return(Expr::none())),
+            Some(value) => registered_value(value, source)
+                .map_or(ValueStatement::ReturnOperand(value), |value| {
+                    ValueStatement::Checked(Statement::Return(value))
+                }),
+        },
+        ast::Stmt::Expr(expr) if expr.value.is_string_literal_expr() => ValueStatement::Ignore,
+        ast::Stmt::Expr(expr) => registered_value(&expr.value, source)
+            .map_or(ValueStatement::DiscardOperand(&expr.value), |value| {
+                ValueStatement::Checked(Statement::Expr(value))
+            }),
+        _ => return None,
+    })
+}
+
 /// Build a complete expression region; an unsupported child keeps its original lowering.
 pub(crate) fn registered_value(node: &ast::Expr, source: RegisteredSource<'_>) -> Option<Expr> {
     Region::Residual.operand(node, source)
