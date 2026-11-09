@@ -3635,7 +3635,13 @@ impl Context {
         Ok(false)
     }
     /// Read an ordinary sequence slice directly when its bounds need no Python callbacks.
-    pub(super) fn get_slice(&mut self, receiver: Id, start: Id, stop: Id) -> Result<Id> {
+    pub(super) fn get_slice(
+        &mut self,
+        receiver: Id,
+        start: Id,
+        stop: Id,
+        slot: Option<usize>,
+    ) -> Result<Id> {
         let parts = [start, stop, NONE];
         if matches!(
             self.heap.get(receiver),
@@ -3652,7 +3658,14 @@ impl Context {
         }) {
             return self.slice(receiver, parts);
         }
-        let key = self.alloc(Value::Slice(parts));
+        let key = if let Some(slot) = slot {
+            self.heap
+                .cached_constant(super::value::ConstantSlot::Linked(slot), |heap| {
+                    Ok(heap.alloc(Value::Slice(parts)))
+                })?
+        } else {
+            self.alloc(Value::Slice(parts))
+        };
         self.get_item(receiver, key)
     }
 

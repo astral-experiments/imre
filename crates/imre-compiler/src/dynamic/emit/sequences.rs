@@ -31,31 +31,6 @@ fn permanent_handle(value: &Expr) -> Option<u16> {
     u16::try_from(handle).ok()
 }
 
-/// A constant key contains only immutable literals and distinguishes Python types and float bits.
-fn constant(value: &Expr) -> Option<Constant> {
-    Some(match literal(value) {
-        ExprKind::None => Constant::None,
-        ExprKind::Bool(b) => Constant::Bool(*b),
-        ExprKind::Int(n) => Constant::Int(n.clone()),
-        ExprKind::Float(n) => Constant::Float(n.to_bits()),
-        ExprKind::Bytes(b) => Constant::Bytes(b.clone()),
-        ExprKind::Str(text) => Constant::Text(
-            text.chars()
-                .flat_map(|c| u32::from(c).to_le_bytes())
-                .collect(),
-        ),
-        ExprKind::Builtin(Builtin::RegisteredString(points), _) => Constant::Text(points.clone()),
-        ExprKind::Builtin(Builtin::RegisteredComplex(r, i), _) => {
-            Constant::Complex(r.to_bits(), i.to_bits())
-        }
-        ExprKind::Builtin(Builtin::RegisteredEllipsis, _) => Constant::Ellipsis,
-        ExprKind::Tuple(items) => {
-            Constant::Tuple(items.iter().map(constant).collect::<Option<_>>()?)
-        }
-        _ => return None,
-    })
-}
-
 impl Function<'_, '_> {
     /// Equal literals share a slot within a source unit. The address remains distinct after linking
     /// independently compiled providers, and the runtime holds its value in the current heap.
@@ -105,7 +80,12 @@ impl Function<'_, '_> {
             };
         }
         let slot = tuple
-            .then(|| values.iter().map(constant).collect::<Option<Vec<_>>>())
+            .then(|| {
+                values
+                    .iter()
+                    .map(Constant::from_expr)
+                    .collect::<Option<Vec<_>>>()
+            })
             .flatten()
             .map(|keys| self.constant_slot(Constant::Tuple(keys)));
         if let Some(handles) = values

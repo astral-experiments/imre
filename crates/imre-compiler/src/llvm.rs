@@ -2874,7 +2874,10 @@ impl Emitter<'_, '_> {
                 // is unreachable, but uses the same immediate-check protocol.
                 self.body.end("unreachable");
             }
-            Statement::AugmentItem(list, index, op, expression) => {
+            Statement::AugmentItem(_, _, ir::ItemUpdate::Protocol(_), _) => {
+                unreachable!("Python item update in fixed calling convention")
+            }
+            Statement::AugmentItem(list, index, ir::ItemUpdate::Fixed(op), expression) => {
                 // Augmented assignment instead roots the target and old item first.
                 let nonnegative = self.nonnegative_index(index);
                 let list = self.operand(list);
@@ -4844,6 +4847,9 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredUnary(_)
             | Builtin::RegisteredSubscript(..)
             | Builtin::RegisteredSpread
+            | Builtin::RegisteredIndexConstant(_)
+            | Builtin::RegisteredSlice
+            | Builtin::RegisteredDeleteItem
             | Builtin::RegisteredDict(_)
             | Builtin::RegisteredEllipsis
             | Builtin::RegisteredComplex(..)

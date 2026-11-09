@@ -221,35 +221,30 @@ impl Function<'_, '_> {
                         Self::expr,
                     );
                 }
-                if let ast::Expr::Slice(slice) = v.slice.as_ref()
-                    && slice.step.is_none()
-                {
-                    let object = self.expr(&v.value);
-                    let span = self.expression_span(expr, &v.value, b'[');
-                    let [start, stop] = [&slice.lower, &slice.upper].map(|bound| {
-                        bound
-                            .as_deref()
-                            .map_or_else(|| "0".into(), |e| self.expr(e))
-                    });
-                    self.take_matching_check();
-                    let position =
-                        span.map_or_else(|| "null".into(), |span| self.output.position(span));
-                    return self.checked(&format!(
-                        "call i64 @imre_dyn_get_slice_at(ptr %ctx, i64 {object}, i64 {start}, i64 {stop}, ptr {position})"
-                    ));
-                }
-                self.subscript(
-                    v.value.as_ref(),
-                    v.slice.as_ref(),
-                    Some((v.range(), v.value.end())),
-                    Self::expr,
-                )
+                let constant = crate::frontend::registered_constant_key(
+                    &v.slice,
+                    self.source.registered_source(),
+                );
+                let key = match v.slice.as_ref() {
+                    ast::Expr::Slice(slice) if slice.step.is_none() => super::IndexKey::Bounds(
+                        slice.lower.as_deref(),
+                        slice.upper.as_deref(),
+                        constant.as_ref().map(|(k, _)| k),
+                    ),
+                    _ if let Some((_, value)) = &constant => super::IndexKey::Prepared(value),
+                    key => super::IndexKey::Object(key),
+                };
+                let base = self.expr(&v.value);
+                self.subscript(&base, key, v.range(), v.value.end(), Self::index_operand)
             }
-            ast::Expr::Slice(slice) => {
-                let [start, stop, step] = [&slice.lower, &slice.upper, &slice.step]
-                    .map(|e| e.as_deref().map_or_else(|| "0".into(), |e| self.expr(e)));
-                self.op("slice_object", &[&start, &stop, &step])
-            }
+            ast::Expr::Slice(slice) => self.slice_object(
+                [
+                    slice.lower.as_deref(),
+                    slice.upper.as_deref(),
+                    slice.step.as_deref(),
+                ],
+                Self::expr,
+            ),
             ast::Expr::Dict(v) => self.dict_display(
                 v.items.iter().map(|item| (item.key.as_ref(), &item.value)),
                 Self::expr,

@@ -346,6 +346,127 @@ pub(crate) fn display_elements(node: &ast::Expr) -> Option<(&[ast::Expr], Displa
     }
 }
 
+/// An index constant is identified by typed literal content, including the sign of zero.
+/// Fold only literal index operands. Dynamic bounds and starred elements still run in order.
+pub(in crate::frontend) fn index_key<E>(
+    node: &ast::Expr,
+    operand: &mut impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
+) -> StdResult<Expr, E> {
+    use ir::Constant as C;
+    let (value, constant) = match node {
+        ast::Expr::Slice(slice) => {
+            let mut bounds = Vec::with_capacity(3);
+            let mut literal = true;
+            for bound in [&slice.lower, &slice.upper, &slice.step] {
+                bounds.push(match bound.as_deref() {
+                    Some(bound) => {
+                        literal &= bound.is_literal_expr();
+                        index_key(bound, operand)?
+                    }
+                    None => Expr::none(),
+                });
+            }
+            let constant = literal
+                .then(|| {
+                    Some(C::Slice(Box::new([
+                        ir::Constant::from_expr(&bounds[0])?,
+                        ir::Constant::from_expr(&bounds[1])?,
+                        ir::Constant::from_expr(&bounds[2])?,
+                    ])))
+                })
+                .flatten();
+            if slice.step.is_none() {
+                bounds.pop();
+            }
+            (
+                super::operation(Builtin::RegisteredSlice, Type::PythonObject, bounds),
+                constant,
+            )
+        }
+        ast::Expr::Tuple(tuple) => {
+            let values = tuple
+                .elts
+                .iter()
+                .map(|item| {
+                    if let Some(starred) = item.as_starred_expr() {
+                        let value = index_key(&starred.value, operand)?;
+                        Ok(super::operation(
+                            Builtin::RegisteredSpread,
+                            Type::PythonObject,
+                            vec![value],
+                        ))
+                    } else {
+                        index_key(item, operand)
+                    }
+                })
+                .collect::<StdResult<Vec<_>, E>>()?;
+            let value = Expr {
+                ty: Type::PythonObject,
+                kind: ExprKind::Tuple(values),
+            };
+            let constant = ir::Constant::from_expr(&value);
+            (value, constant)
+        }
+        _ => {
+            let value = if let Some(op) = node.as_unary_op_expr()
+                && matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
+                && let Some(n) = op.operand.as_number_literal_expr()
+            {
+                Expr {
+                    ty: Type::PythonObject,
+                    kind: number_literal(&n.value, op.op == ast::UnaryOp::USub),
+                }
+            } else {
+                operand(node)?
+            };
+            let Some(key) = ir::Constant::from_expr(&value) else {
+                return Ok(value);
+            };
+            if matches!(key, C::None | C::Ellipsis | C::Bool(_))
+                || matches!(&key, C::Int(text) if text.parse::<i64>().is_ok_and(crate::dynamic::is_permanent_integer))
+            {
+                return Ok(value);
+            }
+            let value = match value.kind {
+                ExprKind::Builtin(Builtin::RegisteredLocation(..), mut args) => args.remove(0),
+                _ => value,
+            };
+            (value, Some(key))
+        }
+    };
+    let value = if let Some(key) = constant {
+        // Permanent singleton handles already have their Python identity.
+        match key {
+            C::None | C::Ellipsis | C::Bool(_) => value,
+            _ => super::operation(
+                Builtin::RegisteredIndexConstant(key),
+                Type::PythonObject,
+                vec![value],
+            ),
+        }
+    } else {
+        value
+    };
+    Ok(located(node.range(), node.start(), value))
+}
+
+/// Retain the same checked key when the subscript receiver or its containing statement is residual.
+pub(crate) fn registered_constant_key(
+    node: &ast::Expr,
+    source: RegisteredSource<'_>,
+) -> Option<(ir::Constant, Expr)> {
+    let value = index_key(node, &mut |e| registered_value(e, source).ok_or(())).ok()?;
+    match &value.kind {
+        ExprKind::Builtin(Builtin::RegisteredLocation(..), args) => match &args[0].kind {
+            ExprKind::Builtin(Builtin::RegisteredIndexConstant(key), _) => {
+                Some((key.clone(), value))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn display_operands<E>(
     items: &[ast::Expr],
     source: RegisteredSource<'_>,
@@ -472,13 +593,10 @@ pub(super) fn operation<E>(
             }
             ExprKind::Builtin(Builtin::RegisteredDict(entries), operands)
         }
-        ast::Expr::Subscript(index)
-            if !matches!(&*index.slice, ast::Expr::Slice(_))
-                && source.partition_index(index).is_none() =>
-        {
+        ast::Expr::Subscript(index) if source.partition_index(index).is_none() => {
             ExprKind::Builtin(
                 Builtin::RegisteredSubscript(node.range(), index.value.end()),
-                vec![child(&index.value)?, child(&index.slice)?],
+                vec![child(&index.value)?, index_key(&index.slice, &mut child)?],
             )
         }
         _ => return Ok(None),
@@ -489,8 +607,15 @@ pub(super) fn operation<E>(
     }))
 }
 
+pub(crate) fn registered_index_key(key: &ast::Expr, source: RegisteredSource<'_>) -> Option<Expr> {
+    index_key(key, &mut |e| registered_value(e, source).ok_or(())).ok()
+}
+
 /// Build a complete expression region; an unsupported child keeps its original lowering.
 pub(crate) fn registered_value(node: &ast::Expr, source: RegisteredSource<'_>) -> Option<Expr> {
+    if node.is_slice_expr() {
+        return registered_index_key(node, source);
+    }
     operation(
         node,
         source,
@@ -867,5 +992,31 @@ mod tests {
                 fused.is_some()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod index_constant_tests {
+    use super::*;
+
+    fn identity(source: &str) -> Option<ir::Constant> {
+        let graph = SourceGraph::single(source).unwrap();
+        let entry = &graph.modules[graph.entry];
+        let module = ModuleSource::new(entry);
+        let expr = &entry.parsed.syntax().body[0].as_expr_stmt().unwrap().value;
+        let key = &expr.as_subscript_expr().unwrap().slice;
+        registered_constant_key(key, module.context(source)).map(|(key, _)| key)
+    }
+
+    #[test]
+    fn code_constants_distinguish_types_and_fold_only_literal_slices() {
+        assert_eq!(identity("x[1, 2]"), identity("x[(+1, 2)]"));
+        assert_ne!(identity("x[1,]"), identity("x[True,]"));
+        assert_ne!(identity("x[0.0,]"), identity("x[-0.0,]"));
+        assert_eq!(identity("x[:]"), identity("x[None:None:None]"));
+        assert!(identity("x[1, 2:3, (False, 4)]").is_some());
+        assert!(identity("x[1:-3:-1]").is_none());
+        assert!(identity("x[a, :3]").is_none());
+        assert!(identity("x[1, *values]").is_none());
     }
 }

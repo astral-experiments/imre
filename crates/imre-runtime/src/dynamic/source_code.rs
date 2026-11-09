@@ -3174,6 +3174,7 @@ impl Context {
             .and_then(|range| program.literals.get(&range).copied())
             .unwrap_or(NONE);
         self.alloc(Value::Code(value::CodeObject {
+            compilation_constants: Default::default(),
             parsed_parameters: Default::default(),
             varnames: NONE,
             cellvars: NONE,

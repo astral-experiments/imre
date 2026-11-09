@@ -54,6 +54,7 @@ declare void @imre_dyn_named_assignment(ptr, i64, i64, i64)
 declare void @imre_dyn_assignment_target(ptr, ptr, i64, i64)
 declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
 declare i64 @imre_dyn_get_slice_at(ptr, i64, i64, i64, ptr)
+declare i64 @imre_dyn_get_linked_slice_at(ptr, i64, i64, i64, ptr, ptr)
 declare void @imre_dyn_call_position(ptr, ptr)
 declare i64 @imre_dyn_contains_literal_tuple(ptr, i64, ptr, i64, i32)
 declare i64 @imre_dyn_scoped_call_at(ptr, i64, i64, i64, i64, ptr, i64)
@@ -890,18 +891,7 @@ impl SourceMap<'_> {
     }
 }
 
-#[derive(Clone, Eq, Hash, PartialEq)]
-enum Constant {
-    None,
-    Ellipsis,
-    Bool(bool),
-    Int(String),
-    Float(u64),
-    Complex(u64, u64),
-    Bytes(Vec<u8>),
-    Text(Vec<u8>),
-    Tuple(Vec<Self>),
-}
+use crate::ir::Constant;
 
 #[derive(Clone, Copy, Default)]
 struct Declarations {
@@ -1205,6 +1195,16 @@ enum CallArguments {
         index: u32,
         get_position: String,
     },
+}
+
+enum IndexKey<'a, E> {
+    Object(&'a E),
+    Bounds(
+        Option<&'a E>,
+        Option<&'a E>,
+        Option<&'a crate::ir::Constant>,
+    ),
+    Prepared(&'a crate::ir::Expr),
 }
 
 struct Function<'a, 'p> {
