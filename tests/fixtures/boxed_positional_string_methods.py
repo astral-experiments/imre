@@ -25,6 +25,9 @@ def current():
         def split(self, separator):
             return ("overridden", separator)
 
+        def __contains__(self, item):
+            return False
+
     assert Text("abc").split("-") == ("overridden", "-")
     owners = ["-".join(["a", "b"])]
 
@@ -59,6 +62,21 @@ def current():
     assert getattr("kept", UpperName("different"))() == "KEPT"
     assert word.__getattribute__("upper").__self__ is word
     assert str.__add__(word, "") is word
+
+    contains = str.__contains__
+    assert type(contains).__name__ == "wrapper_descriptor"
+    assert contains("ΣStraße", "Straße")
+    assert not word.__contains__("STRASSE")
+    bound = contains.__get__(word, str)
+    assert bound.__self__ is word and bound("e\ud800")
+    text = Text("Straße")
+    assert "Straße" not in text and contains(text, "Straße")
+    try:
+        contains(word, 1)
+    except TypeError as error:
+        assert str(error) == "'in <string>' requires string as left operand, not int"
+    else:
+        raise AssertionError("non-string operand accepted")
 
     class Reflected:
         def __radd__(self, other):

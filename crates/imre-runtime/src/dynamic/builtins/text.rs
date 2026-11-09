@@ -2412,7 +2412,7 @@ pub(super) fn method(
         (owner, name),
         (
             "str",
-            "__add__" | "__eq__" | "__hash__" | "__mod__" | "__rmod__"
+            "__add__" | "__contains__" | "__eq__" | "__hash__" | "__mod__" | "__rmod__"
         ) | ("bytes", "__mod__")
     ) {
         let (&receiver, args) = args.split_first().ok_or_else(|| {
@@ -2449,6 +2449,10 @@ pub(super) fn method(
         };
         if name == "__add__" {
             return ctx.concat_str(receiver, other);
+        }
+        if name == "__contains__" {
+            // Calling the descriptor directly bypasses a subclass override.
+            return ctx.contains(other, ctx.scalar_value(receiver)).map(boolean);
         }
         if name == "__eq__" {
             return Ok(match ctx.string_storage(other) {
