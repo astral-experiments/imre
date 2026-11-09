@@ -115,7 +115,7 @@ pub(crate) trait ClosedSource {
 
 impl ClosedSource for crate::modules::SourceModule {
     fn project_path(&self) -> Option<&Path> {
-        self.is_program_source().then_some(&self.path)
+        self.checks_source_contracts().then_some(&self.path)
     }
     fn supplies_declarations(&self) -> bool {
         !self.bundled && !self.is_namespace()
@@ -152,7 +152,9 @@ pub(crate) fn check_registered_project<'a>(
             let Some(id) = winner.checked_module else {
                 return false;
             };
-            if winner.is_program != graph.modules[id].is_program_source() || !matched.insert(id) {
+            if winner.is_program != graph.modules[id].checks_source_contracts()
+                || !matched.insert(id)
+            {
                 return false;
             }
             if winner.name == "__main__" {

@@ -762,7 +762,12 @@ pub(crate) struct RegisteredSources<'a> {
 }
 
 pub(crate) fn compile(
-    (path, module_root, mut filesystem): (&Path, Option<&Path>, crate::watch::FileSystem<'_>),
+    (path, module_root, mut filesystem, wheel_records): (
+        &Path,
+        Option<&Path>,
+        crate::watch::FileSystem<'_>,
+        &mut crate::installed_wheels::WheelRecords,
+    ),
     options: &CompileOptions,
     object_imports: bool,
     operation: Option<ObjectOperation>,
@@ -1150,7 +1155,7 @@ pub(crate) fn compile(
             wheel_roots.retain(|root| {
                 let selected = sources.iter().any(|(_, path, _)| path.starts_with(root));
                 if selected {
-                    installed_wheels.extend(crate::installed_wheels::InstalledWheel::discover(
+                    installed_wheels.extend(wheel_records.discover(
                         root,
                         &mut inputs,
                         &mut filesystem,
@@ -1806,6 +1811,30 @@ pub(crate) fn compile(
         .into_iter()
         .map(|(name, file, body)| (name.into(), Path::new(bundled_root).join(file), body.into()))
         .collect();
+    // runpy selects __main__ for a package, including a namespace package.
+    let entry_owner = module_entry.and_then(|name| {
+        let main;
+        let name = if entry_sources.get(name).is_none_or(|(_, package)| *package) {
+            main = format!("{name}.__main__");
+            main.as_str()
+        } else {
+            name
+        };
+        let (root, _) = entry_sources.get(name)?;
+        let (_, path, _) = selected_sources
+            .iter()
+            .map(|(id, _, _)| &sources[*id])
+            .find(|(module, _, _)| module == name)?;
+        crate::installed_wheels::ModuleEntryRoot::select(
+            root,
+            path,
+            initial[..path0_len].contains(root),
+            wheel_records,
+            options,
+            &mut inputs,
+            &mut filesystem,
+        )
+    });
     // The bundle lives in the launcher. This absolute, non-directory path can neither
     // expose the working directory under -I nor collide with an explicit source root.
     let bundle_entry = startup
@@ -1876,7 +1905,22 @@ pub(crate) fn compile(
         .into_iter()
         .enumerate()
         .map(|(index, (id, program, module))| {
-            let mut registration = RegisteredSource::new(&sources[id], program, module);
+            let (name, path, _) = &sources[id];
+            let application = entry_sources
+                .get(name)
+                .filter(|_| index < ordinary_registrations.unwrap_or(usize::MAX))
+                .and_then(|(root, _)| entry_owner.as_ref()?.is_program(root, path))
+                .unwrap_or(program);
+            if application {
+                registrations.python_providers.remove(path);
+            } else {
+                registrations.python_providers.insert(path.clone());
+            }
+            // Emit the selected application's signature. Preserve the existing checker
+            // scope: owning a declaration does not prove that a call will reach it.
+            let mut registration =
+                RegisteredSource::new(&sources[id], program && application, module);
+            registration.check_execution |= application;
             // The selected source can execute from any user search root. Only the
             // SDK winner uses bundled_root, including when its bytes come from the SDK ZIP.
             registration.check_execution |= index < named_registrations.unwrap_or(0)
@@ -1896,12 +1940,6 @@ pub(crate) fn compile(
             registration
         })
         .collect();
-    registrations.python_providers.extend(
-        selected_sources
-            .iter()
-            .filter(|source| !source.is_program)
-            .map(|source| source.path.to_owned()),
-    );
     let (winners, file_alternatives) =
         selected_sources.split_at(ordinary_registrations.unwrap_or(selected_sources.len()));
     // SDK members retain their loader-visible filenames while the ZIP is the build input.

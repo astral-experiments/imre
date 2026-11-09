@@ -91,6 +91,7 @@ impl BuildOptions {
         if !flags.ignore_environment
             && let Some(paths) = env::var_os("PYTHONPATH").filter(|value| !value.is_empty())
         {
+            let start = options.compile.extension_paths.len();
             for path in env::split_paths(&paths) {
                 let path = if path.as_os_str().is_empty() {
                     PathBuf::from(".")
@@ -108,6 +109,7 @@ impl BuildOptions {
                 }
                 options.compile.extension_paths.push(path);
             }
+            options.compile.pythonpath = start..options.compile.extension_paths.len();
         }
         if options.module_root.is_some() {
             return Err(

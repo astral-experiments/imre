@@ -18,6 +18,29 @@ from pathlib import Path
 from fixture_entry import imported_fixture
 
 
+def check_module_search_root(imre, root, run):
+    app = root / "application"
+    app.mkdir()
+    (app / "wheel_module.py").write_text(
+        "def twice(n: int) -> int: return n * 2\n"
+        "def unused() -> int: return twice('x')\n"
+    )
+    distribution = app / "wheel_module-1.dist-info"
+    distribution.mkdir()
+    (distribution / "RECORD").write_text("wheel_module.py,,\n")
+    scores = app / "scores.py"
+    scores.write_text(
+        "def take(n: int, other: int) -> int: return n + other\n"
+        "def later(): raise LookupError('second argument')\n"
+        "try: take('x', later())\n"
+        "except LookupError as error: print(error.args[0])\n"
+    )
+    entry = app / "launch.py"
+    entry.write_text("import scores, wheel_module\nprint(wheel_module.twice(scores.take(1, 2)))\n")
+    result = run(imre, "-B", "-m", "launch", extra={"PYTHONPATH": str(app)})
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"second argument\n6\n", b""), result
+
+
 def check_command_stdin(imre, run):
     source = (
         "import os, sys\n"
@@ -1826,6 +1849,7 @@ def main():
                 timeout=timeout,
             )
 
+        check_module_search_root(imre, root, run)
         check_tracemalloc_startup(imre, run)
         check_registered_run_path(imre, root, run)
         check_frozen_modules_startup(imre, root, run)
