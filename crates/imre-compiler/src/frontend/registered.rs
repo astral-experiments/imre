@@ -1244,7 +1244,10 @@ mod tests {
                     Builtin::BindAnnotationExpression(id), args), .. }] if *id == ir::AnnotationCodeId(3) &&
                     matches!(args.as_slice(), [Expr { kind: ExprKind::Str(text), .. }] if text == "list[int]"))));
         {
-            assert!(matches!(sites[&stmts[2].start()].value, AnnotationValue::Checked(_)));
+            assert!(matches!(
+                sites[&stmts[2].start()].value,
+                AnnotationValue::Checked(_)
+            ));
             let unavailable = &sites[&stmts[4].start()];
             assert!(matches!(unavailable.value, AnnotationValue::Source(_)));
             let mixed = DeferredModuleAnnotation::prepare_body(&[first, unavailable, second]);
@@ -1259,7 +1262,8 @@ mod tests {
 
     #[test]
     fn prepared_source_runs_keep_their_order_and_namespace_ownership() {
-        let text = "from . import a\nx: int = a\nif a:\n    del a\ny: int = (lambda: 1)()\nimport z\n";
+        let text =
+            "from . import a\nx: int = a\nif a:\n    del a\ny: int = (lambda: 1)()\nimport z\n";
         let mut stmts = ruff_python_parser::parse_module(text)
             .unwrap()
             .into_syntax()
@@ -1366,7 +1370,8 @@ mod tests {
     #[test]
     fn nested_walruses_share_the_checked_method_and_packed_call() {
         let graph =
-            SourceGraph::single("(outer := (inner := obj.method(callback(*args, **kw))))\n").unwrap();
+            SourceGraph::single("(outer := (inner := obj.method(callback(*args, **kw))))\n")
+                .unwrap();
         let entry = &graph.modules[graph.entry];
         let source = values::ModuleSource::new(entry);
         let suite = registered_suite(
@@ -1382,26 +1387,24 @@ mod tests {
                 assert_eq!(expr.ty, rhs.ty);
                 binds.push(suite.local_names[slot].name.as_str());
             }
-            ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
-                match &call.target {
-                    ir::RegisteredCallTarget::Method { name, .. } => {
-                        assert_eq!(call.arguments, ir::RegisteredArguments::Positional);
-                        assert_eq!(operands.len(), 2);
-                        calls.push(name.as_str());
-                    }
-                    ir::RegisteredCallTarget::Callable { .. } => {
-                        assert_eq!(operands.len(), 3);
-                        assert_eq!(
-                            call.arguments,
-                            ir::RegisteredArguments::Packed(ir::PackedArguments {
-                                starred: vec![true],
-                                keywords: vec![None],
-                            })
-                        );
-                        calls.push("packed");
-                    }
+            ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => match &call.target {
+                ir::RegisteredCallTarget::Method { name, .. } => {
+                    assert_eq!(call.arguments, ir::RegisteredArguments::Positional);
+                    assert_eq!(operands.len(), 2);
+                    calls.push(name.as_str());
                 }
-            }
+                ir::RegisteredCallTarget::Callable { .. } => {
+                    assert_eq!(operands.len(), 3);
+                    assert_eq!(
+                        call.arguments,
+                        ir::RegisteredArguments::Packed(ir::PackedArguments {
+                            starred: vec![true],
+                            keywords: vec![None],
+                        })
+                    );
+                    calls.push("packed");
+                }
+            },
             _ => {}
         });
         assert_eq!(binds, ["outer", "inner"]);

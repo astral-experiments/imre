@@ -619,10 +619,9 @@ impl Checker<'_> {
         let releases_owner = self.can_release_owner(slot)
             || self.module_namespace.unknown_key
             || !self.module_namespace.exposed.is_empty()
-                && self
-                    .names
-                    .iter()
-                    .any(|(name, &local)| local == slot && self.module_namespace.exposed.contains(name));
+                && self.names.iter().any(|(name, &local)| {
+                    local == slot && self.module_namespace.exposed.contains(name)
+                });
         if releases_owner {
             self.release_module_owner();
         }

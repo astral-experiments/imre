@@ -77,7 +77,11 @@ impl StatementLowering for Checker<'_> {
                     "attribute target requires a Python object",
                 ));
             }
-            statements.push(registered::attribute_statement(effect.action, effect.field, values));
+            statements.push(registered::attribute_statement(
+                effect.action,
+                effect.field,
+                values,
+            ));
         }
         Ok(Some(statements))
     }
