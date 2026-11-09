@@ -13,6 +13,7 @@ pub(crate) type Result<T, M = String> = std::result::Result<T, Failure<M>>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
     Ordinary,
+    ExecutionOperand(ModuleId),
     ExactType,
     DeclaredArgument,
     ReturnType,

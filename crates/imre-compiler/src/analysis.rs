@@ -3,9 +3,11 @@
 mod class_cell;
 #[cfg(test)]
 mod closed_program_tests;
+mod execution;
 #[cfg(test)]
 mod incremental_tests;
 mod inferred_shapes;
+mod run_path;
 mod tuple_displays;
 
 use std::cell::Cell;
@@ -63,6 +65,7 @@ struct Database {
 pub(crate) struct Session {
     db: Database,
     files: Vec<File>,
+    external_loader_declarations: File,
     tuple_spreads: Vec<HashMap<TextSize, usize>>,
     rules: Arc<RuleSelection>,
     pub(crate) root: PathBuf,
@@ -133,6 +136,7 @@ pub(crate) fn check_registered_project<'a>(
         Item = crate::dynamic::RegisteredSource<'a>,
         IntoIter: ExactSizeIterator + Clone,
     >,
+    has_file_body: Option<&dyn Fn(&str) -> bool>,
     checked: Option<&crate::modules::SourceGraph>,
 ) -> Result<(), String> {
     let sources = sources.into_iter();
@@ -171,7 +175,11 @@ pub(crate) fn check_registered_project<'a>(
                     || matched.contains(&id)
             })
         {
-            return result.clone();
+            result.clone()?;
+            return graph.session.check_registered_execution(
+                sources.map(|s| (s.checked_module.unwrap(), s)),
+                has_file_body,
+            );
         }
     }
 
@@ -193,7 +201,8 @@ pub(crate) fn check_registered_project<'a>(
             }
         }
     }
-    for winner in sources {
+    let first_winner = paths.len();
+    for winner in sources.clone() {
         let crate::dynamic::RegisteredSource {
             path,
             source,
@@ -211,7 +220,29 @@ pub(crate) fn check_registered_project<'a>(
         session.add(&path, &source, kind)?;
         paths.push((path, is_program));
     }
-    session.check_closed_program(&paths, None, &[], None)
+    session.check_closed_program(&paths, None, &[], None)?;
+    session.check_registered_execution((first_winner..).zip(sources), has_file_body)
+}
+
+impl Session {
+    /// Check both execution boundaries against the winners of the same registered program.
+    fn check_registered_execution<'a>(
+        &self,
+        sources: impl Iterator<Item = (usize, crate::dynamic::RegisteredSource<'a>)> + Clone,
+        has_file_body: Option<&dyn Fn(&str) -> bool>,
+    ) -> Result<(), String> {
+        let ordinary = self.check_execution_escapes(
+            sources
+                .clone()
+                .filter(|(_, source)| source.check_execution)
+                .map(|(id, source)| (id, source.path)),
+        );
+        let files = self.check_run_path_callers(sources, has_file_body);
+        match (ordinary, files) {
+            (Err(ordinary), Err(files)) => Err(format!("{ordinary}\n{files}")),
+            (result, Ok(())) | (Ok(()), result) => result,
+        }
+    }
 }
 
 /// Validate each native initializer at its own origin. Text retained for a
@@ -454,12 +485,13 @@ impl Session {
             )
             .map_err(|error| error.to_string())?;
         let vendored = ty_vendored::file_system().clone();
+        let external_loader_declarations = stdlib_stubs.join("_frozen_importlib_external.pyi");
         // Based on ty_vendored 0.0.15 (licenses/typeshed.txt). Retain the cache
         // helpers' object parameters when importing updated typeshed declarations.
         system
             .fs()
             .write_file_all(
-                stdlib_stubs.join("_frozen_importlib_external.pyi"),
+                &external_loader_declarations,
                 include_str!("stubs/_frozen_importlib_external.pyi"),
             )
             .map_err(|e| e.to_string())?;
@@ -536,9 +568,12 @@ impl Session {
         // Lowering queries types with lints disabled. Tracking the rules invalidates
         // these cached queries when the full check enables diagnostics.
         DiagnosticRules::new(&db, Arc::default());
+        let external_loader_declarations = system_path_to_file(&db, &external_loader_declarations)
+            .map_err(|error| error.to_string())?;
         Ok(Self {
             db,
             files: Vec::new(),
+            external_loader_declarations,
             tuple_spreads: Vec::new(),
             rules: Arc::new(rules),
             root: PathBuf::from(root),
@@ -783,11 +818,15 @@ impl Session {
     /// Start diagnostics with independent rules and Salsa storage. Every file has already
     /// passed the loader's preflight in this snapshot.
     pub(crate) fn diagnostic_copy(&self) -> Result<Self, String> {
+        self.copy_for_diagnostics(None)
+    }
+
+    fn copy_for_diagnostics(&self, script_entry: Option<File>) -> Result<Self, String> {
         let mut copy = Self::with_storage(
             &self.root,
             &self.extension_roots,
             salsa::Storage::default(),
-            false,
+            script_entry.is_some(),
         )?;
         copy.explicit_check = self.explicit_check;
         for &file in &self.files {
@@ -796,7 +835,12 @@ impl Session {
                 .as_system_path()
                 .expect("first-party source");
             let source = ruff_db::source::source_text(&self.db, file);
-            let file = copy.write_file(path.as_str(), source.as_str())?;
+            let file = if Some(file) == script_entry {
+                let entry = path.parent().unwrap().join("<__main__>.py");
+                copy.write_file(entry.as_str(), source.as_str())?
+            } else {
+                copy.write_file(path.as_str(), source.as_str())?
+            };
             copy.files.push(file);
         }
         Ok(copy)
@@ -2091,11 +2135,22 @@ fn resolves_to_stdlib_function(
     owner: &str,
     name: &str,
 ) -> bool {
+    expression
+        .inferred_type(model)
+        .is_some_and(|ty| is_stdlib_function_type(model, ty, owner, name))
+}
+
+fn is_stdlib_function_type<'db>(
+    model: &SemanticModel<'db>,
+    ty: ty_python_semantic::types::Type<'db>,
+    owner: &str,
+    name: &str,
+) -> bool {
     use ty_python_semantic::types::{Type, TypeDefinition};
     let db = model.db();
-    let Some(ty @ Type::FunctionLiteral(_)) = expression.inferred_type(model) else {
+    if !matches!(ty, Type::FunctionLiteral(_)) {
         return false;
-    };
+    }
     let Some(TypeDefinition::Function(def)) = ty.definition(db, &model.program_environment())
     else {
         return false;

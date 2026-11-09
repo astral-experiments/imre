@@ -727,6 +727,7 @@ pub(crate) struct RegisteredSource<'a> {
     pub(crate) source: &'a str,
     pub(crate) kind: SourceKind,
     pub(crate) is_program: bool,
+    pub(crate) check_execution: bool,
     pub(crate) checked_module: Option<crate::modules::ModuleId>,
 }
 
@@ -746,6 +747,7 @@ impl<'a> RegisteredSource<'a> {
                 SourceKind::File
             },
             is_program,
+            check_execution: is_program,
             checked_module,
         }
     }
@@ -756,6 +758,7 @@ pub(crate) struct RegisteredSources<'a> {
     pub(crate) roots: &'a [PathBuf],
     pub(crate) winners: &'a [RegisteredSource<'a>],
     pub(crate) file_alternatives: &'a [RegisteredSource<'a>],
+    pub(crate) has_file_body: Option<&'a dyn Fn(&str) -> bool>,
 }
 
 pub(crate) fn compile(
@@ -1099,6 +1102,7 @@ pub(crate) fn compile(
     let mut entry_sources: HashMap<String, (PathBuf, bool)> = HashMap::new();
     let mut bundled_includes = HashMap::new();
     let mut before_site = HashSet::new();
+    let mut named_registrations = None;
     let mut ordinary_registrations = None;
     let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
     let mut frozen_files: Vec<String> = Vec::new();
@@ -1116,6 +1120,11 @@ pub(crate) fn compile(
     let mut bundled_imports = VecDeque::new();
     let mut through_getter = false;
     loop {
+        // Everything named by the entry, declarations, and ordinary file imports
+        // is drained before lazy providers and bulk wheel/archive members.
+        if selected_work.is_empty() && work.is_empty() {
+            named_registrations.get_or_insert(selected_sources.len());
+        }
         let (item, selected) = if let Some(next) = selected_work.pop_front() {
             (next, true)
         } else if let Some(next) = work.pop_front() {
@@ -1865,8 +1874,15 @@ pub(crate) fn compile(
     // Borrow the winners once discovery has finished growing the emitter's source table.
     let selected_sources: Vec<_> = selected_sources
         .into_iter()
-        .map(|(id, program, module)| {
+        .enumerate()
+        .map(|(index, (id, program, module))| {
             let mut registration = RegisteredSource::new(&sources[id], program, module);
+            // The selected source can execute from any user search root. Only the
+            // SDK winner uses bundled_root, including when its bytes come from the SDK ZIP.
+            registration.check_execution |= index < named_registrations.unwrap_or(0)
+                && entry_sources
+                    .get(registration.name)
+                    .is_some_and(|(origin, _)| origin != Path::new(bundled_root));
             if registrations
                 .archive_members
                 .contains_key(registration.path)
@@ -1888,15 +1904,6 @@ pub(crate) fn compile(
     );
     let (winners, file_alternatives) =
         selected_sources.split_at(ordinary_registrations.unwrap_or(selected_sources.len()));
-    check(
-        entry_requests_objects || startup_provider,
-        Some(RegisteredSources {
-            root: &root,
-            roots: &roots,
-            winners,
-            file_alternatives,
-        }),
-    )?;
     // SDK members retain their loader-visible filenames while the ZIP is the build input.
     for path in inputs
         .files
@@ -1905,6 +1912,31 @@ pub(crate) fn compile(
     {
         registrations.physical_files.entry(path).or_default();
     }
+    // file_code_from_bytes compares the original OS spelling and digest.
+    let has_file_body = |filename: &str| {
+        selected_sources.iter().any(|s| {
+            s.path.as_os_str() == std::ffi::OsStr::new(filename)
+                && registrations.physical_files.contains_key(s.path)
+                && !module_errors.contains_key(s.path)
+        })
+    };
+    let sdk_runpy = sources
+        .iter()
+        .any(|(name, path, _)| name == "runpy" && path.starts_with(bundled_root))
+        && (imre_ast::providers::is_frozen("runpy", || frozen_modules)
+            || entry_sources
+                .get("runpy")
+                .is_none_or(|(root, _)| root == Path::new(bundled_root)));
+    check(
+        entry_requests_objects || startup_provider,
+        Some(RegisteredSources {
+            root: &root,
+            roots: &roots,
+            winners,
+            file_alternatives,
+            has_file_body: sdk_runpy.then_some(&has_file_body),
+        }),
+    )?;
     // A namespace portion has no initializer. Its registered origin is a directory
     // that must remain available for the scratch session to add its child modules.
     let namespace_portions: HashSet<_> = inputs.directories.iter().map(|(path, _)| path).collect();

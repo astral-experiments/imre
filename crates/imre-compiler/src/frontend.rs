@@ -12673,11 +12673,23 @@ impl<'a> Checker<'a> {
                 return Err(self.object_builtin_error(name, call));
             }
             _ => {
-                return Err(error(
+                let diagnostic = Diagnostic::at(
                     self.source,
                     call,
-                    "unknown function or unsupported builtin arguments",
-                ));
+                    "unknown function or unsupported builtin arguments".to_owned(),
+                );
+                return Err(if matches!(name, "exec" | "eval")
+                    && self.graph.session.is_stdlib_function(
+                        self.module,
+                        &call.func,
+                        "builtins",
+                        name,
+                    ) {
+                    diagnostic.classified(Kind::ExecutionOperand(self.module))
+                } else {
+                    diagnostic
+                }
+                .into());
             }
         };
         Ok(Expr {

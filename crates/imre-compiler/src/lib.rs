@@ -457,13 +457,8 @@ fn object_fallback(
             }
             CheckedProgram::Native(ir) if !boxed_startup => {
                 let (mut module, mut owners) = *ir;
-                if let Some((id, operand, only_input)) = ir::text_execution(&module) {
+                if let Some((id, operand)) = ir::text_execution(&module) {
                     let source = &graph.modules[id];
-                    if only_input {
-                        return Err(LoweringDiagnostic::at(&source.source, &operand,
-                            "exec cannot execute Python from standard input. Define the handlers in the program and select one by name.")
-                            .with_path(&source.path).to_string());
-                    }
                     let object = LoweringDiagnostic::at(
                         &source.source,
                         &operand,
@@ -514,8 +509,21 @@ fn object_fallback(
     };
     // A newly found checked provider can lower normally. If lowering fails, its
     // dependencies alone do not admit the caller to the object importer.
-    let fallback = |graph| match (graph, native_candidate) {
-        (Some(graph), Some(value)) => native_result(graph, value),
+    let fallback = |graph| match (graph, native_candidate, error.kind) {
+        (Some(graph), Some(value), _) => native_result(graph, value),
+        (Some(graph), None, LoweringKind::ExecutionOperand(id))
+            if graph.modules[id].is_program_source() =>
+        {
+            // Native lowering can fail before the file has a runtime registration.
+            // Check its existing contracts before diagnosing the failed call's source.
+            if let Some(contract) = &graph.source_contract {
+                contract.clone()?;
+            }
+            graph
+                .session
+                .check_execution_escapes(std::iter::once((id, graph.modules[id].path.as_path())))?;
+            Err(error.to_string())
+        }
         _ => Err(error.to_string()),
     };
     let checked_graph = graph;
@@ -622,12 +630,13 @@ fn object_fallback(
                 registered.root,
                 registered.roots,
                 registered.winners.iter().copied(),
+                registered.has_file_body,
                 checked_graph.as_ref(),
             )?;
             if registered
                 .file_alternatives
                 .iter()
-                .any(|source| source.is_program)
+                .any(|source| source.check_execution)
             {
                 // Check a linked file provider with its own bindings. The ordinary program
                 // still imports the frozen definitions in the check above.
@@ -636,6 +645,7 @@ fn object_fallback(
                     .iter()
                     .map(|source| dynamic::RegisteredSource {
                         is_program: false,
+                        check_execution: false,
                         ..*source
                     })
                     .collect();
@@ -644,6 +654,7 @@ fn object_fallback(
                     registered.root,
                     registered.roots,
                     files,
+                    registered.has_file_body,
                     checked_graph.as_ref(),
                 )?;
             }
