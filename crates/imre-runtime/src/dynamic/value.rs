@@ -3690,6 +3690,19 @@ pub(super) struct Frame {
     created_finalizer: bool,
 }
 
+/// Empty frame storage reserved before a native worker is spawned.
+pub(super) struct WorkerStack(Vec<Frame>);
+
+impl WorkerStack {
+    pub(super) fn reserve() -> Result<Self> {
+        let mut frames = Vec::new();
+        frames
+            .try_reserve_exact(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        Ok(Self(frames))
+    }
+}
+
 impl Frame {
     /// The strong handles owned by this activation, in marking order.
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
@@ -3794,6 +3807,10 @@ impl Heap {
     }
 
     pub fn new() -> Self {
+        Self::with_worker_stack(None)
+    }
+
+    pub(super) fn with_worker_stack(reserved: Option<WorkerStack>) -> Self {
         let mut slots = vec![
             Slot::new(Value::None),
             Slot::new(Value::Bool(false)),
@@ -3835,7 +3852,11 @@ impl Heap {
             text_position: Cell::default(),
             linked_sources: HashMap::new(),
             spare_frame_roots: Vec::new(),
-            frames: vec![Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE)],
+            frames: {
+                let mut frames = reserved.map_or_else(|| Vec::with_capacity(1), |stack| stack.0);
+                frames.push(Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE));
+                frames
+            },
             fault_generation: Cell::new(None),
             fault_workers: RefCell::new(None),
             next_collection: FIRST_DYNAMIC_SLOT + 4096,
