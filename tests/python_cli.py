@@ -86,6 +86,21 @@ def check_registered_entry_operand(imre, root, run):
     assert result.returncode and not result.stdout, result
     assert b"Imre: expected int, got bool" in result.stderr, result
 
+    bad_body = functions.replace("    send(a + b)", "    values: list[int] = [3]\n    values.append(True)\n    send(a + b)")
+    replacements = (
+        "def replacement(a: int, b: int, send):\n    print('replacement')\n    send(a + b)\n"
+        "def install(callback):\n    globals()['publish'] = replacement\n    return callback\n"
+        "send = {'send': report}[input()]\n"
+    )
+    for invocation in ("publish(3, 5, send)", "publish(3, 5, install(send))"):
+        entry.write_text(bad_body + replacements + invocation + "\n")
+        result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+        assert result.returncode and not result.stdout, result
+        assert b"checked_operand.py:3:19: Imre: expected int, got bool" in result.stderr, result
+    entry.write_text(bad_body + replacements + "install(send)\npublish(3, 5, send)\n")
+    result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"replacement\n8\n", b""), result
+
 
 def check_module_search_root(imre, root, run):
     app = root / "application"

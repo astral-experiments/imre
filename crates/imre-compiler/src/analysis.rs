@@ -8,7 +8,7 @@ mod execution;
 mod incremental_tests;
 mod inferred_shapes;
 mod initializer_calls;
-pub(crate) use initializer_calls::{passive_function, unambiguous_file_module};
+pub(crate) use initializer_calls::{inert_declaration, passive_function, unambiguous_file_module};
 mod run_path;
 mod tuple_displays;
 
@@ -216,15 +216,46 @@ pub(crate) fn check_registered_project<'a>(
 impl Session {
     /// A module operand follows the statement's normal continuation if they have
     /// the same use-def condition. Calls before the statement may themselves raise.
-    fn unconditional_module_operand(
+    pub(crate) fn unconditional_module_operand(
         &self,
         module: usize,
         statement: ruff_text_size::TextSize,
         operand: TextRange,
     ) -> bool {
+        self.unconditional_operand(
+            module,
+            ty_python_core::FileScopeId::global(),
+            Some(statement),
+            operand,
+        )
+    }
+
+    pub(crate) fn unconditional_function_operand(
+        &self,
+        module: usize,
+        function: &ruff_python_ast::StmtFunctionDef,
+        operand: TextRange,
+    ) -> bool {
         let file = self.db.program_file(self.files[module]);
         let index = ty_python_core::semantic_index(&self.db, file);
-        let flow = index.use_def_map(ty_python_core::FileScopeId::global());
+        let Some(scope) =
+            index.try_node_scope(ty_python_core::scope::NodeWithScopeRef::Function(function))
+        else {
+            return false;
+        };
+        self.unconditional_operand(module, scope, None, operand)
+    }
+
+    fn unconditional_operand(
+        &self,
+        module: usize,
+        scope: ty_python_core::FileScopeId,
+        statement: Option<ruff_text_size::TextSize>,
+        operand: TextRange,
+    ) -> bool {
+        let file = self.db.program_file(self.files[module]);
+        let index = ty_python_core::semantic_index(&self.db, file);
+        let flow = index.use_def_map(scope);
         let condition = |range: TextRange| {
             flow.range_reachability()
                 .filter(|(scope, _)| scope.contains_range(range))
@@ -232,7 +263,11 @@ impl Session {
                 // The use-def map omits its default, always-reachable intervals.
                 .map_or(ty_python_core::reachability_constraints::ScopedReachabilityConstraintId::ALWAYS_TRUE, |(_, condition)| condition)
         };
-        condition(operand) == condition(TextRange::at(statement, 1.into()))
+        let required = statement.map_or(
+            ty_python_core::reachability_constraints::ScopedReachabilityConstraintId::ALWAYS_TRUE,
+            |start| condition(TextRange::at(start, 1.into())),
+        );
+        condition(operand) == required
             && !ty_python_semantic::types::ide_support::unreachable_ranges(&self.db, file)
                 .iter()
                 .any(|excluded| excluded.range.contains_range(operand))

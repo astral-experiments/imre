@@ -1035,6 +1035,7 @@ fn lower_graph(
         cache.validate_abi(&definitions, &globals);
     }
     let mut functions = Vec::new();
+    let mut refused_body = None;
     let mut zip_sums = Vec::new();
     let mut owners = Vec::new();
     let mut call_graph = Vec::new();
@@ -1072,7 +1073,27 @@ fn lower_graph(
                     }
                 }
                 Err(error) if error.is_object() => {}
-                Err(error) => return Err(error.terminal_in(graph, *module_id)),
+                Err(error) => {
+                    let report = error.terminal_in(graph, *module_id);
+                    let id = callable_definitions[signature.id];
+                    if graph.registered_startup
+                        && *module_id == graph.entry
+                        && signature.method.is_none()
+                        && let Some(operand) = report.exact_operand()
+                        && let Some(function) =
+                            module.parsed.syntax().body[id.statement].as_function_def_stmt()
+                        && function.decorator_list.is_empty()
+                        && !function.is_async
+                        && !imre_ast::code_flags::is_generator(&function.body)
+                        && graph
+                            .session
+                            .unconditional_function_operand(*module_id, function, operand)
+                    {
+                        refused_body = Some((id, report));
+                        break;
+                    }
+                    return Err(report);
+                }
             }
             continue;
         }
@@ -1167,6 +1188,23 @@ fn lower_graph(
             .iter()
             .map(|&index| module.parsed.syntax().body[index].clone())
             .collect::<Vec<_>>();
+        if let Some((definition, mut report)) = refused_body.take() {
+            // The normal entry binder can establish that this physical definition
+            // is called. Its diagnostic remains the ordinary result on every exit.
+            checker.observed_definition = Some(Box::new(CalledDefinition {
+                definition,
+                entry_site: None,
+            }));
+            let _ = graph.try_complete_body(module_id, false, || {
+                checker.block(&statements).ok().map(drop)
+            });
+            if let Some((statement, call)) =
+                checker.observed_definition.and_then(|seen| seen.entry_site)
+            {
+                report.reached_in_entry(module_id, statement, call);
+            }
+            return Err(report);
+        }
         let (mut body, _) = checker
             .block(&statements)
             .inspect_err(capture_on_object)
@@ -2639,7 +2677,13 @@ enum Iteration {
     Prepared(pipelines::Prepared),
 }
 
+struct CalledDefinition {
+    definition: DefinitionId,
+    entry_site: Option<(TextSize, ruff_text_size::TextRange)>,
+}
+
 struct Checker<'a> {
+    observed_definition: Option<Box<CalledDefinition>>,
     /// Locals in this body are bound in an existing Python activation.
     registered: Option<registered::Frame<'a>>,
     namespace_calls: HashSet<ruff_text_size::TextRange>,
@@ -2726,6 +2770,7 @@ impl<'a> Checker<'a> {
         globals: &'a ModuleValues,
     ) -> Self {
         Self {
+            observed_definition: None,
             registered: None,
             namespace_calls: HashSet::new(),
             module_namespace: Default::default(),

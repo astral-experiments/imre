@@ -43,6 +43,13 @@ fn passive(stmt: &Stmt) -> bool {
     }
 }
 
+pub(crate) fn inert_declaration(statement: &Stmt) -> bool {
+    matches!(
+        statement,
+        Stmt::FunctionDef(_) | Stmt::Pass(_) | Stmt::Expr(_)
+    ) && passive(statement)
+}
+
 /// No statement in this function can enter application code when all supplied
 /// and defaulted arguments are literals. The caller still establishes its identity.
 pub(crate) fn passive_function(function: &ruff_python_ast::StmtFunctionDef) -> bool {

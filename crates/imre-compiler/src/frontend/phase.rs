@@ -28,7 +28,7 @@ pub(crate) enum Kind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Position {
     range: TextRange,
-    entry_statement: Option<(ModuleId, TextSize)>,
+    entry_statement: Option<(ModuleId, TextSize, TextRange)>,
     line: usize,
     column: usize,
 }
@@ -85,9 +85,23 @@ impl<M> Diagnostic<M> {
     }
 
     pub(crate) fn entry_operand(&self) -> Option<(ModuleId, TextSize, TextRange)> {
-        let position = self.position.as_ref()?;
-        let (owner, statement) = position.entry_statement?;
-        (self.kind == Kind::ExactType).then_some((owner, statement, position.range))
+        let entry = self.position.as_ref()?.entry_statement?;
+        (self.kind == Kind::ExactType).then_some(entry)
+    }
+
+    pub(super) fn exact_operand(&self) -> Option<TextRange> {
+        (self.kind == Kind::ExactType).then_some(self.position.as_ref()?.range)
+    }
+
+    pub(super) fn reached_in_entry(
+        &mut self,
+        module: ModuleId,
+        statement: TextSize,
+        call: TextRange,
+    ) {
+        if let Some(position) = &mut self.position {
+            position.entry_statement = Some((module, statement, call));
+        }
     }
 
     pub(crate) fn with_path(mut self, path: &std::path::Path) -> Self {
@@ -226,7 +240,9 @@ impl Failure {
             && report.kind == Kind::ExactType
             && let Some(position) = &mut report.position
         {
-            position.entry_statement.get_or_insert((module, statement));
+            position
+                .entry_statement
+                .get_or_insert((module, statement, position.range));
         }
         self
     }
