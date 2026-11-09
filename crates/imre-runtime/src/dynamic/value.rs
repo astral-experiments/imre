@@ -7747,6 +7747,39 @@ mod tests {
     }
 
     #[test]
+    fn prompt_finalizers_recheck_both_unindexed_edges_of_a_cycle() {
+        for break_cycle in [false, true] {
+            let mut heap = Heap::new();
+            let owner = heap.alloc(Value::List(Vec::new()));
+            heap.register_finalizer(owner);
+            let cell = heap.alloc(Value::Cell(None));
+            let mut scope = Scope::new(String::new(), Some(owner));
+            scope.class_cell = Some(cell);
+            let scope = heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(scope)));
+            *heap.get_mut(cell) = Value::Cell(Some(scope));
+            heap.release_temporaries_since(0);
+
+            let check = |heap: &mut Heap| {
+                heap.acyclic_finalizer([NONE; 2], [].into_iter(), None)
+                    .unwrap()
+            };
+            assert_eq!(check(&mut heap), None);
+            assert_eq!(heap.cyclic_finalizers.verified_owners(&heap), &[owner]);
+
+            let Value::Scope(scope) = heap.get_mut(scope) else {
+                unreachable!()
+            };
+            if break_cycle {
+                scope.class_cell = None;
+            } else {
+                scope.parent = None;
+            }
+            assert!(heap.cyclic_finalizers.verified_owners(&heap).is_empty());
+            assert_eq!(check(&mut heap), Some(owner));
+        }
+    }
+
+    #[test]
     fn prompt_finalizers_recheck_a_cycle_and_its_path_to_the_owner() {
         let mut heap = Heap::new();
         let owner = heap.alloc(Value::List(Vec::new()));

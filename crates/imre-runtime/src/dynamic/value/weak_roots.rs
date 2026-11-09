@@ -136,8 +136,9 @@ impl CycleRetention {
                     }
                 }
             }
-            // One opaque edge may use the full strong-child visitor at validation.
-            if missing > 1 || (missing != 0 && limit < links.len()) {
+            // A cycle can also retain an owner through a path leaving the cycle.
+            // At that junction both edges may need the full strong-child visitor.
+            if missing > 2 || (missing != 0 && limit < links.len()) {
                 return None;
             }
         }
