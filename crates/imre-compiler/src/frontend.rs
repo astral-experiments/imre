@@ -112,7 +112,9 @@ mod record_inputs;
 mod records;
 mod regex;
 mod registered;
+mod retained;
 pub(crate) use registered::{RegisteredFunction, registered_operand, registered_suite};
+pub(crate) use retained::RegisteredNative;
 mod sequences;
 mod shutil;
 mod sign_parameters;
@@ -604,6 +606,7 @@ fn lower_graph(
     mut cache: Option<&mut CallerCache>,
     key_reprs: &mut HashSet<DefinitionId>,
 ) -> StdResult<(ir::Module, Vec<ModuleId>), Diagnostic> {
+    graph.native_functions.borrow_mut().clear();
     let types = Types::default();
     typing::collect_sites(graph, &types);
     namedtuples::collect(graph, &types)?;
@@ -1131,7 +1134,7 @@ fn lower_graph(
         .iter()
         .map(|&module| graph.modules[module].archive.is_none())
         .collect();
-    for helper in helpers.into_functions() {
+    for helper in helpers.take_functions() {
         python_frames.push(helper.source_frame);
         owners.push(helper.module);
         functions.push(helper.function);
@@ -1325,7 +1328,7 @@ fn lower_function(
     signature: &Signature,
     registered_locals: Option<&mut HashMap<usize, String>>,
 ) -> BodyResult {
-    checker.registered = registered_locals.is_some();
+    checker.registered = registered_locals.is_some() && !checker.native_activation;
     #[cfg(test)]
     caller_cache::record_lowering(definition.name.as_str());
     let module = &checker.graph.modules[checker.module];
@@ -2493,6 +2496,8 @@ enum Iteration {
 struct Checker<'a> {
     /// Locals in this body are bound in an existing Python activation.
     registered: bool,
+    /// Keep source checkpoints while lowering the ordinary fixed-layout operations.
+    native_activation: bool,
     /// Doctest prompts share an exec-style namespace until the case ends.
     interactive_names: bool,
     /// A later local assignment shadows builtin iter throughout a function.
@@ -2571,6 +2576,7 @@ impl<'a> Checker<'a> {
     ) -> Self {
         Self {
             registered: false,
+            native_activation: false,
             interactive_names: false,
             local_iter: false,
             positional_pack: None,
@@ -4850,7 +4856,7 @@ impl<'a> Checker<'a> {
             {
                 lowered.push(Statement::Assign(*flag, Expr::boolean(true)));
             }
-            if self.registered {
+            if self.registered || self.native_activation {
                 // Even a pass has a Python frame checkpoint for pending signals and exceptions.
                 body.push(registered::checkpoint(statement));
             } else if !lowered.is_empty() && self.fault_enabled() {

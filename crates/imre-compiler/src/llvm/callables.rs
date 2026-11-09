@@ -13,6 +13,16 @@ pub(super) struct Uses {
     pub(super) marked: BTreeSet<usize>,
 }
 
+impl Uses {
+    pub(super) fn is_empty(&self) -> bool {
+        self.targets.is_empty()
+            && self.layouts.is_empty()
+            && self.marked.is_empty()
+            && !self.context
+            && !self.inspected
+    }
+}
+
 /// Bound adapters pass the record's receiver according to the target's native
 /// convention. Cold adapters take the callable owner from the invocation frame.
 pub(super) fn adapters(emitter: &mut Emitter<'_, '_>) {

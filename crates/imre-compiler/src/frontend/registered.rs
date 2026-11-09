@@ -28,6 +28,21 @@ pub(super) fn capture(
             continue;
         };
         let Some(signature) = inference.registered_signature(signature) else {
+            if let Some(signature) = inference.checked_signature(signature) {
+                let helpers = Helpers::new(inference.len());
+                let checker =
+                    Checker::new(graph, id, signatures, classes, types, &helpers, globals);
+                if let Some(native) =
+                    retained::capture(checker, function, &signature, inference.len(), &helpers)
+                {
+                    graph
+                        .native_functions
+                        .borrow_mut()
+                        .entry(id)
+                        .or_default()
+                        .insert(function.start(), native);
+                }
+            }
             continue;
         };
         let helpers = Helpers::new(inference.len());

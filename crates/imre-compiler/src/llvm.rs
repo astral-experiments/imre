@@ -329,6 +329,48 @@ pub(crate) fn emit_file(
     Ok((std::mem::take(output.entry_buffer()), prefer_objects))
 }
 
+pub(crate) struct RegisteredCode {
+    pub(crate) symbol: String,
+    pub(crate) definitions: String,
+}
+
+/// Emit the compact, specialized root and its owned helpers with the usual checked LLVM generator.
+/// A registered caller already has a running Python context, so it cannot run a native program initializer.
+pub(crate) fn registered_native(
+    module: &Module,
+    site: usize,
+    sanitize: bool,
+    line_of: impl Fn(ruff_text_size::TextSize) -> usize,
+) -> Result<RegisteredCode, Unsupported> {
+    let ranges = crate::ranges::analyze(module);
+    let mut output = Output::new(&vec![0; module.functions.len()], 1, 0, false);
+    output.registered = Some(site);
+    crate::ir::walk_expressions(&module.functions[0].body, &mut |expr| {
+        if let ExprKind::Builtin(Builtin::RegisteredStatement(range, _), _) = &expr.kind {
+            output
+                .statement_lines
+                .insert(range.start(), line_of(range.start()));
+        }
+    });
+    let symbol = output.function_name(0);
+    emit_program(module, &ranges, sanitize, &mut output)?;
+    Ok(RegisteredCode {
+        symbol,
+        definitions: std::mem::take(output.entry_buffer()),
+    })
+}
+
+pub(crate) fn registered_native_prelude() -> String {
+    let mut ir = String::new();
+    write_declarations(&mut ir);
+    ir.push_str(&integer_helpers());
+    ir.push_str(&nullable_pointer_helpers());
+    ir.push_str(BRANCH_WEIGHTS);
+    ir
+}
+
+const BRANCH_WEIGHTS: &str = "\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n!1 = !{!\"branch_weights\", i32 2000, i32 1}\n";
+
 fn emit_program(
     module: &Module,
     ranges: &RangeFacts<'_>,
@@ -544,7 +586,8 @@ fn emit_program(
         .filter_map(|m| m.repr_method)
         .collect();
     let mut bodies = Vec::with_capacity(module.functions.len() + 1);
-    for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
+    let entry = emitter.output.registered.is_none().then_some(&module.entry);
+    for (id, function) in module.functions.iter().chain(entry).enumerate() {
         let entry = id == module.functions.len();
         emitter.output.current = if entry {
             emitter.output.entry
@@ -556,8 +599,43 @@ fn emit_program(
             emitter.body.reset_names();
         }
         let frame = function_source_frame(module, &repr_methods, id);
-        let params = emitter.function(function, entry, frame, &borrows[id])?;
+        let mut params = emitter.function(function, entry, frame, &borrows[id])?;
+        if id == 0 && emitter.output.registered.is_some() {
+            let names = "ptr %ctx, i64 %scope, ptr %file";
+            params = if params.is_empty() {
+                names.to_owned()
+            } else {
+                format!("{names}, {params}")
+            };
+        }
         bodies.push((params, std::mem::take(&mut emitter.body.code)));
+    }
+    if emitter.output.registered.is_some() {
+        // These resources depend on program startup, static layout tables or object pools.
+        // Keep their existing registered operations until they can share those owners.
+        if !emitter.strings.is_empty()
+            || !module.globals.is_empty()
+            || !module.class_metadata.is_empty()
+            || !emitter.json_schema_roots.is_empty()
+            || !emitter.async_frames.is_empty()
+            || !emitter.async_invoke_frames.is_empty()
+            || !emitter.static_functions.is_empty()
+            || !emitter.callable_uses.is_empty()
+            || !emitter.output.record_types.is_empty()
+            || emitter.output.has_local_helpers()
+            || emitter.uses_sequence_layout
+            || emitter.uses_append_windows
+            || emitter.uses_byte_output_windows
+            || emitter.uses_forward_cursors
+            || emitter.uses_percent_tuple
+            || !extension_modules.is_empty()
+        {
+            return Err(Unsupported(
+                "Imre: retained code requires native module initialization or private helpers",
+            ));
+        }
+        write_function_bodies(emitter.output, module, bodies, sanitize);
+        return Ok(false);
     }
     emitter
         .output
@@ -704,15 +782,27 @@ fn emit_program(
     }
     emitter.enum_table();
     emitter.literal_pool();
+    write_function_bodies(emitter.output, module, bodies, sanitize);
+    // Layout hints never replace the representation, overflow, or error guards.
+    emitter.output.common().push_str(BRANCH_WEIGHTS);
+    Ok(!mixed_link_owners.is_empty())
+}
+
+fn write_function_bodies(
+    output: &mut Output,
+    module: &Module,
+    bodies: Vec<(String, String)>,
+    sanitize: bool,
+) {
     for (id, (params, body)) in bodies.into_iter().enumerate() {
         let (owner, name, returns) = if let Some(f) = module.functions.get(id) {
             (
-                emitter.output.function_owner(id),
-                emitter.output.function_name(id),
+                output.function_owner(id),
+                output.function_name(id),
                 f.returns.llvm(),
             )
         } else {
-            (emitter.output.entry, "main".to_owned(), "i32")
+            (output.entry, "main".to_owned(), "i32")
         };
         // Keep native function entries aligned to a cache line as the linked runtime changes.
         let attrs = if sanitize {
@@ -720,22 +810,11 @@ fn emit_program(
         } else {
             " align 64"
         };
-        emitter.output.common().push('\n');
-        emitter
-            .output
+        output.common().push('\n');
+        output
             .function(owner, &name, returns, &params, attrs)
             .push_str(&body);
     }
-    // Layout hints never replace the representation, overflow, or error guards.
-    emitter
-        .output
-        .common()
-        .push_str("\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n");
-    emitter
-        .output
-        .common()
-        .push_str("!1 = !{!\"branch_weights\", i32 2000, i32 1}\n");
-    Ok(!mixed_link_owners.is_empty())
 }
 
 struct Emitter<'a, 'module> {
@@ -5010,6 +5089,13 @@ impl Emitter<'_, '_> {
             })
             .collect::<Vec<_>>();
         let result = match builtin {
+            Builtin::RegisteredStatement(range, _) if self.output.registered.is_some() => {
+                let line = self.output.statement_lines[&range.start()];
+                self.line(format!("call void @imre_dyn_statement_with_exception(ptr %ctx, ptr null, i64 0, ptr %file, i32 {line}, i64 0)"));
+                let failed = self.instruction("call i1 @imre_dyn_failed(ptr %ctx)");
+                self.check_failed(&failed);
+                none()
+            }
             Builtin::RegisteredDefinition(_)
             | Builtin::RegisteredStatement(..)
             | Builtin::RegisteredCall(..)
@@ -12143,6 +12229,24 @@ slow:
 #[cfg(test)]
 mod tests {
     use crate::{CompileOptions, compile};
+
+    #[test]
+    fn registered_code_keeps_the_checked_reduction_and_its_private_helper() {
+        let source = "def total(text: str) -> int:\n    digits = list(map(int, text))\n    return sum([x * (x + 1) for x in digits])\nprint(total(input()))\n";
+        let mut graph = crate::modules::SourceGraph::single(source).unwrap();
+        let (mut module, _) = crate::frontend::lower_with_owners(&mut graph).unwrap();
+        crate::specialize(&mut module).unwrap();
+        let native = super::registered_native(&module, 2, false, |_| 1).unwrap();
+        assert_eq!(native.symbol, "imre_registered_2_0");
+        assert!(native.definitions.contains("call ptr @imre_str_int_list("));
+        assert!(
+            native
+                .definitions
+                .contains("call i64 @imre_registered_2_1(")
+        );
+        assert!(native.definitions.contains("mul nsw i64"));
+        assert!(!native.definitions.contains("@main("));
+    }
 
     #[test]
     fn ascii_membership_shares_only_stable_character_lookups() {

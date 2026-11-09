@@ -373,6 +373,17 @@ impl Inference {
     }
 
     /// The registered binder has real Python objects even when fixed callers cannot infer a layout.
+    pub(super) fn checked_signature(&self, signature: &Signature) -> Option<Signature> {
+        let pending = self.pending.borrow();
+        let value = &pending[signature.id];
+        if value.returns.is_none() || value.params.iter().any(Option::is_none) {
+            return None;
+        }
+        let mut signature = signature.clone();
+        self.update(&mut signature);
+        Some(signature)
+    }
+
     pub(super) fn registered_signature(&self, signature: &Signature) -> Option<Signature> {
         let pending = self.pending.borrow();
         let params = &pending[signature.id].params;
