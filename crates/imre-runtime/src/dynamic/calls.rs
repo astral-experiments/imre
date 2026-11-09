@@ -787,6 +787,12 @@ impl Context {
     fn default_text_attribute(&mut self, obj: Id, text: &str, op: ObjectAttribute) -> Result<Id> {
         match op {
             ObjectAttribute::Get => self.default_get_attr(obj, text),
+            ObjectAttribute::Edit(_)
+                if text == "f_builtins"
+                    && matches!(self.heap.get(obj), Value::PythonFrame { .. }) =>
+            {
+                Err(self.readonly_getset_error("frame", text, obj))
+            }
             ObjectAttribute::Edit(Some(value)) => {
                 self.default_set_attr(obj, text, value).map(|_| NONE)
             }
@@ -3181,6 +3187,7 @@ impl Context {
                 return super::frame_locals::get(self, obj);
             }
             Value::PythonFrame { globals, .. } if name == "f_globals" => return Ok(globals),
+            Value::PythonFrame { builtins, .. } if name == "f_builtins" => return Ok(builtins),
             Value::PythonFrame { code, .. } if name == "f_code" => {
                 if !self.audit_hooks.is_empty() {
                     let attribute = self.text(name);
