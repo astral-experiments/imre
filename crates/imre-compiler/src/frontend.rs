@@ -12746,6 +12746,19 @@ impl<'a> Checker<'a> {
             }
             checked_path = Some(value);
         }
+        if !gzip
+            && let Some(mode) = args.find_argument_value("mode", 1)
+            && !mode.is_string_literal_expr()
+            && args.find_argument_value("file", 0).is_some()
+            && paths::has_open_arguments(args)
+        {
+            let message = if mode.is_literal_expr() {
+                "open mode must be a string"
+            } else {
+                "fixed-layout open requires a literal string mode to select its stream type. Use 'from io import open' for string modes selected at runtime"
+            };
+            return Err(error(self.source, mode, message));
+        }
         let (path, mode) = match call.arguments.args.as_ref() {
             [path] if !gzip => (path, "r"),
             [path, ast::Expr::StringLiteral(mode)] => {
@@ -12792,7 +12805,18 @@ impl<'a> Checker<'a> {
             for keyword in &call.arguments.keywords {
                 match keyword.arg.as_deref() {
                     Some("encoding") if !encoding => {
-                        self.utf8_encoding_keyword(keyword)?;
+                        let value = &keyword.value;
+                        if !self.is_utf8_literal(value)? {
+                            let message = if value.is_literal_expr()
+                                && !value.is_string_literal_expr()
+                                && !matches!(value, ast::Expr::NoneLiteral(_))
+                            {
+                                "open encoding must be a string or None"
+                            } else {
+                                "fixed-layout open requires encoding='utf-8'. Use 'from io import open' to pass another string encoding or None"
+                            };
+                            return Err(error(self.source, value, message));
+                        }
                         args.push(self.expr(&keyword.value)?);
                         encoding = true;
                     }
@@ -12867,15 +12891,7 @@ impl<'a> Checker<'a> {
                 "text file I/O accepts only encoding='utf-8'",
             ));
         }
-        let ast::Expr::StringLiteral(value) = &encoding.value else {
-            return Err(error(
-                self.source,
-                encoding,
-                "encoding must be the literal 'utf-8'",
-            ));
-        };
-        check_string(value, self.source)?;
-        if value.value.to_str() != "utf-8" {
+        if !self.is_utf8_literal(&encoding.value)? {
             return Err(error(
                 self.source,
                 encoding,
@@ -12883,6 +12899,14 @@ impl<'a> Checker<'a> {
             ));
         }
         Ok(())
+    }
+
+    fn is_utf8_literal(&self, value: &ast::Expr) -> Result<bool, String> {
+        let ast::Expr::StringLiteral(literal) = value else {
+            return Ok(false);
+        };
+        check_string(literal, self.source)?;
+        Ok(literal.value.to_str() == "utf-8")
     }
 }
 
@@ -12905,6 +12929,29 @@ fn literal_binding_names(suite: &[ast::Stmt]) -> Option<std::collections::HashSe
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fixed_open_diagnostics_preserve_literal_errors() {
+        use crate::modules::SourceGraph;
+
+        for (source, expected) in [
+            ("mode = 'r'\nopen('data', mode)", "literal string mode"),
+            ("open('data', None)", "open mode must be a string"),
+            ("open('data', encoding=None)", "from io import open"),
+            (
+                "open('data', encoding=1)",
+                "open encoding must be a string or None",
+            ),
+            (
+                r"open('data', encoding='\ud800')",
+                "surrogate string escapes",
+            ),
+        ] {
+            let graph = SourceGraph::single_with_mode(source, true).unwrap();
+            let error = super::lower(&graph).err().expect("invalid fixed open");
+            assert!(error.contains(expected), "{source}: {error}");
+        }
+    }
+
     #[test]
     fn fractions_use_python_numeric_equality() {
         use crate::modules::SourceGraph;

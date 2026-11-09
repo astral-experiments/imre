@@ -33,6 +33,13 @@ pub(super) fn is_update_open(args: &ast::Arguments, mode: &str) -> bool {
     } else {
         2
     };
+    mode.len() == expected_len
+        && mode.contains(&b'+')
+        && mode.iter().any(|c| matches!(c, b'r' | b'w' | b'x' | b'a'))
+        && has_open_arguments(args)
+}
+
+pub(super) fn has_open_arguments(args: &ast::Arguments) -> bool {
     let parameters = [
         "file",
         "mode",
@@ -42,10 +49,7 @@ pub(super) fn is_update_open(args: &ast::Arguments, mode: &str) -> bool {
         "newline",
         "closefd",
     ];
-    mode.len() == expected_len
-        && mode.contains(&b'+')
-        && mode.iter().any(|c| matches!(c, b'r' | b'w' | b'x' | b'a'))
-        && !args.args.iter().any(ast::Expr::is_starred_expr)
+    !args.args.iter().any(ast::Expr::is_starred_expr)
         && parameters.get(args.args.len()..).is_some_and(|available| {
             args.keywords.iter().all(|kw| {
                 kw.arg
