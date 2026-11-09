@@ -298,6 +298,12 @@ impl Context {
         let Some(key) = name.nonexact_key(self) else {
             return self.class_attr(class, &name.text(self).ok()?);
         };
+        self.class_dictionary_member(class, key)
+            .map(|(_, _, value)| value)
+    }
+
+    /// Return the declaring class, stored key and member selected by one type lookup.
+    fn class_dictionary_member(&mut self, class: Id, key: Id) -> Option<(Id, Id, Id)> {
         // CPython clears hash and equality exceptions from type lookup. Instance dictionary
         // operations hash the key independently and propagate their own failures.
         let hash = self.dictionary_hash(key).ok()?;
@@ -331,7 +337,8 @@ impl Context {
                 dictionary
             };
             if let (_, Some(index)) = self.find_dictionary_key(dictionary, key, Some(hash)).ok()? {
-                return Some(self.stored_entries(dictionary)[index].1);
+                let (stored, member) = self.stored_entries(dictionary)[index];
+                return Some((base, stored, member));
             }
         }
         None
@@ -1409,9 +1416,6 @@ impl Context {
                         || name.starts_with("FrameLocalsProxy.")
                         || name.starts_with("abc.")
                         || name.starts_with("selectors._SelectorMapping.")
-                        || name
-                            .strip_prefix("str.")
-                            .is_some_and(|method| builtins::STR_METHODS.contains(&method))
                 }
                 _ => false,
             };
@@ -1497,7 +1501,7 @@ impl Context {
             {
                 self.bind_attribute(method, object, class)
             }
-            (None, None) => self.builtin_attribute(object, name, AttributeLookup::Value),
+            (None, None) => self.builtin_attribute(object, name, AttributeLookup::Value, None),
         }
     }
 
@@ -2284,7 +2288,7 @@ impl Context {
         }
     }
     pub(super) fn missing_attribute(&self, obj: Id, name: &str) -> Error {
-        let message = if matches!(self.heap.get(obj), Value::Class { .. }) {
+        let message = if self.is_type_object(obj) {
             let class = self.class_name(obj);
             let class = &class[..class.floor_char_boundary(100)];
             format!("type object '{class}' has no attribute '{name}'")
@@ -2586,7 +2590,7 @@ impl Context {
         }
         let base = self.scalar_value(obj);
         if builtins::method_name(self.heap.get(base), name).is_some() {
-            return self.builtin_attribute(obj, name, AttributeLookup::Value);
+            return self.builtin_attribute(obj, name, AttributeLookup::Value, None);
         }
         let mut kind = self
             .builtin_type_name(obj)
@@ -2776,6 +2780,45 @@ impl Context {
         )
     }
 
+    /// Resolve a Python name object against immutable native type dictionaries.
+    fn native_attribute_with_key(
+        &mut self,
+        obj: Id,
+        class: Id,
+        receiver: Id,
+        key: Id,
+        spelling: &str,
+    ) -> Result<Id> {
+        let meta = self.builtin("type");
+        let meta_member = if receiver == NONE {
+            self.class_dictionary_member(meta, key)
+                .map(|(_, _, member)| member)
+        } else {
+            None
+        };
+        if let Some(member) = meta_member
+            && self.readable_data_descriptor(member)
+        {
+            return self.bind_attribute(member, obj, meta);
+        }
+        if let Some((base, stored, member)) = self.class_dictionary_member(class, key) {
+            if base == class
+                && matches!(self.heap.get(member), Value::Native(symbol)
+                    if BuiltinDescriptor::lookup(symbol).is_some())
+            {
+                return self.bind_attribute(member, receiver, class);
+            }
+            // Some native implementations are intrinsic and absent from their type
+            // dictionary. Use the spelling actually selected by equality to dispatch them.
+            let name = self.str_value(stored)?.to_owned();
+            return self.default_get_attr(obj, &name);
+        }
+        if let Some(member) = meta_member {
+            return self.bind_attribute(member, obj, meta);
+        }
+        Err(self.missing_attribute(obj, spelling))
+    }
+
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
     fn default_attr(
         &mut self,
@@ -2785,6 +2828,25 @@ impl Context {
     ) -> Result<Id> {
         let spelling = attr.text(self)?;
         let name = spelling.as_ref();
+        let native_key = match (attr.nonexact_key(self), self.heap.get(obj)) {
+            (Some(key), Value::Native(owner))
+                if matches!(owner.as_str(), "str" | "tuple" | "list") =>
+            {
+                Some((obj, NONE, key))
+            }
+            (
+                Some(key),
+                Value::Str(_) | Value::SurrogateStr(_) | Value::Tuple(_) | Value::List(_),
+            ) => Some((self.exact_type(obj)?, obj, key)),
+            _ => None,
+        };
+        if let Some((class, receiver, key)) = native_key
+            && (name == "__getattribute__" || self.class_attr(class, name).is_some_and(|member| {
+                matches!(self.heap.get(member), Value::Native(symbol) if BuiltinDescriptor::lookup(symbol).is_some())
+            }))
+        {
+            return self.native_attribute_with_key(obj, class, receiver, key, name);
+        }
         if name == "__dict__"
             && matches!(self.heap.get(obj), Value::Native(symbol) if builtins::exception_kind(symbol).is_some())
         {
@@ -2887,14 +2949,41 @@ impl Context {
         }
         // These native layouts inherit object's attribute reader. A Python mixin can
         // supply the member earlier in the published MRO.
-        let object_reader = name == "__getattribute__"
-            && self.is_type_object(obj)
-            && self.allocation_base(obj).is_some_and(|base| {
-                matches!(self.heap.get(base), Value::Native(kind)
-                    if matches!(kind.as_str(), "tuple" | "list" | "dict" | "str" | "bytes"
-                        | "bytearray" | "int" | "bool" | "float" | "complex" | "set" | "frozenset"))
-            });
-        let named_reader = object_reader && attr.nonexact_key(self).is_some();
+        let inherits_reader = |kind: &str| {
+            matches!(
+                kind,
+                "tuple"
+                    | "list"
+                    | "dict"
+                    | "str"
+                    | "bytes"
+                    | "bytearray"
+                    | "int"
+                    | "bool"
+                    | "float"
+                    | "complex"
+                    | "set"
+                    | "frozenset"
+            )
+        };
+        let reader = if name != "__getattribute__" {
+            None
+        } else if self.is_type_object(obj) {
+            self.allocation_base(obj)
+                .filter(|&base| matches!(self.heap.get(base), Value::Native(kind) if inherits_reader(kind)))
+                .map(|_| (obj, NONE))
+        } else if self
+            .heap
+            .get(obj)
+            .intrinsic_type_name()
+            .is_some_and(inherits_reader)
+        {
+            Some((self.exact_type(obj)?, obj))
+        } else {
+            None
+        };
+        let named_reader = reader.is_some_and(|(_, receiver)| receiver == NONE)
+            && attr.nonexact_key(self).is_some();
         let metaclass_member = match *self.heap.get(obj) {
             _ if named_reader => {
                 let meta = self.exact_type(obj)?;
@@ -2916,12 +3005,12 @@ impl Context {
         {
             return self.bind_attribute(member, obj, meta);
         }
-        if object_reader {
-            let member = if named_reader {
-                self.class_attr_with_name(obj, attr)
+        if let Some((class, receiver)) = reader {
+            let member = if attr.nonexact_key(self).is_some() {
+                self.class_attr_with_name(class, attr)
             } else {
                 let object = self.builtin("object");
-                self.base_lineage(obj, true).into_iter().find_map(|base| {
+                self.base_lineage(class, true).into_iter().find_map(|base| {
                     if base == object {
                         self.raw_object_member(name)
                     } else {
@@ -2930,7 +3019,7 @@ impl Context {
                 })
             };
             if let Some(member) = member {
-                return self.bind_attribute(member, NONE, obj);
+                return self.bind_attribute(member, receiver, class);
             }
             if let Some((meta, member)) = metaclass_member {
                 return self.bind_attribute(member, obj, meta);
@@ -3089,7 +3178,7 @@ impl Context {
             if name == "maxlen" {
                 return Ok(ring.maxlen.map_or(NONE, |n| self.int(n as i64)));
             }
-            return self.builtin_attribute(obj, name, lookup);
+            return self.builtin_attribute(obj, name, lookup, native_key);
         }
         if let Some(value) = super::paramspec::attribute(self, obj, name) {
             return value;
@@ -4267,7 +4356,7 @@ impl Context {
                 }
                 _ if explicit || matches!(self.heap.get(callable), Value::Function { .. }) => {
                     if name == "__init__" {
-                        return self.builtin_attribute(obj, name, lookup);
+                        return self.builtin_attribute(obj, name, lookup, native_key);
                     }
                     return self.lookup_attr(callable, name);
                 }
@@ -5741,10 +5830,16 @@ impl Context {
                 return self.instance_attribute(obj, class, None, name);
             }
         }
-        self.builtin_attribute(obj, name, lookup)
+        self.builtin_attribute(obj, name, lookup, native_key)
     }
 
-    fn builtin_attribute(&mut self, obj: Id, name: &str, lookup: AttributeLookup) -> Result<Id> {
+    fn builtin_attribute(
+        &mut self,
+        obj: Id,
+        name: &str,
+        lookup: AttributeLookup,
+        native_key: Option<(Id, Id, Id)>,
+    ) -> Result<Id> {
         if name == "__doc__" {
             let owner = match self.heap.get(obj) {
                 Value::Native(symbol) => Some(symbol.as_str()),
@@ -5871,6 +5966,12 @@ impl Context {
             }
         }
         if let Some(method) = builtins::method_name(self.heap.get(base), name) {
+            if BuiltinDescriptor::lookup(&method).is_some() {
+                let class = self.exact_type(obj)?;
+                if let Some(member) = self.class_attr(class, name) {
+                    return self.bind_attribute(member, obj, class);
+                }
+            }
             let fun = self.alloc(Value::Native(method));
             return Ok(self.alloc(Value::Method {
                 callable: fun,
@@ -5889,6 +5990,9 @@ impl Context {
             if builtins::dir::listed_by_native_base(self, obj, name)? {
                 return Ok(NONE);
             }
+        }
+        if let Some((class, receiver, key)) = native_key {
+            return self.native_attribute_with_key(obj, class, receiver, key, name);
         }
         Err(self.missing_attribute(obj, name))
     }

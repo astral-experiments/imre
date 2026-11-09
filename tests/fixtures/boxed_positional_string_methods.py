@@ -47,6 +47,30 @@ def current():
     assert sorted(["Straße", "STRASSE", "A"], key=fold) == ["A", "Straße", "STRASSE"]
     saved = "kept".upper
     assert saved.__self__ == "kept" and saved() == "KEPT"
+    assert str.upper.__get__("kept", str)() == "KEPT"
+
+    class UpperName(str):
+        def __hash__(self):
+            return hash("upper")
+
+        def __eq__(self, other):
+            return other == "upper"
+
+    assert getattr("kept", UpperName("different"))() == "KEPT"
+    assert word.__getattribute__("upper").__self__ is word
+    assert str.__add__(word, "") is word
+
+    class Reflected:
+        def __radd__(self, other):
+            return other.upper()
+
+    assert "abc" + Reflected() == "ABC"
+    try:
+        str.__add__("abc", Reflected())
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("direct concatenation called the reflected operand")
     try:
         "ab".upper(1)
     except TypeError:
