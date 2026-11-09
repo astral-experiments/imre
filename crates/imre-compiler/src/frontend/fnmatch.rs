@@ -98,7 +98,7 @@ impl Checker<'_> {
                 .elts
                 .iter()
                 .map(|n| self.expr(n))
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<std::result::Result<Vec<_>, _>>()?;
             if values
                 .iter()
                 .all(|v| matches!(v.ty, Type::Str | Type::Bytes))
@@ -115,7 +115,7 @@ impl Checker<'_> {
                     .into_iter()
                     .zip(&list.elts)
                     .map(|(v, n)| self.coerce(v, element, n))
-                    .collect::<Result<_, _>>()?;
+                    .collect::<std::result::Result<_, _>>()?;
                 return Ok(Iteration::Container {
                     iterable: Expr {
                         ty: self.types.list(element),

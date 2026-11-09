@@ -9,6 +9,8 @@ use std::os::unix::process::ExitStatusExt;
 mod build_cache;
 mod build_output;
 mod cli;
+#[cfg(all(target_os = "linux", not(test)))]
+mod closed_stdio;
 mod python_command;
 #[cfg(unix)]
 mod run_program;
@@ -29,8 +31,8 @@ const JEMALLOC_RUNTIME: &str = "libimre_runtime_jemalloc.a";
 const STDLIB_ARCHIVE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/imre-stdlib.zip"));
 const PYTHON_HEADER: &str = include_str!("../../imre-runtime/include/Python.h");
 
-const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--reachable-only] [--runtime-imports] [--entry-profile FILE] [--watch | -w]
-       imre [-I] [-E] [-s] [-S] [-B] [-O] [-u] [-W OPTION] [-X faulthandler] [-X tracemalloc[=NFRAME]] [-X utf8[=0|1]] [-X warn_default_encoding] [-X context_aware_warnings=0|1] (-c CODE | SCRIPT) [PROGRAM_ARGUMENTS...]
+const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--extension-path DIRECTORY] [--include-module MODULE] [--reachable-only] [--entry-profile FILE] [--watch | -w]
+       imre [-I] [-E] [-P] [-s] [-S] [-B] [-O] [-u] [-W OPTION] [-X frozen_modules[=on|off]] [-X faulthandler] [-X tracemalloc[=NFRAME]] [-X utf8[=0|1]] [-X warn_default_encoding] [-X context_aware_warnings=0|1] (-c CODE | SCRIPT) [PROGRAM_ARGUMENTS...]
        On Linux, -X cpu_count=N|default sets the number of logical CPUs.
        imre extension-header
        imre build-target [--output-dir DIRECTORY]
@@ -41,8 +43,8 @@ const USAGE: &str = "Usage: imre check SOURCE.py [--module-root DIRECTORY] [--ex
 Build options:
   --module-root DIRECTORY  --runtime LIBRARY.a  --emit-llvm FILE.ll
   --reachable-only         Compile definitions reachable from program entry and module initialization
-  --runtime-imports        Allow native object dispatch when static lowering cannot compile an import graph
-  --extension-path DIRECTORY  Search an installed Imre wheel directory (repeatable)
+  --extension-path PATH       Search a directory or ZIP for Python modules, or a directory for Imre extensions (repeatable)
+  --include-module MODULE    Link a source module for runtime import (repeatable)
   --clang CLANG  --opt-level 0|1|2|3  --sanitize  --no-cache  --whole-program
   -q, --quiet              Suppress build status
   -v, --verbose            Show individual module decisions
@@ -142,10 +144,8 @@ fn run() -> Result<ExitCode, String> {
                 eprintln!("{message}");
                 return Ok(ExitCode::FAILURE);
             }
-            Err(python_command::ParseError::TraceDepthLimit) => {
-                eprintln!(
-                    "Fatal Python error: init_interp_main: can't start tracemalloc\nPython runtime state: core initialized\nValueError: the number of frames must be in range [1; 65535]\n"
-                );
+            Err(python_command::ParseError::FatalCore(message)) => {
+                eprintln!("{message}");
                 #[cfg(unix)]
                 {
                     // SAFETY: pthread_self returns the calling thread without transferring ownership.
@@ -215,6 +215,8 @@ fn run() -> Result<ExitCode, String> {
         return Ok(ExitCode::SUCCESS);
     }
     let source_path = source_path.ok_or(USAGE)?;
+    let target_os = target_os(target.as_deref());
+    options.target_os = Some(target_os);
     if command == "check" {
         if watch {
             imre_compiler::IncrementalCompiler::default().watch_file_with_options(
@@ -275,15 +277,9 @@ fn run() -> Result<ExitCode, String> {
             })
         })
         .transpose()?;
-    let target_os = target_os(target.as_deref());
     let linux = cfg!(target_os = "linux") && target_os == "linux";
     let runtime = runtime_archive(runtime, allocator, linux, options.address_sanitizer)?;
-    if !runtime.is_file() {
-        return Err(format!(
-            "Runtime not found: {}. Build the workspace or pass --runtime.",
-            runtime.display()
-        ));
-    }
+    let runtime_is_file = runtime.is_file();
     let mut progress = BuildOutput::new(verbosity);
     let label = if execute { &source_path } else { &output };
     let bundled = clang
@@ -295,11 +291,12 @@ fn run() -> Result<ExitCode, String> {
         .filter(|_| target.as_deref().is_none_or(native_linux_gnu_target));
     let native_link = target.is_none() && lto_linker.is_none() && link.args.is_empty();
     let native_objects = native_link && llvm_path.is_none();
-    let native = if native_objects && clang.is_none() && !options.address_sanitizer {
-        build_cache::native_toolchain(&runtime, bundled_native)
-    } else {
-        None
-    };
+    let native =
+        if runtime_is_file && native_objects && clang.is_none() && !options.address_sanitizer {
+            build_cache::native_toolchain(&runtime, bundled_native)
+        } else {
+            None
+        };
     let split =
         !whole_program && (native.is_some() || (native_objects && options.address_sanitizer));
     if split && !options.address_sanitizer {
@@ -351,7 +348,7 @@ fn run() -> Result<ExitCode, String> {
                 &link,
             )
         });
-    // Wheel archives and their optional library manifests must be reread at link time.
+    // Keep explicit extension paths on their ordinary linker path.
     // Generated module objects are still keyed by their complete LLVM IR.
     let executable_cache = cache
         .as_ref()
@@ -399,14 +396,20 @@ fn run() -> Result<ExitCode, String> {
         Units(Vec<CodegenUnit>),
     }
     let mut boxed_ir_dump = None;
-    let (code, input_paths, sources, extension_archives) = if split {
-        let c = imre_compiler::compile_file_units(&source_path, module_root.as_deref(), &options)?;
-        (
-            Code::Units(c.units),
-            c.input_paths,
-            c.source_inputs,
-            c.extension_archives,
-        )
+    let thin_units =
+        lto_linker.is_some() && !whole_program && llvm_path.is_none() && !options.address_sanitizer;
+    let (code, input_paths, mut sources, extension_archives) = if split || thin_units {
+        let mut c = if thin_units {
+            imre_compiler::compile_file_for_thin_lto(&source_path, module_root.as_deref(), &options)
+        } else {
+            imre_compiler::compile_file_units(&source_path, module_root.as_deref(), &options)
+        }?;
+        let code = if thin_units && c.units.len() == 1 {
+            Code::Whole(c.units.pop().unwrap().llvm_ir)
+        } else {
+            Code::Units(c.units)
+        };
+        (code, c.input_paths, c.source_inputs, c.extension_archives)
     } else {
         let (c, units) =
             if native_link && !whole_program && options.address_sanitizer && llvm_path.is_some() {
@@ -429,7 +432,17 @@ fn run() -> Result<ExitCode, String> {
         };
         (code, c.input_paths, c.source_inputs, c.extension_archives)
     };
-    let (library_manifests, native_libraries) = extension_libraries(&extension_archives)?;
+    if !runtime_is_file {
+        return Err(format!(
+            "Runtime not found: {}. Build the workspace or pass --runtime.",
+            runtime.display()
+        ));
+    }
+    let (library_manifests, native_libraries) =
+        extension_libraries(&extension_archives, &mut sources)?;
+    // A wheel's -l flags may use implicit linker search directories beyond the
+    // driver's recorded roots. Relink until those choices can be validated.
+    sources.relink_site_wheel |= !native_libraries.is_empty();
     validate_paths(
         input_paths
             .iter()
@@ -451,7 +464,9 @@ fn run() -> Result<ExitCode, String> {
     if let (Some(path), Some(ir)) = (&llvm_path, boxed_ir_dump) {
         std::fs::write(path, ir).map_err(|e| e.to_string())?;
     }
-    let stage = executable_cache.and_then(|c| c.stage());
+    let stage = executable_cache
+        .filter(|_| !sources.relink_site_wheel)
+        .and_then(|c| c.stage());
     let staged_output = stage.as_ref().map(|s| s.path().join("program"));
     let mut temporary = None;
     let mut scratch = None;
@@ -474,6 +489,22 @@ fn run() -> Result<ExitCode, String> {
             temporary = Some(file);
             vec![input]
         }
+        Code::Units(units) if thin_units => {
+            let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+            let mut inputs = Vec::with_capacity(units.len());
+            for (i, unit) in units.into_iter().enumerate() {
+                let path = dir.path().join(format!("unit-{i}.ll"));
+                let mut file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+                // LLVM uses source_filename in its internal symbol identities and module hash.
+                let id = blake3::hash(unit.llvm_ir.as_bytes());
+                writeln!(file, "source_filename = \"imre-{id}\"")
+                    .and_then(|()| file.write_all(unit.llvm_ir.as_bytes()))
+                    .map_err(|e| e.to_string())?;
+                inputs.push(path);
+            }
+            scratch = Some(dir);
+            inputs
+        }
         Code::Units(units) => {
             if stage.is_none() {
                 scratch = Some(tempfile::tempdir().map_err(|e| e.to_string())?);
@@ -492,9 +523,11 @@ fn run() -> Result<ExitCode, String> {
                 &optimization,
                 options.address_sanitizer,
                 dir.path(),
-                cache
-                    .as_ref()
-                    .filter(|_| stage.is_some() || !options.extension_paths.is_empty()),
+                cache.as_ref().filter(|_| {
+                    stage.is_some()
+                        || sources.relink_site_wheel
+                        || !options.extension_paths.is_empty()
+                }),
                 |name, hit| progress.unit(name, hit),
             )?;
             progress.linking();
@@ -622,6 +655,7 @@ fn run() -> Result<ExitCode, String> {
                 stage.path(),
                 file,
                 &output,
+                &extension_archives,
                 options.bundled_provider_archive.as_deref(),
             )
             .is_some()
@@ -642,14 +676,20 @@ fn run() -> Result<ExitCode, String> {
 
 /// Read only library names, never arbitrary driver or linker options, from a wheel.
 /// Keep input manifests protected by the same output alias check as the archives.
-fn extension_libraries(archives: &[PathBuf]) -> Result<(Vec<PathBuf>, Vec<String>), String> {
+fn extension_libraries(
+    archives: &[PathBuf],
+    sources: &mut imre_compiler::SourceInputs,
+) -> Result<(Vec<PathBuf>, Vec<String>), String> {
     let mut manifests = Vec::new();
     let mut libraries = Vec::new();
     for archive in archives {
         let path = archive.with_extension("libs");
         let canonical = match path.canonicalize() {
             Ok(canonical) => canonical,
-            Err(e) if e.kind() == ErrorKind::NotFound => continue,
+            Err(e) if e.kind() == ErrorKind::NotFound => {
+                sources.missing.push(path);
+                continue;
+            }
             Err(e) => return Err(format!("{}: {e}", path.display())),
         };
         if canonical.parent() != archive.parent() {
@@ -676,6 +716,11 @@ fn extension_libraries(archives: &[PathBuf]) -> Result<(Vec<PathBuf>, Vec<String
                 libraries.push(arg);
             }
         }
+        sources.files.push((
+            path.clone(),
+            canonical,
+            blake3::hash(contents.as_bytes()).to_hex().to_string(),
+        ));
         manifests.push(path);
     }
     Ok((manifests, libraries))
@@ -754,6 +799,19 @@ fn program_exit_code(status: ExitStatus) -> ExitCode {
     ExitCode::from(code.unwrap_or(1) as u8)
 }
 
+/// A copied venv launcher can use the native tools and archives in its base installation.
+fn installation_file(name: &str) -> std::io::Result<PathBuf> {
+    let executable = std::env::current_exe()?;
+    let local = executable.with_file_name(name);
+    if local.exists() {
+        return Ok(local);
+    }
+    let version = imre_compiler::PYTHON_VERSION;
+    let layout =
+        imre_ast::layout::InterpreterLayout::new(&executable, (version.major, version.minor))?;
+    Ok(layout.base_executable.with_file_name(name))
+}
+
 fn runtime_archive(
     runtime: Option<PathBuf>,
     allocator: Option<Allocator>,
@@ -783,9 +841,7 @@ fn runtime_archive(
         Allocator::System => "libimre_runtime.a",
         Allocator::Jemalloc => JEMALLOC_RUNTIME,
     };
-    Ok(std::env::current_exe()
-        .map_err(|error| error.to_string())?
-        .with_file_name(filename))
+    installation_file(filename).map_err(|error| error.to_string())
 }
 
 /// The release's startup objects and libraries match only its native GNU/Linux ABI.

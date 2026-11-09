@@ -155,6 +155,20 @@ impl Output {
         self.used(self.function_owner(id), self.adapter_name(id, bound))
     }
 
+    pub fn byte_constant(&mut self, owner: usize, name: &str, bytes: &[u8]) {
+        let output = self.global(
+            owner,
+            name,
+            "unnamed_addr constant",
+            format_args!("[{} x i8]", bytes.len()),
+        );
+        output.push_str("c\"");
+        for byte in bytes {
+            write!(output, "\\{byte:02X}").unwrap();
+        }
+        output.push_str("\"\n");
+    }
+
     pub fn global(
         &mut self,
         owner: usize,
@@ -238,17 +252,18 @@ pub(crate) fn emit_units(
     functions: &[usize],
     names: &[String],
     entry: usize,
-) -> Result<Vec<CodegenUnit>, String> {
+) -> Result<(Vec<CodegenUnit>, bool), super::Unsupported> {
     let mut output = Output::new(functions, names.len(), entry, true);
-    emit_program(module, ranges, sanitize, &mut output)?;
-    Ok(names
+    let prefer_objects = emit_program(module, ranges, sanitize, &mut output)?;
+    let units = names
         .iter()
         .zip(output.finish())
         .map(|(name, llvm_ir)| CodegenUnit {
             name: name.clone(),
             llvm_ir,
         })
-        .collect())
+        .collect();
+    Ok((units, prefer_objects))
 }
 
 #[cfg(test)]

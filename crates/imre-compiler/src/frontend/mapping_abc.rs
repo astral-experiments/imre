@@ -162,7 +162,7 @@ impl Checker<'_> {
     }
 
     /// Truth uses the concrete class's __bool__ when present, otherwise __len__.
-    pub(super) fn mapping_truth(
+    pub(super) fn record_truth(
         &mut self,
         class: usize,
         value: Expr,
@@ -171,7 +171,7 @@ impl Checker<'_> {
         let direct = |checker: &mut Self, class: usize, receiver: Expr| {
             if checker.classes.methods[class].contains_key("__bool__") {
                 checker.record_slot(class, receiver, "__bool__", &[], at)
-            } else {
+            } else if checker.classes.declarations.definitions[class].mapping {
                 let size = checker.record_slot(class, receiver, "__len__", &[], at)?;
                 Ok(Expr {
                     ty: Type::Bool,
@@ -180,6 +180,9 @@ impl Checker<'_> {
                         vec![checker.checked_mapping_size(size, at)?],
                     ),
                 })
+            } else {
+                // The dispatch has already evaluated this ordinary instance.
+                Ok(Expr::boolean(true))
             }
         };
         if self.classes.has_concrete_subclasses(class) {

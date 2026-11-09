@@ -504,7 +504,9 @@ impl Initialization {
                 module: checker.module,
                 statement: index,
             };
-            if checker.graph.unused_literal_global(definition) {
+            if module.import_config_slot(statement).is_some()
+                || checker.graph.unused_literal_global(definition)
+            {
                 continue;
             }
             let mut imports = HashSet::new();
@@ -685,7 +687,7 @@ impl Initialization {
         binding_reads: &[HashSet<DefinitionId>],
         callables: &[DefinitionId],
         targets: &HashMap<Type, HashSet<usize>>,
-    ) -> Result<(), String> {
+    ) -> std::result::Result<(), String> {
         let module = &graph.modules[self.module];
         for checkpoint in &self.checkpoints {
             let mut reads = HashSet::new();

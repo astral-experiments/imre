@@ -1,6 +1,7 @@
 import builtins
 from collections import OrderedDict
 import inspect
+import operator
 import sys
 import warnings
 from annotationlib import Format
@@ -139,6 +140,16 @@ class Published:
         pass
 
 
+class DocumentedFactory:
+    """DocumentedFactory(value, /, *, retries=2)\n--\n\nFactory protocol."""
+
+    __text_signature__ = '(spoof)'
+
+
+class InheritedFactory(DocumentedFactory):
+    pass
+
+
 class ConstructorBase:
     def __init__(self, count: int = 2, *, flag=False) -> None: pass
 
@@ -264,6 +275,39 @@ for cls in (dict, DictFactory):
     else:
         raise AssertionError("native dict constructor acquired a signature")
 
+for factory, arg, constructor in (
+    (operator.attrgetter, "real", "(attr, /, *attrs)"),
+    (operator.itemgetter, 0, "(item, /, *items)"),
+    (operator.methodcaller, "upper", "(name, /, *args, **kwargs)"),
+):
+    operation = factory(arg)
+    assert str(inspect.signature(factory)) == constructor
+    assert str(inspect.signature(operation)) == "(obj, /)"
+    assert factory.__text_signature__ == constructor
+    assert operation.__text_signature__ == "(obj, /)"
+    assert str(inspect.signature(operation.__call__)) == "(*args, **kwargs)"
+
+assert operator.attrgetter.__call__(operator.attrgetter("__name__"), original) == "original"
+assert operator.itemgetter.__call__(operator.itemgetter(0), [8]) == 8
+assert operator.methodcaller.__call__(operator.methodcaller("upper"), "ok") == "OK"
+
+
+class methodcaller:
+    __module__ = "operator"
+
+    def __call__(self, value):
+        return value
+
+
+lookalike = methodcaller()
+assert str(inspect.signature(lookalike)) == "(value)"
+try:
+    operator.methodcaller.__call__(lookalike, "ok")
+except TypeError:
+    pass
+else:
+    raise AssertionError("native wrapper accepted a Python lookalike")
+
 power = (2).__pow__
 assert str(inspect.signature(power)) == "(value, mod=None, /)"
 assert power(3, 5) == 3
@@ -364,6 +408,14 @@ assert type(inspect._sentinel) is object
 assert inspect.ismodule(inspect)
 assert not inspect.ismodule(inspect.Parameter)
 
+
+DocumentedFactory.__doc__ = 'new documentation'
+assert DocumentedFactory.__text_signature__ == '(value, /, *, retries=2)'
+assert InheritedFactory.__text_signature__ is None
+bound = inspect.signature(InheritedFactory).bind("payload", retries=3)
+assert bound.arguments == {"value": "payload", "retries": 3}
+assert inspect.getattr_static(type, "__text_signature__").__get__(tuple, type) == tuple.__text_signature__
+assert str(inspect.signature(type("Entries", (tuple,), {}))) == "(iterable=(), /)"
 
 print(inspect.signature(ConstructorChild), inspect.signature(NewFirst), inspect.signature(DefaultInit))
 

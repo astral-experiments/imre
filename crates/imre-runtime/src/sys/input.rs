@@ -47,14 +47,14 @@ impl Input {
         let data = &bytes[..prefix + count];
         self.text.clear();
         self.offset = 0;
-        let ready = if matches!(settings.codec, Codec::ShiftJis) {
-            crate::objects::shift_jis::decode_chunk(
-                &mut self.text,
-                data,
-                Some(&settings.errors),
-                self.eof,
-            )
-            .inspect_err(|_| self.text.clear())?
+        let ready = if let Codec::Wide(format) = settings.codec {
+            format
+                .decode_text(&mut self.text, data, Some(&settings.errors), self.eof)
+                .inspect_err(|_| self.text.clear())?
+        } else if let Codec::DoubleByte(format) = settings.codec {
+            format
+                .decode_chunk(&mut self.text, data, Some(&settings.errors), self.eof)
+                .inspect_err(|_| self.text.clear())?
         } else {
             let ready = if !self.eof && matches!(settings.codec, Codec::Utf8 { .. }) {
                 complete_prefix(data)

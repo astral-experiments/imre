@@ -1,5 +1,6 @@
 from selectors import BaseSelector, EVENT_READ, EVENT_WRITE, PollSelector, SelectSelector
 import selectors
+from abc import ABCMeta
 from collections.abc import Mapping
 import os
 
@@ -61,6 +62,11 @@ def current():
             assert isinstance(selector, factory)
             assert not isinstance(selector, other)
             mapping = selector.get_map()
+            mapping_class = type(mapping)
+            assert mapping_class is selectors._SelectorMapping
+            assert type(mapping_class) is ABCMeta
+            assert mapping_class.__abstractmethods__ == frozenset()
+            assert mapping_class._abc_caches_clear() is None
             assert mapping is selector.get_map() and isinstance(mapping, Mapping)
             assert not mapping
             with open("selector-ready.bin", "w+b", 0) as stream:

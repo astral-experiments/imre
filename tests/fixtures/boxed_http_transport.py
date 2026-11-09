@@ -1,9 +1,32 @@
 def current():
+    import codecs
     import errno
     import io
     import socket
     from http.client import HTTPConnection, HTTPMessage, parse_headers
     from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class RequestBytes(bytes):
+        def decode(self, *args):
+            raise AssertionError("handler invoked bytes subclass decode")
+
+    class HeaderStream(io.BytesIO):
+        def readline(self, size=-1):
+            return RequestBytes(super().readline(size))
+
+    def unexpected_lookup(encoding):
+        raise AssertionError(encoding)
+
+    handler = object.__new__(BaseHTTPRequestHandler)
+    handler.raw_requestline = RequestBytes(b"GET /caf\xe9 HTTP/1.0\r\n")
+    handler.rfile = HeaderStream(b"X-Note: caf\xe9\r\n\r\n")
+    original_lookup = codecs.lookup
+    try:
+        codecs.lookup = unexpected_lookup
+        assert handler.parse_request()
+        assert handler.path == "/café" and handler.headers["X-Note"] == "café"
+    finally:
+        codecs.lookup = original_lookup
 
     class RecordingMessage(HTTPMessage):
         def set_raw(self, name, value):

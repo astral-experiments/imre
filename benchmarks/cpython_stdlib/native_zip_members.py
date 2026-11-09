@@ -1,4 +1,4 @@
-"""Drive CPython's original stored and deflated CRC tests with native ZIP operations."""
+"""Drive CPython's original ZIP member CRC tests with native ZIP operations."""
 import argparse
 import ast
 import io
@@ -242,7 +242,10 @@ def main():
                 assert mode == "r"
                 return Member(self.data, name)
 
-        for cls in (suite.StoredBadCrcTests, suite.DeflateBadCrcTests):
+        crc_cases = [suite.StoredBadCrcTests, suite.DeflateBadCrcTests]
+        if not getattr(suite.ZstdBadCrcTests, "__unittest_skip__", False):
+            crc_cases.append(suite.ZstdBadCrcTests)
+        for cls in crc_cases:
             for method in ("test_testzip_with_bad_crc", "test_read_with_bad_crc"):
                 diagnostic.clear()
                 case, outcome = cls(method), unittest.TestResult()
@@ -253,6 +256,13 @@ def main():
                     raise AssertionError((case.id(), outcome.errors, outcome.failures, outcome.skipped, diagnostic))
                 report["tests"][case.id()] = list(diagnostic)
                 print("pass", case.id())
+        if suite.ZstdBadCrcTests in crc_cases:
+            payload = b"Zstandard member\n" * 8000
+            fixture = io.BytesIO()
+            with zipfile.ZipFile(fixture, "w", compression=zipfile.ZIP_ZSTANDARD) as writer:
+                writer.writestr("data", payload)
+            events = list(invoke(fixture.getvalue(), "read", "data"))
+            assert len(events) == 1 and decode(events[0], "data") == payload
         control, binary = compile("control", CONTROL)
         fixture = work / "control.zip"
         import warnings

@@ -547,6 +547,14 @@ impl Reachable {
             || self.class_attributes.contains(&(owner, name.to_owned()))
     }
     pub(super) fn collect(graph: &SourceGraph, strict_callers: bool) -> Self {
+        Self::collect_with_reprs(graph, strict_callers, &HashSet::new())
+    }
+
+    pub(super) fn collect_with_reprs(
+        graph: &SourceGraph,
+        strict_callers: bool,
+        key_reprs: &HashSet<DefinitionId>,
+    ) -> Self {
         let mut found = Self::default();
         for (module, source) in graph.modules.iter().enumerate() {
             for (statement, node) in source.parsed.syntax().body.iter().enumerate() {
@@ -748,7 +756,14 @@ impl Reachable {
                                 || (refs.found.http_commands
                                     && (name.starts_with("do_") || name == "__getattr__")
                                     && graph.is_http_handler(id))
-                                || refs.found.attributes.contains(name)
+                                || (if name == "__repr__" && !key_reprs.is_empty() {
+                                    // Preserve the existing graph. When a newly discovered
+                                    // formatter uses an f-string, its field types determine
+                                    // any further repr methods during checked lowering.
+                                    graph.includes_method(id.module, method)
+                                } else {
+                                    refs.found.attributes.contains(name)
+                                })
                                 || matches!(
                                     name,
                                     "__init__"
@@ -764,7 +779,8 @@ impl Reachable {
                                     && has_base(graph, id, |module, base| {
                                         crate::classes::mapping_base(graph, module, base)
                                     }))
-                                || (name == "__repr__" && exception_base(graph, id))
+                                || (name == "__repr__"
+                                    && (exception_base(graph, id) || key_reprs.contains(&id)))
                                 || definition_effect(graph, id.module, method))
                                 && refs.found.methods.insert((id.module, method.start()))
                             {
@@ -1180,6 +1196,45 @@ mod tests {
                 ..Default::default()
             },
         )
+    }
+
+    #[test]
+    fn missing_record_key_roots_only_its_display_methods() {
+        let source = r#"from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class Detail:
+    n: int
+    def __repr__(self) -> str:
+        return f"detail-{self.n}"
+
+@dataclass(frozen=True)
+class Part:
+    n: int
+    def __repr__(self) -> str:
+        return repr(Detail(self.n))
+
+@dataclass(frozen=True)
+class Key:
+    part: Part
+
+@dataclass(frozen=True)
+class Other:
+    n: int
+    def __repr__(self) -> str:
+        return "unrelated-key"
+
+other = Other(1)
+records = {Key(Part(1)): 0}
+records[Key(Part(2))]
+"#;
+        let ir = reachable(source).unwrap();
+        let callbacks = ir
+            .lines()
+            .filter(|line| line.starts_with("@semantics_class_") && line.contains(", ptr @fn_"));
+        assert_eq!(callbacks.count(), 2);
+        let invalid = source.replace(r#"return f"detail-{self.n}""#, "return 3");
+        assert!(reachable(&invalid).unwrap_err().contains("expected str"));
     }
 
     #[test]

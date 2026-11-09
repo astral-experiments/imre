@@ -1,5 +1,7 @@
 """Combine registered native modules with the filesystem entry that contains them."""
-from _imre_importlib import registered_path, registered_path_spec
+from _imre_importlib import (
+    _installed_source_members, _installed_stdlib, registered_path, registered_path_spec,
+)
 
 
 # Keep the identity installed in sys.meta_path when callers rebind the public export.
@@ -28,7 +30,7 @@ def _installed_source_spec(fullname, registry_path, target):
 
 class _RegisteredFileFinder(FileFinder):
     def __init__(self, path, registry_path):
-        super().__init__(path, *_file_loader_defaults())
+        super().__init__(path, *_get_supported_file_loaders())
         # The compiler also registers virtual paths, such as '<imre stdlib>/unittest'.
         self._registry_path = registry_path
 
@@ -44,15 +46,23 @@ class _RegisteredFileFinder(FileFinder):
             return registered
         on_disk = super().find_spec(fullname, target)
         if on_disk is not None and on_disk.loader is not None:
+            # Keep the issued loader when FileFinder selects the same compiled source file.
+            if (registered is not None and type(on_disk.loader) is SourceFileLoader
+                    and type(on_disk.origin) is str and on_disk.origin == registered.origin):
+                return registered
             return on_disk
         return registered if registered is not None else on_disk
 
 
-_file_path_hook = FileFinder.path_hook(*_file_loader_defaults())
+_file_path_hook = FileFinder.path_hook(*_get_supported_file_loaders())
 
 
 def _registered_path_hook(path):
     registry_path = registered_path(path)
-    if registry_path is not None:
-        return _RegisteredFileFinder(path, registry_path)
-    return _file_path_hook(path)
+    if registry_path is None:
+        raise ImportError('not a registered module path', path=path)
+    return _RegisteredFileFinder(path, registry_path)
+
+def _set_bootstrap_module(_bootstrap_module):
+    global _bootstrap
+    _bootstrap = _bootstrap_module

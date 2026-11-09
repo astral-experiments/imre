@@ -90,23 +90,27 @@ impl Output {
                 .is_some_and(|pending| pending.try_append_parts(parts))
     }
 
-    pub(super) fn write_text(&mut self, text: &str) -> Result<()> {
+    pub(super) fn write_text(
+        &mut self,
+        text: &str,
+        input: impl FnOnce() -> Result<StrOwner>,
+    ) -> Result<()> {
         let Some(encoder) = self.encoder.as_mut() else {
             return self.write(text.as_bytes()).map_err(errno_error);
         };
-        let translated;
-        let text = if let Some(newline) = encoder.newline {
-            translated = super::path_text::output_newlines(text, newline)?;
-            &translated
-        } else {
-            text
-        };
-        let encoded =
-            encoder
-                .codec
-                .encode(text, encoder.errors.as_deref().map(Str::as_str), || {
-                    super::super::text::try_owned_string(text)
-                })?;
+        let translated = encoder
+            .newline
+            .filter(|_| text.contains('\n'))
+            .map(|newline| super::path_text::output_newlines(text, newline))
+            .transpose()?;
+        let encoded = encoder.codec.encode(
+            translated.as_deref().unwrap_or(text),
+            encoder.errors.as_deref().map(Str::as_str),
+            || match &translated {
+                Some(value) => super::super::text::try_owned_string(value),
+                None => input(),
+            },
+        )?;
         if matches!(encoder.codec, Codec::Utf8 { signature: true }) {
             encoder.codec = Codec::Utf8 { signature: false };
         }
@@ -364,11 +368,14 @@ impl Input {
         } else {
             TEXT_CHUNK_SIZE
         };
+        // Start at the end of the untouched zeroed window. The Python reader
+        // can take the allocation, and a native refill can reuse its capacity.
+        let bytes = crate::zeroed_io_buffer(capacity).map_err(|_| Error::memory_error())?;
         Ok(Self {
             raw: ReadBuffer::Pipe {
                 source: Source::Plain(file).take(u64::MAX),
-                bytes: reserve(capacity)?,
-                start: 0,
+                start: bytes.len(),
+                bytes,
                 window,
             },
             text: TextBuffer::default(),
@@ -419,6 +426,25 @@ impl Input {
         let pos = file.seek(at).map_err(super::errno_error)?;
         self.raw.consume(buffered);
         Ok(pos)
+    }
+
+    /// Hand the newly opened pipe's reserved read-ahead storage to its Python reader.
+    pub(super) fn take_pipe_buffer(&mut self) -> Result<Bytes> {
+        let ReadBuffer::Pipe {
+            source,
+            bytes,
+            start,
+            window,
+        } = &mut self.raw
+        else {
+            unreachable!("Popen input has pipe storage")
+        };
+        if source.limit() == u64::MAX && *start == *window && bytes.len() == *window {
+            *start = 0;
+            return Ok(std::mem::take(bytes));
+        }
+        // A second wrapper must not take unread bytes belonging to the first.
+        crate::zeroed_io_buffer(*window)
     }
 
     /// Detach bytes already prefetched by the public buffered pipe before reading its raw fd.
@@ -711,17 +737,21 @@ pub(in crate::objects) fn decode_text_lines(bytes: &[u8], codec: Codec) -> Resul
             text.push_str(&decoder.decoded);
         }
         Ok(text)
-    } else if matches!(codec, Codec::ShiftJis) {
+    } else if matches!(codec, Codec::DoubleByte(_) | Codec::Wide(_)) {
         let mut start = 0;
         let mut end = 0;
         for chunk in chunks.chain([&[][..]]) {
             end += chunk.len();
-            start += super::super::codecs::shift_jis::decode_chunk(
-                &mut text,
-                &bytes[start..end],
-                None,
-                chunk.is_empty(),
-            )?;
+            let input = &bytes[start..end];
+            start += match codec {
+                Codec::Wide(format) => {
+                    format.decode_text(&mut text, input, None, chunk.is_empty())?
+                }
+                Codec::DoubleByte(format) => {
+                    format.decode_chunk(&mut text, input, None, chunk.is_empty())?
+                }
+                _ => unreachable!(),
+            };
         }
         Ok(super::super::codecs::universal_newlines(text))
     } else {

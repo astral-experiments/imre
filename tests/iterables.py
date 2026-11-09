@@ -9,6 +9,8 @@ from assignments import main
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "iterables"
 
 REJECTED = {
+    # A range's stored bounds are not tuple elements for the numeric literal shortcut.
+    "sumprod_range": "from math import sumprod\nprint(sumprod(range(3), [10, 20, 30]))\n",
     "sumprod_unknown_length_unconditional_float_return": (
         "from math import sumprod\n"
         "def dot(a: list[float], b: list[float]) -> float:\n"

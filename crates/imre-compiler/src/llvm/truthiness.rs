@@ -62,6 +62,19 @@ impl Emitter<'_, '_> {
                     }
                 }
                 Type::Bool => value.operand.clone(),
+                Type::Range => {
+                    let [start, stop, step] = [0, 1, 2].map(|i| {
+                        let pointer = self.field_pointer(value, i);
+                        self.field_value(&pointer, Type::Int)
+                    });
+                    let ascending = self.compare(Compare::Greater, &step, &small(0));
+                    let forward = self.compare(Compare::Less, &start, &stop);
+                    let backward = self.compare(Compare::Greater, &start, &stop);
+                    self.instruction(format!(
+                        "select i1 {}, i1 {}, i1 {}",
+                        ascending.operand, forward.operand, backward.operand
+                    ))
+                }
                 Type::VarTuple(_) => {
                     let len = self
                         .instruction(format!("call i64 @imre_tuple_len(ptr {})", value.operand));

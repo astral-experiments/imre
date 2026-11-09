@@ -16,7 +16,9 @@ A second ordinary driver omitted only the initial `import re_registry`. Both nat
 
 On the same merged build, invoking the three IDs with `imre -m unittest -v` exited 1 before discovery because Imre could not load `unittest.__main__`. Stock CPython passed all three through that command. The native ledger above comes from the selected `TextTestRunner` driver.
 
-## Reproduce on Linux
+## Reproduce the historical ordinary and explicit builds on Linux
+
+Use the base `f8c78c11180a164c759d5645283505e14513ed0c` or merged `3172a8ffed7a39f108d6356e07fec301063b7cd4` toolchain recorded in the terminal ledger.
 
 Use a checkout of CPython `5607950ef232dad16d75c0cf53101d9649d89115`, its 3.14.5 interpreter, a matching Imre compiler and runtime, and clang with lld. Run these commands from the Imre repository root in Bash. Set `CPYTHON_SRC`, `PYTHON314`, `IMRE`, `IMRE_RUNTIME` and `CLANG` to the corresponding paths.
 

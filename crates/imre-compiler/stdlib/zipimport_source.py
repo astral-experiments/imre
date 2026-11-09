@@ -1,7 +1,5 @@
 """Source package imports for the native module registry."""
-from _imre_importlib import _zip_path_importers as _path_importers
-
-_ENCODING_NAME_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."
+from _imre_importlib import _zip_path_importers as _path_importers, compile_file as _compile_file
 
 
 class zipimporter(_ZipResourceLoader):
@@ -42,29 +40,15 @@ class zipimporter(_ZipResourceLoader):
 
     def get_code(self, fullname):
         filename = self.get_filename(fullname)
-        text = self.get_data(filename).decode('utf-8').removeprefix('\ufeff')
-        text = text.replace('\r\n', '\n').replace('\r', '\n')
-        for line in text.split('\n', 2)[:2]:
-            line = line.lstrip(' \t\f')
-            if line and not line.startswith('#'):
-                break
-            for marker in ('coding:', 'coding='):
-                offset = line.find(marker)
-                while offset >= 0:
-                    offset += len(marker)
-                    while offset < len(line) and line[offset] in ' \t':
-                        offset += 1
-                    if offset < len(line) and line[offset] in _ENCODING_NAME_CHARS:
-                        raise NotImplementedError('encoding declarations in ZIP source are unsupported')
-                    offset = line.find(marker, offset)
-        return compile(text, filename, 'exec')
+        return _compile_file(compile, self.get_data(filename), filename)
 
     def create_module(self, spec):
         # Use the standard module object allocated by module_from_spec.
         return None
 
     def exec_module(self, module):
-        exec(self.get_code(module.__name__), module.__dict__)
+        from _frozen_importlib_external import _LoaderBasics
+        return _LoaderBasics.exec_module(self, module)
 
     def _origin(self, fullname):
         entry = self._member(fullname)

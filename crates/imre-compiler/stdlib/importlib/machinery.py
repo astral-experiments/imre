@@ -1,4 +1,4 @@
-from ._bootstrap import ModuleSpec
+from ._bootstrap import BuiltinImporter, FrozenImporter, ModuleSpec
 from ._bootstrap_external import (
     BYTECODE_SUFFIXES,
     EXTENSION_SUFFIXES,

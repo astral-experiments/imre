@@ -91,12 +91,6 @@ impl BuildOptions {
         if !flags.ignore_environment
             && let Some(paths) = env::var_os("PYTHONPATH").filter(|value| !value.is_empty())
         {
-            let search_archives = match &invocation {
-                Invocation::Command(_) | Invocation::Module { .. } => true,
-                Invocation::Script { path, .. } => {
-                    path.is_file() && !imre_compiler::is_zip_path(path)
-                }
-            };
             for path in env::split_paths(&paths) {
                 let path = if path.as_os_str().is_empty() {
                     PathBuf::from(".")
@@ -104,7 +98,7 @@ impl BuildOptions {
                     path
                 };
                 if !path.is_dir() {
-                    if !search_archives || !imre_compiler::is_zip_path(&path) {
+                    if !imre_compiler::is_zip_path(&path) {
                         continue;
                     }
                     options
@@ -156,6 +150,8 @@ impl BuildOptions {
             (version.major, version.minor),
         )
         .map_err(|e| e.to_string())?;
+        let stdlib = layout.stdlib_dir();
+        let stdlib = stdlib.is_dir().then_some(stdlib);
         let venv = layout.venv_system_site;
         let user_site = if !flags.no_site
             && imre_ast::layout::InterpreterLayout::user_site_enabled(flags.no_user_site, venv)
@@ -189,6 +185,10 @@ impl BuildOptions {
         site_dirs.extend(prefix_sites);
         site_dirs.retain(|path| path.is_dir());
         // site runs before Python prepends the script directory or command cwd.
+        let has_hook = |root: &PathBuf| {
+            root.join("sitecustomize.py").is_file() || root.join("sitecustomize").is_dir()
+        };
+        let stdlib_sitecustomize = !flags.no_site && stdlib.as_ref().is_some_and(has_hook);
         options.compile.sitecustomize = process_pth
             || (!flags.no_site
                 && options
@@ -196,15 +196,16 @@ impl BuildOptions {
                     .extension_paths
                     .iter()
                     .chain(&site_dirs)
-                    .any(|root| {
-                        root.join("sitecustomize.py").is_file()
-                            || root.join("sitecustomize").is_dir()
-                    }));
+                    .any(has_hook));
+        options.compile.stdlib_sitecustomize = stdlib_sitecustomize;
         #[cfg(unix)]
-        if !layout.stdlib_archive.is_file() {
+        if layout.stdlib_archive.is_file() {
+            options.compile.installed_stdlib_archive = Some(layout.stdlib_archive.clone());
+        } else {
             options.compile.stdlib_fallback = Some(super::build_cache::stdlib_archive_path()?);
         }
         options.compile.user_site_pth = user_site.filter(|_| process_pth);
+        options.compile.stdlib_dir = stdlib;
         options.compile.site_dirs = site_dirs;
         Ok(options)
     }
@@ -233,8 +234,8 @@ impl BuildOptions {
             if command == "check"
                 && flag != "--module-root"
                 && flag != "--extension-path"
+                && flag != "--include-module"
                 && flag != "--reachable-only"
-                && flag != "--runtime-imports"
                 && flag != "--entry-profile"
             {
                 return Err(USAGE.to_owned());
@@ -254,13 +255,33 @@ impl BuildOptions {
                     self.compile.reachable_only = true;
                 }
                 Some("--reachable-only") => self.compile.reachable_only = true,
-                Some("--runtime-imports") => self.compile.runtime_imports = true,
                 Some("--module-root") => self.module_root = Some(value()?.into()),
-                Some("--extension-path") => self.compile.extension_paths.push(value()?.into()),
+                Some("--extension-path") => {
+                    let path: PathBuf = value()?.into();
+                    if imre_compiler::is_zip_path(&path) {
+                        self.compile
+                            .python_archive_indices
+                            .push(self.compile.extension_paths.len());
+                    }
+                    self.compile.extension_paths.push(path);
+                }
+                Some("--include-module") => {
+                    let name = value()?
+                        .into_string()
+                        .map_err(|_| "--include-module requires a UTF-8 module name")?;
+                    self.compile.include_modules.insert(name);
+                }
                 Some("-o") if command == "build" => self.output = Some(value()?.into()),
                 Some("--runtime") => self.runtime = Some(value()?.into()),
                 Some("--emit-llvm") => self.llvm_path = Some(value()?.into()),
-                Some("--clang") => self.clang = Some(value()?),
+                Some("--clang") => {
+                    let driver = value()?;
+                    self.clang = if driver.is_empty() {
+                        Self::initial().clang
+                    } else {
+                        Some(driver)
+                    };
+                }
                 Some("--lto-linker") => self.lto_linker = Some(value()?.into()),
                 Some("--target") => self.target = Some(value()?),
                 Some("--allocator") => {

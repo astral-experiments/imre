@@ -36,6 +36,7 @@ fn native_start_and_join_publish_the_worker_lifetime() {
                 release: None,
             },
             None,
+            Arc::default(),
         )
         .unwrap();
         let poll = worker.handle.join(Some(Duration::ZERO));
@@ -80,7 +81,7 @@ fn bound_hash_worker_owns_expanded_input_while_running() {
 
     // Hold the worker inside the native update while the caller clears the original list.
     let held = hash.lock();
-    let worker = launch(&ctx, operation, None).unwrap();
+    let worker = launch(&ctx, operation, None, Arc::default()).unwrap();
     ctx.workers.entries.push(Entry {
         handle: Arc::clone(&worker.handle),
         daemon: false,
@@ -139,18 +140,20 @@ fn zero_timeout_applies_to_worker_exit_and_all_observers_share_native_join() {
     let (polling, poll) = mpsc::channel();
     let (finished, returned) = mpsc::channel();
     let (completed, completion) = mpsc::channel();
-    let handle = Handle::spawn(move || {
-        let gate = ExitGate {
-            entered,
-            poll,
-            returned,
-            completed,
-        };
-        GATE.with(|cell| assert!(cell.set(gate).is_ok()));
-        body.recv_timeout(timeout).unwrap();
-        Err("worker failure".into())
-    })
-    .unwrap();
+    let handle = Arc::<Handle>::default();
+    handle
+        .spawn(move || {
+            let gate = ExitGate {
+                entered,
+                poll,
+                returned,
+                completed,
+            };
+            GATE.with(|cell| assert!(cell.set(gate).is_ok()));
+            body.recv_timeout(timeout).unwrap();
+            Err("worker failure".into())
+        })
+        .unwrap();
 
     handle.join(Some(Duration::ZERO)).unwrap();
     assert!(handle.alive());
@@ -189,9 +192,10 @@ fn shutdown_joins_non_daemon_workers_and_leaves_daemon_workers_running() {
                 release: None,
             },
             None,
+            Arc::default(),
         )
         .unwrap();
-        let normal = launch(&ctx, Operation::Empty, None).unwrap();
+        let normal = launch(&ctx, Operation::Empty, None, Arc::default()).unwrap();
         for (worker, is_daemon) in [(&daemon, true), (&normal, false)] {
             ctx.workers.entries.push(Entry {
                 handle: Arc::clone(&worker.handle),
@@ -211,4 +215,62 @@ fn shutdown_joins_non_daemon_workers_and_leaves_daemon_workers_running() {
     daemon.handle.join(None).unwrap();
     assert!(daemon_alive);
     assert!(non_daemon_joined);
+}
+
+#[test]
+fn detached_handle_keeps_the_non_daemon_worker_registered_until_exit() {
+    let mut ctx = context();
+    let handle = Arc::<Handle>::default();
+    assert_eq!(handle.ident(), 0);
+    assert!(!handle.is_done());
+    assert!(handle.set_done().is_err());
+    let active = while_lock_held(|gate| {
+        let worker = launch(
+            &ctx,
+            Operation::Acquire {
+                lock: Arc::clone(gate),
+                release: None,
+            },
+            None,
+            Arc::clone(&handle),
+        )
+        .unwrap();
+        assert!(Arc::ptr_eq(&worker.handle, &handle));
+        assert_ne!(handle.ident(), thread_ident());
+        assert_eq!(handle.ident(), worker.ident);
+        assert!(handle.check_new().is_err());
+        ctx.workers.entries.push(Entry {
+            handle: worker.handle,
+            daemon: false,
+            owner: None,
+            operands: Vec::new(),
+            ident: worker.ident,
+            active: Arc::clone(&worker.active),
+        });
+        handle.set_done().unwrap();
+        handle.join_public(&mut ctx, None).unwrap();
+        assert!(handle.is_done());
+        assert!(handle.awaiting_exit());
+        ctx.reap_thread_operands();
+        assert_eq!(ctx.workers.entries.len(), 1);
+        worker.active
+    });
+    ctx.workers.join_non_daemon();
+    assert!(!active.load(Ordering::Acquire));
+    assert!(!handle.awaiting_exit());
+    ctx.reap_thread_operands();
+    assert!(ctx.workers.entries.is_empty());
+}
+
+#[test]
+fn set_done_after_body_exit_releases_the_unclaimed_native_handle() {
+    let handle = Arc::<Handle>::default();
+    handle.spawn(|| Ok(())).unwrap();
+    assert!(handle.wait(Some(Duration::from_secs(5)), State::join_pending));
+    // The body signalled exit, but no Python observer has joined its OS thread.
+    assert!(handle.native.lock().unwrap().thread.is_some());
+    handle.set_done().unwrap();
+    assert!(handle.native.lock().unwrap().thread.is_none());
+    assert!(handle.is_done());
+    handle.join(None).unwrap();
 }

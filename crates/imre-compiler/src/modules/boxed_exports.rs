@@ -15,6 +15,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             exports!(
                 $module,
                 "AF_INET6",
+                "AF_UNIX",
                 "AI_NUMERICHOST",
                 "AI_NUMERICSERV",
                 "AI_PASSIVE",
@@ -75,6 +76,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
         ),
         M::CodecsNative => exports!(
             "_codecs",
+            "_imre_bind_module_search",
             "_imre_codec_functions",
             "_imre_idna_label",
             "_imre_native_search",
@@ -151,7 +153,6 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
         M::SocketNative => socket_exports!(
             "_socket",
             "AF_INET",
-            "AF_UNIX",
             "AF_UNSPEC",
             "IPPROTO_TCP",
             "SHUT_RD",
@@ -174,6 +175,8 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "allocate",
             "allocate_lock",
             "error",
+            "exit",
+            "exit_thread",
             "start_new_thread"
         ),
         M::TracemallocNative => exports!(
@@ -509,7 +512,9 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "SocketKind",
             "create_connection",
             "create_server",
-            "has_dualstack_ipv6"
+            "has_dualstack_ipv6",
+            "recv_fds",
+            "send_fds"
         ),
         M::Sys => exports!(
             "sys",
@@ -565,7 +570,13 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "tzname",
             "tzset"
         ),
-        M::Traceback => exports!("traceback", "extract_tb", "print_stack", "walk_tb"),
+        M::Traceback => exports!(
+            "traceback",
+            "extract_tb",
+            "format_exception_only",
+            "print_stack",
+            "walk_tb"
+        ),
         M::Types => exports!(
             "types",
             "BuiltinMethodType",

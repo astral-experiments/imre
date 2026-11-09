@@ -4,7 +4,7 @@ use super::*;
 use crate::types::{CACHE_INFO, NamedTuple, TupleOrigin};
 use std::rc::Rc;
 
-pub(super) fn collect(graph: &SourceGraph, types: &Types) -> Result<(), String> {
+pub(super) fn collect(graph: &SourceGraph, types: &Types) -> std::result::Result<(), Diagnostic> {
     for (module_id, module) in graph.modules.iter().enumerate() {
         for (index, statement) in module.parsed.syntax().body.iter().enumerate() {
             let definition = DefinitionId {
@@ -25,7 +25,7 @@ pub(super) fn collect(graph: &SourceGraph, types: &Types) -> Result<(), String> 
             {
                 continue;
             }
-            let fail = |message| module.error(call, message);
+            let fail = |message| module.diagnostic(call, message);
             let [ast::Expr::StringLiteral(name), names] = call.arguments.args.as_ref() else {
                 return Err(fail(
                     "namedtuple requires a literal type name and field names",
@@ -34,7 +34,7 @@ pub(super) fn collect(graph: &SourceGraph, types: &Types) -> Result<(), String> 
             if !call.arguments.keywords.is_empty() {
                 let error =
                     fail("namedtuple keyword options require native Python object operations");
-                return Err(graph.require_object_class_layout(error));
+                return Err(error.classified(Kind::ScopedClassLayout));
             }
             let name = name.value.to_string();
             let fields: Vec<String> = if let ast::Expr::StringLiteral(value) = names {
@@ -52,7 +52,7 @@ pub(super) fn collect(graph: &SourceGraph, types: &Types) -> Result<(), String> 
                         ast::Expr::StringLiteral(field) => Ok(field.value.to_string()),
                         _ => Err(fail("namedtuple field names must be literal strings")),
                     })
-                    .collect::<Result<_, _>>()?
+                    .collect::<std::result::Result<_, _>>()?
             } else {
                 return Err(fail(
                     "namedtuple field names require a literal string, list, or tuple",

@@ -4,8 +4,10 @@ from itertools import accumulate as _accumulate
 from math import ceil as _ceil, cos as _cos, floor as _floor, log as _log
 from math import sin as _sin, sqrt as _sqrt, tau as TWOPI
 from operator import index as _index
+from os import urandom as _urandom
 
 BPF = 53
+RECIP_BPF = 2 ** -BPF
 _ONE = 1
 
 
@@ -143,6 +145,10 @@ class Random:
         if not len(seq):
             raise IndexError('Cannot choose from an empty sequence')
         return seq[self._randbelow(len(seq))]
+
+    def choices(self, population, weights=None, *, cum_weights=None, k=1):
+        """Return k selections from population with replacement."""
+        return _choices(self.random, population, weights, cum_weights, k)
 
     def shuffle(self, x):
         """Shuffle list x in place, and return None."""
@@ -296,3 +302,49 @@ class Random:
             self.gauss_next = _sin(x2pi) * g2rad
 
         return mu + z * sigma
+
+
+class SystemRandom(Random):
+    """Alternate random number generator using sources provided
+    by the operating system (such as /dev/urandom on Unix or
+    CryptGenRandom on Windows).
+
+     Not available on all systems (see os.urandom() for details).
+
+    """
+
+    def random(self):
+        """Get the next random number in the range 0.0 <= X < 1.0."""
+        return (int.from_bytes(_urandom(7)) >> 3) * RECIP_BPF
+
+    def getrandbits(self, k):
+        """getrandbits(k) -> x.  Generates an int with k random bits."""
+        if k < 0:
+            raise ValueError('number of bits must be non-negative')
+        numbytes = (k + 7) // 8                       # bits / 8 and rounded up
+        x = int.from_bytes(_urandom(numbytes))
+        return x >> (numbytes * 8 - k)                # trim excess bits
+
+    def randbytes(self, n):
+        """Generate n random bytes."""
+        # os.urandom(n) fails with ValueError for n < 0
+        # and returns an empty bytes string for n == 0.
+        return _urandom(n)
+
+    def seed(self, *args, **kwds):
+        "Stub method.  Not used for a system random number generator."
+        return None
+
+    def _notimplemented(self, *args, **kwds):
+        "Method should not be called for a system random number generator."
+        raise NotImplementedError('System entropy source does not have state.')
+    getstate = setstate = _notimplemented
+
+    def __getstate__(self):
+        return self.getstate()
+
+    def __setstate__(self, state):
+        self.setstate(state)
+
+    def __reduce__(self):
+        return self.__class__, (), self.getstate()

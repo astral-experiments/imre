@@ -112,7 +112,9 @@ pub(super) fn doc_method(
             return Err(Error::new("TypeError", message));
         }
     }
-    if let Value::SlotMember { owner, name: field } = *ctx.heap.get(member)
+    if let Value::SlotMember {
+        owner, name: field, ..
+    } = *ctx.heap.get(member)
         && kwargs.is_empty()
     {
         return match (name, rest) {
@@ -427,7 +429,7 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     ctx.bind(scope, "__doc__", doc);
     bind_make(ctx, scope, name, fields)?;
     let defaults = has_defaults.then(|| ctx.alloc(Value::Tuple(defaults)));
-    bind_new(ctx, scope, &typename, &names, defaults)?;
+    bind_new(ctx, scope, &typename, &names, fields, defaults)?;
     let tuple = ctx.builtin("tuple");
     ctx.enable_class_annotation_provider(scope);
     let class = ctx.allocate_class(typename, scope, vec![tuple])?;
@@ -494,7 +496,7 @@ pub(super) fn bind_make(ctx: &mut Context, scope: Id, name: Id, fields: Id) -> R
     Ok(())
 }
 
-/// Assemble constructor source and documentation without aborting on an oversized field list.
+/// Assemble names and documentation without aborting on an oversized field list.
 fn text_parts(parts: &[&str]) -> Result<String> {
     let mut output = String::new();
     for part in parts {
@@ -503,12 +505,102 @@ fn text_parts(parts: &[&str]) -> Result<String> {
     Ok(output)
 }
 
-/// Give the generated function the declared parameter names and ordinary Python argument binding.
+/// Parameter symbols follow Python identifier normalization, while field attributes keep their spelling.
+fn constructor_parameters(
+    ctx: &mut Context,
+    names: &[String],
+    fields: Id,
+    filename: Id,
+) -> Result<(Id, Id)> {
+    let mut varnames = Vec::new();
+    varnames
+        .try_reserve_exact(names.len().saturating_add(1))
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    varnames.push(ctx.heap.code_name("_cls"));
+    for (index, name) in names.iter().enumerate() {
+        let symbol = match crate::objects::normalize_unicode("NFKC", name)? {
+            Some(normalized) if normalized.as_str() != name => {
+                // A parameter used as an expression must remain a name after normalization.
+                let symbol = normalized.as_str();
+                if matches!(symbol, "True" | "False" | "None") {
+                    return Err(Error::new(
+                        "ValueError",
+                        format!("identifier field can't represent '{symbol}' constant"),
+                    ));
+                }
+                ctx.heap.code_name(symbol)
+            }
+            _ => {
+                let Value::Tuple(fields) = ctx.heap.get(fields) else {
+                    unreachable!("validated namedtuple fields")
+                };
+                fields[index]
+            }
+        };
+        varnames.push(symbol);
+    }
+    let positional = varnames
+        .iter()
+        .map(|&symbol| ctx.str_value(symbol))
+        .collect::<Result<Vec<_>>>()?;
+    let mut seen = HashSet::new();
+    seen.try_reserve(positional.len())
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    seen.insert("_cls");
+    // The first user parameter starts at byte 13 in CPython's one-line lambda.
+    let mut offset = 13;
+    for (name, symbol) in names.iter().zip(&positional[1..]) {
+        if !seen.insert(*symbol) {
+            let range = |n: usize| {
+                ruff_text_size::TextSize::try_from(n).map_err(|_| Error::new("MemoryError", ""))
+            };
+            let span = ruff_text_size::TextRange::new(range(offset)?, range(offset + name.len())?);
+            return Err(ctx.located_syntax_error(
+                &format!("duplicate argument '{symbol}' in function definition"),
+                super::source_code::SyntaxSpan::InFields(span),
+                filename,
+                &[0],
+            )?);
+        }
+        offset += name.len() + 2;
+    }
+    let parameters = serde_json::json!({
+        "positional": positional,
+        "scope_complete": true,
+        "scope_locals_complete": true,
+        "code_flags": imre_ast::code_flags::OPTIMIZED | imre_ast::code_flags::NEWLOCALS,
+    });
+    Ok((
+        ctx.text(parameters.to_string()),
+        ctx.alloc(Value::Tuple(varnames)),
+    ))
+}
+
+/// Invoke the allocator from this particular function's globals using its bound positional frame.
+pub(super) fn construct(ctx: &mut Context, scope: Id) -> Result<Id> {
+    let signature = ctx.parsed_parameters(ctx.heap.current_code())?;
+    let allocate = ctx.lookup(scope, "_tuple_new")?;
+    ctx.heap.keep(allocate);
+    let cls = ctx.lookup(scope, "_cls")?;
+    let mut fields = Vec::new();
+    fields
+        .try_reserve_exact(signature.positional.len() - 1)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    for name in &signature.positional[1..] {
+        fields.push(ctx.lookup(scope, name)?);
+    }
+    let fields = ctx.alloc(Value::Tuple(fields));
+    ctx.call_in_scope(scope, allocate, vec![cls, fields], Vec::new())
+        .and_then(|value| ctx.check_call_return(value))
+}
+
+/// Bind the shared constructor code with this definition's signature, globals and defaults.
 pub(super) fn bind_new(
     ctx: &mut Context,
     scope: Id,
     typename: &str,
     names: &[String],
+    field_ids: Id,
     defaults: Option<Id>,
 ) -> Result<Id> {
     let mut fields = String::new();
@@ -532,29 +624,25 @@ pub(super) fn bind_new(
         (module, module_name),
         (builtins, empty),
     ]);
-    let source = ctx.text(text_parts(&[
-        "def __new__(_cls, ",
-        &fields,
-        "):\n    return _tuple_new(_cls, (",
-        &fields,
-        "))",
-    ])?);
-    ctx.exec_source(source, globals, None, None)?;
-    let new = ctx
-        .dict_named_item(globals, "__new__")
-        .expect("generated function");
-    ctx.heap.keep(new);
-    let key = ctx.text("__new__");
-    ctx.delete_item(globals, key)?;
-    let Value::Function { code, .. } = *ctx.heap.get(new) else {
-        unreachable!()
-    };
+    let filename = ctx.text("<string>");
+    let (parameters, varnames) = constructor_parameters(ctx, names, field_ids, filename)?;
     let lambda = ctx.text("<lambda>");
-    let Value::Code(code) = ctx.heap.get_mut(code) else {
-        unreachable!()
+    let code = ctx.prelinked_code(
+        super::value::Body::Native(super::ffi::namedtuple_constructor, NONE),
+        ctx.root_scope(scope),
+        lambda,
+        parameters,
+        (lambda, NONE),
+        (filename, 1),
+    );
+    let Value::Code(metadata) = ctx.heap.get_mut(code) else {
+        unreachable!("prelinked code")
     };
-    code.name = lambda;
-    code.qualname = lambda;
+    metadata.varnames = varnames;
+    metadata.cellvars = super::value::EMPTY_TUPLE;
+    let name = ctx.text("__new__");
+    let new = ctx.construct_function(&[code, globals, name, defaults.unwrap_or(NONE)], &[])?;
+    ctx.heap.keep(new);
     let qualname = ctx.text(text_parts(&[typename, ".__new__"])?);
     let doc = ctx.text(text_parts(&[
         "Create new instance of ",
@@ -565,9 +653,6 @@ pub(super) fn bind_new(
     ])?);
     ctx.set_attr(new, "__qualname__", qualname)?;
     ctx.set_attr(new, "__doc__", doc)?;
-    if let Some(defaults) = defaults {
-        ctx.set_attr(new, "__defaults__", defaults)?;
-    }
     let descriptor = super::method_decorator::static_method(ctx, new)?;
     ctx.bind(scope, "__new__", descriptor);
     let collections = ctx.module("collections")?;

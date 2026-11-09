@@ -3,18 +3,60 @@
 /// CPython 3.14.5's pyc magic number followed by CRLF in little-endian wire order.
 pub const PYC_MAGIC_NUMBER_TOKEN: u32 = 3627 | ((b'\r' as u32) << 16) | ((b'\n' as u32) << 24);
 
+/// Native archives in import order. The first filename carries the wheel ABI tag.
+pub const NATIVE_ARCHIVE_EXTENSIONS: [&str; 2] = ["imre1.a", "imre.a"];
+
+/// Python language version used by the compiler and the runtime import machinery.
+pub const PYTHON_VERSION: ruff_python_ast::PythonVersion = ruff_python_ast::PythonVersion::PY314;
+
+/// Filesystem module suffixes in discovery order; match compound suffixes before ".so".
+pub fn module_suffixes() -> [String; 7] {
+    let version = PYTHON_VERSION;
+    let abi = if cfg!(target_os = "macos") {
+        "darwin".to_owned()
+    } else {
+        let libc = if cfg!(target_env = "musl") {
+            "musl"
+        } else {
+            "gnu"
+        };
+        format!("{}-linux-{libc}", std::env::consts::ARCH)
+    };
+    let tagged = format!(".cpython-{}{}-{abi}.so", version.major, version.minor);
+    let [versioned, legacy] = NATIVE_ARCHIVE_EXTENSIONS.map(|ext| format!(".{ext}"));
+    [
+        tagged,
+        ".abi3.so".into(),
+        versioned,
+        legacy,
+        ".so".into(),
+        ".py".into(),
+        ".pyc".into(),
+    ]
+}
+
+/// Unicode Character Database version shipped with the target CPython 3.14 release.
+pub const UNICODE_DATA_VERSION: &str = "16.0.0";
+
+pub mod comprehension;
 #[cfg(target_os = "linux")]
 pub mod epoll;
 pub mod exceptions;
+pub mod executable;
+pub mod forward_refs;
+pub mod indentation;
 pub mod layout;
 pub mod lzma;
+pub mod numbers;
 pub mod providers;
 pub mod python_nodes;
+pub mod source_encoding;
 pub mod startup;
 pub mod strings;
 mod type_aliases;
 pub mod zlib;
-pub use type_aliases::{generic_class_arguments_error, type_alias_error};
+pub use type_aliases::annotation_scope_error as type_alias_error;
+pub use type_aliases::{annotation_scope_error, generic_class_arguments_error};
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -25,10 +67,66 @@ use ruff_python_ast::{self as ast, Identifier};
 use ruff_python_stdlib::identifiers::is_mangled_private;
 use ruff_text_size::{Ranged, TextSize};
 
+/// A valueless parenthesized name in an annotation neither binds nor reads the name.
+pub fn annotation_visits_target(assignment: &ast::StmtAnnAssign) -> bool {
+    assignment.simple || assignment.value.is_some() || !assignment.target.is_name_expr()
+}
+
+/// Diagnose the positional-only range constructor before converting any bounds.
+pub fn range_constructor_error(positional: usize, keywords: bool) -> Option<String> {
+    if keywords {
+        Some("range() takes no keyword arguments".into())
+    } else {
+        match positional {
+            0 => Some("range expected at least 1 argument, got 0".into()),
+            1..=3 => None,
+            n => Some(format!("range expected at most 3 arguments, got {n}")),
+        }
+    }
+}
+
 /// A pattern that neither inspects nor captures its operand.
 pub fn wildcard_pattern(pattern: &ast::Pattern) -> bool {
     matches!(pattern, ast::Pattern::MatchAs(p) if p.pattern.is_none() && p.name.is_none())
         || matches!(pattern, ast::Pattern::MatchStar(p) if p.name.is_none())
+}
+
+/// The sequence protocol operations required by one validated sequence pattern.
+pub struct SequencePatternPlan {
+    /// A sole star does not call len. Otherwise require exactly or at least this many items.
+    pub length: Option<(ast::CmpOp, usize)>,
+    pub items: SequencePatternItems,
+}
+
+pub enum SequencePatternItems {
+    /// Every item is a wildcard. The subject need not be indexed or iterated.
+    Ignore,
+    /// Fetch only inspected items on either side of this ignored star.
+    IndexAround(usize),
+    /// Unpack in iteration order, collecting a list at the optional capture.
+    Unpack(Option<usize>),
+}
+
+/// Use the same observable length, indexing and iteration policy in both boxed backends.
+pub fn sequence_pattern_plan(patterns: &[ast::Pattern]) -> SequencePatternPlan {
+    let star = patterns
+        .iter()
+        .position(|p| matches!(p, ast::Pattern::MatchStar(_)));
+    let length = match star {
+        None => Some((ast::CmpOp::Eq, patterns.len())),
+        Some(_) if patterns.len() > 1 => Some((ast::CmpOp::GtE, patterns.len() - 1)),
+        _ => None,
+    };
+    let items = if patterns.iter().all(wildcard_pattern) {
+        SequencePatternItems::Ignore
+    } else if let Some(index) = star
+        && wildcard_pattern(&patterns[index])
+    {
+        SequencePatternItems::IndexAround(index)
+    } else {
+        SequencePatternItems::Unpack(star)
+    };
+    SequencePatternPlan { length, items }
 }
 
 /// Wildcard imports can only publish names in a module body, including its conditional suites.
@@ -170,6 +268,34 @@ pub fn captured_thread_locks<'a>(
     }
 }
 
+/// CPython omits the caret for the whole call in these assignment and return statements.
+pub fn unhighlighted_call(stmt: &ast::Stmt) -> Option<ruff_text_size::TextRange> {
+    match stmt {
+        ast::Stmt::Assign(v)
+            if matches!(v.targets.as_slice(), [ast::Expr::Name(_)])
+                && matches!(&*v.value, ast::Expr::Call(_)) =>
+        {
+            Some(v.value.range())
+        }
+        ast::Stmt::Return(v) => v.value.as_deref().and_then(|e| match e {
+            ast::Expr::Call(c) if matches!(&*c.func, ast::Expr::Name(_)) => Some(e.range()),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
+/// Locate the delimiter after a call target or subscription receiver on a traceback line.
+pub fn traceback_delimiter(
+    source: &[u8],
+    prefix_end: usize,
+    end: usize,
+    opener: u8,
+) -> Option<usize> {
+    let suffix = source.get(prefix_end..end)?;
+    Some(prefix_end + suffix.iter().position(|&b| b == opener)?)
+}
+
 /// Python locates attribute loads and optimized method calls at the attribute name.
 pub fn expression_position(
     expr: &ast::Expr,
@@ -230,16 +356,10 @@ pub struct Names {
     pub string_annotations: bool,
     pub duplicate_type_parameter: Option<Identifier>,
     original: HashMap<TextSize, Name>,
-    owners: HashMap<TextSize, Name>,
     import_roots: HashSet<TextSize>,
 }
 
 impl Names {
-    /// Return the class owning the lexical names in a deferred generator suite.
-    pub fn suite_owner(&self, start: TextSize) -> Option<&str> {
-        self.owners.get(&start).map(Name::as_str)
-    }
-
     /// A private definition keeps its source name for introspection.
     pub fn definition<'a>(&'a self, name: &'a Identifier) -> &'a str {
         self.original
@@ -260,11 +380,66 @@ pub fn future_annotations(body: &[ast::Stmt]) -> bool {
 
 /// Whether the module imports a given compiler feature from __future__.
 pub fn future_import(body: &[ast::Stmt], feature: &str) -> bool {
-    body.iter().any(|s| {
-        matches!(s, ast::Stmt::ImportFrom(i) if i.level == 0
-            && i.module.as_deref() == Some("__future__")
-            && i.names.iter().any(|n| n.name.as_str() == feature))
-    })
+    leading_future_imports(body)
+        .any(|import| import.names.iter().any(|n| n.name.as_str() == feature))
+}
+
+/// Future directives form one contiguous prefix after the optional module docstring.
+fn leading_future_imports(body: &[ast::Stmt]) -> impl Iterator<Item = &ast::StmtImportFrom> {
+    ast::helpers::body_without_leading_docstring(body)
+        .iter()
+        .map_while(future_statement)
+}
+
+fn future_statement(stmt: &ast::Stmt) -> Option<&ast::StmtImportFrom> {
+    let ast::Stmt::ImportFrom(import) = stmt else {
+        return None;
+    };
+    (import.level == 0 && import.module.as_deref() == Some("__future__")).then_some(import)
+}
+
+/// Check future statement placement after the module's optional docstring.
+pub fn future_import_error(
+    body: &[ast::Stmt],
+) -> Option<(ruff_text_size::TextRange, &'static str)> {
+    use ast::visitor::Visitor;
+    struct Check(Option<ruff_text_size::TextRange>);
+    impl<'a> Visitor<'a> for Check {
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            if self.0.is_some() {
+                return;
+            }
+            if future_statement(stmt).is_some() {
+                self.0 = Some(stmt.range());
+            } else if ast::helpers::is_compound_statement(stmt) {
+                stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+                    ast::visitor::walk_stmt(self, stmt)
+                });
+            }
+        }
+        fn visit_expr(&mut self, _: &'a ast::Expr) {}
+    }
+    let mut check = Check(None);
+    for stmt in ast::helpers::body_without_leading_docstring(body)
+        .iter()
+        .skip_while(|stmt| future_statement(stmt).is_some())
+    {
+        check.visit_stmt(stmt);
+        if let Some(range) = check.0 {
+            // The symbol table visits the imported aliases before checking
+            // future placement, including a star in this same statement.
+            if let Some(star) = misplaced_star_import(body)
+                && star.start() < range.end()
+            {
+                return Some((star, "import * only allowed at module level"));
+            }
+            return Some((
+                range,
+                "from __future__ imports must occur at the beginning of the file",
+            ));
+        }
+    }
+    None
 }
 
 pub fn lower(body: &mut [ast::Stmt]) -> Names {
@@ -378,14 +553,6 @@ impl Transformer for Mangler<'_> {
                 return;
             }
             ast::Stmt::FunctionDef(function) => {
-                if !self.owner.is_empty()
-                    && let Some(first) = function.body.first()
-                {
-                    self.names
-                        .borrow_mut()
-                        .owners
-                        .insert(first.start(), Name::new(self.owner));
-                }
                 self.definition(&mut function.name);
                 if let Some(params) = &mut function.type_params {
                     self.type_parameter_bindings(params);
@@ -414,14 +581,6 @@ impl Transformer for Mangler<'_> {
 
     fn visit_expr(&self, expr: &mut ast::Expr) {
         match expr {
-            ast::Expr::Lambda(lambda)
-                if !self.owner.is_empty() && matches!(*lambda.body, ast::Expr::Yield(_)) =>
-            {
-                self.names
-                    .borrow_mut()
-                    .owners
-                    .insert(lambda.body.start(), Name::new(self.owner));
-            }
             ast::Expr::Name(name) => self.remember(name.start(), &mut name.id),
             ast::Expr::Attribute(attr) => self.definition(&mut attr.attr),
             _ => {}

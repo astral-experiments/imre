@@ -309,12 +309,15 @@ impl Pattern {
     // CPython may match an empty alternative with pos past endpos, while a
     // zero-minimum repeat can fail there. Slicing to an empty haystack loses that distinction.
     fn check_reversed_match(&self) -> Result<()> {
-        if regex_automata::util::syntax::parse_with(
-            &self.engine_source,
-            &syntax(self.bytes, self.engine_flags()),
-        )
-        .is_ok_and(|hir| hir.properties().minimum_len() != Some(0))
-        {
+        let consumes_input = match &self.regex {
+            Matcher::Lookahead(matcher) => matcher.requires_input,
+            _ => regex_automata::util::syntax::parse_with(
+                &self.engine_source,
+                &syntax(self.bytes, self.engine_flags()),
+            )
+            .is_ok_and(|hir| hir.properties().minimum_len() != Some(0)),
+        };
+        if consumes_input {
             return Ok(());
         }
         Err(Error::new(
@@ -1556,9 +1559,12 @@ impl Match {
         {
             return Ok((span.start as i64, span.end as i64));
         }
-        let text = ctx.str_value(self.subject)?;
-        let start = text[..span.start].chars().count() as i64;
-        let end = start + text[span.range()].chars().count() as i64;
+        let position = |byte| {
+            ctx.heap
+                .string_character_offset(scalar, byte)
+                .expect("regex spans end on UTF-8 boundaries") as i64
+        };
+        let (start, end) = (position(span.start), position(span.end));
         Ok((start, end))
     }
 
@@ -1790,8 +1796,10 @@ pub(super) fn search(
     let byte = |i: usize| {
         if pattern.bytes || i >= text.len() {
             i.min(text.len())
-        } else if i == 0 || ctx.heap.is_ascii_str(ctx.scalar_value(string)) {
-            i
+        } else if subject.projection.is_none() {
+            ctx.heap
+                .string_byte_offset(ctx.scalar_value(string), i)
+                .unwrap_or(text.len())
         } else {
             std::str::from_utf8(text)
                 .expect("text regex subject is UTF-8")
@@ -1818,21 +1826,17 @@ pub(super) fn search(
         };
     }
     if matches!(method, "scanner" | "finditer") {
-        let buffer_view = match ctx.heap.get(ctx.scalar_value(string)) {
-            // Keep the export alive for the scanner's lifetime. A Match keeps only the subject.
-            Value::ByteArray(_) | Value::Array(_) => Some(ctx.new_memoryview(string)?),
-            Value::MemoryView { .. } => {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "exporting a memoryview to a regex scanner is unsupported",
-                ));
-            }
-            _ => None,
-        };
+        // The scanner exports its subject until destruction; a Match only retains it.
+        let storage = ctx.view_storage_id(string);
+        if matches!(
+            ctx.heap.get(storage),
+            Value::ByteArray(_) | Value::Array(_) | Value::MemoryView { .. }
+        ) {
+            ctx.heap.note_buffer_view(storage);
+        }
         let scanner = ctx.alloc(Value::RegexScanner {
             pattern: receiver,
             subject: string,
-            buffer_view,
             initial_start: start,
             start: Some(start),
             end,

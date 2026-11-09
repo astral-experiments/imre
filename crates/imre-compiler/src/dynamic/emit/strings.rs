@@ -34,7 +34,7 @@ pub(super) fn check_docs(
             .map(Ranged::range)
             .find(|range| replacements.contains_key(range))
     }) {
-        return Err(crate::frontend::error(
+        return Err(crate::frontend::diagnostic_message(
             source,
             &range,
             "surrogate string escapes are unsupported in docstrings",

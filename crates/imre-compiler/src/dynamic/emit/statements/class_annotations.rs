@@ -58,9 +58,14 @@ impl Function<'_, '_> {
         }).to_string());
         let start = *sites.first_key_value().unwrap().0;
         let body = Body::ClassAnnotations(sites.into_values().collect(), bindings.globals);
-        let code = self
-            .output
-            .definition(self.source, String::new(), body, start, false, None);
+        let code = self.output.definition(
+            self.source,
+            String::new(),
+            body,
+            start,
+            false,
+            Entry::Compiled,
+        );
         let environment = self.op(
             "class_annotation_environment",
             &[&self.scope.clone(), &offsets],
@@ -118,7 +123,7 @@ impl Function<'_, '_> {
                 after
             });
             self.checkpoint(&site.expression);
-            let value = self.expr(&site.expression);
+            let value = self.annotation_value(&site.expression);
             let key = self.code_name(&site.name);
             self.op("put", &[&result, &key, &value]);
             if let Some(after) = after {

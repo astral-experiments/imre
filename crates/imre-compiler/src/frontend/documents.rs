@@ -202,7 +202,7 @@ impl Checker<'_> {
                     .elts
                     .iter()
                     .map(|v| self.expr_expected(v, ANY))
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
                 op(
                     Op::WrapList,
                     LIST,

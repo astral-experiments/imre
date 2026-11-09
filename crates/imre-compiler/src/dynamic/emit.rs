@@ -10,10 +10,12 @@ use ruff_text_size::Ranged;
 use crate::CodegenUnit;
 
 mod boolean;
+mod comprehensions;
 mod expressions;
 mod patterns;
 mod statements;
 mod strings;
+mod suspension;
 
 mod permanent {
     include!("../../../imre-runtime/native/boxed-handles.rs");
@@ -27,15 +29,19 @@ declare i32 @imre_dyn_finish(ptr)
 declare i64 @imre_dyn_lit(ptr, i32, ptr, i64)
 declare i64 @imre_dyn_permanent_sequence(ptr, ptr, i64, i1)
 declare i64 @imre_dyn_lookup(ptr, i64, ptr, i64)
+declare i64 @imre_dyn_import_name(ptr, i64, i64, i64, i32)
 declare i64 @imre_dyn_mark_class_annotation(ptr, i64, i64, i32)
 declare i64 @imre_dyn_define(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
 declare i1 @imre_dyn_failed(ptr)
 declare i64 @imre_dyn_truth_mark(ptr)
 declare void @imre_dyn_comprehension_step(ptr, i64)
 declare void @imre_dyn_discard_truth(ptr, i64)
+declare i64 @imre_dyn_keep_operands(ptr, i64, i64, i64)
+declare void @imre_dyn_discard_expression(ptr, i64)
 declare void @imre_dyn_named_assignment(ptr, i64, i64, i64)
 declare void @imre_dyn_assignment_target(ptr, ptr, i64, i64)
 declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
+declare i64 @imre_dyn_get_slice_at(ptr, i64, i64, i64, ptr)
 declare void @imre_dyn_call_position(ptr, ptr)
 declare i64 @imre_dyn_contains_literal_tuple(ptr, i64, ptr, i64, i32)
 declare i64 @imre_dyn_scoped_call_at(ptr, i64, i64, i64, i64, ptr, i64)
@@ -43,9 +49,11 @@ declare i64 @imre_dyn_positional_method_at(ptr, i64, ptr, i64, i64, ptr, i64)
 declare i64 @imre_dyn_partition_field_at(ptr, i64, ptr, i32, ptr, i64, ptr, i64)
 declare i64 @imre_dyn_string_method_target(ptr, i64, ptr, ptr)
 declare i64 @imre_dyn_unpack_pair(ptr, i64, ptr)
+declare i64 @imre_dyn_next_pair(ptr, i64, ptr, i1)
 declare i64 @imre_dyn_builtin_method_target(ptr, i64, ptr, ptr)
 declare i64 @imre_dyn_dict_get_target(ptr, i64, ptr)
 declare i64 @imre_dyn_positional_call_at(ptr, i64, ptr, i64, i64, ptr, i64)
+declare i64 @imre_dyn_keyword_call_at(ptr, i64, ptr, i64, ptr, i64, i64, ptr, i64)
 declare void @imre_dyn_expression_line(ptr, i32)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
 ";
@@ -91,16 +99,50 @@ load:
 }
 ";
 
+type ModuleSource = (String, PathBuf, String);
+
+#[derive(Clone, Copy, Default)]
+pub(super) struct PhysicalFile {
+    pub(super) digest: Option<[u8; 32]>,
+    pub(super) future_flags: u32,
+}
+
+/// Snapshots and admission facts for the bodies selected by import resolution.
+#[derive(Default)]
+pub(super) struct RegisteredBodies {
+    // Decoded installed files retain the fingerprint of their original loader bytes.
+    pub(super) physical_files: HashMap<PathBuf, PhysicalFile>,
+    pub(super) archive_members: HashMap<PathBuf, ([u8; 32], u32)>,
+    // These provide declarations to the checked program. Their Python bodies
+    // retain Python argument binding, including annotations available to reflection.
+    pub(super) python_providers: HashSet<PathBuf>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum ModuleOrigin {
+    Program,
+    Provider,
+    Bundled,
+}
+
 /// All module source has already been resolved. Import execution remains conditional.
 pub(crate) fn emit(
-    modules: &[(String, PathBuf, String)],
+    (files, builtins): (&[ModuleSource], &[ModuleSource]),
     config: &str,
     keep_docstrings: bool,
     bundled_root: &Path,
     providers: &HashSet<String>,
     split: bool,
-    source_only_provider: Option<&str>,
+    (module_errors, registrations): (
+        &HashMap<PathBuf, Box<super::ModuleSyntaxError>>,
+        &RegisteredBodies,
+    ),
 ) -> Result<(Vec<CodegenUnit>, bool), String> {
+    let RegisteredBodies {
+        physical_files,
+        archive_members,
+        python_providers,
+    } = registrations;
     let mut units = Vec::new();
     let mut used_archive = false;
     let mut output = Output {
@@ -112,31 +154,72 @@ pub(crate) fn emit(
     let mut main = format!(
         "declare void @imre_dyn_register_source(ptr, ptr, ptr, ptr, i64, ptr)\n\ndefine i32 @main(i32 %argc, ptr %argv) {{\nentry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
     );
-    if source_only_provider.is_some() {
+    output
+        .functions
+        .push_str("declare void @imre_dyn_register_file_code(ptr, ptr, ptr, ptr, i32, ptr)\n");
+    if !archive_members.is_empty() {
         output
             .functions
-            .push_str("declare void @imre_dyn_register_bundled_source(ptr, ptr, ptr, ptr, i64)\n");
+            .push_str("declare void @imre_dyn_register_zip_source(ptr, ptr, ptr, ptr, i32, ptr)\n");
+    }
+    if !builtins.is_empty() {
+        output.functions.push_str(
+            "declare void @imre_dyn_register_builtin_source(ptr, ptr, ptr, ptr, i64, ptr)\n",
+        );
+    }
+    if !module_errors.is_empty() {
+        output.functions.push_str(
+            "declare void @imre_dyn_register_module_error(ptr, ptr, ptr, ptr, i64, ptr, ptr, i8, ptr)\n",
+        );
     }
     let mut declarations = HashSet::new();
-    for (unit, (name, path, source)) in modules.iter().enumerate() {
+    let files = files.iter().map(|module| (module, false));
+    let builtins = builtins.iter().map(|module| (module, true));
+    for (unit, ((name, path, source), builtin)) in files.chain(builtins).enumerate() {
         let bundled = path.starts_with(bundled_root);
+        let origin = if bundled {
+            ModuleOrigin::Bundled
+        } else if python_providers.contains(path) {
+            ModuleOrigin::Provider
+        } else {
+            ModuleOrigin::Program
+        };
         let module_name = output.data(name.as_bytes());
-        let file = output.data(path.to_str().ok_or("module path must be UTF-8")?.as_bytes());
-        if bundled && source_only_provider == Some(name.as_str()) {
+        let file = output.data(path.as_os_str().as_encoded_bytes());
+        if !builtin && let Some(error) = module_errors.get(path) {
+            let message = output.data(error.message.as_bytes());
+            let position = error
+                .position
+                .map_or_else(|| "null".into(), |span| output.position(span));
             let text = output.data(source.as_bytes());
+            let hash = archive_members
+                .get(path)
+                .map_or_else(|| "null".into(), |(digest, _)| output.data(digest));
             writeln!(
                 main,
-                "  call void @imre_dyn_register_bundled_source(ptr %ctx, ptr {module_name}, ptr {file}, ptr {text}, i64 {})",
-                source.len()
+                "  call void @imre_dyn_register_module_error(ptr %ctx, ptr {module_name}, ptr {file}, ptr {text}, i64 {}, ptr {message}, ptr {position}, i8 {}, ptr {hash})",
+                source.len(), if error.parse_error { 2 } else { u8::from(error.in_args) }
             ).unwrap();
             continue;
         }
+        // Python source files use universal newlines, including inside literals.
+        // Keep the original physical bytes for registration.
+        let physical = !builtin && physical_files.contains_key(path);
+        let file_digest = physical_files.get(path).and_then(|file| file.digest);
+        let code_source = if physical && file_digest.is_none() {
+            crate::normalize_source(source, crate::SourceKind::File)?
+        } else if file_digest.is_some() || archive_members.contains_key(path) {
+            crate::normalize_source(source, crate::SourceKind::DecodedFile)?
+        } else {
+            std::borrow::Cow::Borrowed(source.as_str())
+        };
         let check_archive = bundled && !providers.is_empty();
         // A standalone initializer can be compiled separately even without a provider pack.
         let separate = split && unit != 0 && !source.is_empty();
         let mut external = None;
         if (check_archive || separate)
-            && let Some((symbol, ir)) = initializer(name, path, source, keep_docstrings, bundled)?
+            && let Some((symbol, ir)) =
+                initializer(name, path, &code_source, keep_docstrings, origin)?
         {
             let archived = check_archive && providers.contains(&symbol);
             if archived || separate {
@@ -155,17 +238,43 @@ pub(crate) fn emit(
         }
         let code = match external {
             Some(symbol) => symbol,
-            None => output.module(unit, name, path, source, &file, bundled)?,
+            None => output.source_body(
+                unit,
+                name,
+                path,
+                &code_source,
+                &file,
+                SourceBody::Module(origin),
+            )?,
         };
-        // Retain the text of virtual providers alongside the installed initializer.
+        if let Some((digest, flags)) = archive_members.get(path) {
+            let hash = output.data(digest);
+            writeln!(main, "  call void @imre_dyn_register_zip_source(ptr %ctx, ptr {module_name}, ptr {file}, ptr {hash}, i32 {flags}, ptr {code})").unwrap();
+            continue;
+        }
+        // Physical code reads keep using the file. Identify its compiled snapshot without
+        // embedding the source or exposing stale bytes through SourceFileLoader.get_data().
+        if physical {
+            use sha2::{Digest, Sha256};
+            let digest = file_digest.unwrap_or_else(|| Sha256::digest(source.as_bytes()).into());
+            let hash = output.data(&digest);
+            let flags = physical_files[path].future_flags;
+            writeln!(main, "  call void @imre_dyn_register_file_code(ptr %ctx, ptr {module_name}, ptr {file}, ptr {hash}, i32 {flags}, ptr {code})").unwrap();
+            continue;
+        }
         let (text, len) = if bundled {
             (output.data(source.as_bytes()), source.len())
         } else {
             ("null".to_owned(), 0)
         };
+        let register = if builtin {
+            "imre_dyn_register_builtin_source"
+        } else {
+            "imre_dyn_register_source"
+        };
         writeln!(
             main,
-            "  call void @imre_dyn_register_source(ptr %ctx, ptr {module_name}, ptr {file}, ptr {text}, i64 {len}, ptr {code})"
+            "  call void @{register}(ptr %ctx, ptr {module_name}, ptr {file}, ptr {text}, i64 {len}, ptr {code})"
         )
         .unwrap();
     }
@@ -186,24 +295,30 @@ pub(super) fn initializer(
     path: &Path,
     source: &str,
     keep_docstrings: bool,
-    bundled: bool,
+    origin: ModuleOrigin,
 ) -> Result<Option<(String, String)>, String> {
     let mut output = Output {
         keep_docstrings,
         ..Output::default()
     };
-    let filename = path.to_str().ok_or("module path must be UTF-8")?;
-    let file = output.data(filename.as_bytes());
-    let entry = output.module(0, name, path, source, &file, bundled)?;
+    let filename = path.as_os_str().as_encoded_bytes();
+    let file = output.data(filename);
+    let entry = output.source_body(0, name, path, source, &file, SourceBody::Module(origin))?;
     // These slots are numbered across the whole program and must stay in its codegen unit.
     if !output.string_constant_slots.is_empty() {
         return Ok(None);
     }
     let mut ir = format!("{ABI}\n{}\n{}", output.constants, output.functions);
     let mut hash = blake3::Hasher::new();
-    for field in [std::env::consts::ARCH, name, filename, source, &ir] {
+    for field in [
+        std::env::consts::ARCH.as_bytes(),
+        name.as_bytes(),
+        filename,
+        source.as_bytes(),
+        ir.as_bytes(),
+    ] {
         hash.update(&(field.len() as u64).to_le_bytes());
-        hash.update(field.as_bytes());
+        hash.update(field);
     }
     hash.update(&[u8::from(keep_docstrings)]);
     let symbol = format!("imre_provider_{}", hash.finalize().to_hex());
@@ -211,49 +326,147 @@ pub(super) fn initializer(
     Ok(Some((symbol, ir)))
 }
 
+struct ParsedSource {
+    parsed: ruff_python_parser::Parsed<ast::ModModule>,
+    replacements: HashMap<ruff_text_size::TextRange, Vec<u32>>,
+}
+
+fn parse_source(path: &Path, source: &str, keep_docstrings: bool) -> Result<ParsedSource, String> {
+    let parsed = imre_ast::indentation::prepare(source)
+        .parse_module()
+        .map_err(|err| format!("{}: {err}", path.display()))?;
+    let replacements = check_parsed_source(path, source, &parsed, keep_docstrings)?;
+    Ok(ParsedSource {
+        parsed,
+        replacements,
+    })
+}
+
+pub(super) fn check_parsed_source(
+    path: &Path,
+    source: &str,
+    parsed: &ruff_python_parser::Parsed<ast::ModModule>,
+    keep_docstrings: bool,
+) -> Result<HashMap<ruff_text_size::TextRange, Vec<u32>>, String> {
+    if let Some((range, reason)) = imre_ast::comprehension::dict_unpacking_error(parsed) {
+        let error =
+            crate::frontend::diagnostic_message(source, &range, &format!("SyntaxError: {reason}"));
+        return Err(format!("{}:{error}", path.display()));
+    }
+    crate::analysis::check_scope_syntax(source, parsed.syntax())
+        .map_err(|error| format!("{}:{error}", path.display()))?;
+    if let Some(keyword) = imre_ast::repeated_keyword(parsed.syntax().into()) {
+        let name = keyword.arg.as_ref().expect("repeated named argument");
+        let reason = format!("SyntaxError: keyword argument repeated: {name}");
+        let error = crate::frontend::diagnostic_message(source, keyword, &reason);
+        return Err(format!("{}:{error}", path.display()));
+    }
+    let replacements = strings::literal_replacements(source, parsed.tokens());
+    if keep_docstrings && !replacements.is_empty() {
+        strings::check_docs(source, &parsed.syntax().body, &replacements)
+            .map_err(|error| format!("{}:{error}", path.display()))?;
+    }
+    Ok(replacements)
+}
+
+pub(super) fn lower_source(
+    path: &Path,
+    source: &str,
+    body: &mut [ast::Stmt],
+) -> Result<imre_ast::Names, String> {
+    let private_names = imre_ast::lower(body);
+    if source.contains("nonlocal") {
+        statements::type_parameters::check_nonlocals(source, body)
+            .map_err(|error| format!("{}:{error}", path.display()))?;
+    }
+    if let Some((range, reason)) = imre_ast::annotation_scope_error(body) {
+        let error =
+            crate::frontend::diagnostic_message(source, &range, &format!("SyntaxError: {reason}"));
+        return Err(format!("{}:{error}", path.display()));
+    }
+    if let Some(param) = &private_names.duplicate_type_parameter {
+        let reason = format!("SyntaxError: duplicate type parameter '{}'", param.id);
+        let error = crate::frontend::diagnostic_message(source, param, &reason);
+        return Err(format!("{}:{error}", path.display()));
+    }
+    Ok(private_names)
+}
+
+/// Validate the executable bodies. Discovery already recorded the malformed modules.
+pub(super) fn check(
+    (files, builtins): (&[ModuleSource], &[ModuleSource]),
+    keep_docstrings: bool,
+    module_errors: &HashMap<PathBuf, Box<super::ModuleSyntaxError>>,
+) -> Result<(), String> {
+    for (_, path, source) in files.iter().chain(builtins) {
+        if !module_errors.contains_key(path) {
+            check_source(path, source, keep_docstrings)?;
+        }
+    }
+    Ok(())
+}
+
+fn check_source(path: &Path, source: &str, keep_docstrings: bool) -> Result<(), String> {
+    let source_tree = parse_source(path, source, keep_docstrings)?;
+    lower_source(path, source, &mut source_tree.parsed.into_syntax().body)?;
+    Ok(())
+}
+
 impl Output {
-    fn module(
+    fn source_body(
         &mut self,
         unit: usize,
         name: &str,
         path: &Path,
         source: &str,
         file: &str,
-        bundled: bool,
+        kind: SourceBody<'_>,
     ) -> Result<String, String> {
-        let parsed = ruff_python_parser::parse_module(source)
-            .map_err(|err| format!("{}: {err}", path.display()))?;
-        crate::analysis::check_scope_syntax(source, parsed.syntax())
-            .map_err(|error| format!("{}:{error}", path.display()))?;
-        if let Some(keyword) = imre_ast::repeated_keyword(parsed.syntax().into()) {
-            let name = keyword.arg.as_ref().expect("repeated named argument");
-            let reason = format!("SyntaxError: keyword argument repeated: {name}");
-            let error = crate::frontend::error(source, keyword, &reason);
-            return Err(format!("{}:{error}", path.display()));
+        let bundled = matches!(kind, SourceBody::Module(ModuleOrigin::Bundled));
+        let provider = matches!(kind, SourceBody::Module(ModuleOrigin::Provider));
+        let expression = matches!(&kind, SourceBody::Expression(_));
+        // The expression grammar supplies its own checked syntax and tokens.
+        // Both inputs below then use the same name lowering and native code entry.
+        enum Input<'a> {
+            Module(ParsedSource),
+            Expression(ast::ModModule, &'a ast::token::Tokens),
         }
-        let replacements = strings::literal_replacements(source, parsed.tokens());
-        if self.keep_docstrings && !replacements.is_empty() {
-            strings::check_docs(source, &parsed.syntax().body, &replacements)
-                .map_err(|error| format!("{}:{error}", path.display()))?;
-        }
-        let package = crate::modules::import_package(
-            name,
-            path.file_name().is_some_and(|file| file == "__init__.py"),
-        );
+        let input = match kind {
+            SourceBody::Module(_) => {
+                Input::Module(parse_source(path, source, self.keep_docstrings)?)
+            }
+            SourceBody::Expression(parsed) => {
+                let expression = parsed.syntax();
+                let stmt = ast::Stmt::Expr(ast::StmtExpr {
+                    node_index: Default::default(),
+                    range: expression.body.range(),
+                    value: expression.body.clone(),
+                });
+                Input::Expression(
+                    ast::ModModule {
+                        node_index: Default::default(),
+                        range: expression.range(),
+                        body: std::iter::once(stmt).collect(),
+                    },
+                    parsed.tokens(),
+                )
+            }
+        };
+        let (syntax, tokens) = match &input {
+            Input::Module(p) => (p.parsed.syntax(), p.parsed.tokens()),
+            Input::Expression(syntax, tokens) => (syntax, *tokens),
+        };
         let docs = if self.keep_docstrings && name == "collections" && bundled {
             crate::modules::doctest::sealed(crate::modules::IntrinsicModule::Collections)
         } else {
             None
         };
-        let has_templates = parsed
-            .tokens()
+        let has_templates = tokens
             .iter()
             .any(|t| t.kind() == ast::token::TokenKind::TStringStart);
-        let template_expressions =
-            imre_ast::strings::template_expressions(source, parsed.tokens(), parsed.syntax());
+        let template_expressions = imre_ast::strings::template_expressions(source, tokens, syntax);
         // CPython starts the module provider at the first statement, excluding its decorators.
-        let module_start = parsed
-            .syntax()
+        let module_start = syntax
             .body
             .first()
             .map(|stmt| {
@@ -263,7 +476,7 @@ impl Output {
                     _ => None,
                 };
                 last.and_then(|decorator| {
-                    parsed.tokens().after(decorator.end()).iter().find(|token| {
+                    tokens.after(decorator.end()).iter().find(|token| {
                         use ast::token::TokenKind;
                         matches!(
                             token.kind(),
@@ -274,22 +487,19 @@ impl Output {
                 .map_or_else(|| stmt.start(), Ranged::start)
             })
             .unwrap_or_default();
-        let mut body = parsed.into_syntax().body;
+        let class_keywords = tokens
+            .iter()
+            .filter(|token| token.kind() == ast::token::TokenKind::Class)
+            .map(Ranged::start)
+            .collect();
+        let (mut body, replacements) = match input {
+            Input::Module(p) => (p.parsed.into_syntax().body, p.replacements),
+            Input::Expression(syntax, tokens) => {
+                (syntax.body, strings::literal_replacements(source, tokens))
+            }
+        };
         let method_imports = imre_ast::module_imports(&body);
-        let private_names = imre_ast::lower(&mut body);
-        if source.contains("nonlocal") {
-            statements::type_parameters::check_nonlocals(source, &body)
-                .map_err(|error| format!("{}:{error}", path.display()))?;
-        }
-        if let Some((range, reason)) = imre_ast::type_alias_error(&body) {
-            let error = crate::frontend::error(source, &range, &format!("SyntaxError: {reason}"));
-            return Err(format!("{}:{error}", path.display()));
-        }
-        if let Some(param) = &private_names.duplicate_type_parameter {
-            let reason = format!("SyntaxError: duplicate type parameter '{}'", param.id);
-            let error = crate::frontend::error(source, param, &reason);
-            return Err(format!("{}:{error}", path.display()));
-        }
+        let private_names = lower_source(path, source, &mut body)?;
         // Frozen code exposes its origin independently of the module's registered source path.
         let code_file = match (bundled, name) {
             (true, "_frozen_importlib") => self.data(b"<frozen importlib._bootstrap>"),
@@ -299,9 +509,13 @@ impl Output {
             _ => file.to_owned(),
         };
         let location = SourceMap {
-            // These CPython providers validate their public arguments in Python.
-            python_annotations: bundled && matches!(name, "_py_warnings" | "tomllib._parser"),
+            bundled,
+            path,
+            // These CPython providers implement their own call semantics in Python.
+            python_annotations: provider
+                || bundled && matches!(name, "_py_warnings" | "tomllib._parser" | "typing"),
             module_start,
+            class_keywords,
             docs,
             unit,
             has_templates,
@@ -311,7 +525,6 @@ impl Output {
             barry_as_flufl: imre_ast::future_import(&body, "barry_as_FLUFL"),
             string_annotations: private_names.string_annotations,
             private_names,
-            package,
             text: source,
             file: &code_file,
             newlines: source
@@ -319,13 +532,25 @@ impl Output {
                 .map(|(offset, _)| offset)
                 .collect(),
         };
-        Ok(self.code(
-            &location,
-            String::new(),
-            Body::Namespace(&body, false),
-            false,
-        ))
+        let suite = if expression {
+            let [ast::Stmt::Expr(statement)] = body.as_slice() else {
+                return Err("expected an annotation expression".into());
+            };
+            Body::Expression(&statement.value)
+        } else {
+            Body::Namespace(&body, false)
+        };
+        let code = self.code(&location, String::new(), suite, false, false);
+        match self.diagnostic.take() {
+            Some(diagnostic) => Err(diagnostic),
+            None => Ok(code),
+        }
     }
+}
+
+enum SourceBody<'a> {
+    Module(ModuleOrigin),
+    Expression(&'a ruff_python_parser::Parsed<ast::ModExpression>),
 }
 
 enum DefinitionName<'a> {
@@ -335,6 +560,7 @@ enum DefinitionName<'a> {
 
 enum Body<'a> {
     Namespace(&'a [ast::Stmt], bool),
+    ClassParameters(&'a ast::StmtClassDef),
     Statements(&'a [ast::Stmt]),
     /// A suspended suite and its generator, coroutine, or async generator code flag.
     GeneratorFunction(&'a [ast::Stmt], u32),
@@ -345,14 +571,37 @@ enum Body<'a> {
         Option<statements::ClassBindings>,
     ),
     Expression(&'a ast::Expr),
-    YieldingLambda(&'a ast::Expr),
     TypeAlias(&'a ast::Expr),
-    Generator(&'a [ast::Comprehension], &'a ast::Expr),
+    Generator(
+        &'a imre_ast::comprehension::Plan<'a>,
+        indexmap::IndexSet<String>,
+    ),
+}
+
+impl Body<'_> {
+    fn generator_flags(&self) -> u32 {
+        use imre_ast::code_flags::{ASYNC_GENERATOR, GENERATOR, yields_in_expression};
+        match self {
+            Self::GeneratorFunction(_, flags) => *flags,
+            Self::Generator(plan, _) if plan.body_suspends() => ASYNC_GENERATOR,
+            Self::Generator(..) => GENERATOR,
+            Self::Expression(expr) if yields_in_expression(expr) => GENERATOR,
+            _ => 0,
+        }
+    }
+}
+
+enum Entry {
+    Compiled,
+    Suspended,
 }
 
 struct SourceMap<'a> {
+    bundled: bool,
+    path: &'a Path,
     python_annotations: bool,
     module_start: ruff_text_size::TextSize,
+    class_keywords: Vec<ruff_text_size::TextSize>,
     docs: Option<crate::modules::doctest::SealedDocs>,
     unit: usize,
     has_templates: bool,
@@ -361,7 +610,6 @@ struct SourceMap<'a> {
     private_names: imre_ast::Names,
     method_imports: std::collections::BTreeSet<String>,
     text: &'a str,
-    package: &'a str,
     string_annotations: bool,
     barry_as_flufl: bool,
     file: &'a str,
@@ -400,13 +648,22 @@ enum StringConstant {
     Tuple(Vec<Vec<u8>>),
 }
 
-#[derive(Default)]
-struct Output {
-    keep_docstrings: bool,
+#[derive(Clone, Copy, Default)]
+struct Declarations {
+    declared_suspension: bool,
     declared_statement_line: bool,
+    declared_definition_position: bool,
     emitted_named_op: bool,
     emitted_guarded_lit: bool,
     emitted_guarded_named_op: bool,
+    registered_expression: bool,
+}
+
+#[derive(Default)]
+struct Output {
+    declarations: Declarations,
+    diagnostic: Option<String>,
+    keep_docstrings: bool,
     string_constant_slots: HashMap<(usize, StringConstant), usize>,
     strings: HashMap<Vec<u8>, u32>,
     interned_identifiers: BTreeSet<String>,
@@ -417,6 +674,33 @@ struct Output {
 }
 
 impl Output {
+    /// Roll back private code sites when an optional annotation expression cannot be compiled.
+    fn try_native_body(&mut self, emit: impl FnOnce(&mut Self) -> String) -> Option<String> {
+        let code = self.count;
+        let functions = self.functions.len();
+        let constants = self.constants.len();
+        let strings = self.strings.len() as u32;
+        let positions = self.positions.len();
+        let slots = self.string_constant_slots.len();
+        let declarations = self.declarations;
+        let names = std::mem::take(&mut self.interned_identifiers);
+        let outer_diagnostic = self.diagnostic.take();
+        let site = emit(self);
+        let added_names = std::mem::replace(&mut self.interned_identifiers, names);
+        if std::mem::replace(&mut self.diagnostic, outer_diagnostic).is_none() {
+            self.interned_identifiers.extend(added_names);
+            return Some(site);
+        }
+        self.count = code;
+        self.functions.truncate(functions);
+        self.constants.truncate(constants);
+        self.strings.retain(|_, id| *id < strings);
+        self.positions.retain(|_, id| *id < positions);
+        self.string_constant_slots.retain(|_, id| *id < slots);
+        self.declarations = declarations;
+        None
+    }
+
     /// Distinct Python definitions keep distinct addresses even if LLVM merges their bodies.
     fn definition(
         &mut self,
@@ -425,18 +709,23 @@ impl Output {
         body: Body<'_>,
         start: ruff_text_size::TextSize,
         in_function: bool,
-        suspended: Option<(String, usize)>,
+        entry: Entry,
     ) -> String {
         let site = format!("@code_site{}", self.count);
-        let (entry, body_line) = if let Some(source) = suspended {
-            self.count += 1;
-            source
+        let suspended = matches!(entry, Entry::Suspended);
+        let tag = if suspended {
+            if !self.declarations.declared_suspension {
+                self.functions.push_str(suspension::ABI);
+                self.declarations.declared_suspension = true;
+            }
+            permanent::NATIVE_SUSPENDED_BODY
         } else {
-            (self.code(source, prefix, body, in_function), 0)
+            0
         };
+        let entry = self.code(source, prefix, body, in_function, suspended);
         writeln!(
             self.constants,
-            "{site} = private constant %code_site {{ ptr {entry}, ptr {}, i32 {}, i32 {body_line} }}",
+            "{site} = private constant %code_site {{ ptr {entry}, ptr {}, i32 {}, i32 {tag} }}",
             source.file,
             source.line(start)
         )
@@ -482,6 +771,7 @@ impl Output {
         prefix: String,
         body: Body<'_>,
         in_function: bool,
+        native_suspension: bool,
     ) -> String {
         let name = format!("@code{}", self.count);
         self.count += 1;
@@ -489,6 +779,12 @@ impl Output {
         let mut f = Function {
             output: self,
             source,
+            native_suspension,
+            async_generator: matches!(
+                body,
+                Body::GeneratorFunction(_, imre_ast::code_flags::ASYNC_GENERATOR)
+            ),
+            current_range: ruff_text_size::TextRange::empty(source.module_start),
             class_sites: None,
             module_annotation_sites: None,
             in_function,
@@ -503,7 +799,7 @@ impl Output {
             },
             prefix,
             ir: String::new(),
-            block: "entry".into(),
+            block: if native_suspension { "start" } else { "entry" }.into(),
             error: "failed".into(),
             pending_check: None,
             scope: "%scope".into(),
@@ -548,17 +844,15 @@ impl Output {
                     f.jump("module_body");
                 }
             }
-            Body::Statements(stmts) => {
+            Body::ClassParameters(class) => f.parameterized_class(class),
+            Body::Statements(stmts) | Body::GeneratorFunction(stmts, _) => {
                 f.declare_globals(stmts);
                 f.statements(stmts);
-            }
-            Body::GeneratorFunction(..) | Body::YieldingLambda(_) => {
-                unreachable!("suspended definitions store their source in the code site")
             }
             Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
             Body::Annotations(entries, class) => f.annotations(&entries, class, false),
             Body::ModuleAnnotations(entries) => f.annotations(&entries, None, true),
-            Body::Generator(generators, element) => f.generator_step(generators, element),
+            Body::Generator(plan, _) => f.generator_step(plan),
             Body::Expression(expr) | Body::TypeAlias(expr) => {
                 f.checkpoint(expr);
                 if matches!(body, Body::TypeAlias(_)) {
@@ -566,11 +860,11 @@ impl Output {
                     f.op("annotation_format", &[&format]);
                 }
                 let value = f.expr(expr);
-                f.end(&format!("ret i64 {value}"));
+                f.return_value(&value);
             }
         }
         if !f.terminated {
-            f.end("ret i64 0");
+            f.return_value("0");
         }
         let mut entry = if f.max_live == 0 {
             String::new()
@@ -591,14 +885,26 @@ impl Output {
             )
             .unwrap();
         }
-        writeln!(f.output.functions,
-            "define internal i64 {name}(ptr %ctx, i64 %scope) {{\nentry:\n{entry}{}failed:\n  ret i64 0\n}}", f.ir).unwrap();
+        if f.native_suspension {
+            writeln!(f.output.functions,
+                "define internal ptr {name}(ptr %context_slot, i64 %scope) presplitcoroutine {{\nentry:\n{entry}{}{}{} }}",
+                suspension::PROLOGUE, f.ir, suspension::EPILOGUE).unwrap();
+        } else {
+            writeln!(f.output.functions,
+                "define internal i64 {name}(ptr %ctx, i64 %scope) {{\nentry:\n{entry}{}failed:\n  ret i64 0\n}}", f.ir).unwrap();
+        }
         name
     }
 }
 
-/// Pack expanded operands in Python containers or pass evaluated positional handles directly.
+/// Pass fixed operands in native storage or pack expanded operands in Python containers.
 enum CallArguments {
+    FixedKeywords {
+        array: &'static str,
+        positional: usize,
+        names: String,
+        keywords: usize,
+    },
     Packed {
         args: String,
         kwargs: String,
@@ -641,6 +947,9 @@ struct Function<'a, 'p> {
     caught: Vec<String>,
     simple_call: Option<ruff_text_size::TextRange>,
     expression_line: usize,
+    native_suspension: bool,
+    async_generator: bool,
+    current_range: ruff_text_size::TextRange,
 }
 
 struct ErrorCheck {
@@ -650,12 +959,16 @@ struct ErrorCheck {
 }
 
 #[derive(Clone)]
+struct ContextExit {
+    range: ruff_text_size::TextRange,
+    is_async: bool,
+    callable: String,
+    caught: String,
+}
+
+#[derive(Clone)]
 enum Cleanup {
-    With {
-        line: usize,
-        exit: String,
-        caught: String,
-    },
+    With(ContextExit),
     ExceptionName(String),
     PendingValue {
         value: String,
@@ -684,7 +997,21 @@ impl Function<'_, '_> {
 
     fn line(&mut self, line: &str) {
         self.flush_check();
-        writeln!(self.ir, "  {line}").unwrap();
+        self.instruction(line);
+    }
+
+    fn instruction(&mut self, line: &str) {
+        // A suspended activation outlives the Context borrow of any one resume. Only
+        // the slot's address is stable. Each runtime call receives the current borrow.
+        if self.native_suspension
+            && let Some((before, after)) = line.split_once("ptr %ctx")
+        {
+            let ctx = self.name("%active_ctx");
+            writeln!(self.ir, "  {ctx} = load volatile ptr, ptr %context_slot").unwrap();
+            writeln!(self.ir, "  {before}ptr {ctx}{after}").unwrap();
+        } else {
+            writeln!(self.ir, "  {line}").unwrap();
+        }
     }
 
     fn value(&mut self, instruction: &str) -> String {
@@ -697,6 +1024,19 @@ impl Function<'_, '_> {
         if !self.terminated {
             self.line(instruction);
             self.terminated = true;
+        }
+    }
+
+    fn return_value(&mut self, value: &str) {
+        if self.native_suspension {
+            if !self.terminated {
+                self.line(&format!(
+                    "call void @imre_dyn_suspend_return(ptr %context_slot, i64 {value})"
+                ));
+                self.jump("complete");
+            }
+        } else {
+            self.end(&format!("ret i64 {value}"));
         }
     }
 
@@ -736,7 +1076,12 @@ impl Function<'_, '_> {
             next,
         }) = self.pending_check.take()
         {
-            writeln!(self.ir, "  {failed} = call i1 @imre_dyn_failed(ptr %ctx)\n  br i1 {failed}, label %{handler}, label %{next}\n{next}:").unwrap();
+            self.instruction(&format!("{failed} = call i1 @imre_dyn_failed(ptr %ctx)"));
+            writeln!(
+                self.ir,
+                "  br i1 {failed}, label %{handler}, label %{next}\n{next}:"
+            )
+            .unwrap();
             self.block = next;
         }
     }
@@ -775,9 +1120,9 @@ impl Function<'_, '_> {
 
     fn lit(&mut self, kind: i32, bytes: &[u8]) -> String {
         let loader = if self.take_matching_check() {
-            if !self.output.emitted_guarded_lit {
+            if !self.output.declarations.emitted_guarded_lit {
                 self.output.functions.push_str(GUARDED_LIT);
-                self.output.emitted_guarded_lit = true;
+                self.output.declarations.emitted_guarded_lit = true;
             }
             "@imre_boxed_guarded_lit"
         } else {
@@ -788,6 +1133,50 @@ impl Function<'_, '_> {
             "call i64 {loader}(ptr %ctx, i32 {kind}, ptr {literal}, i64 {})",
             bytes.len()
         ))
+    }
+
+    /// An annotation's text is still a normal str. Retain its native expression
+    /// separately so a later evaluation can supply a new globals/locals pair.
+    fn annotation_text(&mut self, value: &str) -> String {
+        if !self.source.bundled
+            && let Ok(parsed) = imre_ast::forward_refs::parse(value)
+            && imre_ast::forward_refs::validate(&parsed).is_ok()
+            && !parsed.syntax().body.is_name_expr()
+            && !parsed.syntax().body.is_literal_expr()
+        {
+            let unit = self.source.unit;
+            let code = self.output.try_native_body(|output| {
+                let file = output.data(b"<string>");
+                match output.source_body(
+                    unit,
+                    "",
+                    Path::new("<string>"),
+                    value,
+                    &file,
+                    SourceBody::Expression(&parsed),
+                ) {
+                    Ok(code) => code,
+                    Err(err) => {
+                        output.diagnostic = Some(err);
+                        String::new()
+                    }
+                }
+            });
+            if let Some(code) = code {
+                if !self.output.declarations.registered_expression {
+                    self.output
+                        .functions
+                        .push_str("declare void @imre_dyn_bind_expression(ptr, i64, ptr)\n");
+                    self.output.declarations.registered_expression = true;
+                }
+                let text = self.text(value);
+                self.line(&format!(
+                    "call void @imre_dyn_bind_expression(ptr %ctx, i64 {text}, ptr {code})"
+                ));
+                return text;
+            }
+        }
+        self.text(value)
     }
 
     fn text(&mut self, value: &str) -> String {
@@ -827,14 +1216,14 @@ impl Function<'_, '_> {
                 name.len()
             ));
         }
-        if !self.output.emitted_named_op {
+        if !self.output.declarations.emitted_named_op {
             self.output.functions.push_str(NAMED_OP);
-            self.output.emitted_named_op = true;
+            self.output.declarations.emitted_named_op = true;
         }
         let operation = if self.take_matching_check() {
-            if !self.output.emitted_guarded_named_op {
+            if !self.output.declarations.emitted_guarded_named_op {
                 self.output.functions.push_str(GUARDED_NAMED_OP);
-                self.output.emitted_guarded_named_op = true;
+                self.output.declarations.emitted_guarded_named_op = true;
             }
             "@imre_boxed_guarded_named_op"
         } else {
@@ -913,6 +1302,15 @@ impl Function<'_, '_> {
     }
 
     fn unsupported(&mut self, what: &str) -> String {
+        if self.native_suspension {
+            let (line, col) = self.source.line_and_column(self.current_range.start());
+            let (end_line, end_col) = self.source.line_and_column(self.current_range.end());
+            self.output.diagnostic.get_or_insert_with(|| format!(
+                "{}:{line}:{}: unsupported {what} in a compiled suspended function (through {end_line}:{})",
+                self.source.path.display(), col + 1, end_col + 1
+            ));
+            return "0".into();
+        }
         let what = self.text(what);
         self.op("unsupported", &[&what])
     }
@@ -934,11 +1332,7 @@ impl Function<'_, '_> {
         if text.get(start..end)?.contains(&b'\n') {
             return None;
         }
-        let split = prefix_end
-            + text
-                .get(prefix_end..end)?
-                .iter()
-                .position(|&b| b == opener)?;
+        let split = imre_ast::traceback_delimiter(text, prefix_end, end, opener)?;
         let (line, col) = self.source.line_and_column(range.start());
         Some([line, col, col + (split - start), col + (end - start)])
     }
@@ -961,6 +1355,7 @@ impl Function<'_, '_> {
     }
 
     fn checkpoint(&mut self, node: &impl Ranged) {
+        self.current_range = node.range();
         let (ptr, count) = self.live_handles();
         let line = self.source.line(node.start());
         self.expression_line = line;
@@ -1005,6 +1400,15 @@ impl Function<'_, '_> {
                 "imre_dyn_partition_field_at",
                 format!("ptr {array}, i32 {index}, ptr {get_position}"),
             ),
+            CallArguments::FixedKeywords {
+                array,
+                positional,
+                names,
+                keywords,
+            } => (
+                "imre_dyn_keyword_call_at",
+                format!("ptr {array}, i64 {positional}, ptr {names}, i64 {keywords}"),
+            ),
             CallArguments::Packed { args, kwargs } => (
                 "imre_dyn_scoped_call_at",
                 format!("i64 {args}, i64 {kwargs}"),
@@ -1031,11 +1435,76 @@ mod tests {
     use super::*;
 
     #[test]
+    fn exception_group_handlers_in_nested_generators_have_native_entries() {
+        let source = "def supported():\n    yield 1\ndef handled():\n    def nested():\n        yield 2\n    try:\n        yield 3\n    except* ValueError:\n        pass\ndef outer():\n    def inner():\n        try:\n            yield 4\n        except* ValueError:\n            pass\n    yield 5\n";
+        let (_, ir) = initializer(
+            "sample",
+            Path::new("sample.py"),
+            source,
+            true,
+            ModuleOrigin::Program,
+        )
+        .unwrap()
+        .unwrap();
+        let tag = format!(", i32 {} }}", permanent::NATIVE_SUSPENDED_BODY);
+        assert_eq!(ir.lines().filter(|line| line.ends_with(&tag)).count(), 5);
+        assert_eq!(
+            ir.matches("call void @imre_dyn_suspend_operands(").count(),
+            5
+        );
+        assert!(!ir.contains("except* ValueError"));
+    }
+
+    #[test]
+    fn suspended_definitions_use_native_entries_in_each_module_origin() {
+        let source = "def items(xs):\n    yield 1\n    yield from xs\npark = lambda: (yield 2)\nresume = lambda: 1 + (yield 3)\nasync def more(xs):\n    async for x in xs:\n        yield x\nasync def consume(f):\n    return await f()\n";
+        for bundled in [false, true] {
+            let (_, ir) = initializer(
+                "example",
+                Path::new("example.py"),
+                source,
+                true,
+                if bundled {
+                    ModuleOrigin::Bundled
+                } else {
+                    ModuleOrigin::Program
+                },
+            )
+            .unwrap()
+            .unwrap();
+            let tag = format!(", i32 {} }}", permanent::NATIVE_SUSPENDED_BODY);
+            assert_eq!(ir.lines().filter(|line| line.ends_with(&tag)).count(), 5);
+            let operations: Vec<_> = ir
+                .lines()
+                .filter(|line| line.contains("call void @imre_dyn_suspend_operands("))
+                .map(|line| line.rsplit_once(", i32 ").unwrap().1)
+                .collect();
+            assert_eq!(operations, ["0)", "3)", "0)", "0)", "2)", "1)", "2)"]);
+        }
+    }
+
+    #[test]
+    fn pass_fixed_keywords_directly_and_keep_expanded_calls_packed() {
+        let source = "target(1, name=2)\ntarget(1, **options)\n";
+        let (_, ir) = initializer(
+            "example",
+            Path::new("example.py"),
+            source,
+            true,
+            ModuleOrigin::Bundled,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(ir.matches("call i64 @imre_dyn_keyword_call_at(").count(), 1);
+        assert_eq!(ir.matches("call i64 @imre_dyn_scoped_call_at(").count(), 1);
+    }
+
+    #[test]
     fn declare_exit_line_only_for_compiled_with() {
         let path = Path::new("<imre stdlib>/example.py");
         let declare = "declare void @imre_dyn_set_statement_line";
         for (source, expected) in [("value = 1", 0), ("with a, b:\n    pass", 1)] {
-            let (_, ir) = initializer("example", path, source, true, true)
+            let (_, ir) = initializer("example", path, source, true, ModuleOrigin::Bundled)
                 .unwrap()
                 .unwrap();
             assert_eq!(ir.matches(declare).count(), expected);
@@ -1048,7 +1517,10 @@ mod tests {
         let path = root.join("example.py");
         let source = "value = 1";
         let compiled = |name, path: &Path, src, docs| {
-            initializer(name, path, src, docs, true).unwrap().unwrap().0
+            initializer(name, path, src, docs, ModuleOrigin::Bundled)
+                .unwrap()
+                .unwrap()
+                .0
         };
         let symbol = compiled("example", &path, source, true);
         assert_ne!(symbol, compiled("other", &path, source, true));
@@ -1059,9 +1531,15 @@ mod tests {
         assert_ne!(symbol, compiled("example", &path, "value = 2", true));
         assert_ne!(symbol, compiled("example", &path, source, false));
         assert!(
-            initializer("example", &path, "value = t'{123}'", true, true)
-                .unwrap()
-                .is_none()
+            initializer(
+                "example",
+                &path,
+                "value = t'{123}'",
+                true,
+                ModuleOrigin::Bundled
+            )
+            .unwrap()
+            .is_none()
         );
 
         let bundled = ("example".into(), path, source.into());
@@ -1071,14 +1549,31 @@ mod tests {
             source.into(),
         );
         let symbols = HashSet::from([symbol.clone()]);
+        let registrations = RegisteredBodies {
+            physical_files: HashMap::from([(project.1.clone(), Default::default())]),
+            ..Default::default()
+        };
+        let initializers = (&HashMap::new(), &registrations);
         let refs = |modules: &[_]| {
-            let (units, used) = emit(modules, "{}", true, root, &symbols, false, None).unwrap();
+            let (units, used) = emit(
+                (modules, &[]),
+                "{}",
+                true,
+                root,
+                &symbols,
+                false,
+                initializers,
+            )
+            .unwrap();
             let ir = &units[0].llvm_ir;
             assert!(used);
             let declared = format!("declare i64 @{symbol}(ptr, i64)");
             assert_eq!(ir.lines().filter(|line| *line == declared).count(), 1);
             ir.lines()
-                .filter(|line| line.contains("call void @imre_dyn_register_source("))
+                .filter(|line| {
+                    line.contains("call void @imre_dyn_register_source(")
+                        || line.contains("call void @imre_dyn_register_file_code(")
+                })
                 .map(|line| line.ends_with(&format!("@{symbol})")))
                 .collect::<Vec<_>>()
         };
@@ -1088,13 +1583,13 @@ mod tests {
         );
         assert!(
             !emit(
-                std::slice::from_ref(&project),
+                (std::slice::from_ref(&project), &[]),
                 "{}",
                 true,
                 root,
                 &symbols,
                 false,
-                None
+                initializers
             )
             .unwrap()
             .1
@@ -1102,24 +1597,36 @@ mod tests {
         assert_eq!(refs(&[project.clone(), bundled.clone()]), [false, true]);
 
         let (units, used) = emit(
-            &[bundled.clone(), project.clone()],
+            (&[bundled.clone(), project.clone()], &[]),
             "{}",
             true,
             root,
             &symbols,
             false,
-            Some("example"),
+            (
+                &HashMap::from([(
+                    bundled.1.clone(),
+                    Box::new(super::super::ModuleSyntaxError::new(
+                        source,
+                        ruff_text_size::TextRange::default(),
+                        "invalid".into(),
+                        false,
+                    )),
+                )]),
+                &registrations,
+            ),
         )
         .unwrap();
         assert!(!used);
         let ir = &units[0].llvm_ir;
         assert_eq!(
-            ir.matches("call void @imre_dyn_register_bundled_source(")
+            ir.matches("call void @imre_dyn_register_module_error(")
                 .count(),
             1
         );
         assert_eq!(
-            ir.matches("call void @imre_dyn_register_source(").count(),
+            ir.matches("call void @imre_dyn_register_file_code(")
+                .count(),
             1
         );
         assert!(!ir.contains(&symbol));
@@ -1129,14 +1636,21 @@ mod tests {
             PathBuf::from("/other/example.py"),
             project.2.clone(),
         );
+        let registrations = RegisteredBodies {
+            physical_files: HashMap::from([
+                (project.1.clone(), Default::default()),
+                (shadow.1.clone(), Default::default()),
+            ]),
+            ..Default::default()
+        };
         let (units, used) = emit(
-            &[bundled, project.clone(), shadow, project],
+            (&[bundled, project.clone(), shadow, project], &[]),
             "{}",
             true,
             root,
             &symbols,
             true,
-            None,
+            (&HashMap::new(), &registrations),
         )
         .unwrap();
         assert!(used);

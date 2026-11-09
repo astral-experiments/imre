@@ -38,37 +38,98 @@ impl Checker<'_> {
         Ok(self.ordered_builtin(Builtin::Repeat, ty, args))
     }
 
+    /// Construct a stored range without materializing its elements.
+    pub(super) fn range_value(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        // Keep the established error result accepted by iterator consumers. A binding
+        // error raises before the constructed value could reach the outer operation.
+        if let Some(failure) = self.range_argument_error(call, self.types.cursor(Type::Int))? {
+            return Ok(failure);
+        }
+        let range = Expr {
+            ty: Type::Range,
+            kind: ExprKind::Builtin(Builtin::RecordFromFields, self.range_bounds(call)?),
+        };
+        if call.arguments.args.len() < 3 {
+            return Ok(range);
+        }
+        let slot = self.hidden(Type::Range);
+        Ok(Expr {
+            ty: Type::Range,
+            kind: ExprKind::Scope {
+                body: vec![
+                    Statement::Assign(slot, range),
+                    pipelines::check_range_step(self.range_field(slot, 2)),
+                ],
+                value: Box::new(self.local(slot)),
+                clear: vec![slot],
+            },
+        })
+    }
+
+    fn range_field(&self, slot: usize, index: usize) -> Expr {
+        Expr {
+            ty: Type::Int,
+            kind: ExprKind::Field(Box::new(self.local(slot)), index),
+        }
+    }
+
+    fn range_bounds(&mut self, call: &ast::ExprCall) -> Result<Vec<Expr>, String> {
+        self.reject_builtin_keywords(call)?;
+        let args = call
+            .arguments
+            .args
+            .iter()
+            .map(|node| self.integer_index(node))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        match args.as_slice() {
+            [stop] => Ok(vec![Expr::integer(0), stop.clone(), Expr::integer(1)]),
+            [start, stop] => Ok(vec![start.clone(), stop.clone(), Expr::integer(1)]),
+            [_, _, _] => Ok(args),
+            _ => Err(error(
+                self.source,
+                call,
+                "range takes one to three integers",
+            )),
+        }
+    }
+
+    /// Snapshot an iterable once before acquiring its independent, bounded cursor.
+    pub(super) fn range_cursor(&mut self, value: Expr) -> Expr {
+        let slot = self.hidden(Type::Range);
+        let fields = (0..3).map(|i| self.range_field(slot, i)).collect();
+        let ty = self.types.cursor(Type::Int);
+        Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Assign(slot, value)],
+                clear: vec![slot],
+                value: Box::new(Expr {
+                    ty,
+                    kind: ExprKind::Builtin(Builtin::Progression { bounded: true }, fields),
+                }),
+            },
+        }
+    }
+
     pub(super) fn cursor_source_value(&mut self, node: &ast::Expr) -> Result<Expr, String> {
         if let ast::Expr::Call(call) = node
-            && matches!(&*call.func, ast::Expr::Name(name) if name.id == "range")
-            && self.resolve(&call.func).is_none()
-            && !self.names.contains_key("range")
+            && self.unshadowed_builtin(&call.func, "range")
         {
-            self.reject_builtin_keywords(call)?;
-            let args = call
-                .arguments
-                .args
-                .iter()
-                .map(|node| self.integer_index(node))
-                .collect::<Result<Vec<_>, _>>()?;
-            let args = match args.as_slice() {
-                [stop] => vec![Expr::integer(0), stop.clone(), Expr::integer(1)],
-                [start, stop] => vec![start.clone(), stop.clone(), Expr::integer(1)],
-                [_, _, _] => args,
-                _ => {
-                    return Err(error(
-                        self.source,
-                        call,
-                        "range takes one to three integers",
-                    ));
-                }
-            };
+            if let Some(failure) = self.range_argument_error(call, self.types.cursor(Type::Int))? {
+                return Ok(failure);
+            }
+            let args = self.range_bounds(call)?;
             return Ok(Expr {
                 ty: self.types.cursor(Type::Int),
                 kind: ExprKind::Builtin(Builtin::Progression { bounded: true }, args),
             });
         }
-        self.expr(node)
+        let value = self.expr(node)?;
+        Ok(if value.ty == Type::Range {
+            self.range_cursor(value)
+        } else {
+            value
+        })
     }
 
     fn cursor_source(&mut self, node: &ast::Expr) -> Result<(Expr, Type), String> {

@@ -15,6 +15,15 @@ class InvalidNotes:
 
 
 def current():
+    from types import GenericAlias
+    from typing import TypeVar
+
+    item = TypeVar("item")
+    for origin in (BaseExceptionGroup, ExceptionGroup, Batch):
+        alias = origin[item]
+        assert type(alias) is GenericAlias and alias.__origin__ is origin
+        assert alias.__args__ == (item,) and alias[ValueError] == origin[ValueError]
+
     class ReportedException(BaseException):
         @property
         def __class__(self):
@@ -36,6 +45,18 @@ def current():
         assert exc is invalid_class
     else:
         raise AssertionError("discarded the exception from __class__")
+
+
+# Both the matched subgroup and the untouched rest survive a yield inside the handler.
+def grouped_rows():
+    try:
+        yield "start"
+        raise Batch("items", [ValueError(1), TypeError(2)])
+    except* ValueError as matched:
+        yield matched
+        raise
+    except* TypeError as failed:
+        raise KeyError("replacement") from failed
 
 
 first = ValueError("bad header")
@@ -85,5 +106,38 @@ for partition in (batch.subgroup, batch.split):
     else:
         raise AssertionError("discarded the exception from __len__")
 
+# Each arm sees its matching leaves. A bare reraise rejoins the untouched remainder.
+invoice = Batch("invoice", [ValueError(35), TypeError(7), OSError("open")])
+amounts = []
+try:
+    try:
+        raise invoice
+    except* ValueError as part:
+        amounts.append(part.exceptions[0].args[0])
+        raise
+    except* TypeError as part:
+        amounts.append(part.exceptions[0].args[0])
+except Batch as pending:
+    assert pending.exceptions == (invoice.exceptions[0], invoice.exceptions[2])
+    assert pending.__traceback__ is invoice.__traceback__
+else:
+    raise AssertionError("lost invoice errors")
+assert amounts == [35, 7]
+
+
 if __name__ == "__main__":
     current()
+    rows = grouped_rows()
+    first_yield = next(rows)
+    assert first_yield == "start"
+    matched = next(rows)
+    assert type(matched) is Batch and matched.exceptions[0].args == (1,)
+    try:
+        next(rows)
+    except ExceptionGroup as merged:
+        replacement, reraised = merged.exceptions
+        assert type(replacement) is KeyError and type(replacement.__cause__) is Batch
+        assert replacement.__cause__.exceptions[0].args == (2,)
+        assert type(reraised) is Batch and reraised.exceptions == matched.exceptions
+    else:
+        raise AssertionError("except* lost the reraised and replacement exceptions")

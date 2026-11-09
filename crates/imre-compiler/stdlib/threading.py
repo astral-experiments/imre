@@ -1,7 +1,7 @@
 """Thread objects for the native object runtime."""
 
 from _thread import TIMEOUT_MAX, LockType as Lock, _local as local, get_ident
-from _thread import allocate_lock as _allocate_lock
+from _thread import _ThreadHandle, _shutdown as _thread_shutdown, allocate_lock as _allocate_lock
 import _thread
 import sys as _sys
 from time import monotonic as _time
@@ -62,6 +62,7 @@ class Thread:
         self._context = context
         self._ident = None
         self._native_id = None
+        self._os_thread_handle = _ThreadHandle()
         self._handle = None
         self._initialized = True
         self._stderr = _sys.stderr
@@ -96,27 +97,17 @@ class Thread:
             raise RuntimeError("cannot join current thread")
         if timeout is not None:
             timeout = max(timeout, 0)
-        _imre_thread.join(self._handle, timeout)
+        self._os_thread_handle.join(timeout)
 
     def is_alive(self):
         assert self._initialized, "Thread.__init__() not called"
-        if self._handle is None:
-            # The main thread has an identity and shutdown state, but no spawned handle.
-            return (
-                issubclass(type(self), _MainThread)
-                and self._ident is not None
-                and not self._stopped
-            )
-        return _imre_thread.alive(self._handle)
+        return self._ident is not None and not self._os_thread_handle.is_done()
 
     def __repr__(self):
         assert self._initialized, "Thread.__init__() was not called"
-        status = "initial"
-        if self._ident is not None:
-            status = "started"
-            if ((self._handle is not None and not _imre_thread.alive(self._handle))
-                    or (self is _main_thread and self._stopped)):
-                status = "stopped"
+        status = "started" if self._ident is not None else "initial"
+        if self._os_thread_handle.is_done():
+            status = "stopped"
         if self._daemonic:
             status += " daemon"
         if self._ident is not None:
@@ -1005,6 +996,7 @@ class _MainThread(Thread):
         Thread.__init__(self, name="MainThread", daemon=False)
         self._stopped = False
         self._ident = get_ident()
+        _imre_thread.attach_current(self._os_thread_handle)
         if _HAVE_THREAD_NATIVE_ID:
             self._native_id = get_native_id()
 
@@ -1061,13 +1053,14 @@ _main_thread = _MainThread()
 
 def _shutdown():
     global _SHUTTING_DOWN
-    if _main_thread._stopped:
+    if _main_thread._os_thread_handle.is_done():
         return
     _SHUTTING_DOWN = True
     for callback in reversed(_threading_atexits):
         callback()
+    _main_thread._os_thread_handle._set_done()
     _main_thread._stopped = True
-    _imre_thread.shutdown()
+    _thread_shutdown()
 
 
 def main_thread():

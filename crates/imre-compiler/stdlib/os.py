@@ -29,7 +29,12 @@ except ImportError:
     pass
 
 if sys.platform == "linux":
-    from posix import fdatasync
+    from posix import ctermid, fdatasync, getloadavg, sync, uname, uname_result
+    from posix import (
+        CLD_CONTINUED, CLD_DUMPED, CLD_EXITED, CLD_KILLED, CLD_STOPPED, CLD_TRAPPED,
+        P_ALL, P_PGID, P_PID, P_PIDFD, WCONTINUED, WEXITED, WNOWAIT, WSTOPPED,
+        WUNTRACED, waitid, waitid_result,
+    )
     from posix import F_LOCK, F_TEST, F_TLOCK, F_ULOCK, lockf
     from posix import MFD_CLOEXEC, memfd_create
     from posix import RWF_APPEND, RWF_DSYNC, RWF_HIPRI, RWF_NOWAIT, RWF_SYNC, preadv, pwritev
@@ -71,7 +76,7 @@ if sys.platform == "linux":
 
 
 import posix as _posix
-for _name in ("getegid", "getresgid", "getresuid", "setgroups", "setregid", "setreuid"):
+for _name in ("getegid", "getresgid", "getresuid", "setgroups", "setregid", "setresgid", "setresuid", "setreuid"):
     if _name in vars(_posix):
         globals()[_name] = getattr(_posix, _name)
 del _name, _posix

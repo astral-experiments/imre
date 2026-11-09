@@ -30,7 +30,7 @@ pub extern "C" fn imre_bytearray_new() -> *const Object {
 }
 
 impl Storage {
-    fn bytearray(&self) -> &[u8] {
+    pub(super) fn bytearray(&self) -> &[u8] {
         let Self::ByteArray(bytes) = self else {
             unreachable!()
         };

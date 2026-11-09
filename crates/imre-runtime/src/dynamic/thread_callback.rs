@@ -1,9 +1,8 @@
 //! Move executable code and lock ownership into a fresh boxed context.
 //! Only the compiler can certify that the function needs no surrounding heap.
 
-use super::source_code::CapturedAcquire;
 use super::thread_worker::Operation;
-use super::value::{Body, Code, CodeObject, Location};
+use super::value::{Body, Code, CodeObject};
 use super::{Context, Error, Id, NONE, Result, Value, copy_label, ffi};
 use crate::objects::locks::PrimitiveLock;
 use crate::objects::logging::HandlerLock;
@@ -16,17 +15,12 @@ enum Argument {
     Builtin(&'static str),
 }
 
-enum Entry {
-    Native(Code),
-    Source(CapturedAcquire),
-}
-
 pub(super) struct Callback {
-    entry: Entry,
+    entry: Code,
     module: String,
     name: String,
     qualname: String,
-    filename: String,
+    filename: Vec<u32>,
     first_line: u32,
     signature: String,
     values: Vec<Argument>,
@@ -135,14 +129,18 @@ impl Callback {
             return Ok(None);
         };
         let code = ctx.code_object(code);
-        if code.is_coroutine() || !code.closure_supported {
+        // Heap-local code operands do not cross the isolated worker interpreter.
+        if matches!(code.body, Body::Native(_, operands) if operands != NONE)
+            || code.is_coroutine()
+            || !code.closure_supported
+        {
             return Ok(None);
         }
         let signature = ctx.str_value(code.parameters)?;
         let meta: serde_json::Value = serde_json::from_str(signature)
             .map_err(|e| Error::new("SystemError", e.to_string()))?;
         if let Some(receiver) = receiver {
-            if !matches!(code.body, Body::Native(_)) {
+            if !matches!(code.body, Body::Native(_, NONE)) {
                 return Ok(None);
             }
             let Some(field) = meta["thread_bound_lock_field"].as_str() else {
@@ -173,27 +171,24 @@ impl Callback {
                 roots,
             )));
         }
+        let captured = match ctx.heap.get(closure) {
+            Value::Tuple(cells) => Some(cells.as_slice()),
+            Value::Cell(_) => Some(std::slice::from_ref(&closure)),
+            _ => None,
+        };
         if let [name] = code.freevars.as_slice()
             && pos.is_empty()
             && kwargs.is_none_or(
                 |id| matches!(ctx.heap.get(id), Value::Dict(entries) if entries.is_empty()),
             )
-            && let Value::Tuple(cells) = ctx.heap.get(closure)
-            && let [cell] = cells.as_slice()
+            && let Some(cells) = captured
+            && let [cell] = cells
             && let Value::Cell(Some(id)) = *ctx.heap.get(*cell)
         {
             let entry = match &code.body {
-                Body::Native(entry) if meta["thread_captured_locks"].as_array().is_some_and(|names|
+                Body::Native(entry, NONE) if meta["thread_captured_locks"].as_array().is_some_and(|names|
                     matches!(names.as_slice(), [one] if one.as_str() == Some(name.as_str()))) =>
-                    Entry::Native(*entry),
-                Body::Source(program) if ["posonly", "positional", "kwonly"].iter().all(|key|
-                    meta[*key].as_array().is_some_and(Vec::is_empty))
-                    && meta["varargs"].is_null() && meta["kwargs"].is_null() => {
-                    let Some(original) = program.captured_acquire(name) else {
-                        return Ok(None);
-                    };
-                    Entry::Source(original)
-                }
+                    *entry,
                 _ => return Ok(None),
             };
             let receiver = match ctx.heap.get(id) {
@@ -213,7 +208,7 @@ impl Callback {
                 && let Some(kwargs) = kwargs
                 && matches!(ctx.heap.get(kwargs), Value::Dict(entries) if entries.is_empty())
                 && let Some(names) = meta["thread_captured_locks"].as_array()
-                && let Value::Tuple(cells) = ctx.heap.get(closure)
+                && let Some(cells) = captured
                 && cells.len() == code.freevars.len()
                 && cells.len() == names.len()
             {
@@ -234,7 +229,7 @@ impl Callback {
                 // Source calls without transferable operands still fall through to normal
                 // target admission. Keep the existing diagnostic for certified native code.
                 let unavailable = || match code.body {
-                    Body::Native(_) => Err(unsupported()),
+                    Body::Native(..) => Err(unsupported()),
                     _ => Ok(None),
                 };
                 let [first, last] = names.as_slice() else {
@@ -263,7 +258,7 @@ impl Callback {
             }
             return Ok(None);
         }
-        let Body::Native(entry) = code.body else {
+        let Body::Native(entry, NONE) = code.body else {
             return Ok(None);
         };
         if closure != NONE
@@ -318,8 +313,11 @@ impl Callback {
                 Value::HandlerLock(lock) => Argument::RLock(Arc::clone(lock)),
                 Value::Native(name) if !high_level => {
                     let symbol = [
+                        "_signal.pause",
                         "_signal.set_wakeup_fd",
                         "_thread._count",
+                        "_thread.exit",
+                        "_thread.exit_thread",
                         "sys.exit",
                         "sys.get_coroutine_origin_tracking_depth",
                         "sys.set_coroutine_origin_tracking_depth",
@@ -337,7 +335,7 @@ impl Callback {
             roots.push(id);
             values.push(value);
         }
-        let callback = Self::from_code(ctx, code, scope, Entry::Native(entry), values)?;
+        let callback = Self::from_code(ctx, code, scope, entry, values)?;
         Ok(Some((Operation::Python(Box::new(callback)), roots)))
     }
 
@@ -345,7 +343,7 @@ impl Callback {
         ctx: &Context,
         code: &CodeObject,
         scope: Id,
-        entry: Entry,
+        entry: Code,
         values: Vec<Argument>,
     ) -> Result<Self> {
         Ok(Self {
@@ -353,7 +351,7 @@ impl Callback {
             module: copy_label(&ctx.scope_data(scope).module)?,
             name: copy_label(ctx.str_value(code.name)?)?,
             qualname: copy_label(ctx.str_value(code.qualname)?)?,
-            filename: copy_label(ctx.str_value(code.filename)?)?,
+            filename: ctx.string_codepoints(code.filename)?.into_owned(),
             first_line: code.first_line,
             signature: copy_label(ctx.str_value(code.parameters)?)?,
             values,
@@ -392,27 +390,19 @@ impl Callback {
         let name = ctx.text(self.name);
         let qualname = ctx.text(self.qualname);
         let signature = ctx.text(self.signature);
-        let location = Location {
-            file: self.filename.into(),
-            line: self.first_line,
-            span: None,
-        };
-        let code = match self.entry {
-            Entry::Native(entry) => ctx.prelinked_code(
-                Body::Native(entry),
-                scope,
-                name,
-                signature,
-                (qualname, NONE),
-                location,
-            ),
-            Entry::Source(original) => {
-                original.load(&mut ctx, scope, name, signature, qualname, location)?
-            }
-        };
+        let filename = ctx.text_codepoints(self.filename);
+        let location = (filename, self.first_line);
+        let code = ctx.prelinked_code(
+            Body::Native(self.entry, NONE),
+            scope,
+            name,
+            signature,
+            (qualname, NONE),
+            location,
+        );
         let defaults = ctx.dict(Vec::new());
         let function =
-            ctx.define_function(code, scope, name, defaults, qualname, NONE, NONE, false);
+            ctx.define_function(code, scope, name, defaults, qualname, NONE, NONE, false)?;
         // Preserve object identity when multiple parameters alias the same lock.
         let mut aliases = HashMap::new();
         aliases

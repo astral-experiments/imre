@@ -2,13 +2,13 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 150 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
+**At a glance:** 152 of 297 modules accept an ordinary import; 2 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 295 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
 **Native / upstream** counts unchanged test executions in the checked-in Linux suites: the body, assertions, operation and fixtures must all run on Imre at **both O0 and O3**. The denominator includes upstream skips, companion suites and repeated test IDs. A dash means there is no measurement; zero is a measured result. These are test counts, not percentages of an API.
 
-The last two columns show where CPython still helps at O3. **CPython fixture**: 464 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,490 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
+The last two columns show where CPython still helps at O3. **CPython fixture**: 507 test bodies run on Imre with CPython providing part or all of the fixture (for example, setup or test objects). **CPython test**: 1,489 executions exercise Imre operations with CPython running the test body or checking its assertions. Neither count contributes to the native numerator.
 
 ## Modules with examples, accepted imports or suite results
 
@@ -56,6 +56,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `genericpath` | Yes | The genericpath companion suite is counted under `os`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | — | — | — |
 | `getopt` | Yes | No API example recorded. | — | — | — |
 | `gettext` | Yes | Translate singular, plural and contextual messages from GNU MO catalogs selected by domain and language, with source-text fallback. [Evidence](../tests/fixtures/text/gettext_catalog.py) | [18 / 73](../benchmarks/cpython_stdlib/full/gettext/) | 6 | 0 |
+| `glob` | Yes | No API example recorded. | — | — | — |
 | `grp` | Yes | No API example recorded. | — | — | — |
 | `gzip` | Yes | Read text lines and binary chunks from gzip files. [Evidence](../tests/fixtures/files/stream_reads.py) | — | — | — |
 | `hashlib` | Yes | SHAKE-128 and SHAKE-256 extendable-output digests. MD5, SHA-1, SHA-2 and SHA-3 (224, 256, 384 and 512) construction, incremental updates, copy, digest and hexdigest. [BLAKE2b and BLAKE2s](../tests/fixtures/bytes/hashlib_blake2.py) support keyed hashing, configurable digest sizes and tree parameters. [Evidence](../benchmarks/cpython_stdlib/full/hashlib/README.md) | [0 / 82](../benchmarks/cpython_stdlib/full/hashlib/) | 2 | 0 |
@@ -67,7 +68,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `inspect` | Yes | `cleandoc(doc=text)` for strings. `getattr_static` for selected owners and literal attribute names. [Evidence](../benchmarks/cpython_stdlib/full/inspect/README.md) | [0 / 362](../benchmarks/cpython_stdlib/full/inspect/) | 1 | 1 |
 | `io` | Yes | In-memory `StringIO` and `BytesIO` streams. [Evidence](../benchmarks/cpython_stdlib/full/doctest/stringio/README.md) | — | — | — |
 | `ipaddress` | Yes | No API example recorded. | — | — | — |
-| `itertools` | Yes | Selected `chain`, `islice`, `repeat`, `tee` and `groupby` iterators. [Evidence](../benchmarks/cpython_stdlib/full/itertools/README.md) | [0 / 138](../benchmarks/cpython_stdlib/full/itertools/) | 11 | 0 |
+| `itertools` | Yes | Selected `chain`, `islice`, `repeat`, `tee` and `groupby` iterators. [Evidence](../benchmarks/cpython_stdlib/full/itertools/README.md) | [0 / 138](../benchmarks/cpython_stdlib/full/itertools/) | 52 | 1 |
 | `json` | Yes | Decode and encode supported JSON values via `loads`, `load`, `dumps` and `dump`. [Evidence](../benchmarks/cpython_stdlib/full/json/README.md) | [0 / 216](../benchmarks/cpython_stdlib/full/json/) | 38 | 45 |
 | `keyword` | Yes | Check hard and soft keywords with `iskeyword` and `issoftkeyword`. [Evidence](../benchmarks/cpython_stdlib/full/keyword/README.md) | [6 / 11](../benchmarks/cpython_stdlib/full/keyword/) | 3 | 0 |
 | `linecache` | Yes | Filesystem-backed `getline`, cache population and invalidation. [Evidence](../benchmarks/cpython_stdlib/full/linecache/README.md) | [0 / 29](../benchmarks/cpython_stdlib/full/linecache/) | 8 | 10 |
@@ -77,13 +78,14 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `marshal` | Yes | Decode integer, bytes, boolean, and None records with `loads`. [Evidence](../tests/fixtures/boxed_bytecache.py) | — | — | — |
 | `math` | Yes | `prod` multiplies integer factors from iterables with an optional integer start. [Evidence](../tests/fixtures/iterables/math_product.py) | — | — | — |
 | `mimetypes` | Yes | Guess the MIME type and encoding of a filename or URL with POSIX host tables or a custom database. [Evidence](../benchmarks/cpython_stdlib/full/mimetypes/README.md) | [0 / 29](../benchmarks/cpython_stdlib/full/mimetypes/) | 15 | 6 |
+| `mmap` | Rejected | Runtime-loaded Linux file mappings, live memoryviews, bounded searches and overlapping moves. [Evidence](../tests/fixtures/boxed_mmap.py) | — | — | — |
 | `ntpath` | Yes | No API example recorded. | — | — | — |
 | `numbers` | Yes | Check typed numeric values and builtin classes against `Number` with `isinstance` and `issubclass`. [Evidence](../tests/fixtures/unions/numeric_membership.py) | — | — | — |
 | `opcode` | Yes | No API example recorded. | — | — | — |
 | `operator` | Yes | `length_hint` for supported iterators. [Evidence](../benchmarks/cpython_stdlib/full/itertools/repeat.py) | — | — | — |
 | `optparse` | Yes | No API example recorded. | — | — | — |
 | `os` | Yes | File descriptors, process environment and POSIX `os.path`, including `abspath` and `normpath`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | [0 / 579](../benchmarks/cpython_stdlib/full/os/) | 32 | 14 |
-| `pathlib` | Yes | Construct paths from segments or path-like objects; POSIX and Windows pure paths, traversal and selected file I/O. [Evidence](../benchmarks/cpython_stdlib/full/pathlib/README.md) | [0 / 1,369](../benchmarks/cpython_stdlib/full/pathlib/) | 141 | 58 |
+| `pathlib` | Yes | Construct paths from segments or path-like objects; POSIX and Windows pure paths, traversal and selected file I/O. [Evidence](../benchmarks/cpython_stdlib/full/pathlib/README.md) | [0 / 1,369](../benchmarks/cpython_stdlib/full/pathlib/) | 143 | 56 |
 | `pickle` | Yes | Encode integers, booleans, strings, `None` and tuples with `dumps` protocols 0–5. Custom reductions can return an importable global name or a reconstruction callable with positional arguments. Reduction state and cycles are outside this subset. Pre‑4 protocols support top-level globals, with a subset of Python 2 compatibility names for protocols 0–2. [Evidence](../tests/fixtures/boxed_pickle_reduction.py) | — | — | — |
 | `pkgutil` | Yes | No API example recorded. | — | — | — |
 | `platform` | Yes | Read `system()`, `machine()`, and the running Python version from `python_version()`. [Evidence](../benchmarks/cpython_stdlib/interpreter_info.py) | — | — | — |
@@ -91,6 +93,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `posixpath` | Yes | POSIX `os.path` operations on strings and bytes; path tests are counted under `os`. [Evidence](../tests/fixtures/paths/os_path.py) | — | — | — |
 | `pwd` | Yes | No API example recorded. | — | — | — |
 | `py_compile` | Yes | No API example recorded. | — | — | — |
+| `pydoc` | Rejected | Resolve a runtime-imported class or function by dotted name and render a Python function’s signature and docstring as plain text. [Evidence](../tests/fixtures/boxed_pydoc.py) | — | — | — |
 | `pyexpat` | Yes | No API example recorded. | — | — | — |
 | `queue` | Yes | No API example recorded. | — | — | — |
 | `quopri` | Yes | No API example recorded. | — | — | — |
@@ -161,11 +164,9 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `fileinput` |
 | `ftplib` |
 | `getpass` |
-| `glob` |
 | `graphlib` |
 | `imaplib` |
 | `mailbox` |
-| `mmap` |
 | `modulefinder` |
 | `msvcrt` |
 | `multiprocessing` |
@@ -181,7 +182,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `pstats` |
 | `pty` |
 | `pyclbr` |
-| `pydoc` |
 | `pydoc_data` |
 | `readline` |
 | `reprlib` |
@@ -241,6 +241,7 @@ These include documented interfaces such as `__future__` and `_thread`, as well 
 | `_contextvars` | Yes | No API example recorded. | — | — | — |
 | `_datetime` | Yes | No API example recorded. | — | — | — |
 | `_frozen_importlib_external` | Yes | No API example recorded. | — | — | — |
+| `_functools` | Yes | No API example recorded. | — | — | — |
 | `_hashlib` | Yes | No API example recorded. | — | — | — |
 | `_imp` | Yes | `is_frozen` reports frozen modules, and `_override_frozen_modules_for_tests` changes their import precedence. [Evidence](../tests/imports.py) | — | — | — |
 | `_io` | Yes | No API example recorded. | — | — | — |
@@ -290,7 +291,6 @@ Both import modes reject the following names. They have no recorded API example 
 | `_decimal` |
 | `_elementtree` |
 | `_frozen_importlib` |
-| `_functools` |
 | `_gdbm` |
 | `_heapq` |
 | `_hmac` |

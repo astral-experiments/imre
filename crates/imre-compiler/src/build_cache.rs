@@ -53,10 +53,27 @@ struct Manifest {
     executable: String,
 }
 
+#[derive(Serialize, Deserialize)]
+struct ManifestRecord {
+    #[serde(flatten)]
+    manifest: Manifest,
+    checksum: String,
+}
+
+impl Manifest {
+    // Bind the complete dependency list and executable to the request that produced them.
+    fn checksum(&self, link_recipe: &blake3::Hash) -> Option<String> {
+        let mut hasher = blake3::Hasher::new_keyed(link_recipe.as_bytes());
+        serde_json::to_writer(&mut hasher, self).ok()?;
+        Some(hasher.finalize().to_hex().to_string())
+    }
+}
+
 pub struct Cache {
     pub root: PathBuf,
     manifest: PathBuf,
     object_recipe: blake3::Hash,
+    link_recipe: blake3::Hash,
     toolchain: NativeToolchain,
     runtime: PathBuf,
     previous: Option<Manifest>,
@@ -74,7 +91,7 @@ impl NativeToolchain {
         if !cfg!(target_os = "linux") {
             return None;
         }
-        let root = env::current_exe().ok()?.with_file_name("imre-toolchain");
+        let root = super::installation_file("imre-toolchain").ok()?;
         let clang = root.join("bin/clang");
         clang.is_file().then(|| Self {
             clang,
@@ -448,10 +465,9 @@ pub fn native_toolchain(
     {
         return None;
     }
-    let compiler = env::current_exe().ok()?;
     // Also support a standalone linker beside Imre, as in earlier releases.
     let lld = [
-        compiler.with_file_name("imre-ld.lld"),
+        super::installation_file("imre-ld.lld").ok()?,
         PathBuf::from("/usr/bin/ld.lld-18"),
     ]
     .into_iter()
@@ -565,13 +581,13 @@ impl Cache {
                 &options.module_entry,
                 options.path_entry,
                 options.python_startup(),
-                options.runtime_imports,
                 &options.extension_paths,
+                &options.include_modules,
                 &options.python_archive_indices,
-                &options.site_dirs,
+                (&options.stdlib_dir, &options.site_dirs),
                 &options.user_site_pth,
-                options.sitecustomize,
-                &options.stdlib_fallback,
+                (options.sitecustomize, options.stdlib_sitecustomize),
+                (&options.stdlib_fallback, &options.installed_stdlib_archive),
             ),
             env::current_dir().ok()?.join(entry).into_os_string(),
             module_root,
@@ -584,12 +600,17 @@ impl Cache {
         let manifest = root.join(format!("{}.json", link_recipe.to_hex()));
         let previous = fs::read(&manifest)
             .ok()
-            .and_then(|bytes| serde_json::from_slice::<Manifest>(&bytes).ok())
+            .and_then(|bytes| serde_json::from_slice::<ManifestRecord>(&bytes).ok())
+            .and_then(|record| {
+                (record.manifest.checksum(&link_recipe)? == record.checksum)
+                    .then_some(record.manifest)
+            })
             .filter(|m| m.native.iter().all(|(p, stamp)| Stamp::read(p) == *stamp));
         Some(Self {
             root,
             manifest,
             object_recipe,
+            link_recipe,
             toolchain: toolchain.clone(),
             runtime: runtime.resolved,
             previous,
@@ -644,8 +665,16 @@ impl Cache {
         stage: &Path,
         file: &Path,
         materialized_output: &Path,
+        extension_archives: &[PathBuf],
         bundled_provider_archive: Option<&Path>,
     ) -> Option<()> {
+        // A wheel symlink's physical target need not have an archive suffix.
+        if extension_archives
+            .iter()
+            .any(|path| !ordinary_archive(path))
+        {
+            return None;
+        }
         // LLD's Make depfile normalizes POSIX backslashes into separators.
         // Its object trace preserves those names, including archive members.
         let lld = self.toolchain.lld.is_some();
@@ -691,9 +720,10 @@ impl Cache {
                             .is_some_and(|dir| path.starts_with(dir))
                 };
                 let cwd_symlink = p.parent() == Some(cwd.as_path()) && p.is_symlink();
-                // The packaged provider archive is an explicit compiler input, like the runtime.
-                let is_provider =
-                    bundled_provider_archive == Some(p.as_path()) && ordinary_archive(&resolved);
+                // Ordinary archives explicitly selected by the compiler have known identities.
+                let is_provider = (bundled_provider_archive == Some(p.as_path())
+                    || extension_archives.contains(&p))
+                    && ordinary_archive(&resolved);
                 if resolved != self.runtime
                     && !is_provider
                     && !(supported(&resolved) && (supported(&p) || cwd_symlink))
@@ -746,11 +776,15 @@ impl Cache {
         let executable = file_hash(file).ok()?;
         let object = self.root.join(&executable);
         fs::rename(file, &object).ok()?;
-        let record = Manifest {
+        let manifest = Manifest {
             sources,
             native,
             search_dirs,
             executable,
+        };
+        let record = ManifestRecord {
+            checksum: manifest.checksum(&self.link_recipe)?,
+            manifest,
         };
         let mut temp = NamedTempFile::new_in(&self.root).ok()?;
         serde_json::to_writer(&mut temp, &record).ok()?;

@@ -1,5 +1,13 @@
 use super::{Context, Error, Id, NONE, Result, Value};
 
+/// Inspect the initializer slot without binding descriptors or calling the metaclass.
+pub(super) fn uses_base_init(ctx: &Context, base: Id, class: Id) -> bool {
+    ctx.class_attr(class, "__init__").is_none_or(|init| {
+        Some(init) == ctx.class_attr(base, "__init__")
+            || Some(&init) == ctx.builtins.get("object.__init__")
+    })
+}
+
 /// Advance the current child, obtaining another from the outer iterator only on exhaustion.
 pub(super) fn chain_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
     let [base, receiver] = args else {
@@ -158,8 +166,21 @@ pub(in crate::dynamic) struct Cycle {
 /// ordinary Python fields alongside the same traced cursor.
 #[derive(Clone)]
 pub(in crate::dynamic) enum Cursor {
+    Tee {
+        base: Id,
+        position: crate::tee::Position<Id>,
+    },
+    TeeBlock {
+        source: Id,
+        data: crate::tee::Block<Id, Id>,
+    },
     Cycle(Cycle),
     Accumulate(Accumulator),
+    Pairwise {
+        base: Id,
+        source: Id,
+        previous: Option<Id>,
+    },
 }
 
 #[derive(Clone)]
@@ -178,6 +199,12 @@ impl Cursor {
         visit: &mut impl crate::dynamic::value::VisitReferences,
     ) {
         match self {
+            Self::Tee { base, position } => visit.extend([*base, position.block]),
+            Self::TeeBlock { source, data } => {
+                visit.push(*source);
+                visit.extend(data.following);
+                visit.extend(&data.items);
+            }
             Self::Cycle(state) => {
                 visit.extend(state.source);
                 visit.extend(&state.saved);
@@ -186,7 +213,20 @@ impl Cursor {
                 visit.extend([state.base, state.source, state.function]);
                 visit.extend(state.total);
             }
+            Self::Pairwise {
+                base,
+                source,
+                previous,
+            } => {
+                visit.extend([*base, *source]);
+                visit.extend(*previous);
+            }
         }
+    }
+
+    /// The bundled pairwise class has an immutable next slot. Subclasses use normal slot lookup.
+    pub(in crate::dynamic) fn is_exact_pairwise(&self, class: Id) -> bool {
+        matches!(self, Self::Pairwise { base, .. } if *base == class)
     }
 
     pub(in crate::dynamic) fn is_exact_accumulate(&self, class: Id) -> bool {
@@ -208,6 +248,130 @@ fn cursor_instance(ctx: &mut Context, class: Id, state: Cursor) -> Id {
     };
     *itertools = Some(Box::new(state));
     result
+}
+
+struct BoxedBlocks<'a> {
+    ctx: &'a mut Context,
+    block_class: Id,
+    source: Id,
+}
+
+impl crate::tee::Store for BoxedBlocks<'_> {
+    type Link = Id;
+    type Item = Id;
+
+    fn allocate(&mut self) -> std::result::Result<Id, crate::Error> {
+        Ok(cursor_instance(
+            self.ctx,
+            self.block_class,
+            Cursor::TeeBlock {
+                source: self.source,
+                data: crate::tee::Block::new(),
+            },
+        ))
+    }
+
+    fn with_block<R>(
+        &mut self,
+        link: &Id,
+        f: impl FnOnce(&mut crate::tee::Block<Id, Id>) -> R,
+    ) -> R {
+        let Some(Cursor::TeeBlock { data, .. }) = cursor(self.ctx, *link) else {
+            unreachable!("tee cursor holds a live buffer block")
+        };
+        f(data)
+    }
+}
+
+pub(super) fn tee_allocate(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [class, block_class, iterable] = args else {
+        return Err(Error::new("TypeError", "invalid tee constructor arguments"));
+    };
+    if !kwargs.is_empty()
+        || ctx.itertools_layout(*class) != Some("itertools._tee")
+        || ctx.itertools_layout(*block_class) != Some("itertools._TeeBlock")
+    {
+        return Err(Error::new("TypeError", "invalid tee constructor arguments"));
+    }
+    let source = ctx.iterator(*iterable)?;
+    ctx.heap.keep(source);
+    let position = if ctx.heap.get(source).instance_class() == Some(*class)
+        && let Some(Cursor::Tee { position, .. }) = cursor(ctx, source)
+    {
+        position.clone()
+    } else {
+        let block = cursor_instance(
+            ctx,
+            *block_class,
+            Cursor::TeeBlock {
+                source,
+                data: crate::tee::Block::new(),
+            },
+        );
+        crate::tee::Position::new(block)
+    };
+    Ok(cursor_instance(
+        ctx,
+        *class,
+        Cursor::Tee {
+            base: *class,
+            position,
+        },
+    ))
+}
+
+pub(in crate::dynamic) fn next_tee(ctx: &mut Context, receiver: Id) -> Result<Option<Id>> {
+    let Some(Cursor::Tee { base, position }) = cursor(ctx, receiver) else {
+        return Err(Error::new("TypeError", "expected a tee iterator"));
+    };
+    let base = *base;
+    let mut position = position.clone();
+    let Value::Instance {
+        class,
+        itertools: Some(state),
+        ..
+    } = ctx.heap.get(position.block)
+    else {
+        unreachable!("tee cursor holds a live buffer block")
+    };
+    let Cursor::TeeBlock { source, .. } = state.as_ref() else {
+        unreachable!("tee data")
+    };
+    let source = *source;
+    let mut blocks = BoxedBlocks {
+        block_class: *class,
+        source,
+        ctx,
+    };
+    let previous = position.block;
+    let prepared = position.prepare(&mut blocks);
+    // A fork crosses the block boundary even when the frontier is already running.
+    // Publish before returning that error or calling a source that can reenter us.
+    *cursor(blocks.ctx, receiver).expect("live tee") = Cursor::Tee {
+        base,
+        position: position.clone(),
+    };
+    if previous != position.block {
+        blocks.ctx.heap.weak_edge_removed(previous);
+    }
+    let item = prepared?;
+    if item.is_some() {
+        return Ok(item);
+    }
+    let result = blocks.ctx.next_item(source);
+    position.finish(&mut blocks, result.as_ref().ok().and_then(Option::as_ref));
+    *cursor(blocks.ctx, receiver).expect("live tee") = Cursor::Tee { base, position };
+    result
+}
+
+pub(super) fn tee_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [receiver] = args else {
+        return Err(Error::new("TypeError", "expected a tee iterator"));
+    };
+    if !kwargs.is_empty() {
+        return Err(Error::new("TypeError", "expected a tee iterator"));
+    }
+    next_tee(ctx, *receiver)?.ok_or_else(|| Error::new("StopIteration", ""))
 }
 
 pub(super) fn cycle_allocate(
@@ -564,45 +728,64 @@ pub(super) fn pairwise_allocate(
         && kwargs.is_empty()
         && compatible_cursor_class(ctx, *base, *class, "itertools.pairwise")
     {
-        let state = ctx.alloc(Value::Tuple(vec![*source]));
-        return Ok(instance_with_state(ctx, *base, *class, state));
+        return Ok(pairwise_cursor(ctx, *base, *class, *source));
     }
     Err(Error::new("TypeError", "expected a pairwise subclass"))
 }
 
-/// The absence of a second tuple item distinguishes an unstarted cursor from a previous None.
-fn pairwise_state(ctx: &Context, base: Id, receiver: Id) -> Result<(Id, Option<Id>)> {
-    if let Value::Instance {
-        member_values: Some(values),
-        ..
-    } = ctx.heap.get(receiver)
-        && let Some(&state) = values.get(&base)
-        && let Value::Tuple(items) = ctx.heap.get(state)
+/// Root the acquired input until the new pairwise cursor owns it.
+pub(in crate::dynamic) fn pairwise_cursor(
+    ctx: &mut Context,
+    base: Id,
+    class: Id,
+    source: Id,
+) -> Id {
+    ctx.heap.keep(source);
+    cursor_instance(
+        ctx,
+        class,
+        Cursor::Pairwise {
+            base,
+            source,
+            previous: None,
+        },
+    )
+}
+
+/// A missing previous item distinguishes a new cursor from one that yielded None.
+fn pairwise_state(ctx: &mut Context, base: Id, receiver: Id) -> Result<(Id, Option<Id>)> {
+    if let Some(Cursor::Pairwise {
+        base: owner,
+        source,
+        previous,
+    }) = cursor(ctx, receiver)
+        && *owner == base
     {
-        match *items.as_slice() {
-            [source] => return Ok((source, None)),
-            [source, previous] => return Ok((source, Some(previous))),
-            _ => {}
-        }
+        return Ok((*source, *previous));
     }
     Err(Error::new("TypeError", "expected an initialized pairwise"))
 }
 
-fn set_pairwise_state(ctx: &mut Context, base: Id, receiver: Id, source: Id, previous: Option<Id>) {
-    let mut items = vec![source];
-    items.extend(previous);
-    let state = ctx.alloc(Value::Tuple(items));
-    let Value::Instance {
-        member_values: Some(values),
+/// Report the edges released by an exhausted input or a replaced previous item.
+fn set_pairwise_state(ctx: &mut Context, receiver: Id, source: Id, previous: Option<Id>) {
+    let Some(Cursor::Pairwise {
+        source: stored_source,
+        previous: stored_previous,
         ..
-    } = ctx.heap.get_mut(receiver)
+    }) = cursor(ctx, receiver)
     else {
         unreachable!("validated pairwise receiver")
     };
-    let old = values
-        .insert(base, state)
-        .expect("validated pairwise state");
-    ctx.heap.weak_edge_removed(old);
+    let old_source = std::mem::replace(stored_source, source);
+    let old_previous = std::mem::replace(stored_previous, previous);
+    if old_source != source {
+        ctx.heap.weak_edge_removed(old_source);
+    }
+    if let Some(removed) = old_previous
+        && Some(removed) != previous
+    {
+        ctx.heap.weak_edge_removed(removed);
+    }
 }
 
 /// Keep the previous item across a reentrant pull, preserving the source's actual exception.
@@ -613,6 +796,19 @@ pub(super) fn pairwise_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, I
     if !kwargs.is_empty() || ctx.itertools_layout(base) != Some("itertools.pairwise") {
         return Err(Error::new("TypeError", "expected a pairwise instance"));
     }
+    next_paired(ctx, base, receiver)
+}
+
+/// Advance a pairwise cursor, retaining its receiver and operands across either source pull.
+pub(in crate::dynamic) fn next_paired(ctx: &mut Context, base: Id, receiver: Id) -> Result<Id> {
+    let mark = ctx.heap.temporary_mark();
+    ctx.heap.keep(receiver);
+    let result = advance_pairwise(ctx, base, receiver);
+    ctx.heap.release_temporaries_since(mark);
+    result
+}
+
+fn advance_pairwise(ctx: &mut Context, base: Id, receiver: Id) -> Result<Id> {
     let (source, previous) = pairwise_state(ctx, base, receiver)?;
     if source == NONE {
         return Err(Error::new("StopIteration", ""));
@@ -623,7 +819,7 @@ pub(super) fn pairwise_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, I
             .next_result(source)
             .and_then(|item| item.ok_or_else(|| Error::new("StopIteration", "")));
         if result.is_err() {
-            set_pairwise_state(ctx, base, receiver, NONE, None);
+            set_pairwise_state(ctx, receiver, NONE, None);
         }
         result
     };
@@ -633,11 +829,11 @@ pub(super) fn pairwise_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, I
             let item = pull(ctx)?;
             // A reentrant first pull can exhaust the same cursor before returning an item.
             if pairwise_state(ctx, base, receiver)?.0 == NONE {
-                set_pairwise_state(ctx, base, receiver, NONE, None);
+                set_pairwise_state(ctx, receiver, NONE, None);
                 return Err(Error::new("StopIteration", ""));
             }
             ctx.heap.keep(item);
-            set_pairwise_state(ctx, base, receiver, source, Some(item));
+            set_pairwise_state(ctx, receiver, source, Some(item));
             item
         }
     };
@@ -645,7 +841,7 @@ pub(super) fn pairwise_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, I
     let following = pull(ctx)?;
     ctx.heap.keep(following);
     let (live_source, _) = pairwise_state(ctx, base, receiver)?;
-    set_pairwise_state(ctx, base, receiver, live_source, Some(following));
+    set_pairwise_state(ctx, receiver, live_source, Some(following));
     Ok(ctx.alloc(Value::Tuple(vec![previous, following])))
 }
 

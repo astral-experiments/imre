@@ -585,7 +585,7 @@ pub fn translate_pattern_with_line_mode(
     literal_guards: bool,
     multiline: bool,
 ) -> Result<FixedPattern, String> {
-    let (output, groups) = tokenize(
+    let translated = tokenize(
         pattern,
         verbose,
         alphabet,
@@ -594,7 +594,7 @@ pub fn translate_pattern_with_line_mode(
         Grammar::Standard { multiline },
         None,
     )?;
-    analyze(output, groups)
+    analyze(translated.source, translated.groups)
 }
 
 /// Normalize a text pattern requiring a lookaround without accepting backend-specific syntax.
@@ -613,6 +613,7 @@ pub fn lookahead_source(
         Grammar::Lookahead,
         None,
     )
+    .map(TokenizedPattern::into_parts)
 }
 
 /// Translate a pattern needing native backtracking, retaining Python capture slots.
@@ -623,6 +624,16 @@ pub fn backtracking_source(
     alphabet: Alphabet,
     dotall: bool,
 ) -> Result<(String, Vec<Option<String>>), String> {
+    backtracking_pattern(pattern, verbose, alphabet, dotall).map(TokenizedPattern::into_parts)
+}
+
+/// Lower a backtracking pattern and retain its minimum width in Python characters.
+pub fn backtracking_pattern(
+    pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+) -> Result<TokenizedPattern, String> {
     tokenize(
         pattern,
         verbose,
@@ -811,6 +822,7 @@ pub fn validation_source(
         Grammar::Validation,
         None,
     )
+    .map(TokenizedPattern::into_parts)
 }
 
 /// Tokenize byte patterns without expanding categories into ordinary literal ranges.
@@ -825,7 +837,7 @@ pub fn locale_byte_source(pattern: &str, verbose: bool, dotall: bool) -> Option<
         None,
     )
     .ok()
-    .map(|(source, _)| source)
+    .map(|pattern| pattern.source)
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -1018,6 +1030,19 @@ fn skip_comment(input: &mut impl Iterator<Item = char>) -> Result<(), String> {
     }
 }
 
+/// Translation and capture information produced in one pass over the Python spelling.
+pub struct TokenizedPattern {
+    pub source: String,
+    pub groups: Vec<Option<String>>,
+    pub minimum_width: u64,
+}
+
+impl TokenizedPattern {
+    fn into_parts(self) -> (String, Vec<Option<String>>) {
+        (self.source, self.groups)
+    }
+}
+
 fn tokenize(
     pattern: &str,
     mut verbose: bool,
@@ -1026,7 +1051,7 @@ fn tokenize(
     literal_guards: bool,
     grammar: Grammar,
     mut warnings: Option<&mut WarningVisitor<'_>>,
-) -> Result<(String, Vec<Option<String>>), String> {
+) -> Result<TokenizedPattern, String> {
     let lookahead = !matches!(grammar, Grammar::Standard { .. });
     let visiting = warnings.is_some();
     let mut escapes = Escapes {
@@ -1673,7 +1698,11 @@ fn tokenize(
             casefold::scoped(&output, &modes, lookahead)?
         };
     }
-    Ok((output, groups))
+    Ok(TokenizedPattern {
+        source: output,
+        groups,
+        minimum_width: width.width().min,
+    })
 }
 
 fn analyze(output: String, groups: Vec<Option<String>>) -> Result<FixedPattern, String> {

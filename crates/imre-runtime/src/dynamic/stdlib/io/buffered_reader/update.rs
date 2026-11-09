@@ -4,6 +4,8 @@ use super::{Cell, Context, Error, Id, NONE, Reader, Result, Value, index, invoke
 
 #[derive(Default)]
 pub(super) struct Update {
+    // CPython retains this cursor when close retires a window even if raw.close vetoes.
+    pub(super) terminal_raw_pos: Option<Cell<i64>>,
     pub(super) raw_offset: Cell<i64>,
     pub(super) retired: Cell<bool>,
     // Compacting a partially blocked write can place the logical cursor outside the window.
@@ -56,15 +58,25 @@ impl Reader {
             return Ok(());
         };
         self.move_raw(ctx, update, start as i64, false)?;
-        while start < end {
-            let data = bytes_io::copy_bytes(&ctx.bytes_like(self.buffer)?[start..end])?;
-            let Some(n) = bytes_writer::raw_write(ctx, self.raw()?, &data)? else {
-                return Err(descriptor_buffer::blocking_error(ctx, 0, 0));
-            };
-            start += n;
-            self.advance(n);
-            update.raw_offset.set(start as i64);
-            update.dirty.set(Some((start, end)));
+        let advanced = |next, count| {
+            self.advance(count);
+            update.raw_offset.set(next as i64);
+            if let Some(pos) = &update.terminal_raw_pos {
+                pos.set(next as i64);
+            }
+            update.dirty.set(Some((next, end)));
+        };
+        if update.terminal_raw_pos.is_some() {
+            bytes_writer::flush_window(ctx, self.raw()?, self.buffer, start..end, advanced)?;
+        } else {
+            while start < end {
+                let data = bytes_io::copy_bytes(&ctx.bytes_like(self.buffer)?[start..end])?;
+                let Some(n) = bytes_writer::raw_write(ctx, self.raw()?, &data)? else {
+                    return Err(descriptor_buffer::blocking_error(ctx, 0, 0));
+                };
+                start += n;
+                advanced(start, n);
+            }
         }
         update.dirty.set(None);
         // With no valid read window, completion of the last raw write defines the cursor.
@@ -77,6 +89,11 @@ impl Reader {
     pub(super) fn sync_update(&self, ctx: &mut Context) -> Result<()> {
         if let Some(update) = &self.update {
             self.write_back(ctx)?;
+            if self.end.get() != 0
+                && let Some(pos) = &update.terminal_raw_pos
+            {
+                pos.set(update.raw_offset.get());
+            }
             // BufferedRandom rewinds even at offset zero. Raw callbacks observe this seek.
             let result = self.move_raw(ctx, update, self.logical_pos(), true);
             self.reset();
@@ -114,6 +131,12 @@ impl Reader {
 
     fn write_input(&self, ctx: &mut Context, input: Id, update: &Update) -> Result<Id> {
         let size = ctx.native_buffer_bytes(input)?.len();
+        if self.end.get() == 0
+            && update.dirty.get().is_none()
+            && let Some(pos) = &update.terminal_raw_pos
+        {
+            pos.set(0);
+        }
         if update.outside.get().is_none() && size < self.size && size <= self.size - self.pos.get()
         {
             self.buffer_input(ctx, input, 0, size, update)?;
@@ -154,6 +177,9 @@ impl Reader {
         }
         self.move_raw(ctx, update, self.logical_pos(), false)?;
         self.reset();
+        if let Some(pos) = &update.terminal_raw_pos {
+            pos.set(0);
+        }
         let mut written = 0;
         while size - written >= self.size {
             let data = bytes_io::copy_bytes(&ctx.native_buffer_bytes(input)?[written..])?;
@@ -175,9 +201,15 @@ impl Reader {
         Ok(ctx.int(size as i64))
     }
 
-    pub(super) fn update_call(&self, ctx: &mut Context, op: &str, args: &[Id]) -> Result<Id> {
+    pub(super) fn update_call(
+        &self,
+        ctx: &mut Context,
+        receiver: Id,
+        op: &str,
+        args: &[Id],
+    ) -> Result<Id> {
         if op == "write" {
-            return self.with_lock(|| {
+            return self.with_lock(ctx, receiver, |ctx| {
                 // The raw closed property can call this same writer.
                 self.check_open(ctx, "write to closed file")?;
                 self.write_input(ctx, args[0], self.update.as_ref().unwrap())
@@ -191,7 +223,7 @@ impl Reader {
                 "truncate of closed file"
             },
         )?;
-        self.with_lock(|| {
+        self.with_lock(ctx, receiver, |ctx| {
             self.sync_update(ctx)?;
             if op == "truncate" {
                 let raw = self.raw()?;

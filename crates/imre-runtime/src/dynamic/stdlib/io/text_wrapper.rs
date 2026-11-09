@@ -114,11 +114,22 @@ pub(in crate::dynamic) struct Wrapper {
 }
 
 pub(super) fn invoke(ctx: &mut Context, obj: Id, name: &str, args: Vec<Id>) -> Result<Id> {
+    invoke_with(ctx, obj, name, |ctx, method| {
+        ctx.call(method, args, Vec::new())
+    })
+}
+
+pub(super) fn invoke_with(
+    ctx: &mut Context,
+    obj: Id,
+    name: &str,
+    call: impl FnOnce(&mut Context, Id) -> Result<Id>,
+) -> Result<Id> {
     let mark = ctx.heap.temporary_mark();
     ctx.heap.keep(obj);
     let result = ctx
         .lookup_attr(obj, name)
-        .and_then(|f| ctx.call(f, args, Vec::new()));
+        .and_then(|method| call(ctx, method));
     ctx.heap.release_temporaries_since(mark);
     match &result {
         Ok(value) => ctx.heap.keep(*value),
@@ -130,6 +141,59 @@ pub(super) fn invoke(ctx: &mut Context, obj: Id, name: &str, args: Vec<Id>) -> R
     }
     ctx.heap.weak_edge_removed(obj);
     result
+}
+
+fn flush_open(ctx: &mut Context, stream: Id) -> Result<()> {
+    let closed = ctx
+        .lookup_attr(stream, "closed")
+        .and_then(|value| ctx.truth(value))
+        .unwrap_or(false);
+    if !closed {
+        invoke(ctx, stream, "flush", vec![])?;
+    }
+    Ok(())
+}
+
+/// Flush the active sys bindings. Displaced original streams may still own buffered bytes.
+pub(in crate::dynamic) fn flush_standard_outputs(ctx: &mut Context) -> bool {
+    if ctx.threads.system_module.is_none() {
+        return true;
+    }
+    let mark = ctx.heap.temporary_mark();
+    let mut active = [None; 2];
+    let mut ok = true;
+    for (index, name) in ["stdout", "stderr"].into_iter().enumerate() {
+        if let Ok(Some(stream)) = ctx.sys_binding(name)
+            && stream != NONE
+        {
+            ctx.heap.keep(stream);
+            active[index] = Some(stream);
+            if let Err(error) = flush_open(ctx, stream) {
+                ok = false;
+                if index == 0 {
+                    crate::dynamic::unraisable::report(
+                        ctx,
+                        error,
+                        false,
+                        None,
+                        "Exception ignored while flushing sys.stdout",
+                    );
+                }
+            }
+        }
+    }
+    for index in 0..ctx.heap.standard_outputs.len() {
+        if let Some(stream) = ctx.heap.standard_outputs[index]
+            && !active.contains(&Some(stream))
+            && Wrapper::from_receiver(ctx, stream)
+                .is_ok_and(|wrapper| wrapper.buffer_id().is_some())
+        {
+            ctx.heap.keep(stream);
+            let _ = flush_open(ctx, stream);
+        }
+    }
+    ctx.heap.release_temporaries_since(mark);
+    ok
 }
 
 fn flag(ctx: &mut Context, obj: Id, method: &str) -> Result<bool> {
@@ -287,10 +351,7 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
 /// Render public name and mode under the same recursion guard as other I/O objects.
 pub(super) fn repr(ctx: &mut Context, receiver: Id) -> Result<Id> {
     let class = ctx.exact_type(receiver)?;
-    let standard_output = matches!(ctx.heap.get(receiver), Value::TextFile(_));
-    if !standard_output {
-        Wrapper::from_receiver(ctx, receiver)?;
-    }
+    Wrapper::from_receiver(ctx, receiver)?;
     let name = if ctx.heap.get(class).io_kind() == Some("TextIOWrapper") {
         "_io.TextIOWrapper"
     } else {
@@ -322,7 +383,7 @@ pub(super) fn repr(ctx: &mut Context, receiver: Id) -> Result<Id> {
         let field_mark = ctx.heap.temporary_mark();
         let mut rendered_mark = None;
         result = (|| {
-            let value = if field == "encoding" && !standard_output {
+            let value = if field == "encoding" {
                 // Either public getter can reinitialize the wrapper before its private encoding is used.
                 Wrapper::from_receiver(ctx, receiver)?.encoding.get()
             } else {
@@ -670,6 +731,38 @@ fn decode_chunk(
     let errors = ctx.scalar_value(decoder.errors);
     // Registered error handlers can reenter the stream; no reader borrow spans decoding.
     let decoded = match codec {
+        StreamCodec::Registered(Codec::DoubleByte(format)) => {
+            let previous = std::mem::take(&mut input.borrow_mut().tail);
+            let mut truncated = false;
+            let result =
+                codecs::decode_double_byte_chunk(ctx, format, raw, errors, end, &mut truncated);
+            if truncated && !previous.is_empty() {
+                input.borrow_mut().tail = previous;
+            }
+            let (text, consumed) = result?;
+            let data = ctx.bytes_like(raw)?;
+            let mut reader = input.borrow_mut();
+            let suffix = &data[consumed..];
+            if !suffix.is_empty() {
+                // Reentrant reads may have left new pending input during a callback.
+                if reader.tail.len() + suffix.len() > 8 {
+                    let issue = DecodeIssue {
+                        encoding: Codec::DoubleByte(format).name(),
+                        start: 0,
+                        end: data.len(),
+                        reason: "pending buffer overflow",
+                    };
+                    let error = issue.error(data);
+                    return Err(ctx.decode_error(error));
+                }
+                reader
+                    .tail
+                    .try_reserve(suffix.len())
+                    .map_err(|_| crate::Error::allocation())?;
+                reader.tail.extend_from_slice(suffix);
+            }
+            text
+        }
         StreamCodec::Registered(c) => codecs::decode_bytes(ctx, c, raw, Some(errors))?,
         StreamCodec::Wide { format, bom } => {
             let errors = ctx.str_value(errors)?.to_owned();
@@ -765,12 +858,7 @@ pub(super) fn truncate(
         ));
     }
     super::argument_count("TextIOWrapper", "truncate", args.len())?;
-    let buffer = |ctx: &Context| match ctx.heap.get(receiver) {
-        Value::TextFile(file) => file
-            .buffer
-            .ok_or_else(|| Error::new("ValueError", "underlying buffer has been detached")),
-        _ => Wrapper::from_receiver(ctx, receiver)?.binary(),
-    };
+    let buffer = |ctx: &Context| Wrapper::from_receiver(ctx, receiver)?.binary();
     buffer(ctx)?;
     invoke(ctx, receiver, "flush", vec![])?;
     let stream = buffer(ctx)?;

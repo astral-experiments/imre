@@ -4,6 +4,7 @@ import _contextvars
 import contextvars
 from contextvars import Context, ContextVar, Token, copy_context
 from operator import length_hint
+from types import ClassMethodDescriptorType, GenericAlias
 
 
 class Request:
@@ -19,7 +20,22 @@ def current():
     assert _contextvars.Token is Token
     assert _contextvars.copy_context is copy_context
 
-    var = _contextvars.ContextVar("request", default=None)
+    for cls in (ContextVar, Token):
+        alias = cls[Request]
+        raw = vars(cls)["__class_getitem__"]
+        assert type(raw) is ClassMethodDescriptorType
+        assert type(alias) is GenericAlias
+        assert alias.__origin__ is cls and alias.__args__ == (Request,)
+        assert cls.__class_getitem__.__self__ is cls
+        assert raw(cls, Request) == alias == raw.__get__(None, cls)(Request)
+        try:
+            class InvalidBase(alias):
+                pass
+        except TypeError as error:
+            assert "not an acceptable base type" in str(error)
+        else:
+            raise AssertionError("subclassed a final context type")
+    var = _contextvars.ContextVar[Request]("request", default=None)
     assert type(var) is ContextVar and type(Context()) is Context
     assert type(ContextVar) is type and ContextVar.__module__ == "_contextvars"
     assert ContextVar.__qualname__ == "ContextVar"

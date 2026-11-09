@@ -14,8 +14,11 @@ verify-ir = []
 imre-ast = { path = "../imre-ast" }
 imre-regex = { path = "../imre-regex" }
 blake3 = "1"
+csv = "1"
+sha2 = { version = "=0.11.1", default-features = false }
 indexmap = "=2.14.2"
 notify = "8.2.0"
+same-file = "1"
 num-bigint.workspace = true
 rpds = "1"
 serde = { version = "1", features = ["derive"] }
@@ -40,6 +43,9 @@ zip = { version = "8", default-features = false, features = ["deflate-flate2-zli
 
 [build-dependencies]
 zip = { version = "8", default-features = false }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "=1.1.5", features = ["fs"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.190"

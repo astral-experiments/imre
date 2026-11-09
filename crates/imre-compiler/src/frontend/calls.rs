@@ -65,7 +65,7 @@ pub(super) fn scalar_default(
     expected: Type,
     types: &Types,
     source: &str,
-) -> Result<Expr, String> {
+) -> std::result::Result<Expr, String> {
     let mut value = scalar_literal(expression, source)?;
     let ty = value.ty;
     let concrete = types.payload(expected).unwrap_or(expected);
@@ -102,7 +102,7 @@ pub(super) fn scalar_default(
             return Ok(Expr { ty: expected, kind });
         }
     }
-    Err(error(
+    Err(diagnostic_message(
         source,
         expression,
         &format!("default requires exact type {expected}, got {ty}"),
@@ -110,7 +110,10 @@ pub(super) fn scalar_default(
 }
 
 /// A scalar default also supplies an exact type for an unannotated parameter.
-pub(crate) fn scalar_literal(expression: &ast::Expr, source: &str) -> Result<Expr, String> {
+pub(crate) fn scalar_literal(
+    expression: &ast::Expr,
+    source: &str,
+) -> std::result::Result<Expr, String> {
     let (ty, kind) = match expression {
         ast::Expr::NumberLiteral(ast::ExprNumberLiteral {
             value: ast::Number::Int(value),
@@ -149,7 +152,7 @@ pub(crate) fn scalar_literal(expression: &ast::Expr, source: &str) -> Result<Exp
         }
         ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
         _ => {
-            return Err(error(
+            return Err(diagnostic_message(
                 source,
                 expression,
                 "defaults must be int, float, bool, str, bytes, or None literals; numbers may have one sign",
@@ -192,10 +195,27 @@ impl<'a> Supplied<'a> {
         ty: Type,
         sign_only: bool,
     ) -> Result<Expr, String> {
-        match self {
-            Self::Source(node) => checker.direct_argument(node, ty, sign_only),
-            Self::Field(value, node) => checker.direct_value(value, node, ty, sign_only),
+        self.check_with(checker, ty, sign_only, |checker, value, ty, site| {
+            checker.direct_value(value, site, ty, sign_only)
+        })
+    }
+
+    /// Check an operand in context. The destination sees only its evaluated value.
+    pub(super) fn check_with(
+        self,
+        checker: &mut Checker<'_>,
+        ty: Type,
+        sign_only: bool,
+        coerce: impl Fn(&Checker<'_>, Expr, Type, &ast::Expr) -> Result<Expr, String>,
+    ) -> Result<Expr, String> {
+        if let Self::Source(node) = self
+            && !sign_only
+        {
+            return checker.expr_in_context(node, ty, |_, _| false, coerce);
         }
+        let node = self.site();
+        let value = self.value(checker)?;
+        coerce(checker, value, ty, node)
     }
 }
 
@@ -264,6 +284,44 @@ impl ArgumentScope {
         }
     }
 }
+/// Split off a single mapping only if every keyword belongs to the typed rest parameter.
+pub(super) fn rest_keywords<'a>(
+    call: &'a ast::ExprCall,
+    params: &[Parameter],
+) -> (&'a [ast::Keyword], Option<&'a ast::Expr>) {
+    let keywords = call.arguments.keywords.as_ref();
+    if let [spread] = keywords
+        && spread.arg.is_none()
+        && !starred(call)
+        && let Some((rest, positional)) = params.split_last()
+        && rest.kind == ParameterKind::KeywordRest
+        && positional
+            .iter()
+            .all(|p| p.kind == ParameterKind::PositionalOnly)
+    {
+        return (&[], Some(&spread.value));
+    }
+    (keywords, None)
+}
+
+/// A resolved native function can bind fixed named parameters from one trailing mapping.
+pub(super) fn named_mapping<'a>(
+    call: &'a ast::ExprCall,
+    params: &[Parameter],
+) -> Option<&'a ast::Expr> {
+    let (last, explicit) = call.arguments.keywords.split_last()?;
+    (last.arg.is_none()
+        && !starred(call)
+        && explicit.iter().all(|kw| kw.arg.is_some())
+        && params.iter().any(|p| {
+            matches!(
+                p.kind,
+                ParameterKind::PositionalOrKeyword | ParameterKind::KeywordOnly
+            )
+        }))
+    .then_some(&last.value)
+}
+
 pub(super) fn has_unpacking(call: &ast::ExprCall) -> bool {
     starred(call)
         || call
@@ -607,7 +665,16 @@ impl Checker<'_> {
             };
             values.push(value);
         }
-        for keyword in &call.arguments.keywords {
+        let named_mapping = default_owner.and_then(|_| named_mapping(call, params));
+        let (keywords, rest_mapping) = if named_mapping.is_some() {
+            (
+                &call.arguments.keywords[..call.arguments.keywords.len() - 1],
+                None,
+            )
+        } else {
+            rest_keywords(call, params)
+        };
+        for keyword in keywords {
             let name = keyword
                 .arg
                 .as_ref()
@@ -675,20 +742,60 @@ impl Checker<'_> {
                 value
             });
         }
+        let bound_mapping = if let Some(node) = named_mapping {
+            let scope = scope.expect("resolved mapping calls root their operands");
+            Some(self.bind_mapped_keywords(
+                call,
+                node,
+                params,
+                scope,
+                &mut values,
+                &mut order[offset..],
+            )?)
+        } else {
+            None
+        };
         if let Some(index) = rest {
             let (key, value) = self
                 .types
                 .mapping(params[index].ty)
                 .expect("typed keyword rest");
             order[index + offset] = values.len();
-            values.push(Expr {
-                ty: params[index].ty,
-                kind: ExprKind::Dict {
-                    key,
-                    value,
-                    entries: extra,
-                },
-            });
+            let dictionary = if let Some(mapping) = bound_mapping {
+                if extra.is_empty() {
+                    mapping
+                } else {
+                    let first = Expr {
+                        ty: params[index].ty,
+                        kind: ExprKind::Dict {
+                            key,
+                            value,
+                            entries: extra,
+                        },
+                    };
+                    self.plain_dictionary(
+                        ArgumentScope::default(),
+                        (key, value),
+                        vec![first, mapping],
+                    )
+                }
+            } else if let Some(mapping) = rest_mapping {
+                let input = self.expr(mapping)?;
+                self.expect(params[index].ty, input.ty, mapping)?;
+                let mut copy = ArgumentScope::default();
+                let input = copy.hold(self, input);
+                self.plain_dictionary(copy, (key, value), vec![input])
+            } else {
+                Expr {
+                    ty: params[index].ty,
+                    kind: ExprKind::Dict {
+                        key,
+                        value,
+                        entries: extra,
+                    },
+                }
+            };
+            values.push(dictionary);
         }
         for (index, parameter) in params.iter().enumerate() {
             if order[index + offset] == usize::MAX {
@@ -731,6 +838,190 @@ impl Checker<'_> {
             order,
             exhaustive_enum_match: false,
         })
+    }
+
+    /// Bind a live mapping after all earlier operands have acquired roots. The native
+    /// binder writes to fresh formal and rest dictionaries in original key order.
+    fn bind_mapped_keywords(
+        &mut self,
+        call: &ast::ExprCall,
+        node: &ast::Expr,
+        params: &[Parameter],
+        scope: &mut ArgumentScope,
+        values: &mut Vec<Expr>,
+        order: &mut [usize],
+    ) -> Result<Expr, String> {
+        let rest = params
+            .iter()
+            .position(|p| p.kind == ParameterKind::KeywordRest);
+        let Some(Binding::Definition(id)) = self.resolve(&call.func) else {
+            return Err(error(
+                self.source,
+                call,
+                "keyword mapping requires a resolved function",
+            ));
+        };
+        let module = &self.graph.modules[id.module];
+        let ast::Stmt::FunctionDef(function) = &module.parsed.syntax().body[id.statement] else {
+            return Err(error(
+                self.source,
+                call,
+                "keyword mapping requires a function definition",
+            ));
+        };
+        let name = function.name.as_str().to_owned();
+        let qualified = format!("{}.{name}", self.runtime_module_name(id.module));
+        let input = self.expr(node)?;
+        let (key, element) = self.types.mapping(input.ty).ok_or_else(|| {
+            error(
+                self.source,
+                node,
+                "keyword mapping requires a typed dictionary",
+            )
+        })?;
+        self.expect(Type::Str, key, node)?;
+        if let Some(index) = rest {
+            let (_, target) = self
+                .types
+                .mapping(params[index].ty)
+                .expect("typed keyword rest");
+            self.expect(target, element, node)?;
+        }
+        let input = scope.hold(self, input);
+        let empty = |key| Expr {
+            ty: self.types.dict(key, element),
+            kind: ExprKind::Dict {
+                key,
+                value: element,
+                entries: vec![],
+            },
+        };
+        let fixed = empty(Type::Int);
+        let rest = empty(Type::Str);
+        let slots = scope.hold(self, fixed);
+        let remainder = scope.hold(self, rest);
+        let signature = self.keyword_signature(params);
+        let explicit: Vec<_> = call
+            .arguments
+            .keywords
+            .iter()
+            .filter_map(|kw| kw.arg.as_deref())
+            .map(unpacking::string)
+            .collect();
+        let explicit = Expr {
+            ty: self.types.tuple(vec![Type::Str; explicit.len()]),
+            kind: ExprKind::Tuple(explicit),
+        };
+        scope.body.push(Statement::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(
+                Builtin::BindSourceKeywords,
+                vec![
+                    input,
+                    slots.clone(),
+                    remainder.clone(),
+                    unpacking::string(qualified),
+                    signature,
+                    explicit,
+                    Expr::integer(call.arguments.args.len()),
+                ],
+            ),
+        }));
+        let fixed = params.iter().enumerate().filter(|(_, p)| {
+            !matches!(p.kind, ParameterKind::Variadic | ParameterKind::KeywordRest)
+        });
+        for (slot, (index, parameter)) in fixed.enumerate() {
+            if order[index] != usize::MAX
+                || !matches!(
+                    parameter.kind,
+                    ParameterKind::PositionalOrKeyword | ParameterKind::KeywordOnly
+                )
+            {
+                continue;
+            }
+            let key = Expr::integer(slot);
+            let mapped = Expr {
+                ty: element,
+                kind: ExprKind::Builtin(Builtin::DictGet, vec![slots.clone(), key.clone()]),
+            };
+            let mapped = self.direct_value(mapped, node, parameter.ty, parameter.sign_only)?;
+            let arg = if let Some(default) = &parameter.default {
+                self.default_reads = None;
+                if let ExprKind::Call(id, _) = &default.kind {
+                    self.calls.insert(*id);
+                }
+                let has = Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(Builtin::DictContains, vec![key, slots.clone()]),
+                };
+                Expr {
+                    ty: parameter.ty,
+                    kind: ExprKind::Conditional(
+                        Box::new(has),
+                        Box::new(mapped),
+                        Box::new(default.clone()),
+                    ),
+                }
+            } else {
+                mapped
+            };
+            order[index] = values.len();
+            values.push(scope.hold(self, arg));
+        }
+        Ok(remainder)
+    }
+
+    /// A pooled, immutable declaration shared by all visits to this call. The
+    /// fixed parameters precede the names with keyword-only defaults; positional
+    /// defaults form a suffix. Actual arguments are separate IR operands.
+    fn keyword_signature(&self, params: &[Parameter]) -> Expr {
+        let pos = |p: &&Parameter| {
+            matches!(
+                p.kind,
+                ParameterKind::PositionalOnly | ParameterKind::PositionalOrKeyword
+            )
+        };
+        let fixed = |p: &&Parameter| {
+            !matches!(p.kind, ParameterKind::KeywordRest | ParameterKind::Variadic)
+        };
+        let mut fields = vec![
+            Expr::integer(
+                params
+                    .iter()
+                    .take_while(|p| p.kind == ParameterKind::PositionalOnly)
+                    .count(),
+            ),
+            Expr::integer(params.iter().filter(pos).count()),
+            Expr::integer(params.iter().filter(fixed).count()),
+            Expr::integer(
+                params
+                    .iter()
+                    .filter(pos)
+                    .filter(|p| p.default.is_some())
+                    .count(),
+            ),
+        ];
+        for kind in [ParameterKind::Variadic, ParameterKind::KeywordRest] {
+            fields.push(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Bool(params.iter().any(|p| p.kind == kind)),
+            });
+        }
+        fields.extend(
+            params
+                .iter()
+                .filter(fixed)
+                .chain(
+                    params
+                        .iter()
+                        .filter(|p| p.kind == ParameterKind::KeywordOnly && p.default.is_some()),
+                )
+                .map(|p| unpacking::string(&p.name)),
+        );
+        Expr {
+            ty: self.types.tuple(fields.iter().map(|e| e.ty).collect()),
+            kind: ExprKind::Tuple(fields),
+        }
     }
 
     /// Keyword permutation happens only after supplied expressions have executed

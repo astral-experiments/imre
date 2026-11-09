@@ -1,11 +1,12 @@
 //! Static POSIX calls expose a native Path through the same boundary as os.fspath.
 use super::*;
 use crate::ir::PosixPathOperation;
+use std::result::Result;
 
 impl Checker<'_> {
     /// Consume a concrete path sequence once. Display elements use the closed
     /// str/bytes union when needed, so mixed types reach Python's runtime error.
-    fn posix_commonpath(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+    fn posix_commonpath(&mut self, expression: &ast::Expr) -> phase::Result<Expr, String> {
         let expression = if let ast::Expr::Call(call) = expression
             && self.is_builtin_iter(call)
             && call.arguments.keywords.is_empty()
@@ -80,7 +81,7 @@ impl Checker<'_> {
         &mut self,
         call: &ast::ExprCall,
         operation: PosixPathOperation,
-    ) -> Result<Expr, String> {
+    ) -> phase::Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
         let join = operation == PosixPathOperation::Join;
         let param = match operation {

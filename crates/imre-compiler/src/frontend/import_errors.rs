@@ -1,5 +1,6 @@
 //! Source-ordered construction of ImportError's argument tuple and keyword fields.
 use super::*;
+use std::result::Result;
 
 mod keywords;
 
@@ -46,7 +47,7 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         kind: u32,
         receiver: Option<Expr>,
-    ) -> Result<Expr, String> {
+    ) -> phase::Result<Expr, String> {
         // Typeshed omits name_from and treats unknown keywords as static errors;
         // our resolved builtin supplies the CPython constructor or its exact TypeError.
         self.graph.checked_keywords(
@@ -143,7 +144,7 @@ impl Checker<'_> {
     }
 
     /// Convert a value when the native argument tuple or a keyword field retains it.
-    fn import_argument(&mut self, node: &ast::Expr) -> Result<Expr, String> {
+    fn import_argument(&mut self, node: &ast::Expr) -> phase::Result<Expr, String> {
         let value = self.expr(node)?;
         if !self.boxable_value(value.ty) {
             return Err(error(

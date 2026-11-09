@@ -161,18 +161,7 @@ impl RangeFacts<'_> {
             }
             _ => {}
         });
-        loop {
-            let mut changed = false;
-            for &(source, target) in &moves {
-                if !small[source] && small[target] {
-                    small[target] = false;
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
+        crate::ir::propagate_copy_facts(&mut small, &moves);
         small
     }
 }
@@ -978,6 +967,9 @@ impl Analyzer {
                         },
                         _ => Interval::UNKNOWN,
                     },
+                    Builtin::IntBitCount | Builtin::IntBitLength if values[0].small().is_some() => {
+                        Interval::bounded(0, 63)
+                    }
                     Builtin::BytesGet => Interval::bounded(0, 255),
                     Builtin::TryDigitSums(_) => Interval::bounded(-1, MAX_SMALL),
                     Builtin::ListGetI32 => {

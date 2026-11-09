@@ -347,6 +347,7 @@ impl Exception {
             Kind::BadGzipFile => "gzip.BadGzipFile",
             Kind::CsvError => "_csv.Error",
             Kind::GaiError => "socket.gaierror",
+            Kind::ZstdError => "compression.zstd.ZstdError",
             Kind::LzmaError => "_lzma.LZMAError",
             Kind::ZlibError => "zlib.error",
             Kind::TomlDecodeError => "tomllib.TOMLDecodeError",
@@ -736,6 +737,7 @@ impl Error {
     pub(crate) fn into_parts(self) -> (&'static str, Rendered) {
         let kind = match self.kind {
             Kind::BadGzipFile => "gzip.BadGzipFile",
+            Kind::ZstdError => "compression.zstd.ZstdError",
             Kind::ZlibError => "zlib.error",
             kind => kind.name(),
         };
@@ -2111,6 +2113,22 @@ pub(super) fn rendered(text: Str) -> Rendered {
     StrOwner::try_new(text).map_err(|_| std::fmt::Error)
 }
 
+/// Adopt a checked display result. A failing callback retains its Python exception.
+///
+/// # Safety
+/// A non-null pointer transfers one owned native string.
+pub(super) unsafe fn display_result(text: *const Str) -> Rendered {
+    if text.is_null() {
+        return Err(std::fmt::Error);
+    }
+    // SAFETY: the display method returned one owner even if an error is pending.
+    let text = unsafe { StrOwner::from_raw(text) };
+    if imre_error_pending() != 0 {
+        return Err(std::fmt::Error);
+    }
+    Ok(text)
+}
+
 pub(super) fn finish_display(result: Rendered) -> *const Str {
     if imre_error_pending() != 0 {
         return std::ptr::null();
@@ -2187,11 +2205,11 @@ unsafe fn display(value: *const Object, repr: bool) -> *const Str {
                         if index != 0 {
                             output.write_str(", ")?;
                         }
-                        super::values::try_write_repr(&mut output, arg.word, arg.kind)?;
+                        super::values::try_write_argument_repr(&mut output, arg.word, arg.kind)?;
                     }
                 }
                 Payload::Key(key) | Payload::Exit(Some(key)) => {
-                    super::values::try_write_repr(&mut output, key.word, key.kind)?;
+                    super::values::try_write_argument_repr(&mut output, key.word, key.kind)?;
                 }
                 Payload::Process(_) | Payload::Timeout(_) | Payload::Group(_) => {
                     arguments::write_projected_repr(value, &mut output)?;
@@ -2483,16 +2501,51 @@ pub extern "C" fn imre_exception_reraise() {
     }
 }
 
-/// Reports and consumes the pending error after generated-code cleanup. Returning
-/// the exit status lets the C entry point finish normally, including sanitizer
-/// teardown. A failed best-effort stdout flush preserves the original error.
+/// Terminal status computed while generated Python globals are still available.
+/// The entry point releases its owners before delivering an unhandled SIGINT.
+#[repr(C)]
+pub struct UnhandledExit {
+    status: i32,
+    interrupt: bool,
+}
+
+impl UnhandledExit {
+    fn status(status: i32) -> Self {
+        Self {
+            status,
+            interrupt: false,
+        }
+    }
+}
+
+/// Render and consume a pending exception before the entry point releases globals.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_report_unhandled(report: &mut std::mem::MaybeUninit<UnhandledExit>) {
+    report.write(report_unhandled());
+}
+
+/// Complete the reported exit after the generated program's cleanup.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_finish_unhandled(report: &UnhandledExit) -> i32 {
+    if report.interrupt {
+        crate::signals::exit_interrupt()
+    } else {
+        report.status
+    }
+}
+
+/// Report and finish in one call for callers that have already performed cleanup.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_error_unhandled() -> i32 {
+    imre_finish_unhandled(&report_unhandled())
+}
+
+fn report_unhandled() -> UnhandledExit {
     let pending = take_pending();
     let active = ACTIVE.with(RefCell::take);
     drop(active);
     let Some(pending) = pending else {
-        return 0;
+        return UnhandledExit::status(0);
     };
     enum ExitText {
         Original(StrOwner),
@@ -2558,15 +2611,20 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
             };
             let _ = crate::sys::write_stderr(text, true);
         }
-        return status_after_flush(status, stdout, stderr.and(crate::sys::flush_stderr()));
+        return UnhandledExit::status(status_after_flush(
+            status,
+            stdout,
+            stderr.and(crate::sys::flush_stderr()),
+        ));
     }
     let interrupted = kind_of(&pending) == Kind::KeyboardInterrupt;
     write_exception_chain(pending);
+    // Exception display may have written more stdout after the pre-report flush.
+    let stdout = stdout.and_then(|()| crate::flush_stdout());
     let status = status_after_flush(1, stdout, stderr.and(crate::sys::flush_stderr()));
-    if interrupted {
-        crate::signals::exit_interrupt()
-    } else {
-        status
+    UnhandledExit {
+        status,
+        interrupt: interrupted,
     }
 }
 

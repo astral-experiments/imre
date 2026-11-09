@@ -3,6 +3,7 @@ use super::*;
 use crate::modules::IntrinsicModule;
 use crate::types::FunctionSite;
 use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
+use std::result::Result;
 
 struct UsesOverload<'a> {
     graph: &'a SourceGraph,
@@ -157,7 +158,7 @@ impl Checker<'_> {
         &mut self,
         call: &ast::ExprCall,
         intrinsic: Intrinsic,
-    ) -> Result<Expr, String> {
+    ) -> phase::Result<Expr, String> {
         use ir::TypingOperation as Op;
         let result = |ty, op, args| Expr {
             ty,

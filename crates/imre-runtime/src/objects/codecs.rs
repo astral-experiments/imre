@@ -1,6 +1,8 @@
 //! Native text codecs shared by the registry and text files.
+mod double_byte;
 pub(crate) mod idna;
-pub(crate) mod shift_jis;
+pub(crate) use double_byte::DoubleByte;
+mod wide;
 pub(super) mod writer;
 
 use super::bytes::{DecodeIssue, ascii_decode_error, owned_input};
@@ -15,7 +17,6 @@ use std::sync::LazyLock;
 
 pub(crate) struct CodePage {
     index: usize,
-    pub(crate) module_name: &'static str,
     decode: Charmap,
     encode: HashMap<char, u8>,
 }
@@ -29,10 +30,30 @@ impl CodePage {
             .collect();
         Self {
             index,
-            module_name,
             decode,
             encode,
         }
+    }
+
+    /// Append mapped code points up to the next byte requiring an error handler.
+    pub(crate) fn decode_prefix(
+        &self,
+        points: &mut Vec<u32>,
+        data: &[u8],
+        offset: usize,
+        surrogateescape: bool,
+    ) -> Result<Option<DecodeIssue>> {
+        points
+            .try_reserve(data.len() - offset)
+            .map_err(|_| Error::allocation())?;
+        for (index, &byte) in data.iter().enumerate().skip(offset) {
+            points.push(match self.decode.decode(byte) {
+                Some(ch) => u32::from(ch),
+                None if surrogateescape && !byte.is_ascii() => 0xdc00 + u32::from(byte),
+                None => return Ok(Some(charmap_issue(index))),
+            });
+        }
+        Ok(None)
     }
 }
 
@@ -42,8 +63,10 @@ static CP437: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(6, "cp437"));
 static KOI8_U: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(8, "koi8_u"));
 static CP1252: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(9, "cp1252"));
 static ISO8859_15: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(10, "iso8859_15"));
+static ISO8859_2: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(12, "iso8859_2"));
+static KOI8_R: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(18, "koi8_r"));
 
-const CODEC_NAMES: [&str; 12] = [
+const CODEC_NAMES: [&str; 19] = [
     "ascii",
     "iso8859-1",
     "utf-8",
@@ -56,6 +79,13 @@ const CODEC_NAMES: [&str; 12] = [
     "cp1252",
     "iso8859-15",
     "idna",
+    "iso8859-2",
+    "utf-16-le",
+    "utf-16-be",
+    "utf-32-le",
+    "utf-32-be",
+    "big5",
+    "koi8-r",
 ];
 
 thread_local! {
@@ -91,7 +121,13 @@ pub(crate) fn normalize(name: &str) -> Result<String> {
     Ok(normalized)
 }
 
-/// An owned entry in the native registry, shared by typed and boxed callers.
+/// The encodings provider also tries dots as underscores in aliases, but not in module names.
+fn matches_alias(key: &str, aliases: &[&str]) -> bool {
+    aliases.contains(&key)
+        || (key.contains('.') && aliases.contains(&key.replace('.', "_").as_str()))
+}
+
+/// An owned entry in the native codec registry for checked callers.
 #[derive(Clone)]
 pub(crate) struct CodecInfo(ObjectOwner);
 
@@ -210,15 +246,56 @@ pub unsafe extern "C" fn imre_codec_decode(
     errors: *const Str,
 ) -> *const Str {
     // SAFETY: the generated call retains all three operands.
-    let result = unsafe { codec(info).decode(&*bytes, Some(&*errors)) };
-    finish(
-        result.and_then(|s| {
-            StrOwner::try_new(s.into())
-                .map(StrOwner::into_raw)
-                .map_err(|_| Error::allocation())
-        }),
-        std::ptr::null(),
-    )
+    let (codec, data, errors) = unsafe { (codec(info), &*bytes, &*errors) };
+    let text = match codec {
+        Codec::Latin1 => latin1_string(data),
+        _ => codec.decode(data, Some(errors)).map(Str::from),
+    };
+    finish(text.and_then(crate::checked_owned_str), std::ptr::null())
+}
+
+/// Decode a statically selected Latin-1 buffer.
+///
+/// # Safety
+/// The caller retains the immutable byte buffer through decoding.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_bytes_decode_latin1(value: *const Bytes) -> *const Str {
+    // SAFETY: the caller roots the immutable buffer for this call.
+    let text = latin1_string(unsafe { &*value });
+    finish(text.and_then(crate::checked_owned_str), std::ptr::null())
+}
+
+/// Size the native string once and fill it with complete UTF-8 code points.
+fn latin1_string(bytes: &[u8]) -> Result<Str> {
+    let text = if bytes.is_ascii() {
+        // SAFETY: each ASCII byte is a complete UTF-8 code point.
+        Str::try_new(unsafe { std::str::from_utf8_unchecked(bytes) })
+    } else {
+        // Each non-ASCII Latin-1 byte expands to exactly two UTF-8 bytes.
+        let extra = bytes.iter().filter(|byte| !byte.is_ascii()).count();
+        let length = bytes.len() + extra;
+        Str::try_with_capacity(length).map(|mut text| {
+            // SAFETY: an ASCII byte takes one slot and every other byte takes two.
+            // The capacity covers exactly these writes. They form complete UTF-8
+            // sequences, and the new length is published only after initialization.
+            unsafe {
+                let mut output = text.spare_capacity_mut().as_mut_ptr().cast::<u8>();
+                for &byte in bytes {
+                    if byte.is_ascii() {
+                        output.write(byte);
+                        output = output.add(1);
+                    } else {
+                        output.write(0xc0 | (byte >> 6));
+                        output.add(1).write(0x80 | (byte & 0x3f));
+                        output = output.add(2);
+                    }
+                }
+                text.set_len(length);
+            }
+            text
+        })
+    };
+    text.map_err(|_| Error::allocation())
 }
 
 /// Explicit byte order never inserts a BOM. U+FEFF in the input encodes normally.
@@ -336,12 +413,18 @@ pub(crate) enum FixedUnicode {
 impl FixedUnicode {
     pub(crate) fn by_key(key: &str) -> Option<Self> {
         match key {
-            "utf_16_le" | "utf_16le" | "unicodelittleunmarked" => {
+            "utf_16_le" => Some(Self::Utf16(Utf16Order::Little)),
+            "utf_16_be" => Some(Self::Utf16(Utf16Order::Big)),
+            "utf_32_le" => Some(Self::Utf32Le),
+            "utf_32_be" => Some(Self::Utf32Be),
+            k if matches_alias(k, &["utf_16le", "unicodelittleunmarked"]) => {
                 Some(Self::Utf16(Utf16Order::Little))
             }
-            "utf_16_be" | "utf_16be" | "unicodebigunmarked" => Some(Self::Utf16(Utf16Order::Big)),
-            "utf_32_le" | "utf_32le" => Some(Self::Utf32Le),
-            "utf_32_be" | "utf_32be" => Some(Self::Utf32Be),
+            k if matches_alias(k, &["utf_16be", "unicodebigunmarked"]) => {
+                Some(Self::Utf16(Utf16Order::Big))
+            }
+            k if matches_alias(k, &["utf_32le"]) => Some(Self::Utf32Le),
+            k if matches_alias(k, &["utf_32be"]) => Some(Self::Utf32Be),
             _ => None,
         }
     }
@@ -500,7 +583,8 @@ pub(crate) enum Codec {
     Latin1,
     Ascii,
     CodePage(&'static CodePage),
-    ShiftJis,
+    Wide(FixedUnicode),
+    DoubleByte(DoubleByte),
     Idna,
 }
 
@@ -512,8 +596,13 @@ impl Codec {
             Self::Utf8 { signature: false } => 2,
             Self::Utf8 { signature: true } => 3,
             Self::CodePage(page) => page.index,
-            Self::ShiftJis => 7,
+            Self::DoubleByte(DoubleByte::ShiftJis) => 7,
+            Self::DoubleByte(DoubleByte::Big5) => 17,
             Self::Idna => 11,
+            Self::Wide(FixedUnicode::Utf16(Utf16Order::Little)) => 13,
+            Self::Wide(FixedUnicode::Utf16(Utf16Order::Big)) => 14,
+            Self::Wide(FixedUnicode::Utf32Le) => 15,
+            Self::Wide(FixedUnicode::Utf32Be) => 16,
         }
     }
 
@@ -539,13 +628,19 @@ impl Codec {
     }
 
     pub(crate) fn by_key(key: &str, value: &str) -> Result<Self> {
+        if let Some(format) = FixedUnicode::by_key(key) {
+            return Ok(Self::Wide(format));
+        }
         match key {
             "utf8" | "utf_8" | "u8" | "utf" | "utf8_ucs2" | "utf8_ucs4" | "cp65001" => {
                 Ok(Self::Utf8 { signature: false })
             }
             "utf_8_sig" => Ok(Self::Utf8 { signature: true }),
             "shift_jis" | "shiftjis" | "s_jis" | "sjis" | "csshiftjis" | "x_mac_japanese" => {
-                Ok(Self::ShiftJis)
+                Ok(Self::DoubleByte(DoubleByte::ShiftJis))
+            }
+            "big5" | "big5_tw" | "csbig5" | "x_mac_trad_chinese" => {
+                Ok(Self::DoubleByte(DoubleByte::Big5))
             }
             "idna" => Ok(Self::Idna),
             "cp1251" | "1251" | "windows_1251" => Ok(Self::CodePage(&CP1251)),
@@ -553,6 +648,7 @@ impl Codec {
             "cp424" | "424" | "csibm424" | "ebcdic_cp_he" | "ibm424" => Ok(Self::CodePage(&CP424)),
             "cp437" | "437" | "cspc8codepage437" | "ibm437" => Ok(Self::CodePage(&CP437)),
             "iso8859_15" | "iso_8859_15" | "l9" | "latin9" => Ok(Self::CodePage(&ISO8859_15)),
+            "koi8_r" | "cskoi8r" => Ok(Self::CodePage(&KOI8_R)),
             "koi8_u" => Ok(Self::CodePage(&KOI8_U)),
             "latin1" | "latin" | "iso8859" | "latin_1" | "l1" | "iso8859_1" | "iso_8859_1"
             | "iso_8859_1_1987" | "8859" | "cp819" | "ibm819" | "iso_ir_100" | "csisolatin1" => {
@@ -561,6 +657,21 @@ impl Codec {
             "ascii" | "us" | "us_ascii" | "646" | "ansi_x3.4_1968" | "ansi_x3_4_1968"
             | "ansi_x3.4_1986" | "cp367" | "csascii" | "ibm367" | "iso646_us"
             | "iso_646.irv_1991" | "iso_ir_6" => Ok(Self::Ascii),
+            key if key == "iso8859_2"
+                || matches_alias(
+                    key,
+                    &[
+                        "csisolatin2",
+                        "iso_8859_2",
+                        "iso_8859_2_1987",
+                        "iso_ir_101",
+                        "l2",
+                        "latin2",
+                    ],
+                ) =>
+            {
+                Ok(Self::CodePage(&ISO8859_2))
+            }
             _ => Err(option_error(
                 Kind::LookupError,
                 "unknown encoding: ",
@@ -595,6 +706,9 @@ impl Codec {
 
     /// Decode a POSIX filename with the startup codec and Python's surrogateescape policy.
     pub(crate) fn decode_filesystem(self, data: &[u8]) -> Result<Vec<u32>> {
+        if let Self::Wide(format) = self {
+            return format.decode_filesystem(data);
+        }
         if matches!(self, Self::Idna) {
             return self
                 .decode(data, Some("surrogateescape"))
@@ -608,23 +722,23 @@ impl Codec {
             points.extend(super::interpreter_stdlib::fsdecode(data));
             return Ok(points);
         }
-        if matches!(self, Self::ShiftJis) {
-            shift_jis::decode_filesystem(data, &mut points);
+        if let Self::DoubleByte(format) = self {
+            format.decode_filesystem(data, &mut points);
             return Ok(points);
         }
-        for (index, &byte) in data.iter().enumerate() {
-            let ch = match self {
-                Self::Ascii => byte.is_ascii().then(|| char::from(byte)),
-                Self::Latin1 => Some(char::from(byte)),
-                Self::CodePage(page) => page.decode.decode(byte),
-                Self::Utf8 { .. } | Self::ShiftJis | Self::Idna => unreachable!(),
-            };
-            points.push(match ch {
-                Some(ch) => u32::from(ch),
-                None if !byte.is_ascii() => 0xdc00 + u32::from(byte),
-                // The surrogateescape handler cannot consume an unmapped ASCII byte.
-                None => return Err(charmap_decode_error(data, index)),
-            });
+        if let Self::CodePage(page) = self {
+            if let Some(issue) = page.decode_prefix(&mut points, data, 0, true)? {
+                return Err(issue.error(data));
+            }
+        } else {
+            // The remaining codecs are ASCII and Latin-1.
+            points.extend(data.iter().map(|&byte| {
+                if matches!(self, Self::Ascii) && !byte.is_ascii() {
+                    0xdc00 + u32::from(byte)
+                } else {
+                    u32::from(byte)
+                }
+            }));
         }
         Ok(points)
     }
@@ -653,7 +767,7 @@ impl Codec {
                         text.push(ch);
                     } else {
                         decoding_error(&mut text, errors, &[byte], || {
-                            charmap_decode_error(data, index)
+                            charmap_issue(index).error(data)
                         })?;
                     }
                 }
@@ -673,9 +787,13 @@ impl Codec {
                 }
                 Ok(text)
             }
+            Self::Wide(format) => {
+                format.decode_text(&mut text, data, errors, true)?;
+                Ok(text)
+            }
             Self::Idna => idna::decode(data, errors),
-            Self::ShiftJis => {
-                shift_jis::decode_chunk(&mut text, data, errors, true)?;
+            Self::DoubleByte(format) => {
+                format.decode_chunk(&mut text, data, errors, true)?;
                 Ok(text)
             }
             Self::Utf8 { signature } => {
@@ -698,8 +816,8 @@ impl Codec {
 
     /// Encodings other than UTF-8 write one or two bytes for a representable scalar.
     pub(crate) fn encode_unit(self, ch: char) -> Option<([u8; 2], usize)> {
-        if matches!(self, Self::ShiftJis) {
-            return shift_jis::encode_char(ch);
+        if let Self::DoubleByte(format) = self {
+            return format.encode_char(ch);
         }
         self.encode_byte(ch).map(|byte| ([byte, 0], 1))
     }
@@ -709,7 +827,7 @@ impl Codec {
             Self::Ascii => ch.is_ascii().then_some(ch as u8),
             Self::Latin1 => u8::try_from(u32::from(ch)).ok(),
             Self::CodePage(page) => page.encode.get(&ch).copied(),
-            Self::Utf8 { .. } | Self::ShiftJis | Self::Idna => {
+            Self::Utf8 { .. } | Self::DoubleByte(_) | Self::Idna | Self::Wide(_) => {
                 unreachable!("expected a single-byte encoding")
             }
         }
@@ -733,10 +851,11 @@ impl Codec {
 
     pub(crate) fn encoding_error_reason(self) -> (&'static str, &'static str) {
         match self {
+            Self::Wide(format) => (format.name(), "surrogates not allowed"),
             Self::Ascii => ("ascii", "ordinal not in range(128)"),
             Self::Latin1 => ("latin-1", "ordinal not in range(256)"),
             Self::CodePage(_) => ("charmap", "character maps to <undefined>"),
-            Self::ShiftJis => ("shift_jis", "illegal multibyte sequence"),
+            Self::DoubleByte(_) => (self.name(), "illegal multibyte sequence"),
             Self::Idna => unreachable!("IDNA encodes whole labels"),
             Self::Utf8 { .. } => unreachable!("UTF-8 encodes every Unicode scalar"),
         }
@@ -749,6 +868,13 @@ impl Codec {
         error_input: impl FnOnce() -> Result<StrOwner>,
     ) -> Result<Cow<'a, [u8]>> {
         let (codec, reason) = match self {
+            Self::Wide(format) => {
+                return StrEncoder::Wide {
+                    format,
+                    signature: false,
+                }
+                .encode(text, errors.unwrap_or("strict"), error_input);
+            }
             Self::Idna => return idna::encode(text, errors, error_input).map(Cow::Owned),
             Self::Utf8 { signature: false } => return Ok(Cow::Borrowed(text.as_bytes())),
             Self::Utf8 { signature: true } => {
@@ -779,7 +905,7 @@ impl Codec {
                 }
                 "strict" | "surrogatepass" | "surrogateescape" => {
                     let mut end = start;
-                    if !matches!(self, Self::ShiftJis) {
+                    if !matches!(self, Self::DoubleByte(_)) {
                         while let Some((i, _)) =
                             chars.next_if(|(_, c)| self.encode_byte(*c).is_none())
                         {
@@ -840,30 +966,7 @@ fn encoding_error(
     )
 }
 
-/// CR and CRLF shrink to a single ASCII byte, so conversion can reuse the decoded buffer.
-pub(super) fn universal_newlines(text: String) -> String {
-    let mut bytes = text.into_bytes();
-    normalize_newlines(&mut bytes);
-    String::from_utf8(bytes).expect("ASCII newline conversion preserves UTF-8")
-}
-
-/// Compact physical CR and CRLF endings in place, even before the encoding is known.
-pub(super) fn normalize_newlines(bytes: &mut Vec<u8>) {
-    let mut read = 0;
-    let mut written = 0;
-    while read < bytes.len() {
-        let byte = bytes[read];
-        read += 1;
-        bytes[written] = if byte == b'\r' {
-            read += usize::from(bytes.get(read) == Some(&b'\n'));
-            b'\n'
-        } else {
-            byte
-        };
-        written += 1;
-    }
-    bytes.truncate(written);
-}
+pub(super) use imre_ast::source_encoding::universal_newlines;
 
 fn escaped(code: u32) -> Str {
     match code {
@@ -917,20 +1020,13 @@ pub(crate) fn unknown_handler(name: &str) -> Error {
     option_error(Kind::LookupError, "unknown error handler name '", name, "'")
 }
 
-fn charmap_decode_error(data: &[u8], index: usize) -> Error {
-    let bytes = match owned_input(data) {
-        Ok(bytes) => bytes,
-        Err(error) => return error,
-    };
-    let reason = "character maps to <undefined>";
-    let byte = data[index];
-    Error::unicode_decode(
-        "charmap",
-        bytes,
-        index..index + 1,
-        reason,
-        format!("'charmap' codec can't decode byte 0x{byte:02x} in position {index}: {reason}"),
-    )
+fn charmap_issue(index: usize) -> DecodeIssue {
+    DecodeIssue {
+        encoding: "charmap",
+        start: index,
+        end: index + 1,
+        reason: "character maps to <undefined>",
+    }
 }
 
 pub(crate) fn decoding_error(

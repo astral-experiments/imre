@@ -42,12 +42,12 @@ python3.14 "$bench/compare.py" --wheelhouse /tmp/flask-wheels \
   --client /tmp/flask-client --rust "$bench/rust/target/release/imre-flask-hyper-control" \
   --node "$(command -v node)" --bun "$(command -v bun)" \
   --compiler target/release/imre --runtime target/release/libimre_runtime.a \
-  --runtime-imports --build-timeout 420 --rounds 8 \
+  --build-timeout 420 --rounds 8 \
   --server-cpu "$server_cpu" --client-cpus "$client_cpus" --output /tmp/flask-comparison.json
 python3 "$bench/summary.py" /tmp/flask-comparison.json
 ```
 
-The comparison builds `serve.py` at O3. The example allows 420 seconds for compilation and records the budget and elapsed time in `imre_build`. To reuse a release-linked ELF from this same app and wheel set, replace `--compiler`, `--runtime` and `--runtime-imports` with `--imre-binary /absolute/path/to/server`. Both forms run the native proof before timing. The JSON records the proof under `imre_native_preflight` and saves the raw trace beside it. A failed build or proof leaves Imre out of `trials`, while eligible controls can still run. Use `--rounds 0` to run only the preflights, or `--mixed-only --concurrency 8` for the mixed workload alone.
+The comparison builds `serve.py` at O3. The example allows 420 seconds for compilation and records the budget and elapsed time in `imre_build`. To reuse a release-linked ELF from this same app and wheel set, replace `--compiler` and `--runtime` with `--imre-binary /absolute/path/to/server`. Both forms run the native proof before timing. The JSON records the proof under `imre_native_preflight` and saves the raw trace beside it. A failed build or proof leaves Imre out of `trials`, while eligible controls can still run. Use `--rounds 0` to run only the preflights, or `--mixed-only --concurrency 8` for the mixed workload alone.
 
 The negative control supplies the Rust server as the Imre candidate. It serves the health and big-integer JSON responses but fails the signed session check. The command verifies that the control servers receive timing rows and Imre receives none.
 

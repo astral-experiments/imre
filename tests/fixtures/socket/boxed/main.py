@@ -15,3 +15,5 @@ import numeric_host
 import resolver
 import packed_addresses
 import buffered_reader
+import subclass_finalization
+import reinitialize

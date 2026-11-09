@@ -1,6 +1,7 @@
 //! Validates generated value behavior without changing the fixed storage model.
 
 use super::*;
+use std::result::Result;
 
 impl Checker<'_> {
     /// An erased record keeps its concrete descriptor and owner. Admit only
@@ -162,6 +163,7 @@ pub(super) fn repr_supported(ty: Type, types: &Types) -> bool {
         | Type::BytesIO
         | Type::BinaryIO
         | Type::Iterator
+        | Type::Range
         | Type::Callable(_) => false,
         Type::Class(_) => true,
         _ => types
@@ -280,7 +282,8 @@ pub(super) fn validate(
 fn contains_opaque(ty: Type, types: &Types) -> bool {
     matches!(
         ty,
-        Type::Logger
+        Type::Range
+            | Type::Logger
             | Type::LogManager
             | Type::TimedFileHandler
             | Type::ProcessSelectorClass
@@ -344,8 +347,20 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
                 && !classes.methods[id].contains_key("__post_init__")
                 && !classes.has_concrete_subclasses(id))
             .then(|| classes.methods[id]["__init__"].id),
+            str_method: classes.methods[id]
+                .get("__str__")
+                .filter(|method| !method.asynchronous)
+                .map(|method| method.id),
+            async_str: classes.methods[id]
+                .get("__str__")
+                .is_some_and(|method| method.asynchronous),
+            repr_method: classes.methods[id]
+                .get("__repr__")
+                .filter(|method| !method.asynchronous && classes.has_repr_override(id))
+                .map(|method| method.id),
             value_struct: class.dataclass.is_some_and(|options| options.value_struct),
-            dataclass_eq: class.dataclass.as_ref().is_some_and(|options| options.eq),
+            field_equality: class.is_uuid(graph)
+                || class.dataclass.as_ref().is_some_and(|options| options.eq),
             dataclass_repr: class.dataclass.as_ref().is_some_and(|options| options.repr),
             toml_hash: class.toml_hash,
             initializer_fields: (class.generated_initializer
@@ -364,7 +379,8 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
                 .iter()
                 .map(|field| ir::ClassFieldMetadata {
                     name: field.name.clone(),
-                    compare: field.compare,
+                    // A UUID's integer determines equality even when its input was a bool.
+                    compare: field.compare && (!class.is_uuid(graph) || field.name == "_value"),
                     repr: field.repr,
                     repr_text: graph.modules[class.definition.module].bundled
                         && graph.modules[class.definition.module].name == "unittest.mock"

@@ -50,3 +50,24 @@ def current():
     sequence = [0, 1]
     sequence[-1] = 7
     print(sequence)
+
+    # The first target can release the only mapping reference to the second item.
+    import gc
+
+    class Field:
+        label = "retained"
+
+    entries = {"key": Field()}
+
+    class Targets:
+        def __setitem__(self, index, value):
+            if index == 0:
+                entries.clear()
+                gc.collect()
+                print(value)
+            else:
+                print(value.label)
+
+    targets = Targets()
+    for targets[0], targets[1] in entries.items():
+        break

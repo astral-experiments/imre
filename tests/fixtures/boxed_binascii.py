@@ -36,6 +36,10 @@ def current():
     raw.append(33)
     print(a2b_qp(raw))
 
+    print(binascii.b2a_hex is binascii.hexlify)
+    for encode in (binascii.b2a_hex, binascii.hexlify):
+        print(encode.__name__, encode(memoryview(b".\xfa\x00")[1:]))
+        print(encode(data=b"ABC", sep="ÿ", bytes_per_sep=-2))
     for decode in (binascii.a2b_hex, binascii.unhexlify):
         print(repr(decode), decode.__name__, decode.__qualname__, decode.__module__,
               decode.__text_signature__, decode.__self__ is binascii)

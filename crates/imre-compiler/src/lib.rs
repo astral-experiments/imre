@@ -10,7 +10,10 @@ mod effects;
 use imre_regex as fixed_regex;
 mod case_membership;
 mod frontend;
+use frontend::phase::{Diagnostic as LoweringDiagnostic, Kind as LoweringKind};
+
 mod guarded_text;
+mod installed_wheels;
 mod ir;
 mod list_bounds;
 mod list_specialization;
@@ -52,7 +55,7 @@ pub const PYTHON_VERSION: ruff_python_ast::PythonVersion = version::LANGUAGE;
 pub const IMPLEMENTATION_NAME: &str = "imre";
 
 /// File extension of installed native archives linked into an application.
-pub const NATIVE_ARCHIVE_EXTENSION: &str = "imre.a";
+pub const NATIVE_ARCHIVE_EXTENSION: &str = imre_ast::NATIVE_ARCHIVE_EXTENSIONS[1];
 
 /// Startup choices made before a native Python command executes.
 #[derive(Clone, serde::Serialize)]
@@ -60,6 +63,8 @@ pub struct CommandFlags {
     pub isolated: bool,
     pub ignore_environment: bool,
     pub context_aware_warnings: bool,
+    /// Enable the optional frozen modules at startup.
+    pub frozen_modules: bool,
     /// A positive CPU-count override; zero selects the operating system.
     pub cpu_count: i32,
     /// Python's language optimization level; independent of LLVM optimization.
@@ -92,6 +97,8 @@ pub struct PythonCommand {
 
 #[derive(Default)]
 pub struct CompileOptions {
+    /// Operating system for the linked runtime. Library callers default to the compiler's target.
+    pub target_os: Option<&'static str>,
     /// Compile the supplied command without creating a script in the caller's working directory.
     pub command: Option<PythonCommand>,
     /// Canonical import name requested by the interpreter's `-m` entry.
@@ -104,22 +111,28 @@ pub struct CompileOptions {
     pub entry_profile: Option<PathBuf>,
     /// Limit native lowering to definitions a closed entry program can use.
     pub reachable_only: bool,
-    /// Allow file entries with ordinary imports to use the native object runtime after static lowering fails.
-    pub runtime_imports: bool,
     /// Marks generated functions for LLVM's AddressSanitizer pass.
     pub address_sanitizer: bool,
     /// Optional archive of bundled native provider bodies for this target and LLVM optimization.
     pub bundled_provider_archive: Option<PathBuf>,
     /// Compiler-owned archive for a Python launcher missing its installed companion.
     pub stdlib_fallback: Option<PathBuf>,
+    /// Adjacent SDK archive selected by the Python launcher.
+    pub installed_stdlib_archive: Option<PathBuf>,
+    /// The base interpreter's installed filesystem standard library, when present.
+    pub stdlib_dir: Option<PathBuf>,
     /// Existing user and prefix package directories in the launcher's search order.
     pub site_dirs: Vec<PathBuf>,
     /// User directory with .pth files to process during Python startup.
     pub user_site_pth: Option<PathBuf>,
     /// A source sitecustomize module is visible before the command path is prepended.
     pub sitecustomize: bool,
+    /// An installed stdlib hook can run on object startup without selecting that backend.
+    pub stdlib_sitecustomize: bool,
     /// Explicit installation roots containing rebuilt native modules and their type stubs.
     pub extension_paths: Vec<PathBuf>,
+    /// Additional source modules to link for imports whose names are chosen at runtime.
+    pub include_modules: std::collections::BTreeSet<String>,
     /// Indices in extension_paths admitted as ZIPs from PYTHONPATH during Python startup.
     pub python_archive_indices: Vec<usize>,
 }
@@ -137,15 +150,16 @@ impl CompileOptions {
             })
     }
 
-    fn implicit_sites(&self) -> &[PathBuf] {
-        if self
+    fn installed_dirs(&self) -> impl Iterator<Item = &PathBuf> {
+        let sites = if self
             .python_startup()
             .is_some_and(|(flags, _)| flags.no_site)
         {
-            &[]
+            &[][..]
         } else {
-            &self.site_dirs
-        }
+            self.site_dirs.as_slice()
+        };
+        self.stdlib_dir.iter().chain(sites)
     }
 
     fn load_graph(
@@ -154,9 +168,20 @@ impl CompileOptions {
         module_root: Option<&Path>,
         filesystem: watch::FileSystem<'_>,
         import_failure: &mut Option<modules::EntryImportFailure>,
-    ) -> Result<modules::SourceGraph, String> {
+        site_probes: &mut modules::SiteProbes,
+    ) -> Result<Option<modules::SourceGraph>, String> {
+        if let Some(name) = &self.module_entry {
+            return modules::SourceGraph::module_entry(path, name, self, filesystem, site_probes);
+        }
         if let Some(command) = &self.command {
-            return modules::SourceGraph::command(command, self, filesystem, import_failure);
+            return modules::SourceGraph::command(
+                command,
+                self,
+                filesystem,
+                import_failure,
+                site_probes,
+            )
+            .map(Some);
         }
         if let Some((flags, executable)) = &self.script_startup {
             return modules::SourceGraph::script(
@@ -166,22 +191,20 @@ impl CompileOptions {
                 self,
                 filesystem,
                 import_failure,
-            );
+                site_probes,
+            )
+            .map(Some);
         }
-        modules::SourceGraph::load_with(
-            path,
-            module_root,
-            &self.extension_paths,
-            filesystem,
-            self.reachable_only || self.entry_profile.is_some(),
-            self.entry_profile.as_deref(),
-        )
+        modules::SourceGraph::load_with(path, module_root, self, filesystem, import_failure)
+            .map(Some)
     }
 }
 
 /// Checks source syntax, ty diagnostics, and Imre's exact type contract.
 pub fn check(source: &str) -> Result<(), String> {
-    let (module, _) = checked_lower(&mut modules::SourceGraph::single(source)?)?;
+    let mut graph = modules::SourceGraph::single(source)?;
+    graph.session.explicit_check = true;
+    let (module, _) = checked_lower(&mut graph)?.into_native()?;
     verify_after(&module, "lowering")
 }
 
@@ -193,10 +216,11 @@ pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String>
     let (mut module, _) = checked_lower(&mut modules::SourceGraph::single_with_mode(
         source,
         options.reachable_only,
-    )?)?;
+    )?)?
+    .into_native()?;
     specialize(&mut module)?;
     let ranges = ranges::analyze(&module);
-    llvm::emit(&module, &ranges, options.address_sanitizer)
+    llvm::emit(&module, &ranges, options.address_sanitizer).map_err(|error| error.0.to_owned())
 }
 
 /// The generated IR and every source file that must be protected from output writes.
@@ -214,11 +238,20 @@ pub struct SourceInputs {
     /// A native run of this image can request Python source modules at runtime.
     #[serde(default)]
     pub boxed_imports: bool,
+    /// Relink when a wheel or its native dependencies cannot be validated for an executable hit.
+    #[serde(skip)]
+    pub relink_site_wheel: bool,
     pub files: Vec<(PathBuf, PathBuf, String)>,
     pub missing: Vec<PathBuf>,
-    /// Existing namespace portions and the canonical directories they resolve to.
+    /// File-kind queries that affect import admission without reading a provider's contents.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub file_checks: std::collections::BTreeMap<PathBuf, bool>,
+    /// Import search directories and the canonical directories they resolve to.
     #[serde(default)]
     pub directories: Vec<(PathBuf, PathBuf)>,
+    /// Installed distribution RECORD paths visible in each searched wheel root.
+    #[serde(default)]
+    pub wheel_records: Vec<(PathBuf, Vec<PathBuf>)>,
 }
 
 impl SourceInputs {
@@ -226,6 +259,14 @@ impl SourceInputs {
         self.missing
             .iter()
             .all(|p| matches!(p.try_exists(), Ok(false)))
+            && self
+                .file_checks
+                .iter()
+                .all(|(path, expected)| path.is_file() == *expected)
+            && self
+                .wheel_records
+                .iter()
+                .all(|(root, expected)| &installed_wheels::records(root) == expected)
             && self.directories.iter().all(|(p, identity)| {
                 p.is_dir() && p.canonicalize().is_ok_and(|now| &now == identity)
             })
@@ -274,19 +315,18 @@ fn check_file_with(
     mut cache: Option<&mut IncrementalCompiler>,
     filesystem: watch::FileSystem<'_>,
 ) -> Result<(), String> {
-    let typed = |graph: &mut modules::SourceGraph| {
-        let (module, _) = checked_lower_with(graph, cache.as_deref_mut())?;
-        verify_after(&module, "lowering")
-    };
     object_fallback(
-        BoxedLayout::Whole,
-        path,
-        module_root,
+        BoxedLayout::Check,
+        (path, module_root),
         options,
         filesystem,
-        typed,
-        |_| (),
+        |graph| {
+            graph.session.explicit_check = true;
+            checked_lower_with(graph, cache.as_deref_mut())
+        },
+        |_, _| Ok((Vec::new(), false)),
     )
+    .map(drop)
 }
 
 fn named_bytecode(path: &Path) -> bool {
@@ -332,97 +372,191 @@ fn bytecode_script_error(path: &Path, bytes: &[u8]) -> Option<&'static str> {
 
 /// Selects the LLVM outputs for a resolved boxed program.
 enum BoxedLayout<'a> {
+    Check,
     Whole,
     Split,
     WholeWithUnits(&'a mut Vec<CodegenUnit>),
 }
 
 /// Uses the boxed backend when the checked graph requires Python object operations.
-fn object_fallback<T>(
+fn object_fallback(
     layout: BoxedLayout<'_>,
-    path: &Path,
-    module_root: Option<&Path>,
+    (path, module_root): (&Path, Option<&Path>),
     options: &CompileOptions,
     mut filesystem: watch::FileSystem<'_>,
-    mut lower: impl FnMut(&mut modules::SourceGraph) -> Result<T, String>,
-    boxed: impl FnOnce(UnitCompilation) -> T,
-) -> Result<T, String> {
-    if options.module_entry.is_some() {
-        return dynamic::compile(
-            (path, module_root),
-            options,
-            true,
-            None,
-            None,
-            layout,
-            || Ok(()),
-        )?
-        .map(boxed)
-        .ok_or_else(|| "could not compile the module entry".to_owned());
+    mut lower: impl FnMut(&mut modules::SourceGraph) -> Result<CheckedProgram, String>,
+    native: impl Fn(
+        &modules::SourceGraph,
+        CheckedIr,
+    ) -> Result<(Vec<CodegenUnit>, bool), llvm::Unsupported>,
+) -> Result<UnitCompilation, String> {
+    for name in &options.include_modules {
+        if !modules::valid_module_operand(name) {
+            return Err(format!(
+                "--include-module requires an absolute module name, got {name:?}"
+            ));
+        }
     }
-    let boxed_startup = options.sitecustomize
+    let checking = matches!(layout, BoxedLayout::Check);
+    let native_result = |graph, units| {
+        if !options.include_modules.is_empty() {
+            Err(
+                "--include-module requires a runtime module loader; this entry is fully typed"
+                    .into(),
+            )
+        } else if checking {
+            Ok(UnitCompilation::default())
+        } else {
+            Ok(UnitCompilation::native(
+                graph,
+                units,
+                options.entry_profile.as_deref(),
+            ))
+        }
+    };
+    let boxed_startup = options.module_entry.is_some()
+        || options.sitecustomize
         || options
             .python_startup()
             .is_some_and(|(flags, _)| flags.tracemalloc > 0);
     let mut import_failure = None;
+    let mut site_probes = modules::SiteProbes::default();
     let mut infer_sets = true;
+    let mut native_candidate = None;
     let (error, graph, checked_entry) = loop {
         let mut graph = match options.load_graph(
             path,
             module_root,
             filesystem.reborrow(),
             &mut import_failure,
+            &mut site_probes,
         ) {
-            Ok(graph) => graph,
-            Err(error) => break (error, None, false),
+            Ok(Some(graph)) => graph,
+            Ok(None) => {
+                break (
+                    "the module launcher requires its registered sources".into(),
+                    None,
+                    false,
+                );
+            }
+            Err(error) => break (error.into(), None, false),
         };
+        site_probes.record(&mut graph.inputs);
         if !infer_sets {
             graph.set_layout_hint.set(modules::SetLayoutHint::Disabled);
         }
-        match lower(&mut graph) {
-            Ok(value) if !boxed_startup => return Ok(value),
-            // Tracing and startup imports both need the same Python heap as the entry.
-            Ok(_) => {
+        let error = match lower(&mut graph)? {
+            CheckedProgram::Native(_) if graph.runtime_initializer.is_some() && !boxed_startup => {
+                // All first-party code lowered successfully. The unresolved import alone
+                // must use the same admission policy as an unresolved module in the loader.
                 break (
-                    "Python startup requires a boxed entry".to_owned(),
+                    graph.runtime_initializer.take().unwrap().into(),
+                    Some(graph),
+                    false,
+                );
+            }
+            CheckedProgram::Native(ir) if !boxed_startup => {
+                let (mut module, mut owners) = *ir;
+                if let Some((id, operand)) = ir::text_execution(&module) {
+                    let source = &graph.modules[id];
+                    let object = LoweringDiagnostic::at(
+                        &source.source,
+                        &operand,
+                        "exec requires native Python object operations".to_owned(),
+                    )
+                    .with_path(&source.path)
+                    .classified(LoweringKind::ScopedObject);
+                    break (object, Some(graph), false);
+                }
+                if checking {
+                    verify_after(&module, "lowering")?;
+                } else {
+                    for original in specialize(&mut module)? {
+                        owners.push(owners[original]);
+                    }
+                }
+                let reason = match native(&graph, (module, owners)) {
+                    Ok((value, true)) if options.entry_profile.is_none() => {
+                        // Keep the Python entry's full exception locations when it supports this
+                        // module. Otherwise the retained native callable layout can run it.
+                        native_candidate = Some(value);
+                        "Imre: native bound wrapper links use checked exception locations"
+                    }
+                    Ok((value, _)) => return native_result(graph, value),
+                    Err(refusal) => refusal.0,
+                };
+                LoweringDiagnostic::plain(reason.to_owned()).classified(LoweringKind::Object)
+            }
+            // Tracing and startup imports both need the same Python heap as the entry.
+            CheckedProgram::Native(_) => {
+                break (
+                    "Python startup requires a boxed entry".into(),
                     Some(graph),
                     true,
                 );
             }
-            // A guessed layout must not turn a working object program into a type error,
-            // or mask a diagnostic that the ordinary checked-file path would have issued.
-            Err(_) if graph.set_layout_hint.get() == modules::SetLayoutHint::Applied => {
-                infer_sets = false;
-                import_failure = None;
-            }
-            Err(error) => break (error, Some(graph), false),
+            CheckedProgram::Runtime(error) => error,
+        };
+        // A guessed layout must not turn a working object program into a type error,
+        // or mask a diagnostic that the ordinary checked-file path would have issued.
+        if graph.set_layout_hint.get() != modules::SetLayoutHint::Applied {
+            break (error, Some(graph), false);
         }
+        native_candidate = None;
+        infer_sets = false;
+        import_failure = None;
+        site_probes = modules::SiteProbes::default();
     };
-    // Python invocations and explicit object imports enforce annotated calls in
-    // the boxed runtime, where their TypeError can be caught by the program.
-    let checked_file = options.python_startup().is_none() && !options.runtime_imports;
+    // A newly found checked provider can lower normally. If lowering fails, its
+    // dependencies alone do not admit the caller to the object importer.
+    let fallback = |graph| match (graph, native_candidate, error.kind) {
+        (Some(graph), Some(value), _) => native_result(graph, value),
+        (Some(graph), None, LoweringKind::ExecutionOperand(id))
+            if graph.modules[id].is_program_source() =>
+        {
+            // Native lowering can fail before the file has a runtime registration.
+            // Check its existing contracts before diagnosing the failed call's source.
+            if let Some(contract) = &graph.source_contract {
+                contract.clone()?;
+            }
+            graph
+                .session
+                .check_execution_escapes(std::iter::once((id, graph.modules[id].path.as_path())))?;
+            Err(error.to_string())
+        }
+        _ => Err(error.to_string()),
+    };
+    let checked_graph = graph;
+    let graph = checked_graph
+        .as_ref()
+        .filter(|graph| !graph.has_checked_only_import);
+    let checked_file = options.python_startup().is_none();
     if options.entry_profile.is_some()
         || (checked_file
             && graph.as_ref().is_some_and(|g| {
-                g.return_errors.borrow().contains(&error) || g.imports_struct_decorator()
+                matches!(
+                    error.kind,
+                    LoweringKind::ReturnType | LoweringKind::DeclaredArgument
+                ) || g.imports_struct_decorator()
             }))
     {
-        return Err(error);
+        return fallback(checked_graph);
     }
     let operation = graph.as_ref().and_then(|g| {
         if checked_entry {
             Some(dynamic::ObjectOperation::CheckedEntry)
-        } else if g.class_layout_error.borrow().as_ref() == Some(&error) {
+        } else if error.kind.is_class_layout() {
             Some(dynamic::ObjectOperation::ClassLayout)
         } else {
-            (g.object_builtin_errors.borrow().contains(&error)
-                || g.has_native_bytearray.get() && !g.return_errors.borrow().contains(&error))
-            .then_some(dynamic::ObjectOperation::Builtin)
+            (error.kind.checks_object_calls()
+                || g.has_object_constructor_fallback.get()
+                    && error.kind != LoweringKind::ReturnType)
+                .then_some(dynamic::ObjectOperation::Builtin)
         }
     });
     let ordered_command_import = options.command.is_some()
         && import_failure == Some(modules::EntryImportFailure::AfterStatement);
-    let runtime_imports = options.runtime_imports
+    let object_imports = options.module_entry.is_some()
         || import_failure == Some(modules::EntryImportFailure::ZipImport)
         || (options.sitecustomize
             && import_failure == Some(modules::EntryImportFailure::MissingModule))
@@ -430,12 +564,15 @@ fn object_fallback<T>(
         || graph
             .as_ref()
             .is_some_and(|g| g.needs_object_runtime.get() || g.traceback_objects);
-    let check_returns = || {
+    let check_returns = |entry_requests_objects: bool| -> Result<(), String> {
         if let Some(graph) = &graph {
             let requested = graph.check_fallback_calls.get();
+            // A runtime class export can admit a new import graph. Keep direct source-call
+            // diagnostics unless this entry already requested Python object semantics.
+            let check_class_import = graph.imports_runtime_class && !entry_requests_objects;
             if !checked_file
-                && (options.runtime_imports
-                    || !matches!(requested, analysis::FallbackCalls::FunctionBodies))
+                && !check_class_import
+                && !matches!(requested, analysis::FallbackCalls::FunctionBodies)
             {
                 return Ok(());
             }
@@ -449,17 +586,25 @@ fn object_fallback<T>(
                     .any(|names| names.len() > 1)
             });
             let all_calls = !matches!(requested, analysis::FallbackCalls::None)
-                || checked_file && graph.has_native_bytearray.get()
+                || checked_file && graph.has_object_constructor_fallback.get()
                 || !entry.optional_imports.is_empty()
                 || compound_probe
-                || !graph.needs_object_runtime.get()
-                    && graph.object_builtin_errors.borrow().contains(&error);
+                || !graph.needs_object_runtime.get() && error.kind.checks_object_calls()
+                || checked_file && graph.uses_source_loader();
             let checked_calls = if !checked_file {
-                requested
+                if check_class_import
+                    && !matches!(requested, analysis::FallbackCalls::FunctionBodies)
+                {
+                    analysis::FallbackCalls::NamedFunctions
+                } else {
+                    requested
+                }
             } else if graph.check_method_factories.get() {
                 analysis::FallbackCalls::DecoratorFactories
             } else if all_calls {
                 analysis::FallbackCalls::All
+            } else if check_class_import {
+                analysis::FallbackCalls::NamedFunctions
             } else if entry.has_entry_guard() {
                 analysis::FallbackCalls::Entry(graph.entry)
             } else {
@@ -478,18 +623,59 @@ fn object_fallback<T>(
         }
         Ok(())
     };
+    let check = |entry_requests_objects, registered: Option<dynamic::RegisteredSources<'_>>| {
+        check_returns(entry_requests_objects)?;
+        if let Some(registered) = registered {
+            analysis::check_registered_project(
+                registered.root,
+                registered.roots,
+                registered.winners.iter().copied(),
+                registered.has_file_body,
+                checked_graph.as_ref(),
+            )?;
+            if registered
+                .file_alternatives
+                .iter()
+                .any(|source| source.check_execution)
+            {
+                // Check a linked file provider with its own bindings. The ordinary program
+                // still imports the frozen definitions in the check above.
+                let mut files: Vec<_> = registered
+                    .winners
+                    .iter()
+                    .map(|source| dynamic::RegisteredSource {
+                        is_program: false,
+                        check_execution: false,
+                        ..*source
+                    })
+                    .collect();
+                files.extend_from_slice(registered.file_alternatives);
+                analysis::check_registered_project(
+                    registered.root,
+                    registered.roots,
+                    files,
+                    registered.has_file_body,
+                    checked_graph.as_ref(),
+                )?;
+            }
+        }
+        Ok(())
+    };
     match dynamic::compile(
-        (path, module_root),
+        (path, module_root, filesystem),
         options,
-        runtime_imports,
+        object_imports,
         operation
             .or(ordered_command_import.then_some(dynamic::ObjectOperation::OrderedCommandImport)),
-        graph.as_ref(),
+        checked_graph.as_ref(),
         layout,
-        check_returns,
+        check,
     )? {
-        Some(compilation) => Ok(boxed(compilation)),
-        None => Err(error),
+        Some(mut compilation) => {
+            site_probes.record(&mut compilation.source_inputs);
+            Ok(compilation)
+        }
+        None => fallback(checked_graph),
     }
 }
 
@@ -500,6 +686,7 @@ pub fn compile_file(
     options: &CompileOptions,
 ) -> Result<Compilation, String> {
     compile_file_with_layout(path, module_root, options, BoxedLayout::Whole)
+        .map(UnitCompilation::into_whole)
 }
 
 /// Preserves the whole-program IR and returns independent boxed initializers for native codegen.
@@ -515,7 +702,16 @@ pub fn compile_file_with_boxed_units(
         options,
         BoxedLayout::WholeWithUnits(&mut units),
     )?;
-    Ok((compilation, units))
+    Ok((compilation.into_whole(), units))
+}
+
+/// Keeps typed programs whole and emits independent boxed initializers for ThinLTO.
+pub fn compile_file_for_thin_lto(
+    path: &Path,
+    module_root: Option<&Path>,
+    options: &CompileOptions,
+) -> Result<UnitCompilation, String> {
+    compile_file_with_layout(path, module_root, options, BoxedLayout::Split)
 }
 
 /// Resolves and checks the source graph once for the requested boxed outputs.
@@ -524,40 +720,24 @@ fn compile_file_with_layout(
     module_root: Option<&Path>,
     options: &CompileOptions,
     layout: BoxedLayout<'_>,
-) -> Result<Compilation, String> {
-    let typed = |graph: &mut modules::SourceGraph| {
-        let (mut module, _) = checked_lower(graph)?;
-        specialize(&mut module)?;
+) -> Result<UnitCompilation, String> {
+    let typed = |_: &modules::SourceGraph, (module, _): CheckedIr| {
         let ranges = ranges::analyze(&module);
-        let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
-        Ok(Compilation {
-            llvm_ir: llvm::emit(&module, &ranges, options.address_sanitizer)?,
-            extension_archives: graph
-                .modules
-                .iter()
-                .filter_map(|m| m.archive.clone())
-                .collect(),
-            source_inputs,
-            input_paths,
-        })
+        let (llvm_ir, prefer_objects) =
+            llvm::emit_file(&module, &ranges, options.address_sanitizer)?;
+        let units = vec![CodegenUnit {
+            name: "__main__".into(),
+            llvm_ir,
+        }];
+        Ok((units, prefer_objects))
     };
     object_fallback(
         layout,
-        path,
-        module_root,
+        (path, module_root),
         options,
         Default::default(),
+        checked_lower,
         typed,
-        |mut c| Compilation {
-            llvm_ir: c
-                .units
-                .pop()
-                .expect("whole boxed program has one unit")
-                .llvm_ir,
-            input_paths: c.input_paths,
-            source_inputs: c.source_inputs,
-            extension_archives: c.extension_archives,
-        },
     )
 }
 
@@ -566,12 +746,46 @@ pub struct CodegenUnit {
     pub llvm_ir: String,
 }
 
+#[derive(Default)]
 pub struct UnitCompilation {
     pub units: Vec<CodegenUnit>,
     pub input_paths: Vec<PathBuf>,
     pub source_inputs: SourceInputs,
     /// Native archives reached by the static import graph, in link order.
     pub extension_archives: Vec<PathBuf>,
+}
+
+impl UnitCompilation {
+    fn native(
+        mut graph: modules::SourceGraph,
+        units: Vec<CodegenUnit>,
+        profile: Option<&Path>,
+    ) -> Self {
+        let (source_inputs, input_paths) = graph.disk_inputs(profile);
+        Self {
+            units,
+            input_paths,
+            source_inputs,
+            extension_archives: graph
+                .modules
+                .into_iter()
+                .filter_map(|module| Some(module.archive?.identity))
+                .collect(),
+        }
+    }
+
+    fn into_whole(mut self) -> Compilation {
+        Compilation {
+            llvm_ir: self
+                .units
+                .pop()
+                .expect("whole program has one unit")
+                .llvm_ir,
+            input_paths: self.input_paths,
+            source_inputs: self.source_inputs,
+            extension_archives: self.extension_archives,
+        }
+    }
 }
 
 /// Reuses ty's semantic queries across revisions of a first-party program in this process.
@@ -664,89 +878,122 @@ fn compile_file_units_with(
     options: &CompileOptions,
     mut cache: Option<&mut IncrementalCompiler>,
 ) -> Result<UnitCompilation, String> {
-    let typed = |graph: &mut modules::SourceGraph| {
-        let (mut module, mut owners) = checked_lower_with(graph, cache.as_deref_mut())?;
-        for original in specialize(&mut module)? {
-            owners.push(owners[original]);
-        }
+    let typed = |graph: &modules::SourceGraph, (module, owners): CheckedIr| {
         let ranges = ranges::analyze(&module);
         let names = graph
             .modules
             .iter()
             .map(|m| m.name.clone())
             .collect::<Vec<_>>();
-        let (source_inputs, input_paths) = graph.disk_inputs(options.entry_profile.as_deref());
-        Ok(UnitCompilation {
-            units: llvm::emit_units(
-                &module,
-                &ranges,
-                options.address_sanitizer,
-                &owners,
-                &names,
-                graph.entry,
-            )?,
-            extension_archives: graph
-                .modules
-                .iter()
-                .filter_map(|m| m.archive.clone())
-                .collect(),
-            input_paths,
-            source_inputs,
-        })
+        llvm::emit_units(
+            &module,
+            &ranges,
+            options.address_sanitizer,
+            &owners,
+            &names,
+            graph.entry,
+        )
     };
     object_fallback(
         BoxedLayout::Split,
-        path,
-        module_root,
+        (path, module_root),
         options,
         Default::default(),
+        |graph| checked_lower_with(graph, cache.as_deref_mut()),
         typed,
-        |c| c,
     )
 }
 
-/// Reject unsupported operations before ty renders potentially exponential types.
-fn checked_lower(
-    graph: &mut modules::SourceGraph,
-) -> Result<(ir::Module, Vec<modules::ModuleId>), String> {
-    let lowered = frontend::lower_with_owners(graph)?;
-    let (skipped, overloads) = graph.diagnostic_scopes();
-    graph.session.check_scopes(skipped.as_deref(), &overloads)?;
-    Ok(lowered)
+type CheckedIr = (ir::Module, Vec<modules::ModuleId>);
+
+/// The source checker admits the program before the driver chooses its representation.
+enum CheckedProgram {
+    Native(Box<CheckedIr>),
+    Runtime(LoweringDiagnostic),
+}
+
+impl CheckedProgram {
+    fn into_native(self) -> Result<CheckedIr, String> {
+        match self {
+            Self::Native(ir) => Ok(*ir),
+            Self::Runtime(reason) => Err(reason.to_string()),
+        }
+    }
+}
+
+fn checked_lower(graph: &mut modules::SourceGraph) -> Result<CheckedProgram, String> {
+    checked_lower_with(graph, None)
 }
 
 fn checked_lower_with(
     graph: &mut modules::SourceGraph,
     cache: Option<&mut IncrementalCompiler>,
-) -> Result<(ir::Module, Vec<modules::ModuleId>), String> {
-    let Some(compiler) =
-        cache.filter(|_| graph.set_layout_hint.get() != modules::SetLayoutHint::Disabled)
-    else {
-        return checked_lower(graph);
+) -> Result<CheckedProgram, String> {
+    let mut cache =
+        cache.filter(|_| graph.set_layout_hint.get() != modules::SetLayoutHint::Disabled);
+    let lowered = if let Some(compiler) = cache.as_deref_mut() {
+        compiler.cache.restore_hints(graph)?;
+        let callers = compiler.callers.prepare(graph);
+        if callers.is_some() && compiler.cached_set_hint {
+            graph.set_layout_hint.set(modules::SetLayoutHint::Applied);
+        }
+        let result = frontend::lower_with_caller_cache(graph, callers);
+        compiler.cached_set_hint =
+            result.is_ok() && graph.set_layout_hint.get() == modules::SetLayoutHint::Applied;
+        compiler.cache.retain_hints(graph, result.is_ok());
+        result
+    } else {
+        frontend::lower_with_owners(graph)
     };
-    compiler.cache.restore_hints(graph)?;
-    let callers = compiler.callers.prepare(graph);
-    if callers.is_some() && compiler.cached_set_hint {
-        graph.set_layout_hint.set(modules::SetLayoutHint::Applied);
+    let (skipped, overloads) = graph.diagnostic_scopes();
+    let skipped = skipped.as_deref();
+    // A fully lowered graph has already checked the actual first-party definitions.
+    // Keep its existing diagnostics and proof scopes. When a representation is
+    // unavailable, the declared Python call contracts still apply to the graph.
+    let result = if lowered.is_ok() {
+        lowered.and_then(|ir| {
+            if let Some(compiler) = cache.as_deref_mut() {
+                compiler.cache.check_scopes(
+                    &mut graph.session,
+                    &graph.inputs,
+                    skipped,
+                    &overloads,
+                )?;
+            } else {
+                graph.session.check_scopes(skipped, &overloads)?;
+            }
+            graph.source_contract = Some(Ok(()));
+            Ok(ir)
+        })
+    } else {
+        let checked = if let Some(compiler) = cache.as_deref_mut() {
+            compiler.cache.check_closed_program(
+                &mut graph.session,
+                &graph.inputs,
+                &graph.modules,
+                skipped,
+                &overloads,
+                None,
+            )
+        } else {
+            graph
+                .session
+                .check_closed_program(&graph.modules, skipped, &overloads, None)
+        };
+        // An inapplicable object representation cannot replace a native source or ABI
+        // diagnostic. A real registration checks this result before emitting its body.
+        graph.source_contract = Some(checked);
+        lowered
+    };
+    match result {
+        Ok(ir) => Ok(CheckedProgram::Native(Box::new(ir))),
+        Err(reason) => {
+            if let Some(compiler) = cache {
+                compiler.callers = frontend::CallerCache::default();
+            }
+            Ok(CheckedProgram::Runtime(reason))
+        }
     }
-    let lowered = frontend::lower_with_caller_cache(graph, callers);
-    compiler.cached_set_hint =
-        lowered.is_ok() && graph.set_layout_hint.get() == modules::SetLayoutHint::Applied;
-    compiler.cache.retain_hints(graph, lowered.is_ok());
-    let checked = lowered.and_then(|lowered| {
-        let (skipped, overloads) = graph.diagnostic_scopes();
-        compiler.cache.check_scopes(
-            &mut graph.session,
-            &graph.inputs,
-            skipped.as_deref(),
-            &overloads,
-        )?;
-        Ok(lowered)
-    });
-    if checked.is_err() {
-        compiler.callers = frontend::CallerCache::default();
-    }
-    checked
 }
 
 fn specialize(module: &mut ir::Module) -> Result<Vec<usize>, String> {
@@ -802,6 +1049,7 @@ fn verify_after(module: &ir::Module, stage: &str) -> Result<(), String> {
 #[derive(Clone, Copy, PartialEq)]
 enum SourceKind {
     File,
+    DecodedFile,
     Command,
 }
 
@@ -929,6 +1177,94 @@ mod tests {
     use super::{CompileOptions, compile};
 
     #[test]
+    fn inference_outcomes_survive_a_directory_rename() {
+        let root = tempfile::tempdir().unwrap();
+        let original = root.path().join("ordinary");
+        let renamed = root
+            .path()
+            .join("inference is waiting for a function return type");
+        std::fs::create_dir(&original).unwrap();
+        std::fs::write(
+            original.join("display.py"),
+            "def unresolved(arg):\n    return arg\n\ndef display() -> str:\n    return (1.25).hex()\n\nprint(display())\n",
+        )
+        .unwrap();
+        std::fs::write(
+            original.join("saved.py"),
+            "def waiting():\n    return waiting()\n\ndef witness() -> bool:\n    return isinstance(3, waiting())\n\nprint('steady')\n",
+        )
+        .unwrap();
+        std::fs::write(
+            original.join("recursive.py"),
+            "def waiting():\n    return waiting()\n\nwaiting()\n",
+        )
+        .unwrap();
+
+        // An operand may wait even though the enclosing expression replaces its result.
+        std::fs::write(
+            original.join("replace.py"),
+            "def waiting():\n    return waiting()\n\ndef witness() -> str:\n    return 'x'.replace(waiting(), 'y')\n\nprint('steady')\n",
+        )
+        .unwrap();
+        std::fs::write(
+            original.join("stalled_forwards.py"),
+            concat!(
+                "def left(x: int):\n    return right(x)\n\n",
+                "def right(x: int):\n    return left(x)\n\n",
+                "def forward(x: int):\n    return leaf(x)\n\n",
+                "def leaf(x: int):\n    return x + 1\n\n",
+                "def bad(x: int):\n    return unknown\n\n",
+                "print(forward(3))\n",
+            ),
+        )
+        .unwrap();
+        let check = |directory: &std::path::Path| {
+            let program = super::compile_file(
+                &directory.join("display.py"),
+                None,
+                &CompileOptions::default(),
+            )
+            .unwrap();
+            assert!(program.llvm_ir.contains("call ptr @imre_dyn_new("));
+            super::check_file(&directory.join("replace.py"), None).unwrap();
+            for (file, diagnostic) in [
+                (
+                    "stalled_forwards.py",
+                    "14:12: Imre: name is not a local value; globals and first-class functions are unsupported",
+                ),
+                (
+                    "saved.py",
+                    "5:26: Imre: isinstance requires supported static classes",
+                ),
+                (
+                    "recursive.py",
+                    "1:1: Imre: cannot infer function return type; add an annotation; recursive calls remain unsupported",
+                ),
+            ] {
+                let path = directory.join(file).canonicalize().unwrap();
+                let error = super::check_file(&path, None).unwrap_err();
+                assert_eq!(error, format!("{}:{diagnostic}", path.display()));
+            }
+        };
+        check(&original);
+        std::fs::rename(&original, &renamed).unwrap();
+        check(&renamed);
+    }
+
+    #[test]
+    fn dictionary_set_construction_preserves_object_fallback() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.py");
+        std::fs::write(
+            &path,
+            "keys = set({'first': 1, 'second': 2})\nprint([3, 7], len(keys), 'second' in keys)\n",
+        )
+        .unwrap();
+        let program = super::compile_file(&path, None, &CompileOptions::default()).unwrap();
+        assert!(program.llvm_ir.contains("call ptr @imre_dyn_new("));
+    }
+
+    #[test]
     fn native_bytearray_construction_preserves_object_fallback() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("main.py");
@@ -948,17 +1284,13 @@ mod tests {
         .unwrap();
         assert!(super::check_file(&path, None).is_err());
 
-        // Explicit runtime imports must also preserve annotated return errors.
+        // The same object route must preserve annotated return errors.
         std::fs::write(
             &path,
             "def build() -> int:\n    buffer = bytearray()\n    return 'bad'\n\nprint(build())\n",
         )
         .unwrap();
-        let options = super::CompileOptions {
-            runtime_imports: true,
-            ..Default::default()
-        };
-        let error = super::check_file_with_options(&path, None, &options).unwrap_err();
+        let error = super::check_file(&path, None).unwrap_err();
         assert!(error.contains("expected int, got str"), "{error}");
     }
 
@@ -974,34 +1306,26 @@ mod tests {
             "def wrong() -> int:\n    return 'x'\nprint(gather('a'), wrong())\n",
         ] {
             std::fs::write(&path, format!("{gather}{usage}")).unwrap();
-            for runtime_imports in [false, true] {
-                let options = CompileOptions {
-                    runtime_imports,
-                    ..Default::default()
-                };
-                let ordinary = super::object_fallback(
-                    super::BoxedLayout::Whole,
-                    &path,
-                    None,
-                    &options,
-                    Default::default(),
-                    |graph| {
-                        graph
-                            .set_layout_hint
-                            .set(super::modules::SetLayoutHint::Disabled);
-                        let (module, _) = super::checked_lower(graph)?;
-                        super::verify_after(&module, "lowering")
-                    },
-                    |_| (),
-                );
-                assert_eq!(
-                    super::check_file_with_options(&path, None, &options),
-                    ordinary
-                );
-                if !runtime_imports {
-                    assert_eq!(incremental.check_file(&path, None), ordinary);
-                }
-            }
+            let options = CompileOptions::default();
+            let ordinary = super::object_fallback(
+                super::BoxedLayout::Check,
+                (&path, None),
+                &options,
+                Default::default(),
+                |graph| {
+                    graph
+                        .set_layout_hint
+                        .set(super::modules::SetLayoutHint::Disabled);
+                    super::checked_lower(graph)
+                },
+                |_, _| Ok((Vec::new(), false)),
+            )
+            .map(drop);
+            assert_eq!(
+                super::check_file_with_options(&path, None, &options),
+                ordinary
+            );
+            assert_eq!(incremental.check_file(&path, None), ordinary);
         }
     }
 
@@ -1099,6 +1423,16 @@ mod tests {
         }
         let flat = format!("print(len([{}]))\n", "(1 + 2),".repeat(256));
         compile(&flat, &CompileOptions::default()).unwrap();
+
+        let calls = vec!["part()"; 84].join(" + ");
+        super::analysis::check_source_complexity(&format!("table = tuple({calls})\n")).unwrap();
+        for expression in [
+            format!("f{}", "()".repeat(128)),
+            format!("f({}){}", "1+".repeat(50) + "1", "[0]".repeat(50)),
+            vec!["f()"; 128].join(" + "),
+        ] {
+            assert!(super::analysis::check_source_complexity(&expression).is_err());
+        }
 
         let clauses = "row is not None or ".repeat(64);
         super::check(&format!(
@@ -1385,6 +1719,44 @@ def first(stream: Stream) -> str:
         }
         let sequential = format!("{file}{}", "with f, f:\n    pass\n".repeat(100));
         super::check(&sequential).unwrap();
+    }
+
+    #[test]
+    fn module_functions_take_precedence_over_builtin_calls() {
+        let source = r#"
+import builtins
+
+def print(value: int) -> int:
+    return value + 1
+
+def sorted(value: int) -> list[int]:
+    return [value]
+
+def result() -> list[int]:
+    increment = print
+    return sorted(increment(print(40)))
+
+builtins.print(result()[0])
+"#;
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert!(!llvm.contains("call ptr @imre_dyn_new("));
+    }
+
+    #[test]
+    fn generic_io_annotations_use_typed_stream_reads() {
+        let source = r#"
+import typing
+from typing import IO as Stream
+
+def text(stream: Stream[str]) -> str:
+    return stream.readline()
+
+def binary(stream: typing.IO[bytes]) -> bytes:
+    return stream.readline()
+"#;
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert!(llvm.contains("call ptr @imre_text_readline("));
+        assert!(llvm.contains("call ptr @imre_binary_readline("));
     }
 
     #[test]

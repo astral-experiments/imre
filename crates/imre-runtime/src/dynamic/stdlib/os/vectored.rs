@@ -1,10 +1,7 @@
 //! Linux scatter reads and gather writes over exported buffers.
 
 use super::{Context, Error, Id, Result, Value};
-use std::{
-    collections::{HashMap, TryReserveError, hash_map::Entry},
-    ops::Range,
-};
+use std::{collections::TryReserveError, ops::Range};
 
 fn no_memory(_: TryReserveError) -> Error {
     Error::new("MemoryError", "")
@@ -88,40 +85,9 @@ fn transfer_exported(
     transfer: Transfer,
     write: bool,
 ) -> Result<Id> {
-    let mut vectors = Vec::new();
-    vectors.try_reserve_exact(spans.len()).map_err(no_memory)?;
-    let mut bases = HashMap::new();
-    bases.try_reserve(spans.len()).map_err(no_memory)?;
+    let mut scratch = crate::dynamic::raw_read_window::IoVectors::new(spans.len())?;
     loop {
-        // Get one pointer per allocation; multiple iovecs may overlap in that storage.
-        // A signal handler can mutate buffers between attempts, so reacquire the bases.
-        bases.clear();
-        vectors.clear();
-        for (storage, range) in spans {
-            let (base, length) = match bases.entry(*storage) {
-                Entry::Occupied(entry) => *entry.get(),
-                Entry::Vacant(entry) => {
-                    let backing = if write {
-                        let bytes = ctx.owner_bytes(*storage)?;
-                        (bytes.as_ptr().cast_mut(), bytes.len())
-                    } else {
-                        let bytes = ctx.writable_storage_bytes(*storage)?;
-                        (bytes.as_mut_ptr(), bytes.len())
-                    };
-                    *entry.insert(backing)
-                }
-            };
-            if range.end > length {
-                return Err(Error::new(
-                    "BufferError",
-                    "underlying buffer has changed size",
-                ));
-            }
-            vectors.push(libc::iovec {
-                iov_base: base.wrapping_add(range.start).cast(),
-                iov_len: range.len(),
-            });
-        }
+        let vectors = scratch.resolve(ctx, spans, !write)?;
         let iov = vectors.as_ptr();
         let count = vectors.len() as libc::c_int;
         // SAFETY: each iovec addresses live exported storage until the syscall returns.

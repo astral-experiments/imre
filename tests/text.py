@@ -13,6 +13,11 @@ from comprehensions import require_result, run
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "text"
 STDLIB = FIXTURES.parents[2] / "benchmarks" / "cpython_stdlib"
 REJECTED = {
+    "uuid_subclass_key": (
+        "from uuid import UUID\nclass Ticket(UUID):\n    pass\n"
+        "def lookup(key: UUID, query: UUID) -> str:\n    return {key: 'found'}[query]\n"
+        "print(lookup(Ticket(int=1), UUID(int=1)))"
+    ),
     "decimal_ordering": 'from decimal import Decimal\nprint(Decimal("1.00") < Decimal(1))',
     "decimal_float_equality": 'from decimal import Decimal\nprint(Decimal("1.00") == 1.0)',
     "decimal_fallback_invalid_call": (
@@ -27,7 +32,6 @@ REJECTED = {
     "formatter_nested_argument": 'from _string import formatter_parser\ndef number(item: int) -> int:\n    return item\nformatter_parser(number("bad"))',
     "isalnum_union_descriptor_receiver": "def test(value: str | int) -> bool:\n    return str.isalnum(value)",
     "isalnum_nested_descriptor_argument": "def required(value: int) -> int:\n    return value\nstr.isalnum(required())",
-    "ord_bytearray": 'ord(bytearray(b"x"))',
     "ord_memoryview": 'ord(memoryview(b"x"))',
     "ord_nested_argument": 'def required(x: str) -> str:\n    return x\nord(c=required())',
     "quote_from_bytes_unrelated_return": (
@@ -163,6 +167,7 @@ def main() -> None:
                 actual = run_fixture(source, [str(binary)], temporary)
                 require_result(actual, None)
                 assert actual.stdout == expected.stdout, (source.name, level, actual.stdout, expected.stdout)
+                binary.unlink()
                 checks += 1
         for name, source in REJECTED.items():
             path = temporary / f"{name}.py"

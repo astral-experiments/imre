@@ -1,9 +1,9 @@
 //! One Python attribute dictionary per local object and native thread.
 
-use std::borrow::Cow;
+use super::attribute_name::AttributeName as Name;
 use std::sync::{Arc, Weak};
 
-use super::{Context, Error, Id, NONE, Result, Value, builtins};
+use super::{Context, Error, Id, NONE, Result, Value};
 
 pub(super) const CLASS: &str = "_thread._local";
 
@@ -25,36 +25,11 @@ pub(super) fn is_method(name: &str) -> bool {
     matches!(name, "__getattribute__" | "__setattr__" | "__delattr__")
 }
 
-/// Direct slot calls can carry any Python object, including a key in the local dictionary.
-#[derive(Clone, Copy)]
-pub(super) enum Name<'a> {
-    Text(&'a str),
-    Key(Id),
-}
-
-impl<'a> Name<'a> {
-    pub(super) fn from_lookup(text: &'a str, original: Option<Id>) -> Self {
-        original.map_or(Self::Text(text), Self::Key)
-    }
-
-    fn key(self, ctx: &mut Context) -> Id {
-        match self {
-            Self::Text(name) => ctx.text(name),
-            Self::Key(key) => key,
-        }
-    }
-
-    fn text(self, ctx: &Context) -> Result<Cow<'a, str>> {
-        match self {
-            Self::Text(name) => Ok(Cow::Borrowed(name)),
-            Self::Key(key) => builtins::attribute_name(ctx, key).map(Cow::Owned),
-        }
-    }
-
+impl Name<'_> {
     fn is_dict(self, ctx: &mut Context) -> Result<bool> {
         match self {
             Self::Text(name) => Ok(name == "__dict__"),
-            Self::Key(key) => match ctx.heap.get(key) {
+            Self::Python { key, .. } => match ctx.heap.get(key) {
                 Value::Str(name) => Ok(name == "__dict__"),
                 _ => {
                     let marker = ctx.text("__dict__");
@@ -143,13 +118,33 @@ pub(super) fn method(
         ));
     }
     match (slot, arguments) {
-        ("__getattribute__", [key]) => ctx.local_attribute(obj, Name::Key(*key)),
+        ("__getattribute__", [key]) => ctx.local_attribute(
+            obj,
+            Name::Python {
+                key: *key,
+                text: None,
+            },
+        ),
         ("__setattr__", [key, value]) => {
-            ctx.update_local_attribute(obj, Name::Key(*key), Some(*value))?;
+            ctx.update_local_attribute(
+                obj,
+                Name::Python {
+                    key: *key,
+                    text: None,
+                },
+                Some(*value),
+            )?;
             Ok(NONE)
         }
         ("__delattr__", [key]) => {
-            ctx.update_local_attribute(obj, Name::Key(*key), None)?;
+            ctx.update_local_attribute(
+                obj,
+                Name::Python {
+                    key: *key,
+                    text: None,
+                },
+                None,
+            )?;
             Ok(NONE)
         }
         _ => {
@@ -380,7 +375,7 @@ mod initialization_tests;
 #[cfg(test)]
 mod tests {
     use super::Dictionaries;
-    use crate::dynamic::value::{Heap, Location, NONE, Value};
+    use crate::dynamic::value::{Heap, Id, Location, NONE, Value};
     use std::rc::Rc;
     use std::sync::{Barrier, Mutex};
 
@@ -388,7 +383,7 @@ mod tests {
     fn dictionaries_are_private_and_unrooted_after_thread_exit() {
         let mut heap = Heap::new();
         let mut dictionary = || {
-            let payload: Rc<[Vec<String>]> = Rc::from([]);
+            let payload: Rc<[Vec<Id>]> = Rc::from([]);
             let probe = Rc::downgrade(&payload);
             let value = heap.alloc(Value::AttrGetter(payload));
             (heap.alloc(Value::Dict(vec![(NONE, value)].into())), probe)

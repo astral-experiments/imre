@@ -1,6 +1,36 @@
-use super::source_code::{DelegateOutcome, GeneratorInput};
 use super::value::{Body, FrameOwner, Location};
 use super::{Context, Error, Id, NONE, Result, Value};
+
+pub(super) enum GeneratorInput {
+    Send(Id),
+    Throw { error: Error, args: Vec<Id> },
+}
+
+impl GeneratorInput {
+    pub(super) fn keep(&self, heap: &mut super::value::Heap, owner: Id) -> Result<()> {
+        let input_roots = match self {
+            GeneratorInput::Send(_) => 1,
+            GeneratorInput::Throw { error, args } => args.len() + error.roots().count(),
+        };
+        heap.reserve_temporaries(1 + input_roots)?;
+        heap.keep(owner);
+        match self {
+            GeneratorInput::Send(value) => heap.keep(*value),
+            GeneratorInput::Throw { error, args } => {
+                for root in error.roots().chain(args.iter().copied()) {
+                    heap.keep(root);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+pub(super) enum DelegateOutcome {
+    Yield(Id),
+    Done(Id),
+    LookupFailed(Error),
+}
 
 pub(super) const ANEXT_METHODS: &[&str] = &[
     "__await__",
@@ -25,6 +55,23 @@ pub(super) fn coroutine_method(owner: &str, name: &str) -> bool {
 }
 
 impl Context {
+    /// A suspended Python definition owns a generator frame; a coroutine also
+    /// exposes its origin, await protocol and unstarted-coroutine finalizer.
+    pub(super) fn new_suspended(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Result<Id> {
+        let frame = self.new_generator(code, scope, owner);
+        let definition = self.code_object(code);
+        if definition.is_coroutine() {
+            let origin = self.coroutine_origin();
+            let coroutine = self.alloc(Value::Coroutine { frame, origin });
+            self.heap.watch_unstarted_coroutine(coroutine)?;
+            Ok(coroutine)
+        } else if definition.flags & imre_ast::code_flags::ASYNC_GENERATOR != 0 {
+            Ok(self.async_generator(frame))
+        } else {
+            Ok(frame)
+        }
+    }
+
     pub(super) fn new_generator(&mut self, code: Id, scope: Id, owner: FrameOwner) -> Id {
         let definition = self.code_object(code);
         let (name, qualname) = match owner {
@@ -44,8 +91,7 @@ impl Context {
             lineno: definition.first_line,
             code,
             scope,
-            iterators: Vec::new(),
-            protected: Vec::new(),
+            native: None,
             offset: Some(0),
             running: false,
         });
@@ -77,6 +123,87 @@ impl Context {
             *qualname = value;
         }
         Ok(())
+    }
+
+    pub(super) fn generator_send(&mut self, generator: Id, sent: Id) -> Result<Id> {
+        self.send_generator_frame(generator, generator, sent)
+    }
+
+    /// Send a value into a frame while keeping its public generator or coroutine alive.
+    pub(super) fn send_generator_frame(
+        &mut self,
+        generator: Id,
+        finalizer: Id,
+        sent: Id,
+    ) -> Result<Id> {
+        let Value::Generator {
+            code,
+            running,
+            offset,
+            ..
+        } = *self.heap.get(generator)
+        else {
+            return Err(Error::new(
+                "TypeError",
+                "generator.send requires a generator",
+            ));
+        };
+        let coroutine = self.code_object(code).is_coroutine();
+        let kind = if coroutine { "coroutine" } else { "generator" };
+        if running {
+            return Err(Error::new(
+                "ValueError",
+                format!("{kind} already executing"),
+            ));
+        }
+        if coroutine && offset.is_none() {
+            return Err(Error::new(
+                "RuntimeError",
+                "cannot reuse already awaited coroutine",
+            ));
+        }
+        if sent != NONE && offset == Some(0) {
+            return Err(Error::new(
+                "TypeError",
+                format!("can't send non-None value to a just-started {kind}"),
+            ));
+        }
+        let next = if matches!(self.code_object(code).body, Body::Native(..)) {
+            self.next_result(generator)?
+        } else {
+            stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+                self.resume_native(generator, finalizer, GeneratorInput::Send(sent))
+            })?
+        };
+        next.ok_or_else(|| self.exception("StopIteration", &[]))
+    }
+
+    /// A generator lambda has no implicit StopIteration handler; a def or genexpr does.
+    pub(super) fn frame_error(&mut self, error: Error, code: Id) -> Error {
+        let definition = self.code_object(code);
+        if definition.generator_lambda {
+            return error;
+        }
+        let async_gen = definition.flags & imre_ast::code_flags::ASYNC_GENERATOR != 0;
+        let coroutine = definition.is_coroutine();
+        let message = if self.is_stop_iteration(&error) {
+            if async_gen {
+                "async generator raised StopIteration"
+            } else if coroutine {
+                "coroutine raised StopIteration"
+            } else {
+                "generator raised StopIteration"
+            }
+        } else if async_gen && self.is_builtin_error(&error, "StopAsyncIteration") {
+            "async generator raised StopAsyncIteration"
+        } else {
+            return error;
+        };
+        let cause = self.raised_instance(error);
+        let mut converted = Error::new("RuntimeError", message);
+        converted.tracing().cause = Some(cause);
+        converted.context = cause;
+        converted
     }
 
     /// Acquire an asynchronous iterator once, without binding its next descriptor yet.
@@ -265,10 +392,10 @@ impl Context {
         self.check_call_depth(0)?;
         self.call_depth += 1;
         let result = stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || match method {
-            "__next__" => self.generator_send(frame, NONE),
-            "send" => self.generator_send(frame, args[1]),
-            "throw" => self.generator_throw(frame, &args[1..]),
-            "close" => self.generator_close(frame),
+            "__next__" => self.send_generator_frame(frame, coroutine, NONE),
+            "send" => self.send_generator_frame(frame, coroutine, args[1]),
+            "throw" => self.throw_into_generator_frame(frame, coroutine, &args[1..]),
+            "close" => self.close_generator_frame(frame, coroutine),
             _ => unreachable!("known coroutine method"),
         });
         self.call_depth -= 1;
@@ -351,9 +478,12 @@ impl Context {
                         self.call(method, Vec::new(), Vec::new())?;
                     }
                     Err(missing) if self.is_attribute_error(&missing) => {}
-                    Err(other) => eprintln!(
-                        "Exception ignored while closing generator: {}",
-                        other.report(&self.heap)
+                    Err(other) => super::unraisable::report(
+                        self,
+                        other,
+                        true,
+                        Some(iter),
+                        "Exception ignored while closing generator",
                     ),
                 }
                 return Err(error);
@@ -378,12 +508,18 @@ impl Context {
     }
 
     pub(super) fn generator_throw(&mut self, id: Id, args: &[Id]) -> Result<Id> {
+        self.throw_into_generator_frame(id, id, args)
+    }
+
+    /// Throw into a frame on behalf of its public generator or coroutine.
+    fn throw_into_generator_frame(&mut self, id: Id, finalizer: Id, args: &[Id]) -> Result<Id> {
         let mut error = self.generator_exception(args)?;
         let Value::Generator {
             code,
             scope,
             offset,
             running,
+            lineno,
             ..
         } = *self.heap.get(id)
         else {
@@ -410,27 +546,37 @@ impl Context {
                 Err(error)
             };
         }
-        if offset == Some(0) {
-            // Throwing into a fresh generator unwinds at its definition before any body instruction.
+        let fresh = offset == Some(0);
+        if fresh || matches!(self.code_object(code).body, Body::Native(..)) {
+            // A fresh frame unwinds at its definition, a suspended native frame at its yield.
             let definition = self.code_object(code);
             let location = Location {
                 file: self.str_value(definition.filename)?.to_owned().into(),
-                line: definition.first_line,
+                line: lineno,
                 span: None,
             };
             self.heap.enter(scope, code, FrameOwner::Generator(id));
             self.heap.publish_statement(&[], location, NONE);
             self.record_exception_frame(&mut error, None);
             self.heap.leave(NONE, false);
+            if !fresh {
+                // Unwind the compiled iterator stack. The traceback retains Python locals,
+                // including the outer iterator in .0.
+                let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                    unreachable!("generator scope")
+                };
+                frame
+                    .names
+                    .retain(|name, _| name != ".iterator" && !name.starts_with(".iterator."));
+                error = self.frame_error(error, code);
+            }
+            self.heap.disarm_finalizer(finalizer);
             self.heap.discard_generator_frame(id);
             return Err(error);
         }
-        if matches!(self.code_object(code).body, Body::Native(_)) {
-            self.heap.discard_generator_frame(id);
-            return Err(self.frame_error(error, code));
-        }
-        self.resume_source_input(
+        self.resume_native(
             id,
+            finalizer,
             GeneratorInput::Throw {
                 error,
                 args: super::copy_ids(args)?,
@@ -440,6 +586,11 @@ impl Context {
     }
 
     pub(super) fn generator_close(&mut self, id: Id) -> Result<Id> {
+        self.close_generator_frame(id, id)
+    }
+
+    /// Close a suspended frame on behalf of its public generator or coroutine.
+    pub(super) fn close_generator_frame(&mut self, id: Id, finalizer: Id) -> Result<Id> {
         let Value::Generator {
             code,
             offset,
@@ -463,13 +614,15 @@ impl Context {
         if offset.is_none() {
             return Ok(NONE);
         }
-        if offset == Some(0) || matches!(self.code_object(code).body, Body::Native(_)) {
+        if offset == Some(0) || matches!(self.code_object(code).body, Body::Native(..)) {
+            self.heap.disarm_finalizer(finalizer);
             self.heap.discard_generator_frame(id);
             return Ok(NONE);
         }
         let exit = self.exception("GeneratorExit", &[]);
-        match self.resume_source_input(
+        match self.resume_native(
             id,
+            finalizer,
             GeneratorInput::Throw {
                 error: exit,
                 args: Vec::new(),

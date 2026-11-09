@@ -3,50 +3,17 @@ use crate::modules::{Binding, Intrinsic, IntrinsicModule, SourceGraph, bundled_s
 
 /// Prefer boxed module implementations over the common bundled sources.
 pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
+    if let Some(path) = crate::modules::charmap_provider_path(name, true) {
+        return Some((path, include_str!("../../stdlib/encodings/charmap.py")));
+    }
+    if let Some((_, path)) = super::FIXED_UTF_PROVIDERS
+        .iter()
+        .find(|(id, _)| *id == name)
+    {
+        return Some((path, include_str!("../../stdlib/encodings/utf_fixed.py")));
+    }
     match name {
-        "types" => {
-            const UPSTREAM: &str = include_str!(
-                "../../../../benchmarks/cpython_stdlib/full/types/upstream/Lib/types.py"
-            );
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some((
-                "types.py",
-                SOURCE.get_or_init(|| {
-                    let start = UPSTREAM.find("def new_class(").unwrap();
-                    let (helpers, _) = UPSTREAM[start..]
-                        .split_once("def get_original_bases(")
-                        .unwrap();
-                    let descriptor = UPSTREAM.find("class DynamicClassAttribute:").unwrap();
-                    let coroutine = UPSTREAM.find("def coroutine(func):").unwrap();
-                    format!(
-                        "{helpers}{}\n{}\n{}",
-                        include_str!("../../stdlib/types_original_bases.py"),
-                        &UPSTREAM[descriptor..coroutine],
-                        include_str!("../../stdlib/types_coroutine.py"),
-                    )
-                }),
-            ))
-        }
-        "http.server" => {
-            const UPSTREAM: &str = include_str!(
-                "../../../../benchmarks/cpython_stdlib/full/http/upstream/Lib/http/server.py"
-            );
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some(("http/server.py", SOURCE.get_or_init(|| {
-                let start = UPSTREAM.find("class SimpleHTTPRequestHandler(").unwrap();
-                let (handler, _) = UPSTREAM[start..]
-                    .split_once("# Utilities for CGIHTTPRequestHandler")
-                    .unwrap();
-                // The existing server's _escape implements html.escape with quote=False.
-                let handler = handler
-                    .replace("html.escape(displaypath, quote=False)", "_escape(displaypath)")
-                    .replace("html.escape(displayname, quote=False)", "_escape(displayname)");
-                format!(
-                    "{}\nimport datetime\nimport email.utils\nimport io\nimport mimetypes\nimport os\nimport posixpath\nimport shutil\nimport urllib.parse\n\n{handler}",
-                    include_str!("../../stdlib/http/server.py")
-                )
-            })))
-        }
+        "types" => bundled_source!("types.py"),
         "reprlib" => bundled_source!("reprlib.py"),
         // The scalar Decimal stays available for checked serializers.
         "decimal" => Some(("decimal.py", include_str!("../../stdlib/decimal_boxed.py"))),
@@ -90,111 +57,13 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "runpy" => bundled_source!("runpy.py"),
         // CPython 3.14.5 Lib/trace.py. See licenses/CPython.txt.
         "trace" => bundled_source!("trace.py"),
-        "traceback" => Some((
-            "traceback.py",
-            include_str!("../../stdlib/traceback_stack.py"),
-        )),
+        // CPython 3.14.5 Lib/traceback.py with native traceback positions.
+        "traceback" => bundled_source!("traceback.py"),
         "subprocess" if cfg!(unix) => {
             bundled_source!("subprocess.py")
         }
-        "linecache" => {
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            const UPSTREAM: &str = include_str!(
-                "../../../../benchmarks/cpython_stdlib/full/linecache/upstream/Lib/linecache.py"
-            );
-            // Keep CPython's cache, loader fallback and invalidation. The native source
-            // decoder implements the disk path ordinarily provided by tokenize.open.
-            Some(("linecache.py", SOURCE.get_or_init(|| {
-                UPSTREAM.replace("import tokenize\n", "from _imre_linecache import source_lines\n")
-                    .replace("with tokenize.open(fullname) as fp:\n            lines = fp.readlines()",
-                             "with open(fullname, 'rb') as fp:\n            lines = source_lines(fp.read())")
-            })))
-        }
-        "inspect" => {
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some((
-                "inspect.py",
-                SOURCE.get_or_init(|| {
-                    // Keep the full CPython Parameter, BoundArguments and Signature implementations.
-                    // The runtime supplies read-only mappings and Unicode identifier validation.
-                    const UPSTREAM: &str = include_str!(
-                        "../../../../benchmarks/cpython_stdlib/full/inspect/upstream/Lib/inspect.py"
-                    );
-                    let section = |start, end| {
-                        let begin = UPSTREAM.find(start).unwrap();
-                        UPSTREAM[begin..].split_once(end).unwrap().0
-                    };
-                    // Some native descriptors implement assignment in the runtime without a
-                    // Python-visible setter on their type.
-                    let descriptors = section(
-                        "def ismethoddescriptor(object):",
-                        "if hasattr(types, 'GetSetDescriptorType'):",
-                    )
-                    .replace(
-                        "or hasattr(tp, \"__delete__\")",
-                        "or hasattr(tp, \"__delete__\") or _native_data_descriptor(object)",
-                    );
-                    // Keep CPython's class-creation checks and read Imre's abstract flag.
-                    let abstract_predicate = section("def isabstract(object):", "def _getmembers(")
-                        .replace("object.__flags__", "_abstract_flags(object)");
-                    // Load the parser dependencies on first signature inspection. The boxed
-                    // list iterator exposes next() but has no Python-visible __next__ method.
-                    let text_signatures = section(
-                        "def _signature_strip_non_python_syntax(",
-                        "def _signature_from_builtin(",
-                    )
-                    .replace("    if not signature:", "    import token\n    import tokenize\n    if not signature:")
-                    .replace("iter(lines).__next__", "functools.partial(next, iter(lines))")
-                    .replace("    Parameter = cls._parameter_cls", "    import ast\n    Parameter = cls._parameter_cls");
-                    // BlockFinder and getblock share tokenize. Delay its import until the
-                    // first scan so importing inspect alone does not initialize the tokenizer.
-                    let source_blocks = section("class EndOfBlock(", "def walktree(")
-                        .replace(
-                            "        self.indent = 0",
-                            "        global tokenize\n        if 'tokenize' not in globals():\n            import tokenize\n        self.indent = 0",
-                        )
-                        .replace("iter(lines).__next__", "functools.partial(next, iter(lines))");
-                    // Imre records native source positions without CPython bytecode offsets.
-                    let frame_info = section(
-                        "def getframeinfo(",
-                        "# ------------------------------------------------ static version of getattr",
-                    )
-                        .replace("_get_code_position_from_tb(frame)", "_frame_position(frame)")
-                        .replace("_get_code_position(frame.f_code, frame.f_lasti)", "_frame_position(frame)");
-                    [
-                        include_str!("../../stdlib/inspect.py"),
-                        include_str!("../../stdlib/inspect_signature.py"),
-                        "import abc\nimport collections.abc\nimport dis\nimport functools\nimport importlib.machinery\nimport linecache\nimport os\nimport sys\nfrom collections import namedtuple\nfrom inspect import _abstract_flags, _frame_position",
-                        section("TPFLAGS_IS_ABSTRACT =", "def ismethoddescriptor(object):"),
-                        &descriptors,
-                        section("def isfunction(object):", "# A marker for markcoroutinefunction"),
-                        section("def isasyncgenfunction(obj):", "def isabstract(object):"),
-                        &abstract_predicate,
-                        section("def _getmembers(", "def getmro(cls):"),
-                        section("def indentsize(line):", "def _findclass(func):"),
-                        section("def getfile(object):", "class ClassFoundException("),
-                        section("def findsource(object):", "class EndOfBlock("),
-                        &source_blocks,
-                        section("AGEN_CREATED =", "_NonUserDefinedCallables ="),
-                        section("_Traceback = namedtuple(", "def _get_code_position_from_tb("),
-                        &frame_info,
-                        section("def getmro(cls):", "def indentsize(line):"),
-                        section("def _findclass(func):", "def cleandoc(doc):"),
-                        section("GEN_CREATED = ", "def getgeneratorlocals("),
-                        section("CORO_CREATED = ", "AGEN_CREATED ="),
-                        section("def formatannotation(", "def formatannotationrelativeto("),
-                        section("Arguments = namedtuple(", "def getargs(co):"),
-                        section("FullArgSpec = namedtuple(", "def formatannotation("),
-                        section("def formatargvalues(", "ClosureVars = namedtuple("),
-                        section("_NonUserDefinedCallables =", "def _signature_get_user_defined_method("),
-                        section("def _signature_get_partial(", "def _signature_strip_non_python_syntax("),
-                        &text_signatures,
-                        section("class _void:", "class BufferFlags("),
-                    ]
-                    .join("\n")
-                }),
-            ))
-        }
+        // CPython 3.14.5 Lib/linecache.py. See licenses/CPython.txt.
+        "linecache" => bundled_source!("linecache.py"),
         "bisect" => bundled_source!("bisect.py"),
         "email.errors" => Some((
             "email/errors.py",
@@ -242,6 +111,7 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "pathlib._os" => bundled_source!("pathlib/_os.py"),
         "pathlib.types" => bundled_source!("pathlib/types.py"),
         "glob" => bundled_source!("glob.py"),
+        "bz2" => bundled_source!("bz2.py"),
         "gzip" => bundled_source!("gzip.py"),
         "ntpath" => bundled_source!("ntpath.py"),
         "shlex" => Some((
@@ -300,6 +170,8 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
                 include_str!("../../stdlib/unittest/boxed_mock.py"),
                 "\n",
                 include_str!("../../stdlib/unittest/boxed_patch.py"),
+                "\n",
+                include_str!("../../stdlib/unittest/threading_mock.py"),
             ),
         )),
         "unittest.loader" => Some((
@@ -307,21 +179,16 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
             include_str!("../../stdlib/unittest/loader_boxed.py"),
         )),
         "threading" => bundled_source!("threading.py"),
-        "textwrap" => {
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some(("textwrap.py", SOURCE.get_or_init(|| {
-                // The boxed ABI can forward the original **kwargs, preserving omitted
-                // options and dispatching construction through the module's TextWrapper.
-                const WRAPPER: &str = include_str!("../../stdlib/textwrap/wrapper.py");
-                const UPSTREAM: &str = include_str!(
-                    "../../../../benchmarks/cpython_stdlib/full/textwrap/upstream/Lib/textwrap.py"
-                );
-                let (implementation, _) = WRAPPER.split_once("\ndef wrap(").unwrap();
-                let first = UPSTREAM.find("\ndef wrap(").unwrap();
-                let (functions, _) = UPSTREAM[first..].split_once("\nif __name__").unwrap();
-                format!("{implementation}{functions}")
-            })))
-        }
+        "textwrap" => Some((
+            "textwrap.py",
+            // The public functions forward the caller's **kwargs to the module's TextWrapper.
+            concat!(
+                include_str!("../../stdlib/textwrap/wrapper.py"),
+                "\n\n",
+                include_str!("../../stdlib/textwrap/functions_boxed.py"),
+                "\n",
+            ),
+        )),
         "importlib.resources._adapters" => bundled_source!("importlib/resources/_adapters.py"),
         "importlib.resources" => bundled_source!("importlib/resources/__init__.py"),
         "importlib.readers" => bundled_source!("importlib/readers.py"),
@@ -334,94 +201,19 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         "importlib._abc" => bundled_source!("importlib/_abc.py"),
         "importlib.abc" => bundled_source!("importlib/abc.py"),
         "importlib.machinery" => bundled_source!("importlib/machinery.py"),
-        "_frozen_importlib" | "importlib._bootstrap" => {
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            let file = if name == "_frozen_importlib" {
-                "_frozen_importlib.py"
-            } else {
-                "importlib/_bootstrap.py"
-            };
-            Some((file, SOURCE.get_or_init(|| {
-                const UPSTREAM: &str = include_str!(
-                    "../../../../benchmarks/cpython_stdlib/full/importlib/upstream/Lib/importlib/_bootstrap.py"
-                );
-                let section = |start, end| {
-                    let begin = UPSTREAM.find(start).unwrap();
-                    UPSTREAM[begin..].split_once(end).unwrap().0
-                };
-                // The native warning backend is the public warnings module; load it only on emission.
-                let imports = section("def _gcd_import(", "def _builtin_from_name(")
-                    .replace("_warnings.warn(", "_warning_module().warn(");
-                let find = section("def _find_spec(", "def _sanity_check(")
-                    .replace("for finder in meta_path:", "for index, finder in enumerate(meta_path):")
-                    .replace("                spec = find_spec(name, path, target)", concat!(
-                        "                spec = find_spec(name, path, target)\n",
-                        "                if index + 1 < len(meta_path) and meta_path[index + 1] is _BundledImporter:\n",
-                        "                    spec = _prefer_bundled_spec(finder, spec, name, path, target)",
-                    ))
-                    .replace("with _ImportLockContext():", "with _import_lock:")
-                    .replace("_warnings.warn('sys.meta_path is empty', ImportWarning)",
-                             "_import_warning('sys.meta_path is empty', 1254)");
-                let exec = section("def _exec(spec, module):", "def _load_backward_compatible(")
-                    .replace("_warnings.warn(msg, ImportWarning)", "_import_warning(msg, 866)");
-                let load = section("def _load_backward_compatible(", "# Loaders")
-                    .replace("_warnings.warn(msg, ImportWarning)", "_import_warning(msg, 921)");
-                // Preserve CPython's module creation hooks and its fresh/reload attribute rules.
-                [
-                    include_str!("../../stdlib/importlib/legacy_source_loader.py"),
-                    section("class ModuleSpec:", "def _spec_from_module("),
-                    section("def _init_module_attrs(", "def _module_repr_from_spec("),
-                    section("def _call_with_frames_removed(", "def _requires_builtin("),
-                    section("def _resolve_name(", "def _find_spec("),
-                    section("def _sanity_check(", "_ERR_MSG_PREFIX ="),
-                    section("def _object_name(", "# Bootstrap-related"),
-                    &find,
-                    &exec,
-                    &load,
-                    &imports,
-                ].join("\n")
-            })))
-        }
-        "_frozen_importlib_external" | "importlib._bootstrap_external" => {
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some(("importlib/_bootstrap_external.py", SOURCE.get_or_init(|| {
-                // A create_module hook can convert a file package into a namespace spec.
-                const UPSTREAM: &str = include_str!(
-                    "../../../../benchmarks/cpython_stdlib/full/importlib/upstream/Lib/importlib/_bootstrap_external.py"
-                );
-                let section = |start, end| {
-                    let begin = UPSTREAM.find(start).unwrap();
-                    UPSTREAM[begin..].split_once(end).unwrap().0
-                };
-                // Preserve FileFinder’s package, loader and cache ordering for filesystem entries.
-                let spec = section("_POPULATE = object()", "def _bless_my_loader(")
-                    .replace("_get_supported_file_loaders()", "_file_loader_defaults(location)");
-                let members: Vec<_> = include_str!(concat!(env!("OUT_DIR"), "/imre-stdlib-members.txt"))
-                    .lines()
-                    .collect();
-                let members = serde_json::to_string(&members)
-                    .expect("stdlib source paths serialize as strings");
-                let installed_sources = format!("_installed_source_members = {members}");
-                [
-                    include_str!("../../stdlib/importlib/source_loader.py"),
-                    section("_CASE_INSENSITIVE_PLATFORMS_STR_KEY =", "def _pack_uint32("),
-                    section("def _unpack_uint32(", "def _unpack_uint16("),
-                    section("if _MS_WINDOWS:\n    def _path_join(", "def _write_atomic("),
-                    section("def _get_cached(", "def _calc_mode("),
-                    section("def _classify_pyc(", "def _validate_timestamp_pyc("),
-                    section("def _compile_bytecode(", "def _code_to_timestamp_pyc("),
-                    section("class SourcelessFileLoader(", "class ExtensionFileLoader("),
-                    &spec,
-                    &section("class _NamespacePath:", "class FileFinder:")
-                        .replace("_warnings.warn('sys.path_hooks is empty', ImportWarning)",
-                                 "_warn_import(globals(), 'sys.path_hooks is empty', 1224, _is_frozen)"),
-                    section("class FileFinder:", "class AppleFrameworkLoader("),
-                    &installed_sources,
-                    include_str!("../../stdlib/importlib/registered_finder.py"),
-                    section("def _set_bootstrap_module(", "def _install("),
-                ].join("\n")
-            })))
-        }
+        "_frozen_importlib" => Some((
+            "_frozen_importlib.py",
+            include_str!("../../stdlib/importlib/_bootstrap.py"),
+        )),
+        "importlib._bootstrap" => bundled_source!("importlib/_bootstrap.py"),
+        "_frozen_importlib_external" | "importlib._bootstrap_external" => Some((
+            "importlib/_bootstrap_external.py",
+            concat!(
+                include_str!("../../stdlib/importlib/_bootstrap_external.py"),
+                "\n\n\n",
+                include_str!("../../stdlib/importlib/registered_finder.py"),
+            ),
+        )),
         // CPython 3.14.5 Lib/uuid.py with a public Enum declaration for SafeUUID.
         "uuid" => Some(("uuid.py", include_str!("../../stdlib/uuid_boxed.py"))),
         "asyncio" => bundled_source!("asyncio/__init__.py"),
@@ -590,4 +382,21 @@ fn target(call: &ast::ExprCall) -> Option<String> {
         .split('.')
         .all(ruff_python_stdlib::identifiers::is_identifier)
         .then_some(absolute)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::boxed_source;
+
+    #[test]
+    fn inspect_compiles_the_tracked_python_verbatim() {
+        let (filename, source) = boxed_source("inspect").unwrap();
+        assert_eq!(filename, "inspect.py");
+        // A header may span lines, or its old spelling may occur in a docstring.
+        // Even the body after such a header must reach the parser byte for byte.
+        let body = source
+            .strip_prefix(include_str!("../../stdlib/inspect_cleandoc.py"))
+            .and_then(|rest| rest.strip_prefix('\n'));
+        assert!(body == Some(include_str!("../../stdlib/inspect.py")));
+    }
 }

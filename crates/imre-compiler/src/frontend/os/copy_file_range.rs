@@ -29,7 +29,7 @@ impl Checker<'_> {
         };
         let mut descriptor = |value| {
             let value = self.index_word(value, &call.func, false)?;
-            Ok::<_, String>(scope.hold(self, fd_op(TransferFd, Type::Int, vec![value])))
+            Ok::<_, Failure>(scope.hold(self, fd_op(TransferFd, Type::Int, vec![value])))
         };
         let src = descriptor(arg(0))?;
         let dst = descriptor(arg(1))?;

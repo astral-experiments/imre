@@ -2,6 +2,7 @@
 
 use super::*;
 pub(super) use crate::types::CachePolicy as Policy;
+use std::result::Result;
 
 pub(super) fn policy(
     graph: &SourceGraph,
@@ -319,7 +320,7 @@ impl Checker<'_> {
     pub(super) fn cache_constructor(
         &mut self,
         call: &ast::ExprCall,
-    ) -> Result<Option<Expr>, String> {
+    ) -> phase::Result<Option<Expr>, String> {
         let policy = match self.resolve(&call.func) {
             Some(Binding::Intrinsic(Intrinsic::FunctionCache)) => Policy {
                 capacity: -1,
@@ -370,7 +371,7 @@ impl Checker<'_> {
         policy: Policy,
         annotations: Option<crate::types::AnnotationOrigin>,
         site: &impl Ranged,
-    ) -> Result<Expr, String> {
+    ) -> phase::Result<Expr, String> {
         let (params, returns) = self.types.signature(callable.ty).ok_or_else(|| {
             error(
                 self.source,
@@ -456,7 +457,7 @@ impl Checker<'_> {
         &mut self,
         call: &ast::ExprCall,
         receiver: Option<&Expr>,
-    ) -> Result<Option<Expr>, String> {
+    ) -> phase::Result<Option<Expr>, String> {
         let ast::Expr::Attribute(attr) = &*call.func else {
             return Ok(None);
         };
@@ -554,7 +555,7 @@ impl Checker<'_> {
         declaration: Option<Policy>,
         receiver: Option<Expr>,
         call: &ast::ExprCall,
-    ) -> Result<Expr, String> {
+    ) -> phase::Result<Expr, String> {
         if !call.arguments.is_empty() {
             return Err(error(
                 self.source,

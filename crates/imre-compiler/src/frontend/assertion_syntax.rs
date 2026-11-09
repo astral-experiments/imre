@@ -1,5 +1,6 @@
 //! Validate forbidden bindings before omitting an optimized assertion.
-use super::{ast, error};
+use super::ast;
+use crate::frontend::diagnostic_message;
 use ast::visitor::{Visitor, walk_expr, walk_parameter};
 
 pub(super) fn validate(source: &str, assertion: &ast::StmtAssert) -> Result<(), String> {
@@ -9,24 +10,19 @@ pub(super) fn validate(source: &str, assertion: &ast::StmtAssert) -> Result<(), 
     }
     impl<'ast> Visitor<'ast> for Scan<'_> {
         fn visit_expr(&mut self, expr: &'ast ast::Expr) {
-            let forbidden = match expr {
-                ast::Expr::Name(name) => {
-                    name.ctx != ast::ExprContext::Load && name.id == "__debug__"
-                }
-                ast::Expr::Attribute(attr) => {
-                    attr.ctx != ast::ExprContext::Load && attr.attr.as_str() == "__debug__"
-                }
-                _ => false,
-            };
-            if forbidden {
-                self.error = Some(error(self.source, expr, "cannot assign to __debug__"));
+            if let Some(message) = imre_ast::executable::debug_binding_error(expr) {
+                self.error = Some(diagnostic_message(self.source, expr, message));
             } else if self.error.is_none() {
                 walk_expr(self, expr);
             }
         }
         fn visit_parameter(&mut self, parameter: &'ast ast::Parameter) {
             if parameter.name.as_str() == "__debug__" {
-                self.error = Some(error(self.source, parameter, "cannot assign to __debug__"));
+                self.error = Some(diagnostic_message(
+                    self.source,
+                    parameter,
+                    "cannot assign to __debug__",
+                ));
             } else if self.error.is_none() {
                 walk_parameter(self, parameter);
             }

@@ -215,12 +215,9 @@ def _discover(context, resolvers):
             yield from resolver(context)
 
 
-def _path_distributions(context):
-    name = context.name
-    normalized = _normalize(name) if name else ''
-    legacy = name.lower().replace('-', '_') if name else ''
-    for root in context.path:
-        directory = fspath(root) or '.'
+def _path_distributions(paths, normalized, legacy):
+    for path in paths:
+        directory = path or '.'
         archive = None
         try:
             if _is_file(directory):
@@ -241,7 +238,12 @@ def _path_distributions(context):
 class MetadataPathFinder(DistributionFinder):
     @classmethod
     def find_distributions(cls, context=DistributionFinder.Context()):
-        return _path_distributions(context)
+        name = context.name
+        paths = context.path
+        normalized = _normalize(name) if name else ''
+        legacy = name.lower().replace('-', '_') if name else ''
+        # Capture the path iterator at lookup, leaving filesystem access lazy.
+        return _path_distributions(map(fspath, paths), normalized, legacy)
 
     @staticmethod
     def invalidate_caches():

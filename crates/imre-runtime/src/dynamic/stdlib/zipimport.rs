@@ -1,7 +1,6 @@
 //! Archive resources for a runtime-selected zipimporter.
 
 use std::collections::hash_map::Entry;
-use std::path::Path;
 
 use super::super::builtins::boolean;
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
@@ -15,8 +14,8 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     match (name, args, kwargs) {
-        ("exists", [path], []) => Ok(boolean(Path::new(ctx.str_value(*path)?).exists())),
-        ("isfile", [path], []) => Ok(boolean(Path::new(ctx.str_value(*path)?).is_file())),
+        ("exists", [path], []) => Ok(boolean(ctx.import_path(*path)?.exists())),
+        ("isfile", [path], []) => Ok(boolean(ctx.import_path(*path)?.is_file())),
         ("invalidate", [path], []) => {
             let path = ctx.str_value(*path)?.to_owned();
             ctx.zip_directories.remove(&path);
@@ -34,6 +33,14 @@ pub(super) fn call(
                 }
             }
             Ok(TRUE)
+        }
+        ("names", [path], []) => {
+            let Some(archive) = ctx.zip_directories.get(ctx.str_value(*path)?) else {
+                return Err(ctx.lookup_error("KeyError", *path));
+            };
+            let mut names = Vec::new();
+            archive.visit_names(|name| names.push(ctx.heap.owned_text(name.as_str().into())));
+            Ok(ctx.alloc(Value::List(names)))
         }
         ("read" | "contains", [path, key], []) => {
             let path = ctx.str_value(*path)?;

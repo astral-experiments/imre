@@ -41,9 +41,12 @@ mod input;
 mod shared;
 #[cfg(unix)]
 mod signals;
+mod source_arguments;
 mod string_cursor;
 mod string_owner;
 mod sumprod;
+mod tee;
+mod zstd_streams;
 use shared::Shared;
 type ObjectOwner = Shared<objects::Object>;
 type ListOwner = Shared<List>;
@@ -161,6 +164,16 @@ impl Int {
         } else {
             self.big().bits()
         }
+    }
+
+    /// Count the set bits in the absolute value, including for negative integers.
+    fn bit_count(&self) -> Self {
+        let count = if let Some(value) = self.as_small() {
+            u64::from(value.unsigned_abs().count_ones())
+        } else {
+            self.big().magnitude().count_ones()
+        };
+        Self::from_usize(count as usize)
     }
 
     /// Counts magnitude bits, excluding the sign and leading zeroes.
@@ -535,6 +548,21 @@ pub type Bytes = Vec<u8>;
 /// CPython's variable-size bytes header, cached hash and trailing NUL also need to fit.
 pub(crate) const MAX_BYTES_LEN: usize = isize::MAX as usize - (4 * size_of::<usize>() + 1);
 
+/// Reserve initialized I/O storage without touching each page before a read.
+pub(crate) fn zeroed_io_buffer(size: usize) -> Result<Vec<u8>> {
+    if size == 0 {
+        return Ok(Vec::new());
+    }
+    let layout = std::alloc::Layout::array::<u8>(size).map_err(|_| Error::allocation())?;
+    // SAFETY: size is nonzero and layout describes exactly size bytes.
+    let data = unsafe { std::alloc::alloc_zeroed(layout) };
+    if data.is_null() {
+        return Err(Error::allocation());
+    }
+    // SAFETY: this initialized allocation has the layout Vec<u8> uses for size bytes.
+    Ok(unsafe { Vec::from_raw_parts(data, size, size) })
+}
+
 /// Release unused byte capacity when possible, preserving data if allocation fails.
 ///
 /// Compaction follows a successful read, so its optional allocation must not abort
@@ -804,22 +832,57 @@ impl<W: Write> BinaryOutput<W> {
         }
     }
 
-    #[cold]
-    fn write_all_slow(&mut self, mut bytes: &[u8]) -> io::Result<()> {
-        let supplied = bytes.len();
-        if let Err(error) = self.flush_buffer() {
-            return self.buffer_after_error(bytes, 0, error);
+    fn try_buffer(&mut self, bytes: &[u8]) -> bool {
+        if bytes.is_empty()
+            || (bytes.len() < self.buffer.capacity()
+                && bytes.len() <= self.buffer.capacity() - self.buffer.len())
+        {
+            self.buffer.extend_from_slice(bytes);
+            return true;
         }
-        while !bytes.is_empty() && bytes.len() >= self.buffer.capacity() {
-            match self.inner.write(bytes) {
-                Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
-                Ok(count) => bytes = &bytes[count..],
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => return self.buffer_after_error(bytes, supplied - bytes.len(), error),
+        false
+    }
+
+    /// Make at most one raw write, committing its count before the caller checks signals.
+    /// A nonblocking write can instead accept the remaining input into the buffer.
+    fn write_step(
+        &mut self,
+        bytes: &[u8],
+        sent: &mut usize,
+        write: impl FnOnce(&mut W, &[u8]) -> io::Result<usize>,
+    ) -> io::Result<bool> {
+        let remaining = &bytes[*sent..];
+        let result = if self.buffer.is_empty() {
+            write(&mut self.inner, remaining).and_then(nonzero_write)
+        } else {
+            self.flush_step(write).map(|()| 0)
+        };
+        match result {
+            Ok(count) => {
+                *sent += count;
+                Ok(true)
+            }
+            Err(error) => {
+                self.buffer_after_error(remaining, *sent, error)?;
+                *sent = bytes.len();
+                Ok(false)
             }
         }
-        self.buffer.extend_from_slice(bytes);
-        Ok(())
+    }
+
+    #[cold]
+    fn write_all_slow(&mut self, bytes: &[u8]) -> io::Result<()> {
+        let mut sent = 0;
+        loop {
+            if let Err(error) = self.write_step(bytes, &mut sent, Write::write)
+                && error.kind() != io::ErrorKind::Interrupted
+            {
+                return Err(error);
+            }
+            if self.try_buffer(&bytes[sent..]) {
+                return Ok(());
+            }
+        }
     }
 
     /// After a nonblocking write stalls, keep as much of the new input as fits
@@ -843,18 +906,37 @@ impl<W: Write> BinaryOutput<W> {
         Ok(())
     }
 
+    /// Flush a single prefix. A handler may raise before the next flush.
+    fn flush_step(
+        &mut self,
+        write: impl FnOnce(&mut W, &[u8]) -> io::Result<usize>,
+    ) -> io::Result<()> {
+        let count = nonzero_write(write(&mut self.inner, &self.buffer[self.written..])?)?;
+        self.written += count;
+        if self.written == self.buffer.len() {
+            self.buffer.clear();
+            self.written = 0;
+        }
+        Ok(())
+    }
+
     fn flush_buffer(&mut self) -> io::Result<()> {
-        while self.written < self.buffer.len() {
-            match self.inner.write(&self.buffer[self.written..]) {
-                Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
-                Ok(count) => self.written += count,
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => return Err(error),
+        while !self.buffer.is_empty() {
+            if let Err(error) = self.flush_step(Write::write)
+                && error.kind() != io::ErrorKind::Interrupted
+            {
+                return Err(error);
             }
         }
-        self.buffer.clear();
-        self.written = 0;
         Ok(())
+    }
+}
+
+fn nonzero_write(count: usize) -> io::Result<usize> {
+    if count == 0 {
+        Err(io::ErrorKind::WriteZero.into())
+    } else {
+        Ok(count)
     }
 }
 
@@ -866,10 +948,7 @@ impl<W: Write> Write for BinaryOutput<W> {
 
     #[inline]
     fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
-        if bytes.len() < self.buffer.capacity()
-            && bytes.len() <= self.buffer.capacity() - self.buffer.len()
-        {
-            self.buffer.extend_from_slice(bytes);
+        if self.try_buffer(bytes) {
             return Ok(());
         }
         self.write_all_slow(bytes)
@@ -983,22 +1062,7 @@ pub unsafe extern "C" fn imre_int_literal(data: *const u8, length: usize) -> usi
 
 /// Parse the spelling of a source integer, including signed literals stored in
 /// an argparse schema. Runtime conversion of a string argument stays decimal.
-fn parse_integer_literal(literal: &str) -> Option<BigInt> {
-    let literal = literal.replace('_', "");
-    let (literal, negative) = literal
-        .strip_prefix('-')
-        .map_or((literal.as_str(), false), |s| (s, true));
-    let (digits, radix) = if literal.starts_with("0x") || literal.starts_with("0X") {
-        (&literal[2..], 16)
-    } else if literal.starts_with("0o") || literal.starts_with("0O") {
-        (&literal[2..], 8)
-    } else if literal.starts_with("0b") || literal.starts_with("0B") {
-        (&literal[2..], 2)
-    } else {
-        (literal, 10)
-    };
-    BigInt::parse_bytes(digits.as_bytes(), radix).map(|value| if negative { -value } else { value })
-}
+use imre_ast::numbers::parse_integer_literal;
 
 /// # Safety
 /// Both arguments must be live integer handles; the result is a new reference.
@@ -1070,6 +1134,134 @@ fn integer_binary(a: &Int, b: &Int, op: u32) -> Result<Int> {
     Ok(Int::new(result))
 }
 
+/// Validate indexed selection arguments before narrowing the requested count.
+fn selection_fits(n: &BigInt, k: &BigInt) -> Result<bool> {
+    if n.is_negative() {
+        return Err(Error::new(
+            Kind::ValueError,
+            "n must be a non-negative integer",
+        ));
+    }
+    if k.is_negative() {
+        return Err(Error::new(
+            Kind::ValueError,
+            "k must be a non-negative integer",
+        ));
+    }
+    Ok(k <= n)
+}
+
+/// Compute math.comb for either entry point after both arguments have been indexed.
+fn integer_comb(n: &Int, k: &Int) -> Result<Int> {
+    let (n, k) = (n.big(), k.big());
+    if !selection_fits(&n, &k)? {
+        return Ok(Int::from(0));
+    }
+    let complement = n.as_ref() - k.as_ref();
+    let steps = k.into_owned().min(complement).to_i64().ok_or_else(|| {
+        Error::new(
+            Kind::OverflowError,
+            "min(n - k, k) must not exceed 9223372036854775807",
+        )
+    })?;
+    // C(n, d) = C(n, d - 1) * (n - d + 1) / d. The division is exact,
+    // and the unbounded product does not need a GCD to prevent overflow.
+    let mut factor = n.into_owned();
+    let mut result = BigInt::from(1);
+    for divisor in 1..=steps {
+        result *= &factor;
+        result /= divisor;
+        factor -= 1;
+    }
+    Ok(Int::new(result))
+}
+
+/// # Safety
+/// Both arguments borrow live integer handles. A successful return owns its integer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_math_comb(n: usize, k: usize) -> usize {
+    // SAFETY: the generated caller roots both arguments for this call.
+    let (n, k) = unsafe { (Int::borrow(n), Int::borrow(k)) };
+    finish(integer_comb(&n, &k).map(Int::into_raw), 1)
+}
+
+/// Multiply comparable-sized partial products, keeping a leaf in one word
+/// whenever the bit length of its largest factor guarantees that it fits.
+fn factorial_product(lo: u64, hi: u64) -> BigInt {
+    let count = hi - lo + 1;
+    let bits_per_factor = u64::BITS - hi.leading_zeros();
+    if count <= u64::from(u64::BITS / bits_per_factor) {
+        return BigInt::from((lo..=hi).product::<u64>());
+    }
+    let mid = lo + (hi - lo) / 2;
+    factorial_product(lo, mid) * factorial_product(mid + 1, hi)
+}
+
+/// Multiply k descending factors, reusing the factorial product for word-sized endpoints.
+fn falling_product(n: &BigInt, k: u64) -> BigInt {
+    if k == 0 {
+        return BigInt::from(1);
+    }
+    if k == 1 {
+        return n.clone();
+    }
+    if let Some(hi) = n.to_u64() {
+        return factorial_product(hi - (k - 1), hi);
+    }
+    let half = k / 2;
+    falling_product(n, half) * falling_product(&(n - half), k - half)
+}
+
+fn integer_perm(n: &Int, k: &Int) -> Result<Int> {
+    let (n, k) = (n.big(), k.big());
+    if !selection_fits(&n, &k)? {
+        return Ok(Int::from(0));
+    }
+    let k = k
+        .to_i64()
+        .ok_or_else(|| Error::new(Kind::OverflowError, "k must not exceed 9223372036854775807"))?;
+    Ok(Int::new(falling_product(&n, k as u64)))
+}
+
+/// # Safety
+/// Both operands borrow live integer handles. A successful return owns its integer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_math_perm(n: usize, k: usize) -> usize {
+    // SAFETY: the generated caller roots both operands across this call.
+    let (n, k) = unsafe { (Int::borrow(n), Int::borrow(k)) };
+    finish(integer_perm(&n, &k).map(Int::into_raw), 1)
+}
+
+fn integer_factorial(n: &Int) -> Result<Int> {
+    let n = n.big();
+    if n.is_negative() {
+        return Err(Error::new(
+            Kind::ValueError,
+            "factorial() not defined for negative values",
+        ));
+    }
+    let max = std::ffi::c_long::MAX;
+    let n = n
+        .to_u64()
+        .filter(|&value| value <= max as u64)
+        .ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                format!("factorial() argument should not exceed {max}"),
+            )
+        })?;
+    Ok(Int::new(factorial_product(1, n.max(1))))
+}
+
+/// # Safety
+/// The caller borrows a live integer handle. A successful return owns its integer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_math_factorial(n: usize) -> usize {
+    // SAFETY: the generated caller keeps the operand alive across the call.
+    let n = unsafe { Int::borrow(n) };
+    finish(integer_factorial(&n).map(Int::into_raw), 1)
+}
+
 /// Validates the count before zero shortcuts. Unbounded right shifts retain
 /// the infinite sign extension; impossible left shifts follow CPython 3.14's
 /// signed-64-bit bit-count limit without attempting an enormous allocation.
@@ -1121,6 +1313,16 @@ fn integer_shift(value: &Int, count: &Int, left: bool) -> Result<Int> {
         ));
     }
     Ok(Int::new(value.as_ref() << shift as usize))
+}
+
+/// Return the population count of the magnitude of a canonical integer.
+///
+/// # Safety
+/// The argument must be a rooted, canonical integer handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_bit_count(value: usize) -> usize {
+    // SAFETY: the caller roots the handle through this nonreentrant read.
+    unsafe { Int::borrow(value) }.bit_count().into_raw()
 }
 
 /// Returns the number of bits in the magnitude of a canonical integer.

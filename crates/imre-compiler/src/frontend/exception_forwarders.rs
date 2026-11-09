@@ -140,7 +140,7 @@ impl Checker<'_> {
         name: &str,
         positional: Vec<T>,
         named: Vec<(String, T)>,
-    ) -> Result<Bound<T>, BindFailure> {
+    ) -> std::result::Result<Bound<T>, BindFailure> {
         let supplied = positional.len();
         let mut names = HashMap::new();
         let mut tail = Vec::new();
@@ -482,7 +482,7 @@ impl Checker<'_> {
         }
         let record = scope.finish(Expr {
             ty: Type::Class(class),
-            kind: ExprKind::Builtin(Builtin::ExceptionRecordFields, fields),
+            kind: ExprKind::Builtin(Builtin::RecordFromFields, fields),
         });
         Ok(self.wrap_exception_record(class, record))
     }

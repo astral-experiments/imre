@@ -24,6 +24,9 @@ valid.clear()
 assert signal.SIGINT in signal.valid_signals()
 
 assert signal.alarm is _signal.alarm
+assert signal.pause is _signal.pause
+assert signal.pause.__doc__ == "Wait until a signal arrives."
+
 assert signal.alarm(Delay()) == 0
 try:
     for args, kwargs in (([], {}), ([0, 0], {}), ([], {"seconds": 0}), ([1 << 40], {}), ([0.5], {})):
@@ -157,7 +160,26 @@ def check_handlers():
 check_handlers()
 
 
-def check_buffered_read_eintr():
+def check_pause():
+    seen = []
+
+    def handler(signum, frame):
+        seen.append(signum)
+
+    old = signal.signal(signal.SIGALRM, handler)
+    try:
+        signal.alarm(1)
+        assert signal.pause() is None
+        assert seen == [signal.SIGALRM]
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old)
+
+
+check_pause()
+
+
+def check_buffered_read_eintr(mode):
     import errno
     import io
     import os
@@ -166,21 +188,23 @@ def check_buffered_read_eintr():
 
     def finish_read(signum, frame):
         os.write(w, b"bar")
-        raise InterruptedError(errno.EINTR, "retry readinto")
+        if mode == "rb":
+            raise InterruptedError(errno.EINTR, "retry readinto")
 
     previous = signal.signal(signal.SIGALRM, finish_read)
     try:
-        with io.open(r, "rb") as reader:
+        with io.open(r, mode, encoding="latin-1" if mode == "r" else None) as reader:
             os.write(w, b"foo")
             signal.alarm(1)
-            assert reader.read(6) == b"foobar"
+            assert reader.read(6) == ("foobar" if mode == "r" else b"foobar")
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, previous)
         os.close(w)
 
 
-check_buffered_read_eintr()
+check_buffered_read_eintr("rb")
+check_buffered_read_eintr("r")
 
 
 def check_wakeup_fd():

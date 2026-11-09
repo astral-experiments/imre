@@ -549,7 +549,21 @@ impl Checker<'_> {
         let ast::Expr::Attribute(attribute) = &*call.func else {
             return Ok(None);
         };
-        let stderr = match self.resolve(&attribute.value) {
+        let receiver = self.resolve(&attribute.value);
+        if attribute.attr.as_str() == "reconfigure"
+            && matches!(
+                receiver,
+                Some(Binding::Intrinsic(
+                    Intrinsic::Stdin
+                        | Intrinsic::Stdout
+                        | Intrinsic::OriginalStdout
+                        | Intrinsic::Stderr
+                ))
+            )
+        {
+            return Err(self.scoped_builtin_error("io.TextIOWrapper.reconfigure", call));
+        }
+        let stderr = match receiver {
             Some(Binding::Intrinsic(Intrinsic::Stdout | Intrinsic::OriginalStdout)) => {
                 // The ordinary TextIO method path evaluates and retains the receiver first.
                 return Ok(None);

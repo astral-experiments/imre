@@ -1,9 +1,9 @@
 //! BufferedReader over a native FileIO retains that raw object and its descriptor.
 
-use super::super::{builtins, files, os_error};
+use super::super::{builtins, files};
 use super::descriptor_buffer::{self, backing, ssize};
 use super::{Context, Error, FALSE, Id, NONE, Result, Value};
-use files::{BinaryFile, ReadSource};
+use files::BinaryFile;
 
 pub(super) const METHODS: &[&str] = &[
     "__init__",
@@ -56,32 +56,6 @@ fn validate(owner: &str, name: &str, count: usize, kwargs: &[(String, Id)]) -> R
         _ => return Ok(()),
     };
     Err(Error::new("TypeError", message))
-}
-
-/// A warning or flush override can replace the raw, even across backing types.
-pub(super) fn flush_and_close(ctx: &mut Context, receiver: Id) -> Result<Id> {
-    let flush = super::text_wrapper::invoke(ctx, receiver, "flush", vec![]);
-    if let Err(error) = &flush {
-        for root in error.roots() {
-            ctx.heap.keep(root);
-        }
-    }
-    let close = if let Some(buffer) = backing(ctx, receiver)
-        && let Value::File(handle) = ctx.heap.get(buffer)
-        && let BinaryFile::Descriptor(fd) = handle.as_ref()
-    {
-        fd.close_after_flush(ctx, receiver).map(|_| NONE)
-    } else {
-        super::buffered_reader::close_raw(ctx, receiver)
-    };
-    match (flush, close) {
-        (Err(flush), Err(mut close)) => {
-            close.context = ctx.raised_instance(flush);
-            Err(close)
-        }
-        (Err(flush), _) => Err(flush),
-        (_, result) => result,
-    }
 }
 
 pub(super) fn call(
@@ -166,7 +140,7 @@ pub(super) fn call(
         }
         if receiver != buffer && name == "close" && !fd.closed() {
             fd.warn_on_close(ctx, receiver)?;
-            return flush_and_close(ctx, receiver);
+            return super::buffered_io::close(ctx, receiver);
         }
         return fd.call(ctx, receiver, name, args);
     }
@@ -175,12 +149,6 @@ pub(super) fn call(
             match name {
                 "name" => return Ok(path),
                 "mode" => return Ok(ctx.text(mode)),
-                _ => {}
-            }
-        } else if let Some(fd) = handle.socket_reader_name() {
-            match name {
-                "name" => return Ok(ctx.int(i64::from(fd))),
-                "mode" => return Ok(ctx.text("rb")),
                 _ => {}
             }
         }
@@ -217,15 +185,7 @@ pub(super) fn call(
         let source = slot
             .as_mut()
             .ok_or_else(|| Error::new("ValueError", "read of closed file"))?;
-        let data = match source {
-            ReadSource::File(reader) => descriptor_buffer::read_once(reader, size)?,
-            ReadSource::Socket(socket) => {
-                let mut data = builtins::zeroed_bytes(size)?;
-                let n = socket.read1(&mut data).map_err(os_error)?;
-                data.truncate(n);
-                data
-            }
-        };
+        let data = descriptor_buffer::read_once(source, size)?;
         return Ok(ctx.alloc(Value::Bytes(data)));
     }
     let result = files::binary_method(ctx, buffer, name, args)?;

@@ -2,6 +2,7 @@
 
 use std::ffi::{CStr, c_char};
 use std::slice;
+use std::sync::Arc;
 
 use super::*;
 
@@ -232,7 +233,7 @@ impl Context {
             )),
             "match_sequence_length" => builtins::call(self, "len", &[a], &[]),
             "builtin" => {
-                let name = copy_label(self.str_value(a)?)?;
+                let name = self.copy_name(a)?;
                 Ok(self.builtin(&name))
             }
             "annotation_scope" => Ok(self
@@ -242,7 +243,7 @@ impl Context {
             "lookup_annotation_global"
             | "lookup_class_annotation"
             | "lookup_class_annotation_global" => {
-                let name = copy_label(self.str_value(b)?)?;
+                let name = self.copy_name(b)?;
                 if op != "lookup_annotation_global" {
                     if let Some(&cell) = self.scope_data(a).closure.cells.get("__classdict__") {
                         let Value::Cell(Some(mapping)) = *self.heap.get(cell) else {
@@ -264,19 +265,19 @@ impl Context {
                 self.lookup(scope, &name)
             }
             "lookup" | "lookup_class_local" => {
-                let name = copy_label(self.str_value(b)?)?;
+                let name = self.copy_name(b)?;
                 if op == "lookup_class_local" {
                     return self.lookup_class_local(a, &name);
                 }
                 self.lookup(a, &name)
             }
             "assign" | "assign_target" | "assign_named_target" => {
+                let name = self.copy_name(b)?;
                 let scope = if op == "assign_named_target" {
-                    self.named_expression_scope(a)
+                    self.named_expression_scope(a, &name)
                 } else {
                     a
                 };
-                let name = copy_label(self.str_value(b)?)?;
                 let replaced = self.store_source_name(scope, &name, c)?;
                 if matches!(op, "assign_target" | "assign_named_target") {
                     Ok(flag(replaced))
@@ -296,10 +297,22 @@ impl Context {
                 Ok(NONE)
             }
             "delname" | "clearname" => {
-                let name = copy_label(self.str_value(b)?)?;
+                let name = self.copy_name(b)?;
                 let released = self.replacing_finalizer(a, &name, NONE);
                 let scope = self.binding_scope(a, &name);
-                if self.remove_binding(scope, &name, b)? {
+                let removed = match self.remove_binding(scope, &name, b) {
+                    Err(error)
+                        if op == "delname"
+                            && self.scope_data(a).parent.is_none()
+                            && !self.scope_data(a).globals.contains(name.as_str()) =>
+                    {
+                        // DELETE_NAME replaces the mapping error after its callback has unwound.
+                        self.raised_instance(error);
+                        false
+                    }
+                    result => result?,
+                };
+                if removed {
                     if released {
                         self.heap.release_unbound_finalizers();
                     }
@@ -310,16 +323,29 @@ impl Context {
             }
             "comprehension_scope" => self.comprehension_scope(a, b),
             "import" => {
-                let name = copy_label(self.str_value(b)?)?;
+                let name = self.copy_name(b)?;
                 self.module(&name)
             }
             "fromlist" => self.prepare_fromlist(a, b),
             "from" => self.import_from(a, b),
             "import_star" => self.import_star(a, b),
-            "lookup_enter" => self.context_method(a, "__enter__"),
-            "lookup_exit" => self.context_method(a, "__exit__"),
+            "lookup_enter" => {
+                self.context_method(a, if b == TRUE { "__aenter__" } else { "__enter__" })
+            }
+            "lookup_exit" => {
+                self.context_method(a, if b == TRUE { "__aexit__" } else { "__exit__" })
+            }
+            "await_iter" => {
+                let method = match b {
+                    0 => None,
+                    1 => Some("__aenter__"),
+                    2 => Some("__aexit__"),
+                    _ => return Err(Error::new("SystemError", "invalid await context")),
+                };
+                self.await_iterator(a, method)
+            }
             "attr" | "method" => {
-                let name = copy_label(self.str_value(b)?)?;
+                let name = self.copy_name(b)?;
                 if op == "method" {
                     self.lookup_method(a, &name)
                 } else {
@@ -327,12 +353,12 @@ impl Context {
                 }
             }
             "setattr" => {
-                let name = copy_label(self.str_value(b)?)?;
+                let name = self.copy_name(b)?;
                 self.set_attr(a, &name, c)?;
                 Ok(c)
             }
             "delattr" => {
-                let name = copy_label(self.str_value(b)?)?;
+                let name = self.copy_name(b)?;
                 self.delete_attr(a, &name)?;
                 Ok(NONE)
             }
@@ -358,7 +384,8 @@ impl Context {
                 if matches!(self.heap.get(a), Value::Tuple(_)) {
                     Ok(a)
                 } else {
-                    let items = self.items(a)?;
+                    let mut items = Vec::new();
+                    self.expand_positional_items(&mut items, a, Some(b))?;
                     Ok(self.alloc(Value::List(items)))
                 }
             }
@@ -388,8 +415,12 @@ impl Context {
                 Ok(a)
             }
             "extend" => {
-                let items = self.items(b)?;
-                if let Value::List(list) = self.heap.get_mut(a) {
+                if matches!(self.heap.get(a), Value::List(_)) {
+                    let mut items = Vec::new();
+                    self.expand_positional_items(&mut items, b, None)?;
+                    let Value::List(list) = self.heap.get_mut(a) else {
+                        unreachable!()
+                    };
                     // Fill the available space before growing so __sizeof__ and
                     // partial progress on allocation failure match repeated append.
                     let mut remaining = items.as_slice();
@@ -402,16 +433,18 @@ impl Context {
                         remaining = rest;
                     }
                 } else {
-                    for item in items {
+                    for item in self.items(b)? {
                         self.op("append", a, item, NONE)?;
                     }
                 }
                 Ok(a)
             }
             "update" => self.merge_mapping(a, b, super::calls::MappingOperation::Unpack),
-            "keywords" => {
-                self.merge_mapping(a, b, super::calls::MappingOperation::Keywords(Some(c)))
-            }
+            "keywords" | "class_keywords" => self.merge_mapping(
+                a,
+                b,
+                super::calls::MappingOperation::Keywords((op == "keywords").then_some(c)),
+            ),
             "unpack" | "unpack_read" => {
                 let count = usize::try_from(self.as_integer(b)?)
                     .map_err(|_| Error::new("ValueError", "invalid unpack length"))?;
@@ -440,6 +473,7 @@ impl Context {
             "class_parameter_scope" | "function_parameter_scope" => {
                 super::typing::parameter_scope(self, a, b, op == "class_parameter_scope")
             }
+            "class_parameter_frame" => super::typing::class_parameter_frame(self, a, b),
             "class_annotation_environment" => self.class_annotation_environment(a, b),
             "class_annotation_locals" => {
                 let parent = self.scope_data(a).parent.expect("annotation globals");
@@ -496,6 +530,10 @@ impl Context {
             "generator" => self.generator(a, b, c),
             "yielded" => Ok(self.alloc(Value::Yielded(a))),
             "iter" => self.loop_iterator(a),
+            "get_iter" => self.iterator(a),
+            "loop_cursor" => Ok(self.loop_cursor(a)),
+            "async_iter" => self.async_for_iter(a),
+            "async_next_iter" => self.async_for_next(a),
             "break_iter" => {
                 self.release_loop_iterator(a);
                 Ok(NONE)
@@ -577,8 +615,7 @@ impl Context {
                 Ok(self.raised_instance(error))
             }
             "restore_caught" => {
-                let enclosing = self.heap.caught_exception(a);
-                self.heap.replace_active(enclosing);
+                self.heap.restore_caught(a);
                 Ok(NONE)
             }
             "matches" => {
@@ -588,22 +625,33 @@ impl Context {
                     Ok(FALSE)
                 }
             }
-            "exit_context" => {
-                let (class, traceback, active) = if b == NONE {
-                    (NONE, NONE, self.heap.caught_exception(c))
+            "exit_context" | "async_exit_context" => {
+                let active = if b == NONE {
+                    self.heap.caught_exception(c)
                 } else {
-                    (self.exact_type(b)?, self.exception_traceback(b)?, b)
+                    b
                 };
                 let prior = self.heap.replace_active(active);
-                let result = self.call(a, vec![class, b, traceback], Vec::new());
+                let result = self.call_context_exit(a, b);
                 // The exceptional exit's truth test still runs inside the handler.
-                let result = if b == NONE {
+                let result = if b == NONE || op == "async_exit_context" {
                     result
                 } else {
                     result.and_then(|value| self.truth(value).map(flag))
                 };
                 self.heap.replace_active(prior);
                 result
+            }
+            "except_star_split" => {
+                let (matched, rest) = super::exception_group::split_star(self, a, b)?;
+                Ok(self.alloc(Value::Tuple(vec![matched, rest])))
+            }
+            "except_star_merge" => {
+                let Value::List(raised) = self.heap.get(b) else {
+                    return Err(Error::new("SystemError", "expected except* arm outcomes"));
+                };
+                let raised = super::copy_ids(raised)?;
+                super::exception_group::merge_star(self, a, &raised)
             }
             "raise" | "reraise" => {
                 let a = if op == "reraise" && a == NONE {
@@ -634,6 +682,7 @@ impl Context {
                             ));
                         }
                         trace.cause = Some(cause);
+                        trace.suppress_context = None;
                     }
                     if exception != a && !self.instance_of(exception, a) {
                         // A class may allocate a different exception. CPython normalizes
@@ -656,12 +705,7 @@ impl Context {
                         error = result.clone();
                         error.tracing().instance = Some(normalized);
                     }
-                    let active = self.heap.active_exception();
-                    if active != NONE
-                        && error.trace.as_ref().and_then(|trace| trace.instance) != Some(active)
-                    {
-                        error.context = active;
-                    }
+                    self.chain_raised_instance(&mut error);
                 }
                 Err(error)
             }
@@ -679,9 +723,17 @@ impl Context {
 // until main returns. The context is accessed on one execution thread.
 unsafe fn cstr<'a>(ptr: *const c_char) -> &'a str {
     // SAFETY: the LLVM emitter passes a NUL-terminated UTF-8 constant.
-    unsafe { CStr::from_ptr(ptr) }
-        .to_str()
-        .expect("compiler UTF-8 constant")
+    unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(ptr).to_bytes()) }
+}
+
+/// Recover the native filename constant emitted from OsStr::as_encoded_bytes.
+unsafe fn native_path<'a>(ptr: *const c_char) -> &'a Path {
+    // SAFETY: the compiler emits a nul-terminated native path in the executable's target encoding.
+    unsafe {
+        Path::new(std::ffi::OsStr::from_encoded_bytes_unchecked(
+            CStr::from_ptr(ptr).to_bytes(),
+        ))
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -790,22 +842,25 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         executable,
         helper_executable,
         argv: NONE,
-        sys_path: NONE,
+        startup_path0: None,
         default_encoding: NONE,
+        displaced_sni_callbacks: Default::default(),
         audit_hooks: Vec::new(),
         fork_hooks: Default::default(),
         fault_file: None,
+        fault_user_files: HashMap::new(),
         exit_callbacks: Vec::new(),
         finalizing: Default::default(),
         contexts: Vec::new(),
         buffer_exports: Vec::new(),
         sorting_lists: Vec::new(),
         repr_ancestors: Vec::new(),
+        repr_spare_stack: false,
         // Measure the execution thread before entering the native Python evaluator.
         repr_sequence_words: super::operators::remaining_repr_words(),
         suspended_typing_frames: 0,
         token_missing: NONE,
-        native_code_objects: HashMap::new(),
+        native_filename_labels: HashMap::new(),
         original_builtins: None,
         source_builtins: None,
         zip_directories: HashMap::new(),
@@ -813,6 +868,7 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         codec_entries: Default::default(),
         warning_state: None,
         frozen_override: 0,
+        pending_builtin_names_scope: None,
         modules: NONE,
         import_missing: NONE,
         bootstrap_globals: NONE,
@@ -839,22 +895,17 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
     ctx.import_missing = ctx.instance(object, None);
     let args = args.into_iter().map(|s| ctx.text(s)).collect();
     ctx.argv = ctx.alloc(Value::List(args));
-    let paths: Vec<String> =
-        serde_json::from_value(ctx.config["paths"].clone()).expect("compiler search paths");
-    // The CLI adds its script directory only after site has finished.
-    let defer_path0 = ctx.config["sitecustomize"] == true && ctx.config["path0"] == true;
-    let paths = paths
-        .into_iter()
-        .skip(usize::from(defer_path0))
-        .map(|p| ctx.text(p))
-        .collect();
-    ctx.sys_path = ctx.alloc(Value::List(paths));
     ctx.default_encoding = ctx.heap.code_name(crate::sys::default_encoding().as_str());
     let current = ctx.alloc(Value::Context(Default::default()));
     ctx.contexts.push(current);
     ctx.token_missing = ctx.alloc(Value::TokenMissing);
     // Resolving the handler after an allocation failure must not grow the builtin cache.
     ctx.builtin("MemoryError");
+    // These are already-present runtime types, including the types of singletons,
+    // code, functions and iterators. Publish them before user-defined subclasses.
+    for name in builtins::core_types() {
+        ctx.builtin(name);
+    }
     ctx
 }
 
@@ -879,52 +930,172 @@ pub(super) unsafe extern "C" fn imre_dyn_register_source(
     len: u64,
     code: Code,
 ) {
-    // SAFETY: module names and filenames are static compiler-emitted strings.
-    let (ctx, name, file) = unsafe { (&mut *ctx, cstr(name), cstr(file)) };
-    // SAFETY: non-null text points to a static source constant with exactly len bytes.
-    let bundled_text =
-        (!text.is_null()).then(|| unsafe { std::slice::from_raw_parts(text, len as usize) });
-    register_source(
-        ctx,
-        name,
-        file,
-        ModuleInitializer::Native(code),
-        bundled_text,
-    );
+    // SAFETY: compiled entries supply static module names, source and executable code.
+    unsafe { register_compiled(ctx, name, file, text, len, ModuleInitializer::Native(code)) }
 }
 
-/// Register a bundled Python module whose loader compiles its source on request.
+/// Accept older physical file registrations that do not carry compiler flags.
 #[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_register_bundled_source(
+pub(super) unsafe extern "C" fn imre_dyn_register_file_source(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    digest: *const u8,
+    len: u64,
+    code: Code,
+) {
+    // Older file registrations supplied no fingerprint.
+    let digest = if len == 32 && !digest.is_null() {
+        // SAFETY: the compiler emits a static constant containing all 32 SHA-256 bytes.
+        Some(unsafe { &*digest.cast::<[u8; 32]>() })
+    } else {
+        None
+    };
+    // SAFETY: the compiler supplies static names, filename and initializer.
+    unsafe {
+        register_compiled(
+            ctx,
+            name,
+            file,
+            std::ptr::null(),
+            0,
+            ModuleInitializer::File(code, digest, None),
+        )
+    }
+}
+
+/// Register a physical file's checked bytes, future flags and compiled initializer.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_file_code(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    digest: *const [u8; 32],
+    flags: u32,
+    code: Code,
+) {
+    // SAFETY: the compiler supplies a static digest, names and module entry point.
+    unsafe {
+        register_compiled(
+            ctx,
+            name,
+            file,
+            std::ptr::null(),
+            0,
+            ModuleInitializer::File(code, Some(&*digest), Some(flags)),
+        );
+    }
+}
+
+/// Register the compiled body for a ZIP member without adding a directory finder.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_zip_source(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    digest: *const [u8; 32],
+    flags: u32,
+    code: Code,
+) {
+    // SAFETY: native registration supplies static names, digest and entry point.
+    unsafe {
+        register_compiled(
+            ctx,
+            name,
+            file,
+            std::ptr::null(),
+            0,
+            ModuleInitializer::Zip(code, &*digest, flags),
+        )
+    }
+}
+
+/// Register compiled Python that runs after a built-in module installs its native bindings.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_builtin_source(
     ctx: *mut Context,
     name: *const c_char,
     file: *const c_char,
     text: *const u8,
     len: u64,
+    code: Code,
 ) {
-    // SAFETY: the compiler supplies static UTF-8 source and module names.
-    let (ctx, name, file, bytes) = unsafe {
-        (
-            &mut *ctx,
-            cstr(name),
-            cstr(file),
-            std::slice::from_raw_parts(text, len as usize),
-        )
-    };
-    let source = std::str::from_utf8(bytes).expect("compiler-emitted Python is UTF-8");
-    register_source(
-        ctx,
-        name,
-        file,
-        ModuleInitializer::Source(source),
-        Some(bytes),
-    );
+    // SAFETY: the compiler supplies the same static storage as for a file initializer.
+    unsafe { register_compiled(ctx, name, file, text, len, ModuleInitializer::Builtin(code)) }
+}
+
+unsafe fn register_compiled(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    text: *const u8,
+    len: u64,
+    initializer: ModuleInitializer,
+) {
+    // SAFETY: module names and filenames are static compiler-emitted strings.
+    let (ctx, name, file) = unsafe { (&mut *ctx, cstr(name), native_path(file)) };
+    // SAFETY: non-null text points to a static source constant with exactly len bytes.
+    let bundled_text =
+        (!text.is_null()).then(|| unsafe { std::slice::from_raw_parts(text, len as usize) });
+    register_source(ctx, name, file, initializer, bundled_text);
+}
+
+/// Register a discovery-time error and preserve the source for loader inspection.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_module_error(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    text: *const u8,
+    len: u64,
+    message: *const c_char,
+    position: *const [u32; 4],
+    details: u8,
+    archive_digest: *const [u8; 32],
+) {
+    // SAFETY: the compiler emits all strings and the position as static constants.
+    unsafe {
+        let position = position.as_ref();
+        let parser_line = (details == 2).then(|| {
+            let source = std::str::from_utf8(std::slice::from_raw_parts(text, len as usize))
+                .expect("compiler emitted UTF-8");
+            source
+                .split_inclusive('\n')
+                .nth(position.expect("parser error position")[0] as usize - 1)
+                .unwrap_or("")
+        });
+        register_compiled(
+            ctx,
+            name,
+            file,
+            text,
+            len,
+            ModuleInitializer::Invalid {
+                message: cstr(message),
+                position,
+                in_args: details != 0,
+                parser_line,
+                archive_digest: archive_digest.as_ref(),
+            },
+        );
+    }
+}
+
+/// Bind an emitted expression to its actual annotation string. Equal runtime
+/// text has no association with it. The heap forgets the binding on collection.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_bind_expression(ctx: *mut Context, text: Id, entry: Code) {
+    // SAFETY: compiled callers pass the active interpreter and a linked native entry.
+    let ctx = unsafe { &mut *ctx };
+    ctx.heap
+        .linked_sources
+        .insert(text, LinkedSource::Expression(entry));
 }
 
 fn register_source(
     ctx: &mut Context,
     name: &str,
-    file: &str,
+    file: &Path,
     code: ModuleInitializer,
     bundled_text: Option<&'static [u8]>,
 ) {
@@ -944,7 +1115,15 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     let mut ctx = unsafe { Box::from_raw(ctx) };
     let mark = ctx.heap.temporary_mark();
     let mut failed_site = false;
+    // With unfrozen modules, importing site can execute a filesystem replacement for stat.
+    // Preserve the existing hook-triggered startup in that mode.
+    let startup_site = ctx.config["executable"].is_string()
+        && ctx.config["no_site"] != true
+        && (ctx.config["frozen_modules"] != false || ctx.config["sitecustomize"] == true);
     let result = ctx.startup_sys().and_then(|_| {
+        if ctx.config["path0"] == true && !startup_site {
+            ctx.insert_startup_path0()?;
+        }
         if ctx.config["faulthandler"].as_bool() == Some(true) {
             let handler = ctx.module("faulthandler")?;
             let enable = ctx.lookup_attr(handler, "enable")?;
@@ -971,7 +1150,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             }
             ctx.heap.release_temporaries_since(mark);
         }
-        if ctx.config["sitecustomize"] == true {
+        if startup_site {
             let mark = ctx.heap.temporary_mark();
             ctx.initialize_startup_site()
                 .inspect_err(|_| failed_site = true)?;
@@ -993,6 +1172,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         eprintln!("Fatal Python error: init_import_site: Failed to import the site module");
         eprintln!("Python runtime state: initialized");
         stdlib::traceback::report_chain(&mut ctx, error);
+        crate::fault_handler::unregister_all();
         #[cfg(unix)]
         crate::signals::finalize();
         return 1;
@@ -1076,7 +1256,13 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             "Exception ignored during resource cleanup",
         );
     }
+    let status = if stdlib::io::flush_standard_outputs(&mut ctx) {
+        status
+    } else {
+        120
+    };
     stdlib::io::prepare_writer_shutdown(&ctx);
+    crate::fault_handler::unregister_all();
     crate::fault_handler::disable();
     #[cfg(unix)]
     crate::signals::finalize();
@@ -1145,7 +1331,7 @@ pub(super) fn report_system_exit(ctx: &mut Context, error: Error) -> i32 {
     1
 }
 
-fn finish(ctx: &mut Context, result: Result<Id>) -> Id {
+pub(super) fn finish(ctx: &mut Context, result: Result<Id>) -> Id {
     finish_at(ctx, result, None)
 }
 
@@ -1182,7 +1368,13 @@ pub(super) unsafe extern "C" fn imre_dyn_unpack_pair(
     if ctx.pending.is_some() {
         return NONE;
     }
-    let result = match ctx.heap.get(value) {
+    let result = snapshot_pair(ctx, value, items);
+    finish(ctx, result)
+}
+
+/// Snapshot two items and return the handle that must keep them alive during assignment.
+fn snapshot_pair(ctx: &mut Context, value: Id, items: &mut [Id; 2]) -> Result<Id> {
+    match ctx.heap.get(value) {
         Value::Tuple(values) if values.len() == 2 => {
             items.copy_from_slice(values);
             Ok(value)
@@ -1201,8 +1393,65 @@ pub(super) unsafe extern "C" fn imre_dyn_unpack_pair(
             items.copy_from_slice(&values);
             NONE
         }),
-    };
+    }
+}
+
+/// Advance a compiled loop whose target unpacks exactly two items.
+///
+/// # Safety
+/// Generated code supplies a live context and space for two handles.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_next_pair(
+    ctx: *mut Context,
+    iter: Id,
+    items: *mut [Id; 2],
+    has_else: bool,
+) -> Id {
+    // SAFETY: generated code owns these scratch slots in the active frame.
+    let (ctx, items) = unsafe { (&mut *ctx, &mut *items) };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let result = next_loop_pair(ctx, iter, items, has_else);
     finish(ctx, result)
+}
+
+/// Read dictionary entries directly, keeping both values alive across target assignment.
+fn next_loop_pair(ctx: &mut Context, iter: Id, items: &mut [Id; 2], has_else: bool) -> Result<Id> {
+    let more = if let Value::LoopIterator {
+        source,
+        peeked: None,
+    } = *ctx.heap.get(iter)
+        && let Value::DictIterator(cursor) = *ctx.heap.get(source)
+        && cursor.is_plain_items()
+    {
+        if let Some(pair) = cursor.next_entry_pair(ctx, source)? {
+            ctx.heap.reserve_temporaries(2)?;
+            for value in pair {
+                ctx.heap.keep(value);
+            }
+            *items = pair;
+            true
+        } else {
+            false
+        }
+    } else if ctx.iterator_has_item(iter)? {
+        let value = ctx
+            .next_item(iter)?
+            .ok_or_else(|| Error::new("StopIteration", ""))?;
+        ctx.heap.reserve_temporaries(1)?;
+        ctx.heap.keep(value);
+        let owner = snapshot_pair(ctx, value, items)?;
+        ctx.heap.reserve_temporaries(1)?;
+        ctx.heap.keep(owner);
+        true
+    } else {
+        false
+    };
+    if !more && has_else {
+        ctx.heap.release_unbound_finalizers();
+    }
+    Ok(flag(more))
 }
 
 /// Construct a fresh sequence using the permanent handles in a linked literal.
@@ -1362,10 +1611,47 @@ pub(super) unsafe extern "C" fn imre_dyn_lookup(
     if ctx.pending.is_some() {
         return NONE;
     }
-    let result = std::str::from_utf8(name)
+    let mut result = std::str::from_utf8(name)
         .map_err(|error| Error::new("UnicodeError", error.to_string()))
         .and_then(|name| ctx.lookup(scope, name));
+    finish_operand_position(ctx, &mut result);
     finish(ctx, result)
+}
+
+/// Execute an import statement through the importing frame's builtins.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_import_name(
+    ctx: *mut Context,
+    scope: Id,
+    name: Id,
+    fromlist: Id,
+    level: u32,
+) -> Id {
+    // SAFETY: generated code passes its current interpreter and live Python handles.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let result = ctx.import_in_scope(ctx.heap.current_code(), scope, name, fromlist, level);
+    finish(ctx, result)
+}
+
+/// Read a contiguous slice and attribute failures to the subscription expression.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_get_slice_at(
+    ctx: *mut Context,
+    receiver: Id,
+    start: Id,
+    stop: Id,
+    span: *const [u32; 4],
+) -> Id {
+    // SAFETY: generated native code owns its context and supplies a static span or null.
+    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let result = ctx.get_slice(receiver, start, stop);
+    finish_at(ctx, result, span)
 }
 
 #[unsafe(no_mangle)]
@@ -1383,7 +1669,23 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
         return NONE;
     }
     let reraise = op == "reraise" && (a != NONE || ctx.heap.active_exception() != NONE);
-    let result = ctx.op(op, a, b, c);
+    let mut result = ctx.op(op, a, b, c);
+    if matches!(
+        op,
+        "attr"
+            | "method"
+            | "spread_arguments"
+            | "extend"
+            | "keywords"
+            | "class_keywords"
+            | "iter"
+            | "await_iter"
+            | "async_exit_context"
+            | "truth"
+    ) || (b == TRUE && matches!(op, "lookup_enter" | "lookup_exit"))
+    {
+        finish_operand_position(ctx, &mut result);
+    }
     if reraise && let Err(error) = result {
         ctx.pending = Some(error);
         return NONE;
@@ -1488,10 +1790,11 @@ fn finish_method_target(
     target: Result<(Id, Id)>,
     bound_receiver: &mut Id,
 ) -> Id {
-    let result = target.map(|(callable, receiver)| {
+    let mut result = target.map(|(callable, receiver)| {
         *bound_receiver = receiver;
         callable
     });
+    finish_operand_position(ctx, &mut result);
     finish(ctx, result)
 }
 
@@ -1629,6 +1932,64 @@ pub(super) unsafe extern "C" fn imre_dyn_positional_call_at(
     })
 }
 
+/// Call with positional values followed by values for statically named keywords.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_keyword_call_at(
+    ctx: *mut Context,
+    callable: Id,
+    values: *const Id,
+    positional: usize,
+    mut names: *const c_char,
+    keywords: usize,
+    mark: usize,
+    span: *const [u32; 4],
+    scope: Id,
+) -> Id {
+    // SAFETY: the compiler supplies its context, optional static position and initialized handles.
+    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
+    scoped_call(ctx, span, |ctx| {
+        // SAFETY: the entry-block array holds all operands throughout this call.
+        let values = unsafe { live_handles(values, positional + keywords) };
+        let (args, named) = values.split_at(positional);
+        let args = copy_ids(args)?;
+        let mut kwargs = Vec::new();
+        kwargs
+            .try_reserve_exact(keywords)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        for &value in named {
+            // SAFETY: the emitter stores one NUL-terminated UTF-8 identifier for each value.
+            let name = unsafe { cstr(names) };
+            kwargs.push((copy_label(name)?, value));
+            // SAFETY: this advances to the next identifier or one past the final NUL.
+            names = unsafe { names.add(name.len() + 1) };
+        }
+        let result = ctx.call_in_scope(scope, callable, args, kwargs)?;
+        ctx.finish_call_operands(mark, result);
+        ctx.check_call_return(result)
+    })
+}
+
+/// A failing packed operand or call may span multiple lines in a native resumable frame.
+fn finish_operand_position(ctx: &mut Context, result: &mut Result<Id>) {
+    if let Some([line, end_line, start, end]) = ctx.heap.take_call_position()
+        && let Err(error) = result
+        && matches!(
+            ctx.code_object(ctx.heap.current_code()).body,
+            value::Body::Suspended(_)
+        )
+    {
+        error.tracing().source_position = Some((
+            line,
+            value::TracebackSpan {
+                end_line,
+                start,
+                end,
+                anchor: value::TracebackAnchor::Uniform,
+            },
+        ));
+    }
+}
+
 /// Clear the recorded call position and publish the return value or exception.
 fn scoped_call(
     ctx: &mut Context,
@@ -1639,8 +2000,8 @@ fn scoped_call(
         ctx.heap.set_call_position(None);
         return NONE;
     }
-    let result = invoke(ctx);
-    ctx.heap.set_call_position(None);
+    let mut result = invoke(ctx);
+    finish_operand_position(ctx, &mut result);
     finish_at(ctx, result, span)
 }
 
@@ -1658,11 +2019,11 @@ pub(super) unsafe extern "C" fn imre_dyn_mark_class_annotation(
     finish(ctx, result)
 }
 
-/// The compiler emits a native entry when body_line is zero, or generator source otherwise.
+/// Definition sites carry either an ordinary entry or a coroutine resume entry.
 #[repr(C)]
 union PrelinkedEntry {
     native: Code,
-    source: *const c_char,
+    suspended: value::ResumeCode,
 }
 
 #[repr(C)]
@@ -1670,7 +2031,20 @@ pub(super) struct PrelinkedSite {
     entry: PrelinkedEntry,
     filename: *const c_char,
     first_line: u32,
-    body_line: u32,
+    tag: u32,
+}
+
+/// Definition-time scope and flag fields from a compiled function's parameter metadata.
+#[derive(Default, serde::Deserialize)]
+#[serde(default)]
+struct DefinitionMetadata {
+    generator_lambda: bool,
+    annotation_class: serde_json::Value,
+    scope_reads: serde_json::Value,
+    scope_complete: serde_json::Value,
+    method_class_cell: serde_json::Value,
+    class_cell: serde_json::Value,
+    code_flags: serde_json::Value,
 }
 
 #[unsafe(no_mangle)]
@@ -1689,20 +2063,31 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
     // SAFETY: the compiler supplies a live context and a distinct static record for this definition.
     let (ctx, definition) = unsafe { (&mut *ctx, &*site) };
     let key = site as usize;
-    let code = if let Some(&code) = ctx.native_code_objects.get(&key) {
+    let owner = ctx.heap.current_code();
+    let code = if let Some(&(_, code)) = ctx
+        .code_object(owner)
+        .nested
+        .iter()
+        .find(|(site, _)| *site == key)
+    {
         code
     } else {
         // SAFETY: the filename is a nul-terminated constant in the native executable.
-        let file = unsafe { cstr(definition.filename) };
-        // SAFETY: the compiler tags native functions with line zero and suspended suites
-        // with their one-based source line and a static, nul-terminated UTF-8 string.
+        let file = unsafe { native_path(definition.filename) };
+        let filename = match ctx.import_path_text(file) {
+            Ok(filename) => filename,
+            Err(error) => return finish(ctx, Err(error)),
+        };
+        // SAFETY: the emitter initializes the union with the function ABI selected by the tag.
         let body = unsafe {
-            if definition.body_line == 0 {
-                value::Body::Native(definition.entry.native)
-            } else {
-                value::Body::PendingGenerator {
-                    source: cstr(definition.entry.source),
-                    body_line: definition.body_line,
+            match definition.tag {
+                0 => value::Body::Native(definition.entry.native, NONE),
+                value::NATIVE_SUSPENDED_BODY => value::Body::Suspended(definition.entry.suspended),
+                _ => {
+                    return finish(
+                        ctx,
+                        Err(Error::new("SystemError", "invalid compiled definition tag")),
+                    );
                 }
             }
         };
@@ -1712,16 +2097,15 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
             name,
             parameters,
             (qualname, doc),
-            value::Location {
-                file: file.into(),
-                line: definition.first_line,
-                span: None,
-            },
+            (filename, definition.first_line),
         );
-        ctx.native_code_objects.insert(key, code);
+        let Value::Code(parent) = ctx.heap.get_mut(owner) else {
+            unreachable!()
+        };
+        parent.nested.push((key, code));
         code
     };
-    ctx.define_function(
+    let result = ctx.define_function(
         code,
         scope,
         name,
@@ -1730,7 +2114,8 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
         doc,
         annotate,
         annotation_scope,
-    )
+    );
+    finish(ctx, result)
 }
 
 impl Context {
@@ -1822,23 +2207,24 @@ impl Context {
         name: Id,
         parameters: Id,
         metadata_pair: (Id, Id),
-        location: value::Location,
+        (filename, first_line): (Id, u32),
     ) -> Id {
-        let filename = self.text(location.file);
         let (qualname, doc) = metadata_pair;
         let module_definition = self.scope_data(scope).parent.is_none();
-        let metadata: serde_json::Value = self
+        let metadata: DefinitionMetadata = self
             .str_value(parameters)
             .ok()
+            .filter(|v| v.trim_start().starts_with('{'))
             .and_then(|v| serde_json::from_str(v).ok())
             .unwrap_or_default();
-        let annotation_class = metadata["annotation_class"] == true;
+        let annotation_class = metadata.annotation_class == true;
         let mut read_class = false;
-        let reads = metadata["scope_reads"]
+        let reads = metadata
+            .scope_reads
             .as_array()
             .into_iter()
             .flatten()
-            .filter_map(|v| v.as_str())
+            .filter_map(|value| value.as_str())
             .filter(|name| {
                 if annotation_class && *name == "__class__" {
                     read_class = true;
@@ -1852,11 +2238,11 @@ impl Context {
         } else {
             scope
         };
-        let freevars = if metadata["scope_complete"] != true {
+        let freevars = if metadata.scope_complete != true {
             None
-        } else if let Some(captures_class) = metadata["method_class_cell"].as_bool() {
+        } else if let Some(captures_class) = metadata.method_class_cell.as_bool() {
             self.method_freevars(self.scope_data(scope).parent, reads, captures_class)
-        } else if metadata["class_cell"] == true {
+        } else if metadata.class_cell == true {
             None
         } else {
             self.enclosing_freevars(lexical, reads)
@@ -1873,21 +2259,25 @@ impl Context {
         });
         let closure_supported = freevars.is_some();
         let freevars = freevars.unwrap_or_default();
-        let flags = metadata["code_flags"]
+        let flags = metadata
+            .code_flags
             .as_u64()
             .and_then(|v| u32::try_from(v).ok());
         self.alloc(Value::Code(value::CodeObject {
             parsed_parameters: Default::default(),
+            varnames: NONE,
+            cellvars: NONE,
             body,
             name,
             qualname,
             doc,
             parameters,
             filename,
-            first_line: location.line,
+            first_line,
             module_definition,
             flags: flags.unwrap_or_default(),
             flags_complete: flags.is_some(),
+            generator_lambda: metadata.generator_lambda,
             nested: Vec::new(),
             freevars,
             closure_supported,
@@ -1905,9 +2295,14 @@ impl Context {
         doc: Id,
         annotate: Id,
         annotation_scope: bool,
-    ) -> Id {
+    ) -> Result<Id> {
         let owner = self.scope_data(scope);
-        let class_cell = owner.class_cell;
+        // A borrowed method only owns its defining class if its code captures __class__.
+        let code_data = self.code_object(code);
+        let class_cell = owner.class_cell.filter(|_| {
+            !code_data.closure_supported
+                || code_data.freevars.iter().any(|name| name == "__class__")
+        });
         let scope = if owner.exec_locals.is_some()
             || ((owner.class_body.is_some() || owner.class_namespace.is_some())
                 && !annotation_scope)
@@ -1918,8 +2313,22 @@ impl Context {
         };
         let fields =
             super::function_fields::FunctionFields::new(self, scope, name, qualname, doc, annotate);
+        let names = self.code_object(code).freevars.clone();
+        let entries = if defaults == NONE {
+            Vec::new()
+        } else {
+            self.dict_entries(defaults)
+                .expect("function defaults are a dict")
+                .to_vec()
+        };
+        // Only default values and implicit class cells need the parameter metadata here.
         let signature = self.code_object(code).parameters;
-        let signature: serde_json::Value = if signature == NONE {
+        let signature: serde_json::Value = if signature == NONE
+            || (entries.is_empty()
+                && !names
+                    .iter()
+                    .any(|name| matches!(name.as_str(), "__class__" | "__classdict__")))
+        {
             serde_json::Value::Null
         } else {
             serde_json::from_str(
@@ -1928,10 +2337,6 @@ impl Context {
             )
             .expect("function parameters are valid JSON")
         };
-        let entries = self
-            .dict_entries(defaults)
-            .expect("function defaults are a dict")
-            .to_vec();
         let lookup = |name: &str| {
             entries.iter().find_map(|&(key, value)| {
                 matches!(self.heap.get(key), Value::Str(text) if text == name).then_some(value)
@@ -1968,7 +2373,6 @@ impl Context {
         } else {
             self.dict(keyword)
         };
-        let names = self.code_object(code).freevars.clone();
         let mut cells = Vec::new();
         for name in &names {
             if name == "__classdict__" && signature["annotation_class"] == true {
@@ -1988,16 +2392,19 @@ impl Context {
             while let Some(parent) = self.scope_data(globals).parent {
                 globals = parent;
             }
+            let globals = self.new_function_globals(globals)?;
             self.closure_environment(globals, names, &cells)
+        } else if self.scope_data(scope).parent.is_none() {
+            self.new_function_globals(scope)?
         } else {
             scope
         };
-        let closure = if cells.is_empty() {
-            NONE
-        } else {
-            self.alloc(Value::Tuple(cells))
+        let closure = match cells.as_slice() {
+            [] => NONE,
+            [only] => *only,
+            _ => self.alloc(Value::Tuple(cells)),
         };
-        self.alloc(Value::Function {
+        Ok(self.alloc(Value::Function {
             fields,
             closure,
             code,
@@ -2005,7 +2412,7 @@ impl Context {
             class_cell,
             defaults,
             kwdefaults,
-        })
+        }))
     }
 }
 
@@ -2029,11 +2436,35 @@ pub(super) unsafe extern "C" fn imre_dyn_comprehension_step(ctx: *mut Context, m
     unsafe { (&mut *ctx).comprehension_step(mark) }
 }
 
+/// Check the result discarded by a compiled expression statement after evaluating it once.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_discard_expression(ctx: *mut Context, value: Id) {
+    // SAFETY: the caller owns the context and the result is live in its current frame.
+    unsafe { (&mut *ctx).heap.note_discarded_coroutine(value) }
+}
+
 /// Release a consumed truth operand on the branch that no longer needs it.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_discard_truth(ctx: *mut Context, mark: usize) {
     // SAFETY: the mark comes from the same active Python frame.
     unsafe { (&mut *ctx).discard_truth(mark) }
+}
+
+/// Publish surviving operands before collecting, returning the boundary above the first one.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_keep_operands(
+    ctx: *mut Context,
+    mark: usize,
+    first: Id,
+    second: Id,
+) -> usize {
+    // SAFETY: these live handles and the mark belong to the current generated frame.
+    let ctx = unsafe { &mut *ctx };
+    ctx.discard_temporaries(
+        mark,
+        std::iter::once(first).chain((second != NONE).then_some(second)),
+    );
+    mark + 1
 }
 
 /// Publish the named expression's result before the caller evaluates its next operand.
@@ -2078,6 +2509,17 @@ pub(super) unsafe extern "C" fn imre_dyn_assignment_target(
     }
 }
 
+/// Expose a compound statement's full instruction position during its implicit calls.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_definition_position(
+    ctx: *mut Context,
+    position: *const [u32; 4],
+) {
+    // SAFETY: linked code supplies its active context and an optional static range.
+    let (ctx, position) = unsafe { (&mut *ctx, position.as_ref()) };
+    ctx.heap.set_definition_position(position.copied());
+}
+
 /// Move the executing frame to an implicit call site without releasing statement temporaries.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_set_statement_line(ctx: *mut Context, line: u32) {
@@ -2086,6 +2528,22 @@ pub(super) unsafe extern "C" fn imre_dyn_set_statement_line(ctx: *mut Context, l
     ctx.heap.set_statement_line(line);
     ctx.heap
         .replace_expression(value::ExpressionPosition::Statement);
+}
+
+/// Native code entry for the namedtuple constructor, after ordinary Python argument binding.
+pub(super) unsafe extern "C" fn namedtuple_constructor(raw: *mut Context, scope: Id) -> Id {
+    // SAFETY: execute entered the function frame; all arguments are rooted by its scope and
+    // the static filename lives for the whole process. There are no operand temporaries yet.
+    unsafe {
+        imre_dyn_statement_with_exception(raw, std::ptr::null(), 0, c"<string>".as_ptr(), 1, NONE)
+    };
+    // SAFETY: the caller retains exclusive ownership until this code entry returns.
+    let ctx = unsafe { &mut *raw };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let result = super::namedtuple::construct(ctx, scope);
+    finish(ctx, result)
 }
 
 #[unsafe(no_mangle)]
@@ -2099,25 +2557,56 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
 ) {
     // SAFETY: the emitter supplies its current frame's explicitly live temporaries.
     let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
-    // SAFETY: file names are static constants in the generated native program.
-    let file = unsafe { cstr(file) };
-    ctx.checkpoint(
-        live,
-        value::Location {
-            file: file.into(),
-            line,
-            span: None,
-        },
-        caught,
-    );
-    #[cfg(unix)]
-    if let Err(mut error) = ctx.dispatch_signals() {
-        ctx.record_exception_frame(&mut error, None);
-        ctx.pending = Some(error);
+    // SAFETY: emitted filenames are static native strings for the life of the executable.
+    if let Err(error) = unsafe { ctx.native_statement(live, file, line, caught) } {
+        finish(ctx, Err(error));
     }
 }
 
 impl Context {
+    /// Publish a native statement. Its caller records a failure once at the frame boundary.
+    pub(super) unsafe fn native_statement(
+        &mut self,
+        live: &[Id],
+        file: *const c_char,
+        line: u32,
+        caught: Id,
+    ) -> Result<()> {
+        // SAFETY: both the emitted ABI and native providers pass a static native filename.
+        let file = unsafe { self.native_filename_label(file) }?;
+        self.checkpoint(
+            live,
+            value::Location {
+                file,
+                line,
+                span: None,
+            },
+            caught,
+        );
+        #[cfg(unix)]
+        self.dispatch_signals()?;
+        Ok(())
+    }
+
+    /// Decode a static, NUL-terminated native filename once for statement diagnostics.
+    unsafe fn native_filename_label(&mut self, file: *const c_char) -> Result<Arc<str>> {
+        if let Some(label) = self.native_filename_labels.get(&file.addr()) {
+            return Ok(label.clone());
+        }
+        // SAFETY: the emitted filename is a native path constant for the lifetime of the program.
+        let path = unsafe { native_path(file) };
+        let label: Arc<str> = match path.to_str() {
+            Some(text) if text.is_ascii() => text.into(),
+            _ => {
+                let filename = self.import_path_text(path)?;
+                self.filename_display(filename)?.as_ref().into()
+            }
+        };
+        self.native_filename_labels
+            .insert(file.addr(), label.clone());
+        Ok(label)
+    }
+
     /// Check the old binding without calling a Python mapping's lookup hook.
     pub(super) fn replacing_finalizer(&self, scope: Id, name: &str, value: Id) -> bool {
         if !self.heap.tracks_finalizers() {
@@ -2142,10 +2631,10 @@ impl Context {
                 .values()
                 .chain(self.enum_scopes.values())
                 .chain(self.signal_handlers.iter())
+                .chain(self.displaced_sni_callbacks.iter())
                 .chain(self.typing.roots())
                 .chain(self.builtins.values())
                 .chain(self.native_type_dicts.values())
-                .chain(self.native_code_objects.values())
                 .chain(self.warning_state.iter().flat_map(|state| state.roots()))
                 .chain(self.codec_entries.roots())
                 .chain(&self.audit_hooks)
@@ -2155,6 +2644,7 @@ impl Context {
                 .chain(self.workers.roots().copied())
                 .chain(self.threads.roots())
                 .chain(self.fault_file)
+                .chain(self.fault_user_files.values().copied())
                 .chain(self.contexts.iter().copied())
                 .chain(self.buffer_exports.iter().copied())
                 .chain(self.pending.iter().flat_map(Error::roots))
@@ -2162,7 +2652,6 @@ impl Context {
                 .chain(self.source_builtins)
                 .chain([
                     self.argv,
-                    self.sys_path,
                     self.zip_path_importers,
                     self.modules,
                     self.import_missing,
@@ -2232,6 +2721,7 @@ impl Context {
             if let Some(callbacks) = heap.collect(roots) {
                 self.run_weak_callbacks(callbacks);
             }
+            let _ = self.drain_scheduled_coroutines();
         }
     }
 
@@ -2241,6 +2731,11 @@ impl Context {
             && !self.can_skip_finalizer_sweep(self.heap.temporary_mark())
         {
             if self.finalize_unowned_generator_loop()
+                && self.can_skip_finalizer_sweep(self.heap.temporary_mark())
+            {
+                return;
+            }
+            if self.heap.retire_closed_descriptors()
                 && self.can_skip_finalizer_sweep(self.heap.temporary_mark())
             {
                 return;
@@ -2255,10 +2750,10 @@ impl Context {
             return false;
         };
         let globals = self.finalizer_path_roots();
-        let stdin = super::stdlib::io::rooted_input_chain(self);
+        let streams = super::stdlib::io::rooted_standard_streams(self);
         if !self.heap.cached_finalizers_kept_except(
             globals,
-            stdin.as_ref(),
+            streams.as_ref(),
             Some(self.heap.temporary_mark()),
             &[generator],
         ) {
@@ -2274,7 +2769,15 @@ impl Context {
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.
     pub(super) fn discard_truth(&mut self, mark: usize) {
-        self.discard_temporaries(mark, None);
+        if let Some(error) = self.pending.take() {
+            // A weak callback may reenter Python during unwind. Keep the original
+            // exception alive without exposing it as a failure of the callback.
+            self.discard_temporaries(mark, error.roots());
+            self.pending = Some(error);
+            self.heap.release_temporaries_since(mark);
+        } else {
+            self.discard_temporaries(mark, None);
+        }
     }
 
     /// Release operand roots and report whether a weak callback or finalizer may become runnable.
@@ -2334,18 +2837,21 @@ impl Context {
         if self.heap.full_collection_active() {
             return false;
         }
-        let globals = self.finalizer_path_roots();
-        let input = super::stdlib::io::rooted_input_chain(self);
-        // Include the three owners retained by sys.__stdin__.
-        (self.heap.tracked_finalizer_count() <= super::value::MAX_FRAME_FINALIZERS + 3
-            && (!self.heap.has_weak_values
-                || self.heap.weak_values_kept_by(globals[0], globals[1]))
-            && input
-                .as_ref()
-                .is_some_and(|chain| self.heap.finalizers_kept_by(chain)))
-            || self
-                .heap
-                .cached_finalizers_kept(globals, input.as_ref(), Some(retained_current))
+        let streams = super::stdlib::io::rooted_standard_streams(self);
+        if streams.as_ref().is_some_and(|roots| {
+            self.heap.tracked_finalizer_count() <= super::value::MAX_FRAME_FINALIZERS + roots.len()
+                && self.heap.finalizers_kept_by(roots)
+        }) {
+            return !self.heap.has_weak_values || {
+                let [modules, reference] = self.finalizer_path_roots();
+                self.heap.weak_values_kept_by(modules, reference)
+            };
+        }
+        self.heap.cached_finalizers_kept(
+            self.finalizer_path_roots(),
+            streams.as_ref(),
+            Some(retained_current),
+        )
     }
 
     /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
@@ -2359,12 +2865,16 @@ impl Context {
             // The return value is now rooted in the caller, including its live stream layers.
             let stream = super::stdlib::io::text_descriptor_chain(&self.heap, result);
             if !self.heap.full_collection_active()
-                && let Some(chain) = stream
+                && (stream.is_some()
+                    || self.heap.is_pending_finalizer(result)
+                    || matches!(self.heap.get(result), Value::File(_)))
                 && self.heap.cached_finalizers_kept_except(
                     self.finalizer_path_roots(),
-                    super::stdlib::io::rooted_input_chain(self).as_ref(),
+                    super::stdlib::io::rooted_standard_streams(self).as_ref(),
                     Some(self.heap.temporary_mark()),
-                    &chain,
+                    stream
+                        .as_ref()
+                        .map_or(std::slice::from_ref(&result), |chain| chain.as_slice()),
                 )
             {
                 return;
@@ -2381,6 +2891,14 @@ impl Context {
         self.heap.release_unbound_finalizers();
     }
 
+    /// Deliver warnings discovered by this sweep before the next Python operation changes filters.
+    fn drain_scheduled_coroutines(&mut self) -> Result<()> {
+        if !self.heap.full_collection_active() && self.heap.take_unawaited_check() {
+            self.drain_acyclic_finalizers()?;
+        }
+        Ok(())
+    }
+
     /// Sweep using the active frames and the context's roots before running callbacks.
     pub(super) fn collect_unreachable(&mut self) {
         if self.drain_acyclic_finalizers().is_err() {
@@ -2390,8 +2908,12 @@ impl Context {
         if let Some(callbacks) = heap.collect(roots) {
             self.run_weak_callbacks(callbacks);
         }
+        let _ = self.drain_scheduled_coroutines();
         let [modules, reference] = self.finalizer_path_roots();
         self.heap.learn_weak_roots(modules, reference);
+        let streams = super::stdlib::io::rooted_standard_streams(self);
+        self.heap
+            .learn_descriptor_paths([modules, reference], streams.as_ref());
     }
 
     /// Resolve weakrefs before callbacks, then recheck the original cyclic isolate.
@@ -2399,12 +2921,19 @@ impl Context {
         if self.heap.full_collection_active() {
             return Ok(0);
         }
+        // A warning hook can resurrect a coroutine whose arguments include a separate cycle.
+        // Resolve unreachable acyclic owners before clearing the cyclic isolate's weakrefs.
+        if self.heap.has_unstarted_coroutines() {
+            self.collect_unreachable();
+        }
         self.drain_acyclic_finalizers()?;
         let mark = self.heap.temporary_mark();
         let (heap, roots) = self.heap_and_roots();
         let callbacks = heap.begin_collection(roots, generation)?;
-        let check_older_owners = generation < 2
-            && (!callbacks.is_empty() || self.heap.full_collection_members().next().is_some());
+        if callbacks.is_empty() && self.heap.finish_empty_collection() {
+            self.drain_scheduled_coroutines()?;
+            return Ok(0);
+        }
         let mut released = 0;
         if !callbacks.is_empty() {
             self.run_weak_callbacks(callbacks.iter().copied());
@@ -2424,11 +2953,12 @@ impl Context {
         if let Some(callbacks) = callbacks {
             self.run_weak_callbacks(callbacks);
         }
-        if check_older_owners {
+        if generation < 2 {
             // Even a resurrected cycle can release its last edge to an older acyclic value.
             self.collect_unreachable();
         }
         self.heap.end_full_collection();
+        self.drain_scheduled_coroutines()?;
         Ok(count + released)
     }
 
@@ -2458,6 +2988,106 @@ impl Context {
 mod tests {
     use super::*;
     use std::rc::{Rc, Weak};
+
+    #[test]
+    fn native_function_construction_uses_interpreter_builtins_without_mutating_globals() {
+        unsafe extern "C" fn size(raw: *mut Context, scope: Id) -> Id {
+            // SAFETY: the native function ABI supplies the active, exclusively borrowed Context.
+            let ctx = unsafe { &mut *raw };
+            let result = ctx.lookup(scope, "len").and_then(|callee| {
+                let text = ctx.text("abc");
+                ctx.call(callee, vec![text], Vec::new())
+            });
+            finish(ctx, result)
+        }
+
+        let mut ctx = new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let builtins = ctx.default_source_builtins().unwrap();
+        let scope = ctx.scope("example", None);
+        let name = ctx.text("size");
+        let parameters = ctx.text(r#"{"scope_complete":true,"scope_reads":["len"]}"#);
+        let filename = ctx.text("example.py");
+        let code = ctx.prelinked_code(
+            value::Body::Native(size, NONE),
+            scope,
+            name,
+            parameters,
+            (name, NONE),
+            (filename, 1),
+        );
+        let globals = ctx.dict(Vec::new());
+        let function = ctx.construct_function(&[code, globals], &[]).unwrap();
+        assert_eq!(ctx.lookup_attr(function, "__builtins__").unwrap(), builtins);
+        assert!(ctx.dict_named_item(globals, "__builtins__").is_none());
+        let size = ctx.call(function, vec![], vec![]).unwrap();
+        assert_eq!(ctx.as_int(size).unwrap().to_i64(), Some(3));
+    }
+
+    #[test]
+    fn newly_created_functions_capture_rebound_builtins_in_the_same_globals() {
+        let mut ctx = new_context(
+            serde_json::json!({"paths": [], "python_version": "3.14"}),
+            ["imre"],
+        );
+        let old = ctx.dict(Vec::new());
+        let updated = ctx.dict(Vec::new());
+        let key = ctx.text("__builtins__");
+        let globals = ctx.dict(vec![(key, old)]);
+        let first = ctx.function_environment("invoice", globals, old);
+        assert_eq!(ctx.new_function_globals(first).unwrap(), first);
+        ctx.set_dictionary_key(globals, key, updated, None, true)
+            .unwrap();
+        let second = ctx.new_function_globals(first).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(ctx.module_globals(second).unwrap(), globals);
+        assert_eq!(ctx.function_builtins(first).unwrap(), old);
+        assert_eq!(ctx.function_builtins(second).unwrap(), updated);
+        assert_eq!(ctx.new_function_globals(second).unwrap(), second);
+
+        // sys.modules is mutable and cannot identify a function's original builtins.
+        let original = ctx.module("builtins").unwrap();
+        let alternate = ctx.module("sys").unwrap();
+        let builtins_name = ctx.text("builtins");
+        ctx.set_dictionary_key(ctx.modules, builtins_name, alternate, None, true)
+            .unwrap();
+        let ordinary = ctx.scope("app", None);
+        ctx.bind(ordinary, "__builtins__", alternate);
+        let captured = ctx.new_function_globals(ordinary).unwrap();
+        assert_ne!(captured, ordinary);
+        let expected = ctx.definition_builtins(alternate).unwrap();
+        assert_eq!(ctx.function_builtins(captured).unwrap(), expected);
+        ctx.set_dictionary_key(ctx.modules, builtins_name, original, None, true)
+            .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_filename_labels_belong_to_the_interpreter() {
+        let new_context = || {
+            let argv = [c"imre".as_ptr()];
+            // SAFETY: the constructor consumes the argument pointers before returning.
+            unsafe { Box::from_raw(imre_dyn_new(1, argv.as_ptr(), c"{\"paths\":[]}".as_ptr())) }
+        };
+        let label = |ctx: &mut Context, filename: &'static CStr| {
+            // SAFETY: the string literal has the same lifetime as an emitted filename.
+            unsafe { ctx.native_filename_label(filename.as_ptr()) }.unwrap()
+        };
+        let mut first = new_context();
+        let mut second = new_context();
+        let raw = c"ledger-\xff.py";
+        let first_label = Arc::downgrade(&label(&mut first, raw));
+        let second_label = label(&mut second, raw);
+        assert_eq!(&*label(&mut first, c"other.py"), "other.py");
+
+        first.collect_generation(2).unwrap();
+        let retained = first_label.upgrade().unwrap();
+        assert!(Arc::ptr_eq(&retained, &label(&mut first, raw)));
+        assert!(!Arc::ptr_eq(&retained, &second_label));
+        drop(retained);
+        drop(first);
+        assert!(first_label.upgrade().is_none());
+        assert!(Arc::ptr_eq(&second_label, &label(&mut second, raw)));
+    }
 
     #[test]
     fn linked_small_integer_literals_use_permanent_slots() {
@@ -2497,7 +3127,7 @@ mod tests {
         let source = ctx.alloc(Value::Range(range));
 
         let mark = ctx.heap.temporary_mark();
-        let value: Rc<[Vec<String>]> = Rc::from([]);
+        let value: Rc<[Vec<Id>]> = Rc::from([]);
         let probe = Rc::downgrade(&value);
         ctx.alloc(Value::AttrGetter(value));
         ctx.heap.release_temporaries_since(mark);
@@ -2523,7 +3153,7 @@ mod tests {
         let encode = ctx.builtin("urllib.parse.urlencode");
 
         let mark = ctx.heap.temporary_mark();
-        let value: Rc<[Vec<String>]> = Rc::from([]);
+        let value: Rc<[Vec<Id>]> = Rc::from([]);
         let probe = Rc::downgrade(&value);
         ctx.alloc(Value::AttrGetter(value));
         ctx.heap.release_temporaries_since(mark);
@@ -2567,8 +3197,8 @@ mod tests {
             NONE
         }
 
-        fn payload(ctx: &mut Context) -> (Id, Weak<[Vec<String>]>) {
-            let value: Rc<[Vec<String>]> = Rc::from([]);
+        fn payload(ctx: &mut Context) -> (Id, Weak<[Vec<Id>]>) {
+            let value: Rc<[Vec<Id>]> = Rc::from([]);
             let probe = Rc::downgrade(&value);
             (ctx.alloc(Value::AttrGetter(value)), probe)
         }
@@ -2598,16 +3228,19 @@ mod tests {
             line: 1,
             span: None,
         };
+        let filename = ctx.text(location.file.as_ref());
         let code = ctx.prelinked_code(
-            value::Body::Native(read),
+            value::Body::Native(read, NONE),
             outer,
             name,
             signature,
             (name, NONE),
-            location.clone(),
+            (filename, location.line),
         );
         let defaults = ctx.dict(Vec::new());
-        let function = ctx.define_function(code, outer, name, defaults, name, NONE, NONE, false);
+        let function = ctx
+            .define_function(code, outer, name, defaults, name, NONE, NONE, false)
+            .unwrap();
         let closure = ctx.lookup_attr(function, "__closure__").unwrap();
         let Value::Tuple(cells) = ctx.heap.get(closure) else {
             unreachable!()

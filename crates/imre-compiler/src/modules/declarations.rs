@@ -1,6 +1,4 @@
-//! These sealed imports initialize no state observable in the native subset.
-//! Reachable-only mode can bind them without implementing their operations;
-//! their symbols still fail closed whenever an executable expression uses one.
+//! Sealed import declarations and exports that require a real Python initializer.
 
 use super::{Binding, Intrinsic, IntrinsicModule};
 
@@ -12,6 +10,32 @@ pub(super) fn module(name: &str) -> Option<&'static str> {
 
 pub(super) fn symbol(owner: IntrinsicModule, name: &str) -> Option<Binding> {
     use IntrinsicModule as M;
+    match (owner, name) {
+        (M::RuntimeSource("concurrent"), "futures") => {
+            return Some(Binding::IntrinsicModule(M::RuntimeSource(
+                "concurrent.futures",
+            )));
+        }
+        (
+            M::RuntimeSource(owner @ "concurrent.futures"),
+            "FIRST_COMPLETED"
+            | "FIRST_EXCEPTION"
+            | "ALL_COMPLETED"
+            | "CancelledError"
+            | "TimeoutError"
+            | "InvalidStateError"
+            | "BrokenExecutor"
+            | "Future"
+            | "Executor"
+            | "wait"
+            | "as_completed"
+            | "ProcessPoolExecutor"
+            | "ThreadPoolExecutor",
+        ) => {
+            return Some(Binding::Intrinsic(Intrinsic::RuntimeImport(owner)));
+        }
+        _ => {}
+    }
     let child = match (owner, name) {
         (M::Email, "message") => Some("email.message"),
         (M::Email, "policy") => Some("email.policy"),

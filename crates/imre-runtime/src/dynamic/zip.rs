@@ -42,9 +42,14 @@ impl Context {
     pub(super) fn zip_or_map(
         &mut self,
         name: &str,
+        class: Id,
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Id> {
+        let base = self.builtin(name);
+        if !self.direct_subclass(class, base) {
+            return Err(self.invalid_new_subtype(name, class));
+        }
         let strict = match kwargs {
             [] => false,
             [(key, value)] if key == "strict" => self.truth(*value)?,
@@ -90,7 +95,8 @@ impl Context {
             },
             None => Value::Zip { inputs, strict },
         };
-        Ok(self.alloc(cursor))
+        let storage = self.alloc(cursor);
+        Ok(self.with_subclass_storage(class, base, storage))
     }
 
     /// Pull one row, preserving source errors and the strict mismatch probe order.
@@ -203,7 +209,12 @@ impl Context {
                 format!("descriptor '{name}' of '{owner}' object needs an argument"),
             ));
         };
-        if self.heap.get(cursor).intrinsic_type_name() != Some(owner) {
+        let storage = if matches!(owner, "filter" | "map" | "zip") {
+            self.scalar_value(cursor)
+        } else {
+            cursor
+        };
+        if self.heap.get(storage).intrinsic_type_name() != Some(owner) {
             return Err(Error::new(
                 "TypeError",
                 format!(
@@ -228,7 +239,7 @@ impl Context {
             "__iter__" => Ok(cursor),
             "__length_hint__" => self.length_hint(cursor, None),
             "__next__" => self
-                .next_result(cursor)?
+                .next_result(storage)?
                 .ok_or_else(|| Error::new("StopIteration", "")),
             "__reduce__" => {
                 let Value::DictIterator(state) = self.heap.get(cursor) else {

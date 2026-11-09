@@ -22,6 +22,9 @@ REJECTED = {
     "early_namedtuple_imported": {
         "library.py": 'from collections import namedtuple\ndef early() -> str:\n    return Late("before").value\nVALUE = early()\nLate = namedtuple("Late", "value")\n',
     },
+    "early_builtin_shadow_in_callback": {
+        "main.py": "def relay(label: str) -> None:\n    print(label)\nrelay('before')\ndef print(label: str) -> None:\n    pass\nrelay('after')\n",
+    },
     "entry_call_before_definition": {"main.py": "VALUE = make()\ndef make() -> int:\n    return 1\n"},
     "entry_early_read": {"main.py": "def read() -> int:\n    return SECOND\nFIRST = read()\nSECOND = 2\ndef last() -> None:\n    pass\n"},
     "early_class_entry_enum": {
@@ -71,10 +74,6 @@ REJECTED = {
     "qualified_rebinding": {
         "main.py": "import library\nlibrary.VALUE = 2\n",
         "library.py": "VALUE = 1\n",
-    },
-    "import_after_value": {
-        "library.py": "VALUE = 1\nimport dependency\n",
-        "dependency.py": "VALUE = 2\n",
     },
     "conditional_export": {
         "main.py": "from library import VALUE\n",
@@ -141,11 +140,8 @@ def main() -> None:
             expected_dir.mkdir(parents=True)
             expected = reference(args.python, source, expected_dir, error)
             expected_files = snapshot(expected_dir)
-            modes = [(level, ()) for level in args.opt_levels]
-            if case.name == "distribution_version":
-                modes.extend((level, ("--runtime-imports",)) for level in args.opt_levels)
-            for level, import_flags in modes:
-                actual_dir = temporary / case.name / (f"O{level}-boxed" if import_flags else f"O{level}")
+            for level in args.opt_levels:
+                actual_dir = temporary / case.name / f"O{level}"
                 actual_dir.mkdir()
                 binary = actual_dir / "program"
                 require_success(
@@ -164,7 +160,6 @@ def main() -> None:
                             level,
                             "-o",
                             str(binary),
-                            *import_flags,
                             *flags,
                         ],
                         temporary,
@@ -195,6 +190,8 @@ def main() -> None:
             assert "panicked" not in actual.stderr, (name, actual.stderr)
             if name.startswith("early_class_"):
                 assert "references a class before it is available" in actual.stderr, actual.stderr
+            if name == "early_builtin_shadow_in_callback":
+                assert "calls a definition before it is available" in actual.stderr, actual.stderr
             if name == "uninitialized_rebinding":
                 assert "module value is not initialized on this path" in actual.stderr, actual.stderr
             checks += 1

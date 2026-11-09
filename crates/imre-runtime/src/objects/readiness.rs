@@ -1,11 +1,9 @@
 //! POSIX readiness observes fd numbers without taking ownership.
 use super::exceptions::{Error, Kind, Result, finish};
 use super::records::{RecordDescriptor, allocate_record};
+use super::time::Deadline;
 use super::{Int, List, Object, Storage, StorageCell, Words, c_int, errno_error, object};
-use std::{
-    io, ptr,
-    time::{Duration, Instant},
-};
+use std::{io, ptr, time::Duration};
 
 #[derive(Default)]
 pub(crate) struct Poll {
@@ -60,12 +58,15 @@ impl Poll {
             .len()
             .try_into()
             .map_err(|_| Error::new(Kind::OverflowError, "too many file descriptors"))?;
-        let count = wait(timeout, |remaining| {
-            let ms = remaining.map_or(-1, |d| d.as_nanos().div_ceil(1_000_000) as i32);
-            // SAFETY: nfds is the length of this initialized, exclusively borrowed slice.
-            unsafe { libc::poll(fds.as_mut_ptr(), nfds, ms) }
-        })
-        .map_err(errno_error)? as usize;
+        let count = wait::<Error>(
+            timeout,
+            || Ok(()),
+            |remaining| {
+                let ms = remaining.map_or(-1, |d| d.as_nanos().div_ceil(1_000_000) as i32);
+                // SAFETY: nfds is the length of this initialized, exclusively borrowed slice.
+                unsafe { libc::poll(fds.as_mut_ptr(), nfds, ms) }
+            },
+        )? as usize;
         Ok((
             count,
             fds.iter()
@@ -170,11 +171,12 @@ pub(crate) fn checked_fd(fd: i32) -> Result<i32> {
 }
 
 // Keep the original deadline across EINTR. A zero timeout still observes readiness.
-fn wait(
+fn wait<E: From<Error>>(
     timeout: Option<Duration>,
+    mut check_signals: impl FnMut() -> std::result::Result<(), E>,
     mut call: impl FnMut(Option<Duration>) -> i32,
-) -> io::Result<i32> {
-    let start = Instant::now();
+) -> std::result::Result<i32, E> {
+    let deadline = timeout.map(Deadline::after);
     let mut remaining = timeout;
     loop {
         let n = call(remaining);
@@ -183,9 +185,10 @@ fn wait(
         }
         let err = io::Error::last_os_error();
         if err.kind() != io::ErrorKind::Interrupted {
-            return Err(err);
+            return Err(errno_error(err).into());
         }
-        remaining = timeout.map(|limit| limit.saturating_sub(start.elapsed()));
+        check_signals()?;
+        remaining = deadline.map(Deadline::remaining);
         if remaining == Some(Duration::ZERO) {
             return Ok(0);
         }
@@ -347,9 +350,13 @@ impl SelectFds {
     }
 
     /// Replace the interest sets with the kernel's readiness result, retrying interrupted waits.
-    pub(crate) fn wait(&mut self, timeout: Option<Duration>) -> Result<bool> {
+    pub(crate) fn wait<E: From<Error>>(
+        &mut self,
+        timeout: Option<Duration>,
+        check_signals: impl FnMut() -> std::result::Result<(), E>,
+    ) -> std::result::Result<bool, E> {
         let mut ready = self.sets;
-        let count = wait(timeout, |remaining| {
+        let count = wait(timeout, check_signals, |remaining| {
             ready = self.sets;
             let [r, w, x] = &mut ready;
             let mut tv = remaining.map(|d| {
@@ -369,8 +376,7 @@ impl SelectFds {
                     tv.as_mut().map_or(ptr::null_mut(), ptr::from_mut),
                 )
             }
-        })
-        .map_err(errno_error)?;
+        })?;
         self.sets = if count == 0 { Self::new().sets } else { ready };
         Ok(count != 0)
     }
@@ -412,7 +418,7 @@ pub unsafe extern "C" fn imre_select_wait(
                     })
                 }?;
             }
-            let any_ready = sets.wait(timeout)?;
+            let any_ready = sets.wait(timeout, super::stdlib::check_interrupt)?;
             for (i, list) in lists.into_iter().enumerate() {
                 let mut result = Vec::new();
                 if any_ready {

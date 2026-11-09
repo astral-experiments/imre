@@ -22,6 +22,7 @@ pub(in crate::dynamic) mod stat;
 pub(super) mod statvfs;
 
 use std::ffi::CString;
+use std::os::fd::IntoRawFd;
 
 use super::{Context, Error, Id, NONE, Result, Value, builtins, posixpath};
 use crate::dynamic::builtins::bind_two_positional;
@@ -561,6 +562,8 @@ mod truncate;
 mod unlink;
 mod utime;
 #[cfg(target_os = "linux")]
+pub(in crate::dynamic) mod waitid;
+#[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod xattr;
 
 #[cfg(unix)]
@@ -653,6 +656,9 @@ pub(super) fn is_descriptor_function(name: &str) -> bool {
             && matches!(
                 name,
                 "copy_file_range"
+                    | "setresgid"
+                    | "setresuid"
+                    | "waitid"
                     | "pidfd_open"
                     | "get_terminal_size"
                     | "tcgetpgrp"
@@ -761,19 +767,13 @@ fn file_offset(ctx: &mut Context, value: Id) -> Result<i64> {
 
 /// Hold the buffer export over offset conversion and interrupted write retries.
 fn write_fd(ctx: &mut Context, fd: i32, data: Id, offset: Option<Id>) -> Result<Id> {
-    ctx.with_buffer_export(data, |ctx| {
-        let offset = if let Some(offset) = offset {
-            // PyBUF_SIMPLE acquisition precedes the offset's __index__ call.
-            ctx.check_buffer_exporter(data)?;
-            ctx.native_buffer_bytes(data)?;
-            Some(file_offset(ctx, offset)?)
-        } else {
-            None
-        };
+    ctx.with_read_buffer(data, |ctx, export| {
+        let offset = offset.map(|id| file_offset(ctx, id)).transpose()?;
         loop {
-            // Conversion or signal handlers can change bytes without resizing.
-            let bytes = ctx.native_buffer_bytes(data)?;
-            if let Some(count) = native::try_write(fd, bytes, offset)? {
+            let buffer = export.storage(ctx)?;
+            let ptr = buffer.read_ptr()?;
+            // SAFETY: the export holds this range live until the synchronous syscall returns.
+            if let Some(count) = unsafe { native::try_write(fd, ptr, buffer.len(), offset) }? {
                 return Ok(ctx.int(count as i64));
             }
             ctx.dispatch_signals()?;
@@ -1039,8 +1039,21 @@ fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
         let audit_flags = ctx.int(i64::from(flags | libc::O_CLOEXEC));
         super::audit::event(ctx, "open", &[path, NONE, audit_flags])?;
     }
-    match native::open_at(&pathname, flags, mode, dir_fd) {
-        Ok(fd) => Ok(ctx.int(i64::from(fd))),
+    let fd = open_path(ctx, path, &pathname, flags, mode, dir_fd)?;
+    Ok(ctx.int(i64::from(fd.into_raw_fd())))
+}
+
+/// Decorate only the failed system call. Signal and audit exceptions keep their identity.
+pub(super) fn open_path(
+    ctx: &mut Context,
+    path: Id,
+    pathname: &std::ffi::CStr,
+    flags: i32,
+    mode: i32,
+    dir_fd: i32,
+) -> Result<std::os::fd::OwnedFd> {
+    match native::open_at(pathname, flags, mode, dir_fd, || ctx.dispatch_signals())? {
+        Ok(fd) => Ok(fd),
         Err(error) => {
             Err(ctx.with_errno_filename(crate::objects::errno_error(error).into(), path)?)
         }
@@ -1389,6 +1402,33 @@ pub(super) fn descriptor(
         ));
     }
     #[cfg(target_os = "linux")]
+    if matches!(name, "setresgid" | "setresuid") {
+        let [real, effective, saved] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name} expected 3 arguments, got {}", args.len()),
+            ));
+        };
+        let group = name == "setresgid";
+        let real = chown::owner_id(ctx, *real, group)?;
+        let effective = chown::owner_id(ctx, *effective, group)?;
+        let saved = chown::owner_id(ctx, *saved, group)?;
+        if group {
+            native::setresgid(
+                real as libc::gid_t,
+                effective as libc::gid_t,
+                saved as libc::gid_t,
+            )?;
+        } else {
+            native::setresuid(
+                real as libc::uid_t,
+                effective as libc::uid_t,
+                saved as libc::uid_t,
+            )?;
+        }
+        return Ok(NONE);
+    }
+    #[cfg(target_os = "linux")]
     if name == "tcsetpgrp" {
         let [fd, pgid] = args else {
             return Err(Error::new(
@@ -1539,6 +1579,10 @@ pub(super) fn descriptor(
     #[cfg(unix)]
     if name == "execv" {
         return execv(ctx, args);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "waitid" {
+        return waitid::call(ctx, args);
     }
     if name == "waitpid" {
         let [pid, options] = args else {

@@ -7,6 +7,9 @@ pub(super) fn function_name(symbol: &str) -> Option<&'static str> {
     match symbol {
         "_thread.start_new_thread" => Some("start_new_thread"),
         "_thread._count" => Some("_count"),
+        "_thread._shutdown" => Some("_shutdown"),
+        "_thread.exit" => Some("exit"),
+        "_thread.exit_thread" => Some("exit_thread"),
         _ => None,
     }
 }
@@ -16,6 +19,11 @@ pub(super) fn doc(function: &str) -> &'static str {
         "start_new_thread" => {
             "Start a new thread and return its identifier.\n\nThe thread will call the function with positional arguments from the\ntuple args and keyword arguments taken from the optional dictionary\nkwargs.  The thread exits when the function returns; the return value\nis ignored.  The thread will also exit when the function raises an\nunhandled exception; a stack trace will be printed unless the exception\nis SystemExit."
         }
+        "exit" => {
+            "This is synonymous to ``raise SystemExit''.  It will cause the current\nthread to exit silently unless the exception is caught."
+        }
+        "exit_thread" => "An obsolete synonym of exit().",
+        "_shutdown" => "Wait for all non-daemon threads (other than the calling thread) to stop.",
         "_count" => {
             "Return the number of currently running Python threads, excluding\nthe main thread. The returned number comprises all threads created\nthrough `start_new_thread()` as well as `threading.Thread`, and not\nyet finished.\n\nThis function is meant for internal and specialized purposes only.\nIn most applications `threading.enumerate()` should be used instead."
         }
@@ -131,20 +139,26 @@ pub(super) fn call(
             "TypeError",
             format!(
                 "{}() takes no keyword arguments",
-                if name == "_thread._count" {
-                    name
-                } else {
+                if name == "_thread.start_new_thread" {
                     "start_new_thread"
+                } else {
+                    name
                 }
             ),
         ));
     }
-    if name == "_thread._count" {
+    if name != "_thread.start_new_thread" {
         if !args.is_empty() {
             return Err(Error::new(
                 "TypeError",
-                format!("_thread._count() takes no arguments ({} given)", args.len()),
+                format!("{name}() takes no arguments ({} given)", args.len()),
             ));
+        }
+        if matches!(name, "_thread.exit" | "_thread.exit_thread") {
+            return Err(ctx.exception("SystemExit", &[]));
+        }
+        if name == "_thread._shutdown" {
+            return super::thread_worker::call(ctx, "shutdown", args, kwargs);
         }
         let count = ctx.threads.count.load(Ordering::SeqCst);
         ctx.threads.reap(&mut ctx.heap);
@@ -200,9 +214,13 @@ pub(super) fn call(
         // Once exposed, the live dict can be changed through an arbitrary alias.
         && (ctx.scope_data(*scope).namespace.is_some()
             || ctx.scope_name(*scope, "unraisablehook").is_some_and(|hook| Some(hook) != ctx.threads.default_unraisable_hook)
-            || ctx.heap.default_stderr.is_none_or(|stderr| {
+            || ctx.heap.standard_outputs[1].is_none_or(|stderr| {
                 ctx.scope_name(*scope, "stderr") != Some(stderr)
-                    || matches!(ctx.heap.get(stderr), Value::TextFile(file) if file.closed())
+                    || matches!(ctx.heap.get(stderr), Value::Instance {
+                            memory_stream: Some(super::stdlib::io::MemoryStream::Wrapper(wrapper)), ..
+                        } if wrapper.buffer_id().is_none_or(|buffer| {
+                            matches!(ctx.heap.get(buffer), Value::File(file) if file.closed())
+                        }))
             }))
     {
         return Err(Error::new(

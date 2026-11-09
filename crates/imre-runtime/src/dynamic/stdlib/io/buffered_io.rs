@@ -4,6 +4,44 @@ use super::{Context, Error, Id, NONE, Result, Value};
 
 pub(super) const METHODS: &[&str] = &["read", "read1", "readinto", "readinto1", "write", "detach"];
 
+/// Run the public flush once, then close the raw even if flush raised.
+pub(super) fn flush_and_close(
+    ctx: &mut Context,
+    receiver: Id,
+    close_raw: impl FnOnce(&mut Context) -> Result<Id>,
+) -> Result<Id> {
+    // invoke keeps the exception alive across the raw close callback.
+    let mark = ctx.heap.temporary_mark();
+    let flushed = super::text_wrapper::invoke_with(ctx, receiver, "flush", |ctx, method| {
+        super::descriptor_buffer::flush_before_close(ctx, receiver, method)
+    });
+    if flushed.is_ok() {
+        // The discarded return value can finalize and replace the raw descriptor.
+        ctx.discard_temporaries(mark, [receiver]);
+    }
+    match (flushed, close_raw(ctx)) {
+        (Err(flush), Err(mut close)) => {
+            close.context = ctx.raised_instance(flush);
+            Err(close)
+        }
+        (Err(flush), _) => Err(flush),
+        (Ok(_), closed) => closed,
+    }
+}
+
+/// A public flush can switch between a native descriptor and a Python raw backing.
+pub(super) fn close(ctx: &mut Context, receiver: Id) -> Result<Id> {
+    flush_and_close(ctx, receiver, |ctx| {
+        if let Some(buffer) = super::descriptor_buffer::backing(ctx, receiver)
+            && let Value::File(handle) = ctx.heap.get(buffer)
+            && let super::super::files::BinaryFile::Descriptor(fd) = handle.clone().as_ref()
+        {
+            return fd.close_after_public_flush(ctx, receiver);
+        }
+        super::buffered_reader::close_raw(ctx, receiver)
+    })
+}
+
 /// Render the live name as CPython does in buffered_repr.
 pub(super) fn repr(ctx: &mut Context, receiver: Id) -> Result<Id> {
     let name = match ctx.lookup_attr(receiver, "name") {

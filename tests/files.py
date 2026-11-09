@@ -17,6 +17,8 @@ from contextlib import ExitStack
 from pathlib import Path
 from textwrap import dedent
 
+from fixture_entry import imported_fixture
+
 ACCEPTED = {
     "whole_regular_file": """
         with open("large.bin", "wb") as output:
@@ -1047,6 +1049,8 @@ def main() -> None:
             )
             check_result(reference, category, f"CPython {name}")
             expected_files = snapshot(reference_dir)
+            entry = (imported_fixture(project, path)
+                     if name in {"boxed_zipimport_resources", "named_text_update", "binary_update"} else path)
             for level in args.opt_levels:
                 binary = project / f"native-O{level}"
                 llvm = project / f"native-O{level}.ll"
@@ -1054,17 +1058,15 @@ def main() -> None:
                     [
                         compiler,
                         "build",
-                        str(path),
+                        str(entry),
                         "--module-root",
                         str(project),
                         "-o",
                         str(binary),
-                        "--emit-llvm",
-                        str(llvm),
+                        *(["--emit-llvm", str(llvm)] if name == "text_roundtrip" else []),
                         "--opt-level",
                         level,
                         *flags,
-                        *(["--runtime-imports"] if name in {"boxed_zipimport_resources", "named_text_update", "binary_update"} else []),
                     ],
                     temporary,
                 )
@@ -1092,6 +1094,7 @@ def main() -> None:
                     level,
                     "file bytes differ",
                 )
+                binary.unlink()
                 passed += 1
 
         # CPython surrogateescapes invalid Unix argv bytes; the native string domain

@@ -1,4 +1,5 @@
 import _socket
+import array
 import errno
 import os
 import socket
@@ -32,6 +33,93 @@ with left, right:
     else:
         raise AssertionError("read descriptor flags after close")
 assert right.fileno() == -1
+
+# A release callback can reuse an earlier exporter's storage once its view is gone.
+def check_vector_release(retain):
+    page = bytearray(b"A")
+    saved = []
+    released = []
+
+    class Page:
+        def __buffer__(self, flags):
+            view = memoryview(page)
+            if retain:
+                saved.append(view)
+            return view
+
+    class Trailer:
+        def __buffer__(self, flags):
+            return memoryview(b"B")
+
+        def __release_buffer__(self, view):
+            try:
+                page.extend(b"!")
+            except BufferError:
+                released.append(False)
+            else:
+                released.append(True)
+
+    left, right = socketpair()
+    with left, right:
+        assert left.sendmsg([Page(), Trailer()]) == 2
+        assert right.recv(2) == b"AB"
+    assert released == [not retain]
+    assert page == (b"A" if retain else b"A!")
+
+
+check_vector_release(False)
+check_vector_release(True)
+
+
+# Linux sendmsg uses the caller's flags and current SIGPIPE disposition.
+if hasattr(socket, "MSG_NOSIGNAL"):
+    import signal
+    import sys
+
+    if sys.platform == "linux":
+        delivered = []
+        previous = signal.signal(signal.SIGPIPE, lambda signum, frame: delivered.append(signum))
+        try:
+            left, right = socketpair()
+            right.close()
+            with left:
+                for flags in (socket.MSG_NOSIGNAL, 0):
+                    try:
+                        left.sendmsg([b"x"], [], flags)
+                    except BrokenPipeError as exc:
+                        assert exc.errno == errno.EPIPE
+                    else:
+                        raise AssertionError("write to closed socketpair")
+            assert delivered == [signal.SIGPIPE]
+        finally:
+            signal.signal(signal.SIGPIPE, previous)
+
+
+# Transfer two data ranges and retain the received file after the sender closes its copy.
+left, right = socketpair()
+with left, right:
+    with open(__file__, "rb") as source:
+        descriptors = array.array("i", [source.fileno()])
+        assert left.sendmsg([b"he", b"llo"], [
+            (socket.SOL_SOCKET, socket.SCM_RIGHTS, descriptors)
+        ]) == 5
+    target = bytearray(b"-------")
+    count, control, flags, _ = right.recvmsg_into(
+        [memoryview(target)[1:3], memoryview(target)[3:6]],
+        socket.CMSG_SPACE(descriptors.itemsize),
+    )
+    assert count == 5 and target == b"-hello-" and flags == 0
+    [(level, kind, data)] = control
+    assert (level, kind) == (socket.SOL_SOCKET, socket.SCM_RIGHTS)
+    received = array.array("i")
+    received.frombytes(data)
+    [fd] = received
+    try:
+        assert os.read(fd, 6) == b"import"
+    finally:
+        os.close(fd)
+    right.sendmsg([b"O", b"K"])
+    assert left.recvmsg(2)[:3] == (b"OK", [], 0)
 
 left, right = socketpair(family=socket.AF_UNIX, type=socket.SOCK_DGRAM)
 with left, right:

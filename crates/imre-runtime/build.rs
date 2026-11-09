@@ -4,14 +4,27 @@ use std::path::{Path, PathBuf};
 
 use regex_syntax::hir::{Class, HirKind};
 
-/// Use the same pinned Unicode version as the runtime's regex engine.
-fn write_class_table(out_dir: &Path, file: &str, pattern: &str) {
+/// Use the Unicode classes from the pinned regex engine, including singleton properties.
+fn unicode_class(pattern: &str) -> regex_syntax::hir::ClassUnicode {
     let hir = regex_syntax::Parser::new()
         .parse(pattern)
         .expect("valid Unicode class");
-    let HirKind::Class(Class::Unicode(class)) = hir.kind() else {
-        panic!("expected a Unicode character class");
-    };
+    match hir.into_kind() {
+        HirKind::Class(Class::Unicode(class)) => class,
+        HirKind::Literal(literal) => {
+            let text = std::str::from_utf8(&literal.0).expect("Unicode literal");
+            let point = text.chars().next().expect("singleton character class");
+            assert_eq!(text.len(), point.len_utf8());
+            regex_syntax::hir::ClassUnicode::new([regex_syntax::hir::ClassUnicodeRange::new(
+                point, point,
+            )])
+        }
+        _ => panic!("expected a Unicode character class"),
+    }
+}
+
+fn write_class_table(out_dir: &Path, file: &str, pattern: &str) {
+    let class = unicode_class(pattern);
     let mut table = String::from("&[\n");
     for range in class.ranges() {
         writeln!(
@@ -24,6 +37,31 @@ fn write_class_table(out_dir: &Path, file: &str, pattern: &str) {
     }
     table.push_str("]\n");
     std::fs::write(out_dir.join(file), table).unwrap();
+}
+
+/// Combine the Unicode 16.0 General_Category classes shipped by regex-syntax 0.8.11.
+/// The regex engine only indexes scalar values. Python also accepts lone surrogates.
+fn write_general_categories(out_dir: &Path) {
+    const NAMES: [&str; 30] = [
+        "Cn", "Cs", "Cc", "Cf", "Co", "Ll", "Lm", "Lo", "Lt", "Lu", "Mc", "Me", "Mn", "Nd", "Nl",
+        "No", "Pc", "Pd", "Pe", "Pf", "Pi", "Po", "Ps", "Sc", "Sk", "Sm", "So", "Zl", "Zp", "Zs",
+    ];
+    let mut categories = vec![0u8; 0x110000]; // Cn is the UCD default.
+    categories[0xd800..=0xdfff].fill(1); // Cs has no scalar values.
+    for (index, name) in NAMES.iter().enumerate().skip(2) {
+        let class = unicode_class(&format!(r"\p{{gc={name}}}"));
+        for range in class.ranges() {
+            categories[range.start() as usize..=range.end() as usize].fill(index as u8);
+        }
+    }
+    let mut table = format!("(&{NAMES:?}, &[\n");
+    for (point, &category) in categories.iter().enumerate() {
+        if point == 0 || category != categories[point - 1] {
+            writeln!(table, "    ({point:#x}, {category}),").unwrap();
+        }
+    }
+    table.push_str("])\n");
+    std::fs::write(out_dir.join("unicode_general_categories.rs"), table).unwrap();
 }
 
 // Keep target-specific constants in C so their names and values come from the target headers.
@@ -75,6 +113,7 @@ fn main() {
         "unicode_identifier_continue.rs",
         r"\p{XID_Continue}",
     );
+    write_general_categories(&out_dir);
     const SYMBOLS: &str = include_str!("native/errno-symbols.txt");
     println!("cargo:rerun-if-changed=native/errno-symbols.txt");
     let mut c = String::from(
@@ -120,7 +159,10 @@ fn main() {
         // Darwin exposes this action modifier through its termios header.
         c.push_str("#include <termios.h>\nint imre_platform_tcsasoft(void) { return TCSASOFT; }\n");
     }
+    let mut native = cc::Build::new();
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        native.file("native/mmap.c");
+        println!("cargo:rerun-if-changed=native/mmap.c");
         println!("cargo:rerun-if-changed=native/confstr-names.txt");
         println!("cargo:rerun-if-changed=native/sysconf-names.txt");
         println!("cargo:rerun-if-changed=native/pathconf-names.txt");
@@ -135,7 +177,7 @@ fn main() {
     println!("cargo:rerun-if-changed=native/ssl_capabilities.c");
     println!("cargo:rerun-if-changed=native/locale_decode.c");
     println!("cargo:rerun-if-changed=native/faulthandler.c");
-    cc::Build::new()
+    native
         .file("native/faulthandler.c")
         .file("native/ssl_capabilities.c")
         .file(path)

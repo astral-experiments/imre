@@ -39,7 +39,8 @@ pub(super) fn call(
     match name {
         "zip_open" => {
             let archive = ZipArchive::open_path(text)?;
-            Ok(ctx.alloc(Value::MetadataArchive(Rc::new(archive))))
+            ctx.heap
+                .alloc_native_drop_observer(Value::MetadataArchive(Rc::new(archive)))
         }
         "filenames" => {
             let entries = crate::objects::directory_entries(text, |entry| entry.file_name())

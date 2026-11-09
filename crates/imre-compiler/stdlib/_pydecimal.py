@@ -561,16 +561,18 @@ class Decimal(object):
             if intpart is not None:
                 # finite number
                 fracpart = m.group('frac') or ''
-                raw_exp = m.group('exp') or '0'
-                exp_digits = _coefficient_digits(raw_exp.lstrip('+-'))
-                # Larger magnitudes cannot fit even after subtracting the fraction.
-                if len(exp_digits) > len(str(max(MAX_EMAX + len(fracpart), -MIN_ETINY))):
-                    if context is None:
-                        context = getcontext()
-                    return context._raise_error(InvalidOperation, [InvalidOperation])
-                exp = int(exp_digits)
-                if raw_exp.startswith('-'):
-                    exp = -exp
+                raw_exp = m.group('exp')
+                exp = 0
+                if raw_exp is not None:
+                    exp_digits = _coefficient_digits(raw_exp.lstrip('+-'))
+                    # Larger magnitudes cannot fit even after subtracting the fraction.
+                    if len(exp_digits) > len(str(max(MAX_EMAX + len(fracpart), -MIN_ETINY))):
+                        if context is None:
+                            context = getcontext()
+                        return context._raise_error(InvalidOperation, [InvalidOperation])
+                    exp = int(exp_digits)
+                    if raw_exp.startswith('-'):
+                        exp = -exp
                 coeff = _coefficient_digits(intpart+fracpart)
                 exp -= len(fracpart)
                 if exp < MIN_ETINY or exp + len(coeff) - 1 > MAX_EMAX:
@@ -3829,6 +3831,18 @@ class Decimal(object):
         # format(float, '') behaves similarly to str(float).
         if context is None:
             context = getcontext()
+
+        # Bare fixed point preserves the coefficient's scale, including trailing zeros.
+        if (type(self) is Decimal and type(specifier) is str and specifier == 'f'
+                and type(context) is Context and _localeconv is None and not self._is_special):
+            sign = '-' if self._sign else ''
+            digits = self._int
+            if self._exp >= 0:
+                return sign + (digits if digits == '0' else digits + '0' * self._exp)
+            point = len(digits) + self._exp
+            if point > 0:
+                return sign + digits[:point] + '.' + digits[point:]
+            return sign + '0.' + '0' * -point + digits
 
         spec = _parse_format_specifier(specifier, _localeconv=_localeconv)
 

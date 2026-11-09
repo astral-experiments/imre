@@ -4,6 +4,8 @@
 
 use std::cell::RefCell;
 
+pub(crate) use imre_ast::comprehension::collect_target_names as target_names;
+use imre_ast::comprehension::{Output, Plan, Step};
 use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
 
 use super::*;
@@ -100,79 +102,21 @@ impl Helpers {
     }
 }
 
+/// A consumer can fuse integer addition into an eager list plan.
 #[derive(Clone, Copy)]
-enum Yield<'a> {
-    List(&'a ast::Expr),
-    Sum(&'a ast::Expr),
-    Set(&'a ast::Expr),
-    Dict(&'a ast::Expr, &'a ast::Expr),
+enum Collector {
+    Display(Option<Type>),
+    IntegerSum,
 }
 
-#[derive(Clone, Copy)]
-struct Display<'a> {
-    clauses: &'a [ast::Comprehension],
-    value: Yield<'a>,
-}
-
-impl<'a> Display<'a> {
-    fn from_expr(expression: &'a ast::Expr) -> Option<Self> {
-        match expression {
-            ast::Expr::ListComp(value) => Some(Self {
-                clauses: &value.generators,
-                value: Yield::List(&value.elt),
-            }),
-            ast::Expr::SetComp(value) => Some(Self {
-                clauses: &value.generators,
-                value: Yield::Set(&value.elt),
-            }),
-            ast::Expr::DictComp(value) => Some(Self {
-                clauses: &value.generators,
-                value: Yield::Dict(value.key.as_deref()?, &value.value),
-            }),
-            _ => None,
-        }
-    }
-
-    fn visit_value(self, visitor: &mut impl Visitor<'a>) {
-        match self.value {
-            Yield::List(value) | Yield::Sum(value) | Yield::Set(value) => {
-                visitor.visit_expr(value);
-            }
-            Yield::Dict(key, value) => {
-                visitor.visit_expr(key);
-                visitor.visit_expr(value);
-            }
-        }
-    }
-
-    /// Only this clause's suffix repeats on its backedge. An earlier filter can
-    /// safely narrow a name when the remaining filters and yielded value do not
-    /// replace it.
-    fn repeated_writes(self, index: usize) -> HashSet<String> {
-        let (first, second) = match self.value {
-            Yield::List(value) | Yield::Sum(value) | Yield::Set(value) => (value, None),
-            Yield::Dict(key, value) => (key, Some(value)),
-        };
-        self.clauses[index..]
-            .iter()
-            .flat_map(|clause| std::iter::once(&clause.target).chain(clause.ifs.iter()))
-            .chain([first])
-            .chain(second)
-            .flat_map(narrowing::expression_assignments)
-            .collect()
-    }
-}
-
-pub(crate) fn target_names(target: &ast::Expr, names: &mut HashSet<String>) {
-    if let ast::Expr::Name(name) = target {
-        names.insert(name.id.to_string());
-    } else if let ast::Expr::Starred(starred) = target {
-        target_names(&starred.value, names);
-    } else if let Some(elements) = pattern_elements(target) {
-        for element in elements {
-            target_names(element, names);
-        }
-    }
+/// Writes on the backedge of this loop invalidate earlier narrowing facts.
+fn repeated_writes(plan: &Plan<'_>, depth: usize) -> HashSet<String> {
+    plan.clauses[depth..]
+        .iter()
+        .flat_map(|clause| std::iter::once(&clause.target).chain(clause.ifs.iter()))
+        .chain(plan.output.elements())
+        .flat_map(narrowing::expression_assignments)
+        .collect()
 }
 
 /// Free reads respect nested comprehension scopes: only their leftmost iterable
@@ -180,7 +124,6 @@ pub(crate) fn target_names(target: &ast::Expr, names: &mut HashSet<String>) {
 struct Reads {
     names: HashSet<String>,
     bound: Vec<HashSet<String>>,
-    nested_lambdas: bool,
 }
 
 /// Finds lexical free reads for capture rejection, including through nested
@@ -189,7 +132,6 @@ pub(super) fn free_reads(expression: &ast::Expr, bound: HashSet<String>) -> Hash
     let mut reads = Reads {
         names: HashSet::new(),
         bound: vec![bound],
-        nested_lambdas: true,
     };
     reads.visit_expr(expression);
     reads.names
@@ -199,7 +141,6 @@ pub(super) fn function_reads(function: &ast::StmtFunctionDef) -> HashSet<String>
     let mut reads = Reads {
         names: HashSet::new(),
         bound: Vec::new(),
-        nested_lambdas: true,
     };
     reads.visit_function(function);
     reads.names
@@ -226,55 +167,22 @@ impl<'a> Visitor<'a> for Reads {
 
     fn visit_expr(&mut self, expression: &'a ast::Expr) {
         if let ast::Expr::Lambda(lambda) = expression {
-            if self.nested_lambdas {
-                let mut bound = narrowing::expression_assignments(&lambda.body);
-                if let Some(parameters) = &lambda.parameters {
-                    for parameter in parameters.iter_non_variadic_params() {
-                        if let Some(default) = &parameter.default {
-                            self.visit_expr(default);
-                        }
-                        bound.insert(parameter.name().to_string());
+            let mut bound = narrowing::expression_assignments(&lambda.body);
+            if let Some(parameters) = &lambda.parameters {
+                for parameter in parameters.iter_non_variadic_params() {
+                    if let Some(default) = &parameter.default {
+                        self.visit_expr(default);
                     }
-                }
-                self.bound.push(bound);
-                self.visit_expr(&lambda.body);
-                self.bound.pop();
-            }
-        } else if let ast::Expr::Generator(generator) = expression {
-            self.visit_expr(&generator.generators[0].iter);
-            let mut targets = HashSet::new();
-            for clause in &generator.generators {
-                target_names(&clause.target, &mut targets);
-            }
-            self.bound.push(targets);
-            for (index, clause) in generator.generators.iter().enumerate() {
-                self.visit_expr(&clause.target);
-                if index != 0 {
-                    self.visit_expr(&clause.iter);
-                }
-                for condition in &clause.ifs {
-                    self.visit_expr(condition);
+                    bound.insert(parameter.name().to_string());
                 }
             }
-            self.visit_expr(&generator.elt);
+            self.bound.push(bound);
+            self.visit_expr(&lambda.body);
             self.bound.pop();
-        } else if let Some(display) = Display::from_expr(expression) {
-            self.visit_expr(&display.clauses[0].iter);
-            let mut targets = HashSet::new();
-            for clause in display.clauses {
-                target_names(&clause.target, &mut targets);
-            }
-            self.bound.push(targets);
-            for (index, clause) in display.clauses.iter().enumerate() {
-                self.visit_expr(&clause.target);
-                if index != 0 {
-                    self.visit_expr(&clause.iter);
-                }
-                for condition in &clause.ifs {
-                    self.visit_expr(condition);
-                }
-            }
-            display.visit_value(self);
+        } else if let Some(plan) = Plan::from_expr(expression) {
+            self.visit_expr(plan.outer);
+            self.bound.push(plan.target_names());
+            plan.visit_body(|expr| self.visit_expr(expr));
             self.bound.pop();
         } else if let ast::Expr::Name(name) = expression {
             if name.ctx == ast::ExprContext::Load
@@ -289,6 +197,15 @@ impl<'a> Visitor<'a> for Reads {
             walk_expr(self, expression);
         }
     }
+}
+
+/// Caller-local state shadowed by comprehension iteration targets. Walrus
+/// bindings are exported to the enclosing scope when the body is complete.
+pub(super) struct ComprehensionScope {
+    state: LocalState,
+    names: HashMap<String, usize>,
+    class_receiver: Option<String>,
+    targets: HashSet<String>,
 }
 
 impl Checker<'_> {
@@ -406,24 +323,19 @@ impl Checker<'_> {
         expression: &ast::Expr,
         expected: Option<Type>,
     ) -> Result<Expr, String> {
-        if let ast::Expr::SetComp(set) = expression
-            && let Some(filtered) = self.character_set_filter(set, expected)?
-        {
-            return Ok(filtered);
-        }
-        if let ast::Expr::ListComp(list) = expression
-            && let Some(filtered) = self.string_list_filter(
-                &list.generators,
-                &list.elt,
-                expected.and_then(|ty| self.types.element(ty)),
-                false,
-            )?
-        {
-            return Ok(filtered);
-        }
-        let display = Display::from_expr(expression)
+        let display = Plan::from_expr(expression)
             .ok_or_else(|| error(self.source, expression, "unsupported comprehension display"))?;
-        self.comprehension_display(expression, display, expected)
+        let filtered = match display.output {
+            Output::Set(_) => self.character_set_filter(&display, expected)?,
+            Output::List(_) => {
+                self.string_list_filter(&display, expected.and_then(|ty| self.types.element(ty)))?
+            }
+            _ => None,
+        };
+        if let Some(filtered) = filtered {
+            return Ok(filtered);
+        }
+        self.comprehension_display(expression, &display, Collector::Display(expected))
     }
 
     /// A dict can consume an exact two-column zip in the same order as a
@@ -471,11 +383,8 @@ impl Checker<'_> {
         let value = item("@zipvalue", ast::ExprContext::Load);
         self.comprehension_display(
             &call.func,
-            Display {
-                clauses: &clauses,
-                value: Yield::Dict(&key, &value),
-            },
-            None,
+            &Plan::new(&clauses, Output::Dict(&key, &value)),
+            Collector::Display(None),
         )
         .map(Some)
     }
@@ -489,68 +398,73 @@ impl Checker<'_> {
         };
         self.comprehension_display(
             expression,
-            Display {
-                clauses: &value.generators,
-                value: Yield::Sum(&value.elt),
-            },
-            Some(Type::Int),
+            &Plan::new(&value.generators, Output::List(&value.elt)),
+            Collector::IntegerSum,
         )
     }
 
-    fn comprehension_display(
-        &mut self,
-        expression: &ast::Expr,
-        display: Display<'_>,
-        expected: Option<Type>,
-    ) -> Result<Expr, String> {
-        if display.clauses.iter().any(|clause| clause.is_async) {
-            return Err(error(
-                self.source,
-                expression,
-                "asynchronous comprehensions are unsupported",
-            ));
+    pub(super) fn check_comprehension_inputs(
+        &self,
+        plan: &Plan<'_>,
+        node: &impl Ranged,
+        async_error: &str,
+    ) -> Result<(), String> {
+        let requires_async_iterator = match plan.output {
+            // A single await in a deferred expression gives it the async
+            // generator protocol even if every source is synchronous.
+            Output::Generator(_) => plan.body_suspends(),
+            _ => plan
+                .steps
+                .iter()
+                .any(|step| matches!(step, Step::Next { is_async: true, .. })),
+        };
+        if requires_async_iterator {
+            return Err(error(self.source, node, async_error));
         }
-        if display
+        if plan
             .clauses
             .iter()
             .any(|clause| !narrowing::expression_assignments(&clause.iter).is_empty())
         {
             return Err(error(
                 self.source,
-                expression,
+                node,
                 "assignment expressions are forbidden in comprehension iterables",
             ));
         }
-        let input = self.iteration_input(&display.clauses[0].iter, None)?;
+        Ok(())
+    }
+
+    fn comprehension_display(
+        &mut self,
+        expression: &ast::Expr,
+        display: &Plan<'_>,
+        collector: Collector,
+    ) -> Result<Expr, String> {
+        self.check_comprehension_inputs(
+            display,
+            expression,
+            "asynchronous comprehensions are unsupported",
+        )?;
+        let input = self.iteration_input(display.outer, None)?;
         if matches!(input, Iteration::Prepared(_))
+            // A typed await uses the enclosing coroutine's task and frame.
+            || display.body_suspends()
             || !narrowing::expression_assignments(expression).is_empty()
-            || pipelines::is_pipeline_expression(self, &display.clauses[0].iter)
+            || pipelines::is_pipeline_expression(self, display.outer)
             || !self.local_functions.is_empty()
                 && free_reads(expression, HashSet::new())
                     .iter()
                     .any(|name| self.local_functions.contains_key(name))
         {
-            return self.inline_comprehension(expression, display, expected, input);
+            return self.inline_comprehension(expression, display, collector, input);
         }
-        let mut targets = HashSet::new();
-        for clause in display.clauses {
-            target_names(&clause.target, &mut targets);
-        }
+        let targets = display.target_names();
         let mut reads = Reads {
             names: HashSet::new(),
             bound: vec![targets.clone()],
-            nested_lambdas: false,
         };
-        for (index, clause) in display.clauses.iter().enumerate() {
-            reads.visit_expr(&clause.target);
-            if index != 0 {
-                reads.visit_expr(&clause.iter);
-            }
-            for condition in &clause.ifs {
-                reads.visit_expr(condition);
-            }
-        }
-        display.visit_value(&mut reads);
+        display.visit_body(|expr| reads.visit_expr(expr));
         let mut captures = reads.names.into_iter().collect::<Vec<_>>();
         captures.sort();
         let id = self.helpers.reserve();
@@ -642,7 +556,8 @@ impl Checker<'_> {
             .filter(|value| value.ty == Type::Str)
             .cloned();
         let result = helper.hidden(Type::None);
-        let list_binding = if matches!(display.value, Yield::List(_))
+        let list_binding = if matches!(collector, Collector::Display(_))
+            && matches!(display.output, Output::List(_))
             && let [clause] = display.clauses
             && clause.ifs.is_empty()
             && let Some(target) = clause.target.as_name_expr()
@@ -656,7 +571,7 @@ impl Checker<'_> {
         } else {
             None
         };
-        let (ty, mut body) = helper.comprehension_body(display, input, expected, result)?;
+        let (ty, mut body) = helper.comprehension_body(display, input, collector, result)?;
         if let Some((iterable, target)) = list_binding {
             self.helpers.list_builds.borrow_mut().insert(
                 id,
@@ -711,7 +626,7 @@ impl Checker<'_> {
             };
             body = vec![Statement::Return(gather)];
         }
-        if matches!(display.value, Yield::Sum(_)) && display.clauses.len() == 1 {
+        if matches!(collector, Collector::IntegerSum) && display.clauses.len() == 1 {
             slices::fuse(&mut body, &params, &mut args);
         }
         self.helpers.finish(
@@ -743,7 +658,7 @@ impl Checker<'_> {
     /// Finds the mapping in a checked, callback-free character comprehension.
     /// Ordinary captures and type checks remain intact; the replacement skips
     /// this mapping load for an empty source, just as the original loop does.
-    fn dictionary_gather_mapping(&mut self, display: Display<'_>) -> Result<Option<Expr>, String> {
+    fn dictionary_gather_mapping(&mut self, display: &Plan<'_>) -> Result<Option<Expr>, String> {
         let [clause] = display.clauses else {
             return Ok(None);
         };
@@ -753,7 +668,7 @@ impl Checker<'_> {
         let ast::Expr::Name(target) = &clause.target else {
             return Ok(None);
         };
-        let Yield::List(ast::Expr::Subscript(subscript)) = display.value else {
+        let Output::List(ast::Expr::Subscript(subscript)) = display.output else {
             return Ok(None);
         };
         let ast::Expr::Name(key) = &*subscript.slice else {
@@ -777,50 +692,58 @@ impl Checker<'_> {
         Ok(Some(mapping))
     }
 
+    pub(super) fn enter_comprehension(&mut self, targets: HashSet<String>) -> ComprehensionScope {
+        let scope = ComprehensionScope {
+            state: self.local_state(),
+            names: self.names.clone(),
+            class_receiver: self.class_receiver.clone(),
+            targets: self.comprehension_targets.clone(),
+        };
+        for name in &targets {
+            self.names.remove(name);
+        }
+        if self
+            .class_receiver
+            .as_ref()
+            .is_some_and(|name| targets.contains(name))
+        {
+            self.class_receiver = None;
+        }
+        self.comprehension_targets.extend(targets);
+        self.comprehension_depth += 1;
+        scope
+    }
+
+    pub(super) fn leave_comprehension(&mut self, scope: ComprehensionScope) {
+        self.comprehension_depth -= 1;
+        self.comprehension_targets = scope.targets;
+        self.names = scope.names;
+        self.class_receiver = scope.class_receiver;
+        for (name, &slot) in &self.comprehension_exports {
+            if !self.comprehension_targets.contains(name) {
+                self.names.insert(name.clone(), slot);
+            }
+        }
+        self.restore_state(scope.state);
+    }
+
     /// Shares enclosing bindings while reserving private targets and owners.
     /// Exported assignments survive cleanup; all remaining private slots are
     /// cleared on both normal completion and exceptional loop exits.
     fn inline_comprehension(
         &mut self,
         expression: &ast::Expr,
-        display: Display<'_>,
-        expected: Option<Type>,
+        display: &Plan<'_>,
+        collector: Collector,
         input: Iteration,
     ) -> Result<Expr, String> {
-        let before = self.local_state();
-        let names = self.names.clone();
-        let class_receiver = self.class_receiver.clone();
-        let targets = self.comprehension_targets.clone();
         let first_private = self.locals.len();
         let writes = narrowing::expression_assignments(expression);
-        let mut private_targets = HashSet::new();
-        for clause in display.clauses {
-            target_names(&clause.target, &mut private_targets);
-        }
-        for name in &private_targets {
-            self.names.remove(name);
-        }
-        if self
-            .class_receiver
-            .as_ref()
-            .is_some_and(|name| private_targets.contains(name))
-        {
-            self.class_receiver = None;
-        }
-        self.comprehension_targets.extend(private_targets);
-        self.comprehension_depth += 1;
+        let scope = self.enter_comprehension(display.target_names());
         let result = self.hidden(Type::None);
-        let (ty, body) = self.comprehension_body(display, input, expected, result)?;
-        self.comprehension_depth -= 1;
-        self.comprehension_targets = targets;
-        self.names = names;
-        self.class_receiver = class_receiver;
-        for (name, &slot) in &self.comprehension_exports {
-            if !self.comprehension_targets.contains(name) {
-                self.names.insert(name.clone(), slot);
-            }
-        }
-        self.restore_state(before);
+        let body = self.comprehension_body(display, input, collector, result);
+        self.leave_comprehension(scope);
+        let (ty, body) = body?;
         for name in writes {
             if let Some(slot) = self.names.get(&name) {
                 self.narrowed.remove_mut(slot);
@@ -847,21 +770,21 @@ impl Checker<'_> {
     /// Lower the loops first so their leaf determines the type of the initial value.
     fn comprehension_body(
         &mut self,
-        display: Display<'_>,
+        display: &Plan<'_>,
         input: Iteration,
-        expected: Option<Type>,
+        collector: Collector,
         result: usize,
     ) -> Result<(Type, Vec<Statement>), String> {
-        let loops = self.comprehension_clause(display, 0, input, expected, result)?;
+        let loops = self.comprehension_step(display, 0, None, input, collector, result)?;
         let ty = self.locals[result];
-        let empty = match display.value {
-            Yield::List(_) => ExprKind::List(Vec::new()),
-            Yield::Sum(_) => ExprKind::Int("0".into()),
-            Yield::Set(_) => ExprKind::Set {
+        let empty = match (collector, display.output) {
+            (Collector::Display(_), Output::List(_)) => ExprKind::List(Vec::new()),
+            (Collector::IntegerSum, Output::List(_)) => ExprKind::Int("0".into()),
+            (Collector::Display(_), Output::Set(_)) => ExprKind::Set {
                 element: self.types.set_element(ty).unwrap(),
                 values: Vec::new(),
             },
-            Yield::Dict(..) => {
+            (Collector::Display(_), Output::Dict(..)) => {
                 let (key, value) = self.types.mapping(ty).unwrap();
                 ExprKind::Dict {
                     key,
@@ -869,40 +792,83 @@ impl Checker<'_> {
                     entries: Vec::new(),
                 }
             }
+            _ => unreachable!("invalid eager comprehension collector"),
         };
         let mut body = vec![Statement::Assign(result, Expr { ty, kind: empty })];
         body.extend(loops);
         Ok((ty, body))
     }
 
-    /// Filters are nested in source order and contribute facts only on their true
-    /// edges. Each nested iterable is evaluated anew under the preceding bindings.
-    fn comprehension_clause(
-        &mut self,
-        display: Display<'_>,
-        index: usize,
-        input: Iteration,
-        expected: Option<Type>,
-        result: usize,
-    ) -> Result<Vec<Statement>, String> {
-        let clause = &display.clauses[index];
-        for name in display.repeated_writes(index) {
+    pub(super) fn forget_comprehension_writes(&mut self, plan: &Plan<'_>, depth: usize) {
+        for name in repeated_writes(plan, depth) {
             if let Some(slot) = self.names.get(&name) {
                 self.narrowed.remove_mut(slot);
             }
         }
-        self.lower_iteration(&clause.target, input, &[], |checker| {
-            let mut conditions = Vec::new();
-            for condition in &clause.ifs {
-                conditions.push(checker.condition(condition)?);
-                checker.apply_facts(condition, true);
-            }
-            let mut body = if index + 1 == display.clauses.len() {
-                let guarded = conditions.last().and_then(present_field);
-                checker.comprehension_leaf(display.value, expected, result, guarded)?
-            } else {
-                let input = checker.iteration_input(&display.clauses[index + 1].iter, None)?;
-                checker.comprehension_clause(display, index + 1, input, expected, result)?
+    }
+
+    /// Check conditions in source order, carrying each true edge's narrowing
+    /// facts into the following filter and the accepted body.
+    pub(super) fn comprehension_filters(
+        &mut self,
+        plan: &Plan<'_>,
+        pull: usize,
+        parent: Option<usize>,
+    ) -> Result<(usize, Vec<Expr>), String> {
+        let filters = plan.loop_filters(pull, parent).ok_or_else(|| {
+            error(
+                self.source,
+                plan.outer,
+                "unsupported comprehension loop edges",
+            )
+        })?;
+        let accepted = filters.end;
+        let mut conditions = Vec::with_capacity(filters.len());
+        for step in &plan.steps[filters] {
+            let Step::Filter { test, .. } = step else {
+                unreachable!("validated filter range")
+            };
+            conditions.push(self.condition(test)?);
+            self.apply_facts(test, true);
+        }
+        Ok((accepted, conditions))
+    }
+
+    /// Translate a structured loop of the shared plan to typed iteration IR.
+    /// The target's type and the true edges of its guards are in scope when
+    /// checking either the nested iterator or the output expression.
+    fn comprehension_step(
+        &mut self,
+        plan: &Plan<'_>,
+        pc: usize,
+        parent: Option<usize>,
+        input: Iteration,
+        collector: Collector,
+        result: usize,
+    ) -> Result<Vec<Statement>, String> {
+        let Step::Next { depth, target, .. } = plan.steps[pc] else {
+            unreachable!("an iterator is followed by its pull");
+        };
+        self.forget_comprehension_writes(plan, depth);
+        self.lower_iteration(target, input, &[], |checker| {
+            let (next, conditions) = checker.comprehension_filters(plan, pc, parent)?;
+            let mut body = match plan.steps[next] {
+                Step::Emit { output, .. } => {
+                    let guarded = conditions.last().and_then(present_field);
+                    checker.comprehension_leaf(output, collector, result, guarded)?
+                }
+                Step::Open { iterable, .. } => {
+                    let input = checker.iteration_input(iterable, None)?;
+                    checker.comprehension_step(
+                        plan,
+                        next + 1,
+                        Some(pc),
+                        input,
+                        collector,
+                        result,
+                    )?
+                }
+                _ => unreachable!("a successful guard opens an iterator or emits"),
             };
             for condition in conditions.into_iter().rev() {
                 body = vec![Statement::If(condition, body, Vec::new())];
@@ -916,13 +882,13 @@ impl Checker<'_> {
     /// subscript assignment cannot express that order because it evaluates RHS first.
     fn comprehension_leaf(
         &mut self,
-        value: Yield<'_>,
-        expected: Option<Type>,
+        value: Output<'_>,
+        collector: Collector,
         result: usize,
         guarded: Option<(usize, usize)>,
     ) -> Result<Vec<Statement>, String> {
-        match value {
-            Yield::Sum(expression) => {
+        match (collector, value) {
+            (Collector::IntegerSum, Output::List(expression)) => {
                 let value = self.guarded_element(expression, Some(Type::Int), guarded)?;
                 self.locals[result] = Type::Int;
                 Ok(vec![Statement::Assign(
@@ -937,8 +903,8 @@ impl Checker<'_> {
                     },
                 )])
             }
-            Yield::List(expression) | Yield::Set(expression) => {
-                let is_set = matches!(value, Yield::Set(_));
+            (Collector::Display(expected), Output::List(expression) | Output::Set(expression)) => {
+                let is_set = matches!(value, Output::Set(_));
                 let element = expected.and_then(|ty| {
                     if is_set {
                         self.types.set_element(ty)
@@ -971,7 +937,7 @@ impl Checker<'_> {
                     ),
                 })])
             }
-            Yield::Dict(key, value) => {
+            (Collector::Display(expected), Output::Dict(key, value)) => {
                 let expected = expected.and_then(|ty| self.types.mapping(ty));
                 let key_value = self.guarded_element(key, expected.map(|(ty, _)| ty), guarded)?;
                 if !self.types.hashable_key(key_value.ty) {
@@ -993,6 +959,7 @@ impl Checker<'_> {
                     clear: vec![captured],
                 }])
             }
+            _ => unreachable!("invalid eager comprehension collector"),
         }
     }
 
@@ -1032,6 +999,38 @@ impl Checker<'_> {
 mod tests {
     use crate::ir::{Builtin, ExprKind, Statement, Type, walk_expressions};
     use crate::{CompileOptions, check, compile};
+
+    #[test]
+    fn outer_await_acquires_a_synchronous_generator_iterator_in_its_caller() {
+        let source = r#"
+async def items() -> list[int]:
+    return [1, 2]
+
+async def total() -> int:
+    return sum(x for x in await items())
+"#;
+        let graph = crate::modules::SourceGraph::single(source).unwrap();
+        super::super::lower(&graph).unwrap();
+    }
+
+    #[test]
+    fn synchronous_consumer_requires_a_synchronous_generator_protocol() {
+        let source = r#"
+async def identity(value: int) -> int:
+    return value
+
+async def invalid(values: list[int]) -> int:
+    return sum(await identity(x) for x in values)
+"#;
+        let graph = crate::modules::SourceGraph::single(source).unwrap();
+        let diagnostic = super::super::lower(&graph)
+            .err()
+            .expect("async generator requires an async iterator");
+        assert!(
+            diagnostic.contains("asynchronous generator expressions are unsupported"),
+            "{diagnostic}"
+        );
+    }
 
     #[test]
     fn unrelated_guard_keeps_context_for_bound_method_inference() {

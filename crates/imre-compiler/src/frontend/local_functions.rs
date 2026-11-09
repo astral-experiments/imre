@@ -160,9 +160,13 @@ impl Binding {
                 .is_some_and(|f| comprehensions::function_reads(f).contains(name))
     }
 
-    pub(super) fn target(&self, source: &str, node: &impl Ranged) -> Result<&Function, String> {
+    pub(super) fn target(
+        &self,
+        source: &str,
+        node: &impl Ranged,
+    ) -> std::result::Result<&Function, String> {
         self.function.as_ref().ok_or_else(|| {
-            error(
+            diagnostic_message(
                 source,
                 node,
                 "forward and recursive local function references are unsupported",
@@ -177,7 +181,7 @@ impl Function {
         types: &Types,
         source: &str,
         node: &impl Ranged,
-    ) -> Result<Expr, String> {
+    ) -> std::result::Result<Expr, String> {
         if self.signature.asynchronous {
             types.set_coroutine_target(self.signature.id, crate::types::CoroutineTarget::Coroutine);
         }
@@ -189,7 +193,7 @@ impl Function {
                 )
             })
         {
-            return Err(error(
+            return Err(diagnostic_message(
                 source,
                 node,
                 "local callbacks must be noncapturing and have positional parameters",
@@ -232,9 +236,9 @@ impl Checker<'_> {
         if let Some(slot) = binding.value_slot {
             Ok(self.local(slot))
         } else {
-            binding
+            Ok(binding
                 .target(self.source, value)?
-                .callback(self.types, self.source, value)
+                .callback(self.types, self.source, value)?)
         }
     }
 
@@ -544,7 +548,7 @@ impl Checker<'_> {
             })?;
         let key = (left, right);
         if let Some(function) = comparator.instances.get(&key) {
-            return function.callback(self.types, self.source, node);
+            return Ok(function.callback(self.types, self.source, node)?);
         }
         let definition = Rc::clone(&comparator.definition);
         let params = definition
@@ -692,8 +696,7 @@ impl Checker<'_> {
         for (parameter, ty) in closed_calls::parameters(&definition.parameters)
             .zip(signature.params.iter().map(|p| p.ty))
         {
-            let slot = helper.declare(parameter.name().as_str(), ty, parameter)?;
-            helper.assigned.insert(slot);
+            let slot = helper.bind_parameter(parameter, ty)?;
             params.push(slot);
         }
 

@@ -3,20 +3,27 @@ use super::{Context, Error, Id, NONE, Result, Value};
 use std::collections::HashMap;
 mod encoding;
 
-pub(in super::super) fn install(ctx: &mut Context, module: Id, scope: Id) -> Result<()> {
-    // Keep the dictionary itself so that live registrations are visible, even if
-    // the copyreg module attribute is later rebound.
-    let copyreg = ctx.module("copyreg")?;
-    let table = ctx.lookup_attr(copyreg, "dispatch_table")?;
+/// The accelerator keeps the original dictionaries and observes their in-place edits.
+fn registry(ctx: &mut Context, module: Id, owner: &str, name: &str) -> Result<Id> {
+    let table = ctx.lookup_attr(module, name)?;
     if !matches!(ctx.heap.get(table), Value::Dict(_)) {
         return Err(Error::new(
             "RuntimeError",
             format!(
-                "copyreg.dispatch_table should be a dict, not {}",
+                "{owner}.{name} should be a dict, not {}",
                 ctx.type_name(table)
             ),
         ));
     }
+    Ok(table)
+}
+
+pub(in super::super) fn install(ctx: &mut Context, module: Id, scope: Id) -> Result<()> {
+    let copyreg = ctx.module("copyreg")?;
+    let table = registry(ctx, copyreg, "copyreg", "dispatch_table")?;
+    let compat = ctx.module("_compat_pickle")?;
+    let reverse_names = registry(ctx, compat, "_compat_pickle", "REVERSE_NAME_MAPPING")?;
+    let reverse_imports = registry(ctx, compat, "_compat_pickle", "REVERSE_IMPORT_MAPPING")?;
     let exception = ctx.builtin("Exception");
     let mut exception_class = |name: &str, base| -> Result<Id> {
         let fields = ctx.scope("_pickle", Some(scope));
@@ -38,6 +45,8 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id, scope: Id) -> Res
     *module_state = Some(NativeModuleState::PickleWriter {
         pickling_error,
         dispatch_table: table,
+        reverse_names,
+        reverse_imports,
     });
     let callable = ctx.builtin("_pickle.dumps");
     let dumps = ctx.alloc(Value::Method {
@@ -153,7 +162,7 @@ fn global_module(ctx: &mut Context, obj: Id, name: &str, error: Id) -> Result<Id
     Ok(module)
 }
 
-fn unsupported_reducer(ctx: &Context, obj: Id) -> Error {
+pub(in crate::dynamic) fn unsupported_reducer(ctx: &Context, obj: Id) -> Error {
     Error::new(
         "NotImplementedError",
         format!("native pickle has no reducer for {}", ctx.type_name(obj)),
@@ -287,19 +296,34 @@ fn reduce_without_newargs(
 }
 
 fn default_reduction(ctx: &mut Context, obj: Id, protocol: i32) -> Result<Id> {
-    match ctx.heap.get(obj) {
-        Value::DirEntry(_) if protocol < 2 => {
-            // copyreg's legacy reducer records the class even when its instances cannot be created.
-            let copyreg = ctx.module("copyreg")?;
-            let reconstructor = ctx.lookup_attr(copyreg, "_reconstructor")?;
-            let class = ctx.exact_type(obj)?;
-            let base = ctx.builtin("object");
-            let args = ctx.alloc(Value::Tuple(vec![class, base, NONE]));
-            Ok(ctx.alloc(Value::Tuple(vec![reconstructor, args])))
+    let value = ctx.heap.get(obj);
+    if matches!(value, Value::DirEntry(_))
+        || value
+            .instance_class()
+            .and_then(|class| ctx.heap.get(class).heap_type())
+            == Some(super::unicodedata::CLASS)
+    {
+        if protocol >= 2 {
+            return Err(Error::new(
+                "TypeError",
+                format!("cannot pickle '{}' object", ctx.type_name(obj)),
+            ));
         }
-        Value::DirEntry(_)
-        | Value::ClassMethod { .. }
+        // copyreg's legacy reducer records the class even when its instances cannot be created.
+        let copyreg = ctx.module("copyreg")?;
+        let reconstructor = ctx.lookup_attr(copyreg, "_reconstructor")?;
+        let class = ctx.exact_type(obj)?;
+        let base = ctx.builtin("object");
+        let args = ctx.alloc(Value::Tuple(vec![class, base, NONE]));
+        return Ok(ctx.alloc(Value::Tuple(vec![reconstructor, args])));
+    }
+    match value {
+        Value::ClassMethod { .. }
         | Value::StaticMethod { .. }
+        | Value::ZstdCompressor(_)
+        | Value::ZstdDecompressor(_)
+        | Value::Bz2Compressor(_)
+        | Value::Bz2Decompressor(_)
         | Value::LzmaCompressor(_)
         | Value::LzmaDecompressor(_) => {
             let name = ctx.type_name(obj);
@@ -384,6 +408,8 @@ const BATCH_SIZE: usize = 1000;
 struct Pickler {
     error: Id,
     dispatch_table: Id,
+    reverse_names: Id,
+    reverse_imports: Id,
     protocol: u8,
     fix_imports: bool,
     memo: HashMap<Id, u32>,
@@ -613,6 +639,58 @@ impl Pickler {
         self.save(ctx, value)
     }
 
+    /// Translate a protocol 0–2 GLOBAL through the same Python 2 name tables as CPython.
+    fn legacy_global(&self, ctx: &mut Context, module: Id, name: Id) -> Result<(Id, Id)> {
+        let key = ctx.alloc(Value::Tuple(vec![module, name]));
+        let (_, index) = ctx.find_dictionary_key(self.reverse_names, key, None)?;
+        if let Some(index) = index {
+            let pair = ctx.stored_entries(self.reverse_names)[index].1;
+            let values = match ctx.heap.get(ctx.scalar_value(pair)) {
+                Value::Tuple(items) | Value::NamedTuple { values: items, .. }
+                    if items.len() == 2 =>
+                {
+                    items
+                }
+                _ => {
+                    return Err(Error::new(
+                        "RuntimeError",
+                        format!(
+                            "_compat_pickle.REVERSE_NAME_MAPPING values should be 2-tuples, not {}",
+                            ctx.type_name(pair)
+                        ),
+                    ));
+                }
+            };
+            let (module, name) = (values[0], values[1]);
+            if ctx.string_storage(module).is_none() || ctx.string_storage(name).is_none() {
+                return Err(Error::new(
+                    "RuntimeError",
+                    format!(
+                        "_compat_pickle.REVERSE_NAME_MAPPING values should be pairs of str, not ({}, {})",
+                        ctx.type_name(module),
+                        ctx.type_name(name)
+                    ),
+                ));
+            }
+            return Ok((module, name));
+        }
+        let (_, index) = ctx.find_dictionary_key(self.reverse_imports, module, None)?;
+        if let Some(index) = index {
+            let mapped = ctx.stored_entries(self.reverse_imports)[index].1;
+            if ctx.string_storage(mapped).is_none() {
+                return Err(Error::new(
+                    "RuntimeError",
+                    format!(
+                        "_compat_pickle.REVERSE_IMPORT_MAPPING values should be strings, not {}",
+                        ctx.type_name(mapped)
+                    ),
+                ));
+            }
+            return Ok((mapped, name));
+        }
+        Ok((module, name))
+    }
+
     fn save_global(&mut self, ctx: &mut Context, obj: Id, name: Option<String>) -> Result<()> {
         let name = match name {
             Some(name) => name,
@@ -648,12 +726,17 @@ impl Pickler {
             self.save(ctx, getattr)?;
             encoding::tuple_start(&mut self.out, self.protocol, 2);
         }
+        let global_name = ctx.text(global_name);
+        let (module, global_name) = if self.fix_imports && self.protocol < 3 {
+            self.legacy_global(ctx, module, global_name)?
+        } else {
+            (module, global_name)
+        };
         encoding::global(
             &mut self.out,
             self.protocol,
             ctx.str_value(module)?,
-            global_name,
-            self.fix_imports,
+            ctx.str_value(global_name)?,
         )
         .map_err(|e| {
             if e.kind == "PicklingError" {
@@ -960,6 +1043,8 @@ pub(super) fn dumps(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
             Some(NativeModuleState::PickleWriter {
                 pickling_error,
                 dispatch_table,
+                reverse_names,
+                reverse_imports,
             }),
         ..
     } = *ctx.heap.get(module)
@@ -1034,6 +1119,8 @@ pub(super) fn dumps(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
     let mut pickler = Pickler {
         error: pickling_error,
         dispatch_table,
+        reverse_names,
+        reverse_imports,
         protocol,
         fix_imports,
         memo: HashMap::new(),

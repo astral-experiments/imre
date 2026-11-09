@@ -114,7 +114,7 @@ pub(super) fn launch(
     if python.is_none() && boxed_imports {
         // Native run shares its image with build, which resolves installed sources
         // beside the program. Make the launcher's archive visible at that location.
-        let archive = std::env::current_exe()?.with_file_name("imre-stdlib.zip");
+        let archive = super::installation_file("imre-stdlib.zip")?;
         let target = directory.path().join("imre-stdlib.zip");
         if archive.is_file() {
             std::os::unix::fs::symlink(archive, target)?;

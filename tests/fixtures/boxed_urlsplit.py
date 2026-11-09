@@ -57,6 +57,42 @@ def current():
         assert binary.decode('utf-8').geturl() == text.geturl()
         assert type(parser(b'https://example.test/')) is byte_class
 
+    assert parse.urlunparse(["https", "example.test", "/api", None, None, None]) == "https://example.test/api"
+    assert urlunsplit((b"https", None, b"/api", None, None)) == b"https:///api"
+    assert parse.urlunparse(("file", "", None, "p", None, None)) == "file:///None;p"
+
+    class Reordered(parse.SplitResult):
+        def __iter__(self):
+            return iter(("https", "override.test", "/custom", None, None))
+
+    assert urlunsplit(Reordered("http", "saved.test", "/", "", "")) == "https://override.test/custom"
+
+    class UrlFields:
+        def __iter__(self):
+            return iter(("https", "example.test", "/api", None, None))
+
+        def __len__(self):
+            raise AssertionError("unexpected length hint during URL reconstruction")
+
+    assert urlunsplit(UrlFields()) == "https://example.test/api"
+
+    import gc
+    fields = ["custom", "", "/" + "live".upper(), None, "=".join(["q", "1"]), None]
+
+    class ClearingRegistry:
+        def __contains__(self, scheme):
+            fields.clear()
+            gc.collect()
+            return scheme == "custom"
+
+    registry = parse.uses_netloc
+    try:
+        parse.uses_netloc = ClearingRegistry()
+        assert parse.urlunparse(fields) == "custom:///LIVE?q=1"
+        assert fields == []
+    finally:
+        parse.uses_netloc = registry
+
     class CustomSplit(str):
         def lstrip(self, chars):
             return self

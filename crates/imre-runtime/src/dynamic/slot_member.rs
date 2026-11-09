@@ -1,7 +1,21 @@
 //! Namespace-based class construction and object-valued slot descriptors.
 
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
+use crate::dynamic::value::SlotStorage;
 use ruff_python_stdlib::identifiers::is_identifier;
+
+/// These native bases keep a variable-sized payload before a subclass instance dictionary.
+pub(super) const VARIABLE_SIZE_BASES: [&str; 3] = ["int", "tuple", "bytes"];
+
+/// Python mangles private member names with the name of the declaring class.
+pub(super) fn slot_name(class_name: &str, original: &str) -> String {
+    let owner = class_name.trim_start_matches('_');
+    if original.starts_with("__") && !original.ends_with("__") && !owner.is_empty() {
+        format!("_{owner}{original}")
+    } else {
+        original.to_owned()
+    }
+}
 
 impl Context {
     /// Inspect inherited slot layouts in method resolution order, without invoking Python.
@@ -37,7 +51,13 @@ impl Context {
             let layout = frame
                 .class_namespace
                 .as_deref()
-                .filter(|_| frame.class_cell.is_some())
+                .filter(|layout| {
+                    // A storage-free ancestor using object's allocator needs no cell of its own.
+                    frame.class_cell.is_some()
+                        || (owner != class
+                            && layout.slot_names.as_deref() == Some(&[])
+                            && self.allocation_base(owner) == Some(object))
+                })
                 .ok_or_else(unsupported)?;
             let Value::Tuple(bases) = self.heap.get(layout.bases) else {
                 return Err(unsupported());
@@ -55,19 +75,29 @@ impl Context {
             .collect())
     }
 
+    /// Read the declared object slots from the immutable layout, even if Python rebinds __slots__.
+    pub(super) fn declares_named_slots(&self, owner: Id) -> bool {
+        let Value::Class { scope, .. } = self.heap.get(owner) else {
+            return false;
+        };
+        self.scope_data(*scope)
+            .class_namespace
+            .as_deref()
+            .and_then(|layout| layout.slot_names.as_deref())
+            .is_some_and(|names| {
+                names
+                    .iter()
+                    .any(|name| !matches!(name.as_str(), "__dict__" | "__weakref__"))
+            })
+    }
+
     fn check_inherited_member_storage(&self, bases: &[Id]) -> Result<()> {
         for &base in bases {
             let Value::Class { scope, .. } = self.heap.get(base) else {
                 unreachable!()
             };
             let layout = self.scope_data(*scope).class_namespace.as_deref().unwrap();
-            if !layout.member_slots
-                && layout.slot_names.as_deref().is_some_and(|slots| {
-                    slots
-                        .iter()
-                        .any(|s| !matches!(s.as_str(), "__dict__" | "__weakref__"))
-                })
-            {
+            if !layout.member_slots && self.declares_named_slots(base) {
                 return Err(Error::new(
                     "NotImplementedError",
                     "inherited named slots require owner-bound member descriptors",
@@ -194,9 +224,11 @@ impl Context {
                 "expected an ordinary dataclass type",
             ));
         };
-        let name = self.class_name(old).to_owned();
+        let name = self.lookup_attr(old, "__name__")?;
+        let name_text = self.str_value(name)?.to_owned();
         let module = self.scope_data(original).module.clone();
         let layout = super::value::ClassNamespace {
+            name_override: Some(name),
             member_slots: true,
             provider_annotations: self.has_class_annotation_provider(original),
             ..Default::default()
@@ -214,7 +246,12 @@ impl Context {
         let bases = self
             .class_bases_tuple(old)
             .expect("validated dataclass bases");
-        let class = self.allocate_class(name, scope, bases)?;
+        let class = self.allocate_class(name_text, scope, bases)?;
+        // The initial qualified name is type metadata, outside the __set_name__ member walk.
+        let Value::Scope(frame) = self.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        frame.names.insert(crate::Str::new("__qualname__"), name);
         self.finish_namespace_class(class, scope, cell, None, Vec::new())
     }
 
@@ -656,8 +693,9 @@ impl Context {
         if slots.is_empty() {
             return Ok(Vec::new());
         }
-        if ["int", "tuple", "bytes", "type"]
-            .iter()
+        if VARIABLE_SIZE_BASES
+            .into_iter()
+            .chain(["type"])
             .any(|name| self.has_base(base, name))
         {
             return Err(Error::new(
@@ -720,30 +758,14 @@ impl Context {
         class_name: &str,
         scope: Id,
         slots: &[String],
-        ordinary_slots: bool,
     ) -> Result<Vec<String>> {
         let mut members = Vec::new();
         for original in slots {
-            if original == "__dict__" {
-                if ordinary_slots {
-                    // Ordinary instances already supply dictionary storage through their layout.
-                    continue;
-                }
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "dynamic __dict__ slot descriptors are unsupported",
-                ));
-            }
-            if original == "__weakref__" {
+            // Layout getsets supply the dictionary and weak references independently of named slots.
+            if matches!(original.as_str(), "__dict__" | "__weakref__") {
                 continue;
             }
-            let owner = class_name.trim_start_matches('_');
-            let name =
-                if original.starts_with("__") && !original.ends_with("__") && !owner.is_empty() {
-                    format!("_{owner}{original}")
-                } else {
-                    original.clone()
-                };
+            let name = slot_name(class_name, original);
             if self
                 .namespace_binding(self.scope_data(scope), &name)
                 .is_some()
@@ -760,23 +782,33 @@ impl Context {
         Ok(members)
     }
 
-    fn check_slot_receiver(&self, member: Id, receiver: Id) -> Result<(Id, bool)> {
-        let Value::SlotMember { owner, name } = *self.heap.get(member) else {
+    fn check_slot_receiver(&self, member: Id, receiver: Id) -> Result<(Id, bool, SlotStorage)> {
+        let Value::SlotMember {
+            owner,
+            name,
+            storage,
+        } = *self.heap.get(member)
+        else {
             unreachable!()
         };
         let finalizing = self.heap.get(owner).io_kind() == Some("TextIOWrapper")
             && self.str_value(name)? == "_finalizing";
-        if matches!(self.heap.get(receiver), Value::Instance { class, .. } if self.direct_subclass(*class, owner))
-            || finalizing
-                && matches!(self.heap.get(receiver), Value::TextFile(_))
-                && self.builtins.get("_io.TextIOWrapper") == Some(&owner)
+        if matches!(storage, SlotStorage::Exception(_, _))
+            && matches!(self.heap.get(receiver), Value::Raised(error) if self.raised_error_matches(error, owner))
+            || !matches!(storage, SlotStorage::Exception(_, _))
+                && matches!(self.heap.get(receiver), Value::Instance { class, .. } if self.direct_subclass(*class, owner))
+            || matches!(storage, SlotStorage::Module(_))
+                && matches!(self.heap.get(receiver), Value::Module { constructor: Some(class), .. } if self.direct_subclass(*class, owner))
         {
-            return Ok((name, finalizing));
+            return Ok((name, finalizing, storage));
         }
         let owner_name = if finalizing {
             "_io.TextIOWrapper"
         } else {
-            self.class_name(owner)
+            self.heap
+                .get(owner)
+                .heap_type()
+                .unwrap_or_else(|| self.class_name(owner))
         };
         let receiver_name = self.type_name(receiver);
         let prefix = if finalizing
@@ -795,10 +827,42 @@ impl Context {
         ))
     }
 
-    pub(super) fn read_slot_member(&self, member: Id, receiver: Id) -> Result<Id> {
-        let (name, finalizing) = self.check_slot_receiver(member, receiver)?;
-        if let Value::TextFile(file) = self.heap.get(receiver) {
-            return Ok(super::builtins::boolean(file.finalizing));
+    pub(super) fn read_slot_member(&mut self, member: Id, receiver: Id) -> Result<Id> {
+        let (name, finalizing, storage) = self.check_slot_receiver(member, receiver)?;
+        if let SlotStorage::Exception(kind, index) = storage {
+            let field = super::exception_members::names(kind)[index];
+            return super::exception_members::read(self, kind, field, receiver);
+        }
+        if let SlotStorage::ReadOnlyText(text) = storage {
+            return Ok(self.text(self.str_value(text)?.to_owned()));
+        }
+        if let Value::Module {
+            module_slots,
+            constructor: Some(class),
+            ..
+        } = self.heap.get(receiver)
+            && let SlotStorage::Module(offset) = storage
+        {
+            let name = self.str_value(name)?;
+            return module_slots
+                .as_ref()
+                .and_then(|slots| slots.get(&offset))
+                .copied()
+                .ok_or_else(|| {
+                    let qualname = self.class_qualname(*class);
+                    let module = self
+                        .own_class_attr(*class, "__module__")
+                        .and_then(|name| self.str_value(name).ok())
+                        .filter(|name| !matches!(*name, "__main__" | "builtins"));
+                    let owner = module.map_or_else(
+                        || qualname.to_owned(),
+                        |module| format!("{module}.{qualname}"),
+                    );
+                    Error::new(
+                        "AttributeError",
+                        format!("'{owner}' object has no attribute '{name}'"),
+                    )
+                });
         }
         let Value::Instance { member_values, .. } = self.heap.get(receiver) else {
             unreachable!()
@@ -818,16 +882,43 @@ impl Context {
         receiver: Id,
         value: Option<Id>,
     ) -> Result<()> {
-        let (name, finalizing) = self.check_slot_receiver(member, receiver)?;
+        let (name, finalizing, storage) = self.check_slot_receiver(member, receiver)?;
+        if let SlotStorage::Exception(kind, index) = storage {
+            let field = super::exception_members::names(kind)[index];
+            return super::exception_members::write(self, kind, field, receiver, value);
+        }
+        if matches!(storage, SlotStorage::ReadOnlyText(_)) {
+            return Err(Error::new("AttributeError", "readonly attribute"));
+        }
+        if let SlotStorage::Module(offset) = storage
+            && let Value::Module { module_slots, .. } = self.heap.get_mut(receiver)
+        {
+            let old = if let Some(value) = value {
+                module_slots
+                    .get_or_insert_with(Default::default)
+                    .insert(offset, value)
+            } else {
+                let previous = module_slots
+                    .as_mut()
+                    .and_then(|slots| slots.remove(&offset));
+                if previous.is_none() {
+                    return Err(Error::new(
+                        "AttributeError",
+                        self.str_value(name)?.to_owned(),
+                    ));
+                }
+                previous
+            };
+            if let Some(old) = old {
+                self.heap.weak_edge_removed(old);
+            }
+            return Ok(());
+        }
         if finalizing {
             let value = value
                 .ok_or_else(|| Error::new("TypeError", "can't delete numeric/char attribute"))?;
             if !matches!(value, TRUE | FALSE) {
                 return Err(Error::new("TypeError", "attribute value type must be bool"));
-            }
-            if let Value::TextFile(file) = self.heap.get_mut(receiver) {
-                file.finalizing = value == TRUE;
-                return Ok(());
             }
         }
         let Value::Instance { member_values, .. } = self.heap.get_mut(receiver) else {

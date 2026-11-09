@@ -100,13 +100,36 @@ class Flag:
         value = self._value_
         if value is None:
             raise TypeError(f"'{self}' cannot be inverted")
-        if isinstance(self, _IntFlag):
-            return self.__class__(~value)
-        return self.__class__(self._singles_mask_ & ~value)
+        if self._inverted_ is None:
+            if self._boundary_ in (EJECT, KEEP):
+                self._inverted_ = self.__class__(~value)
+            else:
+                self._inverted_ = self.__class__(self._singles_mask_ & ~value)
+        return self._inverted_
 
     __ror__ = __or__
     __rand__ = __and__
     __rxor__ = __xor__
+
+
+class FlagBoundary(_StrEnum):
+    """
+    control how out of range values are handled
+    "strict" -> error is raised             [default for Flag]
+    "conform" -> extra bits are discarded
+    "eject" -> lose flag status
+    "keep" -> keep flag status and all bits [default for IntFlag]
+    """
+    STRICT = "strict"
+    CONFORM = "conform"
+    EJECT = "eject"
+    KEEP = "keep"
+
+
+STRICT, CONFORM, EJECT, KEEP = FlagBoundary
+_Flag._inverted_ = None
+_Flag._boundary_ = STRICT
+_IntFlag._boundary_ = KEEP
 
 
 def global_enum_repr(self):
@@ -161,6 +184,22 @@ def global_enum(cls, update_str=False):
     return cls
 
 
+def unique(enumeration):
+    """
+    Class decorator for enumerations ensuring unique member values.
+    """
+    duplicates = []
+    for name, member in enumeration.__members__.items():
+        if name != member.name:
+            duplicates.append((name, member.name))
+    if duplicates:
+        alias_details = ', '.join(
+                ["%s -> %s" % (alias, name) for (alias, name) in duplicates])
+        raise ValueError('duplicate values found in %r: %s' %
+                (enumeration, alias_details))
+    return enumeration
+
+
 _not_given = object()
 
 
@@ -187,8 +226,8 @@ def _functional_members(base, names, start):
 
 def _prepare_functional_enum(base, value, names=_not_given, *values, module=None,
                              qualname=None, type=None, start=1, boundary=None):
-    if type is not None or boundary is not None:
-        raise NotImplementedError("functional enum mixins and boundary options are unsupported")
+    if type is not None:
+        raise NotImplementedError("functional enum mixins are unsupported")
     if names is _not_given:
         raise TypeError(f"{base} has no members; specify `names=()` if you meant to create a new, empty, enum")
-    return value, _functional_members(base, names, start), module, qualname
+    return value, _functional_members(base, names, start), module, qualname, boundary

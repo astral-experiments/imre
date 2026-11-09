@@ -1,5 +1,21 @@
 use super::*;
-use crate::dynamic::complex::Complex;
+use crate::dynamic::{IteratorSlice, complex::Complex};
+
+/// Apply a native integral method to the stored float without calling subtype hooks.
+pub(in crate::dynamic) fn round_float_to_integer(
+    ctx: &mut Context,
+    value: f64,
+    method: &str,
+) -> Result<Id> {
+    let rounded = match method {
+        "__ceil__" => value.ceil(),
+        "__floor__" => value.floor(),
+        "__trunc__" => value,
+        _ => unreachable!("float integral method"),
+    };
+    let integer = crate::floats::float_to_integer(rounded)?;
+    Ok(ctx.alloc(Value::Int(crate::Int::new(integer))))
+}
 
 /// Format the receiver's stored binary64 using Python's hexadecimal spelling.
 pub(super) fn hex(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -298,6 +314,76 @@ pub(in crate::dynamic) fn from_numeric_slots(ctx: &mut Context, value: Id) -> Re
     Ok(None)
 }
 
+/// Read only exact integer and boolean operands that fit the native accumulator.
+fn small_integer(value: &Value) -> Option<i64> {
+    match value {
+        Value::Int(value) => value.to_i64(),
+        Value::Bool(value) => Some(i64::from(*value)),
+        _ => None,
+    }
+}
+
+/// A completed reduction or the exact prefix preceding the first Python addition.
+enum IntegerSliceSum {
+    Complete(crate::Int),
+    Prefix { sum: i64, consumed: usize },
+}
+
+/// The iterator has already yielded the first item. Count only subsequent exact additions.
+fn integer_prefix<'a>(
+    ctx: &Context,
+    mut sum: i64,
+    items: impl Iterator<Item = &'a Id>,
+) -> IntegerSliceSum {
+    for (consumed, &item) in items.enumerate() {
+        let Some(next) = small_integer(ctx.heap.get(item)).and_then(|value| sum.checked_add(value))
+        else {
+            return IntegerSliceSum::Prefix { sum, consumed };
+        };
+        sum = next;
+    }
+    IntegerSliceSum::Complete(sum.into())
+}
+
+/// Reduce as much of the native iterator as possible without invoking Python code.
+#[inline(never)]
+fn integer_slice_sum(
+    ctx: &Context,
+    initial: &crate::Int,
+    first: Id,
+    items: IteratorSlice<'_>,
+) -> Option<IntegerSliceSum> {
+    let first_sum = || {
+        initial
+            .to_i64()?
+            .checked_add(small_integer(ctx.heap.get(first))?)
+    };
+    match items {
+        IteratorSlice::Values(items) => Some(integer_prefix(ctx, first_sum()?, items.iter())),
+        IteratorSlice::Reversed(items) => {
+            Some(integer_prefix(ctx, first_sum()?, items.iter().rev()))
+        }
+        IteratorSlice::Bytes(bytes) | IteratorSlice::ReversedBytes(bytes) => {
+            // Each chunk vectorizes in a machine word. Even the largest byte slice fits in i128.
+            let mut subtotal = i128::from(small_integer(ctx.heap.get(first))?);
+            for chunk in bytes.chunks(1 << 16) {
+                subtotal += i128::from(chunk.iter().copied().map(i64::from).sum::<i64>());
+            }
+            if let Some(start) = initial.to_i64() {
+                let result = i128::from(start) + subtotal;
+                return Some(IntegerSliceSum::Complete(match i64::try_from(result) {
+                    Ok(value) => crate::Int::from(value),
+                    Err(_) => crate::Int::new(result.into()),
+                }));
+            }
+            Some(IntegerSliceSum::Complete(crate::Int::new(
+                initial.big().as_ref() + subtotal,
+            )))
+        }
+        _ => None,
+    }
+}
+
 /// Sum a boxed iterable, retaining low-order bits independently on each numerical axis.
 pub(super) fn sum(ctx: &mut Context, source: Id, start: Option<Id>) -> Result<Id> {
     let iterator = ctx.iterator(source)?;
@@ -325,15 +411,47 @@ pub(super) fn sum(ctx: &mut Context, source: Id, start: Option<Id>) -> Result<Id
     };
 
     if let Value::Int(initial) = ctx.heap.get(total)
+        && matches!(ctx.heap.get(iterator), Value::Iterator { .. })
+        && let Some(sum) = integer_slice_sum(ctx, initial, item, ctx.iterator_remaining(iterator)?)
+    {
+        let Value::Iterator {
+            sequence,
+            offset,
+            reverse,
+            ..
+        } = ctx.heap.get_mut(iterator)
+        else {
+            unreachable!()
+        };
+        match sum {
+            IntegerSliceSum::Complete(value) => {
+                *sequence = None;
+                ctx.heap.release_temporaries_since(mark);
+                return Ok(ctx.alloc(Value::Int(value)));
+            }
+            IntegerSliceSum::Prefix { sum, consumed } => {
+                if *reverse {
+                    *offset -= consumed;
+                } else {
+                    *offset += consumed;
+                }
+                ctx.heap.release_temporaries_since(mark);
+                let Some(next) = next_item(ctx)? else {
+                    return Ok(ctx.int(sum));
+                };
+                item = next;
+                total = ctx.int(sum);
+            }
+        }
+    }
+
+    if let Value::Int(initial) = ctx.heap.get(total)
         && let Some(mut integer) = initial.to_i64()
     {
         loop {
-            let value = match ctx.heap.get(item) {
-                Value::Int(value) => value.to_i64(),
-                Value::Bool(value) => Some(i64::from(*value)),
-                _ => None,
-            };
-            let Some(next) = value.and_then(|value| integer.checked_add(value)) else {
+            let Some(next) =
+                small_integer(ctx.heap.get(item)).and_then(|value| integer.checked_add(value))
+            else {
                 let accumulated = ctx.int(integer);
                 total = ctx.binary("+", accumulated, item)?;
                 break;

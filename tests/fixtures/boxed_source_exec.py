@@ -89,6 +89,30 @@ def async_generator_syntax():
 
 
 def syntax_members():
+    for prefix in ("\t", "\t\\\n\t"):
+        try:
+            compile("if True:\n    pass\n" + prefix + "\\ppass\n", "bad_join.py", "exec")
+        except SyntaxError as error:
+            assert type(error) is SyntaxError
+        else:
+            raise AssertionError("invalid line continuation was accepted")
+
+    # Unexpected indentation can still produce an ordinary parser error after a leading join.
+    try:
+        compile("if True:\n    pass\n\t\\\npass\n", "bad_join.py", "exec")
+    except SyntaxError:
+        pass
+    else:
+        raise AssertionError("unexpected indentation was accepted")
+
+    try:
+        compile("if True:\n    pass\n\tpass\0", "bad_join.py", "exec")
+    except SyntaxError as error:
+        assert type(error) is SyntaxError
+        assert error.args == ("source code string cannot contain null bytes",)
+    else:
+        raise AssertionError("source with a NUL was accepted")
+
     try:
         compile(b"# coding: unknown-encoding\n", "dir/one.py", "exec")
     except SyntaxError as error:
@@ -905,6 +929,21 @@ class Private:
             case (__item,):
                 return __item
 """, scope)
+    exec("""
+def pick(value, allow):
+    a = b = "before"
+    match value:
+        case (tuple() | list()) as items if not items:
+            return items
+        case [a, b, 0] | [b, a, 1] if allow:
+            return a, b
+    return b, a
+""", scope)
+    pick = scope["pick"]
+    assert pick([], False) == [] and pick((), False) == ()
+    assert pick([1, 2, 1], True) == (2, 1)
+    assert pick([1, 2, 1], False) == (1, 2)
+    assert pick([1, 2, 2], True) == ("before", "before")
     assert scope["Private"]().unpack((42,)) == 42
     nested = scope["nested"]
 
@@ -924,6 +963,24 @@ class Private:
     assert calls == ["len", "iter", 0, "len"]
     assert nested((("tag", 1), True)) == "guard passed"
     assert nested("ab") is None and nested(b"ab") is None
+
+    class Indexed(Logged):
+        def __getitem__(self, index):
+            calls.append(index)
+            return super().__getitem__(index)
+
+    scope["seq"] = Indexed(("crates", "sample", "resources", "fixture"))
+    calls.clear()
+    exec("match seq:\n    case ['crates', _, 'resources', *_]: matched = True", scope)
+    assert scope.pop("matched") and calls == ["len", 0, 2]
+    calls.clear()
+    exec("match seq:\n    case [first, *_, last]: result = first, last", scope)
+    assert scope["result"] == ("crates", "fixture") and calls == ["len", 0, "len", 3]
+    calls.clear()
+    exec("match seq:\n    case [*_]: pass", scope)
+    assert calls == []
+    exec("match seq:\n    case [first, *middle, last]: result = middle", scope)
+    assert scope["result"] == ["sample", "resources"] and calls == ["len", "iter"]
 
     class Broken(list):
         def __iter__(self):
@@ -963,6 +1020,24 @@ class Private:
     exec("match (Dropped(), Compare()):\n    case (_, 1): pass", scope)
     assert calls == ["dropped", "compared"]
 
+    class Token:
+        def __init__(self, name):
+            self.name = name
+
+        def __del__(self):
+            calls.append(self.name)
+
+    class Trial(list):
+        def __iter__(self):
+            calls.append("unpack")
+            return iter((Token("a"), Token("b"), 2, Token("later")))
+
+    scope["trial"] = Trial([0] * 4)
+    for pattern, attempts in (("[a, b, 0, c] | [b, a, 1, c]", 2), ("[a, b, (0 | 1), c]", 1)):
+        calls.clear()
+        exec("match trial:\n    case " + pattern + ": pass", scope)
+        assert calls == ["unpack", "later", "a", "b"] * attempts
+
     class Compared(Dropped):
         def __eq__(self, other):
             return calls
@@ -983,12 +1058,22 @@ class Private:
     assert picker.pick({"key": 1, "value": 2}) == {"value": 2}
     assert picker.pick(3) == 3
 
-    try:
-        compile("match value:\n    case [a, a]: pass", "<match>", "exec")
-    except SyntaxError:
-        pass
-    else:
-        raise AssertionError("duplicate sequence capture accepted")
+    for pattern, text, start, end, location_arg in (
+        ("[a] | [b]", "alternative patterns bind different names", 10, 19, True),
+        ("_ | 0", "wildcard makes remaining patterns unreachable", 10, 11, True),
+        ("[a, a]", "multiple assignments to name 'a' in pattern", 14, 15, True),
+        ("[a, *a]", "multiple assignments to name 'a' in pattern", 14, 16, True),
+        ("[a, a, *a, *b]", "multiple starred names in sequence pattern", 10, 24, True),
+        ("[*a, *__debug__]", "cannot assign to __debug__", 15, 25, False),
+    ):
+        try:
+            compile("match value:\n    case " + pattern + ": pass", "<match>", "exec")
+        except SyntaxError as error:
+            location = ("<match>", 2, start, None, 2, end)
+            assert error.msg == text and (error.offset, error.end_offset) == (start, end)
+            assert error.args == ((text, location) if location_arg else (text,))
+        else:
+            raise AssertionError("invalid sequence pattern accepted")
 
 
 def source_genexpr():
@@ -1194,6 +1279,27 @@ def source_eval():
 
 
 def exec_caller_namespaces():
+    def store():
+        global exec_probe
+        exec_probe = abs(-7)
+        return exec_probe
+
+    supplied = {"__builtins__": {"abs": lambda value: 2 * value}}
+    separate = {"exec_probe": "local"}
+    assert exec(store.__code__, supplied, separate) is None
+    assert eval(store.__code__, supplied, separate) == -14
+    assert (supplied["exec_probe"], separate["exec_probe"]) == (-14, "local")
+
+    def required(arg):
+        return arg
+
+    try:
+        exec(required.__code__, supplied)
+    except TypeError as exc:
+        assert str(exc) == "required() missing 1 required positional argument: 'arg'"
+    else:
+        raise AssertionError("exec supplied a missing argument")
+
     seen = []
     value = 7
     execute = exec
@@ -1210,6 +1316,30 @@ def exec_caller_namespaces():
     assert exec(compile("40 + 2", "caller", "eval"), {}, separate) is None
     exec("result = n", globals={"n": 8}, locals=separate, closure=None)
     assert separate == {"result": 8}
+
+    def update():
+        nonlocal value
+        value = abs(value)
+
+    other = 11
+
+    def alternate():
+        return other
+
+    namespace = {"abs": lambda n: n * 2}
+    result = exec(update.__code__, namespace, closure=alternate.__closure__)
+    assert result is None
+    assert (value, other) == (7, 22)
+
+    def needs(arg):
+        return value + arg
+
+    try:
+        exec(needs.__code__, namespace, closure=needs.__closure__)
+    except TypeError as exc:
+        assert str(exc) == "needs() missing 1 required positional argument: 'arg'"
+    else:
+        raise AssertionError("missing argument accepted")
 
     outer = {"__doc__": "outer"}
     exec(

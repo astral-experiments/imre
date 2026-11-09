@@ -71,10 +71,52 @@ pub(super) fn annotation_reads(
     uses.direct
 }
 
+/// Reads that reach the containing function and assignment expressions that bind there.
+pub(super) fn comprehension_scope(
+    expression: &ast::Expr,
+    string_annotations: bool,
+) -> (BTreeSet<String>, BTreeSet<String>, BTreeSet<String>) {
+    // Eager comprehensions use the enclosing frame's fast slots. An escaping
+    // genexpr or function nested inside the display still captures its reads.
+    let mut uses = Uses {
+        inline_comprehensions: true,
+        ..Uses::new(string_annotations)
+    };
+    uses.visit_expr(expression);
+    uses.direct.extend(uses.nested.iter().cloned());
+    (uses.direct, uses.walrus, uses.nested)
+}
+
+/// Resolve the body in its own scope. The leftmost iterable has already been
+/// evaluated in the enclosing scope and cannot contribute to this code's cells.
+pub(super) fn generator_scope(
+    plan: &imre_ast::comprehension::Plan<'_>,
+    locals: indexmap::IndexSet<String>,
+    string_annotations: bool,
+) -> ClosureNames {
+    let mut uses = Uses {
+        implicit_class: true,
+        ..Uses::new(string_annotations)
+    };
+    plan.visit_body(|expr| uses.visit_expr(expr));
+    uses.direct.append(&mut uses.nested);
+    let mut scope = ClosureNames {
+        locals,
+        reads: uses.direct,
+        nonlocals: uses.walrus,
+        ..ClosureNames::default()
+    };
+    scope.finish_scope();
+    scope
+}
+
 #[derive(Default)]
 struct Uses {
     direct: BTreeSet<String>,
     nested: BTreeSet<String>,
+    walrus: BTreeSet<String>,
+    implicit_class: bool,
+    inline_comprehensions: bool,
     string_annotations: bool,
 }
 
@@ -83,6 +125,14 @@ impl Uses {
         Self {
             string_annotations,
             ..Self::default()
+        }
+    }
+
+    fn child_scope(&self) -> Self {
+        Self {
+            implicit_class: self.implicit_class,
+            inline_comprehensions: self.inline_comprehensions,
+            ..Self::new(self.string_annotations)
         }
     }
 
@@ -114,32 +164,40 @@ impl Uses {
     fn suite(&mut self, body: &[ast::Stmt], params: Option<&ast::Parameters>, class: bool) {
         let mut bounds = ClosureNames::default();
         bounds.visit_body(body);
-        let mut child = Self::new(self.string_annotations);
+        let mut child = self.child_scope();
         child.visit_body(body);
         self.child(child, bounds, params, class);
     }
 
-    fn comprehension<'a>(
-        &mut self,
-        generators: &[ast::Comprehension],
-        items: impl IntoIterator<Item = &'a ast::Expr>,
-    ) {
-        let mut child = Self::new(self.string_annotations);
-        let mut bounds = ClosureNames::default();
-        for (index, generator) in generators.iter().enumerate() {
-            bounds.visit_expr(&generator.target);
-            if index == 0 {
-                self.visit_expr(&generator.iter);
-            } else {
-                child.visit_expr(&generator.iter);
+    fn comprehension(&mut self, plan: imre_ast::comprehension::Plan<'_>) {
+        self.visit_expr(plan.outer);
+        let mut child = self.child_scope();
+        let bounds = ClosureNames {
+            locals: plan.collect_target_names(),
+            ..ClosureNames::default()
+        };
+        plan.visit_body(|expr| child.visit_expr(expr));
+        // Assignment expressions escape comprehension scopes, but stop at a lambda or function.
+        if self.inline_comprehensions {
+            if !matches!(plan.output, imre_ast::comprehension::Output::Generator(_)) {
+                self.walrus.append(&mut child.walrus);
+                self.direct.extend(
+                    child
+                        .direct
+                        .into_iter()
+                        .filter(|name| !bounds.locals.contains(name.as_str())),
+                );
+                self.nested.extend(
+                    child
+                        .nested
+                        .into_iter()
+                        .filter(|name| !bounds.locals.contains(name.as_str())),
+                );
+                return;
             }
-            for condition in &generator.ifs {
-                child.visit_expr(condition);
-            }
+            self.nested.extend(child.walrus.iter().cloned());
         }
-        for item in items {
-            child.visit_expr(item);
-        }
+        self.walrus.append(&mut child.walrus);
         self.child(child, bounds, None, false);
     }
 }
@@ -181,6 +239,15 @@ impl<'a> Visitor<'a> for Uses {
             ast::Expr::Name(n) if n.ctx == ast::ExprContext::Load => {
                 let name = n.id.as_str();
                 self.direct.insert(name.to_owned());
+                if self.implicit_class && name == "super" {
+                    self.direct.insert("__class__".to_owned());
+                }
+            }
+            ast::Expr::Named(n) => {
+                if let ast::Expr::Name(target) = &*n.target {
+                    self.walrus.insert(target.id.to_string());
+                }
+                self.visit_expr(&n.value);
             }
             ast::Expr::Lambda(f) => {
                 if let Some(params) = &f.parameters {
@@ -188,17 +255,13 @@ impl<'a> Visitor<'a> for Uses {
                 }
                 let mut bounds = ClosureNames::default();
                 bounds.visit_expr(&f.body);
-                let mut child = Self::new(self.string_annotations);
+                let mut child = self.child_scope();
                 child.visit_expr(&f.body);
                 self.child(child, bounds, f.parameters.as_deref(), false);
             }
-            ast::Expr::ListComp(e) => self.comprehension(&e.generators, [e.elt.as_ref()]),
-            ast::Expr::SetComp(e) => self.comprehension(&e.generators, [e.elt.as_ref()]),
-            ast::Expr::DictComp(e) => self.comprehension(
-                &e.generators,
-                e.key.as_deref().into_iter().chain([e.value.as_ref()]),
-            ),
-            ast::Expr::Generator(e) => self.comprehension(&e.generators, [e.elt.as_ref()]),
+            expr if let Some(plan) = imre_ast::comprehension::Plan::from_expr(expr) => {
+                self.comprehension(plan);
+            }
             _ => visitor::walk_expr(self, expr),
         }
     }

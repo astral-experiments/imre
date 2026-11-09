@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass, field
 
+FILTER_DIR: bool = True
+
 
 def _format_list(parts: list[str], pretty: bool) -> str:
     entries = ", ".join(parts)
@@ -28,14 +30,12 @@ class _DictionaryPatch:
     values: dict[str, str]
     clear: bool
     _original: dict[str, str] | None
-    _starts: int
 
     def __init__(self, mapping: dict[str, str], values: dict[str, str], clear: bool) -> None:
         self.in_dict = mapping
         self.values = values
         self.clear = clear
         self._original = None
-        self._starts = 0
 
     def _enter(self) -> dict[str, str]:
         self._original = self.in_dict.copy()
@@ -50,14 +50,21 @@ class _DictionaryPatch:
 
     def start(self) -> dict[str, str]:
         result = self._enter()
-        self._starts += 1
+        _active_patches.append(self)
         return result
 
     def stop(self) -> bool | None:
-        if self._starts == 0:
-            return None
-        self._starts -= 1
-        return self._exit()
+        for index in range(len(_active_patches)):
+            if _active_patches[index] is self:
+                # Keep start order for stopall, including after a manual stop.
+                for tail in range(index + 1, len(_active_patches)):
+                    _active_patches[tail - 1] = _active_patches[tail]
+                _active_patches.pop()
+                return self._exit()
+        return None
+
+
+_active_patches: list[_DictionaryPatch] = []
 
 
 class _PatchFactory:
@@ -65,6 +72,10 @@ class _PatchFactory:
 
     def __init__(self) -> None:
         self.TEST_PREFIX = "test"
+
+    def stopall(self) -> None:
+        for patcher in reversed(_active_patches):
+            patcher.stop()
 
     def _dictionary(self, in_dict: dict[str, str], values: dict[str, str] | None, clear: bool, kwargs: dict[str, str]) -> _DictionaryPatch:
         if values is None:

@@ -3,6 +3,7 @@
 use ruff_python_ast::visitor::{Visitor, walk_comprehension, walk_expr, walk_stmt};
 
 use super::*;
+use std::result::Result;
 
 pub(super) fn check_reads(
     function: &ast::StmtFunctionDef,
@@ -23,7 +24,7 @@ pub(super) fn check_reads(
     };
     reads.visit_body(&function.body);
     if let Some(expr) = reads.invalid {
-        Err(error(
+        Err(diagnostic_message(
             source,
             expr,
             if empty_tuple_default {
@@ -58,7 +59,7 @@ pub(super) fn check_pack_reads(
     };
     reads.visit_body(&function.body);
     if let Some(expr) = reads.invalid {
-        Err(error(
+        Err(diagnostic_message(
             source,
             expr,
             "a variadic positional parameter supports iteration, expansion, and len",
@@ -165,6 +166,7 @@ impl<'ast> Visitor<'ast> for Reads<'_, 'ast> {
             }
             ast::Expr::Call(call)
                 if matches!(&*call.func, ast::Expr::Name(name) if name.id == "len")
+                    && self.graph.resolve(self.module, &call.func).is_none()
                     && let [arg] = call.arguments.args.as_ref() =>
             {
                 self.allow(arg);

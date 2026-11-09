@@ -1,7 +1,6 @@
 """Synchronous HTTP request handling on socketserver's TCP streams."""
 from __future__ import annotations
 
-import codecs
 import socket
 import socketserver
 import sys
@@ -228,7 +227,7 @@ class BaseHTTPRequestHandler(socketserver.StreamRequestHandler):
         self.command = None
         self.request_version = self.default_request_version
         self.close_connection = True
-        self.requestline = codecs.lookup("iso-8859-1").decode(self.raw_requestline)[0].rstrip("\r\n")
+        self.requestline = str(self.raw_requestline, "iso-8859-1").rstrip("\r\n")
         words = self.requestline.split()
         if not words:
             return False
@@ -278,7 +277,7 @@ class BaseHTTPRequestHandler(socketserver.StreamRequestHandler):
                 return False
             if line == b"\r\n" or line == b"\n" or not line:
                 break
-            lines.append(codecs.lookup("iso-8859-1").decode(line)[0])
+            lines.append(str(line, "iso-8859-1"))
         message = self.MessageClass()
         message._parse(lines)
         self.headers = message

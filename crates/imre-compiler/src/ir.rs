@@ -77,6 +77,8 @@ pub(crate) enum Type {
     Union(usize),
     /// An owned tagged reference to a string list or a fixed tuple of strings.
     StringIterable,
+    /// Immutable start, stop and step. Each iteration gets its own cursor.
+    Range,
     /// An internal container or string cursor, never available in user annotations.
     Iterator,
     /// A first-class cursor whose next operation transfers one exact element type.
@@ -271,6 +273,7 @@ pub(crate) enum TypingOperation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SocketOp {
     Constant(&'static str),
+    ControlSize { padded: bool },
     GetFqdn,
     New,
     Bind,
@@ -370,6 +373,7 @@ impl std::fmt::Display for Type {
             Self::BytesIO => "io.BytesIO",
             Self::SourceModule => "module",
             Self::Path => "pathlib.Path",
+            Self::Range => "range",
             Self::PathInfo => "pathlib.types.PathInfo",
             Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
             Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
@@ -466,6 +470,8 @@ pub(crate) enum SourceFrame {
 pub(crate) struct Module {
     /// Interpreter settings already selected by the Python-style launcher.
     pub command_flags: Option<crate::CommandFlags>,
+    /// NUL-separated source registrations that mask native providers in this image.
+    pub builtin_module_sources: Option<String>,
     /// Exact storage shapes survive checking so lowering need not erase them to
     /// generic tagged slots. Class identities index `class_fields`; container
     /// identities refer to this compilation's interned type universe.
@@ -503,8 +509,13 @@ pub(crate) struct ClassMetadata {
     pub http_members: Vec<HttpMember>,
     /// A closed frozen layout whose generated constructor only stores its fields.
     pub frozen_initializer: Option<usize>,
+    /// Checked instance method used to render a retained value after type erasure.
+    pub repr_method: Option<usize>,
+    pub str_method: Option<usize>,
+    /// An explicit async override cannot be called through a synchronous text slot.
+    pub async_str: bool,
     pub value_struct: bool,
-    pub dataclass_eq: bool,
+    pub field_equality: bool,
     pub dataclass_repr: bool,
     pub toml_hash: bool,
     /// Field index for each parameter of a generated, field-only initializer.
@@ -1017,6 +1028,23 @@ impl CharacterFilter {
     }
 }
 
+/// Unknown executable text can change the active namespace. Keep its ordinary object dispatch.
+pub(crate) fn text_execution(module: &Module) -> Option<(usize, ruff_text_size::TextRange)> {
+    let mut first = None;
+    for function in module.functions.iter().chain([&module.entry]) {
+        walk_expressions(&function.body, &mut |expr| {
+            if let ExprKind::Builtin(Builtin::ExecText(module, span), _) = &expr.kind
+                && first.is_none_or(|(id, range): (usize, ruff_text_size::TextRange)| {
+                    (*module, span.start()) < (id, range.start())
+                })
+            {
+                first = Some((*module, *span));
+            }
+        });
+    }
+    first
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
     ByteArrayNew,
@@ -1046,6 +1074,7 @@ pub(crate) enum Builtin {
     AccumulateCursor,
     SysStdout,
     SysHasStdout,
+    TargetLittleEndian,
     SysOriginalOutput {
         stderr: bool,
     },
@@ -1116,6 +1145,7 @@ pub(crate) enum Builtin {
     LiteralStringView,
     IntListContains,
     StringListContains,
+    StringTupleContains,
     StructListContains,
     StringContains,
     /// Immutable byte subsequence; operands are evaluated needle first.
@@ -1140,6 +1170,7 @@ pub(crate) enum Builtin {
         field: u32,
     },
     SysImplementation,
+    SysBuiltinModuleNames,
     SysStdlibModuleNames,
     SysStreamText {
         descriptor: u8,
@@ -1184,6 +1215,7 @@ pub(crate) enum Builtin {
     TimeExtras,
     TimeExtra(bool),
     TimeSleep,
+    SignalPause,
     WarningFilter {
         category: u32,
         invalid: u32,
@@ -1205,9 +1237,12 @@ pub(crate) enum Builtin {
     LogRecord(LogRecordOperation),
     Formatter(FormatterOperation),
     Input,
+    /// The selected builtin exec on a checked string operand.
+    ExecText(usize, ruff_text_size::TextRange),
     InputSelectStdout,
     InputFinish,
     Chr,
+    UnicodePropertyOfOrdinal(UnicodeProperty),
     Ord,
     IntegerPower,
     ModularPower,
@@ -1218,17 +1253,25 @@ pub(crate) enum Builtin {
     IntExtremum {
         minimum: bool,
     },
+    MathComb,
+    MathPerm,
+    MathFactorial,
+    IntBitCount,
     IntBitLength,
     IntHash,
     FloatIsInteger,
     FloatAcos,
     FloatAsin,
     FloatAtan,
+    FloatDegrees,
+    FloatFmod,
+    FloatRadians,
     FloatErfc,
     Sumprod,
     /// Base-two logarithm after checking the Python domain in the caller.
     FloatLog2,
     FloatLog10,
+    FloatLog1p,
     IntLog10,
     IntSignAsFloat,
     Bool,
@@ -1257,7 +1300,7 @@ pub(crate) enum Builtin {
     ObjectRecordProject(usize),
     ObjectStreamProject,
     ObjectTextProject,
-    ObjectIsExactTuple,
+    IsExactTuple,
     ObjectRecordIdentity {
         class: usize,
         reversed: bool,
@@ -1265,8 +1308,9 @@ pub(crate) enum Builtin {
     MappingObjectGet,
     ExceptionTupleView,
     ExceptionKeywordSuggestion,
-    /// A new, completely initialized record for a proven forwarding constructor.
-    ExceptionRecordFields,
+    BindSourceKeywords,
+    /// A new nominal record whose arguments initialize its complete checked layout.
+    RecordFromFields,
     /// Check the return type of __str__ or __repr__ before crossing the formatter ABI.
     ExceptionFormatterResult(bool),
     ExceptionArgs,
@@ -1402,6 +1446,7 @@ pub(crate) enum Builtin {
     Encode,
     Decode,
     DecodeAscii,
+    DecodeLatin1,
     BytesHex,
     FloatDivmod,
     UrlsafeB64encode,
@@ -1444,7 +1489,7 @@ pub(crate) enum Builtin {
     HashUpdateFile,
     HashName,
     HashType,
-    HashIdentity,
+    PointerIdentity,
     HashDigestSize,
     HashBlockSize,
     HashDigest {
@@ -1988,6 +2033,24 @@ pub(crate) enum PatchOperation {
     HunkText,
 }
 
+/// Character properties shared by checked calls and the native Unicode database.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum UnicodeProperty {
+    Bidirectional,
+    Category,
+    EastAsianWidth,
+}
+
+impl UnicodeProperty {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Bidirectional => "bidirectional",
+            Self::Category => "category",
+            Self::EastAsianWidth => "east_asian_width",
+        }
+    }
+}
+
 /// Closed string operations preserve exact argument and storage types.
 #[derive(Clone, Copy)]
 pub(crate) enum TextOperation {
@@ -1997,6 +2060,7 @@ pub(crate) enum TextOperation {
     ZFill {
         copy: bool,
     },
+    UnicodeProperty(UnicodeProperty),
     Normalize,
     Lower,
     Upper,
@@ -2595,7 +2659,7 @@ impl InstanceType {
             Self::Deque => matches!(ty, Type::Deque(_)),
             Self::Dict => matches!(ty, Type::Dict(_)),
             Self::Set => matches!(ty, Type::Set(_)),
-            Self::Tuple => matches!(ty, Type::Tuple(_) | Type::CodecInfo),
+            Self::Tuple => matches!(ty, Type::Tuple(_) | Type::VarTuple(_) | Type::CodecInfo),
             Self::SimpleNamespace => matches!(ty, Type::SimpleNamespace(_)),
             Self::ModuleSpec => matches!(ty, Type::ModuleSpec(_)),
             Self::Exception(_) => matches!(
@@ -2961,6 +3025,60 @@ pub(crate) fn invariant_string_cursors(function: &Function, private: &[usize]) -
         mark(body, &stable, &eligible, &mut result);
     });
     result
+}
+
+/// A local keeps a fact only if every value copied into it also has that fact.
+/// Copy edges can point backward through a loop or through a moved temporary.
+pub(crate) fn propagate_copy_facts(proven: &mut [bool], copies: &[(usize, usize)]) {
+    loop {
+        let mut changed = false;
+        for &(source, target) in copies {
+            if !proven[source] && proven[target] {
+                proven[target] = false;
+                changed = true;
+            }
+        }
+        if !changed {
+            return;
+        }
+    }
+}
+
+/// Only a plain function owns the writable third word used by wrapper links.
+pub(crate) fn plain_link_owners(function: &Function, owners: &[&Expr]) -> bool {
+    fn origin(value: &Expr) -> &ExprKind {
+        match &value.kind {
+            ExprKind::Builtin(Builtin::FunctionWrappedSet, args) => origin(&args[0]),
+            ExprKind::Scope { value, .. } => origin(value),
+            kind => kind,
+        }
+    }
+
+    let mut plain = vec![true; function.locals.len()];
+    for &parameter in &function.params {
+        plain[parameter] = false;
+    }
+    let mut copies = Vec::new();
+    walk_nodes(&function.body, &mut |node| match node {
+        // Clearing a slot does not give it a new callable.
+        Node::Statement(Statement::Clear(_) | Statement::Scope { .. })
+        | Node::Expression(Expr {
+            kind: ExprKind::Scope { .. },
+            ..
+        }) => {}
+        Node::Statement(Statement::Move(target, source)) => copies.push((*source, *target)),
+        _ => node_writes(node, &mut |slot, value| match value.map(origin) {
+            Some(ExprKind::Local(source)) => copies.push((*source, slot)),
+            Some(ExprKind::Builtin(Builtin::StaticFunction(_), _)) => {}
+            _ => plain[slot] = false,
+        }),
+    });
+    propagate_copy_facts(&mut plain, &copies);
+    owners.iter().all(|owner| match origin(owner) {
+        ExprKind::Local(slot) => plain[*slot],
+        ExprKind::Builtin(Builtin::StaticFunction(_), _) => true,
+        _ => false,
+    })
 }
 
 /// Visits every local write in a suite. Only ordinary assignments carry a right-hand side.

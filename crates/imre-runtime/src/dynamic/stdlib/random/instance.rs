@@ -14,15 +14,7 @@ pub(in crate::dynamic) enum RandomState {
 }
 
 pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
-    let source = ctx.text(include_str!("random.py"));
-    let filename = ctx.text("<imre stdlib>/random.py");
-    let mode = ctx.text("exec");
-    let code = ctx.compile_source(source, filename, mode, false)?;
-    let globals = ctx.module_globals(scope)?;
-    ctx.exec_source(code, globals, None, None)?;
-    let class = ctx
-        .dict_named_item(globals, "Random")
-        .expect("Random class");
+    let class = ctx.scope_name(scope, "Random").expect("Random class");
     let Value::Class {
         heap_type,
         scope: fields,
@@ -48,6 +40,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "randbytes",
         "sample",
         "expovariate",
+        "uniform",
     ] {
         let bound = ctx.lookup_attr(singleton, name)?;
         ctx.bind(scope, name, bound);
@@ -76,6 +69,32 @@ fn state(ctx: &mut Context, receiver: Id) -> &mut RandomState {
         unreachable!()
     };
     state
+}
+
+/// Draw from the receiver's current stream, including after a Python callback reseeds it.
+pub(super) fn draw(ctx: &mut Context, receiver: Id) -> f64 {
+    match state(ctx, receiver) {
+        RandomState::Local(local) => local.borrow_mut().random(),
+        RandomState::Shared => objects::imre_random_float(),
+    }
+}
+
+/// Identify the captured native random method, including one inherited or borrowed.
+pub(super) fn bound_stream(ctx: &Context, method: Id) -> Option<(Id, Id)> {
+    let Value::Method {
+        callable, receiver, ..
+    } = *ctx.heap.get(method)
+    else {
+        return None;
+    };
+    let Value::HeapTypeMethod {
+        owner,
+        name: "random",
+    } = *ctx.heap.get(callable)
+    else {
+        return None;
+    };
+    (ctx.heap.get(owner).heap_type() == Some(CLASS)).then_some((owner, receiver))
 }
 
 pub(in crate::dynamic) fn call(
@@ -118,10 +137,7 @@ pub(in crate::dynamic) fn call(
         }
         "random" => {
             super::random_args(rest, kwargs)?;
-            let value = match state(ctx, receiver) {
-                RandomState::Local(local) => local.borrow_mut().random(),
-                RandomState::Shared => objects::imre_random_float(),
-            };
+            let value = draw(ctx, receiver);
             Ok(ctx.alloc(Value::Float(value)))
         }
         "getrandbits" => {

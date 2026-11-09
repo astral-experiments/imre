@@ -1,4 +1,5 @@
 use super::*;
+use std::result::Result;
 
 pub(super) fn annotation(slice: &ast::Expr, types: &Types, source: &str) -> Result<Type, String> {
     let arguments = match slice {
@@ -6,12 +7,16 @@ pub(super) fn annotation(slice: &ast::Expr, types: &Types, source: &str) -> Resu
         item => std::slice::from_ref(item),
     };
     if arguments.is_empty() {
-        return Err(error(source, slice, "Literal requires at least one string"));
+        return Err(diagnostic_message(
+            source,
+            slice,
+            "Literal requires at least one string",
+        ));
     }
     let mut values = Vec::with_capacity(arguments.len());
     for argument in arguments {
         let ast::Expr::StringLiteral(string) = argument else {
-            return Err(error(
+            return Err(diagnostic_message(
                 source,
                 argument,
                 "Literal requires fixed string values",

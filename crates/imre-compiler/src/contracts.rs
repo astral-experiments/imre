@@ -70,6 +70,7 @@ impl Builtin {
             }
             Self::SplitIntSource(_) | Self::SplitTextSource(_) | Self::SplitTextLen | Self::StringSliceEqual => Contract::new(false, PreservesLists),
             Self::SplitTextField(_) => Contract::new(true, PreservesLists),
+            Self::StringTupleContains => Contract::new(false, PreservesLists),
             Self::SplitIntField(_) | Self::SplitIntCached(_) | Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) | Self::FilterCharacterSet(_) => {
                 Contract::new(true, PreservesLists)
             }
@@ -136,16 +137,15 @@ impl Builtin {
             | Self::ExceptionFieldLen
             | Self::ExceptionFieldIndex
             | Self::ExceptionFormatterResult(_) => Contract::new(true, PreservesLists),
-            Self::MappingObjectGet | Self::ObjectTextProject => Contract::new(true, PreservesOwners),
+            Self::MappingObjectGet | Self::ObjectTextProject | Self::RecordFromFields => Contract::new(true, PreservesOwners),
             Self::BoxValue
             | Self::ExceptionTupleView
             | Self::ObjectRecordProject(_)
-            | Self::ObjectIsExactTuple
+            | Self::IsExactTuple
             | Self::ObjectStreamProject
             | Self::ObjectRecordIdentity { .. }
             | Self::ExceptionTupleIdentity
-            | Self::ExceptionKeywordSuggestion
-            | Self::ExceptionRecordFields => Contract::new(false, PreservesOwners),
+            | Self::ExceptionKeywordSuggestion => Contract::new(false, PreservesOwners),
             // Formatting a projected task-group member may call its own __repr__.
             Self::ExceptionFieldRepr
             | Self::ExceptionRepr
@@ -169,6 +169,7 @@ impl Builtin {
                     TextOperation::SplitLineEnds
                     | TextOperation::ExpandTabs
                     | TextOperation::ZFill { .. }
+                    | TextOperation::UnicodeProperty(_)
                     | TextOperation::Normalize
                     | TextOperation::Lower
                     | TextOperation::Upper
@@ -295,7 +296,7 @@ impl Builtin {
             ),
             Self::WarningScopeEnter | Self::WarningScopeExit => Contract::new(false, PreservesLists),
             Self::TimeExtras | Self::TimeExtra(_) => Contract::new(false, PreservesLists),
-            Self::Mktime | Self::MktimeOffset | Self::TimeComponent | Self::TimeSequenceLength | Self::ClockParts(_) | Self::TimeSleep
+            Self::Mktime | Self::MktimeOffset | Self::TimeComponent | Self::TimeSequenceLength | Self::ClockParts(_) | Self::TimeSleep | Self::SignalPause
             | Self::PercentFormat
             | Self::WarningFilter { .. }
             | Self::WarningFormat { .. }
@@ -437,6 +438,7 @@ impl Builtin {
             Self::BytesGet
             | Self::WrapperAttributes(_)
             | Self::Chr
+            | Self::UnicodePropertyOfOrdinal(_)
             | Self::Ord
             | Self::Random(_)
             | Self::IntegerPower
@@ -444,6 +446,7 @@ impl Builtin {
             | Self::NegativeIntegerPower
             | Self::Decode
             | Self::DecodeAscii
+            | Self::DecodeLatin1
             | Self::FloatDivmod | Self::BytesHex
             | Self::UrlsafeB64encode
             | Self::Base64Translate
@@ -479,6 +482,7 @@ impl Builtin {
             | Self::SetDiscard
             | Self::CounterUpdate
             | Self::DictUpdate
+            | Self::BindSourceKeywords
             | Self::KeySet
             | Self::KeyUnion
             | Self::KeyIntersection
@@ -544,11 +548,16 @@ impl Builtin {
             | Self::StringIntList
             | Self::ListAccumulate
             | Self::Sumprod
+            | Self::MathComb
+            | Self::MathPerm
+            | Self::MathFactorial
             | Self::EnumLookup(_)
             | Self::TomlDecode(_)
             | Self::FloatAcos
+            | Self::FloatFmod
             | Self::FloatAsin
             | Self::FloatLog10
+            | Self::FloatLog1p
             | Self::IntLog10
             | Self::FloatFormat { .. } => Contract::new(true, PreservesLists),
             Self::Abs
@@ -566,7 +575,7 @@ impl Builtin {
             | Self::JsonEncoderNew
             | Self::JsonDecoderMemo
             | Self::HashDigestSize
-            | Self::HashIdentity
+            | Self::PointerIdentity
             | Self::HashBlockSize
             | Self::ActiveException
             | Self::SysIntern
@@ -588,10 +597,13 @@ impl Builtin {
             | Self::FaultLine(_)
             | Self::GeneratorFrameLeave
             | Self::IntExtremum { .. }
+            | Self::IntBitCount
             | Self::IntBitLength
             | Self::IntHash
             | Self::FloatIsInteger
             | Self::FloatAtan
+            | Self::FloatDegrees
+            | Self::FloatRadians
             | Self::FloatErfc
             | Self::FloatLog2
             | Self::IntSignAsFloat
@@ -650,6 +662,7 @@ impl Builtin {
             | Self::StringContains
             | Self::BytesContains
             | Self::UnionInject
+            | Self::TargetLittleEndian
             | Self::UnionProject => Contract::new(false, PreservesLists),
             Self::Append
             | Self::AppendInWindow(_)
@@ -661,7 +674,7 @@ impl Builtin {
             | Self::SortByKeys => {
                 Contract::new(true, PreservesOwners)
             }
-            Self::SortByComparator => Contract::new(true, Unknown),
+            Self::ExecText(_, _) | Self::SortByComparator => Contract::new(true, Unknown),
             Self::ListReserveRange | Self::StructCyclePrefix => Contract::new(false, PreservesOwners),
             Self::AnnotationRef
             | Self::BinaryOpen(_)
@@ -759,6 +772,7 @@ impl Builtin {
             | Self::ExceptionFieldIdentity { .. }
             | Self::SysThreadInfo
             | Self::SysThreadText { .. }
+            | Self::SysBuiltinModuleNames
             | Self::SysStdlibModuleNames
             | Self::SysVersionInfo { .. }
             | Self::SysPlatform
@@ -967,14 +981,27 @@ impl Builtin {
             Self::IntExtremum { .. } => {
                 result == Type::Int && args.len() >= 2 && args.iter().all(|arg| arg.ty == Type::Int)
             }
-            Self::IntBitLength | Self::IntHash => signature(&[Type::Int], Type::Int),
+            Self::MathComb | Self::MathPerm => signature(&[Type::Int, Type::Int], Type::Int),
+            Self::MathFactorial | Self::IntBitCount | Self::IntBitLength | Self::IntHash => {
+                signature(&[Type::Int], Type::Int)
+            }
             Self::FloatIsInteger => signature(&[Type::Float], Type::Bool),
+            Self::FloatFmod => {
+                result == Type::Float
+                    && args.len() == 2
+                    && args
+                        .iter()
+                        .all(|arg| matches!(arg.ty, Type::Int | Type::Float))
+            }
             Self::FloatAcos
             | Self::FloatAsin
             | Self::FloatAtan
+            | Self::FloatDegrees
+            | Self::FloatRadians
             | Self::FloatErfc
             | Self::FloatLog2
-            | Self::FloatLog10 => signature(&[Type::Float], Type::Float),
+            | Self::FloatLog10
+            | Self::FloatLog1p => signature(&[Type::Float], Type::Float),
             Self::IntSignAsFloat | Self::IntLog10 => signature(&[Type::Int], Type::Float),
             Self::PairTable(op) => {
                 use crate::ir::PairTableOp::*;
@@ -1267,6 +1294,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_list_extend_snapshot"
                 | "imre_list_extend_unhinted"
                 | "imre_chr"
+                | "imre_unicode_category_of_ordinal"
+                | "imre_unicode_bidirectional_of_ordinal"
                 | "imre_annotation_ref"
                 | "imre_typing_call_stub"
                 | "imre_random_bits"
@@ -1274,6 +1303,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_secrets_choice_index"
                 | "imre_random_progression"
                 | "imre_function_get_wrapped"
+                | "imre_math_comb"
+                | "imre_math_perm"
+                | "imre_math_factorial"
                 | "imre_int_pow"
                 | "imre_int_modpow"
                 | "imre_int_negative_pow"
@@ -1393,6 +1425,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_repeat"
                 | "imre_counter_update"
                 | "imre_dict_update"
+                | "imre_bind_source_keywords"
                 | "imre_key_union"
                 | "imre_key_intersection"
                 | "imre_key_difference"
@@ -1412,6 +1445,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_exception_field_len"
                 | "imre_bytes_decode"
                 | "imre_bytes_decode_ascii"
+                | "imre_bytes_decode_latin1"
                 | "imre_bytes_hex"
                 | "imre_fnmatch_translate"
                 | "imre_fnmatch_translate_bytes"
@@ -1512,6 +1546,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_text_read"
                 | "imre_text_readline"
                 | "imre_text_write"
+                | "imre_text_output_write"
                 | "imre_text_flush"
                 | "imre_text_close"
                 | "imre_bytes_io"
@@ -1546,8 +1581,10 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_sumprod_float_lists"
                 | "imre_sumprod_number_lists"
                 | "imre_float_acos"
+                | "imre_float_fmod"
                 | "imre_float_asin"
                 | "imre_float_log10"
+                | "imre_float_log1p"
                 | "imre_int_log10"
                 | "imre_float_int"
                 | "imre_float_parse"

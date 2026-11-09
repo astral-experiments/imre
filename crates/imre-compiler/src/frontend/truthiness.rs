@@ -34,47 +34,54 @@ impl Checker<'_> {
         self.test_truth(value, expression)
     }
 
-    /// A nullable Mapping follows the same user-defined truth protocol on its
-    /// present arm. Capture it once before testing and unwrapping.
+    fn needs_truth_dispatch(&self, ty: Type) -> bool {
+        let ty = self.types.payload(ty).unwrap_or(ty);
+        match ty {
+            Type::Class(id) => self.classes.truth_dispatch.contains(&id),
+            Type::Union(_) => self
+                .types
+                .members(ty)
+                .unwrap()
+                .into_iter()
+                .any(|member| self.needs_truth_dispatch(member)),
+            _ => false,
+        }
+    }
+
+    /// Value layout alone cannot predict the truth of a base with concrete overrides.
+    pub(super) fn known_truth(&self, ty: Type) -> Option<bool> {
+        if self.needs_truth_dispatch(ty) {
+            None
+        } else {
+            self.types.truthiness(ty)
+        }
+    }
+
     pub(super) fn test_truth(&mut self, value: Expr, at: &impl Ranged) -> Result<Expr, String> {
         let value = Self::weak_target(value);
-        if let Some(class) = self.mapping_class(value.ty) {
-            return self.mapping_truth(class, value, at);
+        if !self.needs_truth_dispatch(value.ty) {
+            return Ok(self.truth_value(value));
         }
-        if let Some(payload) = self.types.payload(value.ty)
-            && let Some(class) = self.mapping_class(payload)
-        {
-            let slot = self.hidden(value.ty);
-            let local = self.local(slot);
-            let absent = Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Builtin(Builtin::IsNone, vec![local.clone()]),
-            };
-            let truth = self.mapping_truth(
-                class,
-                Expr {
-                    ty: payload,
-                    kind: ExprKind::Unwrap(Box::new(local)),
-                },
-                at,
-            )?;
-            return Ok(Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Scope {
-                    body: vec![Statement::Assign(slot, value)],
-                    clear: vec![slot],
-                    value: Box::new(Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Conditional(
-                            Box::new(absent),
-                            Box::new(Expr::boolean(false)),
-                            Box::new(truth),
-                        ),
-                    }),
-                },
-            });
+        if let Type::Class(class) = value.ty {
+            return self.record_truth(class, value, at);
         }
-        Ok(self.truth_value(value))
+        // An optional or tagged value holds the receiver until the chosen arm finishes.
+        let (slot, tag, first, second) = self
+            .protocol_alternatives(value.ty)
+            .ok_or_else(|| error(self.source, at, "unsupported record union in a truth test"))?;
+        let yes = self.test_truth(first, at)?;
+        let no = self.test_truth(second, at)?;
+        Ok(Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Assign(slot, value)],
+                value: Box::new(Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Conditional(Box::new(tag), Box::new(yes), Box::new(no)),
+                }),
+                clear: vec![slot],
+            },
+        })
     }
 
     fn bool_method(&self, ty: Type) -> Option<usize> {
@@ -172,8 +179,13 @@ impl Checker<'_> {
         let mut reachable = true;
         for first in prefix {
             let left = self.boolean_operand(first, expected)?;
-            let known = self.types.truthiness(left.ty);
-            let selected = self.types.truth_branch(left.ty, !and);
+            let known = self.known_truth(left.ty);
+            // A present record with a false override can be the selected operand of "and".
+            let selected = if and && self.needs_truth_dispatch(left.ty) {
+                left.ty
+            } else {
+                self.types.truth_branch(left.ty, !and)
+            };
             if reachable && known != Some(and) {
                 exits.short_circuit(self, first, !and);
                 reachable = known != Some(!and);
@@ -189,13 +201,18 @@ impl Checker<'_> {
         // Exact strings and booleans have immutable, non-raising truth. The
         // decorator observes the same flag after its reason is evaluated.
         let immutable_truth = |ty| matches!(ty, Type::Str | Type::Bool);
-        if class_skip
+        // Exact bool operands already are their truth values, including in a return expression.
+        let booleans = right.ty == Type::Bool
+            && operands
+                .iter()
+                .all(|(_, value, _, _)| value.ty == Type::Bool);
+        let skip_truth = class_skip
             && immutable_truth(right.ty)
             && operands
                 .iter()
                 .all(|(_, value, _, _)| immutable_truth(value.ty))
-            && operands.iter().any(|(_, value, _, _)| value.ty != right.ty)
-        {
+            && operands.iter().any(|(_, value, _, _)| value.ty != right.ty);
+        if booleans || skip_truth {
             let mut values = operands
                 .into_iter()
                 .map(|(_, value, _, _)| self.truth_value(value))
@@ -226,11 +243,7 @@ impl Checker<'_> {
             if known.is_none() {
                 right = self.coerce(right, ty, last)?;
             }
-            if self.bool_method(left.ty).is_some()
-                || self
-                    .mapping_class(self.types.payload(left.ty).unwrap_or(left.ty))
-                    .is_some()
-            {
+            if self.bool_method(left.ty).is_some() || self.needs_truth_dispatch(left.ty) {
                 let slot = self.hidden(left.ty);
                 let captured = self.local(slot);
                 let stop = if self.types.payload(left.ty) == Some(ty) {

@@ -9,7 +9,7 @@ pub(crate) use credentials::{
     setreuid,
 };
 #[cfg(target_os = "linux")]
-pub(crate) use credentials::{getresgid, getresuid};
+pub(crate) use credentials::{getresgid, getresuid, setresgid, setresuid};
 
 use super::exceptions::{Error, Filename, Kind, Result, finish};
 use super::files::{errno_error, errno_with_filenames};
@@ -18,6 +18,7 @@ use crate::StrOwner;
 use num_traits::ToPrimitive;
 use std::ffi::{CStr, CString};
 use std::io;
+use std::os::fd::{FromRawFd, IntoRawFd, OwnedFd};
 
 pub(super) mod links;
 pub(crate) mod scandir;
@@ -241,25 +242,38 @@ pub unsafe extern "C" fn imre_os_open(
             let mode = c_int(mode)?;
             // SAFETY: dir_fd is a rooted optional integer according to the ABI.
             let dir_fd = unsafe { directory_fd(dir_fd) }?;
-            open_at(&name, flags, mode, dir_fd)
-                .map(|fd| Int::from_usize(fd as usize).into_raw())
+            open_at(&name, flags, mode, dir_fd, super::stdlib::check_interrupt)?
+                .map(|fd| Int::from_usize(fd.into_raw_fd() as usize).into_raw())
                 .map_err(|error| errno_with_filenames(error, Some(path), None))
         })(),
         0,
     )
 }
 
-/// Open relative to a directory descriptor and atomically mark the new descriptor close-on-exec.
-pub(crate) fn open_at(path: &CStr, flags: i32, mode: i32, dir_fd: i32) -> io::Result<i32> {
+/// Open relative to a directory descriptor in a single syscall with atomic close-on-exec.
+pub(crate) fn open_at_once(path: &CStr, flags: i32, mode: i32, dir_fd: i32) -> io::Result<OwnedFd> {
+    // SAFETY: path is terminated and the variadic mode is promoted to int.
+    let fd = unsafe { libc::openat(dir_fd, path.as_ptr(), flags | libc::O_CLOEXEC, mode) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: a successful openat returns a new owned descriptor.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+/// Let an interrupted caller run its signal handlers before retrying.
+/// Handler exceptions bypass the caller's filename decoration for syscall errors.
+pub(crate) fn open_at<E>(
+    path: &CStr,
+    flags: i32,
+    mode: i32,
+    dir_fd: i32,
+    mut dispatch: impl FnMut() -> std::result::Result<(), E>,
+) -> std::result::Result<io::Result<OwnedFd>, E> {
     loop {
-        // SAFETY: path is terminated and the variadic mode is promoted to int.
-        let fd = unsafe { libc::openat(dir_fd, path.as_ptr(), flags | libc::O_CLOEXEC, mode) };
-        if fd >= 0 {
-            return Ok(fd);
-        }
-        let error = io::Error::last_os_error();
-        if error.kind() != io::ErrorKind::Interrupted {
-            return Err(error);
+        match open_at_once(path, flags, mode, dir_fd) {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => dispatch()?,
+            result => return Ok(result),
         }
     }
 }
@@ -429,6 +443,21 @@ pub(crate) fn kill(pid: libc::pid_t, signal: libc::c_int) -> Result<()> {
     checked(unsafe { libc::kill(pid, signal) }).map(|_| ())
 }
 
+/// Wait once, leaving a zero PID when WNOHANG finds no reportable state.
+pub(crate) fn waitid(
+    idtype: libc::idtype_t,
+    id: libc::id_t,
+    options: libc::c_int,
+) -> io::Result<libc::siginfo_t> {
+    let mut info = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
+    // SAFETY: waitid receives writable siginfo storage and retains no pointer.
+    if unsafe { libc::waitid(idtype, id, info.as_mut_ptr(), options) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: all bytes were initialized before the kernel wrote the child status.
+    Ok(unsafe { info.assume_init() })
+}
+
 /// Wait for a child independently of Popen and return its unmodified POSIX status.
 pub(crate) fn waitpid<E: From<Error>>(
     pid: libc::pid_t,
@@ -535,7 +564,8 @@ pub unsafe extern "C" fn imre_os_write(fd: usize, bytes: *const crate::Bytes) ->
         c_int(fd)
             .and_then(|fd| {
                 transfer(
-                    || try_write(fd, bytes, None),
+                    // SAFETY: the rooted bytes remain live across the write.
+                    || unsafe { try_write(fd, bytes.as_ptr(), bytes.len(), None) },
                     super::stdlib::check_interrupt,
                 )
             })
@@ -715,24 +745,28 @@ pub(crate) fn try_readinto(fd: i32, dst: &mut [u8]) -> Result<Option<usize>> {
 }
 
 /// Attempt one write, returning None if a pending signal must be dispatched.
-pub(crate) fn try_write(
+///
+/// # Safety
+/// The caller keeps the entire source range live until the syscall returns. The
+/// kernel reads the range directly, including file-backed pages that can change.
+pub(crate) unsafe fn try_write(
     fd: i32,
-    data: &[u8],
+    data: *const u8,
+    length: usize,
     offset: Option<libc::off_t>,
 ) -> Result<Option<usize>> {
     crate::initialize_io();
-    let length = data.len();
     #[cfg(target_os = "macos")]
     let length = if offset.is_none() {
         length.min(i32::MAX as usize)
     } else {
         length
     };
-    // SAFETY: both syscalls borrow fd and read at most length bytes from the live slice.
+    // SAFETY: both syscalls read at most length bytes and retain no pointer.
     let count = unsafe {
         match offset {
-            Some(offset) => libc::pwrite(fd, data.as_ptr().cast(), length, offset),
-            None => libc::write(fd, data.as_ptr().cast(), length),
+            Some(offset) => libc::pwrite(fd, data.cast(), length, offset),
+            None => libc::write(fd, data.cast(), length),
         }
     };
     transferred(count)

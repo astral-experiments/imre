@@ -1,6 +1,6 @@
 use super::{Context, Error, Id, NONE, Result, Value};
 
-fn spelling(ctx: &Context, value: Id) -> bool {
+pub(super) fn spelling(ctx: &Context, value: Id) -> bool {
     matches!(
         ctx.heap.get(ctx.scalar_value(value)),
         Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)

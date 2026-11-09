@@ -1,4 +1,4 @@
-use super::{Heap, Id, Value};
+use super::{CycleSet, END, FindReferences, Heap, Id, MarkMode, Scope, UNMARKED, Value};
 use crate::dynamic::stdlib::{BinaryFile, io::MemoryStream};
 use indexmap::IndexMap;
 use std::collections::{HashSet, VecDeque};
@@ -7,6 +7,8 @@ use std::collections::{HashSet, VecDeque};
 const MAX_WEAK_ENDPOINTS: usize = 16;
 const MAX_NODES: usize = 8192;
 const MAX_EDGES: usize = 65536;
+const FRAME_PROBE_NODES: usize = 256;
+const FRAME_PROBE_EDGES: usize = 2048;
 const CHILDREN_PER_VISIT: usize = 256;
 const SEARCH_BACKOFF: u8 = 63;
 
@@ -24,6 +26,8 @@ enum Origin {
 
 #[derive(Default)]
 pub(super) struct RootPaths {
+    /// The search found every requested endpoint. A new weak reference invalidates this result.
+    pub(super) covers_endpoints: bool,
     anchors: Vec<(Root, Id)>,
     // Kept sorted between searches for membership checks at collection points.
     nodes: Vec<Id>,
@@ -32,6 +36,141 @@ pub(super) struct RootPaths {
     // Dictionary slots must be interpreted the same way during discovery and validation.
     dict_keys: bool,
     retry_with_keys: bool,
+}
+
+/// Strong incoming edges that keep pending owners alive under ordinary reference decrements.
+#[derive(Default)]
+pub(super) struct CycleRetention {
+    pub(super) owners: Vec<Id>,
+    edges: Vec<CycleEdge>,
+    retry: u8,
+}
+
+struct CycleEdge {
+    parent: Id,
+    child: Id,
+    slot: Option<usize>,
+}
+
+impl CycleRetention {
+    /// A declined proof still uses the ordinary classifier on every release.
+    pub(super) fn from_residual(heap: &Heap, cycles: &mut CycleSet) -> Self {
+        let retry = heap.cyclic_finalizers.retry;
+        if retry != 0 {
+            return Self {
+                retry: retry - 1,
+                ..Self::default()
+            };
+        }
+        Self::build(heap, cycles).unwrap_or_else(|| Self {
+            retry: SEARCH_BACKOFF,
+            ..Self::default()
+        })
+    }
+
+    fn build(heap: &Heap, cycles: &mut CycleSet) -> Option<Self> {
+        // The peeled graph has a predecessor inside the residual set for every survivor.
+        // Its queue already has capacity for one position per slot.
+        let parents = &mut cycles.work;
+        parents.resize(cycles.incoming.len(), END);
+        for (parent, &incoming) in cycles.incoming.iter().enumerate() {
+            if incoming != 0 {
+                heap.unreachable_children(heap.get(parent as Id), MarkMode::CycleEdges, |child| {
+                    if cycles.incoming[child] != 0 && parents[child] == END {
+                        parents[child] = parent;
+                    }
+                });
+            }
+        }
+
+        let mut proof = Self::default();
+        for &owner in &heap.ordinary_finalizers {
+            let mut child = owner as usize;
+            if cycles.incoming[child] == 0 {
+                continue;
+            }
+            proof.owners.try_reserve(1).ok()?;
+            proof.owners.push(owner);
+            // Follow predecessors until the path closes a cycle or joins an earlier path.
+            while parents[child] != UNMARKED {
+                let parent = std::mem::replace(&mut parents[child], UNMARKED);
+                // Keep optional edge checks small enough to run at operand releases.
+                if parent == END || proof.edges.len() == 256 {
+                    return None;
+                }
+                proof.edges.try_reserve(1).ok()?;
+                proof.edges.push(CycleEdge {
+                    parent: parent as Id,
+                    child: child as Id,
+                    slot: None,
+                });
+                child = parent;
+            }
+        }
+        // The predecessor table is no longer needed. Index each parent's wanted children
+        // in that same space so a wide container spends its position budget only once.
+        proof.edges.sort_unstable_by_key(|edge| edge.parent);
+        let mut budget = MAX_EDGES;
+        for edges in proof.edges.chunk_by_mut(|a, b| a.parent == b.parent) {
+            let links = Links::from(heap.get(edges[0].parent), true);
+            for (index, edge) in edges.iter().enumerate() {
+                parents[edge.child as usize] = index;
+            }
+            let mut missing = edges.len();
+            let limit = links.len().min(budget);
+            for slot in 0..limit {
+                budget -= 1;
+                if let Some(child) = links.get(slot)
+                    && let Some(edge) = edges.get_mut(parents[child as usize])
+                    && edge.child == child
+                    && edge.slot.is_none()
+                {
+                    edge.slot = Some(slot);
+                    missing -= 1;
+                    if missing == 0 {
+                        break;
+                    }
+                }
+            }
+            // One opaque edge may use the full strong-child visitor at validation.
+            if missing > 1 || (missing != 0 && limit < links.len()) {
+                return None;
+            }
+        }
+        proof.owners.sort_unstable();
+        Some(proof)
+    }
+
+    pub(super) fn verified_owners(&self, heap: &Heap) -> &[Id] {
+        for &CycleEdge {
+            parent,
+            child,
+            slot,
+        } in &self.edges
+        {
+            let Some(value) = heap
+                .slots
+                .get(parent as usize)
+                .and_then(|slot| slot.value.as_ref())
+            else {
+                return &[];
+            };
+            if let Some(slot) = slot {
+                if Links::from(value, true).get(slot) != Some(child) {
+                    return &[];
+                }
+                continue;
+            }
+            let mut edge = FindReferences {
+                targets: [child; 2],
+                found: false,
+            };
+            if value.try_children(&mut edge).is_err() || !edge.found {
+                return &[];
+            }
+        }
+        &self.owners
+    }
 }
 
 /// Strong edges in ordinary containers and namespaces. A missing edge merely loses the proof.
@@ -43,20 +182,32 @@ struct Links<'a> {
 enum Members<'a> {
     None,
     Sequence(&'a [Id]),
+    Generator(&'a crate::dynamic::native_suspension::Saved),
     Names(&'a IndexMap<String, Id>, Option<Id>),
+    Scope(&'a Scope),
     Keys(&'a [(Id, Id)]),
     Values(&'a [(Id, Id)]),
     Entries(&'a [(Id, Id)]),
 }
 
+/// Inspect a bounded set of strong edges without traversing a frame holder's entire payload.
+pub(super) fn indexed_children(value: &Value) -> impl Iterator<Item = Id> + '_ {
+    let links = Links::from(value, false);
+    (0..links.len().min(CHILDREN_PER_VISIT)).filter_map(move |index| links.get(index))
+}
+
 impl<'a> Links<'a> {
+    #[inline(always)]
     fn from(value: &'a Value, dict_keys: bool) -> Self {
         let (direct, members) = match value {
             Value::Module { scope, .. } => ([Some(*scope), None], Members::None),
             Value::Scope(scope) => (
                 [scope.namespace, scope.exec_globals.map(|g| g.dict)],
-                Members::Names(&scope.names, None),
+                Members::Scope(scope),
             ),
+            Value::Cell(contents) => ([*contents, None], Members::None),
+            Value::Traceback { frame, next, .. } => ([Some(*frame), Some(*next)], Members::None),
+            Value::PythonFrame { scope, back, .. } => ([Some(*scope), *back], Members::None),
             Value::Dict(entries) if dict_keys => ([None; 2], Members::Entries(entries)),
             Value::Dict(entries) => ([None; 2], Members::Values(entries)),
             Value::Set { entries, .. } => ([None; 2], Members::Keys(entries)),
@@ -64,7 +215,17 @@ impl<'a> Links<'a> {
             Value::Map { inputs, .. } | Value::Zip { inputs, .. } => {
                 ([None; 2], Members::Sequence(inputs))
             }
-            Value::Generator { iterators, .. } => ([None; 2], Members::Sequence(iterators)),
+            Value::Coroutine { .. } | Value::CoroutineWrapper(_) => {
+                ([value.suspended_owner(), None], Members::None)
+            }
+            Value::Generator { native, .. } => (
+                [value.suspended_owner(), None],
+                native.as_ref().map_or(Members::None, Members::Generator),
+            ),
+            Value::Method {
+                receiver, callable, ..
+            } => ([Some(*receiver), Some(*callable)], Members::None),
+            Value::Iterator { sequence, .. } => ([*sequence, None], Members::None),
             Value::LoopIterator { source, peeked } => ([Some(*source), *peeked], Members::None),
             Value::Instance {
                 fields,
@@ -84,7 +245,16 @@ impl<'a> Links<'a> {
                     Some(MemoryStream::Wrapper(wrapper)) => wrapper.buffer_id(),
                     _ => None,
                 };
-                ([*namespace, *dictionary], Members::Names(fields, stream))
+                let extra = stream.or_else(|| {
+                    // A sparse singleton can still have a large bucket allocation.
+                    value
+                        .stored_member_edges(|slots| {
+                            slots.len() == 1 && slots.allocation_size() <= 256
+                        })
+                        .next()
+                        .map(|[_, value]| value)
+                });
+                ([*namespace, *dictionary], Members::Names(fields, extra))
             }
             Value::File(file) if let BinaryFile::Descriptor(fd) = file.as_ref() => {
                 ([Some(fd.raw), None], Members::None)
@@ -104,7 +274,9 @@ impl<'a> Links<'a> {
             + match self.members {
                 Members::None => 0,
                 Members::Sequence(items) => items.len(),
-                Members::Names(names, buffer) => names.len() + usize::from(buffer.is_some()),
+                Members::Generator(frame) => frame.root_count(),
+                Members::Scope(scope) => scope.names.len() + scope.closure.cells.len(),
+                Members::Names(names, extra) => names.len() + usize::from(extra.is_some()),
                 Members::Keys(entries) | Members::Values(entries) => entries.len(),
                 Members::Entries(entries) => entries.len() * 2,
             }
@@ -116,6 +288,7 @@ impl<'a> Links<'a> {
             && (slot - self.direct.len()).is_multiple_of(2)
     }
 
+    #[inline(always)]
     fn get(&self, index: usize) -> Option<Id> {
         if let Some(&edge) = self.direct.get(index) {
             return edge;
@@ -124,7 +297,19 @@ impl<'a> Links<'a> {
         match self.members {
             Members::None => None,
             Members::Sequence(items) => items.get(index).copied(),
-            Members::Names(names, buffer) if index == names.len() => buffer,
+            Members::Generator(frame) => frame.root_at(index),
+            Members::Scope(scope) => {
+                if index < scope.names.len() {
+                    scope.names.get_index(index).map(|(_, id)| *id)
+                } else {
+                    scope
+                        .closure
+                        .cells
+                        .get_index(index - scope.names.len())
+                        .map(|(_, id)| *id)
+                }
+            }
+            Members::Names(names, extra) if index == names.len() => extra,
             Members::Names(names, _) => names.get_index(index).map(|(_, id)| *id),
             Members::Keys(entries) => entries.get(index).map(|(key, _)| *key),
             Members::Values(entries) => entries.get(index).map(|(_, value)| *value),
@@ -160,7 +345,7 @@ impl RootPaths {
         heap: &Heap,
         globals: [Id; 2],
         endpoints: impl Iterator<Item = Id>,
-        from_frames: bool,
+        full_frame_search: bool,
         dict_keys: bool,
     ) -> Option<Self> {
         let mut edges_left = MAX_EDGES;
@@ -179,7 +364,21 @@ impl RootPaths {
             .into_iter()
             .enumerate()
             .map(|(i, id)| (id, Root::Global(i)));
-        if from_frames && !wanted.is_empty() {
+        if !wanted.is_empty() && (full_frame_search || !heap.frames.is_empty()) {
+            // Small weak-reference cohorts may have frame-held targets without a finalizer.
+            // Reserve the rest of the search for paths through global modules.
+            let reserved_nodes = if full_frame_search {
+                0
+            } else {
+                nodes_left.saturating_sub(FRAME_PROBE_NODES)
+            };
+            let reserved_edges = if full_frame_search {
+                0
+            } else {
+                edges_left.saturating_sub(FRAME_PROBE_EDGES)
+            };
+            nodes_left -= reserved_nodes;
+            edges_left -= reserved_edges;
             let roots = heap
                 .frames
                 .iter()
@@ -196,6 +395,8 @@ impl RootPaths {
                 &mut edges_left,
                 false,
             )?;
+            nodes_left += reserved_nodes;
+            edges_left += reserved_edges;
         }
         if !wanted.is_empty() && nodes_left != 0 && edges_left != 0 {
             paths.search(
@@ -207,6 +408,7 @@ impl RootPaths {
                 true,
             )?;
         }
+        paths.covers_endpoints = wanted.is_empty();
         Some(paths)
     }
 
@@ -339,10 +541,11 @@ impl RootPaths {
 impl Heap {
     pub(super) fn cached_weak_roots(&self, globals: [Id; 2]) -> bool {
         self.weak_roots.valid(self, globals)
-            && self.weak.iter().all(|(target, refs)| {
-                self.weak_roots.contains(*target)
-                    && refs.iter().all(|id| self.weak_roots.contains(*id))
-            })
+            && (self.weak_roots.covers_endpoints
+                || self.weak.iter().all(|(target, refs)| {
+                    self.weak_roots.contains(*target)
+                        && refs.iter().all(|id| self.weak_roots.contains(*id))
+                }))
     }
 
     pub(in crate::dynamic) fn learn_weak_roots(&mut self, modules: Id, reference: Id) {
@@ -360,10 +563,12 @@ impl Heap {
         {
             return;
         }
-        if !self.weak_roots.search_due() {
+        // A complete proof went stale. Look for the new path before backing off again.
+        let refresh = std::mem::take(&mut self.weak_roots.covers_endpoints);
+        if !refresh && !self.weak_roots.search_due() {
             return;
         }
-        let dict_keys = self.weak_roots.retry_with_keys;
+        let dict_keys = self.weak_roots.retry_with_keys || (refresh && self.weak_roots.dict_keys);
         if let Some(paths) = RootPaths::discover(
             self,
             globals,
@@ -392,7 +597,7 @@ impl Heap {
     pub(in crate::dynamic) fn learn_finalizer_paths(
         &mut self,
         globals: [Id; 2],
-        stdin: Option<&[Id; 3]>,
+        streams: Option<&crate::dynamic::stdlib::io::StandardStreamRoots>,
     ) -> bool {
         // Retry from the current roots when a previously proven path loses an anchor or edge.
         if !self.finalizer_roots.nodes.is_empty() && !self.finalizer_roots.valid(self, globals) {
@@ -407,7 +612,7 @@ impl Heap {
             .chain(&self.descriptor_owners)
             .copied()
             .filter(|id| {
-                !stdin.is_some_and(|input| input.contains(id))
+                !streams.is_some_and(|roots| roots.contains(id))
                     && !self.operand_keeps_finalizer(*id, 0)
             });
         let Some(paths) = RootPaths::discover(self, globals, endpoints, true, false) else {
@@ -421,22 +626,31 @@ impl Heap {
         !self.finalizer_roots.nodes.is_empty()
     }
 
-    /// Check published operands in the caller frames and the surviving prefix of the active frame.
+    /// Check the previously observed operand against the current frame and the edges it holds now.
+    fn cached_operand_keeps_finalizer(&self, owner: Id, retained_current: usize) -> bool {
+        let cached = &self.finalizer_operands[owner as usize % self.finalizer_operands.len()];
+        let Some((last_owner, frame, operand)) = cached.get() else {
+            return false;
+        };
+        last_owner == owner
+            && (frame + 1 < self.frames.len() || operand < retained_current)
+            && self
+                .frames
+                .get(frame)
+                .and_then(|f| f.live.get(operand))
+                .is_some_and(|&root| self.short_path_keeps_owner(root, owner))
+    }
+
     fn operand_keeps_finalizer(&self, owner: Id, retained_current: usize) -> bool {
+        self.cached_operand_keeps_finalizer(owner, retained_current)
+            || self.find_finalizer_operand(owner, retained_current)
+    }
+
+    /// Search published caller operands and the surviving prefix of the active frame.
+    fn find_finalizer_operand(&self, owner: Id, retained_current: usize) -> bool {
         let Some(active) = self.frames.len().checked_sub(1) else {
             return false;
         };
-        // The operand and its children can change between releases.
-        let cached = &self.finalizer_operands[owner as usize % self.finalizer_operands.len()];
-        if let Some((last_owner, frame, operand)) = cached.get()
-            && last_owner == owner
-            && (frame < active || operand < retained_current)
-            && let Some(&root) = self.frames.get(frame).and_then(|f| f.live.get(operand))
-            && self.short_path_keeps_owner(root, owner)
-        {
-            return true;
-        }
-
         const MAX_CALLER_OPERANDS: usize = 192;
         let active_limit = self.frames[active].live.len().min(retained_current).min(8);
         let mut operands = self
@@ -464,10 +678,46 @@ impl Heap {
             })
             .or_else(|| operands.find(|&(_, _, root)| self.short_path_keeps_owner(root, owner)));
         if let Some((frame, slot, _)) = found {
-            cached.set(Some((owner, frame, slot)));
+            self.finalizer_operands[owner as usize % self.finalizer_operands.len()]
+                .set(Some((owner, frame, slot)));
             return true;
         }
         false
+    }
+
+    /// Learn a newly opened descriptor's path even when all ordinary finalizers are already rooted.
+    pub(in crate::dynamic) fn learn_descriptor_paths(
+        &mut self,
+        globals: [Id; 2],
+        streams: Option<&crate::dynamic::stdlib::io::StandardStreamRoots>,
+    ) {
+        if self.descriptor_owners.is_empty() {
+            return;
+        }
+        let paths_valid = self.finalizer_roots.valid(self, globals);
+        let retained = self.temporary_mark();
+        if self
+            .descriptor_owners
+            .iter()
+            .any(|&owner| !self.root_keeps_owner(owner, paths_valid, streams, retained))
+        {
+            self.learn_finalizer_paths(globals, streams);
+        }
+    }
+
+    /// Recheck the cached path or a surviving frame binding for a registered owner.
+    fn root_keeps_owner(
+        &self,
+        owner: Id,
+        paths_valid: bool,
+        streams: Option<&crate::dynamic::stdlib::io::StandardStreamRoots>,
+        retained_current: usize,
+    ) -> bool {
+        (paths_valid && self.finalizer_roots.contains(owner))
+            || streams.is_some_and(|roots| roots.contains(&owner))
+            || self.cached_operand_keeps_finalizer(owner, retained_current)
+            || self.bound_in_active_frame(owner)
+            || self.find_finalizer_operand(owner, retained_current)
     }
 
     /// A pending discard preserves the active frame's operands below its mark. It must also
@@ -475,29 +725,45 @@ impl Heap {
     pub(in crate::dynamic) fn cached_finalizers_kept(
         &self,
         globals: [Id; 2],
-        stdin: Option<&[Id; 3]>,
+        streams: Option<&crate::dynamic::stdlib::io::StandardStreamRoots>,
         discard_from: Option<usize>,
     ) -> bool {
-        self.cached_finalizers_kept_except(globals, stdin, discard_from, &[])
+        self.cached_finalizers_kept_except(globals, streams, discard_from, &[])
     }
 
     /// Check all pending owners except those covered by a separate reachability proof.
     pub(in crate::dynamic) fn cached_finalizers_kept_except(
         &self,
         globals: [Id; 2],
-        stdin: Option<&[Id; 3]>,
+        streams: Option<&crate::dynamic::stdlib::io::StandardStreamRoots>,
         discard_from: Option<usize>,
         except: &[Id],
     ) -> bool {
         let paths_valid = self.finalizer_roots.valid(self, globals);
         let kept = |owner: &Id| {
             except.contains(owner)
-                || (paths_valid && self.finalizer_roots.contains(*owner))
-                || stdin.is_some_and(|input| input.contains(owner))
-                || self.operand_keeps_finalizer(*owner, discard_from.unwrap_or(usize::MAX))
-                || self.bound_in_active_frame(*owner)
+                || self.root_keeps_owner(
+                    *owner,
+                    paths_valid,
+                    streams,
+                    discard_from.unwrap_or(usize::MAX),
+                )
         };
-        self.ordinary_finalizers.iter().all(&kept)
+        // Truncating the operand stack cannot break an edge within a heap cycle.
+        // Descriptor and weak-reference checks below still require their original proofs.
+        let ordinary_kept = if self.cyclic_finalizers.owners.is_empty() {
+            self.ordinary_finalizers.iter().all(&kept)
+        } else {
+            let mut cycle_valid = None;
+            self.ordinary_finalizers.iter().all(|owner| {
+                (self.cyclic_finalizers.owners.binary_search(owner).is_ok()
+                    && *cycle_valid.get_or_insert_with(|| {
+                        !self.cyclic_finalizers.verified_owners(self).is_empty()
+                    }))
+                    || kept(owner)
+            })
+        };
+        ordinary_kept
             && (discard_from.is_none()
                 || (self.descriptor_owners.iter().all(kept)
                     && (!self.has_weak_values || self.weak_values_kept_by(globals[0], globals[1]))))
@@ -540,5 +806,10 @@ mod tests {
         heap.new_weak_reference(target, TRUE, Kind::Reference, None)
             .unwrap();
         assert!(!heap.weak_values_kept_by(modules, NONE));
+
+        heap.release_temporaries_since(0);
+        heap.collect([modules].into_iter());
+        assert_eq!(heap.weak_references(target), &[reference]);
+        assert!(heap.cached_weak_roots([modules, NONE]));
     }
 }

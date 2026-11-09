@@ -742,6 +742,12 @@ class Logger(Filterer):
         if self.isEnabledFor(CRITICAL):
             self._log(CRITICAL, msg, args, **kwargs)
 
+    def fatal(self, msg, *args, **kwargs):
+        """
+        Don't use this method, use critical() instead.
+        """
+        self.critical(msg, *args, **kwargs)
+
     def __reduce__(self):
         if getLogger(self.name) is not self:
             import pickle

@@ -257,13 +257,14 @@ def _get_main_module_details(error=ImportError):
 def _get_code_from_file(fname):
     # Check for a compiled file first
     from pkgutil import read_code
+    from _imre_importlib import compile_file
     code_path = os.path.abspath(fname)
     with io.open_code(code_path) as f:
         code = read_code(f)
     if code is None:
         # That didn't work, so try it as normal source code
         with io.open_code(code_path) as f:
-            code = compile(f.read(), fname, 'exec')
+            code = compile_file(compile, f.read(), fname)
     return code
 
 def run_path(path_name, init_globals=None, run_name=None):

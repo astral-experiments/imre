@@ -107,6 +107,44 @@ pub(super) fn call(
             format!("math.{operation}() takes no keyword arguments"),
         ));
     }
+    if operation == "factorial" {
+        let &[n] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "math.factorial() takes exactly one argument ({} given)",
+                    args.len()
+                ),
+            ));
+        };
+        let n = ctx.index_integer(n)?;
+        return Ok(ctx.alloc(Value::Int(crate::integer_factorial(&n)?)));
+    }
+    if operation == "perm" && matches!(args, [_] | [_, super::NONE]) {
+        let n = ctx.index_integer(args[0])?;
+        return Ok(ctx.alloc(Value::Int(crate::integer_factorial(&n)?)));
+    }
+    if matches!(operation, "comb" | "perm") {
+        let &[n, k] = args else {
+            let expected = match operation {
+                "comb" => "2 arguments",
+                _ if args.is_empty() => "at least 1 argument",
+                _ => "at most 2 arguments",
+            };
+            return Err(Error::new(
+                "TypeError",
+                format!("{operation} expected {expected}, got {}", args.len()),
+            ));
+        };
+        let n = ctx.index_integer(n)?;
+        let k = ctx.index_integer(k)?;
+        let result = if operation == "comb" {
+            crate::integer_comb(&n, &k)?
+        } else {
+            crate::integer_perm(&n, &k)?
+        };
+        return Ok(ctx.alloc(Value::Int(result)));
+    }
     if matches!(operation, "gcd" | "lcm") {
         let mut result = if operation == "gcd" {
             BigInt::ZERO
@@ -126,7 +164,7 @@ pub(super) fn call(
     }
     if matches!(
         operation,
-        "atan2" | "copysign" | "ldexp" | "pow" | "remainder"
+        "atan2" | "copysign" | "fmod" | "ldexp" | "pow" | "remainder"
     ) {
         let &[first, second] = args else {
             return Err(Error::new(
@@ -138,6 +176,7 @@ pub(super) fn call(
         let result = match operation {
             "atan2" => first.atan2(as_double(ctx, second)?),
             "copysign" => first.copysign(as_double(ctx, second)?),
+            "fmod" => crate::floats::fmod(first, as_double(ctx, second)?)?,
             "pow" => real_power(first, as_double(ctx, second)?)?,
             "remainder" => ieee_remainder(first, as_double(ctx, second)?)?,
             _ => scale_by_power_of_two(ctx, first, second)?,
@@ -266,12 +305,15 @@ pub(super) fn call(
         }
         return Ok(ctx.alloc(Value::Int(crate::Int::new(n.big().sqrt()))));
     }
-    if matches!(operation, "acos" | "asin") {
-        let function = if operation == "asin" {
-            crate::floats::asin
-        } else {
-            crate::floats::acos
-        };
+    let checked_unary: Option<fn(f64) -> crate::Result<f64>> = match operation {
+        "acos" => Some(crate::floats::acos),
+        "asin" => Some(crate::floats::asin),
+        "degrees" => Some(|x| Ok(crate::floats::imre_float_degrees(x))),
+        "radians" => Some(|x| Ok(crate::floats::imre_float_radians(x))),
+        "log1p" => Some(crate::floats::log1p),
+        _ => None,
+    };
+    if let Some(function) = checked_unary {
         let result = function(as_double(ctx, value)?)?;
         return Ok(ctx.alloc(Value::Float(result)));
     }
@@ -397,14 +439,7 @@ pub(super) fn call(
             number
         }
     };
-    let rounded = match operation {
-        "floor" => number.floor(),
-        "ceil" => number.ceil(),
-        _ => number,
-    };
-    Ok(ctx.alloc(Value::Int(crate::Int::new(
-        crate::floats::float_to_integer(rounded)?,
-    ))))
+    builtins::round_float_to_integer(ctx, number, slot)
 }
 
 /// Read tuple storage directly, including for tuple subclasses. Other points

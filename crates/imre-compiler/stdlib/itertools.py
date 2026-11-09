@@ -2,19 +2,18 @@
 
 
 import _imre_itertools as _itertools
-from operator import index as _index
+from operator import getitem as _getitem, index as _index
 from sys import maxsize as _maxsize
 
 
-def _make_chain(_advance, _set, _allocate):
+def _make_chain(_advance, _allocate):
     class chain:
         """Yield items from each iterable in order."""
 
         __slots__ = ("_sources", "_active")
 
-        def __init__(self, *iterables):
-            _set(self, False, iter(iterables))
-            _set(self, True, None)
+        def __new__(cls, /, *iterables, **kwargs):
+            return _allocate(__class__, cls, iter(iterables), **kwargs)
 
         @classmethod
         def from_iterable(cls, iterable, /):
@@ -31,7 +30,7 @@ def _make_chain(_advance, _set, _allocate):
     return chain
 
 
-chain = _make_chain(_itertools._chain_next, _itertools._chain_set, _itertools._chain_allocate)
+chain = _make_chain(_itertools._chain_next, _itertools._chain_allocate)
 
 
 def _make_cycle(_allocate, _advance):
@@ -392,79 +391,47 @@ def _make_zip_longest(_allocate, _state, _State):
 
 
 zip_longest = _make_zip_longest(_itertools._zip_longest_allocate, _itertools._zip_longest_state, _ZipLongestState)
-del _itertools
+_uses_base_init = _itertools._uses_base_init
 
 
 class _TeeBlock:
-    # Forks only root their current block. Once all forks move past it, its
-    # items can be collected without retaining any preceding blocks.
-    __slots__ = ("source", "values", "filled", "following", "running")
-
-    def __init__(self, source):
-        self.source = source
-        self.values = [None] * 57
-        self.filled = 0
-        self.following = None
-        self.running = False
+    __slots__ = ()
 
 
-class _tee:
-    __slots__ = ("_block", "_index", "__weakref__")
+def _make_tee(_allocate, _advance, _block_type):
+    class _tee:
+        __slots__ = ("__weakref__",)
 
-    def __new__(cls, iterable, /):
-        if cls is not __class__:
-            raise TypeError("expected the itertools._tee class")
-        source = iter(iterable)
-        fork = object.__new__(cls)
-        if type(source) is cls:
-            fork._block = source._block
-            fork._index = source._index
-        else:
-            fork._block = _TeeBlock(source)
-            fork._index = 0
-        return fork
+        def __new__(cls, iterable, /):
+            if cls is not __class__:
+                raise TypeError("expected the itertools._tee class")
+            return _allocate(cls, _block_type, iterable)
 
-    def __init__(self, *args, **kwargs):
-        # Reinitialization leaves the existing cursor in place.
-        pass
+        def __init__(self, *args, **kwargs):
+            # Reinitialization leaves the existing cursor in place.
+            pass
 
-    def __init_subclass__(cls):
-        raise TypeError("type 'itertools._tee' is not an acceptable base type")
+        def __init_subclass__(cls):
+            raise TypeError("type 'itertools._tee' is not an acceptable base type")
 
-    def __copy__(self):
-        return type(self)(self)
+        def __copy__(self):
+            return type(self)(self)
 
-    def __reduce__(self):
-        raise TypeError("cannot pickle '_tee' object")
+        def __reduce__(self):
+            raise TypeError("cannot pickle '_tee' object")
 
-    def __iter__(self):
-        return self
+        def __iter__(self):
+            return self
 
-    def __next__(self):
-        block = self._block
-        index = self._index
-        if index == len(block.values):
-            if block.following is None:
-                block.following = _TeeBlock(block.source)
-            self._block = block = block.following
-            self._index = index = 0
-        if index == block.filled:
-            if block.running:
-                raise RuntimeError("cannot re-enter the tee iterator")
-            block.running = True
-            try:
-                value = next(block.source)
-            except StopIteration:
-                pass
-            else:
-                block.values[index] = value
-                block.filled = index + 1
-            finally:
-                block.running = False
-            if index == block.filled:
-                raise StopIteration
-        self._index = index + 1
-        return block.values[index]
+        def __next__(self):
+            return _advance(self)
+
+    _tee.__qualname__ = "_tee"
+    return _tee
+
+
+_tee = _make_tee(_itertools._tee_allocate, _itertools._tee_next, _TeeBlock)
+del _itertools
 
 
 def tee(iterable, n=2, /):
@@ -572,7 +539,7 @@ class product:
             raise StopIteration
         pools = self._pools
         indices = self._indices
-        result = tuple(pool[index] for pool, index in zip(pools, indices))
+        result = tuple(map(_getitem, pools, indices))
         for position in range(len(indices) - 1, -1, -1):
             indices[position] += 1
             if indices[position] < len(pools[position]):
@@ -770,11 +737,10 @@ class islice:
 
     __slots__ = ("_source", "_position", "_target", "_stop", "_step")
 
-    def __init__(self, *args, **kwargs):
-        # CPython initializes the cursor in its constructor; explicit reinitialization is inert.
-        if hasattr(self, "_source"):
-            return
-        if kwargs:
+    def __new__(cls, /, *args, **kwargs):
+        if not isinstance(cls, type) or not issubclass(cls, __class__):
+            raise TypeError("expected an islice subclass")
+        if kwargs and _uses_base_init(__class__, cls):
             raise TypeError("islice() takes no keyword arguments")
         count = len(args)
         if count < 2:
@@ -793,11 +759,14 @@ class islice:
         stride = _islice_index(step, 1)
         if stride < 1:
             raise ValueError("Step for islice() must be a positive integer or None.")
-        self._source = iter(args[0])
+        source = iter(args[0])
+        self = object.__new__(cls)
+        self._source = source
         self._position = 0
         self._target = target
         self._stop = limit
         self._step = stride
+        return self
 
     def __iter__(self):
         return self

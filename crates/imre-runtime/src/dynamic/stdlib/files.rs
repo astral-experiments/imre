@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
-use std::os::fd::{AsRawFd, RawFd};
+use std::os::fd::{AsRawFd, IntoRawFd};
+use std::os::unix::fs::MetadataExt;
 
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, argument, os_error};
 
@@ -13,8 +14,8 @@ pub(in crate::dynamic) enum BinaryFile {
         path: Id,
     },
     Reader {
-        slot: RefCell<Option<ReadSource>>,
-        path: Option<Id>,
+        slot: RefCell<Option<BufReader<std::fs::File>>>,
+        path: Id,
     },
     Writer {
         file: RefCell<crate::objects::FileState>,
@@ -24,144 +25,69 @@ pub(in crate::dynamic) enum BinaryFile {
 }
 
 impl BinaryFile {
-    /// Opens the documented read, truncate, append, or exclusive-create mode.
-    pub(in crate::dynamic) fn open(
+    /// Wrap the descriptor acquired by open() without performing a second path lookup.
+    pub(in crate::dynamic) fn from_open(
         path: &str,
         name: Id,
-        mode: &str,
+        access: u32,
+        mode: &'static str,
         writer_capacity: Option<usize>,
+        fd: std::os::fd::OwnedFd,
     ) -> Result<Self> {
-        let (flags, mode) = match mode {
-            "rb" => {
-                let (file, _) = crate::objects::open_file(path, 0)?;
-                return Ok(Self::reader(
-                    ReadSource::File(BufReader::new(file)),
-                    Some(name),
-                ));
-            }
-            "wb" | "bw" => (1, "wb"),
-            "ab" | "ba" => (2, "ab"),
-            "xb" | "bx" => (3, "xb"),
-            _ => {
-                return Err(Error::new(
-                    "ValueError",
-                    "unsupported mode for dynamic files",
-                ));
-            }
-        };
+        let opened = crate::objects::prepare_file(fd, access, |error| {
+            crate::objects::errno_with_filename(error, Some(path))
+        })?;
+        if access == 0 {
+            let capacity = crate::text_output::binary_capacity(opened.1.blksize().into());
+            return Ok(Self::Reader {
+                path: name,
+                slot: RefCell::new(Some(BufReader::with_capacity(capacity, opened.0))),
+            });
+        }
         Ok(Self::Writer {
             file: RefCell::new(crate::objects::FileState::binary_writer(
                 path,
-                flags,
+                access,
                 writer_capacity,
+                opened,
             )?),
             path: name,
             mode,
         })
     }
 
-    /// Files and sockets share the same buffered reader methods.
-    pub(in crate::dynamic) fn reader(reader: ReadSource, path: Option<Id>) -> Self {
-        Self::Reader {
-            path,
-            slot: RefCell::new(Some(reader)),
-        }
-    }
-
     /// Filename objects and binary access modes remain observable after close.
     pub(in crate::dynamic) fn path_metadata(&self) -> Option<(Id, &'static str)> {
         match self {
-            Self::Reader {
-                path: Some(path), ..
-            } => Some((*path, "rb")),
+            Self::Reader { path, .. } => Some((*path, "rb")),
             Self::Writer { path, mode, .. } => Some((*path, mode)),
             Self::Standard { path, .. } => Some((*path, "wb")),
             _ => None,
         }
     }
 
-    /// A refused handle allocation drops its reader and releases any retained socket.
     pub(in crate::dynamic) fn into_value(self) -> Result<Value> {
         crate::shared::Shared::try_new(self)
             .map(|file| Value::File(super::super::value::BoxedFile::new(file)))
             .map_err(|_| Error::new("MemoryError", ""))
     }
 
-    /// SocketIO reports its live descriptor, or -1 once this reader has closed.
-    pub(in crate::dynamic) fn socket_reader_name(&self) -> Option<RawFd> {
+    /// All aliases observe closure through the same buffered stream.
+    /// A callback may check frame roots while a file operation holds its state.
+    pub(in crate::dynamic) fn owns_open_descriptor(&self) -> bool {
         match self {
-            Self::Reader { slot, path: None } => {
-                Some(slot.borrow().as_ref().map_or(-1, AsRawFd::as_raw_fd))
-            }
-            _ => None,
+            Self::Reader { slot, .. } => !slot.try_borrow().is_ok_and(|slot| slot.is_none()),
+            Self::Writer { file, .. } => !file.try_borrow().is_ok_and(|file| file.closed()),
+            _ => !self.closed(),
         }
     }
 
-    /// All aliases observe closure through the same buffered stream.
     pub(in crate::dynamic) fn closed(&self) -> bool {
         match self {
             Self::Descriptor(fd) => fd.closed(),
             Self::Standard { file, .. } => file.closed(),
             Self::Reader { slot, .. } => slot.borrow().is_none(),
             Self::Writer { file, .. } => file.borrow().closed(),
-        }
-    }
-}
-
-/// One buffered cursor serves filesystem input and a socket retained by makefile.
-pub(in crate::dynamic) enum ReadSource {
-    File(BufReader<std::fs::File>),
-    Socket(crate::objects::socket::SocketInput),
-}
-
-impl ReadSource {
-    fn seekable(&mut self) -> bool {
-        match self {
-            Self::File(file) => file.get_mut().stream_position().is_ok(),
-            Self::Socket(_) => false,
-        }
-    }
-}
-
-impl Read for ReadSource {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        match self {
-            Self::File(file) => file.read(buf),
-            Self::Socket(sock) => sock.read(buf),
-        }
-    }
-}
-
-impl BufRead for ReadSource {
-    fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
-        match self {
-            Self::File(file) => file.fill_buf(),
-            Self::Socket(sock) => sock.fill_buf(),
-        }
-    }
-
-    fn consume(&mut self, count: usize) {
-        match self {
-            Self::File(file) => file.consume(count),
-            Self::Socket(sock) => sock.consume(count),
-        }
-    }
-}
-
-impl Seek for ReadSource {
-    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
-        match self {
-            Self::File(file) => file.seek(pos),
-            Self::Socket(_) => Err(std::io::Error::from_raw_os_error(libc::ESPIPE)),
-        }
-    }
-}
-
-impl AsRawFd for ReadSource {
-    fn as_raw_fd(&self) -> RawFd {
-        match self {
-            Self::File(file) => file.get_ref().as_raw_fd(),
-            Self::Socket(sock) => sock.as_raw_fd(),
         }
     }
 }
@@ -256,18 +182,35 @@ pub(super) fn binary_method(
         return Err(Error::new("TypeError", "expected a file"));
     };
     let handle = handle.clone();
-    let (slot, socket) = match handle.as_ref() {
+    let slot = match handle.as_ref() {
         BinaryFile::Descriptor(file) => return file.call(ctx, receiver, name, args),
         BinaryFile::Standard { file, .. } => {
             return standard_buffer_method(ctx, file, receiver, name, args);
         }
-        BinaryFile::Reader { slot, path } => (slot, path.is_none()),
+        BinaryFile::Reader { slot, .. } => slot,
         BinaryFile::Writer { file, .. } => {
             if name == "seek" {
                 let whence = whence_argument(ctx, args.get(1).copied())?;
                 let offset = ctx.index_integer(argument(args, 0)?)?;
                 let pos = file.borrow_mut().seek_disk(&offset, i64::from(whence))?;
                 return Ok(ctx.int(pos as i64));
+            }
+            if matches!((name, args), ("close", []) | ("__exit__", [_, _, _])) {
+                let closed = file.borrow().closed();
+                if let Some(result) =
+                    super::io::overridden_close(ctx, receiver, name, closed, |_| {
+                        file.borrow_mut()
+                            .close_binary_after_flush()
+                            .map_err(crate::objects::errno_error)?;
+                        Ok(NONE)
+                    })
+                {
+                    return result;
+                }
+                file.borrow_mut()
+                    .close()
+                    .map_err(crate::objects::errno_error)?;
+                return Ok(NONE);
             }
             let mut file = file.borrow_mut();
             return match (name, args) {
@@ -278,10 +221,6 @@ pub(super) fn binary_method(
                 }
                 ("flush", []) => {
                     file.flush()?;
-                    Ok(NONE)
-                }
-                ("close", []) | ("__exit__", [_, _, _]) => {
-                    file.close().map_err(crate::objects::errno_error)?;
                     Ok(NONE)
                 }
                 ("__enter__", []) if file.closed() => {
@@ -313,10 +252,6 @@ pub(super) fn binary_method(
         "read" | "readline" => Some(read_length(ctx, args.first().copied())?),
         _ => None,
     };
-    if socket && name == "tell" {
-        // SocketIO.tell() calls its unsupported raw seek even after close.
-        return Err(Error::new("UnsupportedOperation", "seek"));
-    }
     if name == "seek" {
         let target = argument(args, 0)?;
         let whence = buffered_whence(ctx, args.get(1).copied())?;
@@ -325,7 +260,7 @@ pub(super) fn binary_method(
             let reader = slot
                 .as_mut()
                 .ok_or_else(|| Error::new("ValueError", "seek of closed file"))?;
-            if !reader.seekable() {
+            if reader.get_mut().stream_position().is_err() {
                 return Err(Error::new(
                     "UnsupportedOperation",
                     "File or stream is not seekable.",
@@ -339,18 +274,12 @@ pub(super) fn binary_method(
             .as_mut()
             .ok_or_else(|| Error::new("ValueError", "I/O operation on closed file"))?;
         if whence == libc::SEEK_SET && offset < 0 {
-            let ReadSource::File(file) = reader else {
-                return Err(Error::new(
-                    "UnsupportedOperation",
-                    "File or stream is not seekable.",
-                ));
-            };
             // A seekable device may accept a negative absolute offset. Ask the
             // underlying file without discarding unread buffered data on failure.
             // SAFETY: the borrowed file keeps its descriptor open for the call.
             let position = unsafe {
                 libc::lseek(
-                    file.get_ref().as_raw_fd(),
+                    reader.get_ref().as_raw_fd(),
                     offset as libc::off_t,
                     libc::SEEK_SET,
                 )
@@ -358,8 +287,8 @@ pub(super) fn binary_method(
             if position < 0 {
                 return Err(os_error(std::io::Error::last_os_error()));
             }
-            let remaining = file.buffer().len();
-            file.consume(remaining);
+            let remaining = reader.buffer().len();
+            reader.consume(remaining);
             return Ok(ctx.int(position as i64));
         }
         let pos = match whence {
@@ -372,8 +301,8 @@ pub(super) fn binary_method(
     }
     let mut slot = slot.borrow_mut();
     if matches!(name, "__exit__" | "close") {
-        if let Some(ReadSource::Socket(mut raw)) = slot.take() {
-            raw.close().map_err(os_error)?;
+        if let Some(reader) = slot.take() {
+            crate::objects::os::close(reader.into_inner().into_raw_fd())?;
         }
         return Ok(NONE);
     }
@@ -424,19 +353,19 @@ pub(super) fn binary_method(
     match name {
         "__enter__" => Ok(receiver),
         "readable" => Ok(TRUE),
-        "seekable" => Ok(crate::dynamic::builtins::boolean(f.seekable())),
+        "seekable" => Ok(crate::dynamic::builtins::boolean(
+            f.get_mut().stream_position().is_ok(),
+        )),
         "isatty" => {
             use std::io::IsTerminal;
-            Ok(
-                if matches!(f, ReadSource::File(file) if file.get_ref().is_terminal()) {
-                    TRUE
-                } else {
-                    FALSE
-                },
-            )
+            Ok(if f.get_ref().is_terminal() {
+                TRUE
+            } else {
+                FALSE
+            })
         }
         "flush" => Ok(NONE),
-        "fileno" => Ok(ctx.int(i64::from(f.as_raw_fd()))),
+        "fileno" => Ok(ctx.int(i64::from(f.get_ref().as_raw_fd()))),
         "tell" => Ok(ctx.int(f.stream_position().map_err(os_error)? as i64)),
         "readinto" => {
             let buffer = readinto_bytes(ctx, argument(args, 0)?)?;
@@ -572,99 +501,5 @@ fn standard_buffer_method(
             "TypeError",
             format!("invalid arguments to file.{name}"),
         )),
-    }
-}
-
-pub(super) fn text_method(
-    ctx: &mut Context,
-    name: &str,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-) -> Result<Id> {
-    let Some((&receiver, args)) = args.split_first() else {
-        return Err(Error::new("TypeError", "expected a text file"));
-    };
-    let Value::TextFile(file) = ctx.heap.get(receiver) else {
-        return Err(Error::new("TypeError", "expected a text file"));
-    };
-    if !kwargs.is_empty() {
-        let class = if name == "__exit__" {
-            ""
-        } else {
-            "TextIOWrapper."
-        };
-        return Err(Error::new(
-            "TypeError",
-            format!("{class}{name}() takes no keyword arguments"),
-        ));
-    }
-    let arity = usize::from(name == "write");
-    if name != "__exit__" && args.len() != arity {
-        let expected = if arity == 0 {
-            "no arguments"
-        } else {
-            "exactly one argument"
-        };
-        return Err(Error::new(
-            "TypeError",
-            format!(
-                "TextIOWrapper.{name}() takes {expected} ({} given)",
-                args.len()
-            ),
-        ));
-    }
-    match name {
-        "encoding" => Ok(file.encoding),
-        "errors" => Ok(file.errors),
-        "closed" => Ok(crate::dynamic::builtins::boolean(file.closed())),
-        "read" | "readline" => Ok(ctx.text(file.read(name == "readline")?.into_string())),
-        "write" => {
-            let input = args[0];
-            let count = match ctx.heap.get(ctx.scalar_value(input)) {
-                Value::Str(text) => {
-                    file.write(text)?;
-                    text.chars().count()
-                }
-                Value::SurrogateStr(points) => {
-                    let count = points.len();
-                    let newline = points.iter().any(|&p| matches!(p, 10 | 13));
-                    let stderr = file.standard_writer()?;
-                    let fd = if stderr { 2 } else { 1 };
-                    let encoding = ctx.text(crate::sys::standard_write_encoding(stderr));
-                    ctx.heap.keep(encoding);
-                    let errors = ctx.text(crate::sys::standard_field(fd, true).as_str());
-                    ctx.heap.keep(errors);
-                    let bytes =
-                        super::codecs::encode_text(ctx, input, Some(encoding), Some(errors))?;
-                    crate::sys::write_standard_encoded(stderr, &bytes, newline)?;
-                    count
-                }
-                _ => {
-                    return Err(Error::new(
-                        "TypeError",
-                        format!("write() argument must be str, not {}", ctx.type_name(input)),
-                    ));
-                }
-            };
-            Ok(ctx.int(count as i64))
-        }
-        "fileno" => Ok(ctx.int(i64::from(file.fileno()?))),
-        "isatty" => Ok(crate::dynamic::builtins::boolean(file.isatty()?)),
-        "flush" => {
-            file.flush()?;
-            Ok(NONE)
-        }
-        "close" | "__exit__" => {
-            if ctx.heap.default_stderr == Some(receiver) {
-                ctx.check_thread_reporter_mutable()?;
-            }
-            file.close()?;
-            Ok(NONE)
-        }
-        "__enter__" if file.closed() => {
-            Err(Error::new("ValueError", "I/O operation on closed file."))
-        }
-        "__enter__" => Ok(receiver),
-        _ => Err(Error::new("AttributeError", name)),
     }
 }

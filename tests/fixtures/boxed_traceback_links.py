@@ -63,4 +63,25 @@ def check():
         assert head.tb_next is None
 
 
+def check_context_cycle(backlink):
+    error = KeyError("expired")
+    active = ValueError("handler")
+    inner = RuntimeError("inner")
+    cause = OSError("cause")
+    active.__context__ = inner
+    inner.__context__ = error if backlink else active
+    try:
+        raise active
+    except ValueError:
+        try:
+            raise error from cause
+        except KeyError as caught:
+            assert caught is error and caught.__context__ is active
+            assert caught.__cause__ is cause and caught.__suppress_context__
+            assert active.__context__ is inner
+            assert inner.__context__ is (None if backlink else active)
+
+
 check()
+check_context_cycle(True)
+check_context_cycle(False)

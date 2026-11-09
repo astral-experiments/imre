@@ -32,6 +32,7 @@ impl Kind {
 #[derive(Clone, Copy)]
 pub(super) struct Reference {
     pub kind: Kind,
+    pub internal: bool,
     pub target: Option<Id>,
     pub callback: Id,
     pub hash: Option<i64>,
@@ -211,7 +212,7 @@ impl Context {
             return self.native_owns_layout_descriptor(class, "__weakref__");
         };
         if ancestors.iter().any(|&base| {
-            matches!(self.heap.get(base), Value::Native(name) if matches!(name.as_str(), "int" | "tuple" | "bytes"))
+            matches!(self.heap.get(base), Value::Native(name) if super::slot_member::VARIABLE_SIZE_BASES.contains(&name.as_str()))
         }) {
             return false;
         }
@@ -277,7 +278,6 @@ impl Context {
             | Value::Array(_)
             | Value::MemoryView { .. }
             | Value::File(_)
-            | Value::TextFile(_)
             | Value::Partial { .. }
             | Value::Cached { .. }
             | Value::HandlerLock(_)
@@ -581,7 +581,7 @@ pub(super) fn call(
                     ),
                 ));
             };
-            let refs = ctx.heap.weak_references(*target);
+            let refs = ctx.heap.python_weak_references(*target);
             if function.ends_with("count") {
                 Ok(ctx.int(refs.len() as i64))
             } else {

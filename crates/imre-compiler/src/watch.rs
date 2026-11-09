@@ -1,7 +1,8 @@
 //! Observe the filesystem answers used by the module loader, including failed lookups.
 //! A check can fail before it has a complete source graph.
 use std::collections::BTreeSet;
-use std::io;
+use std::fs::File;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -25,10 +26,44 @@ enum Fact {
     Identity(Result<PathBuf, String>),
     Content(Result<blake3::Hash, String>),
     Bytes(Result<blake3::Hash, String>),
+    WheelRecords(Vec<PathBuf>),
 }
 
 fn outcome<T, U>(result: &io::Result<T>, map: impl FnOnce(&T) -> U) -> Result<U, String> {
     result.as_ref().map(map).map_err(io::Error::to_string)
+}
+
+/// Read the selected canonical source through one handle. A symlink introduced
+/// after resolution must not substitute another file under the checked identity.
+fn with_source<T>(path: &Path, read: impl FnOnce(&mut File) -> io::Result<T>) -> io::Result<T> {
+    let changed = || {
+        io::Error::new(
+            io::ErrorKind::Interrupted,
+            "source identity changed during compilation",
+        )
+    };
+    #[cfg(target_os = "linux")]
+    {
+        use rustix::fs::{CWD, Mode, OFlags, ResolveFlags, openat2};
+        use rustix::io::Errno;
+        match openat2(
+            CWD,
+            path,
+            OFlags::RDONLY | OFlags::CLOEXEC,
+            Mode::empty(),
+            ResolveFlags::NO_SYMLINKS,
+        ) {
+            Ok(fd) => return read(&mut File::from(fd)),
+            Err(Errno::LOOP) => return Err(changed()),
+            Err(Errno::NOSYS | Errno::PERM) => {}
+            Err(err) => return Err(err.into()),
+        }
+    }
+    let mut source = same_file::Handle::from_file(File::open(path)?)?;
+    if path.canonicalize()? != path || source != same_file::Handle::from_path(path)? {
+        return Err(changed());
+    }
+    read(source.as_file_mut())
 }
 
 impl FileSystem<'_> {
@@ -41,6 +76,12 @@ impl FileSystem<'_> {
         if let Some(inputs) = &mut self.0 {
             inputs.0.push((path.to_owned(), fact()));
         }
+    }
+
+    pub(crate) fn wheel_records(&mut self, path: &Path) -> Vec<PathBuf> {
+        let records = crate::installed_wheels::records(path);
+        self.record(path, || Fact::WheelRecords(records.clone()));
+        records
     }
 
     pub(crate) fn is_file(&mut self, path: &Path) -> bool {
@@ -67,12 +108,34 @@ impl FileSystem<'_> {
         value
     }
 
-    pub(crate) fn read_to_string(&mut self, path: &Path) -> io::Result<String> {
-        let value = std::fs::read_to_string(path);
+    pub(crate) fn read_source_string(&mut self, path: &Path) -> io::Result<String> {
+        let value = with_source(path, |file| io::read_to_string(file));
         self.record(path, || {
             Fact::Content(outcome(&value, |s| blake3::hash(s.as_bytes())))
         });
         value
+    }
+
+    pub(crate) fn read_source(&mut self, path: &Path) -> io::Result<Vec<u8>> {
+        let value = with_source(path, |file| {
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes)?;
+            Ok(bytes)
+        });
+        self.record(path, || Fact::Bytes(outcome(&value, |b| blake3::hash(b))));
+        value
+    }
+
+    /// Hash a file as it is read, retaining its handle for a seekable ZIP reader.
+    pub(crate) fn open_hashed(&mut self, path: &Path) -> io::Result<(std::fs::File, blake3::Hash)> {
+        let result = std::fs::File::open(path).and_then(|mut file| {
+            let digest = blake3::Hasher::new().update_reader(&mut file)?.finalize();
+            Ok((file, digest))
+        });
+        self.record(path, || {
+            Fact::Bytes(outcome(&result, |(_, digest)| *digest))
+        });
+        result
     }
 
     pub(crate) fn read(&mut self, path: &Path) -> io::Result<Vec<u8>> {
@@ -85,6 +148,7 @@ impl FileSystem<'_> {
 impl Inputs {
     fn fresh(&self) -> bool {
         self.0.iter().all(|(path, fact)| match fact {
+            Fact::WheelRecords(value) => crate::installed_wheels::records(path) == *value,
             Fact::File(value) => path.is_file() == *value,
             Fact::Directory(value) => path.is_dir() == *value,
             Fact::Exists(value) => path.exists() == *value,
@@ -144,6 +208,15 @@ impl WatchPaths {
             }
         }
 
+        for (root, fact) in &inputs.0 {
+            if matches!(fact, Fact::WheelRecords(_))
+                && let Ok(real) = root.canonicalize()
+                && real.is_dir()
+            {
+                names.insert(real.clone());
+                directories.insert(real);
+            }
+        }
         Ok(Self { directories, names })
     }
 }
@@ -177,11 +250,11 @@ impl Subscription {
                             _ => {}
                         }
                         let names = watched_names.lock().unwrap();
-                        if !event
-                            .paths
-                            .iter()
-                            .any(|p| names.iter().any(|name| name.starts_with(p)))
-                        {
+                        if !event.paths.iter().any(|p| {
+                            names.iter().any(|name| name.starts_with(p))
+                                || (p.extension().is_some_and(|e| e == "dist-info")
+                                    && p.parent().is_some_and(|parent| names.contains(parent)))
+                        }) {
                             return;
                         }
                         let structural = matches!(
@@ -315,6 +388,34 @@ pub(crate) fn check(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn selected_source_follows_the_open_handle() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helper.py");
+        let other = dir.path().join("other.py");
+        std::fs::write(&path, "checked").unwrap();
+        std::fs::write(&other, "replacement").unwrap();
+        let identity = path.canonicalize().unwrap();
+        let saved = with_source(&identity, |file| {
+            std::fs::rename(&path, dir.path().join("previous.py"))?;
+            symlink(&other, &path)?;
+            io::read_to_string(file)
+        });
+        assert_eq!(saved.unwrap(), "checked");
+        let mut fs = FileSystem::default();
+        assert_eq!(
+            fs.read_source(&identity).unwrap_err().kind(),
+            io::ErrorKind::Interrupted
+        );
+        assert_eq!(
+            fs.read_source_string(&path.canonicalize().unwrap())
+                .unwrap(),
+            "replacement"
+        );
+    }
 
     #[test]
     fn creating_or_editing_an_entry_profile_invalidates_the_check() {

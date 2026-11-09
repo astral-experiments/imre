@@ -16,7 +16,7 @@ impl Context {
         args.insert(0, base);
         let prepared = self.call(prepare, args, kwargs)?;
         self.heap.keep(prepared);
-        let [name, members, module, qualname]: [Id; 4] = self
+        let [name, members, module, qualname, boundary]: [Id; 5] = self
             .items(prepared)?
             .as_slice()
             .try_into()
@@ -34,7 +34,7 @@ impl Context {
         } else {
             module
         };
-        let namespace = self.enum_namespace(&[base]).expect("native enum base");
+        let namespace = self.enum_namespace(&[base])?.expect("native enum base");
         let scalar = namespace.kind.scalar_base().map(|base| self.builtin(base));
         let scope = self.scope(&caller_module, None);
         self.heap.keep(scope);
@@ -64,16 +64,48 @@ impl Context {
             self.bind(scope, &key, value);
         }
         self.bind(scope, "__module__", module);
+        self.bind_enum_boundary(scope, &[base], boundary)?;
         if qualname != NONE {
             self.bind(scope, "__qualname__", qualname);
         }
         self.str_value(self.scope_name(scope, "__qualname__").unwrap())?;
+        let class = self.allocate_enum_class(class_name, scope, base)?;
+        self.populate_enum(class, scalar)?;
+        Ok(class)
+    }
+
+    /// Snapshot the controlling enum base's policy before descriptors and members see the class.
+    pub(in crate::dynamic) fn bind_enum_boundary(
+        &mut self,
+        scope: Id,
+        bases: &[Id],
+        boundary: Id,
+    ) -> Result<()> {
+        let explicit = self.truth(boundary)?;
+        let flag = self.builtin("enum.Flag");
+        if bases.iter().any(|&base| self.direct_subclass(base, flag)) {
+            let policy = if explicit {
+                boundary
+            } else {
+                let base = *bases.last().expect("enum has a base");
+                self.optional_attr(base, "_boundary_")?.unwrap_or(NONE)
+            };
+            self.bind(scope, "_boundary_", policy);
+        }
+        Ok(())
+    }
+
+    pub(super) fn allocate_enum_class(
+        &mut self,
+        class_name: String,
+        scope: Id,
+        base: Id,
+    ) -> Result<Id> {
         let class = self.allocate_class(class_name, scope, vec![base])?;
         self.heap.keep(class);
         self.install_instance_dictionary_descriptor(class, scope);
         self.install_weakref_descriptor(class, scope);
         self.initialize_class_members(class, scope, None)?;
-        self.populate_enum(class, scalar)?;
         Ok(class)
     }
 }

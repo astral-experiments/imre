@@ -12,7 +12,19 @@ The compiler checks and specializes the whole graph before it splits the LLVM ou
 
 ## Boxed compilation
 
-The boxed emitter compiles branches, loops and function bodies to LLVM and calls the runtime for operations such as attribute lookup and calls through a Python object. It uses handles into a runtime-managed heap. This lets the same operation invoke different Python methods depending on its operands. The runtime also handles source loaded during execution. [Boxed emitter](../crates/imre-compiler/src/dynamic/emit.rs) · [Object runtime](../crates/imre-runtime/src/dynamic/mod.rs)
+The boxed emitter compiles branches, loops and function bodies to LLVM and calls the runtime for operations such as attribute lookup and calls through a Python object. It uses handles into a runtime-managed heap. This lets the same operation invoke different Python methods depending on its operands. [Boxed emitter](../crates/imre-compiler/src/dynamic/emit.rs) · [Object runtime](../crates/imre-runtime/src/dynamic/mod.rs)
+
+## What an ordinary build compiles
+
+Imre compiles executable Python bodies ahead of time. Runtime data can still drive object and method dispatch. A caller can select a handler from a dictionary with `rules[key](value)`, or rebind an attribute to a compiled function with `setattr(obj, name, double)` even when `name` comes from input.
+
+Modules still initialize on first import, as `selectors` does with its compiled Python initializer. When `json` imports its helpers, the loader passes their linked native code objects to `exec`. [Built-in initializers](../crates/imre-compiler/src/dynamic/mod.rs#L2170) · [Import loader](../crates/imre-compiler/stdlib/importlib/_bootstrap_external.py#L129)
+
+The compiler reports a reachable `exec(input())` or `runpy.run_path(sys.argv[1])` before linking because it cannot identify the Python body. For a fixed set of plug-ins, declare their modules at build time and select a compiled handler at runtime. A handler that uses `runpy.run_path` can pass the literal filename of a module declared with `--include-module`. [Executable source](../crates/imre-compiler/src/analysis/execution.rs) · [Executable files](../crates/imre-compiler/src/analysis/run_path.rs)
+
+Ordinary builds check arguments against explicitly annotated parameters of first-party functions even when an unrelated operation selects boxed compilation. The typed path rejects the callable dictionary above. [Argument-checking tests](../crates/imre-compiler/src/analysis/closed_program_tests.rs) · [Callable types](subset.md#callable-values-and-callbacks)
+
+A Python-constructed `SourceFileLoader` can execute a physical module’s linked initializer after the file changes or is removed when given the registered name and exact filename as a plain string. With a path-like object, the standard loader reads the file first and can use the initializer if the read and conversion yield that same filename. Custom read and conversion hooks still run. When a selected compiler calls `compile(data, filename, "exec")`, matching registered bytes, origin and compiler settings can select the linked initializer. A code object created for inspection can expose its filename and constants. Executing it requires a compiled body. Issued loaders for bundled modules retain access to their own virtual origins.
 
 ## Runtime
 

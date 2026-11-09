@@ -4,7 +4,7 @@ import _socket
 import errno
 import io
 import os
-from _socket import close, error, has_ipv6, socket
+from _socket import close, error, has_ipv6
 
 _GLOBAL_DEFAULT_TIMEOUT = object()
 
@@ -34,6 +34,184 @@ if hasattr(_socket, "IPV6_V6ONLY"):
 
 
 _blocking_errnos = {errno.EAGAIN, errno.EWOULDBLOCK}
+
+
+class socket(_socket.socket):
+
+    """A subclass of _socket.socket adding the makefile() method."""
+
+    __slots__ = ["__weakref__", "_io_refs", "_closed"]
+
+    def __init__(self, family=-1, type=-1, proto=-1, fileno=None):
+        # For user code address family and type values are IntEnum members, but
+        # for the underlying _socket.socket they're just integers. The
+        # constructor of _socket.socket converts the given argument to an
+        # integer automatically.
+        if fileno is None:
+            if family == -1:
+                family = AF_INET
+            if type == -1:
+                type = SOCK_STREAM
+            if proto == -1:
+                proto = 0
+        _socket.socket.__init__(self, family, type, proto, fileno)
+        self._io_refs = 0
+        self._closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        if not self._closed:
+            self.close()
+
+    def __repr__(self):
+        """Wrap __repr__() to reveal the real class name and socket
+        address(es).
+        """
+        closed = getattr(self, '_closed', False)
+        s = "<%s.%s%s fd=%i, family=%s, type=%s, proto=%i" \
+            % (self.__class__.__module__,
+               self.__class__.__qualname__,
+               " [closed]" if closed else "",
+               self.fileno(),
+               self.family,
+               self.type,
+               self.proto)
+        if not closed:
+            # getsockname and getpeername may not be available on WASI.
+            try:
+                laddr = self.getsockname()
+                if laddr:
+                    s += ", laddr=%s" % str(laddr)
+            except (error, AttributeError):
+                pass
+            try:
+                raddr = self.getpeername()
+                if raddr:
+                    s += ", raddr=%s" % str(raddr)
+            except (error, AttributeError):
+                pass
+        s += '>'
+        return s
+
+    def __getstate__(self):
+        raise TypeError(f"cannot pickle {self.__class__.__name__!r} object")
+
+    def dup(self):
+        """dup() -> socket object
+
+        Duplicate the socket. Return a new socket object connected to the same
+        system resource. The new socket is non-inheritable.
+        """
+        fd = os.dup(self.fileno())
+        sock = self.__class__(self.family, self.type, self.proto, fileno=fd)
+        sock.settimeout(self.gettimeout())
+        return sock
+
+    def accept(self):
+        """accept() -> (socket object, address info)
+
+        Wait for an incoming connection.  Return a new socket
+        representing the connection, and the address of the client.
+        For IP sockets, the address info is a pair (hostaddr, port).
+        """
+        fd, addr = self._accept()
+        sock = socket(self.family, self.type, self.proto, fileno=fd)
+        # Issue #7995: if no default timeout is set and the listening
+        # socket had a (non-zero) timeout, force the new socket in blocking
+        # mode to override platform-specific socket flags inheritance.
+        if getdefaulttimeout() is None and self.gettimeout():
+            sock.setblocking(True)
+        return sock, addr
+
+    def makefile(self, mode="r", buffering=None, *,
+                 encoding=None, errors=None, newline=None):
+        """makefile(...) -> an I/O stream connected to the socket
+
+        The arguments are as for io.open() after the filename, except the only
+        supported mode values are 'r' (default), 'w', 'b', or a combination of
+        those.
+        """
+        # XXX refactor to share code?
+        if not set(mode) <= {"r", "w", "b"}:
+            raise ValueError("invalid mode %r (only r, w, b allowed)" % (mode,))
+        writing = "w" in mode
+        reading = "r" in mode or not writing
+        assert reading or writing
+        binary = "b" in mode
+        rawmode = ""
+        if reading:
+            rawmode += "r"
+        if writing:
+            rawmode += "w"
+        raw = SocketIO(self, rawmode)
+        self._io_refs += 1
+        if buffering is None:
+            buffering = -1
+        if buffering < 0:
+            buffering = io.DEFAULT_BUFFER_SIZE
+        if buffering == 0:
+            if not binary:
+                raise ValueError("unbuffered streams must be binary")
+            return raw
+        if reading and writing:
+            buffer = io.BufferedRWPair(raw, raw, buffering)
+        elif reading:
+            buffer = io.BufferedReader(raw, buffering)
+        else:
+            assert writing
+            buffer = io.BufferedWriter(raw, buffering)
+        if binary:
+            return buffer
+        encoding = io.text_encoding(encoding)
+        text = io.TextIOWrapper(buffer, encoding, errors, newline)
+        text.mode = mode
+        return text
+
+    def _decref_socketios(self):
+        if self._io_refs > 0:
+            self._io_refs -= 1
+        if self._closed:
+            self.close()
+
+    def _real_close(self, _ss=_socket.socket):
+        # This function should not reference any globals. See issue #808164.
+        _ss.close(self)
+
+    def close(self):
+        # This function should not reference any globals. See issue #808164.
+        self._closed = True
+        if self._io_refs <= 0:
+            self._real_close()
+
+    def detach(self):
+        """detach() -> file descriptor
+
+        Close the socket object without closing the underlying file descriptor.
+        The object cannot be used after this call, but the file descriptor
+        can be reused for other purposes.  The file descriptor is returned.
+        """
+        self._closed = True
+        return super().detach()
+
+    @property
+    def family(self):
+        """Read-only access to the address family for this socket.
+        """
+        return _intenum_converter(super().family, AddressFamily)
+
+    @property
+    def type(self):
+        """Read-only access to the socket type.
+        """
+        return _intenum_converter(super().type, SocketKind)
+
+    def get_inheritable(self):
+        return os.get_inheritable(self.fileno())
+
+    def set_inheritable(self, inheritable):
+        os.set_inheritable(self.fileno(), inheritable)
 
 
 class SocketIO(io.RawIOBase):
@@ -167,6 +345,45 @@ def getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
             in _socket.getaddrinfo(host, port, family, type, proto, flags)]
 
 
+if os.name == 'posix':
+    def fromfd(fd, family, type, proto=0):
+        nfd = os.dup(fd)
+        return socket(family, type, proto, nfd)
+
+
+if hasattr(_socket.socket, "sendmsg"):
+    def send_fds(sock, buffers, fds, flags=0, address=None):
+        """ send_fds(sock, buffers, fds[, flags[, address]]) -> integer
+
+        Send the list of file descriptors fds over an AF_UNIX socket.
+        """
+        import array
+
+        return sock.sendmsg(buffers, [(_socket.SOL_SOCKET,
+            _socket.SCM_RIGHTS, array.array("i", fds))])
+
+if hasattr(_socket.socket, "recvmsg"):
+    def recv_fds(sock, bufsize, maxfds, flags=0):
+        """ recv_fds(sock, bufsize, maxfds[, flags]) -> (data, list of file
+        descriptors, msg_flags, address)
+
+        Receive up to maxfds file descriptors returning the message
+        data and a list containing the descriptors.
+        """
+        import array
+
+        # Array of ints
+        fds = array.array("i")
+        msg, ancdata, flags, addr = sock.recvmsg(bufsize,
+            _socket.CMSG_LEN(maxfds * fds.itemsize))
+        for cmsg_level, cmsg_type, cmsg_data in ancdata:
+            if (cmsg_level == _socket.SOL_SOCKET and cmsg_type == _socket.SCM_RIGHTS):
+                fds.frombytes(cmsg_data[:
+                        len(cmsg_data) - (len(cmsg_data) % fds.itemsize)])
+
+        return msg, list(fds), flags, addr
+
+
 if hasattr(_socket, "socketpair"):
     def socketpair(family=None, type=SOCK_STREAM, proto=0):
         """Create a pair of connected sockets."""
@@ -175,7 +392,10 @@ if hasattr(_socket, "socketpair"):
                 family = AF_UNIX
             except NameError:
                 family = AF_INET
-        return _socket.socketpair(family, type, proto)
+        a, b = _socket.socketpair(family, type, proto)
+        a = socket(family, type, proto, a.detach())
+        b = socket(family, type, proto, b.detach())
+        return a, b
 
 
 def create_server(address, *, family=AF_INET, backlog=None, reuse_port=False,

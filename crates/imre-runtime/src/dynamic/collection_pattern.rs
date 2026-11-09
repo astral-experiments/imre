@@ -9,10 +9,6 @@ impl PatternFlags {
     pub(super) const SEQUENCE: Self = Self(1 << 5);
     pub(super) const MAPPING: Self = Self(1 << 6);
 
-    pub(super) fn marker(self) -> i64 {
-        i64::from(self.0)
-    }
-
     pub(super) fn is_empty(self) -> bool {
         self.0 == 0
     }

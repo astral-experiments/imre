@@ -2,15 +2,27 @@ use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
 use super::boolean::{Context as BooleanContext, Flow, Target};
+use super::suspension::Suspension;
 use super::{Body, CallArguments, DefinitionName, Function, permanent};
-
-enum Element<'a> {
-    Value(&'a ast::Expr),
-    Pair(&'a ast::Expr, &'a ast::Expr),
-}
 
 impl Function<'_, '_> {
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
+        let previous = std::mem::replace(&mut self.current_range, expr.range());
+        let value = self.located_expr(expr);
+        self.current_range = previous;
+        value
+    }
+
+    /// Evaluate the receiver before attributing a descriptor lookup to the attribute.
+    fn attribute_receiver(&mut self, field: &ast::ExprAttribute) -> String {
+        let receiver = self.expr(&field.value);
+        if self.native_suspension {
+            self.suspension_position(field.range());
+        }
+        receiver
+    }
+
+    fn located_expr(&mut self, expr: &ast::Expr) -> String {
         let position = imre_ast::expression_position(
             expr,
             &self.source.method_imports,
@@ -67,6 +79,35 @@ impl Function<'_, '_> {
 
     fn expr_inner(&mut self, expr: &ast::Expr, partition: Option<(u32, String)>) -> String {
         match expr {
+            ast::Expr::Await(expr) if self.native_suspension => {
+                let mark = self.temporary_mark();
+                self.unwind_operands(&mark, |f| {
+                    let value = f.expr(&expr.value);
+                    f.await_at(&value, "0", expr.range, &mark)
+                })
+            }
+            ast::Expr::Yield(yielded) if self.native_suspension => {
+                let mark = self.temporary_mark();
+                self.unwind_operands(&mark, |f| {
+                    let value = yielded
+                        .value
+                        .as_deref()
+                        .map_or_else(|| permanent::NONE.to_string(), |value| f.expr(value));
+                    let kind = if f.async_generator {
+                        Suspension::AsyncYield
+                    } else {
+                        Suspension::Yield
+                    };
+                    f.suspend_at(&value, kind, yielded.range, &mark)
+                })
+            }
+            ast::Expr::YieldFrom(delegation) if self.native_suspension => {
+                let mark = self.temporary_mark();
+                self.unwind_operands(&mark, |f| {
+                    let iterable = f.expr(&delegation.value);
+                    f.suspend_at(&iterable, Suspension::Delegate, delegation.range, &mark)
+                })
+            }
             ast::Expr::NoneLiteral(_) => permanent::NONE.to_string(),
             ast::Expr::EllipsisLiteral(_) => permanent::ELLIPSIS.to_string(),
             ast::Expr::BooleanLiteral(v) => (if v.value {
@@ -89,7 +130,7 @@ impl Function<'_, '_> {
             ast::Expr::BytesLiteral(v) => self.lit(2, &v.value.bytes().collect::<Vec<_>>()),
             ast::Expr::Name(v) => self.lookup(v.id.as_str()),
             ast::Expr::Attribute(v) => {
-                let base = self.expr(&v.value);
+                let base = self.attribute_receiver(v);
                 self.attr(&base, v.attr.as_str())
             }
             ast::Expr::Subscript(v) => {
@@ -100,8 +141,23 @@ impl Function<'_, '_> {
                     return self.expr_inner(&v.value, Some((index, position)));
                 }
                 let object = self.expr(&v.value);
-                let key = self.expr(&v.slice);
                 let span = self.expression_span(expr, &v.value, b'[');
+                if let ast::Expr::Slice(slice) = v.slice.as_ref()
+                    && slice.step.is_none()
+                {
+                    let [start, stop] = [&slice.lower, &slice.upper].map(|bound| {
+                        bound
+                            .as_deref()
+                            .map_or_else(|| "0".into(), |e| self.expr(e))
+                    });
+                    self.take_matching_check();
+                    let position =
+                        span.map_or_else(|| "null".into(), |span| self.output.position(span));
+                    return self.checked(&format!(
+                        "call i64 @imre_dyn_get_slice_at(ptr %ctx, i64 {object}, i64 {start}, i64 {stop}, ptr {position})"
+                    ));
+                }
+                let key = self.expr(&v.slice);
                 self.op_at("get", &[&object, &key], span)
             }
             ast::Expr::Slice(slice) => {
@@ -182,25 +238,29 @@ impl Function<'_, '_> {
             ast::Expr::Call(v) => {
                 let mark = self.temporary_mark();
                 // Cap the fixed entry-block scratch space even for calls in cold branches.
-                let direct = v.arguments.args.len() <= 64
-                    && v.arguments.keywords.is_empty()
+                let fixed = v.arguments.args.len() + v.arguments.keywords.len() <= 64
                     && !v
                         .arguments
                         .args
                         .iter()
-                        .any(|value| matches!(value, ast::Expr::Starred(_)));
+                        .any(|value| matches!(value, ast::Expr::Starred(_)))
+                    && v.arguments
+                        .keywords
+                        .iter()
+                        .all(|keyword| keyword.arg.is_some());
+                let direct = fixed && v.arguments.keywords.is_empty();
                 let single_spread = match v.arguments.args.as_ref() {
                     [ast::Expr::Starred(star)] => Some(star),
                     _ => None,
                 };
-                let packed = (!direct && single_spread.is_none()).then(|| self.op("list", &[]));
+                let packed = (!fixed && single_spread.is_none()).then(|| self.op("list", &[]));
                 let mut bound_receiver = None;
                 let callable = if let Some(field) = imre_ast::direct_method(
                     v,
                     &self.source.method_imports,
                     Some(&self.source.private_names),
                 ) {
-                    let receiver = self.expr(&field.value);
+                    let receiver = self.attribute_receiver(field);
                     let name = field.attr.as_str();
                     let lookup = if direct && name == "get" {
                         Some(format!(
@@ -214,7 +274,7 @@ impl Function<'_, '_> {
                         Some(format!(
                             "call i64 @imre_dyn_string_method_target(ptr %ctx, i64 {receiver}, ptr {symbol}, ptr %live)"
                         ))
-                    } else if direct && !name.starts_with('_') {
+                    } else if direct && !name.starts_with("__") {
                         let symbol = self.output.data(name.as_bytes());
                         Some(format!(
                             "call i64 @imre_dyn_builtin_method_target(ptr %ctx, i64 {receiver}, ptr {symbol}, ptr %live)"
@@ -233,16 +293,21 @@ impl Function<'_, '_> {
                         self.named_op("method", &receiver, field.attr.as_str(), "0")
                     }
                 } else {
+                    if self.native_suspension && matches!(&*v.func, ast::Expr::Name(_)) {
+                        self.suspension_position(v.func.range());
+                    }
                     self.expr(&v.func)
                 };
                 let operands = if let Some(star) = single_spread {
                     let source = self.expr(&star.value);
-                    let kwargs = self.keyword_arguments(&v.arguments, &callable);
-                    let args = self.op("spread_arguments", &[&source]);
+                    let kwargs = self.keyword_arguments(&v.arguments, Some(&callable));
+                    let args = self.pack_operand("spread_arguments", &[&source, &callable]);
                     CallArguments::Packed { args, kwargs }
                 } else if let Some(args) = packed {
-                    let kwargs = self.arguments(&args, &v.arguments, &callable);
+                    let kwargs = self.arguments(&args, &v.arguments, Some(&callable));
                     CallArguments::Packed { args, kwargs }
+                } else if !v.arguments.keywords.is_empty() {
+                    self.fixed_keyword_arguments(&v.arguments)
                 } else {
                     let values: Vec<_> = bound_receiver
                         .iter()
@@ -284,10 +349,7 @@ impl Function<'_, '_> {
                 v.parameters.as_deref(),
                 None,
                 None,
-                match v.body.as_ref() {
-                    ast::Expr::Yield(_) => Body::YieldingLambda(&v.body),
-                    body => Body::Expression(body),
-                },
+                Body::Expression(&v.body),
             ),
             ast::Expr::TString(v) => self.template(&v.value),
             ast::Expr::FString(v) => {
@@ -306,35 +368,10 @@ impl Function<'_, '_> {
                 }
                 self.join_format_parts(parts)
             }
-            ast::Expr::Generator(v) => {
-                if v.generators.iter().any(|generator| generator.is_async) {
-                    return self.unsupported("async generator expression");
-                }
-                let iterable = self.expr(&v.generators[0].iter);
-                let iter = self.op("iter", &[&iterable]);
-                let step = self.define(
-                    v.start(),
-                    DefinitionName::Plain("<genexpr>"),
-                    None,
-                    None,
-                    None,
-                    Body::Generator(&v.generators, &v.elt),
-                );
-                let targets = self.comprehension_targets(&v.generators);
-                self.op("generator", &[&step, &iter, &targets])
+            expr if let Some(plan) = imre_ast::comprehension::Plan::from_expr(expr) => {
+                self.comprehension(expr, plan)
             }
-            ast::Expr::ListComp(v) => {
-                self.comprehension("list", &v.generators, Element::Value(&v.elt))
-            }
-            ast::Expr::SetComp(v) => {
-                self.comprehension("set", &v.generators, Element::Value(&v.elt))
-            }
-            ast::Expr::DictComp(v) => match &v.key {
-                Some(key) => {
-                    self.comprehension("dict", &v.generators, Element::Pair(key, &v.value))
-                }
-                None => self.unsupported("dict unpacking comprehension"),
-            },
+            ast::Expr::DictComp(_) => self.unsupported("dict unpacking comprehension"),
             _ => self.unsupported(&format!("{:?}", ast::AnyNodeRef::from(expr).kind())),
         }
     }
@@ -434,27 +471,72 @@ impl Function<'_, '_> {
         self.value(&format!("phi i64 {}", incoming.join(", ")))
     }
 
+    /// Keep just the live stack operands when Python may observe their release.
+    pub(super) fn keep_operands(&mut self, mark: &str, first: &str, second: &str) -> String {
+        self.value(&format!(
+            "call i64 @imre_dyn_keep_operands(ptr %ctx, i64 {mark}, i64 {first}, i64 {second})"
+        ))
+    }
+
+    /// Unwind this operand window before propagating its pending exception.
+    pub(super) fn unwind_operands<T>(
+        &mut self,
+        mark: &str,
+        body: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let failed = self.name("b");
+        let outer = std::mem::replace(&mut self.error, failed.clone());
+        let result = body(self);
+        let ready = self.name("b");
+        self.jump(&ready);
+        self.label(&failed);
+        self.discard_truth(mark);
+        self.jump(&outer);
+        self.label(&ready);
+        self.error = outer;
+        result
+    }
+
     /// A failed intermediate comparison returns its object in a value context and false in a branch.
     fn compare_expr(&mut self, comparison: &ast::ExprCompare, context: BooleanContext) -> String {
-        let mut left = self.expr(&comparison.operands[0]);
-        if let [op @ (ast::CmpOp::In | ast::CmpOp::NotIn)] = comparison.ops.as_ref()
-            && let ast::Expr::Tuple(tuple) = &comparison.operands[1]
-            && tuple.elts.len() <= 8
-            && tuple.elts.iter().all(imre_ast::literal_tuple_element)
+        if let [op] = comparison.ops.as_ref()
+            && !matches!(op, ast::CmpOp::Is | ast::CmpOp::IsNot)
         {
-            // Keep the entry-block scratch array bounded even for very large tuple displays.
-            let values: Vec<_> = tuple.elts.iter().map(|item| self.expr(item)).collect();
-            let (array, count) = self.handle_array(&values);
-            let negate = u32::from(*op == ast::CmpOp::NotIn);
-            let value = self.checked(&format!(
-                "call i64 @imre_dyn_contains_literal_tuple(ptr %ctx, i64 {left}, ptr {array}, i64 {count}, i32 {negate})"
-            ));
+            let left = self.expr(&comparison.operands[0]);
+            let operand = &comparison.operands[1];
+            let value = if matches!(op, ast::CmpOp::In | ast::CmpOp::NotIn)
+                && let ast::Expr::Tuple(tuple) = operand
+                && tuple.elts.len() <= 8
+                && tuple.elts.iter().all(imre_ast::literal_tuple_element)
+            {
+                // Keep the entry-block scratch array bounded for large tuple displays.
+                let values: Vec<_> = tuple.elts.iter().map(|item| self.expr(item)).collect();
+                let (array, count) = self.handle_array(&values);
+                let negate = u32::from(*op == ast::CmpOp::NotIn);
+                self.checked(&format!(
+                    "call i64 @imre_dyn_contains_literal_tuple(ptr %ctx, i64 {left}, ptr {array}, i64 {count}, i32 {negate})"
+                ))
+            } else {
+                let right = self.expr(operand);
+                self.op(op.as_str(), &[&left, &right])
+            };
             return if context == BooleanContext::Condition {
                 self.truth(&value)
             } else {
                 value
             };
         }
+        let mark = self.temporary_mark();
+        self.unwind_operands(&mark, |f| f.comparison_steps(comparison, context, &mark))
+    }
+
+    fn comparison_steps(
+        &mut self,
+        comparison: &ast::ExprCompare,
+        context: BooleanContext,
+        mark: &str,
+    ) -> String {
+        let mut left = self.expr(&comparison.operands[0]);
         let done = self.name("b");
         let mut incoming = Vec::new();
         for (i, (op, operand)) in comparison
@@ -463,12 +545,39 @@ impl Function<'_, '_> {
             .zip(&comparison.operands[1..])
             .enumerate()
         {
-            let right = self.expr(operand);
-            let value = self.op(op.as_str(), &[&left, &right]);
-            left = right;
-            if i + 1 == comparison.ops.len() {
+            let last = i + 1 == comparison.ops.len();
+            let right_mark = self.temporary_mark();
+            let (right, value, predicate) = self.unwind_operands(&right_mark, |f| {
+                let right = f.expr(operand);
+                let predicate = match op {
+                    ast::CmpOp::Is => Some("eq"),
+                    ast::CmpOp::IsNot => Some("ne"),
+                    _ => None,
+                }
+                .map(|relation| f.value(&format!("icmp {relation} i64 {left}, {right}")));
+                let value = if let Some(bit) = &predicate {
+                    f.value(&format!(
+                        "select i1 {bit}, i64 {}, i64 {}",
+                        permanent::TRUE,
+                        permanent::FALSE
+                    ))
+                } else {
+                    f.op(op.as_str(), &[&left, &right])
+                };
+                (right, value, predicate)
+            });
+            if last {
+                // The final operation consumes right before left. Identity
+                // produces an immortal boolean; a rich result may alias either.
+                for boundary in [right_mark.as_str(), mark] {
+                    if predicate.is_some() {
+                        self.discard_truth(boundary);
+                    } else {
+                        self.keep_operands(boundary, &value, "0");
+                    }
+                }
                 let result = if context == BooleanContext::Condition {
-                    self.truth(&value)
+                    predicate.unwrap_or_else(|| self.truth(&value))
                 } else {
                     value
                 };
@@ -478,17 +587,35 @@ impl Function<'_, '_> {
                 incoming.push(format!("[ {result}, %{} ]", self.current_block()));
                 self.jump(&done);
             } else {
-                let truth = self.truth(&value);
+                let rich = predicate.is_none();
+                let middle_end = self.keep_operands(mark, &right, if rich { &value } else { "0" });
+                let truth = predicate
+                    .unwrap_or_else(|| self.unwind_operands(&middle_end, |f| f.truth(&value)));
+                if rich && context == BooleanContext::Condition {
+                    self.discard_truth(&middle_end);
+                }
+                let stop = self.name("b");
+                let next = self.name("b");
+                self.branch(&truth, &next, &stop);
+                self.label(&stop);
+                if rich && context == BooleanContext::Value {
+                    self.keep_operands(mark, &value, "0");
+                } else {
+                    self.discard_truth(mark);
+                }
                 let result = if context == BooleanContext::Condition {
                     "false"
                 } else {
                     &value
                 };
                 incoming.push(format!("[ {result}, %{} ]", self.current_block()));
-                let next = self.name("b");
-                self.branch(&truth, &next, &done);
+                self.jump(&done);
                 self.label(&next);
+                if rich && context == BooleanContext::Value {
+                    self.discard_truth(&middle_end);
+                }
             }
+            left = right;
         }
         self.label(&done);
         let ty = if context == BooleanContext::Condition {
@@ -537,8 +664,7 @@ impl Function<'_, '_> {
         let target = self.op(kind, &[]);
         for element in elements {
             if let ast::Expr::Starred(v) = element {
-                let items = self.expr(&v.value);
-                self.op("extend", &[&target, &items]);
+                self.extend_operand(&target, &v.value);
             } else {
                 let value = self.expr(element);
                 self.op("append", &[&target, &value]);
@@ -547,17 +673,31 @@ impl Function<'_, '_> {
         target
     }
 
+    fn pack_operand(&mut self, operation: &str, args: &[&str]) -> String {
+        if self.native_suspension {
+            self.suspension_position(self.current_range);
+        }
+        self.op(operation, args)
+    }
+
+    fn extend_operand(&mut self, target: &str, expr: &ast::Expr) {
+        let mark = self.temporary_mark();
+        let value = self.expr(expr);
+        self.pack_operand("extend", &[target, &value]);
+        // The target owns the expanded items. Drop the iterable before the next operand.
+        self.discard_truth(&mark);
+    }
+
     pub(super) fn arguments(
         &mut self,
         args: &str,
         syntax: &ast::Arguments,
-        callable: &str,
+        callable: Option<&str>,
     ) -> String {
         // Python evaluates starred positional arguments before the keyword arguments.
         for arg in &syntax.args {
             if let ast::Expr::Starred(s) = arg {
-                let value = self.expr(&s.value);
-                self.op("extend", &[args, &value]);
+                self.extend_operand(args, &s.value);
             } else {
                 let value = self.expr(arg);
                 self.op("append", &[args, &value]);
@@ -566,8 +706,31 @@ impl Function<'_, '_> {
         self.keyword_arguments(syntax, callable)
     }
 
+    /// Evaluate operands in Python order, then publish the handles after nested calls finish.
+    fn fixed_keyword_arguments(&mut self, syntax: &ast::Arguments) -> CallArguments {
+        let mut values: Vec<_> = syntax.args.iter().map(|arg| self.expr(arg)).collect();
+        let positional = values.len();
+        let mut names = Vec::with_capacity(syntax.keywords.len());
+        for keyword in &syntax.keywords {
+            names.push(keyword.arg.as_ref().expect("fixed keyword").as_str());
+            values.push(self.expr(&keyword.value));
+        }
+        let names = self.output.data(names.join("\0").as_bytes());
+        let (array, _) = self.handle_array(&values);
+        CallArguments::FixedKeywords {
+            array,
+            positional,
+            names,
+            keywords: syntax.keywords.len(),
+        }
+    }
+
     /// Evaluate keyword expressions and merge mappings in source order.
-    fn keyword_arguments(&mut self, syntax: &ast::Arguments, callable: &str) -> String {
+    fn keyword_arguments(&mut self, syntax: &ast::Arguments, callable: Option<&str>) -> String {
+        let (merge, callable) = match callable {
+            Some(callable) => ("keywords", callable),
+            None => ("class_keywords", "0"),
+        };
         let kwargs = if syntax.keywords.is_empty() {
             "0".into()
         } else {
@@ -578,7 +741,7 @@ impl Function<'_, '_> {
         while let Some(key) = keywords.peek() {
             if key.arg.is_none() {
                 let value = self.expr(&keywords.next().unwrap().value);
-                self.op("keywords", &[&kwargs, &value, callable]);
+                self.pack_operand(merge, &[&kwargs, &value, callable]);
                 unpacked = true;
             } else {
                 // Python builds each group of named arguments before merging it
@@ -598,7 +761,7 @@ impl Function<'_, '_> {
                     );
                 }
                 if unpacked {
-                    self.op("keywords", &[&kwargs, &group, callable]);
+                    self.pack_operand(merge, &[&kwargs, &group, callable]);
                 }
             }
         }
@@ -676,149 +839,5 @@ impl Function<'_, '_> {
             .into_iter()
             .reduce(|left, right| self.op("format_concat", &[&left, &right]))
             .unwrap_or_else(|| self.text(""))
-    }
-
-    /// Resume the innermost active loop, returning to its parent when it runs out of items.
-    pub(super) fn generator_step(
-        &mut self,
-        generators: &[ast::Comprehension],
-        element: &ast::Expr,
-    ) {
-        let outer = self.lookup(".iterator");
-        let loops: Vec<_> = (0..generators.len())
-            .map(|i| (self.name("b"), format!(".iterator.{i}")))
-            .collect();
-        let done = self.name("b");
-        if loops.len() > 1 {
-            // Only the initial call has the outer iterator in .iterator. Every yield is
-            // inside the last clause, with each active iterator saved in the frame.
-            let first = self.name("b");
-            let resumed = self.value(&format!("icmp eq i64 {outer}, 0"));
-            self.branch(&resumed, &loops.last().unwrap().0, &first);
-            self.label(&first);
-            self.bind(&loops[0].1, &outer);
-            self.bind(".iterator", "0");
-        }
-        self.jump(&loops[0].0);
-        for (i, generator) in generators.iter().enumerate() {
-            let (step, slot) = &loops[i];
-            let body = self.name("b");
-            let exhausted = if i == 0 { done.clone() } else { self.name("b") };
-            self.label(step);
-            let iter = if loops.len() == 1 {
-                outer.clone()
-            } else {
-                self.lookup(slot)
-            };
-            let more = self.op("more", &[&iter]);
-            let cond = self.value(&format!("icmp eq i64 {more}, 2"));
-            self.branch(&cond, &body, &exhausted);
-            self.label(&body);
-            self.checkpoint(element);
-            let item = self.op("next", &[&iter]);
-            self.assign(&generator.target, &item);
-            for filter in &generator.ifs {
-                let keep = self.name("b");
-                self.branch_expr(filter, &keep, step);
-                self.label(&keep);
-            }
-            if let Some(child) = generators.get(i + 1) {
-                let iterable = self.expr(&child.iter);
-                let iterator = self.op("iter", &[&iterable]);
-                self.bind(&loops[i + 1].1, &iterator);
-                self.jump(&loops[i + 1].0);
-            } else {
-                let item = self.expr(element);
-                let yielded = self.op("yielded", &[&item]);
-                self.end(&format!("ret i64 {yielded}"));
-            }
-            if i > 0 {
-                self.label(&exhausted);
-                self.bind(slot, "0");
-                self.jump(&loops[i - 1].0);
-            }
-        }
-        self.label(&done);
-    }
-
-    /// Encode all loop bindings before any comprehension iteration begins.
-    fn comprehension_targets(&mut self, generators: &[ast::Comprehension]) -> String {
-        let mut names = std::collections::HashSet::new();
-        for clause in generators {
-            crate::frontend::target_names(&clause.target, &mut names);
-        }
-        let mut names: Vec<_> = names.into_iter().collect();
-        names.sort_unstable();
-        self.text(&names.join(" "))
-    }
-
-    fn comprehension(
-        &mut self,
-        kind: &str,
-        generators: &[ast::Comprehension],
-        element: Element<'_>,
-    ) -> String {
-        if generators.iter().any(|g| g.is_async) {
-            return self.unsupported("async comprehension");
-        }
-        let output = self.op(kind, &[]);
-        let first = self.expr(&generators[0].iter);
-        let targets = self.comprehension_targets(generators);
-        let scope = self.op("comprehension_scope", &[&self.scope.clone(), &targets]);
-        let previous = std::mem::replace(&mut self.scope, scope);
-        let class_locals = self.class_locals.take();
-        self.comprehension_loop(generators, &first, &output, &element);
-        self.class_locals = class_locals;
-        self.scope = previous;
-        output
-    }
-
-    fn comprehension_loop(
-        &mut self,
-        generators: &[ast::Comprehension],
-        source: &str,
-        out: &str,
-        element: &Element<'_>,
-    ) {
-        let g = &generators[0];
-        let iter = self.op("iter", &[source]);
-        let mark = self.temporary_mark();
-        let step = self.name("b");
-        let body = self.name("b");
-        let done = self.name("b");
-        self.jump(&step);
-        self.label(&step);
-        self.line(&format!(
-            "call void @imre_dyn_comprehension_step(ptr %ctx, i64 {mark})"
-        ));
-        let more = self.op("more", &[&iter]);
-        let cond = self.value(&format!("icmp eq i64 {more}, 2"));
-        self.branch(&cond, &body, &done);
-        self.label(&body);
-        let item = self.op("next", &[&iter]);
-        self.assign(&g.target, &item);
-        for test in &g.ifs {
-            let keep = self.name("b");
-            self.branch_expr(test, &keep, &step);
-            self.label(&keep);
-        }
-        if let Some(next) = generators.get(1) {
-            let source = self.expr(&next.iter);
-            self.comprehension_loop(&generators[1..], &source, out, element);
-        } else {
-            match element {
-                Element::Value(e) => {
-                    let v = self.expr(e);
-                    self.op("append", &[out, &v]);
-                }
-                Element::Pair(k, v) => {
-                    let k = self.expr(k);
-                    let v = self.expr(v);
-                    self.op("put", &[out, &k, &v]);
-                }
-            }
-        }
-        self.jump(&step);
-        self.label(&done);
     }
 }

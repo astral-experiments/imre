@@ -42,6 +42,20 @@ def current():
         else:
             raise AssertionError("accepted a parameterized instance check")
 
+    class Bins(collections.defaultdict):
+        pass
+
+    raw = vars(collections.defaultdict)["__class_getitem__"]
+    assert raw.__objclass__ is collections.defaultdict
+    assert raw.__get__(None, Bins).__self__ is Bins
+    for cls in (collections.defaultdict, Bins):
+        alias = cls[str, int]
+        assert get_origin(alias) is cls and get_args(alias) == (str, int)
+        assert cls().__class_getitem__.__self__ is cls
+        assert raw(cls, (str, int)) == alias
+        counts = alias(int)
+        assert type(counts) is cls and counts["missing"] == 0
+
     queue = Deque[int]([2, 1], maxlen=2)
     queue.append(3)
     assert list(queue) == [1, 3] and queue.maxlen == 2

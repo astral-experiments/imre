@@ -10,6 +10,8 @@ import subprocess
 import sys
 import tempfile
 
+from fixture_entry import imported_fixture
+
 
 FIXTURES = Path(__file__).parent / "fixtures/socket"
 TIMEOUT = 15
@@ -142,17 +144,17 @@ def main():
                             "--opt-level", opt, "-o", binary], check=True, timeout=180)
             with child([binary]) as proc:
                 assert collect(proc) == boxed_output
-            subprocess.run([args.compiler.resolve(), "build", reset, "--runtime-imports", "--no-cache",
+            subprocess.run([args.compiler.resolve(), "build", imported_fixture(Path(directory), reset), "--no-cache",
                             "--runtime", args.runtime.resolve(), "--clang", args.clang,
                             "--opt-level", opt, "-o", binary], check=True, timeout=180)
             actual = buffered_resets([binary])
             assert actual == reset_output, (actual, reset_output)
             if sys.platform.startswith("linux"):
                 refusal = Path(directory) / "reader-refusal.o"
-                subprocess.run([args.clang, "-c", boxed.parent / "reader_refuse.c", "-o", refusal],
+                subprocess.run([args.clang or "clang-18", "-c", boxed.parent / "reader_refuse.c", "-o", refusal],
                                check=True, timeout=TIMEOUT)
-                subprocess.run([args.compiler.resolve(), "build", boxed.parent / "reader_allocation.py",
-                                "--runtime-imports", "--no-cache", "--runtime", args.runtime.resolve(),
+                subprocess.run([args.compiler.resolve(), "build", imported_fixture(Path(directory), boxed.parent / "reader_allocation.py"),
+                                "--no-cache", "--runtime", args.runtime.resolve(),
                                 "--clang", args.clang, "--opt-level", opt, "-o", binary,
                                 "-C", f"link-arg={refusal}",
                                 "-C", "link-arg=-Wl,--wrap=accept4,--wrap=malloc,--wrap=calloc,--wrap=realloc"],

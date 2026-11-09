@@ -2,6 +2,43 @@
 
 use super::*;
 
+fn replace_arguments(call: &ast::ExprCall) -> Option<(&ast::Expr, &ast::Expr, Option<&ast::Expr>)> {
+    match (&*call.arguments.args, &*call.arguments.keywords) {
+        ([old, new], []) => Some((old, new, None)),
+        ([old, new, count], []) => Some((old, new, Some(count))),
+        ([old, new], [kw]) if kw.arg.as_deref() == Some("count") => {
+            Some((old, new, Some(&kw.value)))
+        }
+        _ => None,
+    }
+}
+
+/// The receiver fixes the method, and the completed operand has a builtin non-string class.
+fn fixed_replace_operand(call: &ast::ExprCall, operand: &ast::Expr) -> bool {
+    let Some(method) = call.func.as_attribute_expr() else {
+        return false;
+    };
+    if method.attr.as_str() != "replace" || !method.value.is_string_literal_expr() {
+        return false;
+    }
+    match operand {
+        ast::Expr::List(_) | ast::Expr::Tuple(_) | ast::Expr::Set(_) | ast::Expr::Dict(_) => true,
+        ast::Expr::UnaryOp(op) => {
+            matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
+                && op.operand.is_number_literal_expr()
+        }
+        _ => operand.is_literal_expr() && !operand.is_string_literal_expr(),
+    }
+}
+
+/// Select an existing ty overload diagnostic after the typed frontend stopped lowering.
+pub(crate) fn literal_replace_mismatch(call: &ast::ExprCall) -> bool {
+    !call.arguments.args.iter().any(ast::Expr::is_starred_expr)
+        && replace_arguments(call).is_some_and(|(old, new, _)| {
+            fixed_replace_operand(call, old) || fixed_replace_operand(call, new)
+        })
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum JoinStyle {
     Plain,
@@ -84,6 +121,127 @@ fn positional_template(mut rest: &str, arguments: usize) -> Option<String> {
 }
 
 impl Checker<'_> {
+    pub(super) fn math_fmod(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let args = &call.arguments;
+        if !args.keywords.is_empty() || args.args.len() != 2 {
+            let message = if args.keywords.is_empty() {
+                format!("fmod expected 2 arguments, got {}", args.args.len())
+            } else {
+                "math.fmod() takes no keyword arguments".to_owned()
+            };
+            return self.positional_argument_error(
+                call,
+                &["x", "y"],
+                Type::Float,
+                unpacking::string(message),
+            );
+        }
+        let mut values = Vec::with_capacity(2);
+        for arg in &args.args {
+            let value = powers::integer(self.expr(arg)?);
+            if !matches!(value.ty, Type::Int | Type::Float) {
+                return Err(error(
+                    self.source,
+                    arg,
+                    "math.fmod requires an integer or float",
+                ));
+            }
+            values.push(value);
+        }
+        Ok(Expr {
+            ty: Type::Float,
+            kind: ExprKind::Builtin(Builtin::FloatFmod, values),
+        })
+    }
+
+    /// Keep argument evaluation ahead of index conversion, including when k evaluates to None.
+    pub(super) fn math_perm(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let args = &call.arguments;
+        if !self
+            .graph
+            .session
+            .is_stdlib_function(self.module, &call.func, "math", "perm")
+        {
+            return Err(error(
+                self.source,
+                call,
+                "checked permutation requires a resolved math.perm call",
+            ));
+        }
+        let message = if !args.keywords.is_empty() {
+            Some("math.perm() takes no keyword arguments".into())
+        } else {
+            match args.args.len() {
+                0 => Some("perm expected at least 1 argument, got 0".into()),
+                1 | 2 => None,
+                count => Some(format!("perm expected at most 2 arguments, got {count}")),
+            }
+        };
+        self.graph.checked_overload(self.module, call.range());
+        if let Some(message) = message {
+            return self.positional_argument_error(
+                call,
+                &["n", "k"],
+                Type::Int,
+                unpacking::string(message),
+            );
+        }
+
+        let mut scope = calls::ArgumentScope::default();
+        let n_node = &args.args[0];
+        let n = self.expr(n_node)?;
+        let n = scope.hold(self, n);
+        let k = if let Some(node) = args.args.get(1) {
+            let value = self.expr(node)?;
+            Some((node, scope.hold(self, value)))
+        } else {
+            None
+        };
+        let n = self.index_word(n, n_node, false)?;
+        self.graph
+            .checked_argument_type(self.module, n_node.range());
+        let factorial = |n| Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(Builtin::MathFactorial, vec![n]),
+        };
+        let perm = |n, k| Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(Builtin::MathPerm, vec![n, k]),
+        };
+        let value = match k {
+            None => factorial(n),
+            Some((_, k)) if k.ty == Type::None => factorial(n),
+            Some((node, k)) => {
+                self.graph.checked_argument_type(self.module, node.range());
+                if let Some(ty) = self.types.payload(k.ty) {
+                    let n = scope.hold(self, n);
+                    let absent = Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Builtin(Builtin::IsNone, vec![k.clone()]),
+                    };
+                    let value = Expr {
+                        ty,
+                        kind: ExprKind::Unwrap(Box::new(k)),
+                    };
+                    let k = self.index_word(value, node, false)?;
+                    Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Conditional(
+                            Box::new(absent),
+                            Box::new(factorial(n.clone())),
+                            Box::new(perm(n, k)),
+                        ),
+                    }
+                } else {
+                    let k = self.index_word(k, node, false)?;
+                    perm(n, k)
+                }
+            }
+        };
+        Ok(scope.finish(value))
+    }
+
     /// Captures arguments before acquisition, materializes the source before key
     /// calls, and keeps the source argument rooted until the sorted result escapes.
     pub(super) fn sorted_call(
@@ -690,18 +848,22 @@ impl Checker<'_> {
         receiver: Expr,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        let (old, new, count) = match (&*call.arguments.args, &*call.arguments.keywords) {
-            ([old, new], []) => (old, new, None),
-            ([old, new, count], []) => (old, new, Some(count)),
-            ([old, new], [kw]) if kw.arg.as_deref() == Some("count") => (old, new, Some(&kw.value)),
-            _ => return Err(self.object_builtin_error("str.replace", call)),
+        let Some((old, new, count)) = replace_arguments(call) else {
+            return Err(self.object_builtin_error("str.replace", call));
         };
-        let old = self
-            .expr_expected(old, Type::Str)
-            .map_err(|_| self.object_builtin_error("str.replace", call))?;
-        let new = self
-            .expr_expected(new, Type::Str)
-            .map_err(|_| self.object_builtin_error("str.replace", call))?;
+        let mut string_argument = |node: &ast::Expr| {
+            if self.graph.session.explicit_check && fixed_replace_operand(call, node) {
+                let value = self
+                    .expr(node)
+                    .map_err(|_| self.object_builtin_error("str.replace", call))?;
+                self.coerce(value, Type::Str, node)
+            } else {
+                self.expr_expected(node, Type::Str)
+                    .map_err(|_| self.object_builtin_error("str.replace", call))
+            }
+        };
+        let old = string_argument(old)?;
+        let new = string_argument(new)?;
         let mut args = vec![receiver, old, new];
         if let Some(count) = count {
             let count = powers::integer(self.expr(count)?);

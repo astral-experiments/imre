@@ -23,6 +23,8 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "fstrings"
 
 # Literal whitespace is data, while expression/code indentation remains checked.
 ACCEPTED = {
+    "tab_expression_indentation": 'print(f"""{\n\t1\n}""")\n',
+    "tab_code_indentation": 'if True:\n\tprint(f"{1}")\n',
     "continuation_padding": 'def message() -> str:\n    \t# This comment does not start a statement.\n    return (\n\tf"{4}"\n    )\nprint(message())\n',
     "blank_line_padding": 'if True:\n\t\f\n    print(f"{4}")\n',
     "shadowed_ascii": 'def ascii(value: str) -> str:\n    return "shadow: " + value\nprint(ascii("é"))\nprint(f"{\'é\'!a}")\n',
@@ -59,9 +61,7 @@ REJECTED = {
     "surrogate_adjacent_ordinary": 'print(rf"{1}" "\\uD800")\n',
     "surrogate_inner_ordinary": "print(rf\"{'\\uD800'}\")\n",
     "surrogate_inner_fstring": "print(rf\"{f'\\uD800{1}'}\")\n",
-    "tab_expression_indentation": 'print(f"""{\n\t1\n}""")\n',
     "form_feed_expression_indentation": 'print(f"""{\n\f1\n}""")\n',
-    "tab_code_indentation": 'if True:\n\tprint(f"{1}")\n',
     "unused_unsupported_field": 'def unused() -> str:\n    return f"{(1, 2)}"\nprint(1)\n',
     "unused_dynamic_field": "def unused() -> str:\n    return f\"{eval('1')}\"\nprint(1)\n",
 }
@@ -99,8 +99,8 @@ def rejection_message(name: str) -> str:
         return "numeric formats support signed decimal integers or f and % with literal precision from 0 through 1000"
     if name.startswith("surrogate_"):
         return "surrogate string escapes are unsupported"
-    if name.endswith("_indentation"):
-        return "indentation must use spaces, not tabs or form feeds"
+    if name == "form_feed_expression_indentation":
+        return "form feeds are unsupported in indentation"
     if name == "unused_dynamic_field":
         return ""
     return "unsupported value type for default f-string conversion"

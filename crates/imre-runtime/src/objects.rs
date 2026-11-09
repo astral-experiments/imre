@@ -10,6 +10,7 @@ use crate::StrOwner;
 mod annotations;
 mod argparse;
 mod args;
+mod source_calls;
 pub(crate) use args::python_executable_text;
 mod asyncio;
 pub(crate) mod base32;
@@ -22,6 +23,7 @@ pub(crate) use binascii::{
 };
 pub(crate) use binascii::{base64_decode, urlsafe_encode};
 mod boxed_values;
+pub(crate) mod builtin_module_names;
 mod builtins;
 mod bytes;
 pub(crate) use bytes::DecodeIssue;
@@ -38,8 +40,8 @@ mod chainmap;
 mod charmaps;
 mod codecs;
 pub(crate) use codecs::{
-    Codec, CodecInfo, FixedUnicode, StrEncoder, Utf16Order, decoding_error, idna,
-    normalize as normalize_codec, shift_jis, unknown_handler, utf8_prefix,
+    Codec, DoubleByte, FixedUnicode, StrEncoder, Utf16Order, decoding_error, idna,
+    normalize as normalize_codec, unknown_handler, utf8_prefix,
 };
 mod contexts;
 mod contextvars;
@@ -55,6 +57,8 @@ pub(crate) mod epoll;
 mod errno;
 pub(crate) mod exceptions;
 mod files;
+#[cfg(test)]
+pub(crate) use files::open_file;
 pub(crate) use files::peek_bytes;
 mod text_file;
 pub(crate) use text_file::{MemoryText, TextFile};
@@ -133,13 +137,16 @@ pub(crate) use text::{translate, zfill};
 pub(crate) mod time;
 pub(crate) use text::{Case, UrlInput, capitalize, case_map, case_map_points, urlquote, urlsplit};
 pub(crate) use text::{
-    count_codepoints, count_text, expand_tabs, find_codepoints, find_text, normalize_unicode,
-    ord_byte, ord_char, partition_text, python_alnum, python_isalpha, python_isdigit,
-    python_isidentifier, python_islower, python_isprintable, python_isspace, python_istitle,
-    python_isupper, split_parts,
+    count_codepoints, count_text, east_asian_width, expand_tabs, find_codepoints, find_text,
+    normalize_unicode, ord_byte, ord_char, partition_text, python_alnum, python_isalpha,
+    python_isdigit, python_isidentifier, python_islower, python_isprintable, python_isspace,
+    python_istitle, python_isupper, split_parts,
 };
 mod typing;
-pub(crate) use text::{chr_scalar, short_string};
+pub(crate) use text::{
+    Form, bidirectional, chr_scalar, general_category, legacy, short_index, short_string,
+    ucd_character,
+};
 pub(crate) use typing::{OVERLOAD_DUMMY_ERROR, register_overload};
 mod unions;
 mod values;
@@ -151,8 +158,8 @@ pub(crate) use zipfile::Archive as ZipArchive;
 
 pub(crate) use errno::{DOC as ERRNO_DOC, platform_entries as errno_entries};
 pub(crate) use files::{
-    FileState, GzipDecoder, Memory, Random, errno_error, open_file, open_raw_file,
-    os_error as gzip_read_error,
+    FileState, GzipDecoder, Memory, Random, errno_error, errno_with_filename, file_flags,
+    os_error as gzip_read_error, prepare_file,
 };
 
 use super::{
@@ -309,6 +316,12 @@ enum Storage {
     PairTable(allocator_api2::boxed::Box<pair_tables::Table>),
     SortedSplitFields(Box<SortedSplitFields>),
     RegexPositionIterator(regexes::FindIter, usize),
+}
+
+/// Python identity for a rooted native object represented by its allocation address.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_pointer_identity(value: *const std::ffi::c_void) -> usize {
+    Int::from_usize(value.addr()).into_raw()
 }
 
 /// Borrows a rooted object for one nonreentrant operation.
@@ -610,26 +623,24 @@ pub unsafe extern "C" fn imre_seq_append_owned(
     // SAFETY: these element types have ordinary word storage; value-struct rows
     // would copy their argument and therefore cannot take this ownership path.
     let appended = unsafe {
-        object(value)
-            .0
-            .with_mut(|storage| append_sequence_word(storage.sequence_mut()?, word, kind, true))
+        object(value).0.with_mut(|storage| {
+            append_sequence_word::<true>(storage.sequence_mut()?, word, kind)
+                .map_err(|_| Error::allocation())
+        })
     };
     finish(appended.map(|()| 1), 0)
 }
 
 /// Reserve before acquiring or transferring the argument on either entry path.
-unsafe fn append_sequence_word(
+#[inline]
+unsafe fn append_sequence_word<const OWNED: bool>(
     sequence: &mut Words,
     word: usize,
     kind: u32,
-    owned: bool,
-) -> Result<(), Error> {
+) -> Result<(), smallvec::CollectionAllocErr> {
     sequence.check_kind(kind);
-    sequence
-        .values
-        .try_reserve(1)
-        .map_err(|_| Error::allocation())?;
-    let word = if owned {
+    sequence.values.try_reserve(1)?;
+    let word = if OWNED {
         word
     } else {
         // SAFETY: word is rooted and agrees with the sequence's declared kind.
@@ -660,7 +671,8 @@ pub unsafe extern "C" fn imre_seq_append(value: *const Object, word: usize, kind
                 words.update_header();
                 return result;
             }
-            append_sequence_word(storage.sequence_mut()?, word, kind, false)
+            append_sequence_word::<false>(storage.sequence_mut()?, word, kind)
+                .map_err(|_| Error::allocation())
         })
     };
     finish(appended.map(|()| 1), 0)
@@ -790,26 +802,7 @@ pub unsafe extern "C" fn imre_seq_repeat(value: *const Object, count: usize) -> 
             if let Some(rows) = storage.sequence_storage().rows() {
                 return rows.repeat(count);
             }
-            let values = storage.sequence()?;
-            let length = values
-                .values
-                .len()
-                .checked_mul(count)
-                .filter(|&length| length <= MAX_LIST_LEN)
-                .ok_or_else(|| Error::new(Kind::MemoryError, "list is too large"))?;
-            let mut result = Words::new(values.kind.raw());
-            result
-                .values
-                .try_reserve_exact(length)
-                .map_err(|_| Error::allocation())?;
-            if !values.values.is_empty() {
-                for _ in 0..count {
-                    for &word in &values.values {
-                        result.values.push(values.kind.acquire(word).into_word());
-                    }
-                }
-            }
-            Ok(result)
+            storage.sequence()?.repeated(count)
         })
     };
     finish(
@@ -1463,19 +1456,32 @@ pub unsafe extern "C" fn imre_str_field_spans(value: *const Str, output: *mut us
     // SAFETY: the source is rooted for this scan.
     let source = unsafe { &*value };
     let mut count = 0;
-    for part in source
-        .split(python_whitespace)
-        .filter(|part| !part.is_empty())
-    {
+    let mut visit = |field: &[u8]| {
+        if field.is_empty() {
+            return;
+        }
         if count < fields as usize {
-            let start = part.as_ptr() as usize - source.as_ptr() as usize;
+            let start = field.as_ptr() as usize - source.as_ptr() as usize;
             // SAFETY: the caller provides two words for each requested span.
             unsafe {
                 output.add(1 + 2 * count).write(start);
-                output.add(2 + 2 * count).write(part.len());
+                output.add(2 + 2 * count).write(field.len());
             }
         }
         count += 1;
+    };
+    if source.is_ascii() {
+        // Python includes the ASCII information separators and vertical tab.
+        for field in source
+            .as_bytes()
+            .split(|byte| matches!(byte, 9..=13 | 28..=32))
+        {
+            visit(field);
+        }
+    } else {
+        for field in source.split(python_whitespace) {
+            visit(field.as_bytes());
+        }
     }
     if count > MAX_LIST_LEN {
         fail("MemoryError", "sequence allocation failed");

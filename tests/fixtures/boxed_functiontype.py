@@ -18,6 +18,21 @@ def current():
     copied = types.FunctionType(original.__code__, original.__globals__, "copied", (4,), kwdefaults={"y": 3})
     print(copied(), copied.__name__, copied.__qualname__, copied.__defaults__, copied.__kwdefaults__)
     print(copied.__globals__ is original.__globals__)
+    left = types.FunctionType(original.__code__, original.__globals__, "<genexpr>")
+    right = types.FunctionType(original.__code__, original.__globals__, "<genexpr>")
+    try:
+        del left.missing
+    except AttributeError:
+        pass
+    else:
+        raise AssertionError("deleting a missing function attribute succeeded")
+    left.label = 7
+    assert vars(left) is left.__dict__ and vars(left) == {"label": 7}
+    assert vars(right) == {}
+    replacement = {"label": 9}
+    left.__dict__ = replacement
+    del left.label
+    assert left.__dict__ is replacement and replacement == {}
     namespace = {"marker": 7}
     new = original.__new__
     assert new is types.FunctionType.__new__ and new.__self__ is types.FunctionType

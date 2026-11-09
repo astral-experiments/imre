@@ -1,6 +1,20 @@
 use super::{Context, Error, Id, Result, Value};
 use std::ops::RangeInclusive;
 
+/// Native operator callable types and their Argument Clinic constructor signatures.
+const CALLABLE_TYPES: [(&str, &str); 3] = [
+    ("operator.attrgetter", "(attr, /, *attrs)"),
+    ("operator.itemgetter", "(item, /, *items)"),
+    ("operator.methodcaller", "(name, /, *args, **kwargs)"),
+];
+
+pub(in crate::dynamic) fn callable_type(name: &str) -> Option<(&'static str, &'static str)> {
+    CALLABLE_TYPES
+        .iter()
+        .copied()
+        .find(|(owner, _)| *owner == name)
+}
+
 fn check_args(
     name: &str,
     args: &[Id],
@@ -30,7 +44,17 @@ pub(super) fn attrgetter(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
             let Value::Str(name) = ctx.heap.get(id) else {
                 return Err(Error::new("TypeError", "attribute name must be a string"));
             };
-            Ok(name.split('.').map(str::to_owned).collect())
+            // CPython keeps an undotted argument and interns each component of a dotted name.
+            let mut path = if name.contains('.') {
+                name.clone().split('.').map(|part| ctx.text(part)).collect()
+            } else {
+                vec![id]
+            };
+            for id in &mut path {
+                let (heap, roots) = ctx.heap_and_roots();
+                *id = heap.intern(*id, roots);
+            }
+            Ok(path)
         })
         .collect::<Result<_>>()?;
     Ok(ctx.alloc(Value::AttrGetter(paths)))
@@ -44,6 +68,83 @@ pub(super) fn itemgetter(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     keys.extend_from_slice(args);
     let keys = ctx.alloc(Value::Tuple(keys));
     Ok(ctx.alloc(Value::ItemGetter(keys)))
+}
+
+pub(super) fn methodcaller(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let Some((&name, args)) = args.split_first() else {
+        return Err(Error::new(
+            "TypeError",
+            "methodcaller needs at least one argument, the method name",
+        ));
+    };
+    if ctx.string_storage(name).is_none() {
+        return Err(Error::new("TypeError", "method name must be a string"));
+    }
+    let args = ctx.alloc(Value::Tuple(args.to_vec()));
+    let keywords = ctx.dict(Vec::new());
+    for (key, value) in kwargs {
+        let key = ctx.text(key);
+        ctx.put_item(keywords, key, *value)?;
+    }
+    Ok(ctx.alloc(Value::MethodCaller {
+        name,
+        args,
+        keywords,
+    }))
+}
+
+pub(super) fn reduce_attrgetter(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let getter =
+        builtins::noargs_method_receiver(ctx, "operator.attrgetter", "__reduce__", args, kwargs)?;
+    let Value::AttrGetter(paths) = ctx.heap.get(getter) else {
+        unreachable!("validated attrgetter receiver");
+    };
+    let paths = paths.clone();
+    let names = paths
+        .iter()
+        .map(|path| match path.as_slice() {
+            [name] => Ok(*name),
+            _ => {
+                let name = ctx.attrgetter_name(path);
+                ctx.heap.fresh_string(Value::Str(name.into()))
+            }
+        })
+        .collect::<Result<_>>()?;
+    let names = ctx.alloc(Value::Tuple(names));
+    let class = ctx.builtin("operator.attrgetter");
+    Ok(ctx.alloc(Value::Tuple(vec![class, names])))
+}
+
+pub(super) fn reduce_methodcaller(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let receiver =
+        builtins::noargs_method_receiver(ctx, "operator.methodcaller", "__reduce__", args, kwargs)?;
+    let Value::MethodCaller {
+        name,
+        args,
+        keywords,
+    } = *ctx.heap.get(receiver)
+    else {
+        unreachable!("validated methodcaller receiver");
+    };
+    let class = ctx.builtin("operator.methodcaller");
+    let kw = ctx.keyword_args(keywords)?;
+    let (constructor, args) = if kw.is_empty() {
+        let mut all = vec![name];
+        all.extend(ctx.items(args)?);
+        (class, ctx.alloc(Value::Tuple(all)))
+    } else {
+        let partial = ctx.builtin("functools.partial");
+        (ctx.call(partial, vec![class, name], kw)?, args)
+    };
+    Ok(ctx.alloc(Value::Tuple(vec![constructor, args])))
 }
 
 /// Reconstruct the getter with the original positional key objects, including a single tuple key.
@@ -97,17 +198,70 @@ impl Context {
         };
         items
     }
+    /// Join the stored attribute names for the public representation and reduction.
+    pub(in super::super) fn attrgetter_name(&self, path: &[Id]) -> String {
+        let mut name = String::new();
+        for (i, &part) in path.iter().enumerate() {
+            if i > 0 {
+                name.push('.');
+            }
+            name.push_str(self.str_value(part).expect("attrgetter stores strings"));
+        }
+        name
+    }
+
     pub(in super::super) fn apply_attrgetter(
         &mut self,
-        paths: &[Vec<String>],
+        paths: &[Vec<Id>],
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Id> {
         self.apply_getter("attrgetter", paths.len(), args, kwargs, |ctx, obj, i| {
-            paths[i]
-                .iter()
-                .try_fold(obj, |obj, name| ctx.lookup_attr(obj, name))
+            paths[i].iter().try_fold(obj, |obj, &id| {
+                let name = ctx.copy_name(id)?;
+                ctx.lookup_named_attr(obj, &name, Some(id))
+            })
         })
+    }
+
+    pub(in super::super) fn apply_methodcaller(
+        &mut self,
+        caller: Id,
+        args: &[Id],
+        kwargs: &[(String, Id)],
+    ) -> Result<Id> {
+        let [receiver] = *args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("methodcaller expected 1 argument, got {}", args.len()),
+            ));
+        };
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "methodcaller() takes no keyword arguments",
+            ));
+        }
+        let Value::MethodCaller {
+            name,
+            args: stored,
+            keywords,
+        } = *self.heap.get(caller)
+        else {
+            unreachable!("methodcaller dispatch")
+        };
+        let mark = self.heap.temporary_mark();
+        self.heap.keep(caller);
+        self.heap.keep(receiver);
+        let result = (|| {
+            let attr = builtins::attribute_name(self, name)?;
+            let method = self.lookup_named_attr(receiver, &attr, Some(name))?;
+            self.heap.keep(method);
+            let args = self.items(stored)?;
+            let kwargs = self.keyword_args(keywords)?;
+            self.call(method, args, kwargs)
+        })();
+        self.release_with_result(mark, result)
     }
 
     pub(in super::super) fn apply_itemgetter(
@@ -164,18 +318,20 @@ pub(in crate::dynamic) enum Operation {
     GetItem,
     SetItem,
     DelItem,
+    Call,
     Index,
     LengthHint,
 }
 
 macro_rules! operator_functions {
-    ($($name:literal => $operation:expr),* $(,)?) => {
+    ($($name:literal => $operation:expr,)* checked { $($plain:literal => ($checked:expr, $with_alias:literal)),* $(,)? }) => {
         impl Operation {
-            const NAMES: &[&str] = &[$($name),*];
+            const NAMES: &[(&str, bool)] = &[$(($name, true),)* $(($plain, $with_alias)),*];
 
             pub(in crate::dynamic) fn named(name: &str) -> Option<Self> {
                 Some(match name {
                     $($name => $operation,)*
+                    $($plain => $checked,)*
                     _ => return None,
                 })
             }
@@ -190,17 +346,17 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, owner: Id, scope: Id, modul
     if module == "_operator" {
         super::hmac::bind_compare(ctx, owner, scope, "_operator._compare_digest");
     }
-    for &name in Operation::NAMES {
+    for &(name, with_alias) in Operation::NAMES {
         let function = ctx.builtin(&format!("operator.{name}"));
         ctx.bind(scope, name, function);
-        if module == "operator" && name != "length_hint" {
+        if module == "operator" && with_alias && name != "length_hint" {
             let alias = format!("__{}__", name.trim_end_matches('_'));
             ctx.bind(scope, &alias, function);
         }
     }
-    for name in ["attrgetter", "itemgetter"] {
-        let class = ctx.builtin(&format!("operator.{name}"));
-        ctx.bind(scope, name, class);
+    for (owner, _) in CALLABLE_TYPES {
+        let class = ctx.builtin(owner);
+        ctx.bind(scope, owner.trim_start_matches("operator."), class);
     }
 }
 
@@ -212,6 +368,10 @@ impl Operation {
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Id> {
+        if matches!(self, Self::Call) {
+            let (target, args) = ctx.operator_call_target(super::super::copy_ids(args)?)?;
+            return ctx.call_in_scope(ctx.heap.current_scope(), target, args, kwargs.to_vec());
+        }
         if !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
@@ -246,6 +406,7 @@ impl Operation {
         }
         let obj = args[0];
         match self {
+            Self::Call => unreachable!("forwarded before fixed-arity dispatch"),
             Self::Binary(op) => ctx.binary(op, obj, args[1]),
             Self::InPlace(op) => ctx.inplace(op, obj, args[1]),
             Self::Unary(op) => ctx.op(op, obj, NONE, NONE),
@@ -266,7 +427,28 @@ impl Operation {
     }
 }
 
+fn call_missing_target() -> Error {
+    Error::new("TypeError", "call expected at least 1 argument, got 0")
+}
+
 impl Context {
+    /// Forward consecutive operator.call invocations without translating their keyword packet
+    /// or adding a Python frame. Each wrapper consumes one positional argument.
+    pub(in crate::dynamic) fn operator_call_target(
+        &self,
+        mut args: Vec<Id>,
+    ) -> Result<(Id, Vec<Id>)> {
+        let position = args
+            .iter()
+            .position(
+                |&id| !matches!(self.heap.get(id), Value::Native(name) if name == "operator.call"),
+            )
+            .ok_or_else(call_missing_target)?;
+        let callable = args[position];
+        args.drain(..=position);
+        Ok((callable, args))
+    }
+
     pub(in crate::dynamic) fn length_hint(&mut self, value: Id, default: Option<Id>) -> Result<Id> {
         // PyObject_LengthHint parses the default before consulting either protocol.
         let size_overflow = || {
@@ -305,9 +487,13 @@ impl Context {
             };
             return Ok(self.int(hint as i64));
         }
-        if matches!(self.heap.get(value), Value::Iterator { .. }) {
-            let length = i64::try_from(self.iterator_remaining(value)?.len())
-                .map_err(|_| size_overflow())?;
+        if let Value::Iterator { kind, .. } = *self.heap.get(value) {
+            let remaining = self.iterator_remaining(value)?;
+            let count = match (kind, &remaining) {
+                ("str_ascii_iterator", super::super::IteratorSlice::Text(text)) => text.len(),
+                _ => remaining.len(),
+            };
+            let length = i64::try_from(count).map_err(|_| size_overflow())?;
             return Ok(self.int(length));
         }
         if matches!(self.heap.get(value), Value::StructUnpackIterator { .. }) {

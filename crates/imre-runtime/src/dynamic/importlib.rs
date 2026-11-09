@@ -94,7 +94,7 @@ impl Context {
         Ok(sys)
     }
 
-    /// Enter the selected module in the startup __main__ namespace via the frozen runpy.
+    /// Enter the selected module in the startup __main__ namespace via the selected runpy.
     pub(super) fn run_module_as_main(&mut self, name: String) -> Result<Id> {
         let mark = self.heap.temporary_mark();
         let requested = self.text(&name);
@@ -291,15 +291,10 @@ impl Context {
 
     /// Bootstrap modules remain available even while ordinary frozen imports are disabled.
     pub(super) fn is_frozen(&self, name: &str) -> bool {
-        match name {
-            "_frozen_importlib" | "_frozen_importlib_external" => true,
-            "zipimport" => cfg!(unix),
-            "stat" => {
-                cfg!(any(target_os = "linux", target_os = "macos")) && self.frozen_override >= 0
-            }
-            "__hello__" | "runpy" => self.frozen_override >= 0,
-            _ => false,
-        }
+        imre_ast::providers::is_frozen(name, || match self.frozen_override {
+            0 => self.config["frozen_modules"].as_bool().unwrap_or(true),
+            override_value => override_value > 0,
+        })
     }
 
     pub(super) fn imp_call(
@@ -324,12 +319,11 @@ impl Context {
                     ),
                 ));
             }
-            let suffix = self.config["archive_suffix"]
-                .as_str()
-                .unwrap_or(".imre.a")
-                .to_owned();
-            let suffix = self.text(suffix);
-            return Ok(self.alloc(Value::List(vec![suffix])));
+            let suffixes = imre_ast::NATIVE_ARCHIVE_EXTENSIONS
+                .iter()
+                .map(|ext| self.text(format!(".{ext}")))
+                .collect();
+            return Ok(self.alloc(Value::List(suffixes)));
         }
         let [arg] = args else {
             return Err(Error::new(
@@ -386,10 +380,12 @@ impl Context {
         // regular package can never acquire one of its children implicitly.
         let search = self.items(search)?;
         let bundle = self.config["bundled_root"].as_str().map(PathBuf::from);
-        let roots = search
-            .into_iter()
-            .filter_map(|id| self.str_value(id).ok().map(PathBuf::from))
-            .collect::<Vec<_>>();
+        let mut roots = Vec::new();
+        for entry in search {
+            if self.string_storage(entry).is_some() {
+                roots.push(self.import_path(entry)?);
+            }
+        }
         for spelling in roots
             .into_iter()
             .chain(bundle.iter().filter(|_| top_level).cloned())
@@ -404,11 +400,10 @@ impl Context {
             };
             let Ok(root) = root else { continue };
             let stem = root.join(child);
-            let choices = self.sources.get(name).map_or(&[][..], Vec::as_slice);
             let disk = !bundle.as_ref().is_some_and(|dir| root.starts_with(dir))
                 && Path::new(child).file_name() == Some(std::ffi::OsStr::new(child));
             for path in [stem.join("__init__.py"), stem.with_extension("py")] {
-                let entry = choices.iter().find(|m| m.path == path).map(|m| m.code);
+                let entry = self.registered_file(name, &path).map(|source| source.code);
                 if entry.is_some() || (disk && path.is_file()) {
                     locations.clear();
                     if path.ends_with("__init__.py") {
@@ -420,7 +415,10 @@ impl Context {
                     )));
                 }
             }
-            let entry = choices.iter().find(|m| m.path == stem).map(|m| m.code);
+            let entry = self
+                .file_sources(name)
+                .find(|m| m.path == stem)
+                .map(|m| m.code);
             if entry.is_some() || (disk && stem.is_dir()) {
                 locations.push(stem.clone());
                 namespace.get_or_insert((stem, SourceBody::Namespace));
@@ -461,7 +459,7 @@ impl Context {
     fn zip_source(&mut self, root: &Path, name: &str) -> Result<Option<(PathBuf, Id)>> {
         let module = self.module("zipimport")?;
         let find = self.lookup_attr(module, "_find_at")?;
-        let path = self.text(root.to_string_lossy());
+        let path = self.import_path_text(root)?;
         let name = self.text(name);
         let result = self.call(find, vec![path, name], vec![])?;
         if result == NONE {
@@ -471,24 +469,65 @@ impl Context {
         let [origin, loader] = parts.as_slice() else {
             return Err(Error::new("TypeError", "expected a ZIP origin and loader"));
         };
-        Ok(Some((PathBuf::from(self.str_value(*origin)?), *loader)))
+        Ok(Some((self.import_path(*origin)?, *loader)))
     }
 
     pub(super) fn module_code(&mut self, entry: ModuleInitializer, path: &Path) -> Result<Id> {
-        let filename = self.text(path.to_string_lossy());
+        let filename = self.import_path_text(path)?;
+        self.module_code_at(entry, path, filename)
+    }
+
+    fn module_code_at(
+        &mut self,
+        entry: ModuleInitializer,
+        path: &Path,
+        filename: Id,
+    ) -> Result<Id> {
+        let flags = match entry {
+            ModuleInitializer::Zip(_, _, flags) => Some(flags),
+            ModuleInitializer::File(_, _, flags) => flags,
+            _ => None,
+        };
         let entry = match entry {
-            ModuleInitializer::Native(entry) => entry,
-            ModuleInitializer::Source(text) => {
-                let source = self.text(text);
-                let mode = self.text("exec");
-                // An imported module has its own future flags, independent of its caller.
-                return self.compile_source_with_flags(source, filename, mode, false, 0);
+            ModuleInitializer::Native(entry)
+            | ModuleInitializer::File(entry, ..)
+            | ModuleInitializer::Zip(entry, _, _)
+            | ModuleInitializer::Builtin(entry) => entry,
+            ModuleInitializer::Invalid {
+                message,
+                position,
+                in_args,
+                parser_line,
+                ..
+            } => {
+                if let Some(line) = parser_line {
+                    let mut line = line.to_owned();
+                    if !line.ends_with('\n') {
+                        line.push('\n');
+                    }
+                    return Err(self.parser_syntax_error(
+                        filename,
+                        &path.to_string_lossy(),
+                        &format!(": {message}"),
+                        true,
+                        position.expect("parser error position").map(i64::from),
+                        line,
+                    )?);
+                }
+                return Err(self.syntax_error_at(
+                    message,
+                    filename,
+                    position.map_or([-1, -1, 0, 0], |span| span.map(i64::from)),
+                    in_args,
+                )?);
             }
         };
         let name_id = self.text("<module>");
         Ok(self.alloc(Value::Code(value::CodeObject {
             parsed_parameters: Default::default(),
-            body: value::Body::Native(entry),
+            varnames: NONE,
+            cellvars: NONE,
+            body: value::Body::Native(entry, NONE),
             parameters: NONE,
             nested: Vec::new(),
             freevars: Vec::new(),
@@ -499,27 +538,166 @@ impl Context {
             filename,
             first_line: 1,
             module_definition: true,
-            flags: 0,
-            flags_complete: false,
+            flags: flags.unwrap_or(0),
+            flags_complete: flags.is_some(),
+            generator_lambda: false,
         })))
     }
 
-    /// Return the registered body for this loader, or None to read the source through get_data.
-    pub(super) fn registered_code(&mut self, name: Id, path: Id) -> Result<Id> {
-        let name = self.str_value(name)?;
-        let filename = self.str_value(path)?;
-        if let Some(source) = self
-            .sources
-            .get(name)
-            .and_then(|sources| sources.iter().find(|s| s.path == Path::new(filename)))
+    /// Resolve bytes read from a physical origin to its compiled module code, preserving
+    /// the filename used by nested definitions and leaving namespace creation to exec().
+    pub(super) fn file_code_from_bytes(
+        &mut self,
+        filename: Id,
+        data: Id,
+        inherited: u32,
+        loader: bool,
+    ) -> Result<Option<Id>> {
+        use sha2::{Digest, Sha256};
+        let data = self.scalar_value(data);
+        if !matches!(self.heap.get(data), Value::Bytes(_) | Value::ByteArray(_)) {
+            return Ok(None);
+        }
+        let path = match self.import_path(filename) {
+            Ok(path) => path,
+            // compile accepts diagnostic filenames that have no filesystem representation.
+            Err(error) if !loader && error.kind == "UnicodeEncodeError" => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let mut entries = self.sources.values().flatten().filter_map(|source| {
+            if source.path.as_os_str() != path.as_os_str() {
+                return None;
+            }
+            match source.code {
+                code @ ModuleInitializer::File(entry, Some(digest), flags) => {
+                    Some((code, Some(entry), digest, flags))
+                }
+                code @ ModuleInitializer::Zip(entry, digest, flags) => {
+                    Some((code, Some(entry), digest, Some(flags)))
+                }
+                code @ ModuleInitializer::Invalid {
+                    archive_digest: Some(digest),
+                    ..
+                } => Some((code, None, digest, None)),
+                _ => None,
+            }
+        });
+        let Some((code, entry, digest, flags)) = entries.next() else {
+            return Ok(None);
+        };
+        // A source-declared future already applies to its initializer. Additional
+        // inherited flags need different code. Only the loader owns legacy records
+        // without flags and registrations that carry a syntax diagnostic.
+        if inherited & !flags.unwrap_or(0) != 0 || (flags.is_none() && !loader) {
+            return Ok(None);
+        }
+        if entries.any(|(_, other, hash, other_flags)| {
+            hash != digest
+                || other_flags != flags
+                || match (entry, other) {
+                    (Some(a), Some(b)) => !std::ptr::fn_addr_eq(a, b),
+                    (None, None) => false,
+                    _ => true,
+                }
+        }) {
+            return Ok(None);
+        }
+        if Sha256::digest(self.bytes_like(data)?).as_slice() != digest {
+            return Ok(None);
+        }
+        self.module_code_at(code, &path, filename).map(Some)
+    }
+
+    fn registered_file(&self, name: &str, filename: &Path) -> Option<&super::SourceModule> {
+        let source = self
+            .file_sources(name)
+            .find(|source| source.path == filename)?;
+        // Standalone programs carry first-party source for relocation. While the actual
+        // file is present, let SourceFileLoader read it, including after a failed import.
+        // Bundled stdlib origins are virtual, and compiled initializers keep their code.
+        if matches!(source.code, ModuleInitializer::Invalid { .. })
+            && filename.is_absolute()
+            && filename.is_file()
         {
-            let (entry, path) = (source.code, source.path.clone());
-            return self.module_code(entry, &path);
+            return None;
+        }
+        Some(source)
+    }
+
+    /// Bind the issued loader to its initializer, including modules compiled without source text.
+    pub(super) fn bind_loader_source(&mut self, loader: Id, name: Id, origin: Id) -> Result<()> {
+        let filename = self.import_path(origin)?;
+        if let Some(source) = self.registered_file(self.str_value(name)?, &filename) {
+            let source = super::SourceModule {
+                path: filename,
+                ..*source
+            };
+            self.heap
+                .linked_sources
+                .insert(loader, super::LinkedSource::Loader(source));
+        }
+        Ok(())
+    }
+
+    fn loader_source(&mut self, loader: Id, filename: Id) -> Option<&super::SourceModule> {
+        let path = self.import_path(filename).ok()?;
+        let super::LinkedSource::Loader(source) = self.heap.linked_sources.get(&loader)? else {
+            return None;
+        };
+        (source.path.as_os_str() == path.as_os_str()).then_some(source)
+    }
+
+    pub(super) fn registered_source_data(
+        &mut self,
+        loader: Id,
+        filename: Id,
+    ) -> Option<&'static [u8]> {
+        self.loader_source(loader, filename)?.bundled_text
+    }
+
+    /// Return an issued loader's body or the matching initializer for a plain file loader.
+    pub(super) fn registered_code(
+        &mut self,
+        loader: Id,
+        path: Id,
+        registration: Option<(Id, Id, Id)>,
+    ) -> Result<Id> {
+        if let Some((_, read, convert)) = registration {
+            if !matches!(self.heap.get(path), Value::Str(_) | Value::SurrogateStr(_)) {
+                return Ok(NONE);
+            }
+            let Value::Instance { class, .. } = *self.heap.get(loader) else {
+                return Ok(NONE);
+            };
+            // Reading a user descriptor to test eligibility would invoke a loader hook twice.
+            if self.class_attr(class, "__getattribute__").is_some_and(|hook| {
+                !matches!(self.heap.get(hook), Value::Native(symbol) if symbol == "object.__getattribute__")
+            }) || [("get_data", read), ("source_to_code", convert)].into_iter().any(|(attr, expected)| {
+                self.class_attr(class, attr) != Some(expected) || self.raw_instance_field(loader, attr).is_some()
+            }) {
+                return Ok(NONE);
+            }
+        }
+        if let Some(source) = self.loader_source(loader, path) {
+            let (entry, origin) = (source.code, source.path.clone());
+            return self.module_code(entry, &origin);
+        }
+        // A Python-constructed file loader has no issued-loader binding.
+        if let Some((name, _, _)) = registration {
+            let path = self.import_path(path)?;
+            // Nested code retains the exact filename supplied at build time.
+            if let Ok(name) = self.str_value(name)
+                && let Some(source) = self.registered_file(name, &path)
+                && source.path.as_os_str() == path.as_os_str()
+                && let entry @ ModuleInitializer::File(..) = source.code
+            {
+                return self.module_code(entry, &path);
+            }
         }
         Ok(NONE)
     }
 
-    fn file_spec(&mut self, name: Id, origin: Id, locations: Id, loader: Id) -> Result<Id> {
+    fn file_spec(&mut self, name: Id, origin: Id, locations: Id, body: SourceBody) -> Result<Id> {
         let make = if self.bootstrap_file_spec != NONE
             && matches!(
                 self.str_value(name)?,
@@ -530,15 +708,21 @@ impl Context {
             let importlib = self.module("importlib")?;
             self.lookup_attr(importlib, "_file_spec")?
         };
-        self.call(make, vec![name, origin, locations, loader], vec![])
+        let spec = self.call(make, vec![name, origin, locations, body.loader()], vec![])?;
+        if matches!(body, SourceBody::Registered(_))
+            && let Some(loader) = self.raw_instance_field(spec, "loader")
+        {
+            self.bind_loader_source(loader, name, origin)?;
+        }
+        Ok(spec)
     }
 
-    fn location_list(&mut self, locations: &[PathBuf]) -> Id {
+    pub(super) fn location_list(&mut self, locations: &[PathBuf]) -> Result<Id> {
         let values = locations
             .iter()
-            .map(|p| self.text(p.to_string_lossy()))
-            .collect();
-        self.alloc(Value::List(values))
+            .map(|p| self.import_path_text(p))
+            .collect::<Result<_>>()?;
+        Ok(self.alloc(Value::List(values)))
     }
 
     /// Recheck the search roots supplied by _NamespacePath, ignoring already loaded modules.
@@ -547,7 +731,7 @@ impl Context {
         let mut locations = Vec::new();
         let source = self.source_on_path(name, child, search, child == name, &mut locations)?;
         if matches!(source, Some((_, SourceBody::Namespace))) {
-            Ok(self.location_list(&locations))
+            self.location_list(&locations)
         } else {
             Ok(NONE)
         }
@@ -571,10 +755,10 @@ impl Context {
         scope: Id,
         name: Id,
         origin: Id,
-        loader: Id,
+        body: SourceBody,
     ) -> Result<Id> {
         let locations = self.scope_name(scope, "__path__").unwrap_or(NONE);
-        let spec = self.file_spec(name, origin, locations, loader)?;
+        let spec = self.file_spec(name, origin, locations, body)?;
         let loader = self.lookup_attr(spec, "loader")?;
         self.bind(scope, "__spec__", spec);
         self.bind(scope, "__loader__", loader);
@@ -655,12 +839,11 @@ impl Context {
                 };
                 (child, path, false)
             } else {
-                (fullname, self.sys_path, true)
+                (fullname, NONE, true)
             };
         if self.import_registry_installed {
             let name = self.text(fullname);
-            let path = if top_level { NONE } else { search };
-            let args = vec![name, path];
+            let args = vec![name, search];
             return match finder {
                 Some(finder) => self.call(finder, args, vec![]),
                 None => self.meta_call(NONE, "_find_spec", args),
@@ -675,6 +858,11 @@ impl Context {
                 "find_spec requires a registered source file",
             ));
         }
+        let search = if top_level {
+            self.startup_search_path()?
+        } else {
+            search
+        };
         let mut locations = Vec::new();
         let Some((path, body)) =
             self.source_on_path(fullname, child, search, top_level, &mut locations)?
@@ -683,15 +871,15 @@ impl Context {
         };
         let name = self.text(fullname);
         if matches!(body, SourceBody::Namespace) {
-            let paths = self.location_list(&locations);
+            let paths = self.location_list(&locations)?;
             return self.namespace_spec(name, paths, NONE, NONE);
         }
-        let origin = self.text(path.to_string_lossy());
+        let origin = self.import_path_text(&path)?;
         let locations = if locations.is_empty() {
             NONE
         } else {
-            self.location_list(&locations)
+            self.location_list(&locations)?
         };
-        self.file_spec(name, origin, locations, body.loader())
+        self.file_spec(name, origin, locations, body)
     }
 }

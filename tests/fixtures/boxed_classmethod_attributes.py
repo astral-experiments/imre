@@ -20,6 +20,9 @@ class Child(Base):
 
 
 def current():
+    from inspect import getattr_static, signature
+    from types import MethodType
+
     class Auto:
         def __class_getitem__(cls, key):
             return cls, key
@@ -29,6 +32,7 @@ def current():
 
         @classmethod
         def explicit(cls):
+            """Return the class used to bind this method."""
             return cls
 
     class Derived(Auto):
@@ -36,14 +40,30 @@ def current():
 
     assert vars(vars(Auto)["__class_getitem__"]) == {}
     assert vars(vars(Auto)["__init_subclass__"]) == {}
-    assert vars(vars(Auto)["explicit"])["__name__"] == "explicit"
+    raw = vars(Auto)["explicit"]
+    bound = Derived.explicit
+    assert type(bound) is MethodType and type(raw) is classmethod
+    assert MethodType.__doc__ == "Create a bound instance method object."
+    assert classmethod.__doc__.startswith("Convert a function to be a class method.")
+    assert bound.__self__ is Derived and bound.__func__ is raw.__func__
+    assert str(signature(bound)) == "()" and str(signature(raw.__func__)) == "(cls)"
+    assert raw.__doc__ == bound.__doc__ == "Return the class used to bind this method."
+    raw.__doc__ = "Descriptor override"
+    assert raw.__doc__ == "Descriptor override" and bound.__doc__ == bound.__func__.__doc__
+    for builtin_type in (MethodType, classmethod):
+        try:
+            builtin_type.__doc__ = "Type override"
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("writable builtin type docstring")
+    assert vars(raw)["__name__"] == "explicit"
     assert Derived[str] == (Derived, str)
     outer = Base.__dict__["outer"]
     inner = Base.__dict__["inner"]
     assert outer.__final__ is True and not hasattr(outer.__func__, "__final__")
     assert not hasattr(inner, "__final__") and inner.__func__.__final__ is True
     assert Child.outer() is Child and Child().inner() is Child
-    from inspect import getattr_static
     token = object()
     outer.tag = token
     assert outer.__dict__["tag"] is token and not hasattr(outer.__func__, "tag")

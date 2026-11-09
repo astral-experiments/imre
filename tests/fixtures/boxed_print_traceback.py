@@ -214,7 +214,7 @@ assert summary[0].locals == {'binding': '17', 'value': '17'}
 saved.clear()
 assert StackSummary.extract([(saved, 1)], capture_locals=True)[0].locals is None
 
-from traceback import extract_tb, walk_tb
+from traceback import extract_tb, print_tb, walk_tb
 
 
 def divide_by_zero():
@@ -240,6 +240,10 @@ assert extract_tb(tb, limit=-1) == summary[-1:]
 assert extract_tb(tb, limit=0) == extract_tb(None) == []
 assert summary[-1].lineno == tb.tb_next.tb_lineno
 
+stream = Writer()
+assert print_tb(tb, -1, stream) is None
+assert stream.chunks == [summary.format()[-1], '']
+
 assert list(walk_tb(None)) == []
 assert list(walk_tb(tb)) == [(tb.tb_frame, tb.tb_lineno),
                              (tb.tb_next.tb_frame, tb.tb_next.tb_lineno)]
@@ -248,3 +252,58 @@ view["request_id"] = 17
 captured = StackSummary.extract(walk_tb(tb), capture_locals=True)
 view["request_id"] = 42
 assert captured[-1].locals == {"request_id": "17"}
+
+from traceback import print_list
+
+
+def redirecting_frames():
+    sys.stderr = io.StringIO()
+    yield ("worker.py", 7, "run", "    consume()")
+
+
+previous_stderr = sys.stderr
+saved_colorize = sys.modules["_colorize"]
+output = Writer()
+try:
+    sys.stderr = output
+    sys.modules["_colorize"] = None
+    assert print_list(redirecting_frames()) is None
+finally:
+    sys.modules["_colorize"] = saved_colorize
+    sys.stderr = previous_stderr
+assert output.chunks == ['  File "worker.py", line 7, in run\n    consume()\n', '']
+
+
+
+class Gate:
+    def __await__(self):
+        return (yield "ready")
+
+
+async def spaced_subscription(table):
+    return (table)  [await Gate()]
+
+
+work = spaced_subscription({})
+print(work.send(None))
+try:
+    work.send("missing")
+except KeyError as error:
+    stream = io.StringIO()
+    print_exception(error, file=stream, limit=-1)
+    print(next(line.strip() for line in stream.getvalue().splitlines() if "~" in line))
+
+
+
+def bare_yield():
+    yield "ready"
+
+
+work = bare_yield()
+print(next(work))
+try:
+    work.throw(LookupError("injected"))
+except LookupError as error:
+    stream = io.StringIO()
+    print_exception(error, file=stream, limit=-1)
+    print(stream.getvalue().splitlines()[-2].strip())

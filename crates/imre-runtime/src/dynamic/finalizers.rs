@@ -67,8 +67,16 @@ impl Context {
     pub(super) fn register_instance_finalizer(&mut self, id: Id, class: Option<Id>) {
         if let Some(class) = class
             && self.class_attr(class, "__del__").is_some()
+            && !self.heap.get(class).is_exact_memory_stream()
         {
             self.heap.register_finalizer(id);
+        }
+    }
+
+    /// A stream's Python-owned attributes can make its deallocation order observable.
+    pub(super) fn register_stream_with_attributes(&mut self, owner: Id, class: Id) {
+        if self.heap.get(class).is_exact_memory_stream() {
+            self.heap.register_finalizer(owner);
         }
     }
 
@@ -84,10 +92,10 @@ impl Context {
     pub(super) fn drain_acyclic_finalizers(&mut self) -> Result<bool> {
         let mut finalized = false;
         while self.heap.has_ordinary_finalizers() {
-            let stdin = super::stdlib::io::rooted_input_chain(self);
+            let streams = super::stdlib::io::rooted_standard_streams(self);
             let globals = self.finalizer_path_roots();
             let (heap, roots) = self.heap_and_roots();
-            let Some(owner) = heap.acyclic_finalizer(globals, roots, stdin.as_ref())? else {
+            let Some(owner) = heap.acyclic_finalizer(globals, roots, streams.as_ref())? else {
                 break;
             };
             if !super::stdlib::io::deallocate_exact_pair(self, owner)? {
@@ -98,13 +106,28 @@ impl Context {
         Ok(finalized)
     }
 
+    fn finalize_unstarted_coroutine(&mut self, owner: Id) -> Result<()> {
+        // Cyclic GC already cleared the isolate's weakrefs. On ordinary deallocation,
+        // old weakrefs must expire even when a warning recorder resurrects its source.
+        if !self.heap.in_full_collection(owner) {
+            let (heap, roots) = self.heap_and_roots();
+            let callbacks = heap.clear_dealloc_weakrefs(owner, roots)?;
+            self.run_weak_callbacks(callbacks);
+        }
+        self.warn_unawaited_coroutine(owner)
+    }
+
     pub(super) fn dispatch_finalizer(&mut self, owner: Id) {
         let scan = match self.heap.get(owner) {
             Value::Scandir(scan) => Some(std::rc::Rc::clone(scan)),
             _ => None,
         };
         let async_generator = matches!(self.heap.get(owner), Value::AsyncGenerator { .. });
-        let generator = matches!(self.heap.get(owner), Value::Generator { .. });
+        let generator_frame = match *self.heap.get(owner) {
+            Value::Generator { .. } => Some(owner),
+            Value::Coroutine { frame, .. } => Some(frame),
+            _ => None,
+        };
         let unpack_iterator = matches!(
             self.heap.get(owner),
             Value::StructUnpackIterator {
@@ -112,8 +135,10 @@ impl Context {
                 ..
             }
         );
-        let found = scan.is_some()
-            || generator
+        let exact_socket = matches!(self.heap.get(owner), Value::Socket(_));
+        let found = exact_socket
+            || scan.is_some()
+            || generator_frame.is_some()
             || async_generator
             || unpack_iterator
             || self.slot(owner, "__del__").is_some();
@@ -121,6 +146,12 @@ impl Context {
         super::stdlib::io::note_writer_finalizer(self, owner);
         if !found {
             return;
+        }
+        super::stdlib::io::hand_file_finalization_to_python(self, owner);
+        // The selected slot owns the implicit close. An override can resurrect the
+        // socket or release its fd through os.close without calling the base slot.
+        if let Some(socket) = self.heap.get(owner).socket_handle() {
+            crate::objects::socket::hand_finalization_to_python(socket);
         }
         // Binding a descriptor can itself run Python. Install the once-only bit and
         // root the receiver and current error before resolving the current class slot.
@@ -137,24 +168,38 @@ impl Context {
         } else if unpack_iterator {
             super::stdlib::structure::release_iterator(self, owner);
         } else if async_generator {
-            if let Err(error) = self.finalize_async_generator(owner) {
-                eprintln!(
-                    "Exception ignored while finalizing asynchronous generator: {}",
-                    error.report(&self.heap)
+            self.finalize_async_generator(owner);
+        } else if let Some(frame) = generator_frame {
+            if self.heap.is_unstarted_coroutine(owner) {
+                // A warning recorder can keep its source and subsequently await it.
+                if let Err(error) = self.finalize_unstarted_coroutine(owner) {
+                    super::unraisable::report(
+                        self,
+                        error,
+                        true,
+                        Some(owner),
+                        "Exception ignored while finalizing coroutine",
+                    );
+                }
+            } else if let Err(error) = self.close_generator_frame(frame, owner) {
+                super::unraisable::report(
+                    self,
+                    error,
+                    true,
+                    Some(owner),
+                    "Exception ignored while closing generator",
                 );
             }
-        } else if generator {
-            if let Err(error) = self.generator_close(owner) {
-                eprintln!(
-                    "Exception ignored while calling __del__: {}",
-                    error.report(&self.heap)
-                );
-            }
-        } else if let Some(slot) = self.slot(owner, "__del__") {
+        } else if let Some(slot) = if exact_socket {
+            Some(self.builtin("socket.socket.__del__"))
+        } else {
+            self.slot(owner, "__del__")
+        } {
             self.heap.keep(slot);
             // CPython calls method descriptors unbound, including ordinary
             // functions. Only custom descriptors resolve __get__ before the call.
-            let unbound = matches!(self.heap.get(slot), Value::Function { .. })
+            let unbound = exact_socket
+                || matches!(self.heap.get(slot), Value::Function { .. })
                 || matches!(self.heap.get(slot), Value::Native(name)
                     if super::wrapper_descriptor::BuiltinDescriptor::lookup(name).is_some());
             let target = if unbound {

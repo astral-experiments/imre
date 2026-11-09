@@ -1,4 +1,42 @@
+def capture_float(value: float):
+    return lambda: (value, value + 1)
+
+
 def current():
+    import sys
+
+    def factory(float, rebind=False):
+        def capture(value: float):
+            return lambda: (value, value + 1)
+        if rebind:
+            float = str
+        return capture
+
+    capture_from_factory = factory(float)
+    if sys.implementation.name == "imre":
+        for shadowed in (factory(str), factory(float, rebind=True)):
+            try:
+                shadowed(3)
+            except TypeError:
+                pass
+            else:
+                raise AssertionError("shadowed float annotation admitted an integer")
+
+    for capture in (capture_float, capture_from_factory):
+        for original in (3, 1 << 2000, 0.5):
+            value, total = capture(original)()
+            assert value is original and type(value) is type(original)
+            assert total == original + 1
+
+    class Price(float):
+        def __ceil__(self):
+            return "custom ceil"
+
+    price = Price(-1.25)
+    assert price.__ceil__() == "custom ceil" and float.__ceil__(price) == -1
+    assert type(float.__ceil__) is type(float.__floor__)
+    assert float.__ceil__.__get__(0.25, float)() == 1
+
     print(f'{2.675:.2f}', f'{-0.0:+.0%}', f'{True: .1f}', f'{-3:.2%}')
     print(f'{float("inf"):+f}', f'{float("nan"):.2%}')
     assert f"{2.5:03.0f}" == "002" and f"{3.5:03.0f}" == "004"

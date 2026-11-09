@@ -198,6 +198,10 @@ impl Emitter<'_, '_> {
                 args[1].value.operand,
                 u32::from(copy),
             )),
+            TextOperation::UnicodeProperty(property) => self.checked_instruction(format!(
+                "call ptr @imre_unicode_{}(ptr {source})",
+                property.name()
+            )),
             TextOperation::Normalize => self.checked_instruction(format!(
                 "call ptr @imre_unicode_normalize(ptr {source}, ptr {})",
                 args[1].value.operand,

@@ -6,11 +6,44 @@ use super::super::{context, provider_error};
 use super::{Api, Handle};
 use crate::dynamic::{
     Context,
-    value::{Error, Id, Result, Value},
+    value::{Error, Id, NONE, Result, Value},
 };
 use crate::objects::Codec;
 
 mod extensions;
+
+impl super::OwnedSsl {
+    pub(in crate::dynamic::stdlib::ssl) fn peer_certificate(
+        &self,
+        ctx: &mut Context,
+        binary: bool,
+    ) -> Result<Id> {
+        let ssl = self.handle.as_ptr();
+        let api = self.api;
+        // SAFETY: this reference keeps the SSL alive throughout the query.
+        if unsafe { (api.SSL_is_init_finished)(ssl) } == 0 {
+            return Err(Error::new("ValueError", "handshake not done yet"));
+        }
+        // SAFETY: the peer certificate is borrowed from the live SSL.
+        let cert = unsafe { (api.SSL_get0_peer_certificate)(ssl) };
+        if cert.is_null() {
+            return Ok(NONE);
+        }
+        if binary {
+            let der = api
+                .encode_certificate(cert)
+                .map_err(|e| provider_error(ctx, e))?;
+            return Ok(ctx.alloc(Value::Bytes(der)));
+        }
+        // SAFETY: SSL owns a reference to its context. CPython uses the context's
+        // current verify mode when choosing whether to return the decoded fields.
+        let mode = unsafe { (api.SSL_CTX_get_verify_mode)((api.SSL_get_SSL_CTX)(ssl)) };
+        if mode & super::SSL_VERIFY_PEER == 0 {
+            return Ok(ctx.alloc(Value::Dict(Default::default())));
+        }
+        decode(ctx, api, cert)
+    }
+}
 
 pub(in crate::dynamic::stdlib::ssl) fn ca_certs(
     ctx: &mut Context,

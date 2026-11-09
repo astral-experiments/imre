@@ -126,7 +126,7 @@ def _quoted_template(parts):
 
 
 def _template_repr(template):
-    from typing import _check_annotation_syntax
+    from _typing import _check_annotation_syntax
 
     if any(part.expression.strip() == "" for part in template.interpolations):
         return _template_constructor(template)
@@ -322,7 +322,6 @@ class ForwardRef:
         # scoped forward references, preserving already-known parts of the result.
         import builtins
         names = {**vars(builtins), **globals, **locals}
-        from typing import _typeddict_names
         symbolic = _typeddict_names(
             globals, cells if isinstance(cells, dict) else None,
             owner, names, self.__forward_is_class__,
@@ -413,7 +412,7 @@ def _get_dunder_annotations(obj):
             if type(obj) is type:
                 ann = obj.__annotations__
             else:
-                from typing import _get_type_annotations
+                from _typing import _get_type_annotations
                 ann = _get_type_annotations(obj)
         except AttributeError:
             # For static types, the descriptor raises AttributeError.
@@ -449,6 +448,258 @@ def _stringify_single(value):
     return repr(value)
 
 
+class _TypedDictSymbol:
+    """An operand in a synthetic annotation namespace (see annotationlib._Stringifier)."""
+
+    __slots__ = ForwardRef.__slots__
+
+    def __expression__(self):
+        node = self.__ast_node__
+        return ((node,), 20) if type(node) is str else node
+
+    def __repr__(self):
+        tokens, _ = self.__expression__()
+        return _render_tokens(tokens)
+
+    def __hash__(self):
+        return id(self)
+
+    def __operand__(self, value, precedence=0):
+        if type(value) is _TypedDictSymbol:
+            tokens, priority = value.__expression__()
+            return ("(", *tokens, ")") if priority < precedence else tokens
+        from string.templatelib import Template
+        if type(value) is Template:
+            return ((_template_repr, value),)
+        if self.__stringifier_dict__.stringify or value is None or type(value) in (str, int, float, bool, complex):
+            # Rendering a constant may run a user's repr. Keep the value until unparse.
+            return ((_template_constant, value),)
+        if type(value) in (list, tuple, set, dict):
+            if type(value) is set and not value:
+                return ("{*()}",)
+            opening, closing = ("[", "]") if type(value) is list else (
+                ("(", ")") if type(value) is tuple else ("{", "}"))
+            tokens = [opening]
+            for i, item in enumerate(value):
+                if i:
+                    tokens.append(", ")
+                tokens.extend(self.__operand__(item))
+                if type(value) is dict:
+                    tokens.append(": ")
+                    tokens.extend(self.__operand__(value[item]))
+            if type(value) is tuple and len(value) == 1:
+                tokens.append(",")
+            tokens.append(closing)
+            return tuple(tokens)
+        # Real operands may have no name in the eventual evaluation namespace.
+        names = self.__stringifier_dict__
+        key = f"__annotationlib_name_{names.next_id}__"
+        names.next_id += 1
+        return ((key, value),)
+
+    def __derived__(self, tokens, precedence=20):
+        return self.__stringifier_dict__.symbol(tokens, None, self.__globals__, self.__owner__,
+                                               self.__forward_is_class__, precedence)
+
+    def __getattr__(self, name):
+        return self.__derived__((*self.__operand__(self, 20), ".", name))
+
+    def __iter__(self):
+        # ast.unparse uses bitwise-or precedence for the operand of a star.
+        yield self.__derived__(("*", *self.__operand__(self, 6)))
+
+    def __getitem__(self, index):
+        if self.__ast_node__ == "__classdict__":
+            raise KeyError
+        tokens = [*self.__operand__(self, 20), "["]
+        items = index if isinstance(index, tuple) and index else (index,)
+        for i, item in enumerate(items):
+            if i:
+                tokens.append(", ")
+            if isinstance(item, slice):
+                if item.start is not None:
+                    tokens.extend(self.__operand__(item.start))
+                tokens.append(":")
+                if item.stop is not None:
+                    tokens.extend(self.__operand__(item.stop))
+                if item.step is not None:
+                    tokens.append(":")
+                    tokens.extend(self.__operand__(item.step))
+            else:
+                tokens.extend(self.__operand__(item))
+        if isinstance(index, tuple) and len(index) == 1:
+            tokens.append(",")
+        tokens.append("]")
+        return self.__derived__(tuple(tokens))
+
+    def __call__(self, *args, **kwargs):
+        tokens = [*self.__operand__(self, 20), "("]
+        for arg in args:
+            tokens.extend(self.__operand__(arg))
+            tokens.append(", ")
+        for key, value in kwargs.items():
+            tokens.extend((key, "="))
+            tokens.extend(self.__operand__(value))
+            tokens.append(", ")
+        if args or kwargs:
+            tokens.pop()
+        tokens.append(")")
+        return self.__derived__(tuple(tokens))
+
+    def __contains__(self, item):
+        if self.__ast_node__ == "__conditional_annotations__":
+            return True
+        raise NotImplementedError("symbolic annotation membership")
+
+    def __format__(self, spec):
+        raise TypeError("Cannot stringify annotation containing string formatting")
+
+    def _binary(op, precedence, *, reverse=False, comparison=False):
+        # Powers bind to the right. Nested comparisons need parentheses on either side.
+        left_precedence = precedence + (comparison or op == "**")
+        right_precedence = precedence + (op != "**")
+
+        def binary(self, other):
+            left, right = (other, self) if reverse else (self, other)
+            return self.__derived__(
+                (*self.__operand__(left, left_precedence), f" {op} ",
+                 *self.__operand__(right, right_precedence)), precedence)
+        return binary
+
+    __pow__ = _binary("**", 13)
+    __rpow__ = _binary("**", 13, reverse=True)
+    __mul__ = _binary("*", 11)
+    __rmul__ = _binary("*", 11, reverse=True)
+    __matmul__ = _binary("@", 11)
+    __rmatmul__ = _binary("@", 11, reverse=True)
+    __truediv__ = _binary("/", 11)
+    __rtruediv__ = _binary("/", 11, reverse=True)
+    __floordiv__ = _binary("//", 11)
+    __rfloordiv__ = _binary("//", 11, reverse=True)
+    __mod__ = _binary("%", 11)
+    __rmod__ = _binary("%", 11, reverse=True)
+    __add__ = _binary("+", 10)
+    __radd__ = _binary("+", 10, reverse=True)
+    __sub__ = _binary("-", 10)
+    __rsub__ = _binary("-", 10, reverse=True)
+    __lshift__ = _binary("<<", 9)
+    __rlshift__ = _binary("<<", 9, reverse=True)
+    __rshift__ = _binary(">>", 9)
+    __rrshift__ = _binary(">>", 9, reverse=True)
+    __and__ = _binary("&", 8)
+    __rand__ = _binary("&", 8, reverse=True)
+    __xor__ = _binary("^", 7)
+    __rxor__ = _binary("^", 7, reverse=True)
+    __or__ = _binary("|", 6)
+    __ror__ = _binary("|", 6, reverse=True)
+    __eq__ = _binary("==", 5, comparison=True)
+    __ne__ = _binary("!=", 5, comparison=True)
+    __lt__ = _binary("<", 5, comparison=True)
+    __le__ = _binary("<=", 5, comparison=True)
+    __gt__ = _binary(">", 5, comparison=True)
+    __ge__ = _binary(">=", 5, comparison=True)
+    del _binary
+
+    def _unary(op):
+        def unary(self):
+            return self.__derived__((op, *self.__operand__(self, 12)), 12)
+        return unary
+
+    __pos__ = _unary("+")
+    __neg__ = _unary("-")
+    __invert__ = _unary("~")
+    del _unary
+
+
+class _TypedDictNames(dict):
+    """Resolve missing names without modifying the provider's globals or cells."""
+
+    def symbol(self, tokens, cell, globals, owner, is_class, precedence=20):
+        value = _TypedDictSymbol()
+        value.__arg__ = None
+        value.__ast_node__ = tokens[0] if len(tokens) == 1 else (tokens, precedence)
+        value.__code__ = None
+        value.__stringifier_dict__ = self
+        value.__globals__ = globals
+        value.__cell__ = cell
+        value.__forward_module__ = None
+        value.__forward_is_class__ = is_class
+        value.__forward_is_argument__ = False
+        value.__owner__ = owner
+        value.__extra_names__ = dict(t for t in tokens if type(t) is tuple and type(t[0]) is str) or None
+        value.__resolved_str_cache__ = None
+        self.symbols.append(value)
+        return value
+
+    def __missing__(self, name):
+        return self.symbol((name,), None, self.source_globals, self.owner, self.is_class)
+
+    def finish(self):
+        # Convert the actual operands as in CPython. They can be held inside a
+        # typing alias, an arbitrary container, or a callback's saved state.
+        if not self.symbols:
+            return
+        from _typing import _finish_field_ref
+        for value in self.symbols:
+            if type(value.__ast_node__) is str:
+                value.__arg__ = value.__ast_node__
+                value.__ast_node__ = None
+            else:
+                value.__ast_node__, _ = value.__expression__()
+            value.__stringifier_dict__ = None
+            if value.__cell__ is None:
+                value.__cell__ = self.cells
+            _finish_field_ref(value)
+        self.symbols.clear()
+
+
+def _typeddict_names(source_globals, cells, owner, known, is_class=None, *, stringify=False):
+    names = _TypedDictNames()
+    names.source_globals = source_globals
+    names.cells = cells
+    names.owner = owner
+    names.is_class = isinstance(owner, type) if is_class is None else is_class
+    names.stringify = stringify
+    names.symbols = []
+    names.next_id = 1
+    if known is not None:
+        names.update(known)
+    return names
+
+
+def _typeddict_cell(value):
+    return (lambda: value).__closure__[0]
+
+
+def _typeddict_replay(annotate, owner, format, allow_evaluation):
+    known = {**annotate.__builtins__, **annotate.__globals__} if allow_evaluation else None
+    stringify = format == Format.STRING
+    source_globals = None if stringify else annotate.__globals__
+    names = _typeddict_names(source_globals, None, None if stringify else owner, known,
+                             stringify=stringify)
+    is_class = isinstance(owner, type)
+    closure = None
+    if annotate.__closure__:
+        names.cells = {}
+        new_cells = []
+        for name, cell in zip(annotate.__code__.co_freevars, annotate.__closure__, strict=True):
+            names.cells[name] = cell
+            if allow_evaluation:
+                try:
+                    cell.cell_contents
+                except ValueError:
+                    pass
+                else:
+                    new_cells.append(cell)
+                    continue
+            value = names.symbol((name,), cell, annotate.__globals__, owner, is_class)
+            new_cells.append(_typeddict_cell(value))
+        closure = tuple(new_cells)
+    func = types.FunctionType(annotate.__code__, names, argdefs=annotate.__defaults__,
+                        closure=closure, kwdefaults=annotate.__kwdefaults__)
+    return func, names
+
+
 def call_evaluate_function(evaluate, format, *, owner=None):
     """Call the evaluator for a type alias or type parameter in the requested format."""
     return call_annotate_function(evaluate, format, owner=owner, _is_evaluate=True)
@@ -470,7 +721,6 @@ def call_annotate_function(annotate, format, *, owner=None, _is_evaluate=False):
             return annotations_to_string(annotate(Format.VALUE))
         except Exception:
             pass
-        from typing import _typeddict_replay
         func, _ = _typeddict_replay(annotate, owner, format, False)
         result = func(Format.VALUE_WITH_FAKE_GLOBALS)
         if _is_evaluate:
@@ -478,7 +728,6 @@ def call_annotate_function(annotate, format, *, owner=None, _is_evaluate=False):
         return {key: _stringify_single(value) for key, value in result.items()}
 
     if format == Format.FORWARDREF:
-        from typing import _typeddict_replay
         func, names = _typeddict_replay(annotate, owner, format, True)
         try:
             result = func(Format.VALUE_WITH_FAKE_GLOBALS)

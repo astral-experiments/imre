@@ -33,9 +33,49 @@ def factory():
     return (lambda: 3, lambda: 3)
 
 
+def local_slots(captured, /, ordinary, *args, key, **kwargs):
+    z = ordinary
+    a = key
+    stash = args
+    cache = kwargs
+
+    def inner():
+        return captured, stash, cache
+
+    return z, a, inner
+
+
+def check_slots(function):
+    code = function.__code__
+    names = ("captured", "ordinary", "key", "args", "kwargs", "z", "a", "inner")
+    assert code.co_varnames == names
+    assert code.co_nlocals == len(names)
+    assert code.co_cellvars == ("captured", "cache", "stash")
+    assert CodeType.co_varnames.__get__(code, CodeType) == names
+    assert CodeType.co_nlocals.__get__(code, CodeType) == len(names)
+    z, a, inner = function(1, 2, 3, key=4, extra=5)
+    assert (z, a, inner()) == (2, 4, (1, (3,), {"extra": 5}))
+    assert inner.__code__.co_freevars == ("cache", "captured", "stash")
+    assert inner.__code__.co_varnames == ()
+
+
+def compiled_slots():
+    from types import FunctionType
+
+    check_slots(local_slots)
+    method = Views().get
+    assert FunctionType.__get__(Views.get, method.__self__).__func__ is Views.get
+    assert FunctionType.__code__.__get__(method.__func__) is method.__code__
+    capture = lambda value: ((cell := value), lambda: cell)[1]
+    assert capture.__code__.co_varnames == ("value",)
+    assert capture.__code__.co_cellvars == ("cell",) and capture(6)() == 6
+
+
 def current():
     from inspect import isasyncgenfunction, isgeneratorfunction
     from types import FunctionType, GeneratorType, coroutine
+
+    compiled_slots()
 
     def values():
         yield 1
@@ -115,6 +155,9 @@ def cleanup():
     saved = view.__code__
     method = Views().get
     assert mixed.__code__.co_argcount == 3 and variadic.__code__.co_argcount == 0
+    assert mixed.__code__.co_posonlyargcount == mixed.__code__.co_kwonlyargcount == 1
+    assert variadic.__code__.co_posonlyargcount == variadic.__code__.co_kwonlyargcount == 0
+    assert CodeType.co_kwonlyargcount.__get__(mixed.__code__, CodeType) == 1
     assert saved.co_argcount == 1
     assert method.__code__.co_argcount == Views.get.__code__.co_argcount == 1
     assert CodeType.co_argcount.__get__(mixed.__code__, CodeType) == 3

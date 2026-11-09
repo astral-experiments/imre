@@ -80,8 +80,13 @@ impl Context {
             _ => iter,
         };
         self.bind(scope, ".0", source);
-        self.bind(scope, ".iterator", iter);
-        Ok(self.new_generator(code, scope, FrameOwner::Function(function)))
+        let generator = self.new_generator(code, scope, FrameOwner::Function(function));
+        if self.code_object(code).flags & imre_ast::code_flags::ASYNC_GENERATOR != 0 {
+            Ok(self.async_generator(generator))
+        } else {
+            self.bind(scope, ".iterator", iter);
+            Ok(generator)
+        }
     }
 
     /// Runs the compiled body until it yields one item, returns, or raises.
@@ -133,22 +138,5 @@ impl Context {
             *owner = FrameOwner::Module(NONE);
         }
         result.map_err(|error| self.frame_error(error, code))
-    }
-
-    /// Preserve an escaping StopIteration as the cause and context of the frame's RuntimeError.
-    pub(super) fn frame_error(&mut self, error: Error, code: Id) -> Error {
-        if !self.is_stop_iteration(&error) {
-            return error;
-        }
-        let cause = self.raised_instance(error);
-        let message = if self.code_object(code).is_coroutine() {
-            "coroutine raised StopIteration"
-        } else {
-            "generator raised StopIteration"
-        };
-        let mut error = Error::new("RuntimeError", message);
-        error.tracing().cause = Some(cause);
-        error.context = cause;
-        error
     }
 }

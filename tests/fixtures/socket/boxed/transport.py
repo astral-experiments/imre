@@ -1,7 +1,35 @@
 """Runtime-imported AF_INET operations used by the synchronous WSGI transport."""
+import array
 import errno
+import os
 import _socket
 import socket
+import sys
+
+
+def check_option_buffers(sock):
+    linger = array.array("i", [1, 0])
+    hooks = []
+
+    class Value:
+        def __buffer__(self, flags):
+            hooks.append(("get", flags))
+            return memoryview(linger)
+
+        def __release_buffer__(self, view):
+            hooks.append(("release", view.tobytes()))
+
+    assert socket.SO_LINGER == _socket.SO_LINGER
+    assert sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, Value()) is None
+    assert hooks == [("get", 0), ("release", linger.tobytes())]
+    assert sock.getsockopt(socket.SOL_SOCKET, socket.SO_LINGER, len(linger.tobytes())) == linger.tobytes()
+    if sys.platform == "linux":
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, None, linger.itemsize)
+        except OSError as exc:
+            assert exc.errno == errno.EFAULT
+        else:
+            raise AssertionError("kernel accepted a null address for an integer option")
 
 def check_bind_error(server):
     with socket.socket() as other:
@@ -39,6 +67,8 @@ def run():
     family, kind, protocol, canonical, addr = results[0]
     assert (family, kind, protocol) == (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
     assert canonical == "" and addr == ("127.0.0.1", 0)
+    with socket.socket() as probe:
+        check_option_buffers(probe)
     with socket.socket(family, kind, protocol) as listener, socket.socket() as client:
         assert type(listener) is type(client) is socket.socket
         assert socket.SocketType is _socket.SocketType is _socket.socket
@@ -57,9 +87,12 @@ def run():
                 assert exc.args == ("getsockopt buflen out of range",)
             else:
                 raise AssertionError("getsockopt accepted an invalid buffer size")
-        listener.bind(addr)
+        bind = socket.socket.bind
+        assert bind is _socket.socket.bind
+        bind(listener, addr)
         listener.listen(128)
         server = listener.getsockname()
+        assert _socket.socket.getsockname.__get__(listener)() == server
         assert server[0] == "127.0.0.1" and server[1] > 0
         check_bind_error(server)
         client.connect(server)
@@ -96,6 +129,15 @@ def run():
             pass
         else:
             raise AssertionError("closed socket still had an endpoint")
+        with socket.socket() as second:
+            second.connect(server)
+            fd, address = _socket.socket._accept(listener)
+            with socket.socket(fileno=fd) as accepted:
+                assert accepted.fileno() == fd and not os.get_inheritable(fd)
+                assert address == second.getsockname() == accepted.getpeername()
+                second.sendall(b"k")
+                assert accepted.recv(1) == b"k"
+            assert second.recv(1) == b""
     assert listener.fileno() == -1 and client.fileno() == -1
     try:
         listener.getsockopt(level, option)

@@ -5,18 +5,7 @@ use num_traits::Signed;
 
 /// Clear container storage, then finalize any buffered writer whose last owner was removed.
 pub(in super::super) fn clear_container(ctx: &mut Context, receiver: Id) {
-    let owns_finalizer = |&id: &Id| ctx.heap.could_own_finalizer(id, true);
-    let released = ctx.heap.has_unbound_finalizer(NONE)
-        && match ctx.heap.get(receiver) {
-            Value::List(items) => items.iter().any(owns_finalizer),
-            Value::Dict(entries)
-            | Value::DefaultDict { entries, .. }
-            | Value::Set { entries, .. } => entries
-                .iter()
-                .any(|(key, value)| owns_finalizer(key) || owns_finalizer(value)),
-            Value::Deque(ring) => ring.items.iter().any(owns_finalizer),
-            _ => unreachable!("clearable container"),
-        };
+    let released = ctx.heap.has_unbound_finalizer(NONE) && ctx.heap.clear_owns_finalizer(receiver);
     match ctx.heap.get_mut(receiver) {
         Value::List(items) => {
             for item in std::mem::take(items) {
@@ -777,6 +766,8 @@ pub(super) fn method(
     if matches!(
         name,
         "list.__add__"
+            | "list.__contains__"
+            | "list.__setitem__"
             | "list.__iadd__"
             | "list.__init__"
             | "list.__iter__"
@@ -1491,6 +1482,27 @@ pub(super) fn builtin_slot(
         )));
     }
     let storage = ctx.scalar_value(object);
+    if name == "list.__setitem__" {
+        if !kwargs.is_empty() {
+            return Err(type_error(
+                "wrapper __setitem__() takes no keyword arguments",
+            ));
+        }
+        let [key, value] = rest else {
+            return Err(type_error(format!(
+                "__setitem__ expected 2 arguments, got {}",
+                rest.len()
+            )));
+        };
+        // A list assigned to its own slice copies its contents without invoking __iter__.
+        let value = if object == *value && matches!(ctx.heap.get(*key), Value::Slice(_)) {
+            storage
+        } else {
+            *value
+        };
+        ctx.put_item(storage, *key, value)?;
+        return Ok(NONE);
+    }
     let set_op = set_operator(method);
     let comparison = super::super::operators::comparison_op(method);
     if matches!(method, "__add__" | "__iadd__" | "__contains__" | "__pow__")
@@ -1533,7 +1545,7 @@ pub(super) fn builtin_slot(
             )));
         };
         if method == "__contains__" {
-            return Ok(boolean(ctx.contains(*value, object)?));
+            return Ok(boolean(ctx.contains(*value, storage)?));
         }
         if let Some(op) = comparison {
             return Ok(ctx
@@ -1571,6 +1583,7 @@ pub(super) fn builtin_slot(
             | "__hash__"
             | "__bool__"
             | "__abs__"
+            | "__neg__"
             | "__int__"
             | "__float__"
             | "__iter__"
@@ -1609,6 +1622,9 @@ pub(super) fn builtin_slot(
         }
         if method == "__abs__" {
             return super::absolute_value(ctx, object);
+        }
+        if method == "__neg__" {
+            return ctx.op("neg", storage, NONE, NONE);
         }
         if method == "__int__" {
             return integer::truncate_real(ctx, object);

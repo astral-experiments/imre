@@ -56,7 +56,6 @@ REJECTED = {
     "wrong_contextual_container": "def take(*, words: list[str]) -> None:\n    pass\ntake(words=[1])\n",
     "wrong_optional_keyword": "def take(*, value: int | None = None) -> None:\n    pass\ntake(value=False)\n",
     "starred_arguments": FUNCTION + "print(add(*[1, 2]))\n",
-    "computed_keyword": FUNCTION + 'print(add(**{str("first"): 1}))\n',
     "inconsistent_variadic_shape": "def take(*values) -> None:\n    pass\ntake(1)\ntake(1, 2)\n",
     "variadic_identity": "def take(*values: int) -> None:\n    print(values)\ntake(1)\n",
     "variadic_escape": "def take(*values: int) -> list[int]:\n    return values\n",
@@ -67,6 +66,10 @@ REJECTED = {
     "expanded_duplicate": FUNCTION + 'print(add(1, **{"first": 2}))\n',
     "uninitialized_empty_pack": FUNCTION + "def run(flag: bool) -> int:\n    if flag:\n        keywords = {}\n    return add(1, **keywords)\nrun(False)\n",
     "untyped_keyword_rest": "def take(**values) -> None:\n    pass\ntake(first=1)\n",
+    "wrong_keyword_rest_mapping": (
+        'def take(**values: int) -> None:\n    pass\n'
+        'options: dict[str, str] = {"x": "bad"}\noptions["y"] = "other"\ntake(**options)\n'
+    ),
     "wrong_keyword_rest_type": 'def take(**values: int) -> None:\n    pass\ntake(first="bad")\n',
     "list_default": "def take(values: list[int] = []) -> None:\n    pass\n",
     "dictionary_default": "def take(values: dict[str, int] = {}) -> None:\n    pass\n",

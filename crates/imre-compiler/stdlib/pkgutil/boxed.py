@@ -1,18 +1,30 @@
-"""Discover filesystem modules and read package resources in runtime imports."""
+"""Discover modules on the import path and read package resources."""
 
 import importlib
 import os as _os
 import sys
+from importlib.machinery import FileFinder as _PathFileFinder
 from importlib.util import resolve_name as _spec_name
 from os import fsdecode
 from os.path import abspath as _absolute, dirname, join as _join
 from typing import NamedTuple
+from _imre_importlib import module_suffixes as _target_suffixes
 from _imre_pkgutil import (
     filenames as _filenames,
     find_module as _find_module,
     find_spec as _find_spec,
     isdir as _isdir,
 )
+
+
+try:
+    from zipimport import zipimporter as _ZipImporter
+    from _imre_zipimport import names as _zip_names
+except ImportError:
+    _ZipImporter = ()
+
+
+_module_suffixes = list(_target_suffixes)
 
 
 class ModuleInfo(NamedTuple):
@@ -47,6 +59,101 @@ def get_importer(path_item):
     return importer
 
 
+# From CPython 3.14.5 Lib/pkgutil.py. See licenses/CPython.txt.
+def extend_path(path, name):
+    """Extend a package's path.
+
+    Intended use is to place the following code in a package's __init__.py:
+
+        from pkgutil import extend_path
+        __path__ = extend_path(__path__, __name__)
+
+    For each directory on sys.path that has a subdirectory that
+    matches the package name, add the subdirectory to the package's
+    __path__.  This is useful if one wants to distribute different
+    parts of a single logical package as multiple directories.
+
+    It also looks for *.pkg files beginning where * matches the name
+    argument.  This feature is similar to *.pth files (see site.py),
+    except that it doesn't special-case lines starting with 'import'.
+    A *.pkg file is trusted at face value: apart from checking for
+    duplicates, all entries found in a *.pkg file are added to the
+    path, regardless of whether they are exist the filesystem.  (This
+    is a feature.)
+
+    If the input path is not a list (as is the case for frozen
+    packages) it is returned unchanged.  The input path is not
+    modified; an extended copy is returned.  Items are only appended
+    to the copy at the end.
+
+    It is assumed that sys.path is a sequence.  Items of sys.path that
+    are not (unicode or 8-bit) strings referring to existing
+    directories are ignored.  Unicode items of sys.path that cause
+    errors when used as filenames may cause this function to raise an
+    exception (in line with os.path.isdir() behavior).
+    """
+
+    if not isinstance(path, list):
+        # This could happen e.g. when this is called from inside a
+        # frozen package.  Return the path unchanged in that case.
+        return path
+
+    sname_pkg = name + ".pkg"
+
+    path = path[:] # Start with a copy of the existing path
+
+    parent_package, _, final_name = name.rpartition('.')
+    if parent_package:
+        try:
+            search_path = sys.modules[parent_package].__path__
+        except (KeyError, AttributeError):
+            # We can't do anything: find_loader() returns None when
+            # passed a dotted name.
+            return path
+    else:
+        search_path = sys.path
+
+    for dir in search_path:
+        if not isinstance(dir, str):
+            continue
+
+        finder = get_importer(dir)
+        if finder is not None:
+            portions = []
+            if hasattr(finder, 'find_spec'):
+                spec = finder.find_spec(final_name)
+                if spec is not None:
+                    portions = spec.submodule_search_locations or []
+            # Is this finder PEP 420 compliant?
+            elif hasattr(finder, 'find_loader'):
+                _, portions = finder.find_loader(final_name)
+
+            for portion in portions:
+                # XXX This may still add duplicate entries to path on
+                # case-insensitive filesystems
+                if portion not in path:
+                    path.append(portion)
+
+        # XXX Is this the right thing for subpackages like zope.app?
+        # It looks for a file named "zope.app.pkg"
+        pkgfile = _os.path.join(dir, sname_pkg)
+        if _os.path.isfile(pkgfile):
+            try:
+                f = open(pkgfile)
+            except OSError as msg:
+                sys.stderr.write("Can't open %s: %s\n" %
+                                 (pkgfile, msg))
+            else:
+                with f:
+                    for line in f:
+                        line = line.rstrip('\n')
+                        if not line or line.startswith('#'):
+                            continue
+                        path.append(line) # Don't check for existence!
+
+    return path
+
+
 def read_code(stream):
     # This helper is needed in order for the PEP 302 emulation to
     # correctly handle compiled files
@@ -71,17 +178,43 @@ def get_data(package, resource):
     return spec.loader.get_data(_join(dirname(filename), *resource.split('/')))
 
 
+def _iter_zip_modules(finder, prefix):
+    # CPython 3.14.5 Lib/pkgutil.py considers sorted entries immediately under the prefix.
+    for member in sorted(_zip_names(finder.archive)):
+        if not member.startswith(finder.prefix):
+            continue
+        parts = member[len(finder.prefix):].split('/')
+        if len(parts) == 2 and parts[1].startswith('__init__.py'):
+            yield prefix + parts[0], True
+        elif len(parts) == 1:
+            name = _module_name(parts[0])
+            if name and name != '__init__' and '.' not in name:
+                yield prefix + name, False
+
+
 def iter_modules(path=None, prefix=''):
-    """Yield unique modules and regular packages in filesystem import order."""
+    """Yield unique modules and regular packages in import path order."""
     if isinstance(path, str):
         raise ValueError('path must be None or list of paths to look for modules in')
     seen = set()
     for directory in sys.path if path is None else path:
-        finder = FileFinder(fsdecode(directory))
-        for filename in _filenames(finder.path):
-            info = _module_info(finder, filename, prefix, seen)
-            if info is not None:
-                yield info
+        finder = get_importer(directory)
+        if isinstance(finder, _PathFileFinder):
+            for filename in _filenames(finder.path):
+                info = _module_info(finder, filename, prefix, seen)
+                if info is not None:
+                    yield info
+            continue
+        if isinstance(finder, _ZipImporter):
+            entries = _iter_zip_modules(finder, prefix)
+        elif hasattr(finder, 'iter_modules'):
+            entries = finder.iter_modules(prefix)
+        else:
+            continue
+        for name, ispkg in entries:
+            if name not in seen:
+                seen.add(name)
+                yield ModuleInfo(finder, name, ispkg)
 
 
 # From CPython 3.14.5 Lib/pkgutil.py. See licenses/CPython.txt.

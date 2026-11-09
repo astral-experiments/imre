@@ -44,7 +44,10 @@ fn invalid_aggregate(ty: Type, types: &Types) -> bool {
 }
 
 /// Checks inferred displays as well as annotations, including discarded values.
-pub(super) fn validate_storage(function: &ir::Function, types: &Types) -> Result<(), String> {
+pub(super) fn validate_storage(
+    function: &ir::Function,
+    types: &Types,
+) -> std::result::Result<(), String> {
     let mut invalid = invalid_aggregate(function.returns, types)
         || function
             .locals
@@ -94,7 +97,7 @@ pub(super) fn targets(
     functions: &[ir::Function],
     entry: &ir::Function,
     types: &Types,
-) -> Result<HashMap<Type, HashSet<usize>>, String> {
+) -> std::result::Result<HashMap<Type, HashSet<usize>>, String> {
     let mut targets = HashMap::<Type, HashSet<usize>>::new();
     for function in functions.iter().chain([entry]) {
         ir::walk_expressions(&function.body, &mut |value| {
@@ -159,7 +162,11 @@ impl Checker<'_> {
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
                 source_frame: false,
-                recursion_error: error(self.source, node, "recursive native method adapter"),
+                recursion_error: diagnostic_message(
+                    self.source,
+                    node,
+                    "recursive native method adapter",
+                ),
             },
         );
         Expr {
@@ -271,22 +278,22 @@ impl Checker<'_> {
             && method_site.is_none()
         {
             let asynchronous = signature.asynchronous;
-            inference
-                .callable_signature(
-                    &mut signature,
-                    skip,
-                    expected
-                        .and_then(|ty| self.types.signature(ty))
-                        .map(|(params, result)| {
-                            let returns = if asynchronous {
-                                self.types.awaited(result).unwrap_or(result)
-                            } else {
-                                result
-                            };
-                            (params, returns)
-                        }),
-                )
-                .map_err(|message| error(self.source, node, message))?;
+            inference.callable_signature(
+                &mut signature,
+                skip,
+                expected
+                    .and_then(|ty| self.types.signature(ty))
+                    .map(|(params, result)| {
+                        let returns = if asynchronous {
+                            self.types.awaited(result).unwrap_or(result)
+                        } else {
+                            result
+                        };
+                        (params, returns)
+                    }),
+                self,
+                node,
+            )?;
         }
         let ty = self.types.callable(
             signature.params[skip..]
@@ -421,8 +428,7 @@ impl Checker<'_> {
             .filter(|name| !bound.contains(name));
         let mut params = Vec::new();
         for (parameter, &ty) in names.iter().zip(&parameters) {
-            let slot = helper.declare(parameter.name().as_str(), ty, *parameter)?;
-            helper.assigned.insert(slot);
+            let slot = helper.bind_parameter(&parameter.parameter, ty)?;
             params.push(slot);
         }
         let mut args = Vec::with_capacity(captures.len());
@@ -437,7 +443,7 @@ impl Checker<'_> {
             }
             // A later pull may see a different optional or union arm.
             let value = self.local(source);
-            let slot = helper.declare(&name, value.ty, lambda)?;
+            let slot = helper.declare_binding(&name, value.ty, lambda, true)?;
             helper.assigned.insert(slot);
             params.push(slot);
             args.push(value);
@@ -599,6 +605,12 @@ impl Checker<'_> {
                 "indirect calls require the full positional Callable signature; keywords and omitted defaults are unsupported",
             ));
         }
+        let local = call
+            .func
+            .as_name_expr()
+            .and_then(|name| self.names.get(name.id.as_str()));
+        let local_callable = matches!(callable.kind, ExprKind::Local(slot)
+            if local == Some(&slot) && self.locals[slot] == callable.ty && matches!(callable.ty, Type::Callable(_)));
         let index_callable = self.types.index_callable_signature(callable.ty).is_some();
         let values = call
             .arguments
@@ -610,10 +622,27 @@ impl Checker<'_> {
                 if slot == 0 && index_callable {
                     self.integer_index(argument)
                 } else {
-                    self.expr_expected(argument, ty)
+                    calls::Supplied::Source(argument).check_with(
+                        self,
+                        ty,
+                        false,
+                        |checker, value, expected, site| {
+                            checker.coerce(value, expected, site).map_err(|error| {
+                                error.at_callable_argument(site.range(), || {
+                                    local_callable
+                                        && checker.graph.session.calls_annotated_parameter(
+                                            checker.module,
+                                            call,
+                                            site.range(),
+                                            &checker.graph.modules[checker.module].parsed,
+                                        )
+                                })
+                            })
+                        },
+                    )
                 }
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         if let Type::Coroutine(_) = returns {
             return Ok(self.indirect_coroutine(callable, values, returns));
         }
@@ -629,6 +658,22 @@ impl Checker<'_> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn callable_parameter_owns_its_argument_in_a_checked_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("main.py");
+        let declarations = "import ast\nfrom collections.abc import Callable\ndef take(x: str) -> str: return x\ndef apply(take: Callable[[int], int]) -> int:\n";
+        std::fs::write(&main, format!("{declarations}    return take('x')\n")).unwrap();
+        let error = crate::check_file(&main, None).unwrap_err();
+        assert!(
+            error.contains("main.py:5:17: Imre: expected int, got str"),
+            "{error}"
+        );
+
+        std::fs::write(&main, format!("{declarations}    return take(1)\n")).unwrap();
+        crate::check_file(&main, None).unwrap();
+    }
+
     #[test]
     fn eager_coroutine_factories_remain_direct_calls() {
         let source = "from collections.abc import Awaitable, Callable\nasync def cold(x: int) -> int:\n    return x\ndef factory(x: int) -> Awaitable[int]:\n    return cold(x)\n";

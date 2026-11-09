@@ -8,7 +8,7 @@ def check(args, directory):
     fixtures = Path(__file__).resolve().parent / "fixtures/comparison_allocation"
     source = fixtures / "comparison.py"
     wrapper = directory / "refuse.o"
-    subprocess.run([args.clang, "-c", fixtures / "refuse.c", "-o", wrapper], check=True)
+    subprocess.run([args.clang or "clang-18", "-c", fixtures / "refuse.c", "-o", wrapper], check=True)
     symbols = ("malloc", "realloc", "imre_record_equal", "imre_sequence_equal", "imre_system_exit_code_equal")
     link = ["-C", f"link-arg={wrapper}"]
     for name in symbols:

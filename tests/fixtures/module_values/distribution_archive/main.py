@@ -1,12 +1,40 @@
+import gc
 import os
 import sys
-from importlib.metadata import distribution, distributions, entry_points
+from importlib.metadata import MetadataPathFinder, distribution, distributions, entry_points
 from pathlib import Path
 from zipfile import ZipFile
 from zipimport import zipimporter
 
+
+def capture_distribution(path):
+    found, = distributions(name='demo-tools', path=[path])
+    return sys._getframe()
+
+
+def archive_is_open(path):
+    for name in os.listdir('/proc/self/fd'):
+        try:
+            if os.readlink('/proc/self/fd/' + name) == path:
+                return True
+        except FileNotFoundError:
+            continue
+    return False
+
+
 archive = 'installed.whl'
 Path(archive).write_bytes(Path(__file__).with_name('packages.whl').read_bytes())
+if os.path.isdir('/proc/self/fd'):
+    gc.disable()
+    path = os.path.abspath(archive)
+    frame = capture_distribution(path)
+    MetadataPathFinder.invalidate_caches()
+    gc.collect()
+    assert archive_is_open(path)
+    frame.clear()
+    assert not archive_is_open(path)
+    gc.enable()
+
 unsupported = str(Path(__file__).with_name('unsupported.zip'))
 assert zipimporter(unsupported).get_data('unsupported') == b''
 try:

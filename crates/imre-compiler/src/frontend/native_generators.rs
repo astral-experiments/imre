@@ -4,6 +4,7 @@
 
 use super::*;
 use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
+use std::result::Result;
 
 struct Yield(bool);
 impl<'a> Visitor<'a> for Yield {

@@ -345,7 +345,8 @@ pub(super) fn intersect(
 /// interpreting a local `bytes`, `map`, or `len` as the builtin.
 pub(super) fn alias_builtin_parameters(
     function: &mut ast::StmtFunctionDef,
-    bindings: &HashMap<String, Binding>,
+    graph: &SourceGraph,
+    module: ModuleId,
 ) {
     let params = &mut function.parameters;
     for parameter in params
@@ -357,7 +358,15 @@ pub(super) fn alias_builtin_parameters(
         let name = &mut parameter.parameter.name.id;
         if RESERVED.contains(&name.as_str())
             && name.starts_with(|c: char| c.is_ascii_lowercase())
-            && !bindings.contains_key(name.as_str())
+            && graph.modules[module]
+                .bindings
+                .get(name.as_str())
+                .is_none_or(|&binding| {
+                    graph
+                        .builtin_function_shadow(name.as_str(), binding)
+                        .is_some()
+                        || binding == Binding::Intrinsic(Intrinsic::BuiltinsPrint)
+                })
         {
             let alias = BuiltinAlias {
                 original: name.clone(),

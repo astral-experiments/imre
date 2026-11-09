@@ -123,13 +123,16 @@ impl Checker<'_> {
         if let ast::Expr::Call(range) = arg
             && self.unshadowed_builtin(&range.func, "range")
         {
+            if let Some(failure) = self.range_argument_error(range, Type::Int)? {
+                return Ok(failure);
+            }
             self.reject_builtin_keywords(range)?;
             let values = range
                 .arguments
                 .args
                 .iter()
                 .map(|v| self.expr_expected(v, Type::Int))
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<std::result::Result<Vec<_>, _>>()?;
             let bounds = match values.as_slice() {
                 [stop] => vec![Expr::integer(0), stop.clone(), Expr::integer(1)],
                 [start, stop] => vec![start.clone(), stop.clone(), Expr::integer(1)],

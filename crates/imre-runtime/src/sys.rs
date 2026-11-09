@@ -7,7 +7,7 @@ pub(crate) mod cpu_count;
 mod recursion;
 
 use super::{Int, LazyLock, Mutex, OUTPUT, Output, Str, flush_stdout, initialize_io};
-pub(crate) use recursion::{recursion_limit, set_recursion_limit};
+pub(crate) use recursion::{recursion_limit, set_recursion_limit, with_recursion_frame};
 mod intern;
 use crate::StrOwner;
 use crate::objects::{Codec, errno_error};
@@ -208,46 +208,6 @@ pub(super) fn flush_standard(stderr: bool) -> io::Result<()> {
     }
 }
 
-/// The incremental UTF-8-SIG encoder consumes the signature on its first
-/// attempt, even if that write subsequently raises UnicodeEncodeError.
-pub(crate) fn standard_write_encoding(stderr: bool) -> &'static str {
-    let codec = encoding::settings(false, None).codec;
-    if !matches!(codec, Codec::Utf8 { signature: true }) {
-        return codec.name();
-    }
-    let emitted = if stderr {
-        let mut err = STDERR.lock().unwrap_or_else(|p| p.into_inner());
-        std::mem::replace(&mut err.stream.signature_emitted, true)
-    } else {
-        let mut out = OUTPUT.lock().unwrap_or_else(|p| p.into_inner());
-        std::mem::replace(&mut out.signature_emitted, true)
-    };
-    if emitted { "utf-8" } else { codec.name() }
-}
-
-/// Non-scalar Python strings are encoded by the boxed codec. Successful writes
-/// still share the original text buffer and its line buffering.
-pub(crate) fn write_standard_encoded(
-    stderr: bool,
-    bytes: &[u8],
-    newline: bool,
-) -> super::Result<()> {
-    fn write<W: Write>(out: &mut Output<W>, bytes: &[u8], newline: bool) -> io::Result<()> {
-        if !out.captures.is_empty() {
-            return out.write_all(bytes);
-        }
-        out.write_chunk(bytes, out.line_buffered && newline)
-    }
-    if stderr {
-        let mut err = STDERR.lock().unwrap_or_else(|p| p.into_inner());
-        write(&mut err.stream, bytes, newline)
-    } else {
-        let mut out = OUTPUT.lock().unwrap_or_else(|p| p.into_inner());
-        write(&mut out, bytes, newline)
-    }
-    .map_err(errno_error)
-}
-
 fn with_standard_output<T>(stderr: bool, operation: impl FnOnce(&mut Output) -> T) -> T {
     if stderr {
         operation(&mut stderr_writer().stream)
@@ -382,15 +342,15 @@ pub extern "C" fn imre_os_name() -> *const Str {
 /// # Safety
 /// The caller roots the UTF-8 string throughout the call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_sys_stream_write(stderr: u32, text: *const Str) -> usize {
+pub unsafe extern "C" fn imre_sys_stream_write(stderr: u32, source: *const Str) -> usize {
     // SAFETY: the caller roots the string until the stream write finishes.
-    let text = unsafe { &*text };
+    let text = unsafe { &*source };
     let result = if stderr != 0 {
         write_stderr(text, false).map_err(errno_error)
     } else {
         write_stdout_with(text, false, || {
             // SAFETY: the caller roots this exact string throughout the write.
-            Ok(unsafe { StrOwner::acquire_word(text as *const Str as usize) })
+            Ok(unsafe { StrOwner::acquire_word(source as usize) })
         })
     };
     match result {

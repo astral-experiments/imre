@@ -175,10 +175,30 @@ unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) -> Result<()
     }
 }
 
-trait TableKey {
-    fn try_hash(&self) -> Result<u64, Error>;
+/// Convert a key error at the boundary of a fallible table operation.
+trait TableKeyError {
+    fn into_error(self) -> Error;
+}
 
-    fn try_eq(&self, other: &Self) -> Result<bool, Error>;
+impl TableKeyError for std::convert::Infallible {
+    fn into_error(self) -> Error {
+        match self {}
+    }
+}
+
+impl TableKeyError for Error {
+    fn into_error(self) -> Error {
+        self
+    }
+}
+
+trait TableKey {
+    /// Exact scalar keys can be hashed and compared without raising a Python exception.
+    type Error: TableKeyError;
+
+    fn try_hash(&self) -> Result<u64, Self::Error>;
+
+    fn try_eq(&self, other: &Self) -> Result<bool, Self::Error>;
 }
 
 /// Infallible table keys may choose how they feed the process-keyed hasher.
@@ -241,24 +261,28 @@ fn string_hash(key: &str) -> u64 {
 }
 
 impl<T: InfallibleKey> TableKey for T {
-    fn try_hash(&self) -> Result<u64, Error> {
+    type Error = std::convert::Infallible;
+
+    fn try_hash(&self) -> Result<u64, Self::Error> {
         Ok(self.table_hash())
     }
 
-    fn try_eq(&self, other: &Self) -> Result<bool, Error> {
+    fn try_eq(&self, other: &Self) -> Result<bool, Self::Error> {
         Ok(self.same_key(other))
     }
 }
 
 impl TableKey for TupleKey {
-    fn try_hash(&self) -> Result<u64, Error> {
+    type Error = Error;
+
+    fn try_hash(&self) -> Result<u64, Self::Error> {
         let mut state = HASHER.build_hasher();
         // SAFETY: the key roots an immutable checked tuple throughout hashing.
         unsafe { hash_tuple(self.0, &mut state) }?;
         Ok(state.finish())
     }
 
-    fn try_eq(&self, other: &Self) -> Result<bool, Error> {
+    fn try_eq(&self, other: &Self) -> Result<bool, Self::Error> {
         // SAFETY: both keys root immutable records of the checked key type.
         unsafe { super::values::try_equal(self.0 as usize, other.0 as usize, WordKind::new(6)) }
     }
@@ -427,7 +451,7 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
         entries: &'a [Option<Entry<K, V>>],
         hash: u64,
         key: &'a K,
-        error: &'a mut Option<Error>,
+        error: &'a mut Option<K::Error>,
     ) -> impl FnMut(&usize) -> bool + 'a {
         move |&position| {
             let entry = entries[position].as_ref().unwrap();
@@ -440,7 +464,7 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
         }
     }
 
-    fn key_position(&self, hash: u64, key: &K) -> Result<Option<usize>, Error> {
+    fn key_position(&self, hash: u64, key: &K) -> Result<Option<usize>, K::Error> {
         let mut error = None;
         let found = self.index.find(
             hash,
@@ -472,8 +496,11 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
 
     /// Preserves first-insertion position and returns owners displaced by an update.
     fn insert(&mut self, key: K, value: V) -> Result<Option<(K, V)>, Error> {
-        let hash = key.try_hash()?;
-        if let Some(position) = self.key_position(hash, &key)? {
+        let hash = key.try_hash().map_err(TableKeyError::into_error)?;
+        if let Some(position) = self
+            .key_position(hash, &key)
+            .map_err(TableKeyError::into_error)?
+        {
             let entry = self.entries[position].as_mut().unwrap();
             return Ok(Some((key, std::mem::replace(&mut entry.value, value))));
         }
@@ -490,8 +517,11 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
     ) -> Result<(V, bool), Error> {
         // SAFETY: the caller roots an exact key of this table's representation.
         let key = unsafe { K::borrow(word) };
-        let hash = key.try_hash()?;
-        if let Some(index) = self.key_position(hash, &key)? {
+        let hash = key.try_hash().map_err(TableKeyError::into_error)?;
+        if let Some(index) = self
+            .key_position(hash, &key)
+            .map_err(TableKeyError::into_error)?
+        {
             let slot = &mut self.entries[index].as_mut().unwrap().value;
             let old = *slot;
             if REPLACE {
@@ -505,14 +535,14 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
 
     /// Transfers the removed key and value so they can drop outside the mutation.
     fn remove(&mut self, key: &K) -> Result<Option<Entry<K, V>>, Error> {
-        let hash = key.try_hash()?;
+        let hash = key.try_hash().map_err(TableKeyError::into_error)?;
         let mut error = None;
         let found = self.index.find_entry(
             hash,
             Self::key_matches(&self.entries, hash, key, &mut error),
         );
         if let Some(error) = error {
-            return Err(error);
+            return Err(error.into_error());
         }
         let Ok(slot) = found else {
             return Ok(None);
@@ -580,7 +610,11 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
     fn copy_keys(&self, result: &mut Table<K, ()>) -> Result<(), Error> {
         result.reserve(self.index.len().saturating_sub(result.index.len()))?;
         for entry in self.entries.iter().flatten() {
-            if result.key_position(entry.hash, &entry.key)?.is_none() {
+            if result
+                .key_position(entry.hash, &entry.key)
+                .map_err(TableKeyError::into_error)?
+                .is_none()
+            {
                 result.insert_absent(entry.hash, entry.key.clone(), ())?;
             }
         }
@@ -625,14 +659,14 @@ impl<K: ScalarKey, V: Copy> Table<K, V> {
     unsafe fn promote(&mut self, word: usize) -> Result<bool, Error> {
         // SAFETY: the caller roots a word of this table's key kind.
         let key = unsafe { K::borrow(word) };
-        let hash = key.try_hash()?;
+        let hash = key.try_hash().map_err(TableKeyError::into_error)?;
         let mut error = None;
         let found = self.index.find_mut(
             hash,
             Self::key_matches(&self.entries, hash, &key, &mut error),
         );
         if let Some(error) = error {
-            return Err(error);
+            return Err(error.into_error());
         }
         let Some(slot) = found else {
             return Ok(false);
@@ -676,8 +710,11 @@ impl<K: ScalarKey> Table<K, usize> {
     ) -> Result<Option<OwnedWord>, Error> {
         // SAFETY: the incoming key remains rooted for this whole operation.
         let key = unsafe { K::borrow(word) };
-        let hash = key.try_hash()?;
-        if let Some(position) = self.key_position(hash, &*key)? {
+        let hash = key.try_hash().map_err(TableKeyError::into_error)?;
+        if let Some(position) = self
+            .key_position(hash, &*key)
+            .map_err(TableKeyError::into_error)?
+        {
             let value = self.entries[position].as_ref().unwrap().value;
             // SAFETY: the table roots the stored value of the declared kind.
             return Ok(Some(unsafe { kind.acquire(value) }));
@@ -730,6 +767,8 @@ macro_rules! table {
         }
     };
 }
+
+mod accumulate;
 
 impl<V: Copy> Tables<V> {
     fn try_for_each(
@@ -790,7 +829,11 @@ impl<V: Copy> Tables<V> {
                 return Ok(false);
             }
             for (left, right) in a.entries.iter().flatten().zip(b.entries.iter().flatten()) {
-                if !left.key.try_eq(&right.key)? {
+                if !left
+                    .key
+                    .try_eq(&right.key)
+                    .map_err(TableKeyError::into_error)?
+                {
                     return Ok(false);
                 }
             }
@@ -820,7 +863,9 @@ impl<V: Copy> Tables<V> {
         ) -> Result<Option<V>, Error> {
             // SAFETY: the caller roots the exact key kind of the dispatched table.
             let key = unsafe { K::borrow(word) };
-            let position = table.key_position(key.try_hash()?, &key)?;
+            let position = table
+                .key_position(key.try_hash().map_err(TableKeyError::into_error)?, &key)
+                .map_err(TableKeyError::into_error)?;
             Ok(position.map(|index| table.entries[index].as_ref().unwrap().value))
         }
         // SAFETY: each table borrows its exact rooted key kind.
@@ -3316,33 +3361,37 @@ pub(super) fn pull(cursor: &Object) -> Result<Option<(OwnedWord, Option<OwnedWor
     let mut adapter = None;
     // SAFETY: leaf cursor pulls cannot reenter. Only owners escape the borrow.
     let next = unsafe {
-        cursor.0.with_mut(|storage| match storage {
-            Storage::IteratorAdapter(state) => {
-                adapter = Some(Rc::clone(state));
-                Ok(None)
-            }
-            Storage::IntegerAccumulate(scan) => Ok(scan.next().map(|item| (item, None))),
-            Storage::Accumulate(scan) => scan.next().map(|item| item.map(|item| (item, None))),
-            Storage::Repeat(iterator) => Ok(iterator.next().map(|value| (value, None))),
-            Storage::PathIterator(iterator) => iterator.next().map(|path| {
-                // A non-null path transfers its owner to the caller of pull().
-                (!path.is_null())
-                    .then(|| (OwnedWord::from_owned(path as usize, WordKind::new(5)), None))
-            }),
-            Storage::StringIterator(iterator) => Ok(iterator.next()),
-            Storage::RegexIterator(iterator) => Ok(iterator.next::<false>(&mut 0)),
-            Storage::RegexPositionIterator(iterator, chars) => Ok(iterator.next::<true>(chars)),
-            Storage::LineIterator(iterator) => iterator.next(),
-            Storage::SplitFields(iterator) => iterator.next(),
-            Storage::SortedSplitFields(iterator) => iterator.next(),
-            Storage::MatchingFields(iterator) => iterator.next(),
-            Storage::BytesIterator(iterator) => Ok(iterator.next()),
-            Storage::DequeIterator(iterator) => iterator.next(),
-            _ => storage
-                .mapping_iterator_mut()
-                .next()
-                .map_err(|error| Error::new(Kind::RuntimeError, error.message())),
-        })
+        cursor.0.with_mut(
+            // Keep the leaf dispatch in its native caller, including the closure passed to StorageCell.
+            #[inline(always)]
+            |storage| match storage {
+                Storage::IteratorAdapter(state) => {
+                    adapter = Some(Rc::clone(state));
+                    Ok(None)
+                }
+                Storage::IntegerAccumulate(scan) => Ok(scan.next().map(|item| (item, None))),
+                Storage::Accumulate(scan) => scan.next().map(|item| item.map(|item| (item, None))),
+                Storage::Repeat(iterator) => Ok(iterator.next().map(|value| (value, None))),
+                Storage::PathIterator(iterator) => iterator.next().map(|path| {
+                    // A non-null path transfers its owner to the caller of pull().
+                    (!path.is_null())
+                        .then(|| (OwnedWord::from_owned(path as usize, WordKind::new(5)), None))
+                }),
+                Storage::StringIterator(iterator) => Ok(iterator.next()),
+                Storage::RegexIterator(iterator) => Ok(iterator.next::<false>(&mut 0)),
+                Storage::RegexPositionIterator(iterator, chars) => Ok(iterator.next::<true>(chars)),
+                Storage::LineIterator(iterator) => iterator.next(),
+                Storage::SplitFields(iterator) => iterator.next(),
+                Storage::SortedSplitFields(iterator) => iterator.next(),
+                Storage::MatchingFields(iterator) => iterator.next(),
+                Storage::BytesIterator(iterator) => Ok(iterator.next()),
+                Storage::DequeIterator(iterator) => iterator.next(),
+                _ => storage
+                    .mapping_iterator_mut()
+                    .next()
+                    .map_err(|error| Error::new(Kind::RuntimeError, error.message())),
+            },
+        )
     }?;
     match adapter {
         Some(adapter) => adapter.next().map(|item| item.map(|item| (item, None))),

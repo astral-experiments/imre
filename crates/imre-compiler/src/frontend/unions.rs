@@ -59,6 +59,16 @@ impl Checker<'_> {
             )
         } else {
             let members = self.types.members(ty).unwrap();
+            // A record stored in the base arm can have any of its concrete layouts.
+            let alternatives = match members[0] {
+                Type::Class(base) => self
+                    .classes
+                    .concrete_layouts(base)
+                    .into_iter()
+                    .map(|class| ir::InstanceType::Exact(Type::Class(class)))
+                    .collect(),
+                ty => vec![ir::InstanceType::Exact(ty)],
+            };
             let project = |ty| Expr {
                 ty,
                 kind: ExprKind::Builtin(Builtin::UnionProject, vec![self.local(slot)]),
@@ -67,7 +77,7 @@ impl Checker<'_> {
                 Expr {
                     ty: Type::Bool,
                     kind: ExprKind::Builtin(
-                        Builtin::IsInstance(vec![ir::InstanceType::Exact(members[0])]),
+                        Builtin::IsInstance(alternatives),
                         vec![self.local(slot)],
                     ),
                 },
@@ -800,17 +810,12 @@ impl Checker<'_> {
         }
     }
 
-    /// Recognize exact builtin type comparisons on a local with an erased payload.
+    /// Recognize exact builtin type comparisons on erased values and typed tuples.
     pub(super) fn exact_object_type<'n>(
         &self,
-        compare: &'n ast::ExprCompare,
-    ) -> Option<(&'n ast::Expr, KnownClass, bool)> {
-        let [op @ (ast::CmpOp::Is | ast::CmpOp::IsNot)] = compare.ops.as_ref() else {
-            return None;
-        };
-        let [left, right] = compare.operands.as_ref() else {
-            return None;
-        };
+        left: &'n ast::Expr,
+        right: &'n ast::Expr,
+    ) -> Option<(&'n ast::Expr, KnownClass)> {
         let (call, name) = if let Some(call) = left.as_call_expr() {
             (call, right)
         } else {
@@ -831,19 +836,28 @@ impl Checker<'_> {
         if !call.arguments.keywords.is_empty() || !self.unshadowed_builtin(&call.func, "type") {
             return None;
         }
-        let slot = *self.names.get(value.as_name_expr()?.id.as_str())?;
-        let ty = self
-            .narrowed
-            .get(&slot)
-            .copied()
-            .unwrap_or(self.locals[slot]);
-        (ty == Type::ObjectValue
+        let local_type = value
+            .as_name_expr()
+            .and_then(|name| self.names.get(name.id.as_str()))
+            .map(|slot| {
+                self.narrowed
+                    .get(slot)
+                    .copied()
+                    .unwrap_or(self.locals[*slot])
+            });
+        let exact_tuple = class == KnownClass::Tuple
+            && (matches!(local_type, Some(Type::VarTuple(_)))
+                // Typeshed exposes the native inventory as Sequence[str].
+                || (self.has_static_namespace_root(value)
+                    && self.resolve(value) == Some(Binding::Intrinsic(Intrinsic::SysBuiltinModuleNames)))
+                || self.graph.session.is_string_tuple(self.module, value));
+        ((local_type == Some(Type::ObjectValue) || exact_tuple)
             && self
                 .graph
                 .session
                 .is_known_class(self.module, &call.func, KnownClass::Type)
             && self.graph.session.is_known_class(self.module, name, class))
-        .then_some((value, class, *op == ast::CmpOp::Is))
+        .then_some((value, class))
     }
 
     /// A later walrus write invalidates earlier tests even inside the same and/or.
@@ -853,19 +867,21 @@ impl Checker<'_> {
         test: &ast::Expr,
         truth: bool,
     ) -> HashMap<String, Vec<(Vec<InstanceType>, bool)>> {
+        if let Some((left, op, right)) = self.identity_test(test)
+            && let Some((expr, KnownClass::Str)) = self.exact_object_type(left, right)
+            && let Some(name) = expr.as_name_expr()
+        {
+            return HashMap::from([(
+                name.id.to_string(),
+                vec![(
+                    vec![InstanceType::ExactText],
+                    truth == (op == ast::CmpOp::Is),
+                )],
+            )]);
+        }
         match test {
-            ast::Expr::Compare(compare)
-                if let Some((expr, KnownClass::Str, positive)) =
-                    self.exact_object_type(compare)
-                    && let Some(name) = expr.as_name_expr() =>
-            {
-                HashMap::from([(
-                    name.id.to_string(),
-                    vec![(vec![InstanceType::ExactText], truth == positive)],
-                )])
-            }
             ast::Expr::Call(call)
-                if matches!(&*call.func, ast::Expr::Name(name) if name.id == "isinstance")
+                if self.unshadowed_builtin(&call.func, "isinstance")
                     && call.arguments.args.len() == 2
                     && call.arguments.keywords.is_empty() =>
             {

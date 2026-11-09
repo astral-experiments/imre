@@ -135,7 +135,7 @@ setter!(imre_os_setreuid, setreuid, libc::uid_t, real, effective);
 setter!(imre_os_setregid, setregid, libc::gid_t, real, effective);
 
 #[cfg(target_os = "linux")]
-pub(crate) use saved::{getresgid, getresuid};
+pub(crate) use saved::{getresgid, getresuid, setresgid, setresuid};
 
 #[cfg(target_os = "linux")]
 mod saved {

@@ -3,8 +3,8 @@
 mod update;
 use update::Update;
 
+use crate::shared::Shared;
 use std::cell::Cell;
-use std::rc::Rc;
 
 use super::super::files;
 use super::descriptor_buffer::ssize as index;
@@ -160,25 +160,21 @@ pub(super) fn install(
     size: i64,
     update: bool,
 ) -> Result<Id> {
-    let buffer = ctx.alloc(Value::ByteArray(super::zeroed_bytes(size)?));
-    let state = Rc::new(Reader {
-        raw: Cell::new(Some(raw)),
-        size: size as usize,
-        buffer,
-        end: Cell::new(0),
-        pos: Cell::new(0),
-        absolute: Cell::new(None),
-        locked: Cell::new(false),
-        update: update.then(Update::default),
-    });
-    let attach = |ctx: &mut Context| {
-        let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
-            unreachable!()
-        };
-        *memory_stream = Some(MemoryStream::Reader(Rc::clone(&state)));
-    };
+    let size = usize::try_from(size).map_err(|_| Error::new("ValueError", "negative count"))?;
+    let bytes = crate::zeroed_io_buffer(size).map_err(|_| Error::new("MemoryError", ""))?;
+    install_buffer(ctx, receiver, raw, bytes, update)
+}
+
+pub(super) fn install_buffer(
+    ctx: &mut Context,
+    receiver: Id,
+    raw: Id,
+    mut bytes: Vec<u8>,
+    update: bool,
+) -> Result<Id> {
+    let state = Reader::new(ctx, raw, &mut bytes, update.then(Update::default))?;
     if update && Reader::get(ctx, receiver).is_ok() {
-        attach(ctx);
+        attach(ctx, receiver, state.clone());
     }
     let absolute = invoke(ctx, raw, "tell", vec![])
         .and_then(|n| index(ctx, n))
@@ -205,8 +201,28 @@ pub(super) fn install(
     if update {
         state.raw.set(raw_member(ctx, receiver));
     }
-    attach(ctx);
+    attach(ctx, receiver, state);
     Ok(NONE)
+}
+
+/// Retain the descriptor's complete read/write window without probing or reopening the raw.
+pub(super) fn adopt_for_close<F>(
+    ctx: &mut Context,
+    receiver: Id,
+    raw: Id,
+    file: &mut crate::objects::Random<F>,
+) -> Result<()> {
+    let update = Update {
+        terminal_raw_pos: Some(Cell::new(file.last_raw_pos() as i64)),
+        raw_offset: Cell::new(file.raw_pos as i64),
+        dirty: Cell::new(file.dirty.as_ref().map(|span| (span.start, span.end))),
+        ..Update::default()
+    };
+    let state = Reader::new(ctx, raw, &mut file.buffer, Some(update))?;
+    state.end.set(file.read_end);
+    state.pos.set(file.pos);
+    attach(ctx, receiver, state);
+    Ok(())
 }
 
 fn append(out: &mut Vec<u8>, bytes: &[u8]) -> Result<()> {
@@ -216,18 +232,49 @@ fn append(out: &mut Vec<u8>, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+fn attach(ctx: &mut Context, receiver: Id, state: Shared<Reader>) {
+    let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
+        unreachable!()
+    };
+    *memory_stream = Some(MemoryStream::Reader(state));
+}
+
 impl Reader {
+    fn new(
+        ctx: &mut Context,
+        raw: Id,
+        bytes: &mut Vec<u8>,
+        update: Option<Update>,
+    ) -> Result<Shared<Self>> {
+        // Reserve the new owner before moving bytes that the descriptor has already accepted.
+        let mut state = Shared::try_new(Self {
+            raw: Cell::new(Some(raw)),
+            size: bytes.len(),
+            buffer: NONE,
+            end: Cell::new(0),
+            pos: Cell::new(0),
+            absolute: Cell::new(None),
+            locked: Cell::new(false),
+            update,
+        })
+        .map_err(|_| Error::new("MemoryError", ""))?;
+        Shared::get_mut(&mut state)
+            .expect("fresh reader is uniquely owned")
+            .buffer = ctx.alloc(Value::ByteArray(std::mem::take(bytes)));
+        Ok(state)
+    }
+
     pub(super) fn pending_update(&self) -> Option<Id> {
         self.update.as_ref()?.dirty.get()?;
         self.raw.get()
     }
 
-    fn get(ctx: &Context, receiver: Id) -> Result<Rc<Self>> {
+    fn get(ctx: &Context, receiver: Id) -> Result<Shared<Self>> {
         match ctx.heap.get(receiver) {
             Value::Instance {
                 memory_stream: Some(MemoryStream::Reader(r)),
                 ..
-            } => Ok(Rc::clone(r)),
+            } => Ok(r.clone()),
             _ => Err(Error::new(
                 "ValueError",
                 "I/O operation on uninitialized object",
@@ -288,23 +335,48 @@ impl Reader {
         self.check_raw_open(ctx, message)
     }
 
+    fn raw_closed(&self, ctx: &mut Context) -> Result<bool> {
+        let raw = self.raw()?;
+        if let Some(handle) = super::descriptor_buffer::native_handle(ctx, raw, &["closed"]) {
+            return Ok(handle.live_fd().is_none());
+        }
+        let closed = ctx.lookup_attr(raw, "closed")?;
+        ctx.truth(closed)
+    }
+
     fn check_raw_open(&self, ctx: &mut Context, message: &str) -> Result<()> {
-        let closed = ctx.lookup_attr(self.raw()?, "closed")?;
-        if ctx.truth(closed)? {
+        if self.raw_closed(ctx)? {
             Err(Error::new("ValueError", message))
         } else {
             Ok(())
         }
     }
 
-    fn with_lock<T>(&self, work: impl FnOnce() -> Result<T>) -> Result<T> {
+    fn check_read_open(&self, ctx: &mut Context, message: &str) -> Result<()> {
+        if self.update.is_some() {
+            return self.check_open(ctx, message);
+        }
+        if self.raw_closed(ctx)? && self.unread() == 0 {
+            return Err(Error::new("ValueError", message));
+        }
+        Ok(())
+    }
+
+    fn with_lock<T>(
+        &self,
+        ctx: &mut Context,
+        receiver: Id,
+        work: impl FnOnce(&mut Context) -> Result<T>,
+    ) -> Result<T> {
         if self.locked.replace(true) {
+            let repr = ctx.builtin("repr");
+            let value = ctx.call(repr, vec![receiver], Vec::new())?;
             return Err(Error::new(
                 "RuntimeError",
-                "reentrant call inside buffered reader",
+                format!("reentrant call inside {}", ctx.str_value(value)?),
             ));
         }
-        let result = work();
+        let result = work(ctx);
         self.locked.set(false);
         result
     }
@@ -320,6 +392,20 @@ impl Reader {
     ) -> Result<Option<usize>> {
         let mark = ctx.heap.temporary_mark();
         let raw = self.raw()?;
+        // A builtin FileIO cannot retain the temporary view. Use its same read
+        // operation directly while the live instance method is still native.
+        if let Some(handle) = super::descriptor_buffer::native_handle(ctx, raw, &["readinto"]) {
+            match super::file_io::read_span(ctx, &handle, backing, start..start + length) {
+                // Buffered I/O retries an EINTR raised by Python. Look up the raw
+                // method again because the handler could have installed an override.
+                Err(error) if ctx.has_errno(&error, libc::EINTR) => {}
+                result => {
+                    let count = result?;
+                    self.advance(count.unwrap_or(0));
+                    return Ok(count);
+                }
+            }
+        }
         let dest = ctx.ownerless_byte_view(backing, start, length, false)?;
         let retry = ctx.heap.temporary_mark();
         let value = loop {
@@ -366,12 +452,13 @@ impl Reader {
     ) -> Result<Option<Vec<u8>>> {
         self.reset();
         let mark = ctx.heap.temporary_mark();
+        if amount > crate::MAX_BYTES_LEN {
+            return Err(Error::new("OverflowError", "byte string is too large"));
+        }
         let data = match reserved {
-            Some(mut data) => {
-                data.resize(amount, 0);
-                data
-            }
-            None => super::zeroed_bytes(amount as i64)?,
+            Some(data) => data,
+            None => crate::zeroed_io_buffer(amount)
+                .map_err(|_| Error::new("MemoryError", "bytes allocation is too large"))?,
         };
         let buffer = ctx.alloc(Value::ByteArray(data));
         let Some(n) = self.raw_into(ctx, buffer, 0, amount)? else {
@@ -400,24 +487,27 @@ impl Reader {
         Ok(count.is_some())
     }
 
-    fn read_into(&self, ctx: &mut Context, name: &str, dst: Id) -> Result<Id> {
+    fn read_into(&self, ctx: &mut Context, receiver: Id, name: &str, dst: Id) -> Result<Id> {
         let (target, range) = super::buffered_io::readinto_buffer(ctx, name, dst)?;
         let once = name == "readinto1";
         ctx.with_buffer_export(dst, |ctx| {
-            ctx.with_buffer_export(target, |ctx| self.read_into_span(ctx, target, range, once))
+            ctx.with_buffer_export(target, |ctx| {
+                self.read_into_span(ctx, receiver, target, range, once)
+            })
         })
     }
 
     fn read_into_span(
         &self,
         ctx: &mut Context,
+        receiver: Id,
         target: Id,
         range: std::ops::Range<usize>,
         once: bool,
     ) -> Result<Id> {
         let size = range.len();
-        self.check_open(ctx, "readinto of closed file")?;
-        self.with_lock(|| {
+        self.check_read_open(ctx, "readinto of closed file")?;
+        self.with_lock(ctx, receiver, |ctx| {
             if size == 0 && self.unread() == 0 {
                 self.sync_update(ctx)?;
             }
@@ -491,21 +581,20 @@ impl Reader {
                 return Err(Error::new("OverflowError", "byte string is too large"));
             }
             // Reserve before consuming read-ahead or flushing a buffered write.
-            let reserve = |data: &mut Vec<u8>, size| {
-                data.try_reserve_exact(size)
-                    .map_err(|_| crate::Error::memory_error())
-            };
-            reserve(&mut out, n)?;
+            let reserve =
+                |size| crate::zeroed_io_buffer(size).map_err(|_| crate::Error::memory_error());
+            out = reserve(n)?;
             let remaining = n.saturating_sub(self.unread());
             let direct = remaining - remaining % self.size;
-            if direct != 0 {
-                // Reuse the reservation for a full direct read. Otherwise release
-                // it before reserving the raw window, leaving room for the prefix.
-                if direct < n {
-                    out = Vec::new();
-                    reserve(&mut out, direct)?;
-                }
+            if direct == 0 {
+                out.clear();
+            } else if direct == n {
                 first_raw = Some(std::mem::take(&mut out));
+            } else {
+                // Release the full reservation before acquiring the shorter raw
+                // window. The caller's prefix still lives in the reader.
+                out = Vec::new();
+                first_raw = Some(reserve(direct)?);
             }
         }
         match name {
@@ -612,7 +701,7 @@ impl Reader {
         Ok(ctx.alloc(Value::Bytes(data)))
     }
 
-    fn seek(&self, ctx: &mut Context, offset: i64, whence: i32) -> Result<Id> {
+    fn seek(&self, ctx: &mut Context, receiver: Id, offset: i64, whence: i32) -> Result<Id> {
         let pos = self.logical_pos();
         if let Some(absolute) = self.absolute.get() {
             let start = absolute - self.raw_offset();
@@ -632,7 +721,7 @@ impl Reader {
                 return Ok(ctx.int(target.max(0)));
             }
         }
-        self.with_lock(|| {
+        self.with_lock(ctx, receiver, |ctx| {
             self.write_back(ctx)?;
             let offset = if whence == 1 {
                 offset
@@ -651,6 +740,13 @@ impl Reader {
                 ));
             }
             self.reset();
+            if let Some(cursor) = self
+                .update
+                .as_ref()
+                .and_then(|u| u.terminal_raw_pos.as_ref())
+            {
+                cursor.set(0);
+            }
             self.absolute.set(Some(pos));
             Ok(ctx.int(pos))
         })
@@ -664,14 +760,22 @@ pub(super) fn initialized_raw(ctx: &Context, receiver: Id) -> Option<Id> {
 pub(super) fn close_raw(ctx: &mut Context, receiver: Id) -> Result<Id> {
     let reader = Reader::get(ctx, receiver)?;
     let raw = reader.raw()?;
-    let result = reader.with_lock(|| {
+    let result = reader.with_lock(ctx, receiver, |ctx| {
         let result = invoke(ctx, raw, "close", vec![]);
         if let Some(update) = &reader.update {
             // Retire the backing on which raw.close was called, even when it refuses.
             // The raw remains attached and determines the public closed property.
             update.retired.set(true);
+            if let Some(pos) = &update.terminal_raw_pos
+                && (reader.end.get() != 0 || update.dirty.get().is_some())
+            {
+                pos.set(update.raw_offset.get());
+            }
             update.dirty.set(None);
             reader.reset();
+            if let Some(pos) = &update.terminal_raw_pos {
+                update.raw_offset.set(pos.get());
+            }
         }
         result
     });
@@ -704,10 +808,10 @@ pub(super) fn call(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> 
     ctx.heap.keep(raw);
     ctx.heap.keep(reader.buffer);
     match name {
-        "readinto" | "readinto1" => reader.read_into(ctx, name, args[0]),
+        "readinto" | "readinto1" => reader.read_into(ctx, receiver, name, args[0]),
         "closed" | "name" | "mode" => ctx.lookup_attr(raw, name),
         "write" | "flush" | "truncate" if reader.update.is_some() => {
-            reader.update_call(ctx, name, args)
+            reader.update_call(ctx, receiver, name, args)
         }
         "readable" | "writable" | "seekable" | "fileno" | "isatty" | "flush" => {
             invoke(ctx, raw, name, vec![])
@@ -722,7 +826,7 @@ pub(super) fn call(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> 
         }
         "__exit__" => invoke(ctx, receiver, "close", vec![]),
         "close" => {
-            let closed = reader.with_lock(|| {
+            let closed = reader.with_lock(ctx, receiver, |ctx| {
                 let closed = ctx.lookup_attr(raw, "closed")?;
                 let closed = ctx.truth(closed)?;
                 if !closed && ctx.raw_instance_field(receiver, "_finalizing") == Some(TRUE) {
@@ -733,7 +837,7 @@ pub(super) fn call(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> 
             if closed {
                 return Ok(NONE);
             }
-            super::native_reader::flush_and_close(ctx, receiver)
+            super::buffered_io::close(ctx, receiver)
         }
         "detach" => {
             invoke(ctx, receiver, "flush", vec![])?;
@@ -774,7 +878,7 @@ pub(super) fn call(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> 
             }
             // The offset protocol may read, seek, or reinitialize this reader.
             let offset = files::buffered_offset(ctx, args[0])?;
-            Reader::get(ctx, receiver)?.seek(ctx, offset, whence)
+            Reader::get(ctx, receiver)?.seek(ctx, receiver, offset, whence)
         }
         "read" | "read1" | "readline" | "peek" => {
             if name == "read" && size < -1 {
@@ -783,7 +887,7 @@ pub(super) fn call(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> 
                     "read length must be non-negative or -1",
                 ));
             }
-            reader.check_open(
+            reader.check_read_open(
                 ctx,
                 match name {
                     "readline" => "readline of closed file",
@@ -791,7 +895,16 @@ pub(super) fn call(ctx: &mut Context, receiver: Id, name: &str, args: &[Id]) -> 
                     _ => "read of closed file",
                 },
             )?;
-            reader.with_lock(|| {
+            // Zero-length reads can finish before entering a read-only buffer lock.
+            if size == 0
+                && match &reader.update {
+                    None => name != "peek",
+                    Some(update) => name == "read" && update.terminal_raw_pos.is_some(),
+                }
+            {
+                return Ok(ctx.alloc(Value::Bytes(Vec::new())));
+            }
+            reader.with_lock(ctx, receiver, |ctx| {
                 if name == "read" && size == -1 {
                     reader.read_all(ctx)
                 } else {

@@ -1,6 +1,6 @@
 //! Loads a closed graph of first-party modules and orders their initialization.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -10,8 +10,10 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use crate::analysis::{CheckedDiagnostic, FallbackCalls, Session};
+use crate::frontend::phase::Diagnostic;
 use crate::ir::{
-    Builtin, CopyOperation, FnmatchOperation, PosixPathOperation, SysEncoding, WrapperAttributes,
+    Builtin, CopyOperation, FnmatchOperation, PosixPathOperation, SysEncoding, UnicodeProperty,
+    WrapperAttributes,
 };
 use crate::watch::FileSystem;
 
@@ -20,6 +22,8 @@ mod declarations;
 pub(crate) mod doctest;
 mod empty_keywords;
 mod entry_profile;
+#[cfg(test)]
+mod module_entry_tests;
 mod namedtuple_fields;
 mod ordered_imports;
 mod os;
@@ -29,6 +33,12 @@ pub(crate) use reachability::{definition_effect, http_command_key};
 mod type_aliases;
 
 pub(crate) type ModuleId = usize;
+
+pub(crate) fn valid_module_operand(name: &str) -> bool {
+    name.split('.').all(|part| {
+        !part.is_empty() && Path::new(part).file_name().is_some_and(|file| file == part)
+    })
+}
 
 /// Return the package used to resolve imports originating in this module.
 pub(crate) fn import_package(module: &str, is_package: bool) -> &str {
@@ -98,6 +108,23 @@ macro_rules! bundled_source {
 }
 pub(crate) use bundled_source;
 
+/// Module paths using the same single-byte encoding provider.
+pub(crate) fn charmap_provider_path(name: &str, boxed: bool) -> Option<&'static str> {
+    Some(match name {
+        "encodings.cp1251" => "encodings/cp1251.py",
+        "encodings.cp1252" => "encodings/cp1252.py",
+        "encodings.cp424" => "encodings/cp424.py",
+        "encodings.cp437" => "encodings/cp437.py",
+        // Keep these codec modules on the object importer. Exposing their source
+        // to the checked graph would send literal imports through boxed evaluation.
+        "encodings.iso8859_2" if boxed => "encodings/iso8859_2.py",
+        "encodings.koi8_r" if boxed => "encodings/koi8_r.py",
+        "encodings.iso8859_15" => "encodings/iso8859_15.py",
+        "encodings.koi8_u" => "encodings/koi8_u.py",
+        _ => return None,
+    })
+}
+
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
@@ -136,6 +163,8 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         // CPython 3.14.5's file wrapper and shared stream reader. See licenses/CPython.txt.
         "lzma" => bundled_source!("lzma.py"),
         "compression" => bundled_source!("compression/__init__.py"),
+        "compression.zstd" => bundled_source!("compression/zstd/__init__.py"),
+        "compression.zstd._zstdfile" => bundled_source!("compression/zstd/_zstdfile.py"),
         "compression._common" => bundled_source!("compression/_common/__init__.py"),
         "compression._common._streams" => bundled_source!("compression/_common/_streams.py"),
         // CPython 3.14.5 Lib/zoneinfo. See licenses/CPython.txt.
@@ -224,18 +253,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/warnings.py"
             ),
         )),
-        "_py_warnings" => {
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some(("_py_warnings.py", SOURCE.get_or_init(|| {
-                const UPSTREAM: &str = include_str!(
-                    "../../../benchmarks/cpython_stdlib/full/warnings/upstream/Lib/_py_warnings.py"
-                );
-                UPSTREAM
-                    // A promoted warning owns its traceback. Letting its frame keep the
-                    // exception alive would also keep the warning's source until cyclic GC.
-                    .replace("            raise message", "            try:\n                raise message\n            finally:\n                del message")
-            })))
-        }
+        "_py_warnings" => bundled_source!("_py_warnings.py"),
         "re" => bundled_source!("re/__init__.py"),
         "re._constants" => bundled_source!("re/_constants.py"),
         "decimal" => bundled_source!("decimal.py"),
@@ -258,7 +276,16 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "heapq.py",
             include_str!("../../../benchmarks/cpython_stdlib/full/heapq/upstream/Lib/heapq.py"),
         )),
-        "importlib" => bundled_source!("importlib/__init__.py"),
+        "importlib" => Some((
+            "importlib/__init__.py",
+            concat!(
+                include_str!(
+                    "../../../benchmarks/cpython_stdlib/full/importlib/upstream/Lib/importlib/__init__.py"
+                ),
+                "\n",
+                include_str!("../stdlib/importlib/native_specs.py"),
+            ),
+        )),
         "os" => bundled_source!("os.py"),
         "genericpath" => bundled_source!("genericpath.py"),
         "posixpath" => bundled_source!("posixpath.py"),
@@ -284,39 +311,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "_weakrefset" => bundled_source!("_weakrefset.py"),
         "abc" => bundled_source!("abc.py"),
         "quopri" => bundled_source!("quopri.py"),
-        "base64" => {
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some((
-                "base64.py",
-                SOURCE.get_or_init(|| {
-                    const UPSTREAM: &str = include_str!(
-                        "../../../benchmarks/cpython_stdlib/full/base64/upstream/Lib/base64.py"
-                    );
-                    let from = |start: &str| {
-                        &UPSTREAM[UPSTREAM.find(start).expect("pinned base64 section")..]
-                    };
-                    let section = |start: &str, end: &str| {
-                        from(start)
-                            .split_once(end)
-                            .expect("pinned base64 section end")
-                            .0
-                    };
-                    [
-                        "import binascii\nimport struct\n",
-                        // The runtime supplies the URL-safe codecs.
-                        section("bytes_types =", "_urlsafe_encode_translation ="),
-                        section("# Base32 encoding/decoding", "_b32tab2 ="),
-                        include_str!("../stdlib/base32.py"),
-                        section("def b32encode(s):", "# RFC 3548, Base 16"),
-                        section("def b16decode(", "# Ascii85 encoding/decoding"),
-                        include_str!("../stdlib/base85_encode.py"),
-                        section("def a85decode(", "# The following code is originally taken"),
-                        from("def b85decode("),
-                    ]
-                    .join("\n")
-                }),
-            ))
-        }
+        "base64" => bundled_source!("base64.py"),
         // CPython 3.14.5 Lib/code.py and Lib/codeop.py. See stdlib/docstrings/LICENSE.
         "code" => bundled_source!("code.py"),
         "codecs" => bundled_source!("codecs.py"),
@@ -327,22 +322,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "../../../benchmarks/cpython_stdlib/full/linecache/upstream/Lib/encodings/aliases.py"
             ),
         )),
-        "encodings.ascii" => Some((
-            "encodings/ascii.py",
-            include_str!("../stdlib/encodings/writer_ascii.py"),
-        )),
-        "encodings.latin_1" => Some((
-            "encodings/latin_1.py",
-            include_str!("../stdlib/encodings/writer_latin_1.py"),
-        )),
-        "encodings.utf_8" => Some((
-            "encodings/utf_8.py",
-            include_str!("../stdlib/encodings/writer_utf_8.py"),
-        )),
-        "encodings.utf_8_sig" => Some((
-            "encodings/utf_8_sig.py",
-            include_str!("../stdlib/encodings/writer_utf_8_sig.py"),
-        )),
+        "encodings.ascii" => bundled_source!("encodings/ascii.py"),
+        "encodings.latin_1" => bundled_source!("encodings/latin_1.py"),
+        "encodings.utf_8" => bundled_source!("encodings/utf_8.py"),
+        "encodings.utf_8_sig" => bundled_source!("encodings/utf_8_sig.py"),
         "encodings.utf_16" => Some((
             "encodings/utf_16.py",
             include_str!("../stdlib/encodings/utf_wide.py"),
@@ -351,31 +334,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "encodings/utf_32.py",
             include_str!("../stdlib/encodings/utf_wide.py"),
         )),
-        "encodings.cp1251" => Some((
-            "encodings/cp1251.py",
-            include_str!("../stdlib/encodings/writer_charmap.py"),
-        )),
-        "encodings.cp1252" => Some((
-            "encodings/cp1252.py",
-            include_str!("../stdlib/encodings/writer_charmap.py"),
-        )),
-        "encodings.cp424" => Some((
-            "encodings/cp424.py",
-            include_str!("../stdlib/encodings/writer_charmap.py"),
-        )),
         "encodings.idna" => bundled_source!("encodings/idna.py"),
-        "encodings.shift_jis" => bundled_source!("encodings/shift_jis.py"),
-        "encodings.cp437" => Some((
-            "encodings/cp437.py",
-            include_str!("../stdlib/encodings/writer_charmap.py"),
-        )),
-        "encodings.iso8859_15" => Some((
-            "encodings/iso8859_15.py",
-            include_str!("../stdlib/encodings/writer_charmap.py"),
-        )),
-        "encodings.koi8_u" => Some((
-            "encodings/koi8_u.py",
-            include_str!("../stdlib/encodings/writer_charmap.py"),
+        "encodings.shift_jis" => Some((
+            "encodings/shift_jis.py",
+            include_str!("../stdlib/encodings/multibyte.py"),
         )),
         "codeop" => bundled_source!("codeop.py"),
         "keyword" => Some((
@@ -389,32 +351,18 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "../../../benchmarks/cpython_stdlib/full/linecache/upstream/Lib/tokenize.py"
             ),
         )),
-        "collections" => {
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some(("collections/__init__.py", SOURCE.get_or_init(|| {
-                const UPSTREAM: &str = include_str!(
-                    "../../../benchmarks/cpython_stdlib/full/collections/upstream/Lib/collections/__init__.py"
-                );
-                let (_, wrappers) = UPSTREAM
-                    .split_once("### UserDict\n")
-                    .expect("CPython 3.14.5 UserDict section");
-                let (ordered, _) = UPSTREAM
-                    .split_once("### OrderedDict\n")
-                    .and_then(|(_, tail)| tail.split_once("### namedtuple\n"))
-                    .expect("CPython 3.14.5 OrderedDict section");
-                // Define the Python class in the fresh module's globals and let the
-                // upstream module select _collections.OrderedDict when it is available.
-                concat!(
-                    include_str!("../stdlib/collections/__init__.py"),
-                    "\n",
-                    include_str!("../stdlib/collections/namedtuple_repr.py"),
-                    "\n",
-                    include_str!("../stdlib/collections/recursive_repr.py"),
-                    "\nimport _collections_abc\nimport sys as _sys\n",
-                    "from _weakref import proxy as _proxy\nfrom operator import eq as _eq\n",
-                ).to_owned() + ordered + wrappers
-            })))
-        }
+        "collections" => Some((
+            "collections/__init__.py",
+            concat!(
+                include_str!("../stdlib/collections/__init__.py"),
+                "\n",
+                include_str!("../stdlib/collections/namedtuple_repr.py"),
+                "\n",
+                include_str!("../stdlib/collections/recursive_repr.py"),
+                "\n",
+                include_str!("../stdlib/collections/containers.py"),
+            ),
+        )),
         // CPython 3.14.5 Lib/configparser.py.
         "configparser" => bundled_source!("configparser.py"),
         "contextlib" => Some((
@@ -458,7 +406,16 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             "_imre_socketserver_reader.py",
             include_str!("../stdlib/_socketserver_reader.py"),
         )),
-        "inspect" => bundled_source!("inspect.py"),
+        // The checked graph compiles cleandoc directly. Keep that definition in
+        // the same module namespace when compiling the full object provider.
+        "inspect" => Some((
+            "inspect.py",
+            concat!(
+                include_str!("../stdlib/inspect_cleandoc.py"),
+                "\n",
+                include_str!("../stdlib/inspect.py")
+            ),
+        )),
         "itertools" => bundled_source!("itertools.py"),
         "signal" if cfg!(unix) => bundled_source!("signal.py"),
         "typing" => bundled_source!("typing.py"),
@@ -539,38 +496,31 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "email.quoprimime" => bundled_source!("email/quoprimime.py"),
         "email.utils" => bundled_source!("email/utils.py", from "email"),
         "http" => bundled_source!("http/__init__.py"),
-        "http.client" => {
-            static SOURCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            Some((
-                "http/client.py",
-                SOURCE.get_or_init(|| {
-                    const UPSTREAM: &str = include_str!(
-                        "../../../benchmarks/cpython_stdlib/full/http/upstream/Lib/http/client.py"
-                    );
-                    let transport = UPSTREAM
-                        .replace("import email.parser\n", "")
-                        // Match the same invalid newline bytes without regex lookahead.
-                        .replace(
-                            r"\n(?![ \t])|\r(?![ \t\n])",
-                            r"\n[^ \t]|\r[^ \t\n]|[\n\r]\Z",
-                        );
-                    concat!(
-                        include_str!("../stdlib/http/client.py"),
-                        "\n_parse_http_fields = HTTPMessage._parse\n",
-                    )
-                    .to_owned()
-                        + &transport
-                        + include_str!("../stdlib/http/boxed_headers.py")
-                }),
-            ))
-        }
+        "http.client" => Some((
+            "http/client.py",
+            concat!(
+                include_str!("../stdlib/http/client.py"),
+                include_str!("../stdlib/http/boxed_header_binding.py"),
+                include_str!(
+                    "../../../benchmarks/cpython_stdlib/full/http/upstream/Lib/http/client.py"
+                ),
+                include_str!("../stdlib/http/boxed_headers.py"),
+            ),
+        )),
         "http.cookiejar" => Some((
             "http/cookiejar.py",
             include_str!(
                 "../../../benchmarks/cpython_stdlib/full/http/upstream/Lib/http/cookiejar.py"
             ),
         )),
-        "http.server" => bundled_source!("http/server.py"),
+        "http.server" => Some((
+            "http/server.py",
+            concat!(
+                include_str!("../stdlib/http/server.py"),
+                "\n",
+                include_str!("../stdlib/http/server_files.py"),
+            ),
+        )),
         "locale" => bundled_source!("locale.py"),
         "_imre_gettext_locale" => bundled_source!("_imre_gettext_locale.py"),
         // CPython 3.14.5 Lib/colorsys.py. See licenses/CPython.txt.
@@ -580,26 +530,9 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "optparse" => bundled_source!("optparse.py"),
         "gettext" => bundled_source!("gettext.py"),
         "uuid" => bundled_source!("uuid.py"),
-        _ => None,
+        _ => charmap_provider_path(name, false)
+            .map(|path| (path, include_str!("../stdlib/encodings/charmap.py"))),
     }
-}
-
-/// Spell filesystem import suffixes in longest-first order for both pkgutil frontends.
-pub(crate) fn pkgutil_suffixes() -> String {
-    let version = crate::PYTHON_VERSION;
-    let abi = if cfg!(target_os = "macos") {
-        "darwin".to_owned()
-    } else {
-        let libc = if cfg!(target_env = "musl") {
-            "musl"
-        } else {
-            "gnu"
-        };
-        format!("{}-linux-{libc}", std::env::consts::ARCH)
-    };
-    let tagged = format!(".cpython-{}{}-{abi}.so", version.major, version.minor);
-    let archive = format!(".{}", crate::NATIVE_ARCHIVE_EXTENSION);
-    serde_json::to_string(&[&tagged, ".abi3.so", &archive, ".so", ".py", ".pyc"]).unwrap()
 }
 
 // CPython's built-in/frozen lookup precedes first-party files. These internal and
@@ -629,6 +562,8 @@ pub(crate) enum Binding {
     Definition(DefinitionId),
     /// The module initializer establishes this binding when its guard executes.
     ConditionalValue,
+    /// A class defined by the runtime arm of a TYPE_CHECKING guard.
+    RuntimeClass,
     Value(DefinitionId),
     TypeAlias(ModuleId, usize),
     IntrinsicModule(IntrinsicModule),
@@ -638,6 +573,7 @@ pub(crate) enum Binding {
 /// Sealed namespaces expose only compiler-known symbols, never module values.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum IntrinsicModule {
+    RuntimeSource(&'static str),
     ContextVars,
     ContextVarsNative,
     Importlib,
@@ -689,9 +625,11 @@ pub(crate) enum IntrinsicModule {
     Locale,
     LocaleNative,
     Functools,
+    FunctoolsNative,
     Calendar,
     Fractions,
     Fnmatch,
+    Glob,
     Time,
     Warnings,
     WarningsNative,
@@ -783,6 +721,7 @@ pub(crate) enum IntrinsicModule {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Intrinsic {
+    RuntimeImport(&'static str),
     Context,
     ContextVar,
     ContextToken,
@@ -806,7 +745,10 @@ pub(crate) enum Intrinsic {
     BuiltinsLast,
     BuiltinsLen,
     BuiltinsAscii,
+    BuiltinsPrint,
     BuiltinsHex,
+    OperatorNot,
+    OperatorCall,
     BuiltinsOpen,
     SysDisplayHook,
     ArgumentParser,
@@ -879,7 +821,7 @@ pub(crate) enum Intrinsic {
     CachedProperty,
     NewType,
     Partial,
-    Placeholder,
+    Placeholder(crate::ir::PlaceholderKind),
     Reduce,
     CmpToKey,
     TomlDumps,
@@ -900,8 +842,12 @@ pub(crate) enum Intrinsic {
     MathAcos,
     MathAsin,
     MathAtan,
+    MathDegrees,
+    MathFmod,
+    MathRadians,
     MathErfc,
     MathLog10,
+    MathPerm,
     TimeSleep,
     WarningFilter {
         simple: bool,
@@ -928,6 +874,7 @@ pub(crate) enum Intrinsic {
     SysPlatform,
     SysVersionInfo,
     SysThreadInfo,
+    SysBuiltinModuleNames,
     SysStdlibModuleNames,
     SysVersion,
     SysHexversion,
@@ -956,6 +903,8 @@ pub(crate) enum Intrinsic {
     GetSysconfigPath,
     OsPathExists,
     StringConstant(&'static str),
+    StartupFilesystemRoots,
+    ModuleSuffixes,
     SysExit,
     ShlexSplit,
     ShlexQuote,
@@ -1006,13 +955,19 @@ pub(crate) enum Intrinsic {
     GaiError,
     HError,
     SocketGetFqdn,
+    SocketControlSize {
+        padded: bool,
+    },
     SocketConstant(&'static str),
     Sha1,
     Sha256,
     NamedHash(&'static str),
+    UnicodeProperty(UnicodeProperty),
     UnicodeNormalize {
         check: bool,
     },
+    /// Available in an object program, without requesting one when the export is used.
+    ObjectOnlyExport(&'static str),
     ObjectRuntimeExport(&'static str),
     /// Bind the object provider when this export is used, after checking typed calls.
     ScopedObjectExport(&'static str),
@@ -1023,6 +978,7 @@ pub(crate) enum Intrinsic {
     CodecLookup,
     CodecGetWriter,
     CodecBom(&'static [u8]),
+    CodecNativeBom(&'static [u8], &'static [u8]),
     HashNew,
     HashFileDigest,
     HmacCompareDigest,
@@ -1177,6 +1133,8 @@ impl Intrinsic {
             Self::MathAcos => Some(("math.acos", Builtin::FloatAcos)),
             Self::MathAsin => Some(("math.asin", Builtin::FloatAsin)),
             Self::MathAtan => Some(("math.atan", Builtin::FloatAtan)),
+            Self::MathDegrees => Some(("math.degrees", Builtin::FloatDegrees)),
+            Self::MathRadians => Some(("math.radians", Builtin::FloatRadians)),
             Self::MathErfc => Some(("math.erfc", Builtin::FloatErfc)),
             Self::MathLog10 => Some(("math.log10", Builtin::FloatLog10)),
             _ => None,
@@ -1186,9 +1144,11 @@ impl Intrinsic {
     pub(crate) fn scoped_class_base(self) -> Option<&'static str> {
         match self {
             Self::SOCKETSERVER_CLASS => Some("socketserver base class"),
-            Self::ScopedObjectExport(name @ ("enum.Flag" | "unittest.IsolatedAsyncioTestCase")) => {
-                Some(name)
-            }
+            Self::ScopedObjectExport(
+                name @ ("enum.Flag"
+                | "unittest.IsolatedAsyncioTestCase"
+                | "importlib.abc.SourceLoader"),
+            ) => Some(name),
             _ => None,
         }
     }
@@ -1200,6 +1160,7 @@ impl Intrinsic {
     pub(crate) const RAW_IO_BASE: Self = Self::ObjectRuntimeExport("io.RawIOBase");
     pub(crate) const BUFFERED_IO_BASE: Self = Self::ObjectRuntimeExport("io.BufferedIOBase");
     pub(crate) const TEXT_IO_BASE: Self = Self::ObjectRuntimeExport("io.TextIOBase");
+    pub(crate) const TYPING_IO: Self = Self::ObjectOnlyExport("typing.IO");
     pub(crate) const TYPING_PROTOCOL: Self = Self::ObjectRuntimeExport("typing.Protocol");
     pub(crate) const TYPING_MAPPING: Self = Self::ObjectRuntimeExport("typing.Mapping");
     pub(crate) const TYPING_SEQUENCE: Self = Self::ObjectRuntimeExport("typing.Sequence");
@@ -1231,6 +1192,7 @@ impl IntrinsicModule {
                 | Self::StringFormatting
                 | Self::CollectionsNative
                 | Self::DatetimeNative
+                | Self::FunctoolsNative
                 | Self::SignalNative
         )
     }
@@ -1255,6 +1217,8 @@ impl IntrinsicModule {
             "_datetime" => Some(Self::DatetimeNative),
             "abc" => Some(Self::Abc),
             "asyncio" => Some(Self::Asyncio),
+            "concurrent" => Some(Self::RuntimeSource("concurrent")),
+            "concurrent.futures" => Some(Self::RuntimeSource("concurrent.futures")),
             "contextvars" => Some(Self::ContextVars),
             "_contextvars" => Some(Self::ContextVarsNative),
             "inspect" => Some(Self::Inspect),
@@ -1263,9 +1227,11 @@ impl IntrinsicModule {
             "_locale" => Some(Self::LocaleNative),
             "contextlib" => Some(Self::Contextlib),
             "functools" => Some(Self::Functools),
+            "_functools" => Some(Self::FunctoolsNative),
             "calendar" => Some(Self::Calendar),
             "fractions" => Some(Self::Fractions),
             "fnmatch" => Some(Self::Fnmatch),
+            "glob" => Some(Self::Glob),
             "time" => Some(Self::Time),
             "warnings" => Some(Self::Warnings),
             "_warnings" => Some(Self::WarningsNative),
@@ -1561,6 +1527,7 @@ impl IntrinsicModule {
             (Self::PickleNative, "UnpicklingError") => {
                 Intrinsic::ScopedObjectExport("_pickle.UnpicklingError")
             }
+            (Self::Struct, "_clearcache") => Intrinsic::ScopedObjectExport("struct._clearcache"),
             (Self::Tempfile, "gettempdir") => Intrinsic::ScopedObjectExport("tempfile.gettempdir"),
             (Self::Tempfile, "gettempdirb") => {
                 Intrinsic::ScopedObjectExport("tempfile.gettempdirb")
@@ -1594,6 +1561,7 @@ impl IntrinsicModule {
             (Self::Importlib, "invalidate_caches") => {
                 Intrinsic::ObjectRuntimeExport("importlib.invalidate_caches")
             }
+            (Self::Importlib, "reload") => Intrinsic::ObjectOnlyExport("importlib.reload"),
             (Self::ImportlibLoaderAbc, "Loader") => {
                 Intrinsic::ObjectRuntimeExport("importlib._abc.Loader")
             }
@@ -1611,8 +1579,17 @@ impl IntrinsicModule {
             }
             (Self::ImportlibMetadata, "PackageNotFoundError") => Intrinsic::PackageNotFoundError,
             (Self::ImportlibMachinery, "ModuleSpec") => Intrinsic::ModuleSpec,
+            (Self::ImportlibMachinery, "FrozenImporter") => {
+                Intrinsic::ScopedObjectExport("importlib.machinery.FrozenImporter")
+            }
+            (Self::ImportlibMachinery, "BuiltinImporter") => {
+                Intrinsic::ScopedObjectExport("importlib.machinery.BuiltinImporter")
+            }
             (Self::ImportlibMachinery | Self::ImportlibBootstrapExternal, "NamespaceLoader") => {
                 Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.NamespaceLoader")
+            }
+            (Self::ImportlibAbc, "SourceLoader") => {
+                Intrinsic::ScopedObjectExport("importlib.abc.SourceLoader")
             }
             (Self::ImportlibBootstrapExternal, "SourceFileLoader") => {
                 Intrinsic::ObjectRuntimeExport("_frozen_importlib_external.SourceFileLoader")
@@ -1728,6 +1705,12 @@ impl IntrinsicModule {
             (Self::Warnings, "formatwarning") => Intrinsic::WarningDisplay { show: false },
             (Self::Warnings, "showwarning") => Intrinsic::WarningDisplay { show: true },
             #[cfg(target_os = "linux")]
+            (Self::Fcntl, "F_DUPFD") => Intrinsic::IntConstant(i64::from(libc::F_DUPFD)),
+            #[cfg(target_os = "linux")]
+            (Self::Fcntl, "F_DUPFD_CLOEXEC") => {
+                Intrinsic::IntConstant(i64::from(libc::F_DUPFD_CLOEXEC))
+            }
+            #[cfg(target_os = "linux")]
             (Self::Time, "CLOCK_REALTIME") => {
                 Intrinsic::IntConstant(i64::from(libc::CLOCK_REALTIME))
             }
@@ -1756,6 +1739,9 @@ impl IntrinsicModule {
             }
             (Self::Signal, "SIGINT") => Intrinsic::IntConstant(2),
             (Self::Signal, "SIGTERM") => Intrinsic::IntConstant(15),
+            (Self::Signal | Self::SignalNative, "pause") if cfg!(unix) => {
+                Intrinsic::ScopedObjectExport("_signal.pause")
+            }
             (Self::Signal | Self::SignalNative, "alarm") if cfg!(unix) => {
                 Intrinsic::ObjectRuntimeExport("_signal.alarm")
             }
@@ -1814,6 +1800,10 @@ impl IntrinsicModule {
             (Self::Functools, "singledispatch") => Intrinsic::SingleDispatch,
             (Self::Functools, "update_wrapper") => Intrinsic::UpdateWrapper,
             (Self::Functools, "wraps") => Intrinsic::Wraps,
+            (Self::Glob, "glob") => Intrinsic::ObjectOnlyExport("glob.glob"),
+            (Self::Glob, "iglob") => Intrinsic::ObjectOnlyExport("glob.iglob"),
+            (Self::Glob, "escape") => Intrinsic::ObjectOnlyExport("glob.escape"),
+            (Self::Glob, "translate") => Intrinsic::ObjectOnlyExport("glob.translate"),
             (Self::Fnmatch, "fnmatch" | "fnmatchcase") => {
                 Intrinsic::Fnmatch(FnmatchOperation::Match {
                     normcase: name == "fnmatch",
@@ -1827,9 +1817,14 @@ impl IntrinsicModule {
             (Self::Fnmatch, "translate") => Intrinsic::Fnmatch(FnmatchOperation::Translate),
             (Self::Fnmatch, "_translate") => Intrinsic::Fnmatch(FnmatchOperation::Parts),
             (Self::Functools, "cached_property") => Intrinsic::CachedProperty,
-            (Self::Functools, "partial") => Intrinsic::Partial,
-            (Self::Functools, "Placeholder") => Intrinsic::Placeholder,
-            (Self::Functools, "reduce") => Intrinsic::Reduce,
+            (Self::Functools | Self::FunctoolsNative, "partial") => Intrinsic::Partial,
+            (Self::Functools | Self::FunctoolsNative, "Placeholder") => {
+                Intrinsic::Placeholder(crate::ir::PlaceholderKind::Value)
+            }
+            (Self::Functools | Self::FunctoolsNative, "_PlaceholderType") => {
+                Intrinsic::Placeholder(crate::ir::PlaceholderKind::Class)
+            }
+            (Self::Functools | Self::FunctoolsNative, "reduce") => Intrinsic::Reduce,
             (Self::Functools, "cmp_to_key") => Intrinsic::CmpToKey,
             (Self::TomliW, "dumps") => Intrinsic::TomlDumps,
             (Self::Tomli, "loads") => Intrinsic::TomliLoads,
@@ -1854,6 +1849,9 @@ impl IntrinsicModule {
             (Self::Sys, "exception") => Intrinsic::SysException,
             (Self::Traceback, "print_exc") => Intrinsic::TracebackPrintExc,
             (Self::Traceback, "format_tb") => Intrinsic::ScopedObjectExport("traceback.format_tb"),
+            (Self::Traceback, "print_list") => {
+                Intrinsic::ScopedObjectExport("traceback.print_list")
+            }
             (Self::Traceback, "format_exc") => {
                 Intrinsic::TracebackFormatter("traceback.format_exc")
             }
@@ -1930,6 +1928,7 @@ impl IntrinsicModule {
             (Self::Sys, "dont_write_bytecode") => Intrinsic::SysDontWriteBytecode,
             (Self::Sys, "version_info") => Intrinsic::SysVersionInfo,
             (Self::Sys, "thread_info") => Intrinsic::SysThreadInfo,
+            (Self::Sys, "builtin_module_names") => Intrinsic::SysBuiltinModuleNames,
             (Self::Sys, "stdlib_module_names") => Intrinsic::SysStdlibModuleNames,
             (Self::Sys, "version") => Intrinsic::SysVersion,
             (Self::Sys, "maxunicode") => Intrinsic::IntConstant(0x10FFFF),
@@ -1962,6 +1961,7 @@ impl IntrinsicModule {
             (Self::Builtins, "_") => Intrinsic::BuiltinsLast,
             (Self::Builtins, "len") => Intrinsic::BuiltinsLen,
             (Self::Builtins, "ascii") => Intrinsic::BuiltinsAscii,
+            (Self::Builtins, "print") => Intrinsic::BuiltinsPrint,
             (Self::Builtins, "bin") => Intrinsic::ScopedObjectExport("builtins.bin"),
             (Self::Builtins, "hex") => Intrinsic::BuiltinsHex,
             (Self::Builtins, "open") => Intrinsic::BuiltinsOpen,
@@ -2020,6 +2020,7 @@ impl IntrinsicModule {
             (Self::Typing, "Mapping") => Intrinsic::TYPING_MAPPING,
             (Self::Typing, "Protocol") => Intrinsic::TYPING_PROTOCOL,
             (Self::Typing, "Final") => Intrinsic::Final,
+            (Self::Typing, "IO") => Intrinsic::TYPING_IO,
             (Self::Typing, "TextIO") => Intrinsic::TextIO,
             (Self::Typing, "BinaryIO") => Intrinsic::BinaryIO,
             (Self::Typing, "Optional") => Intrinsic::Optional,
@@ -2039,6 +2040,7 @@ impl IntrinsicModule {
             (Self::Gzip, "open") => Intrinsic::GzipOpen,
             (Self::Gzip, "compress") => Intrinsic::ScopedObjectExport("gzip.compress"),
             (Self::Gzip, "decompress") => Intrinsic::ScopedObjectExport("gzip.decompress"),
+            (Self::Types, "FunctionType") => Intrinsic::ObjectOnlyExport("types.FunctionType"),
             (Self::Types, "GenericAlias") => Intrinsic::ScopedObjectExport("types.GenericAlias"),
             (Self::Types, "ModuleType") => Intrinsic::ModuleType,
             (Self::Types, "SimpleNamespace") => Intrinsic::SimpleNamespace,
@@ -2074,6 +2076,18 @@ impl IntrinsicModule {
             (Self::WeakRef, "proxy") => Intrinsic::WeakProxy,
             (Self::WeakRef, "ProxyType") => Intrinsic::WeakProxyClass { callable: false },
             (Self::WeakRef, "CallableProxyType") => Intrinsic::WeakProxyClass { callable: true },
+            (Self::UnicodeData, "unidata_version") => {
+                Intrinsic::StringConstant(imre_ast::UNICODE_DATA_VERSION)
+            }
+            (Self::UnicodeData, "bidirectional") => {
+                Intrinsic::UnicodeProperty(UnicodeProperty::Bidirectional)
+            }
+            (Self::UnicodeData, "category") => {
+                Intrinsic::UnicodeProperty(UnicodeProperty::Category)
+            }
+            (Self::UnicodeData, "east_asian_width") => {
+                Intrinsic::UnicodeProperty(UnicodeProperty::EastAsianWidth)
+            }
             (Self::UnicodeData, "decomposition") => {
                 Intrinsic::ObjectRuntimeExport("unicodedata.decomposition")
             }
@@ -2081,10 +2095,20 @@ impl IntrinsicModule {
             (Self::UnicodeData, "is_normalized") => Intrinsic::UnicodeNormalize { check: true },
             (Self::Codecs, "lookup") => Intrinsic::CodecLookup,
             (Self::Codecs, "BOM_UTF8") => Intrinsic::CodecBom(b"\xef\xbb\xbf"),
-            (Self::Codecs, "BOM_UTF16_LE") => Intrinsic::CodecBom(b"\xff\xfe"),
-            (Self::Codecs, "BOM_UTF16_BE") => Intrinsic::CodecBom(b"\xfe\xff"),
-            (Self::Codecs, "BOM_UTF32_LE") => Intrinsic::CodecBom(b"\xff\xfe\0\0"),
-            (Self::Codecs, "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
+            (Self::Codecs, "BOM_LE" | "BOM32_LE" | "BOM_UTF16_LE") => {
+                Intrinsic::CodecBom(b"\xff\xfe")
+            }
+            (Self::Codecs, "BOM_BE" | "BOM32_BE" | "BOM_UTF16_BE") => {
+                Intrinsic::CodecBom(b"\xfe\xff")
+            }
+            (Self::Codecs, "BOM64_LE" | "BOM_UTF32_LE") => Intrinsic::CodecBom(b"\xff\xfe\0\0"),
+            (Self::Codecs, "BOM64_BE" | "BOM_UTF32_BE") => Intrinsic::CodecBom(b"\0\0\xfe\xff"),
+            (Self::Codecs, "BOM" | "BOM_UTF16") => {
+                Intrinsic::CodecNativeBom(b"\xff\xfe", b"\xfe\xff")
+            }
+            (Self::Codecs, "BOM_UTF32") => {
+                Intrinsic::CodecNativeBom(b"\xff\xfe\0\0", b"\0\0\xfe\xff")
+            }
             (Self::Socket | Self::SocketNative, "herror") => Intrinsic::HError,
             (Self::Socket, "MsgFlag") => Intrinsic::ScopedObjectExport("socket.MsgFlag"),
             #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -2165,6 +2189,36 @@ impl IntrinsicModule {
             #[cfg(unix)]
             (Self::Socket, "fromfd") => Intrinsic::ScopedObjectExport("socket.fromfd"),
             (Self::Socket, "SocketIO") => Intrinsic::ScopedObjectExport("socket.SocketIO"),
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            (Self::Socket | Self::SocketNative, "IPV6_RECVHOPLIMIT") => {
+                Intrinsic::SocketConstant("ipv6_recvhoplimit")
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            (Self::Socket | Self::SocketNative, "IPV6_HOPLIMIT") => {
+                Intrinsic::SocketConstant("ipv6_hoplimit")
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            (Self::Socket | Self::SocketNative, "IPV6_RECVTCLASS") => {
+                Intrinsic::SocketConstant("ipv6_recvtclass")
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            (Self::Socket | Self::SocketNative, "IPV6_TCLASS") => {
+                Intrinsic::SocketConstant("ipv6_tclass")
+            }
+            #[cfg(target_os = "linux")]
+            (Self::Socket | Self::SocketNative, "IPPROTO_UDPLITE") => {
+                Intrinsic::SocketConstant("ipproto_udplite")
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            (Self::Socket | Self::SocketNative, "SCM_RIGHTS") => {
+                Intrinsic::IntConstant(i64::from(libc::SCM_RIGHTS))
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            (Self::Socket | Self::SocketNative, name @ ("CMSG_LEN" | "CMSG_SPACE")) => {
+                Intrinsic::SocketControlSize {
+                    padded: name == "CMSG_SPACE",
+                }
+            }
             (Self::Socket, "getfqdn") => Intrinsic::SocketGetFqdn,
             (Self::Socket, "socket") => Intrinsic::Socket,
             (Self::Socket, "gaierror") => Intrinsic::GaiError,
@@ -2309,9 +2363,24 @@ impl IntrinsicModule {
             (Self::Operator | Self::OperatorNative, "add" | "__add__") => {
                 Intrinsic::ObjectRuntimeExport("operator.add")
             }
+            (Self::Operator | Self::OperatorNative, "is_") => {
+                Intrinsic::ScopedObjectExport("operator.is_")
+            }
+            (Self::Operator | Self::OperatorNative, "is_not") => {
+                Intrinsic::ScopedObjectExport("operator.is_not")
+            }
             (Self::Operator, "attrgetter") => Intrinsic::AttrGetter,
             (Self::Operator, "itemgetter") => Intrinsic::ObjectRuntimeExport("operator.itemgetter"),
+            (Self::Operator | Self::OperatorNative, "methodcaller") => {
+                Intrinsic::ScopedObjectExport("operator.methodcaller")
+            }
             (Self::Operator, "length_hint") => Intrinsic::LengthHint,
+            (Self::Operator | Self::OperatorNative, "call") | (Self::Operator, "__call__") => {
+                Intrinsic::OperatorCall
+            }
+            (Self::Operator | Self::OperatorNative, "not_") | (Self::Operator, "__not__") => {
+                Intrinsic::OperatorNot
+            }
             (Self::Gc, "is_tracked") => Intrinsic::ScopedObjectExport("gc.is_tracked"),
             (Self::Math, "acos") => Intrinsic::MathAcos,
             (Self::Math, "acosh") => Intrinsic::ScopedObjectExport("math.acosh"),
@@ -2320,7 +2389,13 @@ impl IntrinsicModule {
             (Self::Math, "atan") => Intrinsic::MathAtan,
             (Self::Math, "atan2") => Intrinsic::ScopedObjectExport("math.atan2"),
             (Self::Math, "atanh") => Intrinsic::ScopedObjectExport("math.atanh"),
+            (Self::Math, "perm") => Intrinsic::MathPerm,
+            (Self::Math, "factorial") => Intrinsic::ScopedObjectExport("math.factorial"),
+            (Self::Math, "comb") => Intrinsic::ScopedObjectExport("math.comb"),
             (Self::Math, "cosh") => Intrinsic::ScopedObjectExport("math.cosh"),
+            (Self::Math, "degrees") => Intrinsic::MathDegrees,
+            (Self::Math, "fmod") => Intrinsic::MathFmod,
+            (Self::Math, "radians") => Intrinsic::MathRadians,
             (Self::Math, "erfc") => Intrinsic::MathErfc,
             (Self::Math, "exp") => Intrinsic::ScopedObjectExport("math.exp"),
             (Self::Math, "fabs") => Intrinsic::ScopedObjectExport("math.fabs"),
@@ -2333,6 +2408,7 @@ impl IntrinsicModule {
             (Self::Math, "isfinite") => Intrinsic::ScopedObjectExport("math.isfinite"),
             (Self::Math, "lcm") => Intrinsic::ScopedObjectExport("math.lcm"),
             (Self::Math, "log10") => Intrinsic::MathLog10,
+            (Self::Math, "log1p") => Intrinsic::ScopedObjectExport("math.log1p"),
             (Self::Math, "log2") => Intrinsic::ScopedObjectExport("math.log2"),
             (Self::Math, "ldexp") => Intrinsic::ScopedObjectExport("math.ldexp"),
             (Self::Math, "nextafter") => Intrinsic::ScopedObjectExport("math.nextafter"),
@@ -2430,6 +2506,7 @@ impl IntrinsicModule {
             (Self::Random, "randbytes") => Intrinsic::ScopedObjectExport("random.randbytes"),
             (Self::Random, "sample") => Intrinsic::ScopedObjectExport("random.sample"),
             (Self::Random, "Random") => Intrinsic::ScopedObjectExport("random.Random"),
+            (Self::Random, "uniform") => Intrinsic::ScopedObjectExport("random.uniform"),
             (Self::Random, "expovariate") => Intrinsic::ScopedObjectExport("random.expovariate"),
             (Self::Random, "choices") => Intrinsic::ObjectRuntimeExport("random.choices"),
             (Self::Random, "choice") => Intrinsic::RandomChoice { secure: false },
@@ -2622,6 +2699,12 @@ impl IntrinsicModule {
             (Self::UrllibRequest, "HTTPCookieProcessor") => {
                 Intrinsic::ScopedObjectExport("urllib.request.HTTPCookieProcessor")
             }
+            (Self::UrllibRequest, "ProxyHandler") => {
+                Intrinsic::ScopedObjectExport("urllib.request.ProxyHandler")
+            }
+            (Self::UrllibRequest, "ProxyDigestAuthHandler") => {
+                Intrinsic::ScopedObjectExport("urllib.request.ProxyDigestAuthHandler")
+            }
             (Self::UrllibRequest, "HTTPDigestAuthHandler") => {
                 Intrinsic::ScopedObjectExport("urllib.request.HTTPDigestAuthHandler")
             }
@@ -2712,6 +2795,8 @@ pub(crate) struct SourceModule {
     pub(crate) path: PathBuf,
     pub(crate) name: String,
     pub(crate) source: String,
+    /// Physical text when newline normalization changed the source for analysis.
+    original_source: Option<Box<str>>,
     pub(crate) bundled: bool,
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) bindings: HashMap<String, Binding>,
@@ -2733,10 +2818,27 @@ pub(crate) struct SourceModule {
     pub(crate) snapshots: HashMap<usize, Intrinsic>,
     /// Executable entry statements, or inactive main guards that still require checking.
     pub(crate) executable: Vec<usize>,
-    is_package: bool,
+    pub(crate) is_package: bool,
     search_roots: SearchRoots,
     /// A rebuilt module is declared by a .pyi beside its platform-specific archive.
-    pub(crate) archive: Option<PathBuf>,
+    pub(crate) archive: Option<NativeArchive>,
+}
+
+impl SourceModule {
+    pub(crate) fn original_source(&self) -> &str {
+        self.original_source.as_deref().unwrap_or(&self.source)
+    }
+
+    pub(crate) fn is_program_source(&self) -> bool {
+        !self.bundled
+            && self.archive.is_none()
+            && matches!(self.search_roots, SearchRoots::Single(0))
+    }
+}
+
+pub(crate) struct NativeArchive {
+    path: PathBuf,
+    pub(crate) identity: PathBuf,
 }
 
 enum SearchRoots {
@@ -2843,6 +2945,30 @@ impl SourceModule {
             || (self.is_bundled(TEMPFILE_SPOOL) && class == "SpooledTemporaryFile")
     }
 
+    /// These annotation-only declarations receive immutable data from the checked resolver.
+    pub(crate) fn import_config_slot<'a>(
+        &self,
+        statement: &'a ast::Stmt,
+    ) -> Option<(&'a str, Intrinsic)> {
+        let ast::Stmt::AnnAssign(declaration) = statement else {
+            return None;
+        };
+        if declaration.value.is_some() {
+            return None;
+        }
+        let name = value_name(statement)?;
+        let slot = match name {
+            "_filesystem_roots"
+                if self.is_bundled("pkgutil") || self.is_bundled(METADATA_VERSION) =>
+            {
+                Intrinsic::StartupFilesystemRoots
+            }
+            "_module_suffixes" if self.is_bundled("pkgutil") => Intrinsic::ModuleSuffixes,
+            _ => return None,
+        };
+        Some((name, slot))
+    }
+
     pub(crate) fn is_bundled(&self, name: &str) -> bool {
         self.bundled && self.name == name
     }
@@ -2927,6 +3053,11 @@ impl SourceModule {
                 return Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(export)));
             }
         }
+        if self.is_bundled("unittest.mock") && name == "ThreadingMock" {
+            return Some(Binding::Intrinsic(Intrinsic::RuntimeImport(
+                "unittest.mock",
+            )));
+        }
         if self.is_bundled("unittest.mock") && boxed_mock_export(name) {
             return Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
                 "unittest.mock objects",
@@ -2943,11 +3074,16 @@ impl SourceModule {
         (self.archive.is_none() || matches!(binding, Binding::Definition(_))).then_some(binding)
     }
 
+    pub(crate) fn diagnostic(&self, node: &impl Ranged, message: &str) -> Diagnostic {
+        Diagnostic::at(&self.source, node, message.to_owned()).with_path(&self.path)
+    }
+
     pub(crate) fn error(&self, node: &impl Ranged, message: &str) -> String {
-        let prefix = &self.source[..usize::from(node.start())];
-        let line = prefix.bytes().filter(|&byte| byte == b'\n').count() + 1;
-        let column = prefix.rsplit('\n').next().unwrap_or("").chars().count() + 1;
-        format!("{}:{line}:{column}: Imre: {message}", self.path.display())
+        format!(
+            "{}:{}",
+            self.path.display(),
+            Diagnostic::at(&self.source, node, message)
+        )
     }
 }
 
@@ -2968,8 +3104,13 @@ pub(crate) enum SetLayoutHint {
 }
 
 pub(crate) struct SourceGraph {
+    /// Fixed at graph construction, in the checked resolver's search order.
+    pub(crate) filesystem_roots: Box<[PathBuf]>,
+    /// Declaration result for these exact selected files, prior to any object-path re-selection.
+    pub(crate) source_contract: Option<Result<(), String>>,
     pub(crate) set_layout_hint: std::cell::Cell<SetLayoutHint>,
     pub(crate) float_components: std::cell::Cell<FloatComponents>,
+    pub(crate) missing_repr: std::cell::Cell<Option<DefinitionId>>,
     pub(crate) command_startup: Option<(crate::CommandFlags, String)>,
     pub(crate) virtual_command: bool,
     pub(crate) handled_tracebacks: bool,
@@ -2977,14 +3118,17 @@ pub(crate) struct SourceGraph {
     pub(crate) empty_keywords: empty_keywords::EmptyKeywords,
     checked_diagnostics: std::cell::RefCell<Vec<Vec<CheckedDiagnostic>>>,
     pub(crate) needs_object_runtime: std::cell::Cell<bool>,
-    /// A reachable bytearray constructor keeps its object implementation available on typed failure.
-    pub(crate) has_native_bytearray: std::cell::Cell<bool>,
+    /// A reachable native constructor can use its object implementation if typed lowering fails.
+    pub(crate) has_object_constructor_fallback: std::cell::Cell<bool>,
     pub(crate) check_fallback_calls: std::cell::Cell<FallbackCalls>,
+    pub(crate) imports_runtime_class: bool,
     pub(crate) check_method_factories: std::cell::Cell<bool>,
-    pub(crate) class_layout_error: std::cell::RefCell<Option<String>>,
-    pub(crate) object_builtin_errors: std::cell::RefCell<HashSet<String>>,
-    pub(crate) deferred_object_error: std::cell::RefCell<Option<String>>,
-    pub(crate) return_errors: std::cell::RefCell<HashSet<String>>,
+    pub(crate) class_layout_error: std::cell::RefCell<Option<Diagnostic>>,
+    pub(crate) runtime_initializer: Option<String>,
+    /// Object discovery must establish its own entry when an import was admitted only
+    /// for checked lowering.
+    pub(crate) has_checked_only_import: bool,
+    pub(crate) deferred_object_error: std::cell::RefCell<Option<Diagnostic>>,
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     pub(crate) mutable_builtin_len: bool,
@@ -2994,6 +3138,7 @@ pub(crate) struct SourceGraph {
     zip_files: Vec<(PathBuf, PathBuf, String)>,
     pub(crate) session: Session,
     pub(crate) modules: Vec<SourceModule>,
+    by_name: HashMap<String, ModuleId>,
     pub(crate) entry: ModuleId,
     ordered_bindings: Option<ordered_imports::Bindings>,
     /// The absolute entry spelling used for Python's `__file__`.
@@ -3006,20 +3151,43 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    /// A concrete Python file registered by the checked resolver, before object lowering.
+    pub(crate) fn python_file(&self, name: &str) -> Option<ModuleId> {
+        let id = *self.by_name.get(name)?;
+        let module = &self.modules[id];
+        (!module.bundled
+            && !module.is_namespace()
+            && module.archive.is_none()
+            && !(id == self.entry && self.virtual_command))
+            .then_some(id)
+    }
+
+    /// Match a registered import against the file chosen under its checked search root.
+    pub(crate) fn registration_at(
+        &self,
+        id: ModuleId,
+        root: &Path,
+        file: &Path,
+        init: &Path,
+    ) -> Option<bool> {
+        let module = &self.modules[id];
+        let path = if module.is_package { init } else { file };
+        let matches = module.path == path
+            || self.inputs.directories.iter().any(|(spelling, identity)| {
+                spelling == root
+                    && module
+                        .path
+                        .strip_prefix(identity)
+                        .is_ok_and(|relative| path.strip_prefix(root).ok() == Some(relative))
+            });
+        matches.then_some(module.is_package)
+    }
+
     /// Request checked-file diagnostics without replacing checks requested by a Python entry.
     pub(crate) fn require_fallback_calls(&self) {
         if matches!(self.check_fallback_calls.get(), FallbackCalls::None) {
             self.check_fallback_calls.set(FallbackCalls::All);
         }
-    }
-
-    /// Select object class construction while preserving checked calls and typed module layouts.
-    pub(crate) fn require_object_class_layout(&self, error: String) -> String {
-        self.class_layout_error.replace(Some(error.clone()));
-        self.object_builtin_errors
-            .borrow_mut()
-            .insert(error.clone());
-        error
     }
 
     /// The native value-struct decorator has no corresponding Python object runtime export.
@@ -3059,6 +3227,26 @@ impl SourceGraph {
                 && ast::helpers::any_over_body(&module.parsed.syntax().body, |expr| {
                     self.boxed_pattern_method(id, expr).is_some()
                 })
+        })
+    }
+
+    /// A first-party loader can select object execution before a typed call in another module.
+    pub(crate) fn uses_source_loader(&self) -> bool {
+        self.modules.iter().enumerate().any(|(id, module)| {
+            !module.bundled
+                && (module.bindings.values().any(|binding| {
+                    *binding
+                        == Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                            "importlib.abc.SourceLoader",
+                        ))
+                }) || ast::helpers::any_over_body(&module.parsed.syntax().body, |expr| {
+                    expr.as_attribute_expr().is_some_and(|attr| {
+                        attr.attr.as_str() == "SourceLoader"
+                            && self
+                                .session
+                                .is_stdlib_module(id, &attr.value, "importlib.abc")
+                    })
+                }))
         })
     }
 
@@ -3110,6 +3298,22 @@ impl SourceGraph {
             .map(|(path, _, _)| path.clone())
             .chain(profile.map(Path::to_path_buf))
             .collect();
+        // The linker receives physical archive paths. A hit must also validate the
+        // import spelling in case a wheel symlink was retargeted or removed.
+        for archive in self
+            .modules
+            .iter()
+            .filter_map(|module| module.archive.as_ref())
+        {
+            match FileSystem::default().open_hashed(&archive.identity) {
+                Ok((_, hash)) => inputs.files.push((
+                    archive.path.clone(),
+                    archive.identity.clone(),
+                    hash.to_hex().to_string(),
+                )),
+                Err(_) => inputs.relink_site_wheel = true,
+            }
+        }
         (inputs, paths)
     }
 
@@ -3212,6 +3416,24 @@ impl SourceGraph {
         self.command_startup
             .as_ref()
             .map_or(0, |(flags, _)| flags.optimize)
+    }
+
+    pub(crate) fn include_key_reprs(&mut self, owners: &HashSet<DefinitionId>) {
+        self.reachable = Some(reachability::Reachable::collect_with_reprs(
+            self, false, owners,
+        ));
+        self.refresh_reachable_state();
+    }
+
+    /// Both decisions depend on the methods included in this source graph.
+    fn refresh_reachable_state(&mut self) {
+        self.mutable_documents = self.uses_mutable_documents();
+        if self.handled_tracebacks {
+            self.traceback_objects = self.reachable.as_ref().map_or_else(
+                || reachability::Reachable::collect(self, false).traceback_objects,
+                |roots| roots.traceback_objects,
+            );
+        }
     }
 
     pub(crate) fn reachable_only(&self) -> bool {
@@ -3508,7 +3730,7 @@ impl SourceGraph {
     }
 
     pub(crate) fn single_with_mode(source: &str, reachable_only: bool) -> Result<Self, String> {
-        let mut loader = Loader::new(PathBuf::from("/"), &[], &[], &[], FileSystem::default())?;
+        let mut loader = Loader::new(PathBuf::from("/"), &[], &[], None, FileSystem::default())?;
         loader.allow_imports = false;
         loader.reachable_only = reachable_only;
         let filename = PathBuf::from("/input.py");
@@ -3529,16 +3751,18 @@ impl SourceGraph {
         options: &crate::CompileOptions,
         fs: FileSystem<'_>,
         import_failure: &mut Option<EntryImportFailure>,
+        site_probes: &mut SiteProbes,
     ) -> Result<Self, String> {
         let root = std::env::current_dir().map_err(|e| e.to_string())?;
         let mut loader = Loader::new(
             root.clone(),
             &options.extension_paths,
             &options.python_archive_indices,
-            options.implicit_sites(),
+            Some((options, site_probes)),
             fs,
         )?;
         loader.skip_current_root = command.flags.safe_path;
+        loader.frozen_modules = command.flags.frozen_modules;
         loader.reachable_only = options.reachable_only || options.entry_profile.is_some();
         let filename = root.join("<string>.py");
         let entry = loader.add_source(
@@ -3562,6 +3786,75 @@ impl SourceGraph {
         Ok(graph)
     }
 
+    /// Resolve a Python module operand through the same ordered loader used for imports.
+    /// The runtime launcher still executes runpy and the selected package initializers.
+    /// A non-project provider, or a launcher whose selection requires Python execution,
+    /// leaves the authoritative source set to that launcher's manifest.
+    pub(crate) fn module_entry(
+        path: &Path,
+        name: &str,
+        options: &crate::CompileOptions,
+        mut fs: FileSystem<'_>,
+        site_probes: &mut SiteProbes,
+    ) -> Result<Option<Self>, String> {
+        if !valid_module_operand(name)
+            || !options.path_entry && name.split('.').next() == Some("__main__")
+            || options.sitecustomize
+            || options.stdlib_sitecustomize
+            || options.user_site_pth.is_some()
+        {
+            return Ok(None);
+        }
+        let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+        let spelling = if options.path_entry {
+            cwd.join(path)
+        } else {
+            cwd
+        };
+        if options.path_entry && !fs.is_dir(&spelling) {
+            // A ZIP operand belongs to the ZIP finder, even under isolated startup.
+            return Ok(None);
+        }
+        let root = fs.canonicalize(&spelling).map_err(|e| e.to_string())?;
+        let mut loader = Loader::new(
+            root.clone(),
+            &options.extension_paths,
+            &options.python_archive_indices,
+            Some((options, site_probes)),
+            fs,
+        )?;
+        let startup = options.python_startup();
+        loader.skip_current_root =
+            !options.path_entry && startup.is_some_and(|(flags, _)| flags.safe_path);
+        loader.frozen_modules = startup.is_none_or(|(flags, _)| flags.frozen_modules);
+        loader.reachable_only = options.reachable_only || options.entry_profile.is_some();
+        if !loader.skip_current_root {
+            loader.inputs.directories.push((spelling, root));
+        }
+        loader.module_operand = Some(name.to_owned());
+        if loader.has_project_source("runpy") {
+            return Ok(None);
+        }
+        let entry = match loader.load_module_entry(name) {
+            Ok(Some(id)) => id,
+            Ok(None) => return Ok(None),
+            Err(_) if loader.import_failure.is_some() => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let filename = loader.modules[entry].path.clone();
+        let reachable_only = loader.reachable_only;
+        let mut graph = loader.finish(
+            entry,
+            filename,
+            reachable_only,
+            options.entry_profile.as_deref(),
+        )?;
+        if let Some((flags, executable)) = startup {
+            graph.command_startup = Some((flags.clone(), executable.to_owned()));
+        }
+        Ok(Some(graph))
+    }
+
     /// A directly invoked file is __main__; its enclosing package is not imported.
     pub(crate) fn script(
         path: &Path,
@@ -3570,6 +3863,7 @@ impl SourceGraph {
         options: &crate::CompileOptions,
         mut fs: FileSystem<'_>,
         import_failure: &mut Option<EntryImportFailure>,
+        site_probes: &mut SiteProbes,
     ) -> Result<Self, String> {
         let filename = std::env::current_dir()
             .map_err(|err| err.to_string())?
@@ -3580,7 +3874,7 @@ impl SourceGraph {
         let bytes = if crate::named_bytecode(path) {
             std::fs::File::open(&entry).and_then(crate::read_bytecode_prefix)
         } else {
-            fs.read(&entry)
+            fs.read_source(&entry)
         }
         .map_err(|err| format!("{}: {err}", path.display()))?;
         if let Some(error) = crate::bytecode_script_error(path, &bytes) {
@@ -3596,10 +3890,11 @@ impl SourceGraph {
             root,
             &options.extension_paths,
             &options.python_archive_indices,
-            options.implicit_sites(),
+            Some((options, site_probes)),
             fs,
         )?;
         loader.skip_current_root = flags.safe_path;
+        loader.frozen_modules = flags.frozen_modules;
         let reachable = options.reachable_only || options.entry_profile.is_some();
         loader.reachable_only = reachable;
         let id = loader.add(entry.clone(), entry, "__main__".into(), false, &source)?;
@@ -3618,21 +3913,24 @@ impl SourceGraph {
         Self::load_with(
             entry,
             module_root,
-            extension_paths,
+            &crate::CompileOptions {
+                extension_paths: extension_paths.to_vec(),
+                ..Default::default()
+            },
             FileSystem::default(),
-            false,
-            None,
+            &mut None,
         )
     }
 
     pub(crate) fn load_with(
         entry: &Path,
         module_root: Option<&Path>,
-        extension_paths: &[PathBuf],
+        options: &crate::CompileOptions,
         mut fs: FileSystem<'_>,
-        reachable_only: bool,
-        profile: Option<&Path>,
+        import_failure: &mut Option<EntryImportFailure>,
     ) -> Result<Self, String> {
+        let profile = options.entry_profile.as_deref();
+        let reachable_only = options.reachable_only || profile.is_some();
         // __file__ preserves the invoked spelling, including symlinks and '..'.
         // Use the canonical path below for import resolution and containment.
         let filename = std::env::current_dir()
@@ -3681,9 +3979,15 @@ impl SourceGraph {
             .collect::<Result<Vec<_>, _>>()?
             .join(".");
         let source = fs
-            .read_to_string(&entry)
+            .read_source_string(&entry)
             .map_err(|error| format!("{}: {error}", entry.display()))?;
-        let mut loader = Loader::new(root, extension_paths, &[], &[], fs)?;
+        let mut loader = Loader::new(
+            root,
+            &options.extension_paths,
+            &options.python_archive_indices,
+            None,
+            fs,
+        )?;
         loader.reachable_only = reachable_only;
         if inferred {
             loader.inputs.missing.push(loader.root.join("__init__.py"));
@@ -3699,7 +4003,11 @@ impl SourceGraph {
                 );
             }
         }
-        loader.scan(id)?;
+        if options.python_archive_indices.is_empty() {
+            loader.scan(id)?;
+        } else {
+            loader.scan_python_entry(id, import_failure)?;
+        }
         loader.finish(id, filename, reachable_only, profile)
     }
 
@@ -3708,7 +4016,47 @@ impl SourceGraph {
         if let Some(import) = self.local_static_binding(module, expression) {
             return self.local_import_value(module, expression, import);
         }
-        resolve_binding(&self.modules, module, expression)
+        let binding = resolve_binding(&self.modules, module, expression)?;
+        if let Binding::Definition(id) = binding
+            && self.builtin_before_function(module, expression, id)
+        {
+            return None;
+        }
+        Some(binding)
+    }
+
+    pub(crate) fn builtin_function_shadow(
+        &self,
+        name: &str,
+        binding: Binding,
+    ) -> Option<&ast::StmtFunctionDef> {
+        let Binding::Definition(id) = binding else {
+            return None;
+        };
+        if !crate::frontend::reserved_builtin_function(name) {
+            return None;
+        }
+        self.modules[id.module].parsed.syntax().body[id.statement].as_function_def_stmt()
+    }
+
+    /// A bare read during module initialization can still reach the builtin before a local def.
+    fn builtin_before_function(
+        &self,
+        module: ModuleId,
+        expression: &ast::Expr,
+        id: DefinitionId,
+    ) -> bool {
+        let ast::Expr::Name(name) = expression else {
+            return false;
+        };
+        let statement = &self.modules[id.module].parsed.syntax().body[id.statement];
+        id.module == module
+            && name.start() < statement.end()
+            && statement
+                .as_function_def_stmt()
+                .is_some_and(|function| function.name.id == name.id)
+            && crate::frontend::reserved_builtin_function(name.id.as_str())
+            && self.session.is_unbound_module_read(module, expression)
     }
 
     /// Recognize Protocol and Protocol[T] at the point where the class is defined.
@@ -3940,6 +4288,7 @@ fn resolve_binding(
                 }
                 Binding::Definition(_)
                 | Binding::ConditionalValue
+                | Binding::RuntimeClass
                 | Binding::Value(_)
                 | Binding::TypeAlias(..)
                 | Binding::Intrinsic(_) => None,
@@ -3954,6 +4303,7 @@ const LOGGING_HANDLER_CLASSES: &str = "__imre_logging_handler_classes__";
 pub(crate) const CONTEXTLIB_ABSTRACT: &str = "__imre_contextlib_abstract__";
 const CONTEXTLIB_EXIT_STACK: &str = "__imre_contextlib_exit_stack__";
 const METADATA_VERSION: &str = "__imre_metadata_version__";
+const INSPECT_CLEANDOC: &str = include_str!("../stdlib/inspect_cleandoc.py");
 const INSPECT_FUNCTIONS: &str = "__imre_inspect_functions__";
 const TEMPFILE_SPOOL: &str = "__imre_tempfile_spool__";
 const TEXTWRAP_FUNCTIONS: &str = "__imre_textwrap_functions__";
@@ -4024,13 +4374,52 @@ pub(crate) enum EntryImportFailure {
     AfterStatement,
     MissingModule,
     ZipImport,
+    RuntimeProvider,
+}
+
+/// File probes that affect checked admission, even when the program later uses object imports.
+#[derive(Default)]
+pub(crate) struct SiteProbes {
+    missing: Vec<PathBuf>,
+    selected: bool,
+    file_checks: BTreeMap<PathBuf, bool>,
+}
+
+impl SiteProbes {
+    fn is_file(&mut self, fs: &mut FileSystem<'_>, path: PathBuf) -> bool {
+        *self
+            .file_checks
+            .entry(path)
+            .or_insert_with_key(|p| fs.is_file(p))
+    }
+
+    fn paired(&mut self, fs: &mut FileSystem<'_>, archive: &Path, stub: &Path) -> bool {
+        for file in [archive, stub] {
+            if !fs.is_file(file) {
+                self.missing.push(file.to_owned());
+                return false;
+            }
+        }
+        self.selected = true;
+        true
+    }
+
+    pub(crate) fn record(&self, inputs: &mut crate::SourceInputs) {
+        inputs.missing.extend_from_slice(&self.missing);
+        inputs.file_checks.extend(self.file_checks.clone());
+        inputs.relink_site_wheel = self.selected && inputs.boxed_imports;
+    }
 }
 
 struct Loader<'a> {
+    module_operand: Option<String>,
     fs: FileSystem<'a>,
     /// ty only searches typeshed for builtins; record sealed imports missing from its inventory.
     checked_builtin_imports: Vec<(ModuleId, TextRange)>,
     needs_object_imports: bool,
+    runtime_initializer: Option<String>,
+    has_checked_only_import: bool,
+    imports_runtime_class: bool,
     wildcard_import: Option<String>,
     inputs: crate::SourceInputs,
     zip_files: Vec<(PathBuf, PathBuf, String)>,
@@ -4038,6 +4427,7 @@ struct Loader<'a> {
     root: PathBuf,
     search_roots: Vec<PathBuf>,
     archive_roots: usize,
+    site_probes: Option<(HashSet<PathBuf>, &'a mut SiteProbes)>,
     session: Session,
     modules: Vec<SourceModule>,
     by_name: HashMap<String, ModuleId>,
@@ -4050,6 +4440,7 @@ struct Loader<'a> {
     import_depth: usize,
     allow_imports: bool,
     skip_current_root: bool,
+    frozen_modules: bool,
     reachable_only: bool,
     initialization: Vec<(ModuleId, Range<usize>)>,
     pub(crate) errno_names: Vec<String>,
@@ -4060,18 +4451,20 @@ impl<'a> Loader<'a> {
         root: PathBuf,
         extension_paths: &[PathBuf],
         python_archive_indices: &[usize],
-        site_dirs: &[PathBuf],
+        python: Option<(&crate::CompileOptions, &'a mut SiteProbes)>,
         mut fs: FileSystem<'a>,
     ) -> Result<Self, String> {
         let mut search_roots = Vec::new();
         let mut zip_sources = HashMap::new();
         let mut zip_inputs = crate::SourceInputs::default();
+        let mut inputs = crate::SourceInputs::default();
         for (index, path) in extension_paths.iter().enumerate() {
+            let logical = std::path::absolute(path).map_err(|e| e.to_string())?;
             if python_archive_indices.contains(&index) {
-                let logical = std::path::absolute(path).map_err(|e| e.to_string())?;
                 if let std::collections::hash_map::Entry::Vacant(entry) = zip_sources.entry(logical)
                 {
-                    let archive = crate::zip_entry::ZipSources::open(entry.key(), &mut zip_inputs)?;
+                    let archive =
+                        crate::zip_entry::ZipSources::open(entry.key(), &mut zip_inputs, &mut fs)?;
                     search_roots.push(entry.key().clone());
                     entry.insert(archive);
                 }
@@ -4086,25 +4479,32 @@ impl<'a> Loader<'a> {
                     path.display()
                 ));
             }
+            inputs.directories.push((logical, directory.clone()));
             if !search_roots.contains(&directory) {
                 search_roots.push(directory);
             }
         }
         let archive_roots = search_roots.len();
-        let mut inputs = crate::SourceInputs::default();
-        for site in site_dirs {
-            let canonical = fs.canonicalize(site).map_err(|e| e.to_string())?;
-            inputs
-                .directories
-                .push((site.to_owned(), canonical.clone()));
-            let site = canonical;
-            if !search_roots.contains(&site) {
-                search_roots.push(site);
+        let mut site_roots = HashSet::new();
+        let mut site_probes = None;
+        if let Some((options, probes)) = python {
+            for dir in options.installed_dirs() {
+                let canonical = fs.canonicalize(dir).map_err(|e| e.to_string())?;
+                inputs.directories.push((dir.to_owned(), canonical.clone()));
+                if options.site_dirs.contains(dir) {
+                    site_roots.insert(canonical.clone());
+                }
+                if !search_roots.contains(&canonical) {
+                    search_roots.push(canonical);
+                }
             }
+            site_probes = Some((site_roots, probes));
         }
         Ok(Self {
+            module_operand: None,
             fs,
             archive_roots,
+            site_probes,
             session: Session::new(&root, &search_roots)?,
             search_roots,
             inputs,
@@ -4112,6 +4512,9 @@ impl<'a> Loader<'a> {
             zip_files: zip_inputs.files,
             checked_builtin_imports: Vec::new(),
             needs_object_imports: false,
+            runtime_initializer: None,
+            has_checked_only_import: false,
+            imports_runtime_class: false,
             wildcard_import: None,
             root,
             modules: Vec::new(),
@@ -4124,6 +4527,7 @@ impl<'a> Loader<'a> {
             import_depth: 0,
             allow_imports: true,
             skip_current_root: false,
+            frozen_modules: true,
             reachable_only: false,
             initialization: Vec::new(),
             errno_names: Vec::new(),
@@ -4162,9 +4566,11 @@ impl<'a> Loader<'a> {
             identity.clone(),
             blake3::hash(source.as_bytes()).to_hex().to_string(),
         ));
-        let source = crate::normalize_source(source, kind)
-            .map_err(|error| format!("{}: {error}", path.display()))?
-            .into_owned();
+        let normalized = crate::normalize_source(source, kind)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        let original_source =
+            matches!(normalized, std::borrow::Cow::Owned(_)).then(|| source.into());
+        let source = normalized.into_owned();
         let parsed = self.session.add(&path, &source, kind)?;
         let id = self.modules.len();
         self.by_name.insert(name.clone(), id);
@@ -4174,6 +4580,7 @@ impl<'a> Loader<'a> {
             path,
             name,
             source,
+            original_source,
             bundled: false,
             parsed,
             is_package,
@@ -4277,6 +4684,10 @@ impl<'a> Loader<'a> {
             checked_diagnostics[id].push(CheckedDiagnostic::BuiltinImport(name));
         }
         let mut graph = SourceGraph {
+            filesystem_roots: std::iter::once(self.root)
+                .skip(usize::from(self.skip_current_root))
+                .chain(self.search_roots)
+                .collect(),
             doctest_imports,
             command_startup: None,
             virtual_command: false,
@@ -4295,15 +4706,22 @@ impl<'a> Loader<'a> {
             empty_keywords: empty_keywords::EmptyKeywords::default(),
             checked_diagnostics: std::cell::RefCell::new(checked_diagnostics),
             float_components: Default::default(),
-            needs_object_runtime: std::cell::Cell::new(self.needs_object_imports),
-            has_native_bytearray: Default::default(),
+            missing_repr: Default::default(),
+            // An import that cannot be initialized here must not turn an unused
+            // object-capable namespace into a reason to box the caller.
+            needs_object_runtime: std::cell::Cell::new(
+                self.needs_object_imports && self.runtime_initializer.is_none(),
+            ),
+            has_object_constructor_fallback: Default::default(),
+            source_contract: None,
             set_layout_hint: std::cell::Cell::new(SetLayoutHint::Available),
             check_fallback_calls: Default::default(),
+            imports_runtime_class: self.imports_runtime_class,
             check_method_factories: Default::default(),
             class_layout_error: Default::default(),
-            object_builtin_errors: Default::default(),
-            deferred_object_error: self.wildcard_import.into(),
-            return_errors: Default::default(),
+            runtime_initializer: self.runtime_initializer,
+            has_checked_only_import: self.has_checked_only_import,
+            deferred_object_error: self.wildcard_import.map(Into::into).into(),
             entry_profile: profile
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?
@@ -4320,6 +4738,7 @@ impl<'a> Loader<'a> {
                 .ordered_imports
                 .then(|| ordered_imports::Bindings::new(&self.modules)),
             modules: self.modules,
+            by_name: self.by_name,
             entry,
             initialization: self.initialization,
             errno_names: self.errno_names,
@@ -4337,13 +4756,7 @@ impl<'a> Loader<'a> {
                 Some((library, reachability::Reachable::collect(&graph, true)));
         }
         graph.empty_keywords = empty_keywords::EmptyKeywords::collect(&graph);
-        graph.mutable_documents = graph.uses_mutable_documents();
-        if graph.handled_tracebacks {
-            graph.traceback_objects = graph.reachable.as_ref().map_or_else(
-                || reachability::Reachable::collect(&graph, false).traceback_objects,
-                |roots| roots.traceback_objects,
-            );
-        }
+        graph.refresh_reachable_state();
         graph.mutable_builtin_len = graph.writes_builtin_len();
         Ok(graph)
     }
@@ -4355,7 +4768,8 @@ impl<'a> Loader<'a> {
         failure: &mut Option<EntryImportFailure>,
     ) -> Result<(), String> {
         self.scan(id).inspect_err(|_| {
-            if self.import_failure.is_some()
+            if !self.has_checked_only_import
+                && self.import_failure.is_some()
                 && self.modules[id].parsed.has_no_syntax_errors()
                 && self.session.has_valid_semantic_syntax(id)
             {
@@ -4365,6 +4779,7 @@ impl<'a> Loader<'a> {
     }
 
     fn scan(&mut self, id: ModuleId) -> Result<(), String> {
+        let is_entry = self.is_entry(id);
         let parsed = self.modules[id].parsed.clone();
         let mut imports = Vec::new();
         for stmt in &parsed.syntax().body {
@@ -4404,14 +4819,31 @@ impl<'a> Loader<'a> {
                 ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)
             )
         });
+        let mut pending_builtin_functions = HashSet::new();
+        if is_entry {
+            pending_builtin_functions.extend(
+                parsed
+                    .syntax()
+                    .body
+                    .iter()
+                    .filter_map(ast::Stmt::as_function_def_stmt)
+                    .map(|function| function.name.as_str())
+                    .filter(|name| crate::frontend::reserved_builtin_function(name)),
+            );
+        }
         let mut executable = false;
         let mut segment = 0;
         let mut definition_prefix = false;
         let mut field_separators = Vec::new();
+        let mut runtime_classes = Vec::new();
         for (index, statement) in parsed.syntax().body.iter().enumerate() {
             if self.modules[id].archive.is_some() && !native_declaration(statement) {
                 return Err(self.modules[id].error(statement,
                     "native stubs allow type-only imports and fully annotated, required positional-only methods with an ellipsis body"));
+            }
+            if let Some((name, slot)) = self.modules[id].import_config_slot(statement) {
+                self.bind(id, name, Binding::Intrinsic(slot), statement)?;
+                continue;
             }
             match statement {
                 ast::Stmt::If(guard)
@@ -4431,7 +4863,7 @@ impl<'a> Loader<'a> {
                     }
                 }
                 ast::Stmt::Try(guard)
-                    if (id == 0 || self.partial_source(id))
+                    if (is_entry || self.partial_source(id))
                         && !executable
                         && self.modules[id].entry_globals.is_empty()
                         && let Some((module, names)) =
@@ -4452,13 +4884,14 @@ impl<'a> Loader<'a> {
                 }
                 ast::Stmt::FunctionDef(function) => {
                     definition_prefix |= self.partial_source(id);
-                    if executable && id == 0 {
+                    if executable && is_entry {
                         return Err(self.modules[id].error(
                             statement,
                             "definitions must precede executable module statements",
                         ));
                     }
                     let name = function.name.as_str();
+                    pending_builtin_functions.remove(name);
                     let current = Binding::Definition(DefinitionId {
                         module: id,
                         statement: index,
@@ -4485,7 +4918,7 @@ impl<'a> Loader<'a> {
                             .body
                             .iter()
                             .any(|stmt| matches!(stmt, ast::Stmt::Assign(_)));
-                    if executable && id == 0 {
+                    if executable && is_entry {
                         return Err(self.modules[id].error(
                             statement,
                             "definitions must precede executable module statements",
@@ -4532,9 +4965,9 @@ impl<'a> Loader<'a> {
                                         })
                                     || nested_source && matches!(stmt, ast::Stmt::Expr(_))
                             });
-                        if id == 0 || !simple && !ordered {
+                        if is_entry || !simple && !ordered {
                             self.import_failure =
-                                (id == 0).then_some(EntryImportFailure::AfterStatement);
+                                is_entry.then_some(EntryImportFailure::AfterStatement);
                             return Err(self.modules[id].error(
                                 statement,
                                 "imports must precede executable module statements",
@@ -4583,7 +5016,7 @@ impl<'a> Loader<'a> {
                             &mut field_separators,
                         );
                     }
-                    if executable && id == 0 {
+                    if executable && is_entry {
                         return Err(self.modules[id].error(
                             statement,
                             "definitions must precede executable module statements",
@@ -4611,7 +5044,9 @@ impl<'a> Loader<'a> {
                         && otherwise.test.is_none()
                     {
                         for runtime_statement in &otherwise.body {
-                            if let Some(name) = value_name(runtime_statement)
+                            if let ast::Stmt::ClassDef(class) = runtime_statement {
+                                runtime_classes.push(class.name.as_str());
+                            } else if let Some(name) = value_name(runtime_statement)
                                 && module_value(runtime_statement).is_some()
                             {
                                 self.bind(id, name, Binding::ConditionalValue, runtime_statement)?;
@@ -4645,7 +5080,7 @@ impl<'a> Loader<'a> {
                             }
                         }
                     }
-                    let entry_global = id == 0
+                    let entry_global = is_entry
                         && !executable
                         && (last_definition.is_some_and(|last| index < last)
                             || matches!(
@@ -4668,7 +5103,12 @@ impl<'a> Loader<'a> {
                             continue;
                         }
                         if module_attribute_guard(&self.modules, id, statement)
-                            || imported_function_call(&self.modules, id, statement)
+                            || entry_prefix_call(
+                                &self.modules,
+                                id,
+                                statement,
+                                &pending_builtin_functions,
+                            )
                         {
                             self.modules[id].entry_globals.push(index);
                             continue;
@@ -4676,7 +5116,7 @@ impl<'a> Loader<'a> {
                     }
                     self.scan_value_writes(id, statement)?;
                     if let Some(name) = value_name(statement) {
-                        if (id != 0 || entry_global)
+                        if (!is_entry || entry_global)
                             && self.modules[id].rebound_target(id, statement).is_none()
                         {
                             self.bind(
@@ -4699,6 +5139,14 @@ impl<'a> Loader<'a> {
                 }
             }
         }
+        // Expose otherwise unbound classes after module initialization. Preserve the
+        // existing resolution of names assigned or imported elsewhere in the module.
+        for name in runtime_classes {
+            self.modules[id]
+                .bindings
+                .entry(name.to_owned())
+                .or_insert(Binding::RuntimeClass);
+        }
         if !field_separators.is_empty() {
             let module = &mut self.modules[id];
             let mut source = module.source.clone();
@@ -4706,7 +5154,7 @@ impl<'a> Loader<'a> {
                 let spaces = " ".repeat(range.len());
                 source.replace_range(range, &spaces);
             }
-            module.parsed = self.session.replace_source(id, source);
+            module.parsed = self.session.replace_source(id, source)?;
         }
         self.loading.remove(&id);
         self.initialization
@@ -4767,6 +5215,18 @@ impl<'a> Loader<'a> {
         binding: Binding,
         node: &impl Ranged,
     ) -> Result<(), String> {
+        // Resolve names for the checked graph, but never erase a provider's initializer.
+        // An independently selected object entry will execute the normal Python import.
+        if let Binding::IntrinsicModule(IntrinsicModule::RuntimeSource(owner))
+        | Binding::Intrinsic(Intrinsic::RuntimeImport(owner)) = binding
+        {
+            self.runtime_initializer.get_or_insert_with(|| {
+                self.modules[module].error(
+                    node,
+                    &format!("{owner} requires runtime import initialization"),
+                )
+            });
+        }
         if self.modules[module].bindings.get(name) == Some(&Binding::ConditionalValue) {
             self.modules[module].bindings.insert(name.into(), binding);
             return Ok(());
@@ -4780,6 +5240,26 @@ impl<'a> Loader<'a> {
             self.modules[module].bindings.insert(name.into(), binding);
         }
         Ok(())
+    }
+
+    /// A dotted alias follows visible package attributes after loading the physical leaf.
+    fn aliased_import(&self, name: &str) -> Result<Binding, String> {
+        let mut parts = name.split('.');
+        let root = parts.next().unwrap();
+        let mut binding = Binding::Module(self.by_name[root]);
+        for part in parts {
+            binding = match binding {
+                Binding::Module(parent) => self.modules[parent].export(part).or_else(|| {
+                    // A loaded child may not be published on its parent yet.
+                    let child = format!("{}.{part}", self.modules[parent].name);
+                    self.by_name.get(&child).copied().map(Binding::Module)
+                }),
+                Binding::IntrinsicModule(module) => stdlib_symbol(&self.modules, module, part),
+                _ => None,
+            }
+            .ok_or_else(|| format!("cannot resolve {part:?} in dotted import {name:?}"))?;
+        }
+        Ok(binding)
     }
 
     fn import(&mut self, id: ModuleId, index: usize, statement: &ast::Stmt) -> Result<(), String> {
@@ -4811,14 +5291,14 @@ impl<'a> Loader<'a> {
                         self.bind(id, local.as_str(), Binding::IntrinsicModule(module), alias)?;
                         continue;
                     }
-                    let leaf = self.load_module(name)?;
-                    let (name, target) = if let Some(alias) = &alias.asname {
-                        (alias.as_str(), leaf)
+                    self.load_module(name)?;
+                    let (local, binding) = if let Some(local) = &alias.asname {
+                        (local.as_str(), self.aliased_import(name)?)
                     } else {
-                        let first = name.split('.').next().unwrap();
-                        (first, self.by_name[first])
+                        let root = name.split('.').next().unwrap();
+                        (root, Binding::Module(self.by_name[root]))
                     };
-                    self.bind(id, name, Binding::Module(target), alias)?;
+                    self.bind(id, local, binding, alias)?;
                 }
             }
             ast::Stmt::ImportFrom(import) => {
@@ -4829,8 +5309,22 @@ impl<'a> Loader<'a> {
                 if import.names.iter().any(|alias| alias.name.as_str() == "*") {
                     // The module initializer chooses its exports. Still resolve the
                     // dependency so checked files retain their ordinary diagnostics.
-                    if import.level != 0 || self.intrinsic_module(&name, None)?.is_none() {
+                    let module = if import.level == 0 {
+                        self.intrinsic_module(&name, None)?
+                    } else {
+                        None
+                    };
+                    if module.is_none() {
                         self.load_module(&name)?;
+                    }
+                    if let Some(IntrinsicModule::RuntimeSource(owner)) = module {
+                        self.runtime_initializer.get_or_insert_with(|| {
+                            self.modules[id].error(
+                                import,
+                                &format!("{owner} requires runtime import initialization"),
+                            )
+                        });
+                        return Ok(());
                     }
                     self.needs_object_imports = true;
                     self.wildcard_import.get_or_insert_with(|| {
@@ -4950,7 +5444,10 @@ impl<'a> Loader<'a> {
                             || module == IntrinsicModule::EmailHeaderValueParser
                             || matches!(
                                 (module, binding),
-                                (IntrinsicModule::Socket, Binding::Intrinsic(Intrinsic::StringConstant(_)))
+                                (
+                                    IntrinsicModule::Socket,
+                                    Binding::Intrinsic(Intrinsic::StringConstant(_))
+                                )
                             )
                         {
                             self.checked_builtin_imports.push((id, alias.range()));
@@ -4994,9 +5491,11 @@ impl<'a> Loader<'a> {
                                 export @ (Intrinsic::ObjectRuntimeExport(_) | Intrinsic::Awaitable)
                             ) if export != Intrinsic::TYPING_SEQUENCE
                         );
-                        if module == IntrinsicModule::Collections
-                            && binding == Binding::Intrinsic(Intrinsic::CountElements)
-                        {
+                        if matches!(
+                            (module, alias.name.as_str()),
+                            (IntrinsicModule::Collections, "_count_elements")
+                                | (IntrinsicModule::Struct, "_clearcache")
+                        ) {
                             self.checked_builtin_imports.push((id, alias.range()));
                         }
                         self.bind(id, local.as_str(), binding, alias)?;
@@ -5008,6 +5507,12 @@ impl<'a> Loader<'a> {
                     }
                     return Ok(());
                 }
+                // Loading a new child briefly publishes the module on this package. A
+                // from-import in the package can immediately replace that very binding.
+                let fresh_child = name.rsplit_once('.').and_then(|(parent, child)| {
+                    (parent == self.modules[id].name && !self.by_name.contains_key(&name))
+                        .then_some(child)
+                });
                 // Only a from-import may read an explicitly ready binding from a loading module.
                 let target = match self.by_name.get(&name).copied() {
                     Some(target)
@@ -5036,7 +5541,7 @@ impl<'a> Loader<'a> {
                                     ready
                                 }
                                 Binding::Value(def) => package && self.initialized(def),
-                                Binding::ConditionalValue => false,
+                                Binding::ConditionalValue | Binding::RuntimeClass => false,
                                 _ => package,
                             };
                             if !available {
@@ -5093,8 +5598,16 @@ impl<'a> Loader<'a> {
                         self.checked_builtin_imports.push((id, alias.range()));
                     }
                     self.needs_object_imports |= binding == Binding::ConditionalValue;
+                    self.imports_runtime_class |= binding == Binding::RuntimeClass;
                     let local = alias.asname.as_ref().unwrap_or(&alias.name);
-                    self.bind(id, local.as_str(), binding, alias)?;
+                    if fresh_child == Some(local.as_str())
+                        && let Some(current) = self.modules[id].bindings.get_mut(local.as_str())
+                        && *current == Binding::Module(target)
+                    {
+                        *current = binding;
+                    } else {
+                        self.bind(id, local.as_str(), binding, alias)?;
+                    }
                 }
             }
             _ => unreachable!(),
@@ -5138,21 +5651,24 @@ impl<'a> Loader<'a> {
                     | IntrinsicModule::Md5
                     | IntrinsicModule::Atexit
                     | IntrinsicModule::Imp
-                    | IntrinsicModule::ImportlibAbc
                     | IntrinsicModule::ImportlibLoaderAbc
                     | IntrinsicModule::ImportlibBootstrapExternal
                     | IntrinsicModule::ImportlibResourcesAbc
-            ) || module == IntrinsicModule::SocketNative
-                && imports.is_none_or(|names| {
-                    names.iter().any(|alias| {
-                        !matches!(
-                            module.symbol(alias.name.as_str()),
-                            Some(Binding::Intrinsic(
-                                Intrinsic::IntConstant(_) | Intrinsic::ScopedObjectExport(_)
-                            ))
-                        )
-                    })
-                });
+            ) || matches!(
+                module,
+                IntrinsicModule::SocketNative | IntrinsicModule::ImportlibAbc
+            ) && imports.is_none_or(|names| {
+                names.iter().any(|alias| {
+                    !matches!(
+                        module.symbol(alias.name.as_str()),
+                        Some(Binding::Intrinsic(
+                            Intrinsic::IntConstant(_)
+                                | Intrinsic::SocketControlSize { .. }
+                                | Intrinsic::ScopedObjectExport(_)
+                        ))
+                    )
+                })
+            });
         }
         if module == Some(IntrinsicModule::Dataclasses)
             && imports.is_none_or(|names| {
@@ -5176,23 +5692,18 @@ impl<'a> Loader<'a> {
                     })
                 })
         };
-        let metadata = if module == Some(IntrinsicModule::ImportlibMetadata)
-            && !self.by_name.contains_key(METADATA_VERSION)
-            && imports.is_none_or(|names| names.iter().any(|a| a.name.as_str() == "version"))
-        {
-            let source = concat!(
-                include_str!("../stdlib/importlib/metadata_typed.py"),
-                "\n",
-                include_str!("../stdlib/importlib/metadata_version.py"),
-            );
-            let paths = self.filesystem_search_path()?;
-            Some(format!("{source}\n_search_path: list[str] = {paths}\n"))
-        } else {
-            None
-        };
         // A named import loads only the bundled definitions it can call.
         let bundles = [
-            metadata.as_deref().map(|source| (METADATA_VERSION, source)),
+            (module == Some(IntrinsicModule::ImportlibMetadata)
+                && imports.is_none_or(|names| names.iter().any(|a| a.name.as_str() == "version")))
+            .then_some((
+                METADATA_VERSION,
+                concat!(
+                    include_str!("../stdlib/importlib/metadata_typed.py"),
+                    "\n",
+                    include_str!("../stdlib/importlib/metadata_version.py"),
+                ),
+            )),
             (module == Some(IntrinsicModule::Fractions)
                 && imports.is_none_or(|names| names.iter().any(|a| a.name.as_str() == "Fraction")))
             .then_some((FRACTION_CLASS, include_str!("../stdlib/fraction_pair.py"))),
@@ -5236,7 +5747,7 @@ impl<'a> Loader<'a> {
             .then_some((TEMPFILE_SPOOL, include_str!("../stdlib/tempfile/spool.py"))),
             (module == Some(IntrinsicModule::Inspect)
                 && imports.is_none_or(|names| names.iter().any(|a| a.name.as_str() == "cleandoc")))
-            .then_some((INSPECT_FUNCTIONS, include_str!("../stdlib/inspect.py"))),
+            .then_some((INSPECT_FUNCTIONS, INSPECT_CLEANDOC)),
             (name.split('.').next() == Some("logging") && module.is_some()).then_some((
                 LOGGING_CLASSES,
                 concat!(
@@ -5263,7 +5774,11 @@ impl<'a> Loader<'a> {
             )),
             needs_textwrap(TEXTWRAP_WRAPPER).then_some((
                 TEXTWRAP_WRAPPER,
-                include_str!("../stdlib/textwrap/wrapper.py"),
+                concat!(
+                    include_str!("../stdlib/textwrap/wrapper.py"),
+                    "\n\n",
+                    include_str!("../stdlib/textwrap/functions_typed.py"),
+                ),
             )),
         ];
         for (implementation, source) in bundles.into_iter().flatten() {
@@ -5308,7 +5823,10 @@ impl<'a> Loader<'a> {
     }
 
     fn reject_stdlib_shadow(&mut self, name: &str) -> Result<(), String> {
-        if self.allow_imports && !self.skip_current_root {
+        if self.allow_imports
+            && !self.skip_current_root
+            && !imre_ast::providers::is_frozen(name, || self.frozen_modules)
+        {
             for base in [
                 self.root.join(name.split('.').next().unwrap()),
                 self.root.join(name.replace('.', "/")),
@@ -5336,7 +5854,7 @@ impl<'a> Loader<'a> {
 
     fn partial_source(&self, id: ModuleId) -> bool {
         let module = &self.modules[id];
-        id != 0 && !module.bundled && module.archive.is_none()
+        !self.is_entry(id) && !module.bundled && module.archive.is_none()
     }
 
     fn initialized(&self, def: DefinitionId) -> bool {
@@ -5345,13 +5863,33 @@ impl<'a> Loader<'a> {
         })
     }
 
-    /// Embed the same ordered roots that resolve imports, including Python's safe-path exclusion.
-    fn filesystem_search_path(&self) -> Result<String, String> {
-        let roots = std::iter::once(&self.root)
-            .skip(usize::from(self.skip_current_root))
-            .chain(&self.search_roots)
-            .collect::<Vec<_>>();
-        serde_json::to_string(&roots).map_err(|e| e.to_string())
+    fn is_entry(&self, id: ModuleId) -> bool {
+        let Some(name) = &self.module_operand else {
+            return id == 0;
+        };
+        let module = &self.modules[id];
+        !module.is_package
+            && (module.name == *name
+                || module.name.strip_suffix(".__main__") == Some(name.as_str()))
+    }
+
+    fn load_module_entry(&mut self, name: &str) -> Result<Option<ModuleId>, String> {
+        let mut id = self.load_module(name)?;
+        if self.modules[id].bundled || self.modules[id].archive.is_some() {
+            return Ok(None);
+        }
+        if self.modules[id].is_package {
+            if name == "__main__" || name.ends_with(".__main__") {
+                return Ok(None);
+            }
+            id = self.load_module(&format!("{name}.__main__"))?;
+        }
+        let module = &self.modules[id];
+        let project_source = !module.is_package
+            && !module.bundled
+            && module.archive.is_none()
+            && matches!(module.search_roots, SearchRoots::Single(index) if index <= self.archive_roots);
+        Ok(project_source.then_some(id))
     }
 
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
@@ -5384,8 +5922,22 @@ impl<'a> Loader<'a> {
             return Ok(id);
         }
         let bundled = match name {
-            "_pyio" | "quopri" if self.allow_imports && self.has_project_source(name) => None,
+            _ if !self.frozen_modules
+                && imre_ast::providers::is_optional_frozen(name)
+                && self.has_project_source(name) =>
+            {
+                None
+            }
+            _ if self.allow_imports
+                && (matches!(name, "_pyio" | "quopri")
+                    || imre_ast::providers::is_native_fallback(name))
+                && self.has_project_source(name) =>
+            {
+                None
+            }
             "stat" => stat_mode_source().map(|source| ("stat.py", source)),
+            // Keep the checked definition behind inspect's complete stdlib type stub.
+            "inspect" => Some(("<imre stdlib>/inspect.py", INSPECT_CLEANDOC)),
             // Keep the public typeshed decorator signatures available alongside this singleton.
             "dataclasses" => Some((
                 "<imre stdlib>/dataclasses.py",
@@ -5412,7 +5964,14 @@ impl<'a> Loader<'a> {
                 self.needs_object_imports = true;
                 bundled_runtime_source(name).map(|(path, _)| (path, ""))
             }
-            "pkgutil" => Some(("pkgutil.py", include_str!("../stdlib/pkgutil.py"))),
+            "pkgutil" => Some((
+                "pkgutil.py",
+                concat!(
+                    include_str!("../stdlib/pkgutil.py"),
+                    "\n",
+                    include_str!("../stdlib/pkgutil/iter_modules.py")
+                ),
+            )),
             "zipimport" if cfg!(unix) => Some((
                 "zipimport.py",
                 concat!(
@@ -5455,6 +6014,8 @@ impl<'a> Loader<'a> {
                 include_str!("../stdlib/unittest/__init__.py"),
             )),
             "http.client" => Some(("http/client.py", include_str!("../stdlib/http/client.py"))),
+            // The checked socketserver provides the synchronous server and handler bases.
+            "http.server" => bundled_source!("http/server.py"),
             _ => bundled_runtime_source(name),
         };
         if let Some((filename, source)) = bundled {
@@ -5472,18 +6033,6 @@ impl<'a> Loader<'a> {
                     | "zoneinfo"
                     | "compression._common._streams"
             );
-            let pkgutil_source;
-            let source = if name == "pkgutil" {
-                let paths = self.filesystem_search_path()?;
-                let suffixes = pkgutil_suffixes();
-                let discovery = include_str!("../stdlib/pkgutil/iter_modules.py");
-                pkgutil_source = format!(
-                    "{source}\n{discovery}\n_search_path: list[str] = {paths}\n_module_suffixes: list[str] = {suffixes}\n"
-                );
-                &pkgutil_source
-            } else {
-                source
-            };
             let parent = self.package_parent(name)?;
             // Initializing the package may already have imported this child.
             if let Some(&id) = self.by_name.get(name) {
@@ -5535,28 +6084,67 @@ impl<'a> Loader<'a> {
         Ok(Some((id, child)))
     }
 
+    /// A typeshed declaration alone does not supply a runtime provider. Probe only the
+    /// installed roots, even if an earlier source will win the actual import.
+    fn has_installed_source(&mut self, name: &str) -> bool {
+        let Some((_, probes)) = &mut self.site_probes else {
+            return false;
+        };
+        self.search_roots[self.archive_roots..].iter().any(|site| {
+            let path = site.join(name);
+            probes.is_file(&mut self.fs, path.with_extension("py"))
+                || probes.is_file(&mut self.fs, path.join("__init__.py"))
+        })
+    }
+
+    /// A declaration supplied by ty can describe a third-party module whose executable
+    /// is on a checked search root. Other sealed names keep their normal precedence.
+    fn checked_import_declaration(&mut self, first: &str) -> Result<Option<String>, String> {
+        let declaration = if INTRINSIC_MODULES.contains(&first) {
+            None
+        } else {
+            let Some(file) = vendored_stdlib_declaration(first) else {
+                return Ok(None);
+            };
+            Some(file)
+        };
+        if (first == "quopri"
+            || imre_ast::providers::is_native_fallback(first)
+            || (!self.frozen_modules && imre_ast::providers::is_optional_frozen(first)))
+            && self.has_project_source(first)
+        {
+            return Ok(None);
+        }
+        if IntrinsicModule::named(first).is_none() && imre_ast::providers::provider(first).is_none()
+        {
+            if self.has_installed_source(first) {
+                return Ok(None);
+            }
+            if !ruff_python_stdlib::sys::is_known_standard_library(
+                crate::version::LANGUAGE.minor,
+                first,
+            ) && declaration.is_some()
+            {
+                return Ok(declaration);
+            }
+        }
+        if self.module_operand.is_some() {
+            self.import_failure = Some(EntryImportFailure::RuntimeProvider);
+        }
+        Err(format!(
+            "standard-library imports and shadowing are unsupported: {first:?}"
+        ))
+    }
+
     fn load_new_module(&mut self, name: &str) -> Result<ModuleId, String> {
         let first = name.split('.').next().unwrap_or("");
-        if stdlib_top_level(first)
-            && !((first == "quopri" || imre_ast::providers::is_native_fallback(first))
-                && self.has_project_source(first))
-            && (IntrinsicModule::named(first).is_some()
-                || imre_ast::providers::provider(first).is_some()
-                || !self
-                    .search_roots
-                    .iter()
-                    .skip(self.archive_roots)
-                    .any(|site| {
-                        // A typeshed declaration alone does not supply an importable module.
-                        let path = site.join(first);
-                        self.fs.is_file(&path.with_extension("py"))
-                            || self.fs.is_file(&path.join("__init__.py"))
-                    }))
-        {
-            return Err(format!(
-                "standard-library imports and shadowing are unsupported: {first:?}"
-            ));
-        }
+        let directory_main = name == "__main__" && self.module_operand.as_deref() == Some(name);
+        let declaration = if directory_main {
+            // runpy removes the startup __main__ from sys.modules for a path operand.
+            None
+        } else {
+            self.checked_import_declaration(first)?
+        };
         let parent = self.package_parent(name)?;
         // Parent initialization can have loaded this child while exposing re-exports.
         if let Some(&id) = self.by_name.get(name) {
@@ -5595,33 +6183,59 @@ impl<'a> Loader<'a> {
                 (package, true, None)
             } else {
                 self.inputs.missing.push(package);
-                let archive = base.with_extension(crate::NATIVE_ARCHIVE_EXTENSION);
                 let installed = self.search_roots[..self.archive_roots].contains(root);
-                if installed && self.fs.is_file(&archive) {
-                    if !self.fs.is_file(&stub) {
+                let mut archives = imre_ast::NATIVE_ARCHIVE_EXTENSIONS
+                    .iter()
+                    .map(|ext| base.with_extension(ext));
+                let archive = if installed {
+                    archives.find(|path| {
+                        let exists = self.fs.is_file(path);
+                        if !exists {
+                            self.inputs.missing.push(path.clone());
+                        }
+                        exists
+                    })
+                } else {
+                    self.site_probes
+                        .as_mut()
+                        .filter(|(sites, _)| sites.contains(root))
+                        .and_then(|(_, probes)| {
+                            archives.find(|path| probes.paired(&mut self.fs, path, &stub))
+                        })
+                };
+                if let Some(archive) = archive {
+                    if installed && !self.fs.is_file(&stub) {
                         return Err(format!(
                             "native module {name:?} requires a typed declaration at {}",
                             stub.display()
                         ));
                     }
-                    let archive = self.fs.canonicalize(&archive).map_err(|e| e.to_string())?;
-                    if !archive.starts_with(root) {
+                    let identity = self.fs.canonicalize(&archive).map_err(|e| e.to_string())?;
+                    if !identity.starts_with(root) {
                         return Err(format!(
                             "archive for native module {name:?} resolves outside its extension path"
                         ));
                     }
-                    (stub, false, Some(archive))
+                    (
+                        stub,
+                        false,
+                        Some(NativeArchive {
+                            path: archive,
+                            identity,
+                        }),
+                    )
                 } else if self.fs.is_file(&source) {
                     (source, false, None)
                 } else if installed && self.fs.is_file(&stub) {
                     return Err(format!(
                         "native module {name:?} requires a rebuilt archive at {}",
-                        archive.display()
+                        base.with_extension(crate::NATIVE_ARCHIVE_EXTENSION)
+                            .display()
                     ));
                 } else {
                     self.inputs.missing.push(source);
                     if installed {
-                        self.inputs.missing.extend([archive, stub]);
+                        self.inputs.missing.push(stub);
                     }
                     if self.fs.is_dir(&base) {
                         portions.push((root_index, root.clone(), base));
@@ -5643,6 +6257,19 @@ impl<'a> Loader<'a> {
             resolved = Some((path, identity, is_package, root_index, archive));
             break;
         }
+        if let Some(declaration) = declaration {
+            if resolved.is_some() || (!zip_import && !portions.is_empty()) {
+                self.has_checked_only_import = true;
+            } else if let Some(file) = if name == first {
+                Some(declaration)
+            } else {
+                vendored_stdlib_declaration(&relative)
+            } {
+                return Err(format!(
+                    "no checked runtime provider selected for {name:?} (vendored type declaration {file:?})"
+                ));
+            }
+        }
         let Some((path, identity, is_package, root_index, archive)) = resolved else {
             if zip_import {
                 self.import_failure = Some(EntryImportFailure::ZipImport);
@@ -5650,8 +6277,13 @@ impl<'a> Loader<'a> {
             }
             if portions.is_empty() {
                 self.import_failure = Some(EntryImportFailure::MissingModule);
+                let hint = if name == first {
+                    "\n  help: for an installed dependency, pass --extension-path DIRECTORY where DIRECTORY contains the package or module"
+                } else {
+                    ""
+                };
                 return Err(format!(
-                    "cannot resolve first-party module {name:?} under {}",
+                    "cannot resolve first-party module {name:?} under {}{hint}",
                     self.root.display()
                 ));
             }
@@ -5699,7 +6331,7 @@ impl<'a> Loader<'a> {
         }
         let source = self
             .fs
-            .read_to_string(&path)
+            .read_source_string(&identity)
             .map_err(|error| format!("{}: {error}", path.display()))?;
         // ty resolves logical import paths; canonical identities enforce containment
         // and uniqueness without breaking a single internal symlink's import name.
@@ -5747,10 +6379,15 @@ pub(crate) fn errno_import(statement: &ast::Stmt) -> Option<&ast::StmtImportFrom
 }
 
 fn stdlib_top_level(name: &str) -> bool {
+    INTRINSIC_MODULES.contains(&name) || vendored_stdlib_declaration(name).is_some()
+}
+
+fn vendored_stdlib_declaration(name: &str) -> Option<String> {
     let vendored = ty_vendored::file_system();
-    INTRINSIC_MODULES.contains(&name)
-        || vendored.is_file(format!("stdlib/{name}.pyi").as_str())
-        || vendored.is_file(format!("stdlib/{name}/__init__.pyi").as_str())
+    [".pyi", "/__init__.pyi"]
+        .into_iter()
+        .map(|suffix| format!("stdlib/{name}{suffix}"))
+        .find(|path| vendored.is_file(path.as_str()))
 }
 
 /// Recognize an optional import and any bindings initialized by its probe.
@@ -5942,18 +6579,32 @@ fn single_import_binding(body: &[ast::Stmt]) -> Option<&str> {
 }
 
 /// Resolve a standalone call before adding subsequent definitions to the entry namespace.
-fn imported_function_call(modules: &[SourceModule], id: ModuleId, statement: &ast::Stmt) -> bool {
+fn entry_prefix_call(
+    modules: &[SourceModule],
+    id: ModuleId,
+    statement: &ast::Stmt,
+    pending_builtin_functions: &HashSet<&str>,
+) -> bool {
     let ast::Stmt::Expr(expr) = statement else {
         return false;
     };
     let Some(call) = expr.value.as_call_expr() else {
         return false;
     };
-    let Some(Binding::Definition(def)) = resolve_binding(modules, id, &call.func) else {
-        return false;
-    };
-    def.module != id
-        && modules[def.module].parsed.syntax().body[def.statement].is_function_def_stmt()
+    match resolve_binding(modules, id, &call.func) {
+        Some(Binding::Definition(def)) => {
+            modules[def.module].parsed.syntax().body[def.statement].is_function_def_stmt()
+                && (def.module != id || !pending_builtin_functions.is_empty())
+        }
+        Some(Binding::Intrinsic(Intrinsic::BuiltinsPrint)) => {
+            pending_builtin_functions.contains("print")
+        }
+        None => call
+            .func
+            .as_name_expr()
+            .is_some_and(|name| pending_builtin_functions.contains(name.id.as_str())),
+        _ => false,
+    }
 }
 
 /// Recognize a module attribute test whose only branch raises.
@@ -6107,6 +6758,35 @@ mod native_tests {
     use std::fs;
 
     #[test]
+    fn later_package_imports_are_visible_with_a_separate_type_declaration() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path();
+        fs::write(
+            root.join("typing_extensions.py"),
+            "def get_origin(value: int) -> int:\n    return value + 1\n",
+        )
+        .unwrap();
+        fs::create_dir(root.join("helpers")).unwrap();
+        fs::write(root.join("helpers/__init__.py"), "").unwrap();
+        fs::write(
+            root.join("helpers/score.py"),
+            "def twice(value: int) -> int:\n    return value * 2\n",
+        )
+        .unwrap();
+        let entry = root.join("main.py");
+        let external = "from typing_extensions import get_origin";
+        let local = "from helpers.score import twice";
+        for (first, second) in [(external, local), (local, external)] {
+            fs::write(
+                &entry,
+                format!("{first}\n{second}\nprint(get_origin(3), twice(3))\n"),
+            )
+            .unwrap();
+            crate::check_file(&entry, Some(root)).unwrap();
+        }
+    }
+
+    #[test]
     fn native_declarations_follow_package_ownership_and_preserve_initializers() {
         let workspace = tempfile::tempdir().unwrap();
         let app = workspace.path().join("app");
@@ -6139,6 +6819,10 @@ mod native_tests {
             compiled.extension_archives,
             [archive.canonicalize().unwrap()]
         );
+        assert!(compiled.source_inputs.fresh());
+        fs::write(&archive, b"updated archive").unwrap();
+        assert!(!compiled.source_inputs.fresh());
+        fs::write(&archive, []).unwrap();
         assert_eq!(
             compiled
                 .llvm_ir
@@ -6200,6 +6884,58 @@ mod native_tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn source_ownership_follows_the_winning_search_entry() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().canonicalize().unwrap();
+        let installed = root.join("installed");
+        fs::create_dir(&installed).unwrap();
+        let entry = root.join("main.py");
+        let dependency = installed.join("helper.py");
+        fs::write(&entry, "import helper\n").unwrap();
+        fs::write(&dependency, "value = 7\n").unwrap();
+        let load =
+            || SourceGraph::load(&entry, Some(&root), std::slice::from_ref(&installed)).unwrap();
+        let graph = load();
+        assert!(graph.modules[graph.entry].is_program_source());
+        let helper = graph.modules.iter().find(|m| m.name == "helper").unwrap();
+        assert!(!helper.is_program_source());
+
+        let local = root.join("helper.py");
+        std::os::unix::fs::symlink(&dependency, &local).unwrap();
+        let graph = load();
+        let helper = graph.modules.iter().find(|m| m.name == "helper").unwrap();
+        assert!(helper.is_program_source());
+        assert_eq!(helper.path, local);
+        assert_eq!(fs::canonicalize(&helper.path).unwrap(), dependency);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn changing_an_extension_root_invalidates_the_compiled_source() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let entry = root.join("main.py");
+        fs::write(&entry, "from helper import value\nprint(value)\n").unwrap();
+        for (name, value) in [("first", 23), ("second", 41)] {
+            let directory = root.join(name);
+            fs::create_dir(&directory).unwrap();
+            fs::write(directory.join("helper.py"), format!("value = {value}\n")).unwrap();
+        }
+        let selected = root.join("selected");
+        std::os::unix::fs::symlink(root.join("first"), &selected).unwrap();
+        let options = crate::CompileOptions {
+            extension_paths: vec![selected.clone()],
+            ..Default::default()
+        };
+        let compilation = crate::compile_file(&entry, Some(&root), &options).unwrap();
+        assert!(compilation.source_inputs.fresh());
+        fs::remove_file(&selected).unwrap();
+        std::os::unix::fs::symlink(root.join("second"), &selected).unwrap();
+        assert!(!compilation.source_inputs.fresh());
+    }
+
     #[test]
     fn namespace_portions_track_directory_changes_and_concrete_module_precedence() {
         let workspace = tempfile::tempdir().unwrap();
@@ -6235,6 +6971,82 @@ mod native_tests {
         let (_, paths) = graph.disk_inputs(None);
         assert!(paths.contains(&module));
         assert!(!paths.contains(&namespace.join("__init__.py")));
+    }
+
+    #[test]
+    fn checked_discovery_sources_are_independent_of_search_roots() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path();
+        let entry = root.join("main.py");
+        fs::write(
+            &entry,
+            "from importlib.metadata import version\nfrom pkgutil import iter_modules\n",
+        )
+        .unwrap();
+        for dirname in ["first", "quote'Ω"] {
+            let extension = root.join(dirname);
+            fs::create_dir(&extension).unwrap();
+            let graph = SourceGraph::load(&entry, Some(root), &[extension]).unwrap();
+            for (name, source) in [
+                (
+                    super::METADATA_VERSION,
+                    concat!(
+                        include_str!("../stdlib/importlib/metadata_typed.py"),
+                        "\n",
+                        include_str!("../stdlib/importlib/metadata_version.py"),
+                    ),
+                ),
+                (
+                    "pkgutil",
+                    concat!(
+                        include_str!("../stdlib/pkgutil.py"),
+                        "\n",
+                        include_str!("../stdlib/pkgutil/iter_modules.py"),
+                    ),
+                ),
+            ] {
+                let module = graph
+                    .modules
+                    .iter()
+                    .find(|module| module.is_bundled(name))
+                    .unwrap();
+                assert_eq!(
+                    module.original_source(),
+                    source,
+                    "physical source for {name}"
+                );
+                assert_eq!(
+                    module.source,
+                    crate::normalize_source(source, crate::SourceKind::File).unwrap(),
+                    "checked source for {name}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn project_import_config_uses_its_own_declarations() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path();
+        fs::create_dir(root.join("imre")).unwrap();
+        fs::write(root.join("imre/__init__.py"), "").unwrap();
+        fs::write(
+            root.join("imre/_import_config.py"),
+            "def filesystem_roots(n: int) -> int: return n + 1\n",
+        )
+        .unwrap();
+        let entry = root.join("main.py");
+        fs::write(
+            &entry,
+            concat!(
+                "from imre._import_config import filesystem_roots\n",
+                "import imre._import_config as config\n",
+                "from importlib.metadata import version\n",
+                "print(filesystem_roots(config.filesystem_roots(40)))\n",
+            ),
+        )
+        .unwrap();
+        crate::check_file(&entry, Some(root)).unwrap();
     }
 
     #[test]

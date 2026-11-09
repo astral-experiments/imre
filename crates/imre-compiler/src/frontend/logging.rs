@@ -209,7 +209,7 @@ impl Checker<'_> {
             return Err(error(
                 self.source,
                 call,
-                "logging.shutdown arguments require --runtime-imports",
+                "native lowering of logging.shutdown supports only the no-argument form",
             ));
         }
         let error = self.scoped_builtin_error("logging.shutdown", call);
@@ -854,7 +854,7 @@ impl Checker<'_> {
             .iter()
             .zip(operands)
             .map(|(&slot, node)| self.check_record_value(self.local(slot), node))
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         let arguments = Expr {
             ty: self
                 .types

@@ -1,7 +1,8 @@
 //! URL operations used by runtime-imported request handlers.
 
 use super::{Context, Error, Id, NONE, Result, Value};
-use crate::dynamic::builtins::bind;
+use crate::dynamic::builtins::{bind, boolean};
+use crate::dynamic::copy_ids;
 use crate::objects::{UrlInput, urlquote, urlsplit};
 
 mod join;
@@ -101,14 +102,8 @@ pub(super) fn call(
                 name == "urlparse",
             )
         }
-        "urlunsplit" => {
-            let [parts] = bind(name, args, kwargs, ["components"])?;
-            unsplit::<5>(ctx, required(parts, name, "components")?)
-        }
-        "urlunparse" => {
-            let [parts] = bind(name, args, kwargs, ["components"])?;
-            unsplit::<6>(ctx, required(parts, name, "components")?)
-        }
+        "urlunsplit" => unsplit::<5>(ctx, args, kwargs),
+        "urlunparse" => unsplit::<6>(ctx, args, kwargs),
         "_netloc_property" => {
             let [netloc, field] = bind(name, args, kwargs, ["netloc", "field"])?;
             let field = required(field, name, "field")?;
@@ -152,8 +147,10 @@ fn codec_option<'a>(
 }
 
 fn unquote(ctx: &mut Context, id: Id, encoding: Option<Id>, errors: Option<Id>) -> Result<Id> {
+    let storage = ctx.scalar_value(id);
     let source = match input(ctx, id) {
         Ok(source) => source,
+        Err(_) if matches!(ctx.heap.get(storage), Value::Bytes(_)) => input(ctx, storage)?,
         Err(_) => {
             // CPython first checks for '%' in a non-bytes input and then its split attribute.
             let percent = ctx.text("%");
@@ -183,39 +180,88 @@ fn unquote(ctx: &mut Context, id: Id, encoding: Option<Id>, errors: Option<Id>) 
                 })?;
                 return Ok(id);
             }
-            return Err(Error::new(
-                "TypeError",
-                format!(
-                    "expected string or bytes-like object, got '{}'",
-                    ctx.type_name(id)
-                ),
-            ));
+            if let Value::SurrogateStr(points) = ctx.heap.get(storage) {
+                // unquote decodes the ASCII runs and leaves every other code point untouched.
+                let source = copy_ids(points)?;
+                let encoding = encoding
+                    .filter(|&id| id != NONE)
+                    .unwrap_or_else(|| ctx.text("utf-8"));
+                let errors = errors
+                    .filter(|&id| id != NONE)
+                    .unwrap_or_else(|| ctx.text("replace"));
+                let mut result = Vec::new();
+                for run in source.chunk_by(|a, b| (*a < 128) == (*b < 128)) {
+                    let text;
+                    let decoded = if run[0] < 128 {
+                        let bytes = ctx.alloc(Value::Bytes(run.iter().map(|&p| p as u8).collect()));
+                        // The bytes entry always runs the codec, even on runs without escapes.
+                        let value = unquote(ctx, bytes, Some(encoding), Some(errors))?;
+                        text = ctx.string_codepoints(value)?;
+                        text.as_ref()
+                    } else {
+                        run
+                    };
+                    result
+                        .try_reserve(decoded.len())
+                        .map_err(|_| crate::Error::allocation())?;
+                    result.extend_from_slice(decoded);
+                }
+                return Ok(ctx.text_codepoints(result));
+            }
+            input(ctx, storage).map_err(|_| {
+                Error::new(
+                    "TypeError",
+                    format!(
+                        "expected string or bytes-like object, got '{}'",
+                        ctx.type_name(id)
+                    ),
+                )
+            })?
         }
     };
     // CPython returns unescaped text before inspecting its codec options.
-    if source.is_unescaped_text() {
+    if storage == id && source.is_unescaped_text() {
         return Ok(id);
     }
+    let error_policy = errors;
     let encoding = codec_option(ctx, encoding, "utf-8", "encoding")?;
     let errors = codec_option(ctx, errors, "replace", "errors")?;
-    let text = if errors.is_some_and(|name| super::codecs::uses_python_handler(ctx, name)) {
+    if errors.is_some_and(|name| {
+        name == "surrogateescape" || super::codecs::uses_python_handler(ctx, name)
+    }) {
         // A Python callback can allocate and move the boxed heap.
         let options = (encoding.map(str::to_owned), errors.map(str::to_owned));
-        let owned = ctx.heap.get(id).clone();
+        let owned = ctx.heap.get(storage).clone();
         let input = match &owned {
             Value::Str(s) => UrlInput::Text(s),
             Value::Bytes(b) => UrlInput::Bytes(b),
             _ => unreachable!(),
         };
-        urlquote::decode_component_with(
-            input,
-            options.0.as_deref(),
-            options.1.as_deref(),
-            |codec, data, policy| super::codecs::decode_slice(ctx, codec, data, policy),
-        )?
-    } else {
-        urlquote::decode_component(source, encoding, errors).map_err(|e| ctx.decode_error(e))?
-    };
+        let mut points = Vec::new();
+        urlquote::visit_unquoted(input, options.0.as_deref(), options.1.as_deref(), |part| {
+            match part {
+                urlquote::UnquotedPart::Literal(text) => {
+                    points
+                        .try_reserve(text.len())
+                        .map_err(|_| crate::Error::allocation())?;
+                    points.extend(text.chars().map(u32::from));
+                }
+                urlquote::UnquotedPart::Encoded(codec, data, _) => {
+                    let bytes = ctx.alloc(Value::Bytes(data.to_vec()));
+                    let text = super::codecs::decode_bytes(ctx, codec, bytes, error_policy)?;
+                    let span = ctx.string_codepoints(text)?;
+                    points
+                        .try_reserve(span.len())
+                        .map_err(|_| crate::Error::allocation())?;
+                    points.extend_from_slice(&span);
+                }
+            }
+            Ok::<_, Error>(())
+        })?;
+        return Ok(ctx.text_codepoints(points));
+    }
+    let text =
+        urlquote::decode_component(source, encoding, errors).map_err(|e| ctx.decode_error(e))?;
     Ok(ctx.text(text))
 }
 
@@ -287,53 +333,94 @@ fn property(ctx: &mut Context, netloc: Id, index: u32) -> Result<Id> {
     })
 }
 
-fn unsplit<const N: usize>(ctx: &mut Context, components: Id) -> Result<Id> {
-    let items = ctx.items(components)?;
-    if items.is_empty() {
-        return Err(Error::new("IndexError", "tuple index out of range"));
+/// Check the evaluated fields without invoking truth or decoding protocols.
+fn plain_components<const N: usize>(ctx: &Context, components: &[Id]) -> Option<([Id; N], bool)> {
+    let items: [Id; N] = components.try_into().ok()?;
+    let bytes = match ctx.heap.get(items[0]) {
+        Value::Str(_) => false,
+        Value::Bytes(_) => true,
+        _ => return None,
+    };
+    // In text mode a falsey path keeps its value for slicing, concatenation
+    // or %s formatting with params. Only optional fields can be omitted.
+    if !bytes && items[2] == NONE {
+        return None;
     }
-    if items.len() != N {
-        let message = if items.len() > N {
-            format!(
-                "too many values to unpack (expected {}, got {})",
-                N + 1,
-                items.len() + 1
-            )
-        } else {
-            format!(
-                "not enough values to unpack (expected {}, got {})",
-                N + 1,
-                items.len() + 1
-            )
-        };
-        return Err(Error::new("ValueError", message));
+    let plain = items.iter().all(|&id| match ctx.heap.get(id) {
+        Value::Str(_) => !bytes,
+        Value::Bytes(value) => bytes && value.is_ascii(),
+        _ => id == NONE,
+    });
+    plain.then_some((items, bytes))
+}
+
+fn component_text(ctx: &Context, id: Id) -> &str {
+    match ctx.heap.get(id) {
+        Value::Str(s) => s,
+        Value::Bytes(b) => std::str::from_utf8(b).expect("validated ASCII URL component"),
+        _ if id == NONE => "",
+        _ => unreachable!("validated plain URL component"),
     }
-    let bytes = matches!(input(ctx, items[0])?, UrlInput::Bytes(_));
-    let mut text = [NONE; N];
-    for (field, id) in text.iter_mut().zip(items) {
-        let value = input(ctx, id)?;
-        if bytes != matches!(value, UrlInput::Bytes(_)) && !value.as_bytes().is_empty() {
-            return Err(Error::new(
-                "TypeError",
-                "Cannot mix str and non-str arguments",
-            ));
+}
+
+fn unsplit<const N: usize>(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [components, fallback] = args else {
+        return Err(Error::new(
+            "TypeError",
+            "expected URL components and their coercion function",
+        ));
+    };
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "expected positional URL components",
+        ));
+    }
+    // Tuple subclasses such as ParseResult inherit immutable storage. Consult
+    // the live type slot because a subclass can replace __iter__.
+    let sequence = match ctx.heap.get(*components) {
+        Value::Tuple(_) | Value::List(_) => *components,
+        _ if let Some((storage, _)) = ctx.sequence_payload(*components)
+            && matches!(ctx.heap.get(storage), Value::Tuple(_))
+            && ctx.slot(*components, "__iter__").is_none_or(
+                |slot| matches!(ctx.heap.get(slot), Value::Native(name) if name == "tuple.__iter__"),
+            ) =>
+        {
+            storage
         }
-        *field = match value {
-            UrlInput::Text(_) => id,
-            UrlInput::Bytes(_) => {
-                let decoded = value.decoded()?.to_owned();
-                ctx.text(decoded)
-            }
+        _ => ctx.collect_iterable(*components, false)?,
+    };
+    let (Value::Tuple(fields) | Value::List(fields)) = ctx.heap.get(sequence) else {
+        unreachable!("expanded URL fields")
+    };
+    let Some((items, bytes)) = plain_components::<N>(ctx, fields) else {
+        // Keep a stable view across the call into Python. Immutable tuple
+        // storage is already a snapshot, including for standard URL results.
+        let snapshot = match ctx.heap.get(sequence) {
+            Value::List(items) => ctx.alloc(Value::Tuple(copy_ids(items)?)),
+            _ => sequence,
         };
-    }
-    let registered = if !ctx.str_value(text[0])?.is_empty() && ctx.str_value(text[1])?.is_empty() {
+        return ctx.call(*fallback, vec![snapshot, boolean(N == 6)], Vec::new());
+    };
+    let scheme = component_text(ctx, items[0]);
+    let registered = if !scheme.is_empty() && component_text(ctx, items[1]).is_empty() {
+        // Membership may run Python that clears the original list and collects.
+        ctx.heap.reserve_temporaries(N)?;
+        for id in items {
+            ctx.heap.keep(id);
+        }
+        let scheme = if bytes {
+            ctx.text(component_text(ctx, items[0]).to_owned())
+        } else {
+            items[0]
+        };
         let module = ctx.module("urllib.parse")?;
         let schemes = ctx.lookup_attr(module, "uses_netloc")?;
-        ctx.contains(text[0], schemes)?
+        ctx.contains(scheme, schemes)?
     } else {
         false
     };
-    let fields = text.map(|id| ctx.str_value(id).expect("coerced URL component"));
+    let fields = items.map(|id| component_text(ctx, id));
     let out = match *fields.as_slice() {
         [s, n, p, q, f] => urlsplit::join_fields([s, n, p, q, f], registered)?,
         [s, n, p, params, q, f] => {
@@ -341,6 +428,9 @@ fn unsplit<const N: usize>(ctx: &mut Context, components: Id) -> Result<Id> {
         }
         _ => unreachable!("URL result arity"),
     };
+    if !bytes && out == fields[2] {
+        return Ok(items[2]);
+    }
     Ok(if bytes {
         ctx.alloc(Value::Bytes(out.into_bytes()))
     } else {

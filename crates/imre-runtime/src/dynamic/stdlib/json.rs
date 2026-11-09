@@ -30,7 +30,13 @@ pub(super) fn is_constants_lookup(ctx: &Context, constants: Id, hook: Id) -> boo
 }
 
 /// Scan one value at a Python character offset and return its value and end offset.
-pub(super) fn scan_once(ctx: &mut Context, constant: Id, input: Id, idx: Id) -> Result<Id> {
+pub(super) fn scan_once(
+    ctx: &mut Context,
+    constant: Id,
+    input: Id,
+    idx: Id,
+    pairs_hook: Id,
+) -> Result<Id> {
     let index = ctx.index_integer(idx)?.to_i64().ok_or_else(|| {
         Error::new(
             "OverflowError",
@@ -63,7 +69,7 @@ pub(super) fn scan_once(ctx: &mut Context, constant: Id, input: Id, idx: Id) -> 
     let Some(byte) = text.char_indices().nth(start).map(|(offset, _)| offset) else {
         return Err(ctx.exception("StopIteration", &[idx]));
     };
-    match parse(ctx, &text, wide, byte, constant) {
+    match parse(ctx, &text, wide, byte, constant, pairs_hook) {
         Ok((value, end)) => {
             let end = ctx.int(index + text[byte..end].chars().count() as i64);
             Ok(ctx.alloc(Value::Tuple(vec![value, end])))
@@ -158,14 +164,28 @@ fn parse(
     wide: Option<Id>,
     start: usize,
     constant: Id,
+    pairs_hook: Id,
 ) -> std::result::Result<(Id, usize), JsonTokenError<Error>> {
     let mut keys = HashMap::new();
+    // A callback can collect while the scanner's per-document key memo is live.
+    let key_roots = (pairs_hook != NONE).then(|| ctx.alloc(Value::List(Vec::new())));
     decode_json_tokens_at(
         text,
         start,
         || Str::try_new(text).ok().map(StrOwner::new),
         |value| {
-            Ok(match value {
+            // Each completed child owns one temporary root. A container consumes
+            // those roots when its argument or result takes ownership of the children.
+            let mark = key_roots.map(|_| {
+                let children = match &value {
+                    DecodedJson::Array(items) => items.len(),
+                    DecodedJson::Object(fields) => fields.len(),
+                    _ => 0,
+                };
+                ctx.heap.temporary_mark() - children
+            });
+            let mut released = None;
+            let result = match value {
                 DecodedJson::Null => NONE,
                 DecodedJson::Bool(true) => TRUE,
                 DecodedJson::Bool(false) => FALSE,
@@ -182,9 +202,14 @@ fn parse(
                 DecodedJson::Object(fields) => {
                     let mut entries = Vec::new();
                     let mut positions = HashMap::new();
+                    let mut pairs = Vec::new();
                     let allocation = |_| crate::Error::allocation();
-                    entries.try_reserve(fields.len()).map_err(allocation)?;
-                    positions.try_reserve(fields.len()).map_err(allocation)?;
+                    if pairs_hook == NONE {
+                        entries.try_reserve(fields.len()).map_err(allocation)?;
+                        positions.try_reserve(fields.len()).map_err(allocation)?;
+                    } else {
+                        pairs.try_reserve(fields.len()).map_err(allocation)?;
+                    }
                     keys.try_reserve(fields.len()).map_err(allocation)?;
                     for (body, value) in fields {
                         let name = ParsedString::read(ctx, text, wide, body)?;
@@ -192,9 +217,20 @@ fn parse(
                             std::collections::hash_map::Entry::Occupied(e) => *e.get(),
                             std::collections::hash_map::Entry::Vacant(e) => {
                                 let id = e.key().boxed_key(ctx)?;
+                                if let Some(root) = key_roots {
+                                    let Value::List(keys) = ctx.heap.get_mut(root) else {
+                                        unreachable!()
+                                    };
+                                    keys.try_reserve(1).map_err(allocation)?;
+                                    keys.push(id);
+                                }
                                 *e.insert(id)
                             }
                         };
+                        if pairs_hook != NONE {
+                            pairs.push(ctx.alloc(Value::Tuple(vec![key, value])));
+                            continue;
+                        }
                         let position = *positions.entry(key).or_insert(entries.len());
                         if position == entries.len() {
                             entries.push((key, value));
@@ -202,9 +238,28 @@ fn parse(
                             entries[position] = (key, value);
                         }
                     }
-                    ctx.dict(entries)
+                    if let Some(mark) = mark {
+                        let argument = ctx.alloc(Value::List(pairs));
+                        ctx.heap.release_temporaries_since(mark);
+                        ctx.heap.keep(argument);
+                        let result = ctx.call(pairs_hook, vec![argument], Vec::new())?;
+                        released = Some(argument);
+                        result
+                    } else {
+                        ctx.dict(entries)
+                    }
                 }
-            })
+            };
+            if let Some(mark) = mark {
+                let collect =
+                    released.is_some_and(|arg| arg != result && observe_release(ctx, arg));
+                ctx.heap.release_temporaries_since(mark);
+                ctx.heap.keep(result);
+                if collect {
+                    ctx.collect_unreachable();
+                }
+            }
+            Ok(result)
         },
     )
 }

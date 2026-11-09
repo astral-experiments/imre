@@ -2,6 +2,7 @@
 
 use super::super::{Heap, builtins::zeroed_bytes, value::IoOpenTypes};
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
+use crate::dynamic::value::SlotStorage;
 
 /// Release one native owner's strong edge before the next observable state change.
 fn release_child(ctx: &mut Context, child: Option<Id>) -> Result<()> {
@@ -22,12 +23,14 @@ mod descriptor_buffer;
 mod native_random;
 mod native_reader;
 mod native_writer;
+pub(super) use native_writer::overridden_close;
 mod rwpair;
 pub(in crate::dynamic) use descriptor_buffer::{
     BufferedFd, note_writer_finalizer, prepare_writer_shutdown,
 };
 pub(in crate::dynamic) use rwpair::deallocate_exact_pair;
 mod bytes_io;
+pub(in crate::dynamic) use bytes_io::BytesIoStorage;
 mod bytes_writer;
 pub(in crate::dynamic) use bytes_writer::pending_callback_write;
 mod docstrings;
@@ -36,8 +39,9 @@ pub(super) use file_io::{
     check_binary_options, check_open_string, check_text_options, mode as fileio_mode,
     validate_open_mode,
 };
-pub(in crate::dynamic) use file_io::{open, popen_pipe};
+pub(in crate::dynamic) use file_io::{hand_file_finalization_to_python, open, popen_pipe};
 mod text_wrapper;
+pub(in crate::dynamic) use text_wrapper::flush_standard_outputs;
 
 #[derive(Clone, Copy)]
 pub(in crate::dynamic) enum NativeClass {
@@ -49,13 +53,13 @@ pub(in crate::dynamic) enum NativeClass {
 pub(in crate::dynamic) enum MemoryStream {
     Text(crate::objects::TextFile),
     BufferedFile(Id),
-    Reader(std::rc::Rc<buffered_reader::Reader>),
+    Reader(crate::shared::Shared<buffered_reader::Reader>),
     UninitializedReader(Option<Id>),
     UninitializedWriter(Option<Id>),
     DetachedWriter,
     BufferedBytes(std::rc::Rc<bytes_writer::Writer>),
     Pair(rwpair::Pair),
-    Bytes(std::rc::Rc<bytes_io::BytesIo>),
+    Bytes(bytes_io::BytesIo),
     Wrapper(std::rc::Rc<text_wrapper::Wrapper>),
     Raw(std::rc::Rc<file_io::RawFile>),
     Decoder(newline_decoder::Decoder),
@@ -106,30 +110,10 @@ pub(in crate::dynamic) fn standard_output(ctx: &mut Context, stderr: bool) -> Re
         return unbuffered_standard(ctx, fd, if stderr { "<stderr>" } else { "<stdout>" });
     }
     let file = crate::objects::TextFile::standard(stderr);
-    let encoding = ctx.text(crate::sys::standard_field(fd as u32, false).as_str());
-    let errors = ctx.text(crate::sys::standard_field(fd as u32, true).as_str());
     let path = ctx.text(if stderr { "<stderr>" } else { "<stdout>" });
-    let buffer = ctx.alloc(
-        super::BinaryFile::Standard {
-            file: file.clone(),
-            path,
-        }
-        .into_value()?,
-    );
-    let mode = ctx.text("mode");
-    let write = ctx.text("w");
-    let dictionary = ctx.dict(vec![(mode, write)]);
-    Ok(
-        ctx.alloc(Value::TextFile(super::super::value::BoxedTextFile {
-            file,
-            encoding,
-            errors,
-            dictionary,
-            buffer: Some(buffer),
-            finalizing: false,
-            line_buffering: stderr || crate::stdio_settings().stdout_line_buffered,
-        })),
-    )
+    let buffer = ctx.alloc(super::BinaryFile::Standard { file, path }.into_value()?);
+    let line_buffering = stderr || crate::stdio_settings().stdout_line_buffered;
+    wrap_standard(ctx, fd, buffer, line_buffering, false)
 }
 
 /// Build the interpreter's shared text reader without taking ownership of fd 0.
@@ -187,26 +171,62 @@ fn unbuffered_standard(ctx: &mut Context, fd: i32, name: &str) -> Result<Id> {
     };
     let name = ctx.text(name);
     ctx.set_attr(raw, "name", name)?;
+    wrap_standard(ctx, fd, buffer, false, true)
+}
+
+fn wrap_standard(
+    ctx: &mut Context,
+    fd: i32,
+    buffer: Id,
+    line_buffering: bool,
+    write_through: bool,
+) -> Result<Id> {
+    if !ctx.builtins.contains_key("_io.TextIOWrapper") {
+        ctx.module("_io")?;
+    }
     let wrapper = ctx.builtins["_io.TextIOWrapper"];
     let encoding = ctx.text(crate::sys::standard_field(fd as u32, false).as_str());
     let errors = ctx.text(crate::sys::standard_field(fd as u32, true).as_str());
     let newline = ctx.text("\n");
     let stream = ctx.call(
         wrapper,
-        vec![buffer, encoding, errors, newline, FALSE, TRUE],
+        vec![
+            buffer,
+            encoding,
+            errors,
+            newline,
+            super::super::builtins::boolean(line_buffering),
+            super::super::builtins::boolean(write_through),
+        ],
         Vec::new(),
     )?;
-    let mode = ctx.text(if input { "r" } else { "w" });
+    let mode = ctx.text(if fd == 0 { "r" } else { "w" });
     ctx.set_attr(stream, "mode", mode)?;
     Ok(stream)
 }
 
-/// Follow strong edges from the original sys module without retaining any of the streams.
-pub(in crate::dynamic) fn rooted_input_chain(ctx: &Context) -> Option<[Id; 3]> {
+/// The input descriptor chain and the two output bindings currently held by sys.
+pub(in crate::dynamic) type StandardStreamRoots = [Id; 5];
+
+/// Read the current bindings so rebinding or deletion takes effect at the next check.
+pub(in crate::dynamic) fn rooted_standard_streams(ctx: &Context) -> Option<StandardStreamRoots> {
     let Value::Module { scope, .. } = *ctx.heap.get(ctx.threads.system_module?) else {
         return None;
     };
-    text_descriptor_chain(&ctx.heap, ctx.scope_name(scope, "__stdin__")?)
+    let [stdin, stdout, stderr] = if let Some(streams) = ctx.heap.standard_stream_bindings(scope) {
+        streams
+    } else {
+        let streams = ["__stdin__", "__stdout__", "__stderr__"]
+            .map(|name| ctx.scope_name(scope, name).unwrap_or(NONE));
+        let bindings = ctx.scope_data(scope);
+        // Exposed namespace dictionaries and cells can change independently of the scope.
+        if bindings.namespace.is_none() && bindings.closure.cells.is_empty() {
+            ctx.heap.cache_standard_stream_bindings(scope, streams);
+        }
+        streams
+    };
+    let [input, buffer, raw] = text_descriptor_chain(&ctx.heap, stdin).unwrap_or([NONE; 3]);
+    Some([input, buffer, raw, stdout, stderr])
 }
 
 /// A text wrapper and its buffered descriptor retain the next layer through these native edges.
@@ -219,13 +239,20 @@ pub(in crate::dynamic) fn text_descriptor_chain(heap: &Heap, stream: Id) -> Opti
         return None;
     };
     let buffer = wrapper.buffer.get()?;
-    let Value::File(file) = heap.get(buffer) else {
-        return None;
+    let raw = match heap.get(buffer) {
+        Value::Instance {
+            memory_stream: Some(MemoryStream::Reader(reader)),
+            ..
+        } => reader.raw.get()?,
+        Value::File(file) => {
+            let super::BinaryFile::Descriptor(fd) = file.as_ref() else {
+                return None;
+            };
+            fd.raw
+        }
+        _ => return None,
     };
-    let super::BinaryFile::Descriptor(fd) = file.as_ref() else {
-        return None;
-    };
-    Some([stream, buffer, fd.raw])
+    Some([stream, buffer, raw])
 }
 
 /// Select the default text encoding from the interpreter's startup configuration.
@@ -404,6 +431,8 @@ pub(in super::super) fn install_native(ctx: &mut Context, module: Id, module_obj
             "readable",
             "writable",
             "seekable",
+            "seek",
+            "tell",
             "__enter__",
             "__exit__",
         ],
@@ -577,7 +606,11 @@ fn class(
     };
     if wrapper {
         let name = ctx.text("_finalizing");
-        let member = ctx.alloc(Value::SlotMember { owner, name });
+        let member = ctx.alloc(Value::SlotMember {
+            owner,
+            name,
+            storage: SlotStorage::Instance,
+        });
         ctx.bind(scope, "_finalizing", member);
     }
     let unsupported = ctx.scope_name(module, "UnsupportedOperation").unwrap();
@@ -731,9 +764,11 @@ fn readline(ctx: &mut Context, receiver: Id, size: Option<Id>) -> Result<Id> {
         ctx.heap.keep(method);
     }
     let step = ctx.heap.temporary_mark();
+    let mut gc_limit = ctx.heap.streaming_collection_limit();
     let mut line = Vec::new();
     while line.len() < limit {
         ctx.heap.release_temporaries_since(step);
+        ctx.collect_streaming_garbage(&mut gc_limit);
         let mut size = 1;
         if let Some(peek) = peek {
             let one = ctx.int(1);
@@ -750,15 +785,27 @@ fn readline(ctx: &mut Context, receiver: Id, size: Option<Id>) -> Result<Id> {
                     .map_or(ahead.len(), |i| i + 1);
             }
         }
-        let count = ctx.int(size as i64);
-        let result = match ctx
-            .lookup_attr(receiver, "read")
-            .and_then(|read| ctx.call(read, vec![count], Vec::new()))
+        let mut byte = [0];
+        let result = if size == 1
+            && let Some(raw) = file_io::native_reader(ctx, receiver)
         {
+            // Resolve read again on the next iteration: a signal handler can rebind it.
+            raw.readable_fd()
+                .and_then(|fd| file_io::read_once(ctx, fd, &mut byte))
+                .and_then(|count| match count {
+                    Some(n) => Ok(&byte[..n]),
+                    None => bytes(ctx, NONE, "read"),
+                })
+        } else {
+            let count = ctx.int(size as i64);
+            ctx.lookup_attr(receiver, "read")
+                .and_then(|read| ctx.call(read, vec![count], Vec::new()))
+                .and_then(|value| bytes(ctx, value, "read"))
+        };
+        let data = match result {
             Err(error) if ctx.has_errno(&error, libc::EINTR) => continue,
             result => result?,
         };
-        let data = bytes(ctx, result, "read")?;
         line.try_reserve(data.len())
             .map_err(|_| crate::Error::allocation())?;
         line.extend_from_slice(data);
@@ -870,29 +917,30 @@ pub(in super::super) fn call(
     let buffered = owner_kind == Some("BufferedIOBase");
     let text = owner_kind == Some("TextIOBase");
     let bytes_io = owner_kind == Some("BytesIO");
-    let base_fileno = owner_kind == Some("IOBase") && name == "fileno";
-    let descriptor = if base_fileno || name == "__dict__" {
-        Some("_IOBase")
-    } else if raw {
-        Some("_RawIOBase")
-    } else if buffered {
-        Some("_BufferedIOBase")
-    } else if text {
-        Some("_TextIOBase")
-    } else if matches!(
-        owner_kind,
-        Some("BufferedReader" | "BufferedWriter" | "BufferedRWPair" | "BufferedRandom")
-    ) {
-        owner_kind
-    } else if owner_kind == Some("TextIOWrapper")
-        && matches!(name, "__next__" | "__repr__" | "truncate")
-    {
-        Some("TextIOWrapper")
-    } else if bytes_io {
-        Some("BytesIO")
-    } else {
-        None
-    };
+    let base = owner_kind == Some("IOBase");
+    let descriptor =
+        if base && matches!(name, "fileno" | "__enter__" | "seek" | "tell") || name == "__dict__" {
+            Some("_IOBase")
+        } else if raw {
+            Some("_RawIOBase")
+        } else if buffered {
+            Some("_BufferedIOBase")
+        } else if text {
+            Some("_TextIOBase")
+        } else if matches!(
+            owner_kind,
+            Some("BufferedReader" | "BufferedWriter" | "BufferedRWPair" | "BufferedRandom")
+        ) {
+            owner_kind
+        } else if owner_kind == Some("TextIOWrapper")
+            && matches!(name, "__next__" | "__repr__" | "truncate")
+        {
+            Some("TextIOWrapper")
+        } else if bytes_io {
+            Some("BytesIO")
+        } else {
+            None
+        };
     let Some((&receiver, rest)) = args.split_first() else {
         let message = match (descriptor, name) {
             (
@@ -957,6 +1005,46 @@ pub(in super::super) fn call(
         };
         return Err(Error::new("TypeError", message));
     };
+    if base && name == "seek" {
+        if rest.is_empty() && kwargs.len() <= 2 {
+            return Err(Error::new(
+                "TypeError",
+                "seek() takes at least 1 positional argument (0 given)",
+            ));
+        }
+        let args =
+            super::super::builtins::bind_method_arguments("seek", rest, kwargs, ["", ""], 2)?;
+        for value in args.into_iter().flatten() {
+            super::os::c_int(ctx, value)?;
+        }
+        return Err(Error::new("UnsupportedOperation", "seek"));
+    }
+    if base && matches!(name, "__enter__" | "tell") {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("_IOBase.{name}() takes no keyword arguments"),
+            ));
+        }
+        if !rest.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("_IOBase.{name}() takes no arguments ({} given)", rest.len()),
+            ));
+        }
+        if name == "tell" {
+            let seek = ctx.lookup_attr(receiver, "seek")?;
+            let zero = ctx.int(0);
+            let current = ctx.int(1);
+            return ctx.call(seek, vec![zero, current], Vec::new());
+        }
+        if let Some(closed) = ctx.optional_attr(receiver, "closed")?
+            && ctx.truth(closed)?
+        {
+            return Err(Error::new("ValueError", "I/O operation on closed file."));
+        }
+        return Ok(receiver);
+    }
     if name == "__dict__" {
         return Ok(match ctx.heap.get(receiver) {
             Value::Instance { .. } => ctx.instance_dictionary(receiver, receiver_class),
@@ -1033,7 +1121,7 @@ pub(in super::super) fn call(
         }
         return Ok(NONE);
     }
-    if base_fileno || (text || buffered) && name == "detach" {
+    if base && name == "fileno" || (text || buffered) && name == "detach" {
         if !rest.is_empty() || !kwargs.is_empty() {
             return Err(Error::new(
                 "TypeError",
@@ -1087,9 +1175,6 @@ pub(in super::super) fn call(
         if name == "truncate" {
             return text_wrapper::truncate(ctx, receiver, rest, kwargs);
         }
-        if matches!(ctx.heap.get(receiver), Value::TextFile(_)) {
-            return super::files::text_method(ctx, name, args, kwargs);
-        }
         return text_wrapper::call(ctx, receiver, name, rest, kwargs);
     }
     if owner_kind == Some("FileIO")
@@ -1134,11 +1219,8 @@ pub(in super::super) fn call(
             ctx.set_attr(receiver, "__IOBase_closed", TRUE)?;
             result.map(|_| NONE)
         }
-        "flush" | "__enter__" if closed => {
-            Err(Error::new("ValueError", "I/O operation on closed file."))
-        }
+        "flush" if closed => Err(Error::new("ValueError", "I/O operation on closed file.")),
         "flush" => Ok(NONE),
-        "__enter__" => Ok(receiver),
         "__exit__" => {
             let close = ctx.lookup_attr(receiver, "close")?;
             ctx.call(close, Vec::new(), Vec::new())
@@ -1403,6 +1485,9 @@ fn restore_stream_dict(ctx: &mut Context, receiver: Id, dict: Id, item: &str) ->
                     ctx.type_name(dict),
                 ),
             ));
+        }
+        if let Value::Instance { class, .. } = *ctx.heap.get(receiver) {
+            ctx.register_stream_with_attributes(receiver, class);
         }
         let Value::Instance { namespace, .. } = ctx.heap.get_mut(receiver) else {
             unreachable!("memory stream methods have an instance receiver");

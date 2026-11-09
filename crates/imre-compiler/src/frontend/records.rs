@@ -23,7 +23,7 @@ pub(super) fn executable_method(
     classes: &Classes,
     graph: &SourceGraph,
     types: &Types,
-) -> Result<ast::StmtFunctionDef, String> {
+) -> std::result::Result<ast::StmtFunctionDef, String> {
     let mut method = method.clone();
     method.decorator_list.clear();
     if classes.definitions[context.class].forwarder.is_some()
@@ -105,7 +105,7 @@ pub(super) fn executable_method(
         let module = classes.definitions[context.class].method_origins[context.index].module;
         let source = &graph.modules[module].source;
         if receiver.default.is_some() {
-            return Err(error(
+            return Err(diagnostic_message(
                 source,
                 &receiver,
                 "a class receiver cannot have a default",
@@ -263,12 +263,12 @@ fn class_receiver_annotation(
     graph: &SourceGraph,
     types: &Types,
     source: &str,
-) -> Result<(), String> {
+) -> std::result::Result<(), String> {
     if let ast::Expr::StringLiteral(value) = expression {
         check_string(value, source)?;
         let contents = value.value.to_str();
         let parsed = ruff_python_parser::parse_expression(contents).map_err(|_| {
-            error(
+            diagnostic_message(
                 source,
                 expression,
                 "invalid quoted class receiver annotation",
@@ -283,7 +283,7 @@ fn class_receiver_annotation(
             types,
             contents,
         )
-        .map_err(|message| error(source, expression, &message));
+        .map_err(|message| diagnostic_message(source, expression, &message));
     }
     if let ast::Expr::Subscript(annotation) = expression
         && matches!(&*annotation.value, ast::Expr::Name(name) if name.id == "type")
@@ -299,7 +299,7 @@ fn class_receiver_annotation(
     {
         Ok(())
     } else {
-        Err(error(
+        Err(diagnostic_message(
             source,
             expression,
             "cls must be annotated as type[Self] or type[its class]",
@@ -314,7 +314,7 @@ pub(super) fn factory_defaults(
     class: &crate::classes::Class,
     types: &Types,
     source: &str,
-) -> Result<(), String> {
+) -> std::result::Result<(), String> {
     if !class.generated_initializer {
         return Ok(());
     }
@@ -338,7 +338,7 @@ pub(super) fn field_default(
     ty: Type,
     types: &Types,
     source: &str,
-) -> Result<Option<Expr>, String> {
+) -> std::result::Result<Option<Expr>, String> {
     let Some(default) = &field.default else {
         return Ok(None);
     };
@@ -379,7 +379,7 @@ pub(super) fn field_default(
             values: Vec::new(),
         },
         _ => {
-            return Err(error(
+            return Err(diagnostic_message(
                 source,
                 &field.annotation,
                 "a default factory must match its exact list, dict, set, or Counter field type",
@@ -407,7 +407,7 @@ pub(super) fn record_factories(
     inference: &inference::Inference,
     graph: &SourceGraph,
     types: &Types,
-) -> Result<(), String> {
+) -> std::result::Result<(), String> {
     let mut thunks = HashMap::new();
     for (class, record) in classes.declarations.definitions.iter().enumerate() {
         for (index, field) in record.fields.iter().enumerate() {
@@ -691,6 +691,17 @@ impl Checker<'_> {
         matches!(expression, ast::Expr::Name(name) if self.class_receiver.as_deref() == Some(name.id.as_str()))
     }
 
+    /// Checks the lexical root before resolving a static namespace path.
+    pub(super) fn has_static_namespace_root(&self, expression: &ast::Expr) -> bool {
+        let mut root = expression;
+        while let ast::Expr::Attribute(attribute) = root {
+            root = &attribute.value;
+        }
+        matches!(root, ast::Expr::Name(name)
+            if !self.names.contains_key(name.id.as_str())
+                && !self.comprehension_targets.contains(name.id.as_str()))
+    }
+
     /// Static receiver attributes must not accidentally resolve through an
     /// identically named module import or global binding.
     pub(super) fn resolve(&self, expression: &ast::Expr) -> Option<Binding> {
@@ -709,8 +720,9 @@ impl Checker<'_> {
         if self.is_class_receiver(root)
             || root.as_name_expr().is_some_and(|n| {
                 self.class_lexical.contains(n.id.as_str())
-                    || (self.names.contains_key(n.id.as_str())
-                        && self.mapping_class_import(n.id.as_str()))
+                    || self.names.get(n.id.as_str()).is_some_and(|&slot| {
+                        self.parameter_shadows_binding(n.id.as_str(), self.locals[slot], true)
+                    })
             })
         {
             None
@@ -892,6 +904,23 @@ impl Checker<'_> {
         self.direct_record_display(value, at, method)
     }
 
+    /// A formatter can itself require the repr of another statically known class.
+    fn require_record_repr(&self, class: usize, at: &impl Ranged) -> Result<(), String> {
+        if self.graph.reachable_only()
+            && let Some((owner, method)) = self.classes.repr_override(class)
+            && !method.is_async
+            && !self.graph.includes_method(owner.module, method)
+        {
+            self.graph.missing_repr.set(Some(owner));
+            return Err(error(
+                self.source,
+                at,
+                "this representation requires a reachable __repr__ implementation",
+            ));
+        }
+        Ok(())
+    }
+
     fn direct_record_display(
         &mut self,
         value: Expr,
@@ -905,6 +934,7 @@ impl Checker<'_> {
             {
                 Some(method.id)
             } else if self.classes.has_repr_override(id) {
+                self.require_record_repr(id, at)?;
                 let method = methods.get("__repr__").ok_or_else(|| {
                     error(
                         self.source,
@@ -1012,7 +1042,7 @@ impl Checker<'_> {
         name: &str,
         node: &impl Ranged,
         diagnostic: &str,
-    ) -> String {
+    ) -> Failure {
         if name == "quantize" && self.decimal_class(class) {
             return self.scoped_builtin_error("Decimal.quantize", node);
         }
@@ -1052,6 +1082,9 @@ impl Checker<'_> {
         receiver: Option<Expr>,
         expected: Option<Type>,
     ) -> Result<Expr, String> {
+        if attribute.attr.as_str() == "__repr__" {
+            self.require_record_repr(class, attribute)?;
+        }
         if self.mock_implementation_method(class, attribute.attr.as_str()) {
             return Err(error(
                 self.source,
@@ -1095,9 +1128,7 @@ impl Checker<'_> {
                 })?;
                 let mut signature = signature;
                 if let Some(inference) = self.inference {
-                    inference
-                        .callable_signature(&mut signature, 1, None)
-                        .map_err(|message| error(self.source, attribute, message))?;
+                    inference.callable_signature(&mut signature, 1, None, self, attribute)?;
                 }
                 self.calls.insert(signature.id);
                 if let Some(&(ready, value)) = self
@@ -1193,6 +1224,9 @@ impl Checker<'_> {
         class: usize,
         receiver: Option<Expr>,
     ) -> Result<Expr, String> {
+        if attribute.attr.as_str() == "__repr__" {
+            self.require_record_repr(class, attribute)?;
+        }
         if self.mock_implementation_method(class, attribute.attr.as_str()) {
             return Err(error(
                 self.source,
@@ -1503,7 +1537,7 @@ impl Checker<'_> {
                 calls: HashSet::from([constructor]),
                 class_reads: HashSet::new(),
                 source_frame: false,
-                recursion_error: error(
+                recursion_error: diagnostic_message(
                     self.source,
                     at,
                     "recursive class constructor callbacks are unsupported",

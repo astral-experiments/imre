@@ -21,10 +21,19 @@ pub(super) const METHODS: &[&str] = &[
     "__len__",
     "__lt__",
     "__ne__",
+    "__reduce__",
     "__repr__",
     "__reversed__",
     "count",
     "index",
+];
+
+pub(super) const ITER_METHODS: &[&str] = &[
+    "__iter__",
+    "__next__",
+    "__length_hint__",
+    "__reduce__",
+    "__setstate__",
 ];
 
 #[derive(Clone)]
@@ -158,6 +167,45 @@ impl Cursor {
     }
 }
 
+/// Older pickles restore a consumed count relative to the cursor's current position.
+fn set_state(ctx: &mut Context, receiver: Id, owner: &str, state: Id) -> Result<Id> {
+    let offset = if owner == "range_iterator" {
+        let offset = ctx.index_integer(state)?;
+        if offset
+            .to_i64()
+            .and_then(|n| c_long::try_from(n).ok())
+            .is_none()
+        {
+            return Err(Error::new(
+                "OverflowError",
+                "Python int too large to convert to C long",
+            ));
+        }
+        offset
+    } else if let Value::Int(offset) = ctx.heap.get(state) {
+        offset.clone()
+    } else {
+        let class = ctx.exact_type(state)?;
+        let name = super::stdlib::qualified_type(ctx, class)?;
+        return Err(Error::new(
+            "TypeError",
+            format!("state must be an int, not {}", ctx.str_value(name)?),
+        ));
+    };
+
+    // __index__ may have already advanced this iterator.
+    let Value::RangeIterator(cursor) = ctx.heap.get_mut(receiver) else {
+        unreachable!("validated range iterator")
+    };
+    let remaining = cursor.remaining.big();
+    let offset = offset.big();
+    let zero = BigInt::zero();
+    let skip = offset.as_ref().clamp(&zero, remaining.as_ref());
+    cursor.current = Int::new(cursor.current.big().as_ref() + skip * cursor.step.big().as_ref());
+    cursor.remaining = Int::new(remaining.as_ref() - skip);
+    Ok(super::value::NONE)
+}
+
 /// Dispatch descriptors for ranges and their iterators.
 pub(super) fn method(
     ctx: &mut Context,
@@ -167,7 +215,10 @@ pub(super) fn method(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let search = matches!(name, "count" | "index");
-    let wrapper = !matches!(name, "count" | "index" | "__reversed__" | "__length_hint__");
+    let wrapper = !matches!(
+        name,
+        "count" | "index" | "__reversed__" | "__length_hint__" | "__reduce__" | "__setstate__"
+    );
     let Some((&receiver, rest)) = args.split_first() else {
         return Err(Error::new(
             "TypeError",
@@ -203,16 +254,19 @@ pub(super) fn method(
             format!("{label} takes no keyword arguments"),
         ));
     }
-    if search {
+    if search || name == "__setstate__" {
         let [item] = rest else {
             return Err(Error::new(
                 "TypeError",
                 format!(
-                    "range.{name}() takes exactly one argument ({} given)",
+                    "{owner}.{name}() takes exactly one argument ({} given)",
                     rest.len()
                 ),
             ));
         };
+        if name == "__setstate__" {
+            return set_state(ctx, receiver, owner, *item);
+        }
         let Value::Range(range) = ctx.heap.get(receiver) else {
             unreachable!()
         };
@@ -263,6 +317,31 @@ pub(super) fn method(
         (_, "__repr__") => {
             let repr = ctx.checked_format(receiver, true)?;
             Ok(ctx.text(repr))
+        }
+        (Value::Range(range), "__reduce__") => {
+            let parts = [range.start.clone(), range.stop.clone(), range.step.clone()];
+            let args = parts
+                .into_iter()
+                .map(|item| ctx.alloc(Value::Int(item)))
+                .collect();
+            let args = ctx.alloc(Value::Tuple(args));
+            let class = ctx.builtin("range");
+            Ok(ctx.alloc(Value::Tuple(vec![class, args])))
+        }
+        (Value::RangeIterator(cursor), "__reduce__") => {
+            // The iterator pickles the remaining range, including its aligned exclusive stop.
+            let stop = cursor.current.big().as_ref()
+                + cursor.remaining.big().as_ref() * cursor.step.big().as_ref();
+            let remainder = Range {
+                start: cursor.current.clone(),
+                stop: Int::new(stop),
+                step: cursor.step.clone(),
+                len: cursor.remaining.clone(),
+            };
+            let iter = super::builtins::frame_builtin(ctx, "iter")?;
+            let range = ctx.alloc(Value::Range(remainder));
+            let args = ctx.alloc(Value::Tuple(vec![range]));
+            Ok(ctx.alloc(Value::Tuple(vec![iter, args, super::value::NONE])))
         }
         (Value::Range(range), "__reversed__") => {
             Ok(ctx.alloc(Value::RangeIterator(range.iter(true))))

@@ -15,19 +15,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unix_permissions(0o644);
     println!("cargo:rerun-if-changed=stdlib/installed-sources.txt");
     println!("cargo:rerun-if-changed=stdlib/runtime-only-sources.txt");
-    // Only installed-sources.txt participates in checked file-entry admission.
+    // The standalone marker affects source registration, not the path in the ZIP.
+    let runtime_only = include_str!("stdlib/runtime-only-sources.txt")
+        .lines()
+        .map(|entry| entry.strip_prefix("standalone ").unwrap_or(entry));
     let members: Vec<_> = include_str!("stdlib/installed-sources.txt")
         .lines()
-        .chain(include_str!("stdlib/runtime-only-sources.txt").lines())
+        .chain(runtime_only)
         .collect();
     std::fs::write(out.join("imre-stdlib-members.txt"), members.join("\n"))?;
     for name in members {
-        let path = match name {
-            "shlex.py" => {
-                PathBuf::from("../../benchmarks/cpython_stdlib/full/shlex/upstream/Lib/shlex.py")
-            }
-            _ => Path::new("stdlib").join(name),
+        let root = match name {
+            "http/cookies.py" => "../../benchmarks/cpython_stdlib/full/http/upstream/Lib",
+            "shlex.py" => "../../benchmarks/cpython_stdlib/full/shlex/upstream/Lib",
+            _ => "stdlib",
         };
+        let path = Path::new(root).join(name);
         println!("cargo:rerun-if-changed={}", path.display());
         archive.start_file(name, options)?;
         io::copy(&mut File::open(path)?, &mut archive)?;

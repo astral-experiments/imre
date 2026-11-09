@@ -67,3 +67,36 @@ def current():
             assert name not in sys.modules
         else:
             raise AssertionError("executed a module without a code object")
+
+    class MemorySource(abc.SourceLoader):
+        def get_filename(self, fullname):
+            return "memory_plugin.py"
+
+        def get_data(self, path):
+            reads.append(path)
+            return b"value = 42\r\n"
+
+    assert abc.SourceLoader.__abstractmethods__ == frozenset({"get_data", "get_filename"})
+    assert issubclass(machinery.SourceFileLoader, abc.SourceLoader)
+    assert not issubclass(machinery.SourcelessFileLoader, abc.SourceLoader)
+    reads = []
+    loader = MemorySource()
+    assert loader.get_source("memory_plugin") == "value = 42\n"
+    spec = util.spec_from_loader("memory_plugin", loader)
+    module = util.module_from_spec(spec)
+    loader.exec_module(module)
+    assert module.value == 42 and module.__file__ == spec.origin == "memory_plugin.py"
+    assert module.__spec__ is spec and module.__loader__ is loader
+    assert reads == ["memory_plugin.py", "memory_plugin.py"]
+
+    class InvalidSource(MemorySource):
+        def get_data(self, path):
+            return b"def quote(:\n    pass\n"
+
+    try:
+        InvalidSource().get_code("memory_plugin")
+    except SyntaxError as exc:
+        assert (exc.filename, exc.lineno, exc.offset) == ("memory_plugin.py", 1, 11)
+        assert (exc.text, exc.end_lineno, exc.end_offset) == ("def quote(:\n", 1, 12)
+    else:
+        raise AssertionError("compiled invalid in-memory source")

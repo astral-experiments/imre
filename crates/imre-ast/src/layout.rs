@@ -2,6 +2,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+const STDLIB: &str = "{installed_base}/lib/imre{py_version_short}";
 const SITE_PACKAGES: &str = "{base}/lib/imre{py_version_short}/site-packages";
 
 pub const SCHEME_NAMES: &[&str] = &["posix_prefix", "posix_user", "venv"];
@@ -59,22 +60,36 @@ impl InterpreterLayout {
         if let Some(cfg) = Self::venv_config(executable) {
             prefix = cfg.parent().expect("configuration directory").to_owned();
             let contents = std::fs::read_to_string(&cfg);
-            let home = contents
-                .as_deref()
-                .unwrap_or("")
-                .lines()
-                .find_map(|line| config_value(line, "home"))
-                .map(Path::new)
-                .filter(|home| home.is_absolute());
+            let config_path = |key: &str| {
+                contents
+                    .as_deref()
+                    .unwrap_or("")
+                    .lines()
+                    .find_map(|line| config_value(line, key))
+                    .map(Path::new)
+            };
+            let home = config_path("home").filter(|path| path.is_absolute());
             let physical = executable
                 .canonicalize()
                 .unwrap_or_else(|_| executable.to_owned());
             base_prefix =
                 installation_prefix(home.or_else(|| physical.parent()).unwrap_or(directory));
             let base_binary = if let Some(home) = home
-                && physical == executable
+                && (physical == executable
+                    || directory.canonicalize().ok().as_deref() == physical.parent())
             {
-                home.join(executable.file_name().expect("launcher name"))
+                // Copies can be renamed "python". A nested venv's "executable"
+                // identifies its creator, while "base-executable" survives its removal.
+                ["base-executable", "executable"]
+                    .into_iter()
+                    .filter_map(config_path)
+                    .find(|path| path.parent() == Some(home) && path.is_file())
+                    .map(Path::to_owned)
+                    .or_else(|| {
+                        let installed = home.join("imre");
+                        installed.is_file().then_some(installed)
+                    })
+                    .unwrap_or_else(|| home.join(physical.file_name().expect("launcher name")))
             } else {
                 physical
             };
@@ -155,6 +170,11 @@ impl InterpreterLayout {
             .find(|cfg| cfg.is_file())
     }
 
+    /// A venv shares the base interpreter's standard library, including with -S.
+    pub fn stdlib_dir(&self) -> PathBuf {
+        self.expand_path(&self.base_prefix, STDLIB)
+    }
+
     /// Ordered installation sites; the venv participates even when the base cannot.
     pub fn site_packages(&self, site_initialized: bool) -> impl Iterator<Item = PathBuf> + '_ {
         std::iter::once(&self.prefix)
@@ -190,7 +210,7 @@ impl InterpreterLayout {
             ("posix_user", "include") => "{userbase}/include/python{py_version_short}",
             ("posix_user", "scripts") => "{userbase}/bin",
             ("posix_user", "data") => "{userbase}",
-            ("posix_prefix" | "venv", "stdlib") => "{base}/lib/imre{py_version_short}",
+            ("posix_prefix" | "venv", "stdlib") => STDLIB,
             ("posix_prefix" | "venv", "platstdlib") => "{platbase}/lib/imre{py_version_short}",
             ("posix_prefix" | "venv", "purelib") => SITE_PACKAGES,
             ("posix_prefix" | "venv", "platlib") => {
@@ -212,6 +232,8 @@ impl InterpreterLayout {
         let prefix = if scheme == "posix_user" {
             userbase = Self::user_base()?;
             &userbase
+        } else if template == STDLIB {
+            &self.base_prefix
         } else {
             &self.prefix
         };

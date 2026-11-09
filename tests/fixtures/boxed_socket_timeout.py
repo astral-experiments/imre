@@ -9,8 +9,26 @@ def current():
         assert reader.gettimeout() is None and reader.getblocking()
         reader.settimeout(0)
         assert reader.gettimeout() == 0.0 and not reader.getblocking()
-        reader.setblocking(True)
-        assert reader.gettimeout() is None
+        calls = []
+        error = LookupError('blocking flag')
+
+        class Flag:
+            def __bool__(self):
+                calls.append(1)
+                if len(calls) == 2:
+                    raise error
+                return True
+
+        flag = Flag()
+        reader.setblocking(flag)
+        assert reader.gettimeout() is None and reader.getblocking()
+        try:
+            reader.setblocking(flag)
+        except LookupError as exc:
+            assert exc is error
+        else:
+            raise AssertionError('setblocking ignored the flag error')
+        assert calls == [1, 1]
 
         reader.settimeout(0.025)
         assert reader.gettimeout() == 0.025 and reader.getblocking()

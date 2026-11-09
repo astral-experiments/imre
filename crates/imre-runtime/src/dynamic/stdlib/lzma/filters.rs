@@ -345,9 +345,7 @@ pub(in crate::dynamic) fn properties(
         ));
     };
     let id = unsigned(ctx, *filter_id, "lzma_vli")?;
-    let fields = super::streams::with_input(ctx, *data, |ctx, view| {
-        decode(id, ctx.native_buffer_bytes(view)?)
-    })?;
+    let fields = ctx.with_read_buffer(*data, |ctx, buffer| decode(id, buffer.bytes(ctx)?))?;
     let mut entries = vec![(ctx.text("id"), ctx.int(id as i64))];
     for (key, value) in fields {
         entries.push((ctx.text(key), ctx.int(i64::from(value))));

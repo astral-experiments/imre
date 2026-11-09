@@ -106,6 +106,23 @@ def _unescape_attrvalue(s):
     return attr_charref.sub(_replace_attr_charref, s)
 
 
+def _find_tag_end(rawdata, name_start):
+    if rawdata.find('>', name_start) < 0:
+        return -1
+    # Match one attribute at a time so the length of the tag cannot exhaust
+    # the regex engine's backtracking limit. Quoted values may contain '>'.
+    tag = tagfind_tolerant.match(rawdata, name_start)
+    assert tag
+    k = tag.end()
+    while attr := attrfind_tolerant.match(rawdata, k):
+        k = attr.end()
+    if rawdata.startswith('>', k):
+        return k + 1
+    if rawdata.startswith('/>', k):
+        return k + 2
+    return -1
+
+
 class HTMLParser(_markupbase.ParserBase):
     """Find tags and other markup and call handler functions.
 
@@ -474,13 +491,7 @@ class HTMLParser(_markupbase.ParserBase):
     # Internal -- check to see if we have a complete starttag; return end
     # or -1 if incomplete.
     def check_for_whole_start_tag(self, i):
-        rawdata = self.rawdata
-        match = locatetagend.match(rawdata, i+1)
-        assert match
-        j = match.end()
-        if rawdata[j-1] != ">":
-            return -1
-        return j
+        return _find_tag_end(self.rawdata, i+1)
 
     # Internal -- parse endtag, return end or -1 if incomplete
     def parse_endtag(self, i):
@@ -488,8 +499,6 @@ class HTMLParser(_markupbase.ParserBase):
         # https://html.spec.whatwg.org/multipage/parsing.html#end-tag-open-state
         rawdata = self.rawdata
         assert rawdata[i:i+2] == "</", "unexpected call to parse_endtag"
-        if rawdata.find('>', i+2) < 0:  # fast check
-            return -1
         if not endtagopen.match(rawdata, i):  # </ + letter
             if rawdata[i+2:i+3] == '>':  # </> is ignored
                 # "missing-end-tag-name" parser error
@@ -497,10 +506,8 @@ class HTMLParser(_markupbase.ParserBase):
             else:
                 return self.parse_bogus_comment(i)
 
-        match = locatetagend.match(rawdata, i+2)
-        assert match
-        j = match.end()
-        if rawdata[j-1] != ">":
+        j = _find_tag_end(rawdata, i+2)
+        if j < 0:
             return -1
 
         # find the name: "13.2.5.8 Tag name state"

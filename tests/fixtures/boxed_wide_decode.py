@@ -1,7 +1,31 @@
+import _codecs
 import codecs
 
 
+def check_stream_file():
+    import tempfile
+    import warnings
+
+    with tempfile.TemporaryDirectory() as directory:
+        path = directory + "/lines"
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", DeprecationWarning)
+            with codecs.open(path, "w+", "utf-16") as stream:
+                stream.write("A\r\nΩ")
+                stream.seek(0)
+                assert stream.read() == "A\r\nΩ"
+        assert stream.stream.closed
+        assert len(caught) == 1 and caught[0].category is DeprecationWarning
+
+
 def current():
+    check_stream_file()
+    assert codecs.utf_16_decode is _codecs.utf_16_decode
+    assert codecs.utf_16_decode(b"\xfe\xff\x00A\xd8\x00") == ("A", 4)
+    assert codecs.utf_16_decode(b"\xff\xfeA\x00!", "replace", True) == ("A\ufffd", 5)
+    assert codecs.utf_32_decode is _codecs.utf_32_decode
+    assert codecs.utf_32_decode(b"\x00\x00\xfe\xff\x00\x00\x00A!") == ("A", 8)
+    assert codecs.utf_32_decode(b"\xff\xfe\x00\x00!", "ignore", True) == ("", 5)
     for encoding, bom, data in (
         ("utf-16-le", b"\xff\xfe", b"A\x00=\xd8\r\xdc"),
         ("utf-16-be", b"\xfe\xff", b"\x00A\xd8=\xdc\r"),

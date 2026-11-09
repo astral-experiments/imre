@@ -235,6 +235,35 @@ impl Entries {
         unreachable!("the dictionary probe always yields a bucket")
     }
 
+    /// A proof may read an exact string key only before Python equality would run.
+    pub(in super::super) fn lookup_text(
+        &self,
+        heap: &Heap,
+        name: &str,
+    ) -> ControlFlow<(), Option<Id>> {
+        let Some(index) = &self.index else {
+            if self
+                .iter()
+                .any(|&(key, _)| !matches!(heap.get(key), Value::Str(_)))
+            {
+                return ControlFlow::Break(());
+            }
+            return ControlFlow::Continue(self.named_item(heap, name));
+        };
+        let hash = normalized(crate::python_hash::text(name));
+        let mut probe = Probe::new(hash, index.slots.len());
+        while let Some((_, dense)) = index.next_candidate(self, &mut probe, hash, None) {
+            let (key, value) = self[dense];
+            let Value::Str(stored) = heap.get(key) else {
+                return ControlFlow::Break(());
+            };
+            if stored == name {
+                return ControlFlow::Continue(Some(value));
+            }
+        }
+        ControlFlow::Continue(None)
+    }
+
     /// Probe an unboxed ordinal. Defer before a resident key could run Python equality.
     pub(in super::super) fn lookup_ordinal(
         &self,
@@ -393,16 +422,38 @@ impl Context {
     ) -> Result<()> {
         let entries = self.stored_entries(dict);
         let nodes = entries.ordered_nodes();
-        if (if last { nodes.last() } else { nodes.first() }).is_some_and(|&(node, _)| node == key) {
+        let Some(&(endpoint, _)) = (if last { nodes.last() } else { nodes.first() }) else {
+            return Err(self.missing_move_key(key));
+        };
+        if endpoint == key {
             return Ok(());
         }
-        let (_, dense) = self.find_dictionary_key(dict, key, None)?;
+        let hash = self.dictionary_hash(key)?;
+        let (_, dense) = self.find_dictionary_key(dict, key, Some(hash))?;
         let entries = self.stored_entries(dict);
         let rank = dense
             .and_then(|i| entries.ordered_rank(i))
-            .ok_or_else(|| self.lookup_error("KeyError", key))?;
+            .ok_or_else(|| self.missing_move_key(key))?;
         self.stored_entries_mut(dict).move_to_end(rank, last);
         Ok(())
+    }
+
+    /// move_to_end sets KeyError from the supplied object, including a tuple of arguments.
+    fn missing_move_key(&mut self, key: Id) -> Error {
+        match self.tuple_backing(key) {
+            Value::None => self.exception("KeyError", &[]),
+            Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
+                let args = items.clone();
+                self.exception("KeyError", &args)
+            }
+            Value::Raised(error) if self.is_builtin_error(error, "KeyError") => {
+                let mut error = error.clone();
+                error.tracing().instance = Some(key);
+                self.chain_raised_instance(&mut error);
+                error
+            }
+            _ => self.exception("KeyError", &[key]),
+        }
     }
 
     /// Detach the node before the backing lookup can run an equality callback.

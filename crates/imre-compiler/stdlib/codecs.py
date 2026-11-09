@@ -1,6 +1,8 @@
 """Base classes for the native codec registry."""
 
 
+import builtins
+from sys import byteorder as _byteorder
 from _codecs import _imre_codec_functions, lookup
 
 # Stateless functions backing the built-in encoding modules.
@@ -10,10 +12,22 @@ utf_8_encode = _imre_codec_functions('utf-8')[0]
 
 # CPython 3.14.5, Lib/codecs.py.
 BOM_UTF8 = b'\xef\xbb\xbf'
-BOM_UTF16_LE = b'\xff\xfe'
-BOM_UTF16_BE = b'\xfe\xff'
+BOM_LE = BOM_UTF16_LE = b'\xff\xfe'
+BOM_BE = BOM_UTF16_BE = b'\xfe\xff'
 BOM_UTF32_LE = b'\xff\xfe\x00\x00'
 BOM_UTF32_BE = b'\x00\x00\xfe\xff'
+
+if _byteorder == 'little':
+    BOM = BOM_UTF16 = BOM_UTF16_LE
+    BOM_UTF32 = BOM_UTF32_LE
+else:
+    BOM = BOM_UTF16 = BOM_UTF16_BE
+    BOM_UTF32 = BOM_UTF32_BE
+
+BOM32_LE = BOM_UTF16_LE
+BOM32_BE = BOM_UTF16_BE
+BOM64_LE = BOM_UTF32_LE
+BOM64_BE = BOM_UTF32_BE
 
 
 class CodecInfo(tuple):
@@ -535,6 +549,167 @@ class StreamReader(Codec):
     def __reduce_ex__(self, proto):
         raise TypeError("can't serialize %s" % self.__class__.__name__)
 
+
+class StreamReaderWriter:
+
+    """ StreamReaderWriter instances allow wrapping streams which
+        work in both read and write modes.
+
+        The design is such that one can use the factory functions
+        returned by the codec.lookup() function to construct the
+        instance.
+
+    """
+    # Optional attributes set by the file wrappers below
+    encoding = 'unknown'
+
+    def __init__(self, stream, Reader, Writer, errors='strict'):
+
+        """ Creates a StreamReaderWriter instance.
+
+            stream must be a Stream-like object.
+
+            Reader, Writer must be factory functions or classes
+            providing the StreamReader, StreamWriter interface resp.
+
+            Error handling is done in the same way as defined for the
+            StreamWriter/Readers.
+
+        """
+        self.stream = stream
+        self.reader = Reader(stream, errors)
+        self.writer = Writer(stream, errors)
+        self.errors = errors
+
+    def read(self, size=-1):
+
+        return self.reader.read(size)
+
+    def readline(self, size=None, keepends=True):
+
+        return self.reader.readline(size, keepends)
+
+    def readlines(self, sizehint=None, keepends=True):
+
+        return self.reader.readlines(sizehint, keepends)
+
+    def __next__(self):
+
+        """ Return the next decoded line from the input stream."""
+        return next(self.reader)
+
+    def __iter__(self):
+        return self
+
+    def write(self, data):
+
+        return self.writer.write(data)
+
+    def writelines(self, list):
+
+        return self.writer.writelines(list)
+
+    def reset(self):
+
+        self.reader.reset()
+        self.writer.reset()
+
+    def seek(self, offset, whence=0):
+        self.stream.seek(offset, whence)
+        self.reader.reset()
+        if whence == 0 and offset == 0:
+            self.writer.reset()
+
+    def __getattr__(self, name,
+                    getattr=getattr):
+
+        """ Inherit all other methods from the underlying stream.
+        """
+        return getattr(self.stream, name)
+
+    # these are needed to make "with StreamReaderWriter(...)" work properly
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, tb):
+        self.stream.close()
+
+    def __reduce_ex__(self, proto):
+        raise TypeError("can't serialize %s" % self.__class__.__name__)
+
+
+def open(filename, mode='r', encoding=None, errors='strict', buffering=-1):
+    """ Open an encoded file using the given mode and return
+        a wrapped version providing transparent encoding/decoding.
+
+        Note: The wrapped version will only accept the object format
+        defined by the codecs, i.e. Unicode objects for most builtin
+        codecs. Output is also codec dependent and will usually be
+        Unicode as well.
+
+        If encoding is not None, then the
+        underlying encoded files are always opened in binary mode.
+        The default file mode is 'r', meaning to open the file in read mode.
+
+        encoding specifies the encoding which is to be used for the
+        file.
+
+        errors may be given to define the error handling. It defaults
+        to 'strict' which causes ValueErrors to be raised in case an
+        encoding error occurs.
+
+        buffering has the same meaning as for the builtin open() API.
+        It defaults to -1 which means that the default buffer size will
+        be used.
+
+        The returned wrapped file object provides an extra attribute
+        .encoding which allows querying the used encoding. This
+        attribute is only available if an encoding was specified as
+        parameter.
+    """
+    import warnings
+    warnings.warn("codecs.open() is deprecated. Use open() instead.",
+                  DeprecationWarning, stacklevel=2)
+
+    if encoding is not None and \
+       'b' not in mode:
+        # Force opening of the file in binary mode
+        mode = mode + 'b'
+    file = builtins.open(filename, mode, buffering)
+    if encoding is None:
+        return file
+
+    try:
+        info = lookup(encoding)
+        srw = StreamReaderWriter(file, info.streamreader, info.streamwriter, errors)
+        # Add attributes to simplify introspection
+        srw.encoding = encoding
+        return srw
+    except:
+        file.close()
+        raise
+
+
+def getencoder(encoding):
+
+    """ Lookup up the codec for the given encoding and return
+        its encoder function.
+
+        Raises a LookupError in case the encoding cannot be found.
+
+    """
+    return lookup(encoding).encode
+
+def getdecoder(encoding):
+
+    """ Lookup up the codec for the given encoding and return
+        its decoder function.
+
+        Raises a LookupError in case the encoding cannot be found.
+
+    """
+    return lookup(encoding).decode
 
 def getreader(encoding):
 

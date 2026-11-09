@@ -134,7 +134,7 @@ impl Checker<'_> {
             .args
             .iter()
             .map(|pattern| self.expr(pattern))
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         let ty = values.first().map_or(Type::Str, |v| v.ty);
         if !matches!(ty, Type::Str | Type::Bytes) || values.iter().any(|v| v.ty != ty) {
             return Err(error(

@@ -88,6 +88,13 @@ impl SliceIndices {
 
     /// Normalizes rooted optional integer bounds with a known nonzero step.
     unsafe fn with_step(length: usize, start: usize, stop: usize, step: isize) -> Self {
+        // SAFETY: both optional integer bounds remain rooted throughout normalization.
+        let (first, last) = unsafe { (slice_component(start), slice_component(stop)) };
+        Self::from_bounds(length, first, last, step)
+    }
+
+    /// Normalizes already decoded bounds against the current sequence length.
+    fn from_bounds(length: usize, start: Option<isize>, stop: Option<isize>, step: isize) -> Self {
         let reverse = step < 0;
         let length = length as isize;
         let (lower, upper) = if reverse {
@@ -99,12 +106,10 @@ impl SliceIndices {
             let value = if value < 0 { value + length } else { value };
             value.clamp(lower, upper)
         };
-        // SAFETY: each bound remains rooted; conversion cannot call user code.
-        let start = unsafe { slice_component(start) }
+        let start = start
             .map(normalize)
             .unwrap_or(if reverse { upper } else { lower });
-        // SAFETY: the stop has the same nullable integer representation.
-        let stop = unsafe { slice_component(stop) }
+        let stop = stop
             .map(normalize)
             .unwrap_or(if reverse { lower } else { upper });
         let distance = if reverse { start - stop } else { stop - start };
@@ -261,6 +266,28 @@ fn contiguous_slice<'a>(text: &'a str, length: usize, slice: &SliceIndices) -> &
     }
 }
 
+/// Clips nonnegative code-point bounds without first counting the whole string.
+fn forward_region(text: &str, start: usize, stop: usize) -> &str {
+    let stop = stop.min(text.len());
+    if start >= stop {
+        return "";
+    }
+    if text.as_bytes()[..stop].is_ascii() {
+        // Every offset up to the stop is already a UTF-8 boundary.
+        return &text[start..stop];
+    }
+    let mut offsets = text.char_indices().map(|(offset, _)| offset);
+    let Some(first) = offsets.nth(start) else {
+        return "";
+    };
+    let last = if stop == text.len() {
+        text.len()
+    } else {
+        offsets.nth(stop - start - 1).unwrap_or(text.len())
+    };
+    &text[first..last]
+}
+
 /// Compares contiguous slices without constructing either Python string.
 ///
 /// # Safety
@@ -279,9 +306,16 @@ pub unsafe extern "C" fn imre_str_slice_equal(
         if start == 0 && stop == 0 {
             return text;
         }
+        // SAFETY: the caller roots both bounds for the comparison.
+        let (first, last) = unsafe { (slice_component(start), slice_component(stop)) };
+        if let (Ok(first), Ok(last)) = (
+            usize::try_from(first.unwrap_or(0)),
+            usize::try_from(last.unwrap_or(isize::MAX)),
+        ) {
+            return forward_region(text, first, last);
+        }
         let length = text.chars().count();
-        // SAFETY: both bounds stay rooted and the stride is one.
-        let slice = unsafe { SliceIndices::with_step(length, start, stop, 1) };
+        let slice = SliceIndices::from_bounds(length, first, last, 1);
         contiguous_slice(text, length, &slice)
     }
     // SAFETY: the caller roots both immutable strings and their bounds.
@@ -700,6 +734,23 @@ mod tests {
         imre_list_append, imre_list_get_index, imre_list_len, imre_list_new, imre_list_set_index,
     };
     use num_bigint::BigInt;
+
+    #[test]
+    fn forward_string_regions_clip_code_point_bounds() {
+        for text in ["", "abcd", "éabc", "abcé", "a🙂éz"] {
+            let bounds = (0..=text.len() + 1).chain([usize::MAX]);
+            for start in bounds.clone() {
+                for stop in bounds.clone() {
+                    let expected: String = text
+                        .chars()
+                        .skip(start)
+                        .take(stop.saturating_sub(start))
+                        .collect();
+                    assert_eq!(forward_region(text, start, stop), expected);
+                }
+            }
+        }
+    }
 
     fn integer(value: i64) -> usize {
         Int::small(value).unwrap().into_raw()

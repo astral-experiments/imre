@@ -1,6 +1,7 @@
 //! Preserve catchable errors from a literal add_argument call at the call site.
 
 use super::*;
+use crate::frontend::phase::Result;
 use ruff_python_ast::visitor::walk_stmt;
 
 pub(super) fn is_intrinsic(
