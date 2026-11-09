@@ -72,6 +72,18 @@ def check_module_search_root(imre, root, run):
     result = run(imre, "-B", "-m", "launch", str(back), "x", extra=search)
     assert (result.returncode, result.stdout, result.stderr) == (0, b'take argument "n" requires int\nx\n', b""), result
 
+    # runpy imports the parent into its own namespace before entering the body.
+    package = app / "entry_package"
+    package.mkdir()
+    (package / "__init__.py").write_text(
+        "def __getattribute__(n: int): return n\n"
+        "from __main__ import __getattribute__ as loaded\n"
+        "print(loaded('__name__'))\n"
+    )
+    (package / "__main__.py").write_text("print(__spec__.name)\n")
+    result = run(imre, "-B", "-m", "entry_package", extra={"PYTHONPATH": str(app)})
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"__main__\nentry_package.__main__\n", b""), result
+
 
 def check_command_stdin(imre, run):
     source = (

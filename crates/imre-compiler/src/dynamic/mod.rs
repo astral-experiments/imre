@@ -724,6 +724,8 @@ pub(crate) enum ObjectOperation {
 pub(crate) struct RegisteredSource<'a> {
     /// This registration can start the application before any custom startup module runs.
     pub(crate) initial: bool,
+    /// The ordinary launcher selected this source to execute in the startup namespace.
+    pub(crate) main_body: bool,
     /// This exact source supplies the annotations in the linked application.
     pub(crate) declares_signatures: bool,
     pub(crate) name: &'a str,
@@ -754,6 +756,7 @@ impl<'a> RegisteredSource<'a> {
             check_execution: is_program,
             checked_module,
             initial: false,
+            main_body: false,
             declares_signatures: is_program,
         }
     }
@@ -1823,7 +1826,7 @@ pub(crate) fn compile(
         .map(|(name, file, body)| (name.into(), Path::new(bundled_root).join(file), body.into()))
         .collect();
     // runpy selects __main__ for a package, including a namespace package.
-    let entry_owner = module_entry.and_then(|name| {
+    let module_body = module_entry.and_then(|name| {
         let main;
         let name = if entry_sources.get(name).is_none_or(|(_, package)| *package) {
             main = format!("{name}.__main__");
@@ -1831,14 +1834,16 @@ pub(crate) fn compile(
         } else {
             name
         };
-        let (root, _) = entry_sources.get(name)?;
-        let (_, path, _) = selected_sources
+        let (root, package) = entry_sources.get(name)?;
+        let &(id, _, _) = selected_sources
             .iter()
-            .map(|(id, _, _)| &sources[*id])
-            .find(|(module, _, _)| module == name)?;
+            .find(|(id, _, _)| sources[*id].0 == name)?;
+        Some((id, root, *package))
+    });
+    let entry_owner = module_body.and_then(|(id, root, _)| {
         crate::installed_wheels::ModuleEntryRoot::select(
             root,
-            path,
+            &sources[id].1,
             initial[..path0_len].contains(root),
             wheel_records,
             options,
@@ -1942,6 +1947,10 @@ pub(crate) fn compile(
                 RegisteredSource::new(&sources[id], program && application, module);
             registration.declares_signatures = application;
             registration.check_execution |= application;
+            registration.main_body = match module_entry {
+                None => id == 0,
+                Some(_) => module_body.is_some_and(|(body, _, package)| id == body && !package),
+            };
             registration.initial = index < ordinary_registrations.unwrap_or(usize::MAX)
                 && registration.name == module_entry.unwrap_or("__main__")
                 && !registration.name.contains('.')

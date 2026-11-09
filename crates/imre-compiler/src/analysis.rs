@@ -210,13 +210,25 @@ impl Session {
             .clone()
             .find(|(_, source)| source.initial && source.declares_signatures)
         {
+            // runpy imports the parent package before executing the selected body
+            // as __main__. Only an inert parent can be passed without running code.
+            let (entry, start) = if !start.main_body && self.empty_initializer(entry) {
+                sources
+                    .clone()
+                    .find(|(_, s)| s.main_body && s.declares_signatures)
+                    .unwrap_or((entry, start))
+            } else {
+                (entry, start)
+            };
             let declarations: HashMap<_, _> = sources
                 .clone()
                 .filter(|(_, source)| source.declares_signatures)
                 .map(|(id, source)| (source.name, (id, source.path)))
                 .collect();
-            if let Some(error) = self
-                .initializer_call_error((entry, start.path), |name| declarations.get(name).copied())
+            if let Some(error) =
+                self.initializer_call_error((entry, start.path), start.main_body, |name| {
+                    declarations.get(name).copied()
+                })
             {
                 if !matches!(
                     error.kind,
