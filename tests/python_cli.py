@@ -76,6 +76,16 @@ def check_registered_entry_operand(imre, root, run):
     assert result.returncode and not result.stdout, result
     assert b"checked_operand.py:5:15: Imre: expected int, got bool" in result.stderr, result
 
+    # Inference can discover this file's concrete error before it solves the
+    # signature for the later callback.
+    entry.write_text(
+        functions + "def observe(value): pass\n"
+        "values: list[int] = [3]\nobserve(None)\nvalues.append(True)\n" + setup
+    )
+    result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+    assert result.returncode and not result.stdout, result
+    assert b"Imre: expected int, got bool" in result.stderr, result
+
 
 def check_module_search_root(imre, root, run):
     app = root / "application"
