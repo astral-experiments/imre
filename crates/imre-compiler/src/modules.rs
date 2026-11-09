@@ -2494,6 +2494,7 @@ impl IntrinsicModule {
             (Self::Imre, "struct") => Intrinsic::Struct,
             (Self::Dataclasses, "dataclass") => Intrinsic::Dataclass,
             (Self::Dataclasses, "field") => Intrinsic::DataclassField,
+            (Self::Dataclasses, "fields") => Intrinsic::ObjectOnlyExport("dataclasses.fields"),
             (Self::Dataclasses, "asdict") => Intrinsic::AsDict,
             (Self::Pathlib, "Path" | "PosixPath") => Intrinsic::Path,
             (Self::Pathlib, "PurePath" | "PurePosixPath") => {
