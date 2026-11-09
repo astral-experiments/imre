@@ -22,6 +22,7 @@ impl ModuleSource {
     }
     pub(super) fn context<'a>(&'a self, text: &'a str) -> RegisteredSource<'a> {
         RegisteredSource {
+            templates: None,
             text,
             replacements: &self.replacements,
             has_templates: self.has_templates,
@@ -36,11 +37,25 @@ pub(crate) struct RegisteredSource<'a> {
     pub(crate) text: &'a str,
     pub(crate) replacements: &'a HashMap<TextRange, Vec<u32>>,
     pub(crate) has_templates: bool,
+    pub(crate) templates: Option<&'a HashMap<TextRange, Expr>>,
     pub(crate) method_imports: &'a BTreeSet<String>,
     pub(crate) private_names: Option<&'a imre_ast::Names>,
 }
 
 impl RegisteredSource<'_> {
+    /// Escaped braces may join several middle tokens into one literal element.
+    /// Recover replacement code points in their original source order.
+    pub(crate) fn format_replacements(
+        self,
+        literal: &ast::InterpolatedStringLiteralElement,
+    ) -> Option<Vec<u32>> {
+        let range = literal.range();
+        self.replacements
+            .keys()
+            .any(|&r| range.contains_range(r))
+            .then(|| imre_ast::strings::replacements(&self.text[range]).collect())
+    }
+
     pub(crate) fn direct_method(self, call: &ast::ExprCall) -> Option<&ast::ExprAttribute> {
         imre_ast::direct_method(call, self.method_imports, self.private_names)
     }
@@ -567,6 +582,12 @@ pub(super) fn operation<E>(
             return Ok(Some(name_binding(&name.id)));
         }
         ast::Expr::NumberLiteral(lit) => number_literal(&lit.value, false),
+        ast::Expr::TString(_) => {
+            return Ok(source
+                .templates
+                .and_then(|sites| sites.get(&node.range()))
+                .cloned());
+        }
         ast::Expr::StringLiteral(lit) => {
             return Ok(Some(registered_string(
                 lit.value.to_str(),
@@ -787,6 +808,7 @@ mod tests {
         let parsed = imre_ast::indentation::prepare(text).parse_module().unwrap();
         let imports = imre_ast::module_imports(&parsed.syntax().body);
         let source = RegisteredSource {
+            templates: None,
             text,
             replacements: &HashMap::new(),
             has_templates: false,
@@ -847,6 +869,7 @@ mod tests {
         let text = "obj.emit(value, named=arg)\nf(first=a, *items, **mapping, last=b)\n";
         let parsed = imre_ast::indentation::prepare(text).parse_module().unwrap();
         let source = RegisteredSource {
+            templates: None,
             text,
             replacements: &HashMap::new(),
             has_templates: false,
@@ -911,6 +934,7 @@ mod tests {
         };
         let call = assign.value.as_call_expr().unwrap();
         let source = RegisteredSource {
+            templates: None,
             text,
             replacements: &HashMap::new(),
             has_templates: false,
@@ -945,6 +969,7 @@ mod tests {
                 panic!("expected expression")
             };
             let source = RegisteredSource {
+                templates: None,
                 text: &text,
                 replacements: &replacements,
                 has_templates: false,
@@ -977,6 +1002,7 @@ mod tests {
                 panic!("expected expression")
             };
             let source = RegisteredSource {
+                templates: None,
                 text,
                 replacements: &replacements,
                 has_templates: false,

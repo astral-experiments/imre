@@ -543,7 +543,7 @@ impl<'a> PreparedBody<'a> {
         let has_templates = tokens
             .iter()
             .any(|t| t.kind() == ast::token::TokenKind::TStringStart);
-        let template_expressions = imre_ast::strings::template_expressions(source, tokens, syntax);
+        let template_fields = imre_ast::strings::template_fields(source, tokens, syntax);
         // CPython starts the module provider at the first statement, excluding its decorators.
         let module_start = syntax
             .body
@@ -585,6 +585,16 @@ impl<'a> PreparedBody<'a> {
             replacements: &replacements,
             has_templates,
             method_imports: &method_imports,
+            templates: None,
+        };
+        let templates = if has_templates {
+            crate::frontend::prepare_templates(&body, values, &template_fields)
+        } else {
+            HashMap::new()
+        };
+        let values = crate::frontend::RegisteredSource {
+            templates: Some(&templates),
+            ..values
         };
         let sites = crate::frontend::registered_sites(&body, &private_names);
         let mut operations = sites.operations;
@@ -672,7 +682,8 @@ impl<'a> PreparedBody<'a> {
             class_keywords,
             docs,
             has_templates,
-            template_expressions,
+            templates,
+            template_fields,
             replacements,
             method_imports,
             barry_as_flufl: imre_ast::future_import(&body, "barry_as_FLUFL"),
@@ -866,7 +877,8 @@ struct SourceInfo<'a> {
     class_keywords: Vec<ruff_text_size::TextSize>,
     docs: Option<crate::modules::doctest::SealedDocs>,
     has_templates: bool,
-    template_expressions: HashMap<ruff_text_size::TextSize, String>,
+    templates: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
+    template_fields: HashMap<ruff_text_size::TextSize, imre_ast::strings::TemplateFieldText>,
     replacements: HashMap<ruff_text_size::TextRange, Vec<u32>>,
     private_names: imre_ast::Names,
     method_imports: std::collections::BTreeSet<String>,
@@ -881,6 +893,7 @@ impl SourceInfo<'_> {
             text: self.text,
             replacements: &self.replacements,
             has_templates: self.has_templates,
+            templates: Some(&self.templates),
             method_imports: &self.method_imports,
             private_names: Some(&self.private_names),
         }
@@ -1450,6 +1463,92 @@ impl Function<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prepared_template_emits_after_source_body_is_dropped() {
+        let mut prepared = PreparedBody::module(
+            "query",
+            Path::new("query.py"),
+            r#"query = t"SELECT {client.lookup(*args, key=request.name, **options)!s:>{width}}""#,
+            true,
+            ModuleOrigin::Program(ProgramBodies::default()),
+        )
+        .unwrap();
+        assert!(
+            prepared
+                .source
+                .initializer
+                .as_ref()
+                .unwrap()
+                .fully_checked()
+        );
+        prepared.body.clear();
+        prepared.source.templates.clear();
+        prepared.source.template_fields.clear();
+
+        let mut output = Output::default();
+        let filename = output.data(b"query.py");
+        prepared.emit(&mut output, 0, &filename).unwrap();
+        assert_eq!(
+            output
+                .functions
+                .matches("call i64 @imre_dyn_scoped_call_at(")
+                .count(),
+            1,
+        );
+        assert!(
+            output
+                .functions
+                .contains("call i64 @imre_dyn_cached_handle(")
+        );
+        assert!(
+            output
+                .functions
+                .contains("call i64 @imre_dyn_build_sequence(")
+        );
+        for operation in [
+            "spread_arguments",
+            "format",
+            "template_interpolation",
+            "build_template",
+        ] {
+            let symbol = output.strings[operation.as_bytes()];
+            assert!(
+                output.functions.contains(&format!(
+                    "call i64 @imre_dyn_op_at(ptr %ctx, ptr @str{symbol},"
+                )),
+                "{operation}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_residual_operand_keeps_its_entire_template_at_the_source_boundary() {
+        let prepared = PreparedBody::module(
+            "query",
+            Path::new("query.py"),
+            "first = t'{client.lookup(*args)}'
+second = t'{client.lookup(*args)}{v * 2}'",
+            true,
+            ModuleOrigin::Program(ProgramBodies::default()),
+        )
+        .unwrap();
+        let checked: Vec<_> = prepared
+            .source
+            .templates
+            .keys()
+            .map(|&range| &prepared.source.text[range])
+            .collect();
+        assert_eq!(checked, ["t'{client.lookup(*args)}'"]);
+        assert!(
+            !prepared
+                .source
+                .initializer
+                .as_ref()
+                .unwrap()
+                .fully_checked()
+        );
+    }
 
     #[test]
     fn physical_worker_targets_use_checked_registered_calls() {

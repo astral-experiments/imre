@@ -125,6 +125,15 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                 | Builtin::RegisteredComplex(..),
                 operands,
             ) => operands.is_empty(),
+            ExprKind::Builtin(Builtin::RegisteredTemplate(segments), fields) => {
+                segments.len() == fields.len() + 1
+            }
+            ExprKind::Builtin(
+                Builtin::RegisteredInterpolation { .. } | Builtin::RegisteredFormat,
+                args,
+            ) => args.len() == 2,
+            ExprKind::Builtin(Builtin::RegisteredFormatConversion(_), args) => args.len() == 1,
+            ExprKind::Builtin(Builtin::RegisteredFormatJoin, _) => true,
             ExprKind::Builtin(Builtin::RegisteredDict(entries), operands) => {
                 operands.len()
                     == entries
@@ -532,6 +541,42 @@ impl Frame<'_, '_, '_> {
                 .code
                 .lit(4, &[real.to_le_bytes(), imag.to_le_bytes()].concat()),
             (Builtin::RegisteredString(points), []) => self.code.linked_string(points.clone()),
+            (Builtin::RegisteredTemplate(segments), fields) => {
+                let strings = self.code.emit_string_tuple(segments.clone());
+                let parts = self.code.op("list", &[]);
+                for field in fields {
+                    let part = self.evaluate_handle(field);
+                    self.code.op("append", &[&parts, &part]);
+                }
+                self.code.op("build_template", &[&strings, &parts])
+            }
+            (
+                Builtin::RegisteredInterpolation {
+                    expression,
+                    conversion,
+                },
+                [value, spec],
+            ) => {
+                let value = self.evaluate_handle(value);
+                let spec = self.evaluate_handle(spec);
+                self.code.interpolation(&value, expression, *conversion, &spec)
+            }
+            (Builtin::RegisteredFormatConversion(conversion), [value]) => {
+                let value = self.evaluate_handle(value);
+                self.code.convert_format_value(&value, *conversion)
+            }
+            (Builtin::RegisteredFormat, [value, spec]) => {
+                let value = self.evaluate_handle(value);
+                let spec = self.evaluate_handle(spec);
+                self.code.format_value(&value, &spec)
+            }
+            (Builtin::RegisteredFormatJoin, parts) => {
+                let parts = parts
+                    .iter()
+                    .map(|part| self.evaluate_handle(part))
+                    .collect();
+                self.code.join_format_parts(parts)
+            }
             (Builtin::RegisteredLocation(range, position), [value]) => {
                 let previous_range = std::mem::replace(&mut self.code.current_range, *range);
                 let previous_line = self.code.enter_expression(*position);
@@ -755,6 +800,22 @@ impl<'a> super::IndexKey<'a, Expr> {
 }
 
 impl Function<'_, '_> {
+    /// Construct an interpolation from evaluated handles and its constant source spelling.
+    pub(super) fn interpolation(
+        &mut self,
+        value: &str,
+        expression: &str,
+        conversion: Option<char>,
+        spec: &str,
+    ) -> String {
+        let expression = self.source_text(expression, None);
+        let conversion = conversion.map_or_else(|| "0".to_owned(), |c| self.text(&c.to_string()));
+        let metadata = self.op("list", &[]);
+        self.op("append", &[&metadata, &conversion]);
+        self.op("append", &[&metadata, spec]);
+        self.op("template_interpolation", &[value, &expression, &metadata])
+    }
+
     fn namespace_import(&mut self, import: &ir::NamespaceImport) {
         match import {
             ir::NamespaceImport::Modules(modules) => {

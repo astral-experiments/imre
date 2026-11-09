@@ -4854,6 +4854,11 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredEllipsis
             | Builtin::RegisteredComplex(..)
             | Builtin::RegisteredString(_)
+            | Builtin::RegisteredTemplate(_)
+            | Builtin::RegisteredInterpolation { .. }
+            | Builtin::RegisteredFormatConversion(_)
+            | Builtin::RegisteredFormat
+            | Builtin::RegisteredFormatJoin
             | Builtin::RegisteredAttribute { .. }
             | Builtin::RegisteredLocation(..) => {
                 unreachable!("registered operation in fixed calling convention")

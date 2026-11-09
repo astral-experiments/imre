@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod templates;
+pub(crate) use templates::{prepare_templates, template_segments};
 pub(super) mod values;
 
 pub(super) struct Frame<'a> {
@@ -1267,6 +1269,7 @@ mod tests {
         let replacements = HashMap::new();
         let imports = imre_ast::module_imports(&stmts);
         let source = RegisteredSource {
+            templates: None,
             text,
             private_names: Some(&names),
             replacements: &replacements,
