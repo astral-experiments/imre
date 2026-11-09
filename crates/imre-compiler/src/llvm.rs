@@ -5106,13 +5106,14 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredStatement(..)
             | Builtin::RegisteredCall(..)
             | Builtin::RegisteredName(_)
-            | Builtin::RegisteredAttribute(_)
+            | Builtin::RegisteredUnary(_)
             | Builtin::RegisteredSubscript(..)
             | Builtin::RegisteredDict(_)
             | Builtin::RegisteredEllipsis
             | Builtin::RegisteredComplex(..)
             | Builtin::RegisteredString(_)
-            | Builtin::RegisteredLocation(_) => {
+            | Builtin::RegisteredAttribute { .. }
+            | Builtin::RegisteredLocation(..) => {
                 unreachable!("registered operation in fixed calling convention")
             }
             Builtin::PairTable(ir::PairTableOp::ViewLen(slot)) => {

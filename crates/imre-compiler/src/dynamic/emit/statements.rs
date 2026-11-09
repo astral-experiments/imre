@@ -249,7 +249,6 @@ impl<'a> Visitor<'a> for ClosureNames {
 
 enum Place {
     Name(String),
-    Attr(String, String),
     Item(String, String),
 }
 
@@ -296,9 +295,21 @@ impl Function<'_, '_> {
             self.checkpoint(stmt);
             self.simple_call = imre_ast::unhighlighted_call(stmt);
             if let Some(import) =
-                crate::frontend::registered_import(stmt, &self.source.private_names)
+                crate::frontend::registered_import(stmt, Some(&self.source.private_names))
             {
                 self.registered_value(&import);
+                continue;
+            }
+            if let Some(effects) = crate::frontend::attribute_effects(stmt) {
+                for effect in effects {
+                    self.attribute_operation(
+                        effect.action,
+                        effect.field.attr.as_str(),
+                        effect.field.range(),
+                        effect.operands(),
+                        |code, node| code.expr(node),
+                    );
+                }
                 continue;
             }
             match stmt {
@@ -355,16 +366,23 @@ impl Function<'_, '_> {
                     }
                 }
                 ast::Stmt::Delete(v) => {
-                    for target in &v.targets {
+                    for target in crate::frontend::delete_targets(v) {
+                        if let ast::Expr::Attribute(field) = target {
+                            self.attribute_operation(
+                                crate::ir::AttributeAction::Delete,
+                                field.attr.as_str(),
+                                field.range(),
+                                std::iter::once(field.value.as_ref()),
+                                |code, expr| code.expr(expr),
+                            );
+                            continue;
+                        }
                         match self.place(target) {
                             Some(Place::Name(name)) => {
                                 self.frame.op("delname", &[&self.scope.clone(), &name]);
                             }
                             Some(Place::Item(obj, key)) => {
                                 self.op("delitem", &[&obj, &key]);
-                            }
-                            Some(Place::Attr(obj, name)) => {
-                                self.op("delattr", &[&obj, &name]);
                             }
                             _ => {
                                 self.unsupported("deletion target");
@@ -618,11 +636,15 @@ impl Function<'_, '_> {
     }
 
     fn create_class(&mut self, class: &ast::StmtClassDef, parameters: Option<String>) -> String {
-        let bases = self.op("list", &[]);
-        let kwargs = if let Some(args) = class.arguments.as_deref() {
-            self.arguments(&bases, args, None)
+        let (bases, kwargs) = if let Some(args) = class.arguments.as_deref() {
+            self.argument_pack(
+                &crate::frontend::packed_arguments(args),
+                crate::frontend::registered_arguments(args),
+                None,
+                &mut Self::expr,
+            )
         } else {
-            "0".into()
+            (self.op("list", &[]), "0".into())
         };
         let generic = parameters.is_some();
         if let Some(scope) = parameters {
@@ -1215,10 +1237,6 @@ impl Function<'_, '_> {
     fn place(&mut self, target: &ast::Expr) -> Option<Place> {
         Some(match target {
             ast::Expr::Name(n) => Place::Name(self.code_name(n.id.as_str())),
-            ast::Expr::Attribute(a) => {
-                let obj = self.expr(&a.value);
-                Place::Attr(obj, self.code_name(a.attr.as_str()))
-            }
             ast::Expr::Subscript(s) => {
                 let obj = self.expr(&s.value);
                 Place::Item(obj, self.expr(&s.slice))
@@ -1233,7 +1251,6 @@ impl Function<'_, '_> {
     fn read(&mut self, place: &Place) -> String {
         match place {
             Place::Name(n) => self.frame.op("lookup", &[&self.scope.clone(), n]),
-            Place::Attr(v, n) => self.frame.op("attr", &[v, n]),
             Place::Item(v, k) => self.frame.op("get", &[v, k]),
         }
     }
@@ -1241,7 +1258,6 @@ impl Function<'_, '_> {
     fn write(&mut self, place: &Place, value: &str) {
         match place {
             Place::Name(n) => self.frame.op("assign", &[&self.scope.clone(), n, value]),
-            Place::Attr(v, n) => self.op("setattr", &[v, n, value]),
             Place::Item(v, k) => self.put_item(v, k, value),
         };
     }
@@ -1259,6 +1275,15 @@ impl Function<'_, '_> {
         let elements = match target {
             ast::Expr::Tuple(t) => &t.elts,
             ast::Expr::List(l) => &l.elts,
+            ast::Expr::Attribute(field) => {
+                self.store_attribute(field.attr.as_str(), field.range(), value, |code| {
+                    code.expr(&field.value)
+                });
+                if owned {
+                    self.release_replaced("2");
+                }
+                return;
+            }
             _ => {
                 if let Some(p) = self.place(target) {
                     if owned {
@@ -1266,7 +1291,7 @@ impl Function<'_, '_> {
                             self.assign_owned_name(name, value);
                         } else {
                             self.write(&p, value);
-                            // An attribute or item setter may replace a writer.
+                            // An item setter may replace a writer.
                             self.release_replaced("2");
                         }
                     } else {

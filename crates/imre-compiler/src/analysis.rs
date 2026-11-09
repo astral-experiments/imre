@@ -830,6 +830,27 @@ impl Session {
         self.copy_for_diagnostics(None)
     }
 
+    /// Check a prospective function against the source typing rules before an
+    /// unresolved signature can acquire a new registered entry.
+    pub(crate) fn registered_body_checks(&self) -> Result<Self, String> {
+        let mut session = self.diagnostic_copy()?;
+        DiagnosticRules::get(&session.db)
+            .set_rules(&mut session.db)
+            .to(Arc::new(RuleSelection::from_registry(
+                default_lint_registry(),
+            )));
+        Ok(session)
+    }
+
+    pub(crate) fn source_error_ranges(&self, module: usize) -> Vec<TextRange> {
+        self.db
+            .check_file(self.files[module])
+            .into_iter()
+            .filter(|diagnostic| diagnostic.severity() >= Severity::Error)
+            .filter_map(|diagnostic| diagnostic.primary_span()?.range())
+            .collect()
+    }
+
     fn copy_for_diagnostics(&self, script_entry: Option<File>) -> Result<Self, String> {
         let mut copy = Self::with_storage(
             &self.root,
@@ -1147,6 +1168,46 @@ impl Session {
         matches!(
             module,
             Some("zipfile" | "io" | "_io" | "pathlib" | "re" | "gzip" | "hashlib" | "_hashlib")
+        )
+    }
+
+    /// An unknown inferred type can also come from an invalid operation. Only a dynamic
+    /// parameter that still supplies this name proves the checked frame's late-bound operand.
+    pub(crate) fn is_dynamic_receiver(&self, module: usize, expression: &Expr) -> bool {
+        use ty_python_core::definition::DefinitionKind;
+        use ty_python_semantic::types::ide_support::{
+            ImportAliasResolution, ResolvedDefinition, definitions_for_name,
+        };
+        use ty_python_semantic::types::{DynamicType, Type as Ty};
+
+        let Some(name) = expression.as_name_expr() else {
+            return false;
+        };
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let file = self.db.program_file(self.files[module]);
+        if ty_python_core::semantic_index(&self.db, file)
+            .try_expression_scope_id(expression)
+            .is_none()
+        {
+            return false;
+        }
+        let model = SemanticModel::new(&self.db, file);
+        if !matches!(
+            expression.inferred_type(&model),
+            Some(Ty::Dynamic(DynamicType::Any | DynamicType::Unknown))
+        ) {
+            return false;
+        }
+        let definitions = definitions_for_name(
+            &model,
+            name.id.as_str(),
+            name.into(),
+            ImportAliasResolution::PreserveAliases,
+        );
+        matches!(
+            definitions.as_slice(),
+            [ResolvedDefinition::Definition(definition)]
+                if matches!(definition.kind(&self.db), DefinitionKind::Parameter(_))
         )
     }
 

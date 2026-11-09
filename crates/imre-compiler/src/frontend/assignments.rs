@@ -480,11 +480,11 @@ impl Checker<'_> {
     }
 
     pub(super) fn is_module_namespace(&self, value: &Expr) -> bool {
-        match value.kind {
-            ExprKind::Builtin(Builtin::RegisteredCall(site, ..), _) => {
-                self.namespace_calls.contains(&site)
+        match &value.kind {
+            ExprKind::Builtin(Builtin::RegisteredCall(site), _) => {
+                self.namespace_calls.contains(&site.range)
             }
-            ExprKind::Local(slot) => self.namespace.aliases.contains(&slot),
+            ExprKind::Local(slot) => self.namespace.aliases.contains(slot),
             _ => false,
         }
     }
