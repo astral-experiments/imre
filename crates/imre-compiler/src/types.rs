@@ -197,6 +197,8 @@ impl Types {
     pub(crate) fn verify_type(&self, ty: Type, classes: usize) -> Result<(), String> {
         let storage = self.0.borrow();
         let valid = match ty {
+            // Registered object handles cannot enter a fixed-layout module.
+            Type::PythonObject => false,
             Type::StrLiteral(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::StringLiterals(_)))
             }
@@ -1820,6 +1822,21 @@ impl Types {
                     pending.extend(self.concrete_subclasses(class).iter().copied());
                 }
                 _ => pending.extend(self.children(ty)),
+            }
+        }
+        false
+    }
+
+    /// Whether any stored part of this operand requires a live Python handle.
+    pub(crate) fn stores_python_object(&self, ty: Type) -> bool {
+        let mut pending = vec![ty];
+        let mut visited = std::collections::HashSet::new();
+        while let Some(ty) = pending.pop() {
+            if ty == Type::PythonObject {
+                return true;
+            }
+            if visited.insert(ty) {
+                pending.extend(self.children(ty));
             }
         }
         false

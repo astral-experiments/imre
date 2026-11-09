@@ -1,4 +1,4 @@
-//! Discovers concrete signatures without exposing unknown types to executable IR.
+//! Resolve function signatures to native layouts or registered Python argument storage.
 
 use std::cell::{Cell, RefCell};
 
@@ -329,6 +329,47 @@ struct Pending {
     discovery: ReturnDiscovery,
 }
 
+impl Pending {
+    fn unresolved(
+        &self,
+        graph: &SourceGraph,
+        module: ModuleId,
+        function: &ast::StmtFunctionDef,
+        signature: &Signature,
+    ) -> Option<Diagnostic> {
+        let parameter = self.params.iter().position(Option::is_none);
+        if parameter.is_none() && self.returns.is_some() {
+            return None;
+        }
+        let source = &graph.modules[module].source;
+        let report = if self.used_as_value {
+            Diagnostic::at(
+                source,
+                function,
+                "using this function as a value requires Python argument binding".to_owned(),
+            )
+            .classified(Kind::ScopedObject)
+        } else if let Some(index) = parameter {
+            let name = &signature.params[index].name;
+            Diagnostic::at(
+                source,
+                function,
+                format!(
+                    "cannot infer parameter {name:?}; add an annotation or a concrete direct call"
+                ),
+            )
+            .classified(Kind::UnresolvedParameter(module, function.start()))
+        } else {
+            Diagnostic::at(
+                source,
+                function,
+                "cannot infer function return type; add an annotation; recursive calls remain unsupported".to_owned(),
+            )
+        };
+        Some(report.in_module(graph, module))
+    }
+}
+
 /// Each missing slot is filled once from a checked call or a fully checked body.
 /// Discovery uses the ordinary checker, then discards all of its IR and owners.
 /// The final pass checks every body again with complete, immutable signatures.
@@ -366,6 +407,35 @@ impl Inference {
             },
         });
         id
+    }
+
+    pub(super) fn len(&self) -> usize {
+        self.pending.borrow().len()
+    }
+
+    /// The registered binder has real Python objects even when fixed callers cannot infer a layout.
+    pub(super) fn checked_signature(&self, signature: &Signature) -> Option<Signature> {
+        let pending = self.pending.borrow();
+        let value = &pending[signature.id];
+        if value.returns.is_none() || value.params.iter().any(Option::is_none) {
+            return None;
+        }
+        let mut signature = signature.clone();
+        self.update(&mut signature);
+        Some(signature)
+    }
+
+    pub(super) fn registered_signature(&self, signature: &Signature) -> Option<Signature> {
+        let pending = self.pending.borrow();
+        let params = &pending[signature.id].params;
+        if params.iter().all(Option::is_some) {
+            return None;
+        }
+        let mut signature = signature.clone();
+        for (param, inferred) in signature.params.iter_mut().zip(params) {
+            param.ty = inferred.unwrap_or(Type::PythonObject);
+        }
+        Some(signature)
     }
 
     fn unresolved(&self) -> bool {
@@ -612,6 +682,42 @@ impl Inference {
         changed
     }
 
+    /// At the scalar fixed point, the registered binder can supply real Python objects
+    /// for the remaining arguments of first-party source functions. A missing return
+    /// alone may belong to an unresolved recursive call, which keeps its original diagnostic.
+    fn use_registered_arguments(
+        &self,
+        graph: &SourceGraph,
+        signatures: &HashMap<DefinitionId, Signature>,
+    ) -> Option<HashMap<usize, Diagnostic>> {
+        let mut pending = self.pending.borrow_mut();
+        let mut owners = HashMap::new();
+        for (owner, signature) in signatures {
+            let state = &pending[signature.id];
+            let module = &graph.modules[owner.module];
+            if module.is_program_source() && state.params.iter().any(Option::is_none) {
+                let function =
+                    module.parsed.syntax().body[owner.statement].as_function_def_stmt()?;
+                let diagnostic = state.unresolved(graph, owner.module, function, signature)?;
+                owners.insert(signature.id, diagnostic);
+            }
+        }
+        if pending.iter().enumerate().any(|(id, value)| {
+            !owners.contains_key(&id)
+                && (value.params.iter().any(Option::is_none) || value.returns.is_none())
+        }) {
+            return None;
+        }
+        for &id in owners.keys() {
+            let state = &mut pending[id];
+            for parameter in &mut state.params {
+                parameter.get_or_insert(Type::PythonObject);
+            }
+            state.returns.get_or_insert(Type::PythonObject);
+        }
+        Some(owners)
+    }
+
     /// Stops when every signature is concrete, or no new type evidence is available.
     /// A slot can widen from a command to its common namespace only once.
     pub fn solve(
@@ -621,7 +727,8 @@ impl Inference {
         signatures: &mut HashMap<DefinitionId, Signature>,
         classes: &mut ClassInfo,
         types: &Types,
-    ) -> std::result::Result<(), Diagnostic> {
+    ) -> std::result::Result<HashMap<usize, Diagnostic>, Diagnostic> {
+        let mut registered = HashMap::new();
         loop {
             let widened = self.widened.replace(false);
             if !widened && !self.unresolved() {
@@ -793,44 +900,35 @@ impl Inference {
                 // Only the failure that escaped the checker controls this round.
                 // An alternative may have waited for a signature and been discarded.
                 if let Some(primary) = reports.next() {
+                    if primary.kind.is_object() {
+                        registered::capture(
+                            graph, signatures, classes, types, self, &globals, false,
+                        );
+                    }
                     return Err(primary.with_following(reports));
                 }
                 if self.infer_inherited_parameters(definitions, classes) {
                     continue;
                 }
+                if let Some(owners) = self.use_registered_arguments(graph, signatures) {
+                    registered = owners;
+                    break;
+                }
                 let pending = self.pending.borrow();
                 for (module, function, signature) in definitions.iter() {
-                    let inferred = &pending[signature.id];
-                    // A first-class function can bind Python values when its callers could
-                    // not establish a scalar signature. Its definition is already known.
-                    if inferred.used_as_value
-                        && (inferred.returns.is_none()
-                            || inferred.params.iter().any(Option::is_none))
+                    let Some(unresolved) =
+                        pending[signature.id].unresolved(graph, *module, function, signature)
+                    else {
+                        continue;
+                    };
+                    if unresolved.kind.is_object()
+                        || matches!(unresolved.kind, Kind::UnresolvedParameter(..))
                     {
-                        return Err(Diagnostic::at(
-                            &graph.modules[*module].source,
-                            function,
-                            "using this function as a value requires Python argument binding"
-                                .to_owned(),
-                        )
-                        .classified(Kind::ScopedObject)
-                        .in_module(graph, *module));
+                        registered::capture(
+                            graph, signatures, classes, types, self, &globals, true,
+                        );
                     }
-                    if let Some(index) = inferred.params.iter().position(Option::is_none) {
-                        let name = &signature.params[index].name;
-                        return Err(Diagnostic::at(&graph.modules[*module].source,
-                            function,
-                            format!(
-                                "cannot infer parameter {name:?}; add an annotation or a concrete direct call"
-                            ),
-                        ).in_module(graph, *module));
-                    }
-                    if inferred.returns.is_none() {
-                        return Err(Diagnostic::at(&graph.modules[*module].source,
-                            function,
-                            "cannot infer function return type; add an annotation; recursive calls remain unsupported".to_owned(),
-                        ).in_module(graph, *module));
-                    }
+                    return Err(unresolved);
                 }
                 unreachable!("an unresolved signature has a missing parameter or return");
             }
@@ -846,7 +944,7 @@ impl Inference {
                 self.update(signature);
             }
         }
-        Ok(())
+        Ok(registered)
     }
 }
 
@@ -878,6 +976,11 @@ impl Checker<'_> {
                 }))
             .then_some(&mut scope),
         )?;
+        // A successfully bound source call can enter the definition's registered body.
+        self.globals
+            .missing_bindings
+            .borrow_mut()
+            .remove(&signature.id);
         Ok(scope.finish(self.call_value(signature, ty, args)))
     }
 

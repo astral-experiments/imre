@@ -19,6 +19,7 @@ use crate::types::Types;
 
 mod affine;
 mod asyncio;
+pub(crate) mod body;
 mod byte_outputs;
 mod calendar;
 mod callables;
@@ -30,6 +31,7 @@ mod integer_regions;
 mod json;
 mod line_views;
 mod literals;
+pub(crate) mod operations;
 mod paths;
 mod posixpath;
 mod processes;
@@ -45,6 +47,7 @@ mod truthiness;
 mod unions;
 mod units;
 
+use operations::Operations;
 use units::Output;
 pub(crate) use units::emit_units;
 
@@ -81,6 +84,9 @@ impl Type {
     /// Classifies the type once for LLVM values, retain/release calls, and field descriptors.
     fn word_kind(self) -> WordKind {
         match self {
+            Self::PythonObject => {
+                unreachable!("registered heap handle in fixed calling convention")
+            }
             Self::None => WordKind::None,
             Self::Bool => WordKind::Bool,
             Self::Int => WordKind::Int,
@@ -323,6 +329,55 @@ pub(crate) fn emit_file(
     Ok((std::mem::take(output.entry_buffer()), prefer_objects))
 }
 
+pub(crate) struct RegisteredCode {
+    pub(crate) symbol: String,
+    pub(crate) definitions: String,
+}
+
+/// Emit the compact, specialized root and its owned helpers with the usual checked LLVM generator.
+/// A registered caller already has a running Python context, so it cannot run a native program initializer.
+pub(crate) fn registered_native(
+    module: &Module,
+    site: usize,
+    sanitize: bool,
+    frame_lists: &[(usize, String)],
+    line_of: impl Fn(ruff_text_size::TextSize) -> usize,
+) -> Result<RegisteredCode, Unsupported> {
+    let ranges = crate::ranges::analyze(module);
+    let mut output = Output::new(&vec![0; module.functions.len()], 1, 0, false);
+    output.registered = Some(site);
+    for (slot, name) in frame_lists {
+        let label = format!("imre_registered_{site}_name_{slot}");
+        output.byte_constant(0, &label, name.as_bytes());
+        output.frame_lists.push((*slot, label, name.len()));
+    }
+    crate::ir::walk_expressions(&module.functions[0].body, &mut |expr| {
+        if let ExprKind::Builtin(Builtin::RegisteredStatement(range, _), _) = &expr.kind {
+            output
+                .statement_lines
+                .insert(range.start(), line_of(range.start()));
+        }
+    });
+    let symbol = output.function_name(0);
+    emit_program(module, &ranges, sanitize, &mut output)?;
+    Ok(RegisteredCode {
+        symbol,
+        definitions: std::mem::take(output.entry_buffer()),
+    })
+}
+
+pub(crate) fn registered_native_prelude() -> String {
+    let mut ir = String::new();
+    write_declarations(&mut ir);
+    ir.push_str("declare void @imre_dyn_native_frame_int_list(ptr, i64, ptr, i64, ptr)\n");
+    ir.push_str(&integer_helpers());
+    ir.push_str(&nullable_pointer_helpers());
+    ir.push_str(BRANCH_WEIGHTS);
+    ir
+}
+
+const BRANCH_WEIGHTS: &str = "\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n!1 = !{!\"branch_weights\", i32 2000, i32 1}\n";
+
 fn emit_program(
     module: &Module,
     ranges: &RangeFacts<'_>,
@@ -461,7 +516,7 @@ fn emit_program(
     let mut emitter = Emitter {
         module,
         output,
-        code: String::new(),
+        body: body::FunctionBody::new("entry", ""),
         entry_allocas: String::new(),
         mapping_words: 0,
         forward_cursors: BTreeMap::new(),
@@ -490,10 +545,6 @@ fn emit_program(
         enum_members: Vec::new(),
         http_members: Vec::new(),
         literal_globals,
-        next_value: 0,
-        next_label: 0,
-        current: "entry".to_owned(),
-        terminated: false,
         loops: Vec::new(),
         locals: Vec::new(),
         directory_slot_count: 0,
@@ -518,7 +569,6 @@ fn emit_program(
         cleanup_bytes: 0,
         cleanup_limit_hit: false,
         return_exit: String::new(),
-        error_exit: String::new(),
         sanitize,
         ranges,
         effects,
@@ -543,7 +593,8 @@ fn emit_program(
         .filter_map(|m| m.repr_method)
         .collect();
     let mut bodies = Vec::with_capacity(module.functions.len() + 1);
-    for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
+    let entry = emitter.output.registered.is_none().then_some(&module.entry);
+    for (id, function) in module.functions.iter().chain(entry).enumerate() {
         let entry = id == module.functions.len();
         emitter.output.current = if entry {
             emitter.output.entry
@@ -552,12 +603,48 @@ fn emit_program(
         };
         if emitter.output.split() {
             // SSA names and labels are scoped to one LLVM function.
-            emitter.next_value = 0;
-            emitter.next_label = 0;
+            emitter.body.reset_names();
         }
         let frame = function_source_frame(module, &repr_methods, id);
-        let params = emitter.function(function, entry, frame, &borrows[id])?;
-        bodies.push((params, std::mem::take(&mut emitter.code)));
+        // Only the source root has a registered frame. Helpers unwind into that root.
+        let frame_lists = std::mem::take(&mut emitter.output.frame_lists);
+        let mut params = emitter.function(function, entry, frame, &borrows[id], &frame_lists)?;
+        if id == 0 && emitter.output.registered.is_some() {
+            let names = "ptr %ctx, i64 %scope, ptr %file";
+            params = if params.is_empty() {
+                names.to_owned()
+            } else {
+                format!("{names}, {params}")
+            };
+        }
+        bodies.push((params, std::mem::take(&mut emitter.body.code)));
+    }
+    if emitter.output.registered.is_some() {
+        // These resources depend on program startup, static layout tables or object pools.
+        // Keep their existing registered operations until they can share those owners.
+        if !emitter.strings.is_empty()
+            || !module.globals.is_empty()
+            || !module.class_metadata.is_empty()
+            || !emitter.json_schema_roots.is_empty()
+            || !emitter.async_frames.is_empty()
+            || !emitter.async_invoke_frames.is_empty()
+            || !emitter.static_functions.is_empty()
+            || !emitter.callable_uses.is_empty()
+            || !emitter.output.record_types.is_empty()
+            || emitter.output.has_local_helpers()
+            || emitter.uses_sequence_layout
+            || emitter.uses_append_windows
+            || emitter.uses_byte_output_windows
+            || emitter.uses_forward_cursors
+            || emitter.uses_percent_tuple
+            || !extension_modules.is_empty()
+        {
+            return Err(Unsupported(
+                "Imre: retained code requires native module initialization or private helpers",
+            ));
+        }
+        write_function_bodies(emitter.output, module, bodies, sanitize);
+        return Ok(false);
     }
     emitter
         .output
@@ -704,15 +791,27 @@ fn emit_program(
     }
     emitter.enum_table();
     emitter.literal_pool();
+    write_function_bodies(emitter.output, module, bodies, sanitize);
+    // Layout hints never replace the representation, overflow, or error guards.
+    emitter.output.common().push_str(BRANCH_WEIGHTS);
+    Ok(!mixed_link_owners.is_empty())
+}
+
+fn write_function_bodies(
+    output: &mut Output,
+    module: &Module,
+    bodies: Vec<(String, String)>,
+    sanitize: bool,
+) {
     for (id, (params, body)) in bodies.into_iter().enumerate() {
         let (owner, name, returns) = if let Some(f) = module.functions.get(id) {
             (
-                emitter.output.function_owner(id),
-                emitter.output.function_name(id),
+                output.function_owner(id),
+                output.function_name(id),
                 f.returns.llvm(),
             )
         } else {
-            (emitter.output.entry, "main".to_owned(), "i32")
+            (output.entry, "main".to_owned(), "i32")
         };
         // Keep native function entries aligned to a cache line as the linked runtime changes.
         let attrs = if sanitize {
@@ -720,28 +819,17 @@ fn emit_program(
         } else {
             " align 64"
         };
-        emitter.output.common().push('\n');
-        emitter
-            .output
+        output.common().push('\n');
+        output
             .function(owner, &name, returns, &params, attrs)
             .push_str(&body);
     }
-    // Layout hints never replace the representation, overflow, or error guards.
-    emitter
-        .output
-        .common()
-        .push_str("\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n");
-    emitter
-        .output
-        .common()
-        .push_str("!1 = !{!\"branch_weights\", i32 2000, i32 1}\n");
-    Ok(!mixed_link_owners.is_empty())
 }
 
 struct Emitter<'a, 'module> {
     module: &'a Module,
     output: &'a mut Output,
-    code: String,
+    body: body::FunctionBody,
     entry_allocas: String,
     mapping_words: usize,
     forward_cursors: BTreeMap<usize, ForwardCursor>,
@@ -770,10 +858,6 @@ struct Emitter<'a, 'module> {
     enum_members: Vec<[usize; 3]>,
     http_members: Vec<Option<(u64, usize, usize)>>,
     literal_globals: Vec<Option<String>>,
-    next_value: usize,
-    next_label: usize,
-    current: String,
-    terminated: bool,
     loops: Vec<LoopTarget>,
     locals: Vec<Type>,
     directory_slot_count: usize,
@@ -798,7 +882,6 @@ struct Emitter<'a, 'module> {
     cleanup_bytes: usize,
     cleanup_limit_hit: bool,
     return_exit: String,
-    error_exit: String,
     sanitize: bool,
     ranges: &'a RangeFacts<'module>,
     effects: ExceptionEffects,
@@ -852,21 +935,17 @@ fn regex_positions_may_escape(module: &crate::ir::Module, function: &Function) -
 
 impl Emitter<'_, '_> {
     fn line(&mut self, line: impl AsRef<str>) {
-        writeln!(self.code, "  {}", line.as_ref()).unwrap();
+        self.body.line(line);
     }
 
     fn instruction(&mut self, instruction: impl AsRef<str>) -> String {
-        let result = format!("%v{}", self.next_value);
-        self.next_value += 1;
-        self.line(format!("{result} = {}", instruction.as_ref()));
-        result
+        self.body.instruction(instruction)
     }
 
     /// Gives each emitted operation independent scratch with function lifetime,
     /// including operations inside loops and duplicated finally cleanup paths.
     fn entry_alloca(&mut self, ty: impl AsRef<str>) -> String {
-        let result = format!("%scratch{}", self.next_value);
-        self.next_value += 1;
+        let result = self.body.name("%scratch");
         writeln!(self.entry_allocas, "  {result} = alloca {}", ty.as_ref()).unwrap();
         result
     }
@@ -905,25 +984,19 @@ impl Emitter<'_, '_> {
     }
 
     fn label(&mut self) -> String {
-        let result = format!("b{}", self.next_label);
-        self.next_label += 1;
-        result
+        self.body.label()
     }
 
     fn start(&mut self, label: &str) {
-        writeln!(self.code, "{label}:").unwrap();
-        self.current = label.to_owned();
-        self.terminated = false;
+        self.body.start(label);
     }
 
     fn jump(&mut self, label: &str) {
-        self.line(format!("br label %{label}"));
-        self.terminated = true;
+        self.body.jump(label);
     }
 
     fn branch(&mut self, condition: &str, yes: &str, no: &str) {
-        self.line(format!("br i1 {condition}, label %{yes}, label %{no}"));
-        self.terminated = true;
+        self.body.branch(condition, yes, no);
     }
 
     fn call(&mut self, name: &str, returns: Type, args: &[&Value]) -> Value {
@@ -1111,9 +1184,7 @@ impl Emitter<'_, '_> {
             self.instruction("load atomic i8, ptr @imre_signal_tripped monotonic, align 1");
         let pending = self.instruction(format!("icmp ne i8 {tripped}, 0"));
         let (slow, next) = (self.label(), self.label());
-        self.line(format!(
-            "br i1 {pending}, label %{slow}, label %{next}, !prof !0"
-        ));
+        self.body.conditional(&pending, &slow, &next, Some(false));
         self.start(&slow);
         let raised = self.instruction("call i1 @imre_typed_interrupt()");
         self.check_failed(&raised);
@@ -1127,10 +1198,7 @@ impl Emitter<'_, '_> {
     /// Branch weights guide layout/inlining without assuming errors impossible.
     fn check_failed(&mut self, failed: &str) {
         let (error, success) = (self.label(), self.label());
-        self.line(format!(
-            "br i1 {failed}, label %{error}, label %{success}, !prof !0"
-        ));
-        self.terminated = true;
+        self.body.conditional(failed, &error, &success, Some(false));
         let temporaries = self.temporaries.clone();
         self.start(&error);
         for value in temporaries.iter().rev() {
@@ -1456,7 +1524,7 @@ impl Emitter<'_, '_> {
             .runtime_call(&LIST_BORROW_INDEX, [receiver, &at])
             .value
             .operand;
-        let slow_exit = self.current.clone();
+        let slow_exit = self.body.current.clone();
         self.jump(&end);
         self.start(&end);
         Some(self.instruction(format!(
@@ -1501,7 +1569,7 @@ impl Emitter<'_, '_> {
             .into_value(self);
         // The join takes ownership of the value acquired on this edge.
         self.forget(&ordinary);
-        let slow_exit = self.current.clone();
+        let slow_exit = self.body.current.clone();
         self.jump(&end);
         self.start(&end);
         let result = self.instruction(format!(
@@ -1775,7 +1843,7 @@ impl Emitter<'_, '_> {
     fn cached_string_length(&mut self, slot: usize, text: &Value) -> Value {
         let cached = self.instruction(format!("load i64, ptr %str_count{slot}"));
         let hit = self.instruction(format!("icmp ne i64 {cached}, 0"));
-        let from = self.current.clone();
+        let from = self.body.current.clone();
         let (miss, done) = (self.label(), self.label());
         self.branch(&hit, &done, &miss);
         self.start(&miss);
@@ -1785,7 +1853,7 @@ impl Emitter<'_, '_> {
         let immediate = self.instruction(format!("trunc i64 {word} to i1"));
         let entry = self.instruction(format!("select i1 {immediate}, i64 {word}, i64 0"));
         self.line(format!("store i64 {entry}, ptr %str_count{slot}"));
-        let miss_exit = self.current.clone();
+        let miss_exit = self.body.current.clone();
         self.jump(&done);
         self.start(&done);
         let word = self.instruction(format!(
@@ -1808,11 +1876,11 @@ impl Emitter<'_, '_> {
             receiver.operand, snapshot.receiver.operand
         ));
         let (fallback, end) = (self.label(), self.label());
-        let before = self.current.clone();
+        let before = self.body.current.clone();
         self.branch(&same, &end, &fallback);
         self.start(&fallback);
         let ordinary = self.list_length(receiver);
-        let fallback_end = self.current.clone();
+        let fallback_end = self.body.current.clone();
         self.jump(&end);
         self.start(&end);
         Some(Value {
@@ -1964,7 +2032,7 @@ impl Emitter<'_, '_> {
                     const MAX_CLEANUP_BYTES: usize = 8 * 1024 * 1024;
                     if self.cleanup_limit_hit || self.cleanup_bytes >= MAX_CLEANUP_BYTES {
                         self.cleanup_limit_hit = true;
-                        self.terminated = true;
+                        self.body.terminated = true;
                         return;
                     }
                     let depth = self.cleanups.len();
@@ -1987,13 +2055,13 @@ impl Emitter<'_, '_> {
                         None
                     };
                     self.loops = loops;
-                    let before = self.code.len();
+                    let before = self.body.code.len();
                     let previous_bytes = self.cleanup_bytes;
                     self.block(&body);
                     // Nested copies are already included in this byte range.
-                    self.cleanup_bytes = previous_bytes + (self.code.len() - before);
+                    self.cleanup_bytes = previous_bytes + (self.body.code.len() - before);
                     self.cleanups.truncate(depth);
-                    if self.terminated {
+                    if self.body.terminated {
                         return;
                     }
                     if let Some((error, previous)) = error {
@@ -2016,7 +2084,7 @@ impl Emitter<'_, '_> {
                 self.jump(&self.return_exit.clone());
             }
             Completion::Jump { label, .. } => self.jump(&label),
-            Completion::Error => self.jump(&self.error_exit.clone()),
+            Completion::Error => self.jump(&self.body.error_target.clone()),
         }
     }
 
@@ -2086,9 +2154,9 @@ impl Emitter<'_, '_> {
         if catches_error {
             self.cleanups.pop();
         }
-        if !self.terminated {
+        if !self.body.terminated {
             self.block(orelse);
-            if !self.terminated {
+            if !self.body.terminated {
                 self.route(Completion::Jump {
                     label: end.clone(),
                     depth,
@@ -2130,7 +2198,7 @@ impl Emitter<'_, '_> {
                     name: handler.name,
                 });
                 self.block(&handler.body);
-                if !self.terminated {
+                if !self.body.terminated {
                     self.route(Completion::Jump {
                         label: end.clone(),
                         depth,
@@ -2163,6 +2231,7 @@ impl Emitter<'_, '_> {
         entry: bool,
         frame: Option<&ir::SourceFrame>,
         borrows: &FunctionBorrows,
+        frame_lists: &[(usize, String, usize)],
     ) -> Result<String, Unsupported> {
         self.uses_regex_positions =
             self.module_reads_regex_positions && regex_positions_may_escape(self.module, function);
@@ -2254,7 +2323,7 @@ impl Emitter<'_, '_> {
                 self.start(&failed);
                 let message = self.byte_array(b"cannot enable faulthandler\0".to_vec());
                 self.line(format!("call void @perror(ptr @{message})"));
-                self.line("ret i32 1");
+                self.body.end("ret i32 1");
                 self.start(&ready);
             }
             let filename = self.byte_array(file.as_bytes().to_vec());
@@ -2283,9 +2352,9 @@ impl Emitter<'_, '_> {
             })
             .collect();
         self.directory_slot_count = directory_slots.len();
-        let separate_exits = entry || !directory_slots.is_empty();
+        let separate_exits = entry || !directory_slots.is_empty() || !frame_lists.is_empty();
         self.return_exit = self.label();
-        self.error_exit = if separate_exits {
+        self.body.error_target = if separate_exits {
             self.label()
         } else {
             self.return_exit.clone()
@@ -2338,7 +2407,7 @@ impl Emitter<'_, '_> {
                 self.line(format!("store [4 x i64] zeroinitializer, ptr %line{slot}"));
             }
         }
-        let allocas_at = self.code.len();
+        let allocas_at = self.body.code.len();
         let mut pair_views = BTreeSet::new();
         ir::walk_expressions(&function.body, &mut |expr| {
             if let ExprKind::Builtin(Builtin::PairTable(ir::PairTableOp::Snapshot(slot)), _) =
@@ -2433,7 +2502,7 @@ impl Emitter<'_, '_> {
         }
         let command_flags = self.module.command_flags.as_ref();
         let ignore_env = command_flags.is_some_and(|flags| flags.ignore_environment);
-        let startup_at = self.code.len();
+        let startup_at = self.body.code.len();
         if entry {
             self.line(format!(
                 "call void @imre_process_config_init(i32 {}, i32 {}, i32 {})",
@@ -2489,7 +2558,7 @@ impl Emitter<'_, '_> {
             None => None,
         };
         self.int_buffer_body(function);
-        if !self.terminated {
+        if !self.body.terminated {
             self.jump(&self.return_exit.clone());
         }
         self.start(&self.return_exit.clone());
@@ -2497,10 +2566,17 @@ impl Emitter<'_, '_> {
             self.with_directory_frame(|out, frame| {
                 out.line(format!("call void @imre_object_release(ptr {frame})"));
             });
-            let returned = self.current.clone();
+            let returned = self.body.current.clone();
             let cleanup = self.label();
             self.jump(&cleanup);
-            self.start(&self.error_exit.clone());
+            self.start(&self.body.error_target.clone());
+            for (slot, name, len) in frame_lists {
+                let list = self.borrow_slot(*slot);
+                self.line(format!(
+                    "call void @imre_dyn_native_frame_int_list(ptr %ctx, i64 %scope, ptr @{name}, i64 {len}, ptr {})",
+                    list.operand
+                ));
+            }
             self.with_directory_frame(|out, frame| {
                 for &slot in &directory_slots {
                     let value = out.borrow_slot(slot);
@@ -2513,7 +2589,7 @@ impl Emitter<'_, '_> {
                     "call void @imre_error_attach_directory_frame(ptr {frame})"
                 ));
             });
-            let raised = self.current.clone();
+            let raised = self.body.current.clone();
             self.jump(&cleanup);
             self.start(&cleanup);
             entry.then(|| {
@@ -2572,20 +2648,20 @@ impl Emitter<'_, '_> {
             self.branch(&failed, &error_return, &flush);
             self.start(&error_return);
             let status = self.instruction(format!("call i32 @imre_finish_unhandled(ptr {exit})"));
-            self.line(format!("ret i32 {status}"));
+            self.body.end(format!("ret i32 {status}"));
             self.start(&flush);
             let status = self.instruction("call i32 @imre_finish_stdio()");
-            self.line(format!("ret i32 {status}"));
+            self.body.end(format!("ret i32 {status}"));
         } else if function.returns == Type::None {
-            self.line("ret i8 0");
+            self.body.end("ret i8 0");
         } else {
             let value = self.instruction(format!(
                 "load {}, ptr %function_return",
                 function.returns.llvm()
             ));
-            self.line(format!("ret {returns} {value}"));
+            self.body.end(format!("ret {returns} {value}"));
         }
-        self.code.push_str("}\n");
+        self.body.code.push_str("}\n");
         // Mapping calls transfer their output words before another call can reuse them.
         for name in ["%mapping_key_word", "%mapping_value_word"]
             .into_iter()
@@ -2601,12 +2677,12 @@ impl Emitter<'_, '_> {
                 "null"
             };
             if self.has_extensions {
-                self.code.insert_str(
+                self.body.code.insert_str(
                     startup_at,
                     "  %extension_owner = call i1 @imre_extension_enter()\n",
                 );
             }
-            self.code.insert_str(
+            self.body.code.insert_str(
                 startup_at,
                 &format!(
                     "  call void @imre_typed_start(i32 {}, ptr {layout})\n",
@@ -2614,7 +2690,7 @@ impl Emitter<'_, '_> {
                 ),
             );
         }
-        self.code.insert_str(allocas_at, &self.entry_allocas);
+        self.body.code.insert_str(allocas_at, &self.entry_allocas);
         if self.cleanup_limit_hit {
             return Err(Unsupported(
                 "Imre: finally cleanup expansion exceeds the compiler limit",
@@ -2625,30 +2701,16 @@ impl Emitter<'_, '_> {
 
     fn block(&mut self, statements: &[Statement]) {
         let incoming = self.temporaries.clone();
-        let mut remaining = statements;
-        while let Some((statement, tail)) = remaining.split_first() {
-            if self.terminated {
-                break;
-            }
-            let grouped = self.integer_assignments(remaining);
-            if grouped > 0 {
-                remaining = &remaining[grouped..];
-            } else if let Some((next, after)) = tail.split_first()
-                && (self.move_cleared_local(statement, next) || self.append_pair(statement, next))
-            {
-                remaining = after;
-            } else {
-                self.statement(statement);
-                remaining = tail;
-            }
+        self.emit_block(statements, |emitter| {
             debug_assert!(
-                self.temporaries
+                emitter
+                    .temporaries
                     .iter()
                     .map(|value| (&value.operand, value.ty))
                     .eq(incoming.iter().map(|value| (&value.operand, value.ty))),
                 "statement changed its enclosing expression owners"
             );
-        }
+        });
     }
 
     /// A copy immediately followed by clearing its private source transfers one owner.
@@ -2660,7 +2722,7 @@ impl Emitter<'_, '_> {
             && self.owns_slot(source)
             && self.owns_slot(*target)
         {
-            self.statement(&Statement::Move(*target, source));
+            self.emit_statement(&Statement::Move(*target, source));
             return true;
         }
         false
@@ -2756,69 +2818,10 @@ impl Emitter<'_, '_> {
         }
     }
 
-    fn statement(&mut self, statement: &Statement) {
+    fn other_statement(&mut self, statement: &Statement) {
         match statement {
-            Statement::Assign(slot, expression) => {
-                if let Some(cursor) = self.forward_cursors.get(slot).cloned() {
-                    self.assign_forward_cursor(*slot, expression, cursor);
-                    return;
-                }
-                if self.line_slots[*slot] {
-                    self.assign_line(*slot, expression);
-                    return;
-                }
-                if let ExprKind::Builtin(Builtin::SplitIntSource(mask), args) = &expression.kind {
-                    let value = self.expr(&args[0]);
-                    self.line(format!("call void @imre_str_prepare_int_fields(ptr {}, ptr %split_fields{slot}, i32 {mask})", value.operand));
-                    self.store(*slot, &value);
-                    return;
-                }
-                if let ExprKind::Builtin(Builtin::SplitTextSource(fields), args) = &expression.kind
-                {
-                    let value = self.expr(&args[0]);
-                    self.line(format!("call void @imre_str_field_spans(ptr {}, ptr %text_fields{slot}, i32 {fields})", value.operand));
-                    self.store(*slot, &value);
-                    return;
-                }
-                if self.locals[*slot] == Type::ByteOutput
-                    && matches!(&expression.kind, ExprKind::List(values) if values.is_empty())
-                {
-                    let value = self.call("imre_byte_output_new", Type::ByteOutput, &[]);
-                    if self.byte_output_owners.get(*slot) == Some(&Some(*slot)) {
-                        self.line(format!(
-                            "store {{ ptr, i64, i64 }} zeroinitializer, ptr %byte_window{slot}"
-                        ));
-                    }
-                    self.store(*slot, &value);
-                    return;
-                }
-                if self.struct_locals[*slot] {
-                    let value = self
-                        .struct_snapshot(expression)
-                        .expect("checked scalar struct source");
-                    self.store_borrowed(*slot, &value);
-                    return;
-                }
-                if self.borrowed_locals[*slot] {
-                    let value = self.borrow_projection(expression);
-                    self.store_borrowed(*slot, &value);
-                    return;
-                }
-                if self.concat_assign(*slot, expression) {
-                    return;
-                }
-                if !self.loops.is_empty()
-                    && let Some(fields) = records::replacement_fields(self.module, expression)
-                {
-                    self.assign_loop_record(*slot, fields);
-                    return;
-                }
-                let previous_small = self.assignment_replaces_small(*slot, expression);
-                let value = self.expr(expression);
-                self.store_with_previous_small(*slot, &value, previous_small);
-                if self.fixed_int_lists[*slot] {
-                    self.remember_int_buffer(*slot, &value);
-                }
+            Statement::Assign(..) | Statement::Expr(_) | Statement::Return(_) => {
+                unreachable!("shared IR statement")
             }
             Statement::Move(target, source) => {
                 debug_assert_eq!(self.locals[*target], self.locals[*source]);
@@ -2846,7 +2849,7 @@ impl Emitter<'_, '_> {
                 self.cleanups.push(Cleanup::Slots(clear.clone()));
                 self.block(body);
                 self.cleanups.pop();
-                if !self.terminated {
+                if !self.body.terminated {
                     self.clear_slots(clear);
                 }
             }
@@ -2866,8 +2869,7 @@ impl Emitter<'_, '_> {
                 }
                 // Both runtime helpers always set an error; their success edge
                 // is unreachable, but uses the same immediate-check protocol.
-                self.line("unreachable");
-                self.terminated = true;
+                self.body.end("unreachable");
             }
             Statement::IterNext {
                 iterator,
@@ -3007,32 +3009,6 @@ impl Emitter<'_, '_> {
                 self.release_operand(&old);
                 self.release_operand(&receiver);
             }
-            // Discarded scalar literals have no effects. In particular, a
-            // function docstring must not allocate on every call. Literal
-            // allocation exhaustion is already fatal rather than catchable.
-            Statement::Expr(expression)
-                if matches!(
-                    expression.kind,
-                    ExprKind::Int(_)
-                        | ExprKind::Float(_)
-                        | ExprKind::Bool(_)
-                        | ExprKind::Str(_)
-                        | ExprKind::Bytes(_)
-                        | ExprKind::None
-                ) => {}
-            Statement::Expr(expression) => {
-                if let ExprKind::Builtin(Builtin::TextWrite, args) = &expression.kind {
-                    self.write_discard(args);
-                } else {
-                    let value = self.expr(expression);
-                    self.release(&value);
-                }
-            }
-            Statement::Return(expression) => {
-                let value = self.expr(expression);
-                self.forget(&value);
-                self.route(Completion::Return(value));
-            }
             Statement::If(test, yes, no) => {
                 let mut bounded = false;
                 if crate::list_specialization::is_window_range_guard(test)
@@ -3124,20 +3100,19 @@ impl Emitter<'_, '_> {
                     self.small_locals[slot] = false;
                 }
                 self.guarded_integer_lists.truncate(prior);
-                let yes_ends = self.terminated;
+                let yes_ends = self.body.terminated;
                 if !yes_ends {
                     self.jump(&end);
                 }
                 self.start(&no_label);
                 self.block(no);
-                let no_ends = self.terminated;
+                let no_ends = self.body.terminated;
                 if !no_ends {
                     self.jump(&end);
                 }
                 self.start(&end);
                 if yes_ends && no_ends {
-                    self.line("unreachable");
-                    self.terminated = true;
+                    self.body.end("unreachable");
                 }
             }
             Statement::While(test, body, orelse) => {
@@ -3167,13 +3142,13 @@ impl Emitter<'_, '_> {
                 });
                 self.block(body);
                 self.loops.pop();
-                if !self.terminated {
+                if !self.body.terminated {
                     self.jump(&condition);
                 }
                 if !orelse.is_empty() {
                     self.start(&exhausted);
                     self.block(orelse);
-                    if !self.terminated {
+                    if !self.body.terminated {
                         self.jump(&end);
                     }
                 }
@@ -3228,7 +3203,7 @@ impl Emitter<'_, '_> {
                 self.branch(&zero.operand, &fail, &condition);
                 self.start(&fail);
                 self.checked_line("call void @imre_range_step_zero()");
-                self.line("unreachable");
+                self.body.end("unreachable");
                 self.start(&condition);
                 self.check_interrupt();
                 let mut current = self.borrow_slot(*cursor);
@@ -3260,7 +3235,7 @@ impl Emitter<'_, '_> {
                 });
                 self.block(body);
                 self.loops.pop();
-                if !self.terminated {
+                if !self.body.terminated {
                     if unit_step {
                         self.batch_modular_writes(body, *target, *cursor, *stop);
                     }
@@ -3281,7 +3256,7 @@ impl Emitter<'_, '_> {
                 if !orelse.is_empty() {
                     self.start(&exhausted);
                     self.block(orelse);
-                    if !self.terminated {
+                    if !self.body.terminated {
                         self.jump(&end);
                     }
                 }
@@ -3304,7 +3279,7 @@ impl Emitter<'_, '_> {
                 self.branch(&test.operand, &success, &fail);
                 self.start(&fail);
                 self.checked_line("call void @imre_assert_fail()");
-                self.line("unreachable");
+                self.body.end("unreachable");
                 self.start(&success);
             }
         }
@@ -3324,45 +3299,23 @@ impl Emitter<'_, '_> {
             self.retain(&value);
             value
         } else {
-            self.expression(expression)
+            self.emit_value(expression)
         };
         value.small_integer |= self.ranges.integer(expression).is_some();
         self.owned(value)
     }
 
-    fn expression(&mut self, expression: &Expr) -> Value {
+    fn other_expression(&mut self, expression: &Expr) -> Value {
         match &expression.kind {
-            ExprKind::Int(value) => {
-                if let Ok(value) = value.parse::<i64>()
-                    && (-(1_i64 << 62)..(1_i64 << 62)).contains(&value)
-                {
-                    small(value)
-                } else {
-                    self.pooled_literal(value.as_bytes(), Type::Int)
-                }
-            }
-            ExprKind::Float(value) => Value {
-                ty: Type::Float,
-                operand: format!("0x{:016X}", value.to_bits()),
-                small_integer: false,
-            },
-            ExprKind::Bool(value) => Value {
-                ty: Type::Bool,
-                operand: u8::from(*value).to_string(),
-                small_integer: false,
-            },
-            ExprKind::Str(value) => Value {
-                ty: expression.ty,
-                ..self.pooled_literal(value.as_bytes(), Type::Str)
-            },
-            ExprKind::Bytes(value) => self.pooled_literal(value, Type::Bytes),
-            ExprKind::None => none(),
-            ExprKind::Local(slot) => {
-                let mut value = self.borrow_slot(*slot);
-                value.small_integer |= self.ranges.integer(expression).is_some();
-                self.retain(&value);
-                value
-            }
+            ExprKind::Int(_)
+            | ExprKind::Float(_)
+            | ExprKind::Str(_)
+            | ExprKind::Bytes(_)
+            | ExprKind::Bool(_)
+            | ExprKind::None
+            | ExprKind::Local(_)
+            | ExprKind::Binary(..)
+            | ExprKind::Builtin(..) => unreachable!("shared IR expression"),
             ExprKind::Bind(slot, expression) => {
                 let value = self.expr(expression);
                 self.retain(&value);
@@ -3527,41 +3480,6 @@ impl Emitter<'_, '_> {
                 };
                 self.decode_word(word, expression.ty)
             }
-            ExprKind::Binary(Binary::Concat, ..) if expression.ty == Type::Str => {
-                self.concat(expression)
-            }
-            ExprKind::Binary(op, left, right) => {
-                if matches!(op, Binary::Add)
-                    && matches!(&left.kind, ExprKind::Builtin(Builtin::IntBounded { .. }, _))
-                    && let Some(slot) = self.active_subtotal().map(str::to_owned)
-                {
-                    let subtotal = self.instruction(format!("load i64, ptr {slot}"));
-                    let term = self.operand(right);
-                    let decoded = self.instruction(format!("ashr i64 {}, 1", term.value.operand));
-                    let updated = self.instruction(format!("add nsw i64 {subtotal}, {decoded}"));
-                    self.release_operand(&term);
-                    self.line(format!("store i64 {updated}, ptr {slot}"));
-                    return self.tag_small(&updated);
-                }
-                let direct = self.small_binary_proof(expression, left, right, *op);
-                let left_value = self.operand(left);
-                let right_value = self.operand(right);
-                let result = if let Some(adjust_floor) = direct {
-                    let bounds = self.ranges.integer(left).zip(self.ranges.integer(right));
-                    self.small_binary(
-                        *op,
-                        &left_value.value,
-                        &right_value.value,
-                        adjust_floor,
-                        bounds,
-                    )
-                } else {
-                    self.binary(*op, &left_value.value, &right_value.value)
-                };
-                self.release_operand(&left_value);
-                self.release_operand(&right_value);
-                result
-            }
             ExprKind::Negate(value) => {
                 let direct = self.ranges.integer(expression).is_some()
                     && self.ranges.integer(value).is_some();
@@ -3685,7 +3603,6 @@ impl Emitter<'_, '_> {
                 self.release_operand(&receiver);
                 value
             }
-            ExprKind::Builtin(builtin, args) => self.builtin(builtin, args, expression.ty),
         }
     }
 
@@ -4252,7 +4169,7 @@ impl Emitter<'_, '_> {
         };
         let generic = self.call(symbol, Type::Int, &[value]);
         self.forget(&generic);
-        let wide_exit = self.current.clone();
+        let wide_exit = self.body.current.clone();
         self.jump(&done);
         self.start(&done);
         let operand = self.instruction(format!(
@@ -4376,11 +4293,11 @@ impl Emitter<'_, '_> {
         self.branch(&immediate, &fast, &slow);
         self.start(&fast);
         let small = self.select_integer_extremum(order, args, true);
-        let fast_end = self.current.clone();
+        let fast_end = self.body.current.clone();
         self.jump(&done);
         self.start(&slow);
         let generic = self.select_integer_extremum(order, args, false);
-        let slow_end = self.current.clone();
+        let slow_end = self.body.current.clone();
         self.jump(&done);
         self.start(&done);
         Value {
@@ -4473,6 +4390,9 @@ impl Emitter<'_, '_> {
             self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
         } else {
             match left.ty {
+                Type::PythonObject => {
+                    unreachable!("registered comparison in fixed calling convention")
+                }
                 Type::CmpKey(..) => unreachable!("comparator keys use their callback"),
                 Type::ForwardRef(_) | Type::AnnotationValue(_) => {
                     let symbol = if matches!(left.ty, Type::ForwardRef(_)) {
@@ -4919,7 +4839,7 @@ impl Emitter<'_, '_> {
             self.release_operand(&left);
             if i + 1 == ops.len() {
                 self.release_operand(&right);
-                incoming.push(format!("[ {}, %{} ]", test.operand, self.current));
+                incoming.push(format!("[ {}, %{} ]", test.operand, self.body.current));
                 self.jump(&end);
             } else {
                 let (next, fail) = (self.label(), self.label());
@@ -4927,7 +4847,7 @@ impl Emitter<'_, '_> {
                 let temporaries = self.temporaries.clone();
                 self.start(&fail);
                 self.release_operand(&right);
-                incoming.push(format!("[ false, %{} ]", self.current));
+                incoming.push(format!("[ false, %{} ]", self.body.current));
                 self.jump(&end);
                 self.start(&next);
                 self.temporaries = temporaries;
@@ -4990,12 +4910,12 @@ impl Emitter<'_, '_> {
         self.start(&yes_label);
         let yes = self.expr(yes);
         self.forget(&yes);
-        let yes_end = self.current.clone();
+        let yes_end = self.body.current.clone();
         self.jump(&end);
         self.start(&no_label);
         let no = self.expr(no);
         self.forget(&no);
-        let no_end = self.current.clone();
+        let no_end = self.body.current.clone();
         self.jump(&end);
         self.start(&end);
         Value {
@@ -5021,7 +4941,7 @@ impl Emitter<'_, '_> {
         let mut incoming = Vec::new();
         for (i, expression) in values.iter().enumerate() {
             let value = self.expr(expression);
-            incoming.push(format!("[ {}, %{} ]", value.operand, self.current));
+            incoming.push(format!("[ {}, %{} ]", value.operand, self.body.current));
             if i + 1 == values.len() {
                 self.jump(&end);
             } else {
@@ -5086,7 +5006,7 @@ impl Emitter<'_, '_> {
                 ty: Type::Tuple(*layout),
                 kind: ExprKind::Builtin(Builtin::RecordView, expressions.to_vec()),
             };
-            return self.expression(&Expr {
+            return self.emit_value(&Expr {
                 ty: returns,
                 kind: ExprKind::Field(Box::new(frame), 0),
             });
@@ -5108,7 +5028,7 @@ impl Emitter<'_, '_> {
                 ty: Type::Tuple(id),
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![reference.clone()]),
             };
-            return self.expression(&Expr {
+            return self.emit_value(&Expr {
                 ty: returns,
                 kind: ExprKind::Field(Box::new(frame), *index),
             });
@@ -5205,6 +5125,26 @@ impl Emitter<'_, '_> {
             })
             .collect::<Vec<_>>();
         let result = match builtin {
+            Builtin::RegisteredStatement(range, _) if self.output.registered.is_some() => {
+                let line = self.output.statement_lines[&range.start()];
+                self.line(format!("call void @imre_dyn_statement_with_exception(ptr %ctx, ptr null, i64 0, ptr %file, i32 {line}, i64 0)"));
+                let failed = self.instruction("call i1 @imre_dyn_failed(ptr %ctx)");
+                self.check_failed(&failed);
+                none()
+            }
+            Builtin::RegisteredDefinition(_)
+            | Builtin::RegisteredStatement(..)
+            | Builtin::RegisteredCall(..)
+            | Builtin::RegisteredName(_)
+            | Builtin::RegisteredAttribute(_)
+            | Builtin::RegisteredSubscript(..)
+            | Builtin::RegisteredDict(_)
+            | Builtin::RegisteredEllipsis
+            | Builtin::RegisteredComplex(..)
+            | Builtin::RegisteredString(_)
+            | Builtin::RegisteredLocation(_) => {
+                unreachable!("registered operation in fixed calling convention")
+            }
             Builtin::PairTable(ir::PairTableOp::ViewLen(slot)) => {
                 let count = self.instruction(format!(
                     "getelementptr inbounds {{ ptr, i64 }}, ptr %pair_view{slot}, i32 0, i32 1"
@@ -5235,7 +5175,7 @@ impl Emitter<'_, '_> {
                     "call i64 @imre_pair_table_field(ptr {}, i64 {}, i64 {}, i32 {field})",
                     args[0].value.operand, args[1].value.operand, args[2].value.operand
                 ));
-                let other = self.current.clone();
+                let other = self.body.current.clone();
                 self.jump(&done);
                 self.start(&done);
                 let value = self.instruction(format!(
@@ -9548,7 +9488,7 @@ impl Emitter<'_, '_> {
                 ));
                 let word = self.instruction(format!("load i64, ptr {ptr}"));
                 let ready = self.instruction(format!("icmp ne i64 {word}, 0"));
-                let (before, slow, end) = (self.current.clone(), self.label(), self.label());
+                let (before, slow, end) = (self.body.current.clone(), self.label(), self.label());
                 self.branch(&ready, &end, &slow);
                 self.start(&slow);
                 let fallback = if self.line_slots[slot] {
@@ -9562,7 +9502,7 @@ impl Emitter<'_, '_> {
                         args[0].value.operand
                     ))
                 };
-                let after = self.current.clone();
+                let after = self.body.current.clone();
                 self.jump(&end);
                 self.start(&end);
                 Value {
@@ -9635,13 +9575,13 @@ impl Emitter<'_, '_> {
                     ));
                     let unbound = self.instruction(format!("icmp eq ptr {keys}, null"));
                     let collect = self.instruction(format!("or i1 {hit}, {unbound}"));
-                    let empty = self.current.clone();
+                    let empty = self.body.current.clone();
                     let select = self.label();
                     let done = self.label();
                     self.branch(&collect, &select, &done);
                     self.start(&select);
                     let result = self.checked_instruction(call);
-                    let selected = self.current.clone();
+                    let selected = self.body.current.clone();
                     self.jump(&done);
                     self.start(&done);
                     self.instruction(format!("phi ptr [null, %{empty}], [{result}, %{selected}]"))
@@ -9872,7 +9812,7 @@ impl Emitter<'_, '_> {
             self.present(value, returns)
         };
         self.forget(&value);
-        let present_end = self.current.clone();
+        let present_end = self.body.current.clone();
         self.jump(&end);
         self.start(&absent);
         let default = if let Some(default) = args.get(2) {
@@ -10184,14 +10124,14 @@ impl Emitter<'_, '_> {
         self.start(&allocate);
         let layout = self.output.record_layout(previous.ty);
         let fresh = self.allocate_record(previous.ty, &layout);
-        let allocated = self.current.clone();
+        let allocated = self.body.current.clone();
         self.jump(&write);
         self.start(&cached);
         let replacement = self.checked_pointer(format!(
             "call ptr @imre_record_try_cached_result(ptr {})",
             previous.operand
         ));
-        let reused = self.current.clone();
+        let reused = self.body.current.clone();
         self.jump(&write);
         self.start(&write);
         let record = Value {
@@ -12126,36 +12066,8 @@ done:
             .unwrap();
         }
     }
-    for (op, intrinsic, number) in [("add", "sadd", 0), ("sub", "ssub", 1), ("mul", "smul", 2)] {
-        let (left, decode) = if op == "mul" {
-            ("%x", "  %x = ashr i64 %a, 1\n")
-        } else {
-            ("%a", "")
-        };
-        writeln!(
-            output,
-            r#"
-define internal i64 @int_{op}(i64 %a, i64 %b) alwaysinline {{
-entry:
-  %both = and i64 %a, %b
-  %tag = and i64 %both, 1
-  %small = icmp eq i64 %tag, 1
-  br i1 %small, label %fast, label %big, !prof !1
-fast:
-{decode}  %right = sub i64 %b, 1
-  %pair = call {{ i64, i1 }} @llvm.{intrinsic}.with.overflow.i64(i64 {left}, i64 %right)
-  %result = extractvalue {{ i64, i1 }} %pair, 0
-  %overflow = extractvalue {{ i64, i1 }} %pair, 1
-  br i1 %overflow, label %big, label %done, !prof !0
-done:
-  %encoded = or i64 %result, 1
-  ret i64 %encoded
-big:
-  %slow = call i64 @imre_int_binary(i64 %a, i64 %b, i32 {number}) cold
-  ret i64 %slow
-}}"#
-        )
-        .unwrap();
+    for op in [Binary::Add, Binary::Subtract, Binary::Multiply] {
+        output.push_str(&integer_arithmetic_helper(op));
     }
     output.push_str(conditionals::INTEGER_ABSOLUTE_HELPER);
     output.push_str(&division_helpers());
@@ -12181,6 +12093,44 @@ big:
 "#,
     );
     output
+}
+
+/// Tagged add, subtract and multiply used by checked integer operations in either call ABI.
+pub(crate) fn integer_arithmetic_helper(op: Binary) -> String {
+    let (op, intrinsic, number) = match op {
+        Binary::Add => ("add", "sadd", 0),
+        Binary::Subtract => ("sub", "ssub", 1),
+        Binary::Multiply => ("mul", "smul", 2),
+        _ => unreachable!("expected integer addition, subtraction or multiplication"),
+    };
+    let (left, decode) = if op == "mul" {
+        ("%x", "  %x = ashr i64 %a, 1\n")
+    } else {
+        ("%a", "")
+    };
+    format!(
+        r#"
+define internal i64 @int_{op}(i64 %a, i64 %b) alwaysinline {{
+entry:
+  %both = and i64 %a, %b
+  %tag = and i64 %both, 1
+  %small = icmp eq i64 %tag, 1
+  br i1 %small, label %fast, label %big, !prof !1
+fast:
+{decode}  %right = sub i64 %b, 1
+  %pair = call {{ i64, i1 }} @llvm.{intrinsic}.with.overflow.i64(i64 {left}, i64 %right)
+  %result = extractvalue {{ i64, i1 }} %pair, 0
+  %overflow = extractvalue {{ i64, i1 }} %pair, 1
+  br i1 %overflow, label %big, label %done, !prof !0
+done:
+  %encoded = or i64 %result, 1
+  ret i64 %encoded
+big:
+  %slow = call i64 @imre_int_binary(i64 %a, i64 %b, i32 {number}) cold
+  ret i64 %slow
+}}
+"#
+    )
 }
 
 /// Decoded small integers cannot overflow i64 division. Guard zero before any
@@ -12322,6 +12272,32 @@ slow:
 #[cfg(test)]
 mod tests {
     use crate::{CompileOptions, compile};
+
+    #[test]
+    fn registered_code_keeps_the_checked_reduction_and_its_private_helper() {
+        let source = "def total(text: str) -> int:\n    digits = list(map(int, text))\n    return sum([x * (x + 1) for x in digits])\nprint(total(input()))\n";
+        let mut graph = crate::modules::SourceGraph::single(source).unwrap();
+        let (mut module, _) = crate::frontend::lower_with_owners(&mut graph).unwrap();
+        crate::specialize(&mut module).unwrap();
+        let native =
+            super::registered_native(&module, 2, false, &[(1, "digits".into())], |_| 1).unwrap();
+        assert_eq!(native.symbol, "imre_registered_2_0");
+        assert_eq!(
+            native
+                .definitions
+                .matches("call void @imre_dyn_native_frame_int_list(")
+                .count(),
+            1
+        );
+        assert!(native.definitions.contains("call ptr @imre_str_int_list("));
+        assert!(
+            native
+                .definitions
+                .contains("call i64 @imre_registered_2_1(")
+        );
+        assert!(native.definitions.contains("mul nsw i64"));
+        assert!(!native.definitions.contains("@main("));
+    }
 
     #[test]
     fn ascii_membership_shares_only_stable_character_lookups() {

@@ -10,14 +10,18 @@ use ruff_text_size::Ranged;
 use crate::CodegenUnit;
 
 mod boolean;
+pub(crate) mod checked;
 mod comprehensions;
 mod expressions;
+mod frame;
+mod retained;
+use frame::{RegisteredFrame, SourcePositions};
 mod patterns;
 mod statements;
 mod strings;
 mod suspension;
 
-mod permanent {
+pub(super) mod permanent {
     include!("../../../imre-runtime/native/boxed-handles.rs");
 }
 
@@ -109,7 +113,8 @@ pub(super) struct PhysicalFile {
 
 /// Snapshots and admission facts for the bodies selected by import resolution.
 #[derive(Default)]
-pub(super) struct RegisteredBodies {
+pub(super) struct RegisteredBodies<'a> {
+    pub(super) program_bodies: HashMap<usize, ProgramBodies<'a>>,
     // Decoded installed files retain the fingerprint of their original loader bytes.
     pub(super) physical_files: HashMap<PathBuf, PhysicalFile>,
     pub(super) archive_members: HashMap<PathBuf, ([u8; 32], u32)>,
@@ -119,9 +124,18 @@ pub(super) struct RegisteredBodies {
     pub(super) python_providers: HashSet<usize>,
 }
 
+/// Each source slot can use the checked bodies owned by its selected physical file.
+#[derive(Clone, Copy, Default)]
+pub(super) struct ProgramBodies<'a> {
+    pub(super) checked: Option<&'a super::CheckedFunctions>,
+    pub(super) native:
+        Option<&'a HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredNative>>,
+    pub(super) sanitize: bool,
+}
+
 #[derive(Clone, Copy)]
-pub(super) enum ModuleOrigin {
-    Program,
+pub(super) enum ModuleOrigin<'a> {
+    Program(ProgramBodies<'a>),
     Provider,
     Bundled,
 }
@@ -136,10 +150,11 @@ pub(crate) fn emit(
     split: bool,
     (module_errors, registrations): (
         &HashMap<PathBuf, Box<super::ModuleSyntaxError>>,
-        &RegisteredBodies,
+        &RegisteredBodies<'_>,
     ),
 ) -> Result<(Vec<CodegenUnit>, bool), String> {
     let RegisteredBodies {
+        program_bodies,
         physical_files,
         archive_members,
         python_providers,
@@ -183,7 +198,7 @@ pub(crate) fn emit(
         } else if python_providers.contains(&unit) {
             ModuleOrigin::Provider
         } else {
-            ModuleOrigin::Program
+            ModuleOrigin::Program(program_bodies.get(&unit).copied().unwrap_or_default())
         };
         let module_name = output.data(name.as_bytes());
         let file = output.data(path.as_os_str().as_encoded_bytes());
@@ -214,13 +229,13 @@ pub(crate) fn emit(
         } else {
             std::borrow::Cow::Borrowed(source.as_str())
         };
+        let initializer = PreparedBody::module(name, path, &code_source, keep_docstrings, origin)?;
         let check_archive = bundled && !providers.is_empty();
         // A standalone initializer can be compiled separately even without a provider pack.
         let separate = split && unit != 0 && !source.is_empty();
         let mut external = None;
         if (check_archive || separate)
-            && let Some((symbol, ir)) =
-                initializer(name, path, &code_source, keep_docstrings, origin)?
+            && let Some((symbol, ir)) = initializer.standalone()?
         {
             let archived = check_archive && providers.contains(&symbol);
             if archived || separate {
@@ -239,14 +254,7 @@ pub(crate) fn emit(
         }
         let code = match external {
             Some(symbol) => symbol,
-            None => output.source_body(
-                unit,
-                name,
-                path,
-                &code_source,
-                &file,
-                SourceBody::Module(origin),
-            )?,
+            None => initializer.emit(&mut output, unit, &file)?,
         };
         if let Some((digest, flags)) = archive_members.get(path) {
             let hash = output.data(digest);
@@ -279,6 +287,7 @@ pub(crate) fn emit(
         )
         .unwrap();
     }
+    output.native_prelude();
     main.push_str("  %status = call i32 @imre_dyn_finish(ptr %ctx)\n  ret i32 %status\n}\n");
     units.insert(
         0,
@@ -288,43 +297,6 @@ pub(crate) fn emit(
         },
     );
     Ok((units, used_archive))
-}
-
-/// Emit one standalone initializer with a symbol determined by its source and native body.
-pub(super) fn initializer(
-    name: &str,
-    path: &Path,
-    source: &str,
-    keep_docstrings: bool,
-    origin: ModuleOrigin,
-) -> Result<Option<(String, String)>, String> {
-    let mut output = Output {
-        keep_docstrings,
-        ..Output::default()
-    };
-    let filename = path.as_os_str().as_encoded_bytes();
-    let file = output.data(filename);
-    let entry = output.source_body(0, name, path, source, &file, SourceBody::Module(origin))?;
-    // These slots are numbered across the whole program and must stay in its codegen unit.
-    if !output.string_constant_slots.is_empty() {
-        return Ok(None);
-    }
-    let mut ir = format!("{ABI}\n{}\n{}", output.constants, output.functions);
-    let mut hash = blake3::Hasher::new();
-    for field in [
-        std::env::consts::ARCH.as_bytes(),
-        name.as_bytes(),
-        filename,
-        source.as_bytes(),
-        ir.as_bytes(),
-    ] {
-        hash.update(&(field.len() as u64).to_le_bytes());
-        hash.update(field);
-    }
-    hash.update(&[u8::from(keep_docstrings)]);
-    let symbol = format!("imre_provider_{}", hash.finalize().to_hex());
-    writeln!(ir, "@{symbol} = alias i64 (ptr, i64), ptr {entry}").unwrap();
-    Ok(Some((symbol, ir)))
 }
 
 struct ParsedSource {
@@ -413,19 +385,47 @@ fn check_source(path: &Path, source: &str, keep_docstrings: bool) -> Result<(), 
     Ok(())
 }
 
-impl Output {
-    fn source_body(
-        &mut self,
-        unit: usize,
-        name: &str,
-        path: &Path,
-        source: &str,
-        file: &str,
-        kind: SourceBody<'_>,
-    ) -> Result<String, String> {
+/// Normalized source and lowered names shared by archive, split, and inline placement.
+pub(super) struct PreparedBody<'a> {
+    name: &'a str,
+    body: ast::Suite,
+    source: SourceInfo<'a>,
+    expression: bool,
+    lower_definitions: bool,
+    keep_docstrings: bool,
+}
+
+impl<'a> PreparedBody<'a> {
+    pub(super) fn module(
+        name: &'a str,
+        path: &'a Path,
+        source: &'a str,
+        keep_docstrings: bool,
+        origin: ModuleOrigin<'a>,
+    ) -> Result<Self, String> {
+        Self::new(
+            name,
+            path,
+            source,
+            keep_docstrings,
+            SourceBody::Module(origin),
+        )
+    }
+
+    fn new(
+        name: &'a str,
+        path: &'a Path,
+        source: &'a str,
+        keep_docstrings: bool,
+        kind: SourceBody<'a>,
+    ) -> Result<Self, String> {
         let bundled = matches!(kind, SourceBody::Module(ModuleOrigin::Bundled));
         let provider = matches!(kind, SourceBody::Module(ModuleOrigin::Provider));
         let expression = matches!(&kind, SourceBody::Expression(_));
+        let program_bodies = match kind {
+            SourceBody::Module(ModuleOrigin::Program(bodies)) => bodies,
+            _ => ProgramBodies::default(),
+        };
         // The expression grammar supplies its own checked syntax and tokens.
         // Both inputs below then use the same name lowering and native code entry.
         enum Input<'a> {
@@ -433,9 +433,7 @@ impl Output {
             Expression(ast::ModModule, &'a ast::token::Tokens),
         }
         let input = match kind {
-            SourceBody::Module(_) => {
-                Input::Module(parse_source(path, source, self.keep_docstrings)?)
-            }
+            SourceBody::Module(_) => Input::Module(parse_source(path, source, keep_docstrings)?),
             SourceBody::Expression(parsed) => {
                 let expression = parsed.syntax();
                 let stmt = ast::Stmt::Expr(ast::StmtExpr {
@@ -457,7 +455,7 @@ impl Output {
             Input::Module(p) => (p.parsed.syntax(), p.parsed.tokens()),
             Input::Expression(syntax, tokens) => (syntax, *tokens),
         };
-        let docs = if self.keep_docstrings && name == "collections" && bundled {
+        let docs = if keep_docstrings && name == "collections" && bundled {
             crate::modules::doctest::sealed(crate::modules::IntrinsicModule::Collections)
         } else {
             None
@@ -501,15 +499,17 @@ impl Output {
         };
         let method_imports = imre_ast::module_imports(&body);
         let private_names = lower_source(path, source, &mut body)?;
-        // Frozen code exposes its origin independently of the module's registered source path.
-        let code_file = match (bundled, name) {
-            (true, "_frozen_importlib") => self.data(b"<frozen importlib._bootstrap>"),
-            (true, "_frozen_importlib_external") => {
-                self.data(b"<frozen importlib._bootstrap_external>")
-            }
-            _ => file.to_owned(),
+        // Bundled functions opt in only when their own module initializer is admitted.
+        let ordinary = !expression;
+        let initializer = if ordinary {
+            crate::frontend::registered_suite(&body, true, &replacements, has_templates)
+        } else {
+            None
         };
-        let location = SourceMap {
+        let lower_definitions = ordinary && (!bundled || initializer.is_some());
+        let source = SourceInfo {
+            initializer,
+            program_bodies,
             bundled,
             path,
             // These CPython providers implement their own call semantics in Python.
@@ -518,7 +518,6 @@ impl Output {
             module_start,
             class_keywords,
             docs,
-            unit,
             has_templates,
             template_expressions,
             replacements,
@@ -527,30 +526,82 @@ impl Output {
             string_annotations: private_names.string_annotations,
             private_names,
             text: source,
-            file: &code_file,
-            newlines: source
-                .match_indices('\n')
-                .map(|(offset, _)| offset)
-                .collect(),
         };
-        let suite = if expression {
-            let [ast::Stmt::Expr(statement)] = body.as_slice() else {
+        Ok(Self {
+            name,
+            body,
+            source,
+            expression,
+            lower_definitions,
+            keep_docstrings,
+        })
+    }
+
+    fn emit(&self, output: &mut Output, unit: usize, file: &str) -> Result<String, String> {
+        // Frozen code exposes its origin independently of the module's registered source path.
+        let code_file = match (self.source.bundled, self.name) {
+            (true, "_frozen_importlib") => output.data(b"<frozen importlib._bootstrap>"),
+            (true, "_frozen_importlib_external") => {
+                output.data(b"<frozen importlib._bootstrap_external>")
+            }
+            _ => file.to_owned(),
+        };
+        let location = SourceMap {
+            info: &self.source,
+            definitions: self.lower_definitions.then(|| definition_sites(&self.body)),
+            unit,
+            positions: SourcePositions::new(self.source.text, &code_file),
+        };
+        let suite = if self.expression {
+            let [ast::Stmt::Expr(statement)] = self.body.as_slice() else {
                 return Err("expected an annotation expression".into());
             };
             Body::Expression(&statement.value)
         } else {
-            Body::Namespace(&body, false)
+            Body::Namespace(&self.body, false)
         };
-        let code = self.code(&location, String::new(), suite, false, false);
-        match self.diagnostic.take() {
+        let code = output.code(&location, String::new(), suite, false, false, None);
+        match output.diagnostic.take() {
             Some(diagnostic) => Err(diagnostic),
             None => Ok(code),
         }
     }
+
+    /// Return independent IR only when all its constant slots can live in this unit.
+    pub(super) fn standalone(&self) -> Result<Option<(String, String)>, String> {
+        let mut output = Output {
+            keep_docstrings: self.keep_docstrings,
+            ..Output::default()
+        };
+        let filename = self.source.path.as_os_str().as_encoded_bytes();
+        let file = output.data(filename);
+        let entry = self.emit(&mut output, 0, &file)?;
+        // These slots are numbered across the whole program and must stay in its codegen unit.
+        if !output.string_constant_slots.is_empty() {
+            return Ok(None);
+        }
+        output.native_prelude();
+        let mut ir = format!("{ABI}\n{}\n{}", output.constants, output.functions);
+        let mut hash = blake3::Hasher::new();
+        for field in [
+            std::env::consts::ARCH.as_bytes(),
+            self.name.as_bytes(),
+            filename,
+            self.source.text.as_bytes(),
+            ir.as_bytes(),
+        ] {
+            hash.update(&(field.len() as u64).to_le_bytes());
+            hash.update(field);
+        }
+        hash.update(&[u8::from(self.keep_docstrings)]);
+        let symbol = format!("imre_provider_{}", hash.finalize().to_hex());
+        writeln!(ir, "@{symbol} = alias i64 (ptr, i64), ptr {entry}").unwrap();
+        Ok(Some((symbol, ir)))
+    }
 }
 
 enum SourceBody<'a> {
-    Module(ModuleOrigin),
+    Module(ModuleOrigin<'a>),
     Expression(&'a ruff_python_parser::Parsed<ast::ModExpression>),
 }
 
@@ -563,6 +614,7 @@ enum Body<'a> {
     Namespace(&'a [ast::Stmt], bool),
     ClassParameters(&'a ast::StmtClassDef),
     Statements(&'a [ast::Stmt]),
+    Checked(&'a crate::frontend::RegisteredFunction, &'a [ast::Stmt]),
     /// A suspended suite and its generator, coroutine, or async generator code flag.
     GeneratorFunction(&'a [ast::Stmt], u32),
     ModuleAnnotations(Vec<(&'a str, &'a ast::Expr)>),
@@ -597,24 +649,67 @@ enum Entry {
     Suspended,
 }
 
+/// Collect declaration sites for the registered frame. Executing a definition still
+/// evaluates its header and binds its name at the source statement.
+fn definition_sites(
+    body: &[ast::Stmt],
+) -> HashMap<ruff_text_size::TextSize, &ast::StmtFunctionDef> {
+    use ast::statement_visitor::{StatementVisitor, walk_stmt};
+
+    #[derive(Default)]
+    struct Sites<'a>(HashMap<ruff_text_size::TextSize, &'a ast::StmtFunctionDef>);
+
+    impl<'a> StatementVisitor<'a> for Sites<'a> {
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            match stmt {
+                ast::Stmt::FunctionDef(def) => {
+                    self.0.insert(def.start(), def);
+                    if !def.is_async && def.type_params.is_none() {
+                        self.visit_body(&def.body);
+                    }
+                }
+                ast::Stmt::ClassDef(_) => {}
+                _ => walk_stmt(self, stmt),
+            }
+        }
+    }
+    let mut sites = Sites::default();
+    sites.visit_body(body);
+    sites.0
+}
+
 struct SourceMap<'a> {
+    info: &'a SourceInfo<'a>,
+    definitions: Option<HashMap<ruff_text_size::TextSize, &'a ast::StmtFunctionDef>>,
+    unit: usize,
+    positions: SourcePositions<'a>,
+}
+
+impl<'a> std::ops::Deref for SourceMap<'a> {
+    type Target = SourceInfo<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        self.info
+    }
+}
+
+struct SourceInfo<'a> {
+    initializer: Option<crate::frontend::RegisteredFunction>,
+    program_bodies: ProgramBodies<'a>,
     bundled: bool,
     path: &'a Path,
     python_annotations: bool,
     module_start: ruff_text_size::TextSize,
     class_keywords: Vec<ruff_text_size::TextSize>,
     docs: Option<crate::modules::doctest::SealedDocs>,
-    unit: usize,
     has_templates: bool,
     template_expressions: HashMap<ruff_text_size::TextSize, String>,
     replacements: HashMap<ruff_text_size::TextRange, Vec<u32>>,
     private_names: imre_ast::Names,
     method_imports: std::collections::BTreeSet<String>,
-    text: &'a str,
     string_annotations: bool,
     barry_as_flufl: bool,
-    file: &'a str,
-    newlines: Vec<usize>,
+    text: &'a str,
 }
 
 impl SourceMap<'_> {
@@ -639,20 +734,6 @@ impl SourceMap<'_> {
                 .map(str::to_owned)
         })
     }
-
-    fn line_and_column(&self, offset: ruff_text_size::TextSize) -> (usize, usize) {
-        let line = self.line(offset);
-        let start = if line == 1 {
-            0
-        } else {
-            self.newlines[line - 2] + 1
-        };
-        (line, usize::from(offset) - start)
-    }
-
-    fn line(&self, offset: ruff_text_size::TextSize) -> usize {
-        self.newlines.partition_point(|&n| n < usize::from(offset)) + 1
-    }
 }
 
 #[derive(Eq, Hash, PartialEq)]
@@ -670,6 +751,8 @@ struct Declarations {
     emitted_guarded_lit: bool,
     emitted_guarded_named_op: bool,
     registered_expression: bool,
+    checked_integer_arithmetic: bool,
+    retained_native: bool,
 }
 
 #[derive(Default)]
@@ -735,12 +818,49 @@ impl Output {
         } else {
             0
         };
-        let entry = self.code(source, prefix, body, in_function, suspended);
+        let checked = source
+            .program_bodies
+            .checked
+            .and_then(|functions| functions.get(&start));
+        let native = if matches!(body, Body::Statements(_)) && checked.is_none() {
+            source
+                .program_bodies
+                .native
+                .and_then(|functions| functions.get(&start))
+        } else {
+            None
+        };
+        let lowered;
+        let body = match body {
+            Body::Statements(stmts) => {
+                let selected = if checked.is_some() {
+                    checked
+                } else if source
+                    .definitions
+                    .as_ref()
+                    .and_then(|defs| defs.get(&start))
+                    .is_some_and(|def| def.type_params.is_none())
+                {
+                    lowered = crate::frontend::registered_suite(
+                        stmts,
+                        false,
+                        &source.replacements,
+                        source.has_templates,
+                    );
+                    lowered.as_ref()
+                } else {
+                    None
+                };
+                selected.map_or(body, |function| Body::Checked(function, stmts))
+            }
+            _ => body,
+        };
+        let entry = self.code(source, prefix, body, in_function, suspended, native);
         writeln!(
             self.constants,
             "{site} = private constant %code_site {{ ptr {entry}, ptr {}, i32 {}, i32 {tag} }}",
-            source.file,
-            source.line(start)
+            source.positions.file,
+            source.positions.line(start)
         )
         .unwrap();
         site
@@ -785,19 +905,18 @@ impl Output {
         body: Body<'_>,
         in_function: bool,
         native_suspension: bool,
+        native: Option<&crate::frontend::RegisteredNative>,
     ) -> String {
-        let name = format!("@code{}", self.count);
-        self.count += 1;
+        let frame = RegisteredFrame::new(self, &source.positions, native_suspension);
         let module = matches!(body, Body::Namespace(..)) && prefix.is_empty();
         let mut f = Function {
-            output: self,
+            frame,
             source,
-            native_suspension,
+            current_range: ruff_text_size::TextRange::empty(source.module_start),
             async_generator: matches!(
                 body,
                 Body::GeneratorFunction(_, imre_ast::code_flags::ASYNC_GENERATOR)
             ),
-            current_range: ruff_text_size::TextRange::empty(source.module_start),
             class_sites: None,
             module_annotation_sites: None,
             in_function,
@@ -811,26 +930,18 @@ impl Output {
                 _ => None,
             },
             prefix,
-            ir: String::new(),
-            block: if native_suspension { "start" } else { "entry" }.into(),
-            error: "failed".into(),
-            pending_check: None,
-            scope: "%scope".into(),
-            serial: 0,
-            terminated: false,
-            live: Vec::new(),
-            max_live: 0,
             loops: Vec::new(),
             exits: Vec::new(),
-            caught: Vec::new(),
-            simple_call: None,
-            expression_line: 0,
         };
+        if let Some(native) = native {
+            f.select_native(native);
+        }
         match body {
             Body::Namespace(stmts, _) => {
                 if module && imre_ast::annotations::has_variable_annotation(stmts) {
                     if source.string_annotations {
-                        f.op("setup_module_string_annotations", &[&f.scope.clone()]);
+                        f.frame
+                            .op("setup_module_string_annotations", &[&f.scope.clone()]);
                     } else {
                         // Lower the provider after collecting the body, but run its setup first.
                         f.module_annotation_sites = Some(Vec::new());
@@ -845,7 +956,9 @@ impl Output {
                     f.bind("__doc__", &value);
                 }
                 f.declare_globals(stmts);
-                if f.class_locals.is_some() && !f.source.string_annotations {
+                if module && let Some(checked) = &source.initializer {
+                    f.checked_body(checked);
+                } else if f.class_locals.is_some() && !f.source.string_annotations {
                     f.annotated_class_body(stmts);
                 } else {
                     f.statements(stmts);
@@ -856,6 +969,10 @@ impl Output {
                     f.setup_deferred_module_annotations(&sites);
                     f.jump("module_body");
                 }
+            }
+            Body::Checked(function, stmts) => {
+                f.declare_globals(stmts);
+                f.checked_body(function);
             }
             Body::ClassParameters(class) => f.parameterized_class(class),
             Body::Statements(stmts) | Body::GeneratorFunction(stmts, _) => {
@@ -876,37 +993,7 @@ impl Output {
                 f.return_value(&value);
             }
         }
-        if !f.terminated {
-            f.return_value("0");
-        }
-        let mut entry = if f.max_live == 0 {
-            String::new()
-        } else {
-            format!("  %live = alloca [{} x i64]\n", f.max_live)
-        };
-        // A loaded code object owns its identifier-like strings before any statement runs.
-        if module && !f.output.interned_identifiers.is_empty() {
-            let names = std::mem::take(&mut f.output.interned_identifiers)
-                .into_iter()
-                .collect::<Vec<_>>()
-                .join("\0");
-            let data = f.output.data(names.as_bytes());
-            writeln!(
-                entry,
-                "  call i64 @imre_dyn_lit(ptr %ctx, i32 5, ptr {data}, i64 {})",
-                names.len()
-            )
-            .unwrap();
-        }
-        if f.native_suspension {
-            writeln!(f.output.functions,
-                "define internal ptr {name}(ptr %context_slot, i64 %scope) presplitcoroutine {{\nentry:\n{entry}{}{}{} }}",
-                suspension::PROLOGUE, f.ir, suspension::EPILOGUE).unwrap();
-        } else {
-            writeln!(f.output.functions,
-                "define internal i64 {name}(ptr %ctx, i64 %scope) {{\nentry:\n{entry}{}failed:\n  ret i64 0\n}}", f.ir).unwrap();
-        }
-        name
+        f.frame.finish(module)
     }
 }
 
@@ -935,8 +1022,9 @@ enum CallArguments {
 }
 
 struct Function<'a, 'p> {
-    output: &'a mut Output,
+    frame: RegisteredFrame<'a, 'p>,
     source: &'p SourceMap<'p>,
+    current_range: ruff_text_size::TextRange,
     prefix: String,
     declared_globals: std::collections::BTreeSet<String>,
     in_function: bool,
@@ -945,30 +1033,23 @@ struct Function<'a, 'p> {
     class_sites: Option<statements::class_annotations::ClassSites>,
     class_locals: Option<statements::ClassBindings>,
     annotation_lookup: bool,
-    ir: String,
-    block: String,
-    error: String,
-    pending_check: Option<ErrorCheck>,
-    scope: String,
-    serial: usize,
-    terminated: bool,
-    // Handles held in native registers across statement boundaries must stay reachable.
-    live: Vec<String>,
-    max_live: usize,
     loops: Vec<LoopTarget>,
     exits: Vec<(Cleanup, String)>,
-    caught: Vec<String>,
-    simple_call: Option<ruff_text_size::TextRange>,
-    expression_line: usize,
-    native_suspension: bool,
     async_generator: bool,
-    current_range: ruff_text_size::TextRange,
 }
 
-struct ErrorCheck {
-    handler: String,
-    failed: String,
-    next: String,
+/// The syntax walker adds Python scopes and cleanup to the registered frame operations.
+impl<'a, 'p> std::ops::Deref for Function<'a, 'p> {
+    type Target = RegisteredFrame<'a, 'p>;
+    fn deref(&self) -> &Self::Target {
+        &self.frame
+    }
+}
+
+impl std::ops::DerefMut for Function<'_, '_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.frame
+    }
 }
 
 #[derive(Clone)]
@@ -1002,150 +1083,9 @@ struct LoopTarget {
 }
 
 impl Function<'_, '_> {
-    fn name(&mut self, prefix: &str) -> String {
-        let n = self.serial;
-        self.serial += 1;
-        format!("{prefix}{n}")
-    }
-
-    fn line(&mut self, line: &str) {
-        self.flush_check();
-        self.instruction(line);
-    }
-
-    fn instruction(&mut self, line: &str) {
-        // A suspended activation outlives the Context borrow of any one resume. Only
-        // the slot's address is stable. Each runtime call receives the current borrow.
-        if self.native_suspension
-            && let Some((before, after)) = line.split_once("ptr %ctx")
-        {
-            let ctx = self.name("%active_ctx");
-            writeln!(self.ir, "  {ctx} = load volatile ptr, ptr %context_slot").unwrap();
-            writeln!(self.ir, "  {before}ptr {ctx}{after}").unwrap();
-        } else {
-            writeln!(self.ir, "  {line}").unwrap();
-        }
-    }
-
-    fn value(&mut self, instruction: &str) -> String {
-        let value = self.name("%v");
-        self.line(&format!("{value} = {instruction}"));
-        value
-    }
-
-    fn end(&mut self, instruction: &str) {
-        if !self.terminated {
-            self.line(instruction);
-            self.terminated = true;
-        }
-    }
-
-    fn return_value(&mut self, value: &str) {
-        if self.native_suspension {
-            if !self.terminated {
-                self.line(&format!(
-                    "call void @imre_dyn_suspend_return(ptr %context_slot, i64 {value})"
-                ));
-                self.jump("complete");
-            }
-        } else {
-            self.end(&format!("ret i64 {value}"));
-        }
-    }
-
-    fn jump(&mut self, label: &str) {
-        self.end(&format!("br label %{label}"));
-    }
-
-    fn label(&mut self, label: &str) {
-        self.flush_check();
-        writeln!(self.ir, "{label}:").unwrap();
-        self.block = label.into();
-        self.terminated = false;
-    }
-
-    fn branch(&mut self, condition: &str, yes: &str, no: &str) {
-        self.end(&format!("br i1 {condition}, label %{yes}, label %{no}"));
-    }
-
-    fn checked(&mut self, invocation: &str) -> String {
-        let result = self.value(invocation);
-        self.check_error();
-        result
-    }
-
-    fn check_error(&mut self) {
-        self.pending_check = Some(ErrorCheck {
-            handler: self.error.clone(),
-            failed: self.name("%v"),
-            next: self.name("b"),
-        });
-    }
-
-    fn flush_check(&mut self) {
-        if let Some(ErrorCheck {
-            handler,
-            failed,
-            next,
-        }) = self.pending_check.take()
-        {
-            self.instruction(&format!("{failed} = call i1 @imre_dyn_failed(ptr %ctx)"));
-            writeln!(
-                self.ir,
-                "  br i1 {failed}, label %{handler}, label %{next}\n{next}:"
-            )
-            .unwrap();
-            self.block = next;
-        }
-    }
-
-    /// A guarded successor can deliver the first failure to the same handler.
-    fn take_matching_check(&mut self) -> bool {
-        self.pending_check
-            .take_if(|check| check.handler == self.error)
-            .is_some()
-    }
-
-    /// Publish the real predecessor before referring to it in a phi.
-    fn current_block(&mut self) -> &str {
-        self.flush_check();
-        &self.block
-    }
-
-    fn op(&mut self, name: &str, args: &[&str]) -> String {
-        self.op_at(name, args, None)
-    }
-
-    fn op_at(&mut self, name: &str, args: &[&str], span: Option<[usize; 4]>) -> String {
-        if name != "take_error" {
-            self.take_matching_check();
-        }
-        let op = self.output.data(name.as_bytes());
-        let arg = |index| *args.get(index).unwrap_or(&"0");
-        let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
-        self.checked(&format!(
-            "call i64 @imre_dyn_op_at(ptr %ctx, ptr {op}, i64 {}, i64 {}, i64 {}, ptr {position})",
-            arg(0),
-            arg(1),
-            arg(2)
-        ))
-    }
-
-    fn lit(&mut self, kind: i32, bytes: &[u8]) -> String {
-        let loader = if self.take_matching_check() {
-            if !self.output.declarations.emitted_guarded_lit {
-                self.output.functions.push_str(GUARDED_LIT);
-                self.output.declarations.emitted_guarded_lit = true;
-            }
-            "@imre_boxed_guarded_lit"
-        } else {
-            "@imre_dyn_lit"
-        };
-        let literal = self.output.data(bytes);
-        self.checked(&format!(
-            "call i64 {loader}(ptr %ctx, i32 {kind}, ptr {literal}, i64 {})",
-            bytes.len()
-        ))
+    fn checkpoint(&mut self, node: &impl Ranged) {
+        self.current_range = node.range();
+        self.frame.checkpoint(self.current_range);
     }
 
     /// An annotation's text is still a normal str. Retain its native expression
@@ -1160,14 +1100,15 @@ impl Function<'_, '_> {
             let unit = self.source.unit;
             let code = self.output.try_native_body(|output| {
                 let file = output.data(b"<string>");
-                match output.source_body(
-                    unit,
+                match PreparedBody::new(
                     "",
                     Path::new("<string>"),
                     value,
-                    &file,
+                    output.keep_docstrings,
                     SourceBody::Expression(&parsed),
-                ) {
+                )
+                .and_then(|body| body.emit(output, unit, &file))
+                {
                     Ok(code) => code,
                     Err(err) => {
                         output.diagnostic = Some(err);
@@ -1202,53 +1143,6 @@ impl Function<'_, '_> {
         }
         self.lit(1, value.as_bytes())
     }
-    /// Emit a code-object name, including a Unicode identifier that would not intern as a literal.
-    fn code_name(&mut self, name: &str) -> String {
-        self.output.interned_identifiers.insert(name.to_owned());
-        self.lit(6, name.as_bytes())
-    }
-
-    fn integer(&mut self, n: impl TryInto<i64> + ToString + Copy) -> String {
-        if let Ok(value) = n.try_into()
-            && let Some(id) = permanent::small_integer_id(value)
-        {
-            return id.to_string();
-        }
-        self.lit(0, n.to_string().as_bytes())
-    }
-
-    /// Load a code name and use it as the second operand of a boxed operation.
-    fn named_op(&mut self, op: &str, receiver: &str, name: &str, value: &str) -> String {
-        self.output.interned_identifiers.insert(name.to_owned());
-        if op == "lookup" {
-            // The runtime lookup propagates a pending exception before reading the scope.
-            self.take_matching_check();
-            let data = self.output.data(name.as_bytes());
-            return self.checked(&format!(
-                "call i64 @imre_dyn_lookup(ptr %ctx, i64 {receiver}, ptr {data}, i64 {})",
-                name.len()
-            ));
-        }
-        if !self.output.declarations.emitted_named_op {
-            self.output.functions.push_str(NAMED_OP);
-            self.output.declarations.emitted_named_op = true;
-        }
-        let operation = if self.take_matching_check() {
-            if !self.output.declarations.emitted_guarded_named_op {
-                self.output.functions.push_str(GUARDED_NAMED_OP);
-                self.output.declarations.emitted_guarded_named_op = true;
-            }
-            "@imre_boxed_guarded_named_op"
-        } else {
-            "@imre_boxed_named_op"
-        };
-        let opcode = self.output.data(op.as_bytes());
-        let data = self.output.data(name.as_bytes());
-        self.checked(&format!(
-            "call i64 {operation}(ptr %ctx, ptr {opcode}, i64 {receiver}, ptr {data}, i64 {}, i64 {value})",
-            name.len()
-        ))
-    }
 
     fn lookup(&mut self, name: &str) -> String {
         let op = match &self.class_locals {
@@ -1262,11 +1156,12 @@ impl Function<'_, '_> {
             Some(class) if class.locals.contains(name) => "lookup_class_local",
             _ => "lookup",
         };
-        self.named_op(op, &self.scope.clone(), name, "0")
+        self.frame.named_op(op, &self.scope.clone(), name, "0")
     }
 
     fn bind(&mut self, name: &str, value: &str) {
-        self.named_op("assign", &self.scope.clone(), name, value);
+        self.frame
+            .named_op("assign", &self.scope.clone(), name, value);
     }
 
     fn attr(&mut self, object: &str, name: &str) -> String {
@@ -1276,11 +1171,6 @@ impl Function<'_, '_> {
     fn truth(&mut self, value: &str) -> String {
         let boolean = self.op("truth", &[value]);
         self.value(&format!("icmp eq i64 {boolean}, 2"))
-    }
-
-    /// Save the caller's earlier operands before an expression can release a writer.
-    fn temporary_mark(&mut self) -> String {
-        self.value("call i64 @imre_dyn_truth_mark(ptr %ctx)")
     }
 
     /// End the lifetime of the operands evaluated after the mark.
@@ -1316,9 +1206,15 @@ impl Function<'_, '_> {
 
     fn unsupported(&mut self, what: &str) -> String {
         if self.native_suspension {
-            let (line, col) = self.source.line_and_column(self.current_range.start());
-            let (end_line, end_col) = self.source.line_and_column(self.current_range.end());
-            self.output.diagnostic.get_or_insert_with(|| format!(
+            let (line, col) = self
+                .source
+                .positions
+                .line_and_column(self.current_range.start());
+            let (end_line, end_col) = self
+                .source
+                .positions
+                .line_and_column(self.current_range.end());
+            self.frame.output.diagnostic.get_or_insert_with(|| format!(
                 "{}:{line}:{}: unsupported {what} in a compiled suspended function (through {end_line}:{})",
                 self.source.path.display(), col + 1, end_col + 1
             ));
@@ -1334,49 +1230,7 @@ impl Function<'_, '_> {
         prefix: &ast::Expr,
         opener: u8,
     ) -> Option<[usize; 4]> {
-        let range = expr.range();
-        if self.simple_call == Some(range) {
-            return None;
-        }
-        let start = range.start().to_usize();
-        let end = range.end().to_usize();
-        let prefix_end = prefix.end().to_usize();
-        let text = self.source.text.as_bytes();
-        if text.get(start..end)?.contains(&b'\n') {
-            return None;
-        }
-        let split = imre_ast::traceback_delimiter(text, prefix_end, end, opener)?;
-        let (line, col) = self.source.line_and_column(range.start());
-        Some([line, col, col + (split - start), col + (end - start)])
-    }
-
-    /// Store the handles that must survive the next statement or assignment target.
-    fn live_handles(&mut self) -> (&'static str, usize) {
-        self.handle_array(&self.live.clone())
-    }
-
-    /// Copy evaluated handles into reusable storage in this activation's entry block.
-    fn handle_array(&mut self, values: &[impl AsRef<str>]) -> (&'static str, usize) {
-        let count = values.len();
-        self.max_live = self.max_live.max(count);
-        for (i, value) in values.iter().enumerate() {
-            let value = value.as_ref();
-            let ptr = self.value(&format!("getelementptr i64, ptr %live, i64 {i}"));
-            self.line(&format!("store i64 {value}, ptr {ptr}"));
-        }
-        (if count == 0 { "null" } else { "%live" }, count)
-    }
-
-    fn checkpoint(&mut self, node: &impl Ranged) {
-        self.current_range = node.range();
-        let (ptr, count) = self.live_handles();
-        let line = self.source.line(node.start());
-        self.expression_line = line;
-        self.line(&format!(
-            "call void @imre_dyn_statement_with_exception(ptr %ctx, ptr {ptr}, i64 {count}, ptr {}, i32 {line}, i64 {})",
-            self.source.file, self.caught.last().map_or("0", String::as_str)
-        ));
-        self.check_error();
+        self.expression_range_span(expr.range(), prefix.end(), opener)
     }
 
     fn invoke(&mut self, callable: &str, values: &[&str]) -> String {
@@ -1393,54 +1247,6 @@ impl Function<'_, '_> {
             None,
         )
     }
-
-    /// Pass the caller's temporary root boundary and optional traceback position.
-    fn call_at(
-        &mut self,
-        callable: &str,
-        operands: CallArguments,
-        mark: &str,
-        span: Option<[usize; 4]>,
-    ) -> String {
-        let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
-        let scope = &self.scope;
-        let (function, args) = match operands {
-            CallArguments::PartitionField {
-                array,
-                index,
-                get_position,
-            } => (
-                "imre_dyn_partition_field_at",
-                format!("ptr {array}, i32 {index}, ptr {get_position}"),
-            ),
-            CallArguments::FixedKeywords {
-                array,
-                positional,
-                names,
-                keywords,
-            } => (
-                "imre_dyn_keyword_call_at",
-                format!("ptr {array}, i64 {positional}, ptr {names}, i64 {keywords}"),
-            ),
-            CallArguments::Packed { args, kwargs } => (
-                "imre_dyn_scoped_call_at",
-                format!("i64 {args}, i64 {kwargs}"),
-            ),
-            CallArguments::Positional {
-                array: ptr,
-                count,
-                receiver_slot,
-            } => (
-                if receiver_slot {
-                    "imre_dyn_positional_method_at"
-                } else {
-                    "imre_dyn_positional_call_at"
-                },
-                format!("ptr {ptr}, i64 {count}"),
-            ),
-        };
-        self.checked(&format!("call i64 @{function}(ptr %ctx, i64 {callable}, {args}, i64 {mark}, ptr {position}, i64 {scope})"))
-    }
 }
 
 #[cfg(test)]
@@ -1450,13 +1256,15 @@ mod tests {
     #[test]
     fn exception_group_handlers_in_nested_generators_have_native_entries() {
         let source = "def supported():\n    yield 1\ndef handled():\n    def nested():\n        yield 2\n    try:\n        yield 3\n    except* ValueError:\n        pass\ndef outer():\n    def inner():\n        try:\n            yield 4\n        except* ValueError:\n            pass\n    yield 5\n";
-        let (_, ir) = initializer(
+        let (_, ir) = PreparedBody::module(
             "sample",
             Path::new("sample.py"),
             source,
             true,
-            ModuleOrigin::Program,
+            ModuleOrigin::Program(ProgramBodies::default()),
         )
+        .unwrap()
+        .standalone()
         .unwrap()
         .unwrap();
         let tag = format!(", i32 {} }}", permanent::NATIVE_SUSPENDED_BODY);
@@ -1472,7 +1280,7 @@ mod tests {
     fn suspended_definitions_use_native_entries_in_each_module_origin() {
         let source = "def items(xs):\n    yield 1\n    yield from xs\npark = lambda: (yield 2)\nresume = lambda: 1 + (yield 3)\nasync def more(xs):\n    async for x in xs:\n        yield x\nasync def consume(f):\n    return await f()\n";
         for bundled in [false, true] {
-            let (_, ir) = initializer(
+            let (_, ir) = PreparedBody::module(
                 "example",
                 Path::new("example.py"),
                 source,
@@ -1480,9 +1288,11 @@ mod tests {
                 if bundled {
                     ModuleOrigin::Bundled
                 } else {
-                    ModuleOrigin::Program
+                    ModuleOrigin::Program(ProgramBodies::default())
                 },
             )
+            .unwrap()
+            .standalone()
             .unwrap()
             .unwrap();
             let tag = format!(", i32 {} }}", permanent::NATIVE_SUSPENDED_BODY);
@@ -1499,13 +1309,15 @@ mod tests {
     #[test]
     fn pass_fixed_keywords_directly_and_keep_expanded_calls_packed() {
         let source = "target(1, name=2)\ntarget(1, **options)\n";
-        let (_, ir) = initializer(
+        let (_, ir) = PreparedBody::module(
             "example",
             Path::new("example.py"),
             source,
             true,
             ModuleOrigin::Bundled,
         )
+        .unwrap()
+        .standalone()
         .unwrap()
         .unwrap();
         assert_eq!(ir.matches("call i64 @imre_dyn_keyword_call_at(").count(), 1);
@@ -1517,9 +1329,12 @@ mod tests {
         let path = Path::new("<imre stdlib>/example.py");
         let declare = "declare void @imre_dyn_set_statement_line";
         for (source, expected) in [("value = 1", 0), ("with a, b:\n    pass", 1)] {
-            let (_, ir) = initializer("example", path, source, true, ModuleOrigin::Bundled)
-                .unwrap()
-                .unwrap();
+            let (_, ir) =
+                PreparedBody::module("example", path, source, true, ModuleOrigin::Bundled)
+                    .unwrap()
+                    .standalone()
+                    .unwrap()
+                    .unwrap();
             assert_eq!(ir.matches(declare).count(), expected);
         }
     }
@@ -1530,7 +1345,9 @@ mod tests {
         let path = root.join("example.py");
         let source = "value = 1";
         let compiled = |name, path: &Path, src, docs| {
-            initializer(name, path, src, docs, ModuleOrigin::Bundled)
+            PreparedBody::module(name, path, src, docs, ModuleOrigin::Bundled)
+                .unwrap()
+                .standalone()
                 .unwrap()
                 .unwrap()
                 .0
@@ -1544,13 +1361,15 @@ mod tests {
         assert_ne!(symbol, compiled("example", &path, "value = 2", true));
         assert_ne!(symbol, compiled("example", &path, source, false));
         assert!(
-            initializer(
+            PreparedBody::module(
                 "example",
                 &path,
                 "value = t'{123}'",
                 true,
                 ModuleOrigin::Bundled
             )
+            .unwrap()
+            .standalone()
             .unwrap()
             .is_none()
         );

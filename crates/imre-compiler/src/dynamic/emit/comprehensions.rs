@@ -43,7 +43,9 @@ impl Function<'_, '_> {
             );
             return self.op("generator", &[&function, &iterator, &targets]);
         }
-        let scope = self.op("comprehension_scope", &[&self.scope.clone(), &targets]);
+        let scope = self
+            .frame
+            .op("comprehension_scope", &[&self.scope.clone(), &targets]);
         let enclosing = std::mem::replace(&mut self.scope, scope);
         let class_locals = self.class_locals.take();
         let output = self.op(plan.output.kind(), &[]);

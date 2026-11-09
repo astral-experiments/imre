@@ -94,9 +94,9 @@ impl Helpers {
         self.functions.borrow_mut()[id - self.first] = Some(helper);
     }
 
-    pub fn into_functions(self) -> impl Iterator<Item = Helper> {
+    pub fn take_functions(&self) -> impl Iterator<Item = Helper> {
         self.functions
-            .into_inner()
+            .take()
             .into_iter()
             .map(|helper| helper.expect("checked comprehension filled its helper"))
     }

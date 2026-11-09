@@ -3116,6 +3116,11 @@ pub(crate) enum SetLayoutHint {
 pub(crate) struct SourceGraph {
     /// Fixed at graph construction, in the checked resolver's search order.
     pub(crate) filesystem_roots: Box<[PathBuf]>,
+    /// The launcher has already selected a registered module initializer.
+    pub(crate) registered_startup: bool,
+    pub(crate) native_functions:
+        std::cell::RefCell<HashMap<ModuleId, HashMap<TextSize, crate::frontend::RegisteredNative>>>,
+    registered_functions: std::cell::RefCell<HashMap<ModuleId, crate::dynamic::CheckedFunctions>>,
     /// Declaration result for these exact selected files, prior to any object-path re-selection.
     pub(crate) source_contract: Option<Result<(), String>>,
     pub(crate) set_layout_hint: std::cell::Cell<SetLayoutHint>,
@@ -3161,6 +3166,64 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    /// A representation trial must neither discard a Python operation nor change the
+    /// admission or diagnostics of the enclosing registered program.
+    pub(crate) fn try_complete_body<T>(
+        &self,
+        module: ModuleId,
+        selected: bool,
+        lower: impl FnOnce() -> Option<T>,
+    ) -> Option<T> {
+        let diagnostics = self.checked_diagnostic_count(module);
+        let deferred = self.deferred_object_error.take();
+        let needs_object = self.needs_object_runtime.replace(false);
+        let calls = self.check_fallback_calls.get();
+        let constructor = self.has_object_constructor_fallback.replace(false);
+        let floats = self.float_components.get();
+        let set = self.set_layout_hint.get();
+        let repr = self.missing_repr.get();
+        let result = lower();
+        let deferred_here = self.deferred_object_error.replace(deferred).is_some();
+        let needed_here = self.needs_object_runtime.replace(needs_object);
+        let used_constructor = self.has_object_constructor_fallback.replace(constructor);
+        let result = result.filter(|_| !deferred_here && !needed_here && !used_constructor);
+        if !selected || result.is_none() {
+            self.check_fallback_calls.set(calls);
+            self.float_components.set(floats);
+            self.set_layout_hint.set(set);
+            self.missing_repr.set(repr);
+            self.checked_diagnostics.borrow_mut()[module].truncate(diagnostics);
+        }
+        result
+    }
+
+    /// Keep the checked bodies that can execute with the registered calling convention.
+    pub(crate) fn set_registered_functions(
+        &self,
+        modules: HashMap<ModuleId, crate::dynamic::CheckedFunctions>,
+    ) {
+        self.registered_functions.replace(modules);
+    }
+
+    pub(crate) fn register_function(
+        &self,
+        module: ModuleId,
+        start: TextSize,
+        body: crate::frontend::RegisteredFunction,
+    ) {
+        self.registered_functions
+            .borrow_mut()
+            .entry(module)
+            .or_default()
+            .insert(start, body);
+    }
+
+    pub(crate) fn registered_functions(
+        &self,
+    ) -> std::cell::Ref<'_, HashMap<ModuleId, crate::dynamic::CheckedFunctions>> {
+        self.registered_functions.borrow()
+    }
+
     /// A concrete Python file registered by the checked resolver, before object lowering.
     pub(crate) fn python_file(&self, name: &str) -> Option<ModuleId> {
         let id = *self.by_name.get(name)?;
@@ -4751,6 +4814,9 @@ impl<'a> Loader<'a> {
                 self.needs_object_imports && self.runtime_initializer.is_none(),
             ),
             has_object_constructor_fallback: Default::default(),
+            registered_functions: Default::default(),
+            native_functions: Default::default(),
+            registered_startup: false,
             source_contract: None,
             set_layout_hint: std::cell::Cell::new(SetLayoutHint::Available),
             check_fallback_calls: Default::default(),

@@ -491,6 +491,16 @@ impl Checker<'_> {
 
     /// Callable types contain positional types, not parameter names or defaults.
     pub(super) fn invoke(&mut self, call: &ast::ExprCall, callable: Expr) -> Result<Expr, String> {
+        if callable.ty == Type::PythonObject {
+            if registered::values::registered_positional_call(call) {
+                return registered::values::positional_call(call, callable, |arg| self.expr(arg));
+            }
+            return Err(self.classified_error(
+                Kind::ScopedObject,
+                call,
+                "this Python call requires the registered argument binder",
+            ));
+        }
         if let Type::WeakProxy(class) = callable.ty {
             return self.weak_proxy_call(call, callable, class);
         }

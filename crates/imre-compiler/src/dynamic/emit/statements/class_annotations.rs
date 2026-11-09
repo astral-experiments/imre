@@ -28,7 +28,7 @@ impl Function<'_, '_> {
             mut captures,
             ..
         } = self.class_sites.take().unwrap();
-        if self.terminated || sites.is_empty() {
+        if self.body.terminated || sites.is_empty() {
             return;
         }
 
@@ -59,7 +59,7 @@ impl Function<'_, '_> {
         }).to_string());
         let start = *sites.first_key_value().unwrap().0;
         let body = Body::ClassAnnotations(sites.into_values().collect(), bindings.globals);
-        let code = self.output.definition(
+        let code = self.frame.output.definition(
             self.source,
             String::new(),
             body,
@@ -67,7 +67,7 @@ impl Function<'_, '_> {
             false,
             Entry::Compiled,
         );
-        let environment = self.op(
+        let environment = self.frame.op(
             "class_annotation_environment",
             &[&self.scope.clone(), &offsets],
         );
@@ -104,7 +104,9 @@ impl Function<'_, '_> {
             .any(|s| s.conditional.is_some())
             .then(|| self.lookup("__conditional_annotations__"));
         let dict = self.lookup("__classdict__");
-        let local = self.op("class_annotation_locals", &[&self.scope.clone(), &dict]);
+        let local = self
+            .frame
+            .op("class_annotation_locals", &[&self.scope.clone(), &dict]);
         for name in globals {
             let name = self.code_name(name);
             self.op("declare_global", &[&local, &name]);

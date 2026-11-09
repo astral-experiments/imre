@@ -89,6 +89,8 @@ pub(crate) enum Type {
     NamedException(usize),
     /// An owned view of a concrete Python scalar, tuple, or native module attribute.
     ObjectValue,
+    /// A live Python value rooted by the registered activation and identified in its heap.
+    PythonObject,
     ReadOnlyObjectMapping,
     /// A builtin ImportError (including its ModuleNotFoundError and marker subclasses).
     ImportException,
@@ -361,6 +363,7 @@ impl std::fmt::Display for Type {
             Self::Iterator => "iterator",
             Self::Exception | Self::NamedException(_) => "Exception",
             Self::ObjectValue => "object value",
+            Self::PythonObject => "Python object",
             Self::WeakProxy(_) => "weakref.proxy",
             Self::ReadOnlyObjectMapping => "Mapping[str, object]",
             Self::ImportException => "ImportError",
@@ -1061,6 +1064,13 @@ pub(crate) fn required_object_call(
     executable_text.or(socket_sendfile)
 }
 
+/// Operand layout of one entry in a registered Python dictionary display.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum DictEntryKind {
+    Pair,
+    Unpack,
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
     ByteArrayNew,
@@ -1593,6 +1603,31 @@ pub(crate) enum Builtin {
         line: u32,
     },
     FaultLine(u32),
+    /// An original statement checkpoint and its optional call without a separate highlight.
+    RegisteredStatement(ruff_text_size::TextRange, Option<ruff_text_size::TextRange>),
+    /// The source position in effect while this registered operand is evaluated.
+    RegisteredLocation(ruff_text_size::TextRange),
+    /// Construct the native function at this physical definition site from its evaluated header.
+    RegisteredDefinition(ruff_text_size::TextSize),
+    /// The loaded callable is followed by its positional arguments in evaluation order.
+    RegisteredCall(
+        ruff_text_size::TextRange,
+        ruff_text_size::TextSize,
+        Option<ruff_text_size::TextRange>,
+    ),
+    /// Resolve the code name in the live registered Python scope.
+    RegisteredName(String),
+    /// Look up the attribute on its evaluated Python receiver, including descriptor binding.
+    RegisteredAttribute(String),
+    /// In source order, each pair consumes a key and value, and each unpack one mapping.
+    /// The registered frame owns these operands through dictionary construction.
+    RegisteredDict(Vec<DictEntryKind>),
+    /// Object and key operands, with the original subscript and end of its receiver.
+    RegisteredSubscript(ruff_text_size::TextRange, ruff_text_size::TextSize),
+    RegisteredEllipsis,
+    RegisteredComplex(f64, f64),
+    /// Little-endian Python code points preserve non-scalar values and linked literal identity.
+    RegisteredString(Vec<u8>),
     GeneratorFrameEnter(String),
     GeneratorFrameLeave,
     SysSetRecursionLimit,

@@ -788,13 +788,7 @@ impl Error {
                 {
                     return error;
                 }
-                MEMORY_ERRORS.with(|errors| {
-                    let slot = errors[..MEMORY_ERROR_RESERVE]
-                        .iter()
-                        .find(|error| crate::ObjectOwner::strong_count(&error.borrow()) == 1)
-                        .unwrap_or(&errors[MEMORY_ERROR_RESERVE]);
-                    slot.borrow().clone()
-                })
+                MEMORY_ERRORS.with(|errors| memory_error_slot(errors).borrow().clone())
             }
             Some(payload) => exception_with_cause(self.kind, payload, self.cause),
             None => SEQUENCE_ALLOCATION_ERROR.with_borrow(crate::ObjectOwner::clone),
@@ -839,6 +833,7 @@ pub(crate) fn finish<T>(result: Result<T>, sentinel: T) -> T {
 // CPython reserves sixteen distinct errors and uses one last-resort instance
 // while all sixteen are still observable by callers.
 const MEMORY_ERROR_RESERVE: usize = 16;
+const SEQUENCE_ALLOCATION_MESSAGE: &str = "sequence allocation failed";
 
 thread_local! {
     static MEMORY_ERRORS: [RefCell<crate::ObjectOwner>; MEMORY_ERROR_RESERVE + 1] =
@@ -847,7 +842,7 @@ thread_local! {
         Kind::MemoryError, StrOwner::new(Str::new("record allocation failed")),
     ));
     static SEQUENCE_ALLOCATION_ERROR: RefCell<crate::ObjectOwner> = RefCell::new(new_exception(
-        Kind::MemoryError, StrOwner::new(Str::new("sequence allocation failed")),
+        Kind::MemoryError, StrOwner::new(Str::new(SEQUENCE_ALLOCATION_MESSAGE)),
     ));
     static PENDING: RefCell<Option<crate::ObjectOwner>> = const { RefCell::new(None) };
     static ACTIVE: RefCell<Option<crate::ObjectOwner>> = const { RefCell::new(None) };
@@ -1420,9 +1415,118 @@ pub(super) fn take_pending() -> Option<crate::ObjectOwner> {
     pending
 }
 
+type PlainArguments = (&'static str, Option<StrOwner>);
+
+fn plain_arguments(owner: &mut crate::ObjectOwner) -> Option<PlainArguments> {
+    let value = crate::ObjectOwner::get_mut(owner)?;
+    // SAFETY: the pending owner has no aliases or weak observers.
+    unsafe {
+        value.0.with_mut(|storage| {
+            let Storage::Exception(exception) = storage else {
+                return None;
+            };
+            let name = exception.kind.name();
+            if exception.details.is_some()
+                || exception.suppress_context
+                || imre_ast::exceptions::boxed_builtin_kind(name) != Some(exception.kind)
+            {
+                return None;
+            }
+            let message = match &mut exception.payload {
+                Payload::Empty => None,
+                Payload::Message(text) => {
+                    StrOwner::get_mut(text)?;
+                    Some(text.clone())
+                }
+                _ => return None,
+            };
+            Some((name, message))
+        })
+    }
+}
+
+fn memory_error_slot(
+    errors: &[RefCell<crate::ObjectOwner>; MEMORY_ERROR_RESERVE + 1],
+) -> &RefCell<crate::ObjectOwner> {
+    errors[..MEMORY_ERROR_RESERVE]
+        .iter()
+        .find(|error| crate::ObjectOwner::strong_count(&error.borrow()) == 1)
+        .unwrap_or(&errors[MEMORY_ERROR_RESERVE])
+}
+
+/// The registered heap reports a bare MemoryError on allocation failure. The native
+/// sequence emergency owner has a private diagnostic; an ordinary Python exception
+/// with the same text still follows the normal plain-argument transfer.
+fn pristine_reserve(owner: &mut crate::ObjectOwner, expected: Option<&str>) -> bool {
+    plain_arguments(owner).is_some_and(|(kind, message)| {
+        kind == "MemoryError" && message.as_deref().map(Str::as_str) == expected
+    })
+}
+
+/// Validate the exact owners the allocator would select before observable operations.
+pub(crate) fn plain_reserves_ready() -> bool {
+    SEQUENCE_ALLOCATION_ERROR
+        .with_borrow_mut(|owner| pristine_reserve(owner, Some(SEQUENCE_ALLOCATION_MESSAGE)))
+        && MEMORY_ERRORS
+            .with(|errors| pristine_reserve(&mut memory_error_slot(errors).borrow_mut(), None))
+}
+
+/// The pool keeps the exception alive while its pending reference is temporarily removed.
+/// Extra aliases, weak observers or structured state leave the exact original owner pending.
+fn take_pooled_pending(
+    pool: &RefCell<crate::ObjectOwner>,
+    expected: Option<&str>,
+) -> Option<PlainArguments> {
+    let mut owner = pool.borrow_mut();
+    if !PENDING.with_borrow(|pending| {
+        pending
+            .as_ref()
+            .is_some_and(|p| crate::ObjectOwner::ptr_eq(p, &owner))
+    }) {
+        return None;
+    }
+    drop(take_pending());
+    if pristine_reserve(&mut owner, expected) {
+        return Some(("MemoryError", None));
+    }
+    replace_pending(Some(owner.clone()));
+    None
+}
+
+/// Move a fresh builtin exception with plain arguments to a registered Python frame.
+/// A known allocator reserve may also contribute the sole remaining unobserved owner.
+pub(crate) fn take_plain_pending() -> Option<PlainArguments> {
+    if let Some(plain) = PENDING.with_borrow_mut(|pending| plain_arguments(pending.as_mut()?)) {
+        drop(take_pending());
+        return Some(plain);
+    }
+    // Avoid touching the allocation reserves for an unrelated or externally owned native error.
+    let memory_error = PENDING.with_borrow(|pending| pending.as_ref().is_some_and(|owner| {
+        // SAFETY: the pending slot keeps this immutable read live.
+        unsafe { owner.0.with(|storage| matches!(storage, Storage::Exception(e) if e.kind == Kind::MemoryError)) }
+    }));
+    if !memory_error {
+        return None;
+    }
+    SEQUENCE_ALLOCATION_ERROR
+        .with(|pool| take_pooled_pending(pool, Some(SEQUENCE_ALLOCATION_MESSAGE)))
+        .or_else(|| {
+            MEMORY_ERRORS.with(|errors| {
+                errors
+                    .iter()
+                    .find_map(|pool| take_pooled_pending(pool, None))
+            })
+        })
+}
+
 /// A suspended task retains the exception dynamically active in its own handlers.
 pub(super) fn swap_active(saved: &mut Option<crate::ObjectOwner>) {
     ACTIVE.with(|active| std::mem::swap(&mut *active.borrow_mut(), saved));
+}
+
+/// A registered native call must not attach an opaque native handler to a fresh error.
+pub(crate) fn has_active_native_handler() -> bool {
+    ACTIVE.with(|active| active.borrow().is_some())
 }
 
 pub(super) fn active_exception() -> Option<crate::ObjectOwner> {
@@ -2770,6 +2874,67 @@ mod tests {
         imre_list_get_index, imre_list_new, imre_list_pop, imre_list_repeat,
     };
     use num_bigint::BigInt;
+
+    #[test]
+    fn private_allocation_message_is_not_a_python_argument_match() {
+        Error::new(Kind::MemoryError, SEQUENCE_ALLOCATION_MESSAGE).raise();
+        let (_, message) = take_plain_pending().unwrap();
+        assert_eq!(message.unwrap().as_str(), SEQUENCE_ALLOCATION_MESSAGE);
+
+        // An earlier native handler can edit the reserved object's arguments. The guard
+        // must refuse it and the handoff must leave that exact changed object pending.
+        let set_payload = |replacement| {
+            SEQUENCE_ALLOCATION_ERROR.with_borrow_mut(|owner| {
+                let value = crate::ObjectOwner::get_mut(owner).unwrap();
+                // SAFETY: the pool is the sole owner through both replacements.
+                unsafe {
+                    value.0.with_mut(|s| {
+                        let Storage::Exception(e) = s else {
+                            unreachable!()
+                        };
+                        std::mem::replace(&mut e.payload, replacement)
+                    })
+                }
+            })
+        };
+        let original = set_payload(Payload::Message(StrOwner::new(Str::new("changed"))));
+        let ready = plain_reserves_ready();
+        Error::allocation().raise();
+        let consumed = take_plain_pending().is_some();
+        let same = take_pending().is_some_and(|pending| {
+            SEQUENCE_ALLOCATION_ERROR.with_borrow(|pool| crate::ObjectOwner::ptr_eq(&pending, pool))
+        });
+        drop(set_payload(original));
+        assert!(!ready && !consumed && same);
+    }
+
+    #[test]
+    fn reserved_errors_transfer_only_without_other_owners_or_observers() {
+        assert!(plain_reserves_ready());
+        let alias = SEQUENCE_ALLOCATION_ERROR.with_borrow(Clone::clone);
+        assert!(!plain_reserves_ready());
+        Error::allocation().raise();
+        assert!(take_plain_pending().is_none());
+        assert!(crate::ObjectOwner::ptr_eq(&take_pending().unwrap(), &alias));
+
+        let observer = crate::ObjectOwner::downgrade(&alias);
+        drop(alias);
+        assert!(!plain_reserves_ready());
+        Error::allocation().raise();
+        assert!(take_plain_pending().is_none());
+        assert!(crate::ObjectOwner::ptr_eq(
+            &take_pending().unwrap(),
+            &observer.upgrade().unwrap(),
+        ));
+        drop(observer);
+
+        assert!(plain_reserves_ready());
+        Error::memory_error().raise();
+        let (kind, message) = take_plain_pending().unwrap();
+        assert_eq!(kind, "MemoryError");
+        assert!(message.is_none());
+        assert_eq!(imre_error_pending(), 0);
+    }
 
     #[test]
     fn implicit_context_releases_indirectly_owned_group_members() {

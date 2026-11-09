@@ -13,6 +13,7 @@ pub(crate) type Result<T, M = String> = std::result::Result<T, Failure<M>>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
     Ordinary,
+    UnresolvedParameter(ModuleId, ruff_text_size::TextSize),
     ExecutionOperand(ModuleId),
     RegisteredExecution,
     ExactType,
@@ -151,6 +152,10 @@ impl From<&str> for Diagnostic {
 }
 
 impl Kind {
+    pub(super) fn is_object(self) -> bool {
+        matches!(self, Self::Object | Self::ScopedObject) || self.is_class_layout()
+    }
+
     pub(crate) fn checks_object_calls(self) -> bool {
         matches!(self, Self::ScopedObject | Self::ScopedClassLayout)
     }
@@ -227,7 +232,7 @@ impl Failure {
     }
 
     pub(super) fn is_object(&self) -> bool {
-        matches!(self, Self::Diagnostic(d) if matches!(d.kind, Kind::Object | Kind::ScopedObject | Kind::ClassLayout | Kind::ScopedClassLayout))
+        matches!(self, Self::Diagnostic(d) if d.kind.is_object())
     }
 
     pub(super) fn map_message(mut self, f: impl FnOnce(String) -> String) -> Self {

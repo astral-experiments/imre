@@ -2,24 +2,8 @@
 use super::*;
 use ruff_text_size::TextRange;
 
-/// Preserve Ruff's decoded strings except for the positions where Rust's
-/// Unicode scalar type loses information. Raw literals and bytes are exact.
-pub(super) fn literal_replacements(
-    source: &str,
-    tokens: &ast::token::Tokens,
-) -> HashMap<TextRange, Vec<u32>> {
-    let mut replacements = HashMap::new();
-    for token in tokens {
-        let Some(range) = imre_ast::strings::cooked_content(token) else {
-            continue;
-        };
-        let points: Vec<_> = imre_ast::strings::replacements(&source[range]).collect();
-        if points.iter().any(|&point| point != 0xfffd) {
-            replacements.insert(token.range(), points);
-        }
-    }
-    replacements
-}
+pub(super) use crate::frontend::literal_replacements;
+use crate::frontend::push_codepoints;
 
 /// CPython cannot normalize a docstring containing a surrogate. Report the
 /// offending literal before emitting code; -OO omits the docstring entirely.
@@ -44,24 +28,9 @@ pub(super) fn check_docs(
 }
 
 impl Function<'_, '_> {
-    fn push_codepoints(bytes: &mut Vec<u8>, text: &str, replacements: Option<&[u32]>) {
-        let mut points = replacements.into_iter().flatten();
-        for c in text.chars() {
-            let point = if c == char::REPLACEMENT_CHARACTER && replacements.is_some() {
-                *points
-                    .next()
-                    .expect("one original code point per replacement")
-            } else {
-                u32::from(c)
-            };
-            bytes.extend_from_slice(&point.to_le_bytes());
-        }
-        debug_assert!(points.next().is_none());
-    }
-
     // Equal constants are merged across nested code objects in one compilation.
     fn string_constant_slot(&mut self, constant: StringConstant) -> String {
-        let slots = &mut self.output.string_constant_slots;
+        let slots = &mut self.frame.output.string_constant_slots;
         let next = slots.len();
         let slot = *slots.entry((self.source.unit, constant)).or_insert(next);
         self.integer(slot)
@@ -80,7 +49,7 @@ impl Function<'_, '_> {
                 let mut segment = Vec::new();
                 for part in text.value.iter() {
                     let points = self.source.replacements.get(&part.range());
-                    Self::push_codepoints(&mut segment, part, points.map(Vec::as_slice));
+                    push_codepoints(&mut segment, part, points.map(Vec::as_slice));
                 }
                 Some(segment)
             })
@@ -95,7 +64,7 @@ impl Function<'_, '_> {
             match part {
                 ast::InterpolatedStringElement::Literal(lit) => {
                     let replacements = self.format_replacements(lit);
-                    Self::push_codepoints(&mut segment, &lit.value, replacements.as_deref());
+                    push_codepoints(&mut segment, &lit.value, replacements.as_deref());
                 }
                 ast::InterpolatedStringElement::Interpolation(_) => {
                     segments.push(std::mem::take(&mut segment));
@@ -116,7 +85,7 @@ impl Function<'_, '_> {
         self.op("linked_string_tuple", &[&list, &slot])
     }
 
-    fn linked_string(&mut self, points: Vec<u8>) -> String {
+    pub(super) fn linked_string(&mut self, points: Vec<u8>) -> String {
         let (chunks, remainder) = points.as_chunks::<4>();
         debug_assert!(remainder.is_empty());
         let text = chunks
@@ -138,7 +107,7 @@ impl Function<'_, '_> {
     ) -> String {
         if let Some(points) = self.format_replacements(literal) {
             let mut bytes = Vec::new();
-            Self::push_codepoints(&mut bytes, &literal.value, Some(&points));
+            push_codepoints(&mut bytes, &literal.value, Some(&points));
             self.lit(7, &bytes)
         } else {
             self.text(&literal.value)
@@ -156,30 +125,6 @@ impl Function<'_, '_> {
             .replacements
             .keys()
             .any(|&r| range.contains_range(r))
-            .then(|| imre_ast::strings::replacements(&self.source.text[range]).collect())
-    }
-
-    pub(super) fn literal_text<'a>(
-        &mut self,
-        text: &str,
-        parts: impl Iterator<Item = &'a ast::StringLiteral> + Clone,
-    ) -> String {
-        if !self.source.has_templates
-            && !parts
-                .clone()
-                .any(|part| self.source.replacements.contains_key(&part.range()))
-        {
-            return self.text(text);
-        }
-        let mut bytes = Vec::new();
-        for part in parts {
-            let replacements = self.source.replacements.get(&part.range());
-            Self::push_codepoints(&mut bytes, part, replacements.map(Vec::as_slice));
-        }
-        if self.source.has_templates {
-            self.linked_string(bytes)
-        } else {
-            self.lit(7, &bytes)
-        }
+            .then(|| imre_ast::strings::replacements(&self.source.positions.text[range]).collect())
     }
 }

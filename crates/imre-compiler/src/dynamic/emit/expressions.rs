@@ -7,8 +7,26 @@ use super::{Body, CallArguments, DefinitionName, Function, permanent};
 
 impl Function<'_, '_> {
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
-        let previous = std::mem::replace(&mut self.current_range, expr.range());
-        let value = self.located_expr(expr);
+        self.with_expression_range(expr.range(), |code| {
+            if let Some(value) = crate::frontend::registered_value(
+                expr,
+                &code.source.replacements,
+                code.source.has_templates,
+            ) {
+                code.registered_value(&value)
+            } else {
+                code.located_expr(expr)
+            }
+        })
+    }
+
+    pub(super) fn with_expression_range(
+        &mut self,
+        range: ruff_text_size::TextRange,
+        emit: impl FnOnce(&mut Self) -> String,
+    ) -> String {
+        let previous = std::mem::replace(&mut self.current_range, range);
+        let value = emit(self);
         self.current_range = previous;
         value
     }
@@ -28,22 +46,9 @@ impl Function<'_, '_> {
             &self.source.method_imports,
             Some(&self.source.private_names),
         );
-        let line = self.source.line(position);
-        let previous = self.expression_line;
-        if previous == line {
-            return self.expr_inner(expr, None);
-        }
-        self.expression_line = line;
-        self.line(&format!(
-            "call void @imre_dyn_expression_line(ptr %ctx, i32 {line})"
-        ));
+        let previous = self.enter_expression(position);
         let value = self.expr_inner(expr, None);
-        self.expression_line = previous;
-        if !self.terminated {
-            self.line(&format!(
-                "call void @imre_dyn_expression_line(ptr %ctx, i32 {previous})"
-            ));
-        }
+        self.leave_expression(previous);
         value
     }
 
@@ -53,7 +58,9 @@ impl Function<'_, '_> {
         let ast::Expr::Call(call) = &*subscript.value else {
             return None;
         };
-        if self.source.line(subscript.start()) != self.source.line(subscript.end()) {
+        if self.source.positions.line(subscript.start())
+            != self.source.positions.line(subscript.end())
+        {
             return None;
         }
         let field = imre_ast::direct_method(
@@ -108,27 +115,6 @@ impl Function<'_, '_> {
                     f.suspend_at(&iterable, Suspension::Delegate, delegation.range, &mark)
                 })
             }
-            ast::Expr::NoneLiteral(_) => permanent::NONE.to_string(),
-            ast::Expr::EllipsisLiteral(_) => permanent::ELLIPSIS.to_string(),
-            ast::Expr::BooleanLiteral(v) => (if v.value {
-                permanent::TRUE
-            } else {
-                permanent::FALSE
-            })
-            .to_string(),
-            ast::Expr::NumberLiteral(v) => match &v.value {
-                ast::Number::Int(n) => match n.as_i64() {
-                    Some(value) => self.integer(value),
-                    None => self.lit(0, n.to_string().as_bytes()),
-                },
-                ast::Number::Float(value) => self.lit(3, &value.to_le_bytes()),
-                ast::Number::Complex { real, imag } => {
-                    self.lit(4, &[real.to_le_bytes(), imag.to_le_bytes()].concat())
-                }
-            },
-            ast::Expr::StringLiteral(v) => self.literal_text(v.value.to_str(), v.value.iter()),
-            ast::Expr::BytesLiteral(v) => self.lit(2, &v.value.bytes().collect::<Vec<_>>()),
-            ast::Expr::Name(v) => self.lookup(v.id.as_str()),
             ast::Expr::Attribute(v) => {
                 let base = self.attribute_receiver(v);
                 self.attr(&base, v.attr.as_str())
@@ -140,11 +126,11 @@ impl Function<'_, '_> {
                         span.map_or_else(|| "null".into(), |span| self.output.position(span));
                     return self.expr_inner(&v.value, Some((index, position)));
                 }
-                let object = self.expr(&v.value);
-                let span = self.expression_span(expr, &v.value, b'[');
                 if let ast::Expr::Slice(slice) = v.slice.as_ref()
                     && slice.step.is_none()
                 {
+                    let object = self.expr(&v.value);
+                    let span = self.expression_span(expr, &v.value, b'[');
                     let [start, stop] = [&slice.lower, &slice.upper].map(|bound| {
                         bound
                             .as_deref()
@@ -157,8 +143,13 @@ impl Function<'_, '_> {
                         "call i64 @imre_dyn_get_slice_at(ptr %ctx, i64 {object}, i64 {start}, i64 {stop}, ptr {position})"
                     ));
                 }
-                let key = self.expr(&v.slice);
-                self.op_at("get", &[&object, &key], span)
+                self.subscript(
+                    v.value.as_ref(),
+                    v.slice.as_ref(),
+                    v.range(),
+                    v.value.end(),
+                    Self::expr,
+                )
             }
             ast::Expr::Slice(slice) => {
                 let [start, stop, step] = [&slice.lower, &slice.upper, &slice.step]
@@ -184,20 +175,10 @@ impl Function<'_, '_> {
                 };
                 self.op(op, &[&list])
             }
-            ast::Expr::Dict(v) => {
-                let dict = self.op("dict", &[]);
-                for item in &v.items {
-                    if let Some(key) = &item.key {
-                        let key = self.expr(key);
-                        let value = self.expr(&item.value);
-                        self.op("put", &[&dict, &key, &value]);
-                    } else {
-                        let value = self.expr(&item.value);
-                        self.op("update", &[&dict, &value]);
-                    }
-                }
-                dict
-            }
+            ast::Expr::Dict(v) => self.dict_display(
+                v.items.iter().map(|item| (item.key.as_ref(), &item.value)),
+                Self::expr,
+            ),
             ast::Expr::BinOp(v) => {
                 let left = self.expr(&v.left);
                 let right = self.expr(&v.right);
@@ -230,12 +211,24 @@ impl Function<'_, '_> {
                 let mark = self.temporary_mark();
                 let value = self.expr(&v.value);
                 let name = self.code_name(target.id.as_str());
-                let replaced =
-                    self.op("assign_named_target", &[&self.scope.clone(), &name, &value]);
+                let replaced = self
+                    .frame
+                    .op("assign_named_target", &[&self.scope.clone(), &name, &value]);
                 self.line(&format!("call void @imre_dyn_named_assignment(ptr %ctx, i64 {mark}, i64 {value}, i64 {replaced})"));
                 value
             }
             ast::Expr::Call(v) => {
+                if crate::frontend::registered_positional_call(v) {
+                    // An operand still needs the residual expression emitter.
+                    return self.positional_call(
+                        v.func.as_ref(),
+                        &v.arguments.args,
+                        v.range(),
+                        v.func.end(),
+                        v.func.is_name_expr().then(|| v.func.range()),
+                        Self::expr,
+                    );
+                }
                 let mark = self.temporary_mark();
                 // Cap the fixed entry-block scratch space even for calls in cold branches.
                 let fixed = v.arguments.args.len() + v.arguments.keywords.len() <= 64
@@ -331,16 +324,7 @@ impl Function<'_, '_> {
                     }
                 };
                 let span = self.expression_span(expr, &v.func, b'(');
-                // A caller inspecting this live frame needs the full call range, including
-                // simple and multiline calls for which traceback highlighting is suppressed.
-                let (start_line, start_col) = self.source.line_and_column(v.start());
-                let (end_line, end_col) = self.source.line_and_column(v.end());
-                let position = self
-                    .output
-                    .position([start_line, end_line, start_col, end_col]);
-                self.line(&format!(
-                    "call void @imre_dyn_call_position(ptr %ctx, ptr {position})"
-                ));
+                self.call_position(v.range());
                 self.call_at(&callable, operands, &mark, span)
             }
             ast::Expr::Lambda(v) => self.define(
@@ -358,7 +342,13 @@ impl Function<'_, '_> {
                     match part {
                         ast::FStringPartRef::Literal(lit) => {
                             if !lit.value.is_empty() {
-                                parts.push(self.literal_text(&lit.value, std::iter::once(lit)));
+                                let value = crate::frontend::registered_string(
+                                    &lit.value,
+                                    std::iter::once(lit),
+                                    &self.source.replacements,
+                                    self.source.has_templates,
+                                );
+                                parts.push(self.registered_value(&value));
                             }
                         }
                         ast::FStringPartRef::FString(s) => {
@@ -485,7 +475,7 @@ impl Function<'_, '_> {
         body: impl FnOnce(&mut Self) -> T,
     ) -> T {
         let failed = self.name("b");
-        let outer = std::mem::replace(&mut self.error, failed.clone());
+        let outer = std::mem::replace(&mut self.body.error_target, failed.clone());
         let result = body(self);
         let ready = self.name("b");
         self.jump(&ready);
@@ -493,7 +483,7 @@ impl Function<'_, '_> {
         self.discard_truth(mark);
         self.jump(&outer);
         self.label(&ready);
-        self.error = outer;
+        self.body.error_target = outer;
         result
     }
 

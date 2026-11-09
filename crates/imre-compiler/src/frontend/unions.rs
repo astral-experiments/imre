@@ -781,6 +781,7 @@ impl Checker<'_> {
     /// Evaluating the original condition remains in IR even when its result is known.
     pub(super) fn instance_condition(&self, expression: &Expr) -> Option<bool> {
         match &expression.kind {
+            ExprKind::Bool(value) => Some(*value),
             ExprKind::Builtin(Builtin::IsInstance(classes), args) => {
                 let mut result = None;
                 for member in self.instance_members(args[0].ty) {

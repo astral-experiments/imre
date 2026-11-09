@@ -158,7 +158,7 @@ impl Emitter<'_, '_> {
             return self.block(&f.body);
         }
         self.block(&f.body[..start]);
-        if self.terminated {
+        if self.body.terminated {
             return;
         }
         for slot in slots {
@@ -188,14 +188,14 @@ impl Emitter<'_, '_> {
         let at = self.instruction(format!("lshr i64 {word}, 1"));
         let within = self.instruction(format!("icmp ult i64 {at}, {len}"));
         let valid = self.instruction(format!("and i1 {tag}, {within}"));
-        let (fast, slow, done) = (self.current.clone(), self.label(), self.label());
+        let (fast, slow, done) = (self.body.current.clone(), self.label(), self.label());
         self.branch(&valid, &done, &slow);
         self.start(&slow);
         let normalized = self.checked_int_list_word(format!(
             "call i64 @imre_list_view_index(i64 {word}, i64 {len})"
         ));
         let other = self.instruction(format!("lshr i64 {normalized}, 1"));
-        let fallback = self.current.clone();
+        let fallback = self.body.current.clone();
         self.jump(&done);
         self.start(&done);
         let i = self.instruction(format!("phi i64 [{at}, %{fast}], [{other}, %{fallback}]"));
@@ -266,7 +266,7 @@ impl Emitter<'_, '_> {
             "call i64 @imre_list_borrow_index(ptr {}, i64 {at})",
             list.operand
         ));
-        let fallback = self.current.clone();
+        let fallback = self.body.current.clone();
         self.jump(&done);
         self.start(&done);
         let word = self.instruction(format!(

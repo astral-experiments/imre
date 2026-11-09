@@ -235,6 +235,13 @@ impl Checker<'_> {
                     )));
                 }
                 let receiver = self.expr(&subscript.value)?;
+                if receiver.ty == Type::PythonObject {
+                    let index = self.expr(&subscript.slice)?;
+                    if self.module_scope && self.is_module_namespace(&receiver) {
+                        self.namespace_item_store(&index, &value);
+                    }
+                    return Ok(Statement::SetItem(receiver, index, value));
+                }
                 if let Some((key, element)) = self.types.chainmap_entries(receiver.ty) {
                     let value = self.coerce(value, element, target)?;
                     let key = self.expr_expected(&subscript.slice, key)?;
