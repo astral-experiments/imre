@@ -869,6 +869,26 @@ pub(in crate::dynamic) fn decode_bytes(
                 .map(|(text, _)| text)
         });
     }
+    if let Codec::CodePage(page) = codec
+        && (name == "surrogateescape"
+            || handler_builtin(name).is_some() && ctx.codec_entries.handlers.contains_key(name))
+    {
+        let name = name.to_owned();
+        return ctx.with_buffer_export(input, |ctx| {
+            // Python's charmap decoder honors replacements registered under built-in names.
+            let escape =
+                name == "surrogateescape" && !ctx.codec_entries.handlers.contains_key(&name);
+            let data = ctx.native_buffer_bytes(input)?;
+            let mut points = Vec::new();
+            let Some(issue) = page.decode_prefix(&mut points, data, 0, escape)? else {
+                return Ok(ctx.text_codepoints(points));
+            };
+            let error = issue.error(data);
+            resume_decode(ctx, &name, points, error, |out, bytes, pos| {
+                Ok(page.decode_prefix(out, bytes, pos, escape)?)
+            })
+        });
+    }
     if matches!(codec, Codec::Ascii) && name == "surrogateescape" {
         let bytes = ctx.bytes_like(input)?;
         if !bytes.is_ascii() {
