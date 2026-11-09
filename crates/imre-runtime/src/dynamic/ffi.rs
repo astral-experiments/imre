@@ -2242,7 +2242,15 @@ impl Context {
         let freevars = if metadata.scope_complete != true {
             None
         } else if let Some(captures_class) = metadata.method_class_cell.as_bool() {
-            self.method_freevars(self.scope_data(scope).parent, reads, captures_class)
+            let owner = self.scope_data(scope);
+            // A transferred function already owns a closure environment. Only a method
+            // being defined in a class still needs to skip its definition namespace.
+            let enclosing = if owner.closure.environment {
+                Some(scope)
+            } else {
+                owner.parent
+            };
+            self.method_freevars(enclosing, reads, captures_class)
         } else if metadata.class_cell == true {
             None
         } else {
