@@ -133,6 +133,8 @@ pub struct CompileOptions {
     pub extension_paths: Vec<PathBuf>,
     /// Additional source modules to link for imports whose names are chosen at runtime.
     pub include_modules: std::collections::BTreeSet<String>,
+    /// Entries contributed by PYTHONPATH, after explicitly configured installation roots.
+    pub pythonpath: std::ops::Range<usize>,
     /// Indices in extension_paths admitted as ZIPs from PYTHONPATH during Python startup.
     pub python_archive_indices: Vec<usize>,
 }
@@ -505,7 +507,7 @@ fn object_fallback(
         native_candidate = None;
         infer_sets = false;
         import_failure = None;
-        site_probes = modules::SiteProbes::default();
+        site_probes = site_probes.next_layout();
     };
     // A newly found checked provider can lower normally. If lowering fails, its
     // dependencies alone do not admit the caller to the object importer.
@@ -662,7 +664,12 @@ fn object_fallback(
         Ok(())
     };
     match dynamic::compile(
-        (path, module_root, filesystem),
+        (
+            path,
+            module_root,
+            filesystem,
+            &mut site_probes.wheel_records,
+        ),
         options,
         object_imports,
         operation

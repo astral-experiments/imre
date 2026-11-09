@@ -2820,6 +2820,7 @@ pub(crate) struct SourceModule {
     pub(crate) executable: Vec<usize>,
     pub(crate) is_package: bool,
     search_roots: SearchRoots,
+    entry_ownership: Option<bool>,
     /// A rebuilt module is declared by a .pyi beside its platform-specific archive.
     pub(crate) archive: Option<NativeArchive>,
 }
@@ -2832,7 +2833,15 @@ impl SourceModule {
     pub(crate) fn is_program_source(&self) -> bool {
         !self.bundled
             && self.archive.is_none()
-            && matches!(self.search_roots, SearchRoots::Single(0))
+            && self
+                .entry_ownership
+                .unwrap_or(matches!(self.search_roots, SearchRoots::Single(0)))
+    }
+
+    /// The existing lexical contract checker covers the launch directory. A linked
+    /// signature on an additional search root also applies to live, rebound calls.
+    pub(crate) fn checks_source_contracts(&self) -> bool {
+        self.is_program_source() && matches!(self.search_roots, SearchRoots::Single(0))
     }
 }
 
@@ -3821,7 +3830,7 @@ impl SourceGraph {
             &options.extension_paths,
             &options.python_archive_indices,
             Some((options, site_probes)),
-            fs,
+            fs.reborrow(),
         )?;
         let startup = options.python_startup();
         loader.skip_current_root =
@@ -3842,6 +3851,7 @@ impl SourceGraph {
             Err(error) => return Err(error),
         };
         let filename = loader.modules[entry].path.clone();
+        let skipped = usize::from(loader.skip_current_root);
         let reachable_only = loader.reachable_only;
         let mut graph = loader.finish(
             entry,
@@ -3849,6 +3859,24 @@ impl SourceGraph {
             reachable_only,
             options.entry_profile.as_deref(),
         )?;
+        if let SearchRoots::Single(index) = graph.modules[entry].search_roots {
+            let root = &graph.filesystem_roots[index - skipped];
+            if let Some(owner) = crate::installed_wheels::ModuleEntryRoot::select(
+                root,
+                &graph.modules[entry].path,
+                index == 0,
+                &mut site_probes.wheel_records,
+                options,
+                &mut graph.inputs,
+                &mut fs,
+            ) {
+                for module in &mut graph.modules {
+                    if matches!(module.search_roots, SearchRoots::Single(i) if i == index) {
+                        module.entry_ownership = owner.is_program(root, &module.path);
+                    }
+                }
+            }
+        }
         if let Some((flags, executable)) = startup {
             graph.command_startup = Some((flags.clone(), executable.to_owned()));
         }
@@ -4380,12 +4408,20 @@ pub(crate) enum EntryImportFailure {
 /// File probes that affect checked admission, even when the program later uses object imports.
 #[derive(Default)]
 pub(crate) struct SiteProbes {
+    pub(crate) wheel_records: crate::installed_wheels::WheelRecords,
     missing: Vec<PathBuf>,
     selected: bool,
     file_checks: BTreeMap<PathBuf, bool>,
 }
 
 impl SiteProbes {
+    pub(crate) fn next_layout(self) -> Self {
+        Self {
+            wheel_records: self.wheel_records,
+            ..Self::default()
+        }
+    }
+
     fn is_file(&mut self, fs: &mut FileSystem<'_>, path: PathBuf) -> bool {
         *self
             .file_checks
@@ -4585,6 +4621,7 @@ impl<'a> Loader<'a> {
             parsed,
             is_package,
             search_roots: SearchRoots::Single(0),
+            entry_ownership: None,
             archive: None,
             bindings: HashMap::new(),
             type_bindings: HashMap::new(),
