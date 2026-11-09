@@ -798,6 +798,10 @@ pub(super) fn call(
             let tid = tid.map_or(NONE, |id| {
                 ctx.alloc(Value::Int(crate::Int::from_usize(id as usize)))
             });
+            // A pending Python signal can raise before Thread.start resumes.
+            ctx.set_attr(owner, "_handle", handle_id)?;
+            ctx.set_attr(owner, "_ident", ident)?;
+            ctx.set_attr(owner, "_native_id", tid)?;
             Ok(ctx.alloc(Value::Tuple(vec![handle_id, ident, tid])))
         }
         ("shutdown", &[]) => {

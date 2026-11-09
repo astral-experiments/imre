@@ -86,7 +86,7 @@ class Thread:
         daemon = bool(self.daemon)
         if self._ident is not None:
             raise RuntimeError("threads can only be started once")
-        self._handle, self._ident, self._native_id = _imre_thread.start(self, daemon, has_context)
+        _imre_thread.start(self, daemon, has_context)
 
     def join(self, timeout=None):
         if not self._initialized:
