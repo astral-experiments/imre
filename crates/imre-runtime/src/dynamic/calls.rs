@@ -697,6 +697,9 @@ impl Context {
         );
         // Compiled literal names use the existing inline-field and native-type fast paths.
         // A Python name must run the same descriptor operation even when its spelling was supplied.
+        if !ordinary && matches!(op, ObjectAttribute::Get) {
+            return self.default_attr(obj, name, AttributeLookup::Value);
+        }
         if !ordinary || original.is_none() {
             return self.default_text_attribute(obj, &text, op);
         }
@@ -2731,7 +2734,7 @@ impl Context {
             && self.class_attr(class, "__getattr__").is_none()
             && self.class_attr(class, "__getattribute__").is_none_or(|hook| matches!(self.heap.get(hook), Value::Native(symbol) if symbol == "object.__getattribute__"))
         {
-            self.default_attr(obj, name, AttributeLookup::Method(receiver))
+            self.default_attr(obj, AttributeName::Text(name), AttributeLookup::Method(receiver))
         } else {
             self.lookup_attr(obj, name)
         }
@@ -2739,16 +2742,27 @@ impl Context {
 
     /// Base lookup bypasses Python's __getattribute__ and __getattr__ hooks.
     pub(super) fn default_get_attr(&mut self, obj: Id, name: &str) -> Result<Id> {
-        self.default_attr(obj, name, AttributeLookup::Value)
+        self.default_attr(obj, AttributeName::Text(name), AttributeLookup::Value)
     }
 
     /// Resolve a dir-listed member of a class with the default metaclass for no_type_check.
     pub(super) fn no_type_check_member(&mut self, class: Id, name: &str) -> Result<Id> {
-        self.default_attr(class, name, AttributeLookup::ListedClassMember)
+        self.default_attr(
+            class,
+            AttributeName::Text(name),
+            AttributeLookup::ListedClassMember,
+        )
     }
 
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
-    fn default_attr(&mut self, obj: Id, name: &str, mut lookup: AttributeLookup<'_>) -> Result<Id> {
+    fn default_attr(
+        &mut self,
+        obj: Id,
+        attr: AttributeName<'_>,
+        mut lookup: AttributeLookup<'_>,
+    ) -> Result<Id> {
+        let spelling = attr.text(self)?;
+        let name = spelling.as_ref();
         if name == "__dict__"
             && matches!(self.heap.get(obj), Value::Native(symbol) if builtins::exception_kind(symbol).is_some())
         {
@@ -2849,7 +2863,22 @@ impl Context {
                 return self.bind_attribute(member, obj, class);
             }
         }
+        // These native layouts inherit object's attribute reader. A Python mixin can
+        // supply the member earlier in the published MRO.
+        let object_reader = name == "__getattribute__"
+            && self.is_type_object(obj)
+            && self.allocation_base(obj).is_some_and(|base| {
+                matches!(self.heap.get(base), Value::Native(kind)
+                    if matches!(kind.as_str(), "tuple" | "list" | "dict" | "str" | "bytes"
+                        | "bytearray" | "int" | "bool" | "float" | "complex" | "set" | "frozenset"))
+            });
+        let named_reader = object_reader && attr.nonexact_key(self).is_some();
         let metaclass_member = match *self.heap.get(obj) {
+            _ if named_reader => {
+                let meta = self.exact_type(obj)?;
+                self.class_attr_with_name(meta, attr)
+                    .map(|member| (meta, member))
+            }
             Value::Class {
                 metaclass: Some(meta),
                 ..
@@ -2864,6 +2893,27 @@ impl Context {
             && self.readable_data_descriptor(member)
         {
             return self.bind_attribute(member, obj, meta);
+        }
+        if object_reader {
+            let member = if named_reader {
+                self.class_attr_with_name(obj, attr)
+            } else {
+                let object = self.builtin("object");
+                self.base_lineage(obj, true).into_iter().find_map(|base| {
+                    if base == object {
+                        self.raw_object_member(name)
+                    } else {
+                        self.own_class_attr(base, name)
+                    }
+                })
+            };
+            if let Some(member) = member {
+                return self.bind_attribute(member, NONE, obj);
+            }
+            if let Some((meta, member)) = metaclass_member {
+                return self.bind_attribute(member, obj, meta);
+            }
+            return Err(self.missing_attribute(obj, name));
         }
         if name == "__delattr__"
             && self.is_type_object(obj)
