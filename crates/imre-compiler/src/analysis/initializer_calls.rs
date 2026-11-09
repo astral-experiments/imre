@@ -43,6 +43,27 @@ fn passive(stmt: &Stmt) -> bool {
     }
 }
 
+/// No statement in this function can enter application code when all supplied
+/// and defaulted arguments are literals. The caller still establishes its identity.
+pub(crate) fn passive_function(function: &ruff_python_ast::StmtFunctionDef) -> bool {
+    function.decorator_list.is_empty()
+        && function.type_params.is_none()
+        && function
+            .parameters
+            .iter_non_variadic_params()
+            .all(|parameter| {
+                parameter
+                    .default
+                    .as_deref()
+                    .is_none_or(Expr::is_literal_expr)
+            })
+        && function.body.iter().all(|statement| match statement {
+            Stmt::Return(ret) => ret.value.as_deref().is_none_or(Expr::is_literal_expr),
+            Stmt::Pass(_) | Stmt::Expr(_) | Stmt::If(_) => passive(statement),
+            _ => false,
+        })
+}
+
 fn after_docstring(body: &[Stmt]) -> &[Stmt] {
     let skip = body
         .first()

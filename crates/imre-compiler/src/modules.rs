@@ -3360,9 +3360,15 @@ impl SourceGraph {
     ) -> (crate::SourceInputs, Vec<PathBuf>) {
         let mut inputs = std::mem::take(&mut self.inputs);
         let mut modules = self.modules.iter().enumerate();
-        inputs.files.retain(|_| {
+        inputs.files.retain(|(path, _, _)| {
             let (id, module) = modules.next().expect("one input per module");
-            !module.bundled && !module.is_namespace() && !(id == self.entry && self.virtual_command)
+            !module.bundled
+                && !module.is_namespace()
+                && !(id == self.entry && self.virtual_command)
+                && !self
+                    .zip_files
+                    .iter()
+                    .any(|(archive, _, _)| path.starts_with(archive))
         });
         inputs.files.append(&mut self.zip_files);
         let paths = inputs
@@ -3914,11 +3920,12 @@ impl SourceGraph {
         } else {
             cwd
         };
-        if options.path_entry && !fs.is_dir(&spelling) {
-            // A ZIP operand belongs to the ZIP finder, even under isolated startup.
-            return Ok(None);
-        }
-        let root = fs.canonicalize(&spelling).map_err(|e| e.to_string())?;
+        let archive_entry = options.path_entry && !fs.is_dir(&spelling);
+        let root = if archive_entry {
+            spelling.clone()
+        } else {
+            fs.canonicalize(&spelling).map_err(|e| e.to_string())?
+        };
         let mut loader = Loader::new(
             root.clone(),
             &options.extension_paths,
@@ -3931,7 +3938,18 @@ impl SourceGraph {
             !options.path_entry && startup.is_some_and(|(flags, _)| flags.safe_path);
         loader.frozen_modules = startup.is_none_or(|(flags, _)| flags.frozen_modules);
         loader.reachable_only = options.reachable_only || options.entry_profile.is_some();
-        if !loader.skip_current_root {
+        if archive_entry {
+            let Some(archive) = crate::zip_entry::ZipSources::discover(
+                &spelling,
+                &mut loader.inputs,
+                &mut loader.fs,
+            )?
+            else {
+                return Ok(None);
+            };
+            loader.zip_files.append(&mut loader.inputs.files);
+            loader.zip_sources.insert(root, archive);
+        } else if !loader.skip_current_root {
             loader.inputs.directories.push((spelling, root));
         }
         loader.module_operand = Some(name.to_owned());
@@ -6294,6 +6312,7 @@ impl<'a> Loader<'a> {
         let mut resolved = None;
         let mut portions = Vec::new();
         let mut zip_import = false;
+        let mut member_source = None;
         for (root_index, root) in roots.enumerate() {
             if root_index == 0 && self.skip_current_root {
                 continue;
@@ -6301,7 +6320,23 @@ impl<'a> Loader<'a> {
             if parent_roots.is_some_and(|roots| !roots.contains(root_index)) {
                 continue;
             }
-            if let Some(archive) = self.zip_sources.get(root) {
+            if let Some(archive) = self.zip_sources.get_mut(root) {
+                // The path-entry finder supplies the physical member used as __main__
+                // and the source of imports from this same first-party archive.
+                if root_index == 0
+                    && self.module_operand.is_some()
+                    && let Some(member) = archive.module(name)
+                {
+                    member_source = Some(member.source);
+                    resolved = Some((
+                        member.path.clone(),
+                        member.path,
+                        member.package,
+                        root_index,
+                        None,
+                    ));
+                    break;
+                }
                 if archive.package(name).is_some() {
                     zip_import = true;
                     break;
@@ -6463,13 +6498,18 @@ impl<'a> Loader<'a> {
                 self.modules[previous].name
             ));
         }
-        let source = self
-            .fs
-            .read_source_string(&identity)
-            .map_err(|error| format!("{}: {error}", path.display()))?;
+        let (source, kind) = if let Some(source) = member_source {
+            (source, crate::SourceKind::DecodedFile)
+        } else {
+            let source = self
+                .fs
+                .read_source_string(&identity)
+                .map_err(|error| format!("{}: {error}", path.display()))?;
+            (source, crate::SourceKind::File)
+        };
         // ty resolves logical import paths; canonical identities enforce containment
         // and uniqueness without breaking a single internal symlink's import name.
-        let id = self.add(path, identity, name.to_owned(), is_package, &source)?;
+        let id = self.add_source(path, identity, name.to_owned(), is_package, &source, kind)?;
         self.modules[id].search_roots = SearchRoots::Single(root_index);
         self.modules[id].archive = archive;
         self.scan(id)?;

@@ -8,7 +8,7 @@ mod execution;
 mod incremental_tests;
 mod inferred_shapes;
 mod initializer_calls;
-pub(crate) use initializer_calls::unambiguous_file_module;
+pub(crate) use initializer_calls::{passive_function, unambiguous_file_module};
 mod run_path;
 mod tuple_displays;
 
@@ -110,11 +110,20 @@ pub(crate) fn check_registered_project<'a>(
     >,
     has_file_body: Option<&dyn Fn(&str) -> bool>,
     checked: Option<&crate::modules::SourceGraph>,
+    refusal: Option<&crate::frontend::phase::Diagnostic>,
 ) -> Result<(), String> {
     let sources = sources.into_iter();
     if sources.len() == 0 {
         return Ok(());
     }
+    let entry_operand = checked.zip(refusal).and_then(|(graph, report)| {
+        let (owner, statement, operand) = report.entry_operand()?;
+        (owner == graph.entry
+            && graph
+                .session
+                .unconditional_module_operand(owner, statement, operand))
+        .then(|| (owner, graph.modules[owner].original_source(), report))
+    });
     if let Some(graph) = checked
         && !graph.has_checked_only_import
         && let Some(result) = &graph.source_contract
@@ -153,6 +162,7 @@ pub(crate) fn check_registered_project<'a>(
                 result.clone(),
                 sources.map(|s| (s.checked_module.unwrap(), s)),
                 has_file_body,
+                entry_operand,
             );
         }
     }
@@ -195,16 +205,46 @@ pub(crate) fn check_registered_project<'a>(
         paths.push((path, is_program));
     }
     let contracts = session.check_closed_program(&paths, None, &[], None);
-    session.check_registered_execution(contracts, (first_winner..).zip(sources), has_file_body)
+    session.check_registered_execution(
+        contracts,
+        (first_winner..).zip(sources),
+        has_file_body,
+        entry_operand,
+    )
 }
 
 impl Session {
+    /// A module operand follows the statement's normal continuation if they have
+    /// the same use-def condition. Calls before the statement may themselves raise.
+    fn unconditional_module_operand(
+        &self,
+        module: usize,
+        statement: ruff_text_size::TextSize,
+        operand: TextRange,
+    ) -> bool {
+        let file = self.db.program_file(self.files[module]);
+        let index = ty_python_core::semantic_index(&self.db, file);
+        let flow = index.use_def_map(ty_python_core::FileScopeId::global());
+        let condition = |range: TextRange| {
+            flow.range_reachability()
+                .filter(|(scope, _)| scope.contains_range(range))
+                .min_by_key(|(scope, _)| scope.len())
+                // The use-def map omits its default, always-reachable intervals.
+                .map_or(ty_python_core::reachability_constraints::ScopedReachabilityConstraintId::ALWAYS_TRUE, |(_, condition)| condition)
+        };
+        condition(operand) == condition(TextRange::at(statement, 1.into()))
+            && !ty_python_semantic::types::ide_support::unreachable_ranges(&self.db, file)
+                .iter()
+                .any(|excluded| excluded.range.contains_range(operand))
+    }
+
     /// Check both execution boundaries against the winners of the same registered program.
     fn check_registered_execution<'a>(
         &self,
         contracts: Result<(), String>,
         sources: impl Iterator<Item = (usize, crate::dynamic::RegisteredSource<'a>)> + Clone,
         has_file_body: Option<&dyn Fn(&str) -> bool>,
+        entry_operand: Option<(usize, &str, &crate::frontend::phase::Diagnostic)>,
     ) -> Result<(), String> {
         if let Some((entry, start)) = sources
             .clone()
@@ -236,6 +276,14 @@ impl Session {
                 ) {
                     contracts?;
                 }
+                return Err(error.to_string());
+            }
+            if let Some((owner, original, error)) = entry_operand
+                && start.main_body
+                && start.checked_module == Some(owner)
+                && start.source == original
+            {
+                contracts?;
                 return Err(error.to_string());
             }
         }

@@ -644,6 +644,7 @@ fn object_fallback(
                 registered.winners.iter().copied(),
                 registered.has_file_body,
                 checked_graph.as_ref(),
+                refusal.as_ref(),
             )?;
             if registered
                 .file_alternatives
@@ -670,6 +671,7 @@ fn object_fallback(
                     files,
                     registered.has_file_body,
                     checked_graph.as_ref(),
+                    None,
                 )?;
             }
         }

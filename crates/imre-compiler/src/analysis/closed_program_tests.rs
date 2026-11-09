@@ -83,6 +83,7 @@ fn registered_parameter_changes_recheck_the_unchanged_caller() {
             sources.iter().map(|s| RegisteredSource::new(s, true, None)),
             None,
             Some(&graph),
+            None,
         )
     };
     fs::remove_file(entry).unwrap();
@@ -108,6 +109,7 @@ fn registered_parameter_changes_recheck_the_unchanged_caller() {
             .map(|(i, s)| RegisteredSource::new(s, i == 0, None)),
         None,
         Some(&graph),
+        None,
     )
     .unwrap_err();
     assert!(
@@ -138,6 +140,7 @@ fn new_registration_checks_dormant_bodies_against_registered_declarations() {
             .map(|(i, s)| RegisteredSource::new(s, i == 1, None)),
         None,
         None,
+        None,
     )
     .unwrap_err();
     assert!(
@@ -152,6 +155,7 @@ fn new_registration_checks_dormant_bodies_against_registered_declarations() {
             .iter()
             .enumerate()
             .map(|(i, s)| RegisteredSource::new(s, i == 1, None)),
+        None,
         None,
         None,
     )
@@ -183,6 +187,7 @@ fn registered_python_shadow_provides_the_call_signature() {
                 .iter()
                 .enumerate()
                 .map(|(i, s)| RegisteredSource::new(s, i == 1, None)),
+            None,
             None,
             None,
         )
@@ -527,6 +532,7 @@ fn a_script_named_runpy_does_not_own_the_imported_sdk_function() {
         sources.iter().map(|s| RegisteredSource::new(s, true, None)),
         Some(&|_| false),
         None,
+        None,
     )
     .unwrap_err();
     assert!(
@@ -585,6 +591,7 @@ fn dormant_lexical_checks_keep_known_parameters_of_partial_calls() {
             root,
             &[],
             [RegisteredSource::new(&source, true, None)],
+            None,
             None,
             None,
         )
@@ -754,6 +761,7 @@ fn a_linked_signature_requires_a_reaching_initializer_call() {
             }),
             None,
             None,
+            None,
         )
     };
     let read = "from __main__ import take as use\nif False: use('x')\n";
@@ -825,5 +833,34 @@ fn earlier_unlinked_source_precedes_a_later_initializer_argument() {
     assert!(
         before.contains("main.py:2:6") && before.contains("expected int"),
         "{before}"
+    );
+}
+
+#[test]
+fn the_ordinary_entry_keeps_an_operand_in_the_default_flow_region() {
+    let directory = tempdir().unwrap();
+    let entry = directory.path().join("app.py");
+    fs::write(directory.path().join("observe.py"), "print('observed')\n").unwrap();
+    fs::write(
+        &entry,
+        "import observe\nvalues: list[int] = [3]\nvalues.append(True)\n",
+    )
+    .unwrap();
+    let mut graph = crate::modules::SourceGraph::load(&entry, Some(directory.path()), &[]).unwrap();
+    let crate::CheckedProgram::Runtime(report) =
+        crate::checked_lower_with(&mut graph, None, true).unwrap()
+    else {
+        panic!("expected the normal checker operand diagnostic")
+    };
+    let (owner, statement, argument) = report.entry_operand().unwrap();
+    assert!(
+        graph
+            .session
+            .unconditional_module_operand(owner, statement, argument)
+    );
+    assert!(
+        report
+            .to_string()
+            .contains("app.py:3:15: Imre: expected int, got bool")
     );
 }

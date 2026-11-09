@@ -450,6 +450,8 @@ pub(super) struct ModuleNamespace {
     keys: HashMap<usize, String>,
     exposed: HashSet<String>,
     unknown_key: bool,
+    last_python_call: Option<TextSize>,
+    released_owner: bool,
 }
 
 impl ModuleNamespace {
@@ -459,6 +461,8 @@ impl ModuleNamespace {
             .retain(|slot, key| other.keys.get(slot) == Some(key));
         self.exposed.extend(other.exposed.iter().cloned());
         self.unknown_key |= other.unknown_key;
+        self.last_python_call = self.last_python_call.max(other.last_python_call);
+        self.released_owner |= other.released_owner;
     }
 
     fn key(&self, value: &Expr) -> Option<String> {
@@ -489,6 +493,67 @@ impl Checker<'_> {
         }
     }
 
+    pub(super) fn closed_passive_call(&self, call: &ast::ExprCall) -> bool {
+        if self.module_namespace.unknown_key
+            || self.module_namespace.released_owner
+            || self.live_module_binding(&call.func).is_some()
+            || !call.func.is_name_expr()
+            || !call.arguments.args.iter().all(ast::Expr::is_literal_expr)
+            || !call
+                .arguments
+                .keywords
+                .iter()
+                .all(|keyword| keyword.arg.is_some() && keyword.value.is_literal_expr())
+        {
+            return false;
+        }
+        let Some(Binding::Definition(id)) = self.resolve(&call.func) else {
+            return false;
+        };
+        let definition = &self.graph.modules[id.module].parsed.syntax().body[id.statement];
+        id.module == self.module
+            && self
+                .module_namespace
+                .last_python_call
+                .is_none_or(|end| end <= definition.start())
+            && definition
+                .as_function_def_stmt()
+                .is_some_and(crate::analysis::passive_function)
+    }
+
+    /// Calling Python can replace any module binding visible when control enters the
+    /// callee. A later first assignment still establishes its normal checked layout.
+    pub(super) fn invalidate_called_bindings(
+        &mut self,
+        call: &ast::Expr,
+        checked: &Result<Expr, String>,
+    ) {
+        if self.namespace_calls.contains(&call.range()) {
+            return;
+        }
+        let can_call_python = match checked {
+            Ok(value) => matches!(
+                &value.kind,
+                ExprKind::Call(..)
+                    | ExprKind::Invoke { .. }
+                    | ExprKind::Construct { .. }
+                    | ExprKind::Builtin(Builtin::RegisteredCall(..), _)
+            ),
+            Err(error) => error.is_object(),
+        };
+        if can_call_python {
+            self.module_namespace.last_python_call =
+                self.module_namespace.last_python_call.max(Some(call.end()));
+            self.module_namespace.exposed.extend(
+                self.names
+                    .iter()
+                    .filter(|(_, slot)| self.assigned.contains(slot))
+                    .map(|(name, _)| name.clone()),
+            );
+            self.module_namespace.keys.clear();
+        }
+    }
+
     fn can_release_owner(&self, slot: usize) -> bool {
         self.assigned.contains(&slot) && self.types.stores_python_object(self.locals[slot])
     }
@@ -496,7 +561,11 @@ impl Checker<'_> {
     // A store installs its RHS before releasing the previous owner. A Python finalizer
     // can change any binding already visible in this module before the next lookup.
     fn release_module_owner(&mut self) {
-        self.module_namespace.exposed.extend(self.names.keys().cloned());
+        // A finalizer can replace a function before the next direct call looks it up.
+        self.module_namespace.released_owner = true;
+        self.module_namespace
+            .exposed
+            .extend(self.names.keys().cloned());
         self.module_namespace.keys.clear();
     }
 

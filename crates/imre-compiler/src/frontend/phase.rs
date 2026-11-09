@@ -4,7 +4,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use ruff_text_size::{Ranged, TextRange};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use crate::modules::{ModuleId, SourceGraph};
 
@@ -28,6 +28,7 @@ pub(crate) enum Kind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Position {
     range: TextRange,
+    entry_statement: Option<(ModuleId, TextSize)>,
     line: usize,
     column: usize,
 }
@@ -70,6 +71,7 @@ impl<M> Diagnostic<M> {
         Self {
             position: Some(Position {
                 range,
+                entry_statement: None,
                 line,
                 column,
             }),
@@ -80,6 +82,12 @@ impl<M> Diagnostic<M> {
     pub(crate) fn classified(mut self, kind: Kind) -> Self {
         self.kind = kind;
         self
+    }
+
+    pub(crate) fn entry_operand(&self) -> Option<(ModuleId, TextSize, TextRange)> {
+        let position = self.position.as_ref()?;
+        let (owner, statement) = position.entry_statement?;
+        (self.kind == Kind::ExactType).then_some((owner, statement, position.range))
     }
 
     pub(crate) fn with_path(mut self, path: &std::path::Path) -> Self {
@@ -209,6 +217,20 @@ impl Failure<&'static str> {
 }
 
 impl Failure {
+    pub(super) fn in_entry_statement(
+        mut self,
+        entry: Option<ModuleId>,
+        statement: TextSize,
+    ) -> Self {
+        if let (Some(module), Self::Diagnostic(report)) = (entry, &mut self)
+            && report.kind == Kind::ExactType
+            && let Some(position) = &mut report.position
+        {
+            position.entry_statement.get_or_insert((module, statement));
+        }
+        self
+    }
+
     pub(super) fn at_callable_argument(
         mut self,
         site: TextRange,

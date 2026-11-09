@@ -643,7 +643,11 @@ impl Initialization {
                     // Each module binding has one initializer. Leave its layout unknown
                     // and continue discovering calls that do not read this binding.
                     Err(error) if checker.defer_object_error(&error) => continue,
-                    Err(error) => return Err(error),
+                    Err(error) => {
+                        return Err(
+                            error.in_entry_statement(checker.ordinary_entry(), statement.start())
+                        );
+                    }
                 }
             } else {
                 let (checked, _) = checker.statement(statement, &[])?;
