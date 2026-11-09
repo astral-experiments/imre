@@ -158,19 +158,12 @@ pub(super) struct Trace {
     pub pending_syntax: Option<super::source_code::SyntaxSpan>,
     /// Live members belong to the exception instance across traceback clones.
     pub source_syntax: Option<crate::shared::Shared<[std::cell::Cell<Id>; 9]>>,
-    pub import_names: Option<[Id; 3]>,
+    pub import_names: [Option<Id>; 3],
     pub group: Option<GroupData>,
     pub name_error_name: Option<Id>,
     pub dictionary: Option<Id>,
     stop_value: Id,
     head: Id,
-}
-
-#[derive(Debug)]
-pub(super) struct ImportFields {
-    pub name: Option<String>,
-    pub path: Option<String>,
-    pub name_from: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -187,7 +180,6 @@ pub(super) struct Error {
     pub trace: Option<allocator_api2::boxed::Box<Trace>>,
     /// Python object held by the writable SystemExit.code member.
     pub exit_code: Id,
-    pub import: Option<crate::shared::Shared<ImportFields>>,
 }
 
 /// The decoder reuses these writable fields while BaseException.args keeps its first tuple.
@@ -216,7 +208,6 @@ impl Error {
             context: NONE,
             trace: None,
             exit_code: NONE,
-            import: None,
         }
     }
 
@@ -252,22 +243,12 @@ impl Error {
         (self.class != NONE).then_some(self.class)
     }
 
-    /// Attach the module and member names exposed on a Python import exception.
-    pub fn with_import(
-        mut self,
-        name: Option<&str>,
-        path: Option<String>,
-        name_from: Option<&str>,
-    ) -> Self {
-        let fields = ImportFields {
-            name: name.map(str::to_owned),
-            path,
-            name_from: name_from.map(str::to_owned),
-        };
-        let Ok(fields) = crate::shared::Shared::try_new(fields) else {
+    /// Preserve the original Python name supplied by the importer.
+    pub(super) fn with_import_name(mut self, name: Id) -> Self {
+        let Some(trace) = self.try_tracing() else {
             return Self::new("MemoryError", "");
         };
-        self.import = Some(fields);
+        trace.import_names[0] = Some(name);
         self
     }
 

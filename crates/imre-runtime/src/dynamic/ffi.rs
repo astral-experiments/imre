@@ -1160,9 +1160,10 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
                 ctx.insert_startup_path0()?;
             }
         }
+        let name = ctx.text("__main__");
         let main = ctx
-            .load_bootstrap_module("__main__", None, NONE)?
-            .ok_or_else(|| Context::missing_module("__main__"))?;
+            .load_bootstrap_module("__main__", name, None, NONE)?
+            .ok_or_else(|| Context::missing_module("__main__", name))?;
         if let Some(name) = ctx.config["module_entry"].as_str().map(str::to_owned) {
             ctx.run_module_as_main(name)
         } else {

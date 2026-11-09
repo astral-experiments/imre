@@ -205,22 +205,21 @@ pub(super) fn initialize_import(
             kwargs.len()
         )));
     }
-    let mut names = [NONE; IMPORT_KEYWORDS.len()];
+    let mut names = [None; IMPORT_KEYWORDS.len()];
     for (key, value) in kwargs {
         let Some(index) = IMPORT_KEYWORDS.iter().position(|&name| name == key) else {
             return Err(type_error(format!(
                 "ImportError() got an unexpected keyword argument '{key}'"
             )));
         };
-        names[index] = *value;
+        names[index] = Some(*value);
     }
-    error.import = None;
     let trace = error.tracing();
     trace.import_message = Some(match args {
         [one] => *one,
         _ => NONE,
     });
-    trace.import_names = (!kwargs.is_empty()).then_some(names);
+    trace.import_names = names;
     Ok(())
 }
 

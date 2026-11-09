@@ -830,3 +830,32 @@ def check_exception_state(protocol):
     restored = pickle.loads(pickle.dumps(error, protocol))
     assert type(restored) is JobError and restored.args == ("retry",)
     assert restored.payload[0] is restored
+
+    missing = ModuleNotFoundError("not here")
+    assert missing.__reduce__() == (ModuleNotFoundError, ("not here",))
+    state = missing.__dict__
+    state["name"] = "shadowed"
+    assert missing.__reduce__()[2] is state
+    missing.name = None
+    missing.name_from = "member"
+    missing.path = ["origin"]
+    copied = missing.__reduce__()[2]
+    assert copied == {"name": None, "name_from": "member", "path": ["origin"]}
+    assert copied is not state and copied["path"] is missing.path
+    assert state == {"name": "shadowed"}
+    restored = pickle.loads(pickle.dumps(missing, protocol))
+    assert type(restored) is (ImportError if protocol < 3 else ModuleNotFoundError)
+    assert restored.name is None and restored.path == ["origin"] and restored.name_from == "member"
+    del missing.name
+    del missing.path
+    del missing.name_from
+    assert missing.__reduce__()[2] is state
+
+    try:
+        from sys import missing_pickle_fixture_member
+    except ImportError as error:
+        assert error.__reduce__()[2] == {
+            "name": "sys", "path": None, "name_from": "missing_pickle_fixture_member"
+        }
+    else:
+        raise AssertionError("imported a missing member")

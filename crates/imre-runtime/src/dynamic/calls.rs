@@ -589,8 +589,29 @@ impl Context {
         Ok(error.trace.as_ref().and_then(|trace| trace.dictionary))
     }
 
-    fn reduce_exception(&mut self, object: Id) -> Result<Id> {
-        let state = self.exception_reduction_state(object)?;
+    fn reduce_exception(&mut self, object: Id, owner: &str) -> Result<Id> {
+        let mut state = self.exception_reduction_state(object)?;
+        if owner == "ImportError"
+            && super::exception_members::import_names(self, object)
+                .iter()
+                .any(Option::is_some)
+        {
+            let dict = if let Some(dict) = state {
+                let storage = self.dict_storage(dict).expect("exception dictionary");
+                builtins::copy_dict(self, dict, storage)?
+            } else {
+                self.dict(Vec::new())
+            };
+            self.heap.keep(dict);
+            // Inserting a key can run Python that mutates the remaining slots.
+            for (index, key) in builtins::IMPORT_KEYWORDS.iter().enumerate() {
+                if let Some(value) = super::exception_members::import_names(self, object)[index] {
+                    let key = self.text(*key);
+                    self.set_dictionary_key(dict, key, value, None, true)?;
+                }
+            }
+            state = Some(dict);
+        }
         let class = self.exact_type(object)?;
         let args = self.exception_reduction_arguments(object)?;
         let mut fields = vec![class, args];
@@ -8178,8 +8199,8 @@ impl Context {
             {
                 let object =
                     builtins::noargs_method_receiver(self, owner, "__reduce__", &args, &kwargs)?;
-                if owner == "BaseException" {
-                    self.reduce_exception(object)
+                if matches!(owner, "BaseException" | "ImportError") {
+                    self.reduce_exception(object, owner)
                 } else {
                     // These classes declare reducers for additional native fields.
                     Err(stdlib::pickle::unsupported_reducer(self, object))

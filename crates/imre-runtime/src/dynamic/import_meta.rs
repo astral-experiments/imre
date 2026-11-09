@@ -60,7 +60,7 @@ impl Context {
         self.call(func, args, vec![])
     }
 
-    pub(super) fn parent_import_path(&mut self, name: &str, parent: Id) -> Result<Id> {
+    pub(super) fn parent_import_path(&mut self, name: &str, key: Id, parent: Id) -> Result<Id> {
         self.lookup_attr(parent, "__path__").map_err(|error| {
             if !self.is_attribute_error(&error) {
                 return error;
@@ -73,7 +73,7 @@ impl Context {
                     string_repr(name.rsplit_once('.').unwrap().0)
                 ),
             )
-            .with_import(Some(name), None, None)
+            .with_import_name(key)
         })
     }
 
@@ -148,13 +148,14 @@ impl Context {
         self.alloc(Value::Tuple(vec![NONE, package, original]))
     }
 
-    pub(super) fn frozen_code(&mut self, name: &str) -> Result<Id> {
+    pub(super) fn frozen_code(&mut self, key: Id) -> Result<Id> {
+        let name = self.str_value(key)?;
         let (source, original) = self.frozen_registration(name).ok_or_else(|| {
             Error::new(
                 "ImportError",
                 format!("No such frozen object named {}", string_repr(name)),
             )
-            .with_import(Some(name), None, None)
+            .with_import_name(key)
         })?;
         self.module_code(source.code, Path::new(&format!("<frozen {original}>")))
     }
@@ -165,18 +166,19 @@ impl Context {
     }
 
     /// Look up a module owned by this loader, including native modules without a Python body.
-    fn native_registration(&self, name: &str, bundled: bool) -> Result<Option<&SourceModule>> {
+    fn native_registration(&self, key: Id, bundled: bool) -> Result<Option<&SourceModule>> {
+        let name = self.str_value(key)?;
         let sealed = self.sealed_native(name);
         let registration = self.bundled_registration(name);
         if sealed == bundled || (!sealed && registration.is_none() && !stdlib::is_module(name)) {
-            return Err(Self::missing_module(name));
+            return Err(Self::missing_module(name, key));
         }
         Ok(registration)
     }
 
     /// Return the registered Python body for execution in the caller's module namespace.
-    pub(super) fn native_code(&mut self, name: &str, bundled: bool) -> Result<Id> {
-        let Some(source) = self.native_registration(name, bundled)? else {
+    pub(super) fn native_code(&mut self, key: Id, bundled: bool) -> Result<Id> {
+        let Some(source) = self.native_registration(key, bundled)? else {
             return Ok(NONE);
         };
         let (entry, path) = (source.code, source.path.clone());
@@ -184,9 +186,10 @@ impl Context {
     }
 
     /// Return the source of this loader's registered initializer when it has a Python body.
-    pub(super) fn native_source(&mut self, name: &str, bundled: bool) -> Result<Id> {
+    pub(super) fn native_source(&mut self, key: Id, bundled: bool) -> Result<Id> {
+        let name = self.str_value(key)?;
         let text = self
-            .native_registration(name, bundled)?
+            .native_registration(key, bundled)?
             .or_else(|| self.builtin_initializer(name))
             .and_then(|source| source.bundled_text);
         Ok(if self.is_frozen(name) {
@@ -350,7 +353,7 @@ impl Context {
     pub(super) fn create_native_module(&mut self, name: &str) -> Result<Id> {
         let source = self.bundled_source(name);
         if source.is_none() && !stdlib::is_module(name) {
-            return Err(Self::missing_module(name));
+            return Err(Self::missing_module(name, self.text(name)));
         }
         let locations = self.native_locations(name, source.as_ref().map(|(p, _)| p.as_path()))?;
         Ok(self
@@ -376,7 +379,7 @@ impl Context {
             .bundled_source(&name)
             .map(|(path, code)| (path, code, origin));
         if source.is_none() && !stdlib::is_module(&name) {
-            return Err(Self::missing_module(&name));
+            return Err(Self::missing_module(&name, name_id));
         }
         self.run_initializer(&name, module, scope, name_id, NONE, source)?;
         Ok(NONE)

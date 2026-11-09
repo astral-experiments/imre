@@ -3151,9 +3151,8 @@ pub(super) fn call(
                 kwargs,
                 ["name", "globals", "locals", "fromlist", "level"],
             )?;
-            let name = ctx
-                .str_value(module.ok_or_else(|| type_error("__import__ requires a name"))?)?
-                .to_owned();
+            let key = module.ok_or_else(|| type_error("__import__ requires a name"))?;
+            let name = ctx.copy_name(key)?;
             let level = match level {
                 Some(level) => ctx
                     .index_integer(level)?
@@ -3173,7 +3172,7 @@ pub(super) fn call(
             if name.is_empty() {
                 return Err(Error::new("ValueError", "Empty module name"));
             }
-            let result = ctx.module(&name)?;
+            let result = ctx.module_by_key(&name, key)?;
             if let Some(list) = fromlist
                 && ctx.truth(list)?
             {

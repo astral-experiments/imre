@@ -60,21 +60,7 @@ pub(super) fn read(ctx: &mut Context, kind: Kind, field: &str, object: Id) -> Re
         Kind::ImportError if field == "msg" => {
             Ok(ctx.import_error_message(object, None).unwrap_or(NONE))
         }
-        Kind::ImportError => {
-            let index = super::builtins::IMPORT_KEYWORDS
-                .iter()
-                .position(|&n| n == field)
-                .unwrap();
-            if let Some(fields) = &error.import {
-                let text = [&fields.name, &fields.path, &fields.name_from][index].clone();
-                return Ok(text.map_or(NONE, |s| ctx.text(s)));
-            }
-            Ok(error
-                .trace
-                .as_ref()
-                .and_then(|trace| trace.import_names)
-                .map_or(NONE, |names| names[index]))
-        }
+        Kind::ImportError => Ok(import_names(ctx, object)[import_index(field)].unwrap_or(NONE)),
         Kind::OSError => Ok(ctx
             .os_attribute(object, field)?
             .expect("declared OSError field")),
@@ -182,7 +168,18 @@ pub(super) fn write(
         Kind::ImportError if field == "msg" => {
             ctx.import_error_message(object, Some(value.unwrap_or(NONE)));
         }
-        Kind::ImportError => return Err(ctx.missing_attribute(object, field)),
+        Kind::ImportError => {
+            let Value::Raised(error) = ctx.heap.get_mut(object) else {
+                unreachable!()
+            };
+            let slot = &mut error.tracing().import_names[import_index(field)];
+            let old = std::mem::replace(slot, value);
+            if let Some(old) = old
+                && Some(old) != value
+            {
+                ctx.heap.weak_edge_removed(old);
+            }
+        }
         Kind::OSError => {
             ctx.update_os_field(object, field, value)?;
         }
@@ -194,4 +191,22 @@ pub(super) fn write(
         _ => unreachable!("undeclared exception member"),
     }
     Ok(())
+}
+
+fn import_index(field: &str) -> usize {
+    super::builtins::IMPORT_KEYWORDS
+        .iter()
+        .position(|&name| name == field)
+        .unwrap()
+}
+
+/// An empty slot and an explicit Python None have distinct pickle states.
+pub(super) fn import_names(ctx: &Context, object: Id) -> &[Option<Id>; 3] {
+    let Value::Raised(error) = ctx.heap.get(object) else {
+        unreachable!()
+    };
+    error
+        .trace
+        .as_ref()
+        .map_or(&[None; 3], |trace| &trace.import_names)
 }

@@ -224,6 +224,10 @@ impl Context {
     /// A nonempty fromlist probes the live package path once before binding any names.
     pub(super) fn prepare_fromlist(&mut self, module: Id, list: Id) -> Result<Id> {
         match self.lookup_attr(module, "__path__") {
+            Ok(_) if self.import_registry_installed => {
+                let import = self.builtin("__import__");
+                return self.meta_call(NONE, "_handle_fromlist", vec![module, list, import]);
+            }
             Ok(_) => self.load_fromlist(module, list, false)?,
             Err(err) if self.is_attribute_error(&err) => {}
             Err(err) => return Err(err),
@@ -274,15 +278,18 @@ impl Context {
             let child = format!("{}.{name}", self.str_value(id)?);
             // Missing children are ignored, but a missing dependency inside a child propagates.
             if let Err(error) = self.find_module(&child) {
-                let fields = error.import.as_ref();
-                if !self.is_builtin_error(&error, "ModuleNotFoundError")
-                    || fields.and_then(|fields| fields.name.as_deref()) != Some(&child)
-                {
+                if !self.is_builtin_error(&error, "ModuleNotFoundError") {
                     return Err(error);
                 }
-                let key = self.text(&child);
-                if self.public_registered_module(key)? == Some(NONE) {
-                    return Err(error);
+                let exception = self.raised_instance(error);
+                let ignore = self.with_import_exception(exception, |ctx| {
+                    let name = ctx.lookup_attr(exception, "name")?;
+                    let key = ctx.text(&child);
+                    let equal = ctx.binary("==", name, key)?;
+                    Ok(ctx.truth(equal)? && ctx.public_registered_module(key)? != Some(NONE))
+                })?;
+                if !ignore {
+                    self.op("reraise", exception, NONE, NONE)?;
                 }
             }
         }
@@ -772,12 +779,13 @@ impl Context {
 
     pub(super) fn find_spec(
         &mut self,
-        fullname: &str,
-        original: &str,
+        key: Id,
+        original: Id,
         for_resource: bool,
         finder: Option<Id>,
     ) -> Result<Id> {
-        let key = self.text(fullname);
+        let fullname = self.str_value(key)?.to_owned();
+        let original = self.str_value(original)?.to_owned();
         let modules = self.public_modules()?;
         if self.contains(key, modules)? {
             let modules = self.public_modules()?;
@@ -795,7 +803,7 @@ impl Context {
                         && matches!(
                             self.heap.get(module),
                             Value::Module { constructor: None, origin, .. }
-                                if origin.is_none() || stdlib::is_module(fullname)
+                                if origin.is_none() || stdlib::is_module(&fullname)
                         ) =>
                 {
                     if for_resource {
@@ -827,10 +835,10 @@ impl Context {
                             format!(
                                 "__path__ attribute not found on {} while trying to find {}",
                                 string_repr(parent_name),
-                                string_repr(fullname)
+                                string_repr(&fullname)
                             ),
                         )
-                        .with_import(Some(fullname), None, None);
+                        .with_import_name(key);
                         let cause = self.raised_instance(cause);
                         error.tracing().cause = Some(cause);
                         error.context = cause;
@@ -840,17 +848,16 @@ impl Context {
                 };
                 (child, path, false)
             } else {
-                (fullname, NONE, true)
+                (fullname.as_str(), NONE, true)
             };
         if self.import_registry_installed {
-            let name = self.text(fullname);
-            let args = vec![name, search];
+            let args = vec![key, search];
             return match finder {
                 Some(finder) => self.call(finder, args, vec![]),
                 None => self.meta_call(NONE, "_find_spec", args),
             };
         }
-        if stdlib::is_module(fullname) || self.is_frozen(fullname) {
+        if stdlib::is_module(&fullname) || self.is_frozen(&fullname) {
             if for_resource {
                 return Ok(NONE);
             }
@@ -866,14 +873,13 @@ impl Context {
         };
         let mut locations = Vec::new();
         let Some((path, body)) =
-            self.source_on_path(fullname, child, search, top_level, &mut locations)?
+            self.source_on_path(&fullname, child, search, top_level, &mut locations)?
         else {
             return Ok(NONE);
         };
-        let name = self.text(fullname);
         if matches!(body, SourceBody::Namespace) {
             let paths = self.location_list(&locations)?;
-            return self.namespace_spec(name, paths, NONE, NONE);
+            return self.namespace_spec(key, paths, NONE, NONE);
         }
         let origin = self.import_path_text(&path)?;
         let locations = if locations.is_empty() {
@@ -881,6 +887,6 @@ impl Context {
         } else {
             self.location_list(&locations)?
         };
-        self.file_spec(name, origin, locations, body)
+        self.file_spec(key, origin, locations, body)
     }
 }
