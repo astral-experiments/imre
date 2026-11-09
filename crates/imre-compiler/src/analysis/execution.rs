@@ -334,6 +334,71 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
 }
 
 impl Session {
+    fn execution_visitor<'ast, 'db>(
+        &'db self,
+        module: usize,
+        parsed: &'ast ruff_db::parsed::ParsedModuleRef,
+        model: &'ast SemanticModel<'db>,
+    ) -> Escape<'ast, 'db> {
+        Escape {
+            model,
+            parsed,
+            entered: Default::default(),
+            session: self,
+            module,
+            first: None,
+        }
+    }
+
+    /// An initializer reading source from the genuine input builtin has no finite body
+    /// to register. Resolve both callables before any later initializer contract is checked.
+    pub(super) fn external_source_execution<'ast, 'db>(
+        &'db self,
+        module: usize,
+        parsed: &'ast ruff_db::parsed::ParsedModuleRef,
+        model: &'ast SemanticModel<'db>,
+        stmt: &'ast Stmt,
+    ) -> Option<(TextRange, String)> {
+        let call = stmt.as_expr_stmt()?.value.as_call_expr()?;
+        ExecutionIntrinsic::resolve(model, &call.func)?;
+        let operand = call.arguments.args.first()?;
+        let source = operand.as_call_expr()?;
+        if !source.arguments.keywords.is_empty()
+            || source.arguments.args.len() > 1
+            || !source
+                .arguments
+                .args
+                .iter()
+                .all(Expr::is_string_literal_expr)
+            || !call.arguments.keywords.is_empty()
+            || call.arguments.args.len() > 3
+        {
+            return None;
+        }
+        for namespace in &call.arguments.args[1..] {
+            let scope = namespace.as_call_expr()?;
+            let function = scope.func.inferred_type(model)?;
+            if !scope.arguments.is_empty()
+                || !["globals", "locals"]
+                    .into_iter()
+                    .any(|name| is_stdlib_function_type(model, function, "builtins", name))
+            {
+                return None;
+            }
+        }
+        if !is_stdlib_function_type(
+            model,
+            source.func.inferred_type(model)?,
+            "builtins",
+            "input",
+        ) {
+            return None;
+        }
+        let mut check = self.execution_visitor(module, parsed, model);
+        check.visit_stmt(stmt);
+        check.first
+    }
+
     pub(crate) fn check_execution_escapes<'a>(
         &self,
         sources: impl Iterator<Item = (usize, &'a std::path::Path)>,
@@ -346,14 +411,7 @@ impl Session {
             let source = self.db.program_file(file);
             let parsed = self.parsed(file);
             let model = SemanticModel::new(&self.db, source);
-            let mut visitor = Escape {
-                model: &model,
-                parsed: &parsed,
-                entered: Default::default(),
-                session: self,
-                module: index,
-                first: None,
-            };
+            let mut visitor = self.execution_visitor(index, &parsed, &model);
             visitor.visit_body(&parsed.syntax().body);
             if let Some((range, reason)) = visitor.first {
                 let text = ruff_db::source::source_text(&self.db, file);
