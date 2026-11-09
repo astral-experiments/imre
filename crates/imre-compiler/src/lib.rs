@@ -322,9 +322,9 @@ fn check_file_with(
         (path, module_root),
         options,
         filesystem,
-        |graph| {
+        |graph, registered_initializer| {
             graph.session.explicit_check = true;
-            checked_lower_with(graph, cache.as_deref_mut())
+            checked_lower_with(graph, cache.as_deref_mut(), registered_initializer)
         },
         |_, _| Ok((Vec::new(), false)),
     )
@@ -386,7 +386,7 @@ fn object_fallback(
     (path, module_root): (&Path, Option<&Path>),
     options: &CompileOptions,
     mut filesystem: watch::FileSystem<'_>,
-    mut lower: impl FnMut(&mut modules::SourceGraph) -> Result<CheckedProgram, String>,
+    mut lower: impl FnMut(&mut modules::SourceGraph, bool) -> Result<CheckedProgram, String>,
     native: impl Fn(
         &modules::SourceGraph,
         CheckedIr,
@@ -416,6 +416,11 @@ fn object_fallback(
             ))
         }
     };
+    let checked_file = options.python_startup().is_none();
+    // A Python module launch enters through the runtime registration. Other callers
+    // can return a native diagnostic before registration, including profiled entries.
+    let registered_initializer =
+        options.module_entry.is_some() && !checked_file && options.entry_profile.is_none();
     let boxed_startup = options.module_entry.is_some()
         || options.sitecustomize
         || options
@@ -447,7 +452,7 @@ fn object_fallback(
         if !infer_sets {
             graph.set_layout_hint.set(modules::SetLayoutHint::Disabled);
         }
-        let error = match lower(&mut graph)? {
+        let error = match lower(&mut graph, registered_initializer)? {
             CheckedProgram::Native(_) if graph.runtime_initializer.is_some() && !boxed_startup => {
                 // All first-party code lowered successfully. The unresolved import alone
                 // must use the same admission policy as an unresolved module in the loader.
@@ -532,7 +537,6 @@ fn object_fallback(
     let graph = checked_graph
         .as_ref()
         .filter(|graph| !graph.has_checked_only_import);
-    let checked_file = options.python_startup().is_none();
     if options.entry_profile.is_some()
         || (checked_file
             && graph.as_ref().is_some_and(|g| {
@@ -647,6 +651,8 @@ fn object_fallback(
                     .iter()
                     .map(|source| dynamic::RegisteredSource {
                         is_program: false,
+                        declares_signatures: false,
+                        initial: false,
                         check_execution: false,
                         ..*source
                     })
@@ -743,7 +749,7 @@ fn compile_file_with_layout(
         (path, module_root),
         options,
         Default::default(),
-        checked_lower,
+        |graph, registered_initializer| checked_lower_with(graph, None, registered_initializer),
         typed,
     )
 }
@@ -906,7 +912,9 @@ fn compile_file_units_with(
         (path, module_root),
         options,
         Default::default(),
-        |graph| checked_lower_with(graph, cache.as_deref_mut()),
+        |graph, registered_initializer| {
+            checked_lower_with(graph, cache.as_deref_mut(), registered_initializer)
+        },
         typed,
     )
 }
@@ -929,15 +937,29 @@ impl CheckedProgram {
 }
 
 fn checked_lower(graph: &mut modules::SourceGraph) -> Result<CheckedProgram, String> {
-    checked_lower_with(graph, None)
+    checked_lower_with(graph, None, false)
 }
 
 fn checked_lower_with(
     graph: &mut modules::SourceGraph,
     cache: Option<&mut IncrementalCompiler>,
+    registered_entry: bool,
 ) -> Result<CheckedProgram, String> {
     let mut cache =
         cache.filter(|_| graph.set_layout_hint.get() != modules::SetLayoutHint::Disabled);
+    let call_error = analysis::ClosedSource::project_path(&graph.modules[graph.entry])
+        .filter(|_| !registered_entry)
+        .and_then(|entry| {
+            graph
+                .session
+                .initializer_call_error((graph.entry, entry), |name| {
+                    let id = graph.python_file(name)?;
+                    Some((
+                        id,
+                        analysis::ClosedSource::project_path(&graph.modules[id])?,
+                    ))
+                })
+        });
     let lowered = if let Some(compiler) = cache.as_deref_mut() {
         compiler.cache.restore_hints(graph)?;
         let callers = compiler.callers.prepare(graph);
@@ -952,6 +974,18 @@ fn checked_lower_with(
     } else {
         frontend::lower_with_owners(graph)
     };
+    if let Some(error) = call_error {
+        // Both representations reject this call. Preserve a prior annotated error at
+        // its original checked location even when this file contains several failures.
+        let diagnostic = match lowered {
+            Err(prior) if prior.earlier_contract(&error) => prior,
+            _ => error,
+        };
+        if let Some(compiler) = cache {
+            compiler.callers = frontend::CallerCache::default();
+        }
+        return Ok(CheckedProgram::Runtime(diagnostic));
+    }
     let (skipped, overloads) = graph.diagnostic_scopes();
     let skipped = skipped.as_deref();
     // A fully lowered graph has already checked the actual first-party definitions.
@@ -1319,11 +1353,11 @@ mod tests {
                 (&path, None),
                 &options,
                 Default::default(),
-                |graph| {
+                |graph, registered_initializer| {
                     graph
                         .set_layout_hint
                         .set(super::modules::SetLayoutHint::Disabled);
-                    super::checked_lower(graph)
+                    super::checked_lower_with(graph, None, registered_initializer)
                 },
                 |_, _| Ok((Vec::new(), false)),
             )

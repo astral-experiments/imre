@@ -147,8 +147,8 @@ mod zip_sums;
 mod zipfile;
 use assignments::LocalState;
 pub(crate) use caller_cache::CallerCache;
-pub(crate) use calls::scalar_literal;
 use calls::{Parameter, ParameterKind, parameter};
+pub(crate) use calls::{fixed_call_arguments, known_declared_argument, scalar_literal};
 use comprehensions::Helpers;
 pub(crate) use comprehensions::target_names;
 pub(crate) use function_text::{docstring, docstring_literal};
@@ -1605,13 +1605,7 @@ fn signature(
         // Unresolved types exist only in the discarded discovery pass. solve()
         // fills every slot before ordinary lowering can construct executable IR.
         let ty = ty.unwrap_or(Type::None);
-        let kind = if index < function.parameters.posonlyargs.len() {
-            ParameterKind::PositionalOnly
-        } else if index < function.parameters.posonlyargs.len() + function.parameters.args.len() {
-            ParameterKind::PositionalOrKeyword
-        } else {
-            ParameterKind::KeywordOnly
-        };
+        let kind = ParameterKind::fixed(&function.parameters, index);
         let default = parameter
             .default
             .as_deref()

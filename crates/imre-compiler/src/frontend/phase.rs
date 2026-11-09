@@ -90,6 +90,18 @@ impl<M> Diagnostic<M> {
         self
     }
 
+    pub(crate) fn earlier_contract(&self, other: &Self) -> bool {
+        matches!(
+            self.kind,
+            Kind::ExactType | Kind::DeclaredArgument | Kind::ReturnType
+        ) && self.path == other.path
+            && self
+                .position
+                .as_ref()
+                .zip(other.position.as_ref())
+                .is_some_and(|(a, b)| a.range.start() < b.range.start())
+    }
+
     pub(crate) fn matching_contract(
         &self,
         path: &std::path::Path,

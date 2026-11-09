@@ -722,6 +722,10 @@ pub(crate) enum ObjectOperation {
 
 #[derive(Clone, Copy)]
 pub(crate) struct RegisteredSource<'a> {
+    /// This registration can start the application before any custom startup module runs.
+    pub(crate) initial: bool,
+    /// This exact source supplies the annotations in the linked application.
+    pub(crate) declares_signatures: bool,
     pub(crate) name: &'a str,
     pub(crate) path: &'a Path,
     pub(crate) source: &'a str,
@@ -749,6 +753,8 @@ impl<'a> RegisteredSource<'a> {
             is_program,
             check_execution: is_program,
             checked_module,
+            initial: false,
+            declares_signatures: is_program,
         }
     }
 }
@@ -1917,6 +1923,13 @@ pub(crate) fn compile(
         "command_source":command,"path0_bytes":path0_bytes,
         "command":in_memory,"module_entry":module_entry,"path_entry":options.path_entry,"paths":paths,
     });
+    let sdk_runpy = sources
+        .iter()
+        .any(|(name, path, _)| name == "runpy" && path.starts_with(bundled_root))
+        && (imre_ast::providers::is_frozen("runpy", || frozen_modules)
+            || entry_sources
+                .get("runpy")
+                .is_none_or(|(root, _)| root == Path::new(bundled_root)));
     // Borrow the winners once discovery has finished growing the emitter's source table.
     let selected_sources: Vec<_> = selected_sources
         .into_iter()
@@ -1927,7 +1940,17 @@ pub(crate) fn compile(
             // scope: owning a declaration does not prove that a call will reach it.
             let mut registration =
                 RegisteredSource::new(&sources[id], program && application, module);
+            registration.declares_signatures = application;
             registration.check_execution |= application;
+            registration.initial = index < ordinary_registrations.unwrap_or(usize::MAX)
+                && registration.name == module_entry.unwrap_or("__main__")
+                && !registration.name.contains('.')
+                && !options.sitecustomize
+                && !options.stdlib_sitecustomize
+                && options.user_site_pth.is_none()
+                && module_entry
+                    .is_none_or(|name| sdk_runpy && crate::analysis::unambiguous_file_module(name))
+                && !startup.is_some_and(|(flags, _)| flags.has_warning_options);
             // The selected source can execute from any user search root. Only the
             // SDK winner uses bundled_root, including when its bytes come from the SDK ZIP.
             registration.check_execution |= index < named_registrations.unwrap_or(0)
@@ -1965,13 +1988,6 @@ pub(crate) fn compile(
                 && !module_errors.contains_key(s.path)
         })
     };
-    let sdk_runpy = sources
-        .iter()
-        .any(|(name, path, _)| name == "runpy" && path.starts_with(bundled_root))
-        && (imre_ast::providers::is_frozen("runpy", || frozen_modules)
-            || entry_sources
-                .get("runpy")
-                .is_none_or(|(root, _)| root == Path::new(bundled_root)));
     check(
         entry_requests_objects || startup_provider,
         Some(RegisteredSources {
