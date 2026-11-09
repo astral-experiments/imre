@@ -40,6 +40,38 @@ def check_module_search_root(imre, root, run):
     result = run(imre, "-B", "-m", "launch", extra={"PYTHONPATH": str(app)})
     assert (result.returncode, result.stdout, result.stderr) == (0, b"second argument\n6\n", b""), result
 
+    # The entry comes from app even when the ordinary lookup of scores prefers the wheel.
+    wheel = root / "score-wheel"
+    wheel.mkdir()
+    (wheel / "scores.py").write_text("def take(n: int): return n\n")
+    metadata = wheel / "scores-1.dist-info"
+    metadata.mkdir()
+    (metadata / "RECORD").write_text("scores.py,,\n")
+    scores.write_text("def take(n: int): return n\n")
+    entry.write_text(
+        "import sys\nsys.path.insert(0, sys.argv[1])\nfrom scores import take\n"
+        "try: print(take(sys.argv[2]))\nexcept TypeError as error: print(error)\n"
+    )
+    search = {"PYTHONPATH": os.pathsep.join(map(str, (wheel, app)))}
+    for selected, expected in ((app, b'take argument "n" requires int\n'), (wheel, b"x\n")):
+        result = run(imre, "-B", "-m", "launch", str(selected), "x", extra=search)
+        assert (result.returncode, result.stdout, result.stderr) == (0, expected, b""), result
+
+    # Overlapping roots expose the same file as an application module and as a provider.
+    back = app / "back"
+    back.mkdir()
+    (back / "scores.py").write_text("def take(n: int): return n\n")
+    entry.write_text(
+        "import sys\nfrom back import scores as nested\n"
+        "sys.path.insert(0, sys.argv[1])\nimport scores\n"
+        "for module in (nested, scores):\n"
+        "    try: print(module.take(sys.argv[2]))\n"
+        "    except TypeError as error: print(error)\n"
+    )
+    search = {"PYTHONPATH": os.pathsep.join(map(str, (app, back)))}
+    result = run(imre, "-B", "-m", "launch", str(back), "x", extra=search)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b'take argument "n" requires int\nx\n', b""), result
+
 
 def check_command_stdin(imre, run):
     source = (
@@ -2256,6 +2288,27 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         (namespace_package / "helper.py").write_text("globals()['answer'] = 42\n")
         (namespace_package / "entry.py").write_text("from .helper import answer\nprint(answer)\n")
         compare("-B", "-m", "namespace_plugin.entry")
+
+        # Both namespace portions supply the same module and its relative dependency.
+        roots = [root / "first_portion", root / "second_portion"]
+        for portion in roots:
+            package = portion / "backends"
+            package.mkdir(parents=True)
+            (package / "adapter.py").write_text("from .settings import label\n")
+            (package / "settings.py").write_text(f"label = {portion.name!r}\n")
+        (root / "choose_backend.py").write_text(
+            "import sys\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "from backends.adapter import label\n"
+            "print(label)\n"
+        )
+        search = {"PYTHONPATH": os.pathsep.join(map(str, roots))}
+        for portion in roots:
+            compare("-B", "-m", "choose_backend", str(portion), extra=search)
+
+        (roots[1] / "backends" / "adapter.py").write_text("from . import optional\n")
+        (roots[1] / "backends" / "optional.py").write_text("invalid syntax!\n")
+        compare("-B", "-m", "choose_backend", str(roots[0]), extra=search)
 
         # An ordinary module under the first root wins over a package in a later root.
         (root / "preferred.py").write_text("print('file wins')\n")

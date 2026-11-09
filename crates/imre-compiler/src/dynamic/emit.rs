@@ -113,9 +113,10 @@ pub(super) struct RegisteredBodies {
     // Decoded installed files retain the fingerprint of their original loader bytes.
     pub(super) physical_files: HashMap<PathBuf, PhysicalFile>,
     pub(super) archive_members: HashMap<PathBuf, ([u8; 32], u32)>,
-    // These provide declarations to the checked program. Their Python bodies
+    // Each source slot has its own ownership, even if two names resolve to one file.
+    // Providers contribute declarations to the checked program. Their Python bodies
     // retain Python argument binding, including annotations available to reflection.
-    pub(super) python_providers: HashSet<PathBuf>,
+    pub(super) python_providers: HashSet<usize>,
 }
 
 #[derive(Clone, Copy)]
@@ -179,7 +180,7 @@ pub(crate) fn emit(
         let bundled = path.starts_with(bundled_root);
         let origin = if bundled {
             ModuleOrigin::Bundled
-        } else if python_providers.contains(path) {
+        } else if python_providers.contains(&unit) {
             ModuleOrigin::Provider
         } else {
             ModuleOrigin::Program
