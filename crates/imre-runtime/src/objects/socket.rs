@@ -21,6 +21,7 @@ pub(super) struct Socket {
     kind: i32,
     proto: i32,
     fd: RawFd,
+    installation: u64,
     tls: Option<Rc<TlsRegistration>>,
     // Python socket timeouts use signed nanoseconds: -1 blocks indefinitely, 0 is nonblocking.
     timeout_ns: i64,
@@ -622,6 +623,11 @@ fn install_owned(
 
 fn install_fd(s: &Object, raw: RawFd, blocking: bool, family: i32, kind: i32, proto: i32) {
     state(s, |s| {
+        // Restoring an alias after detach or close starts a new receiver lifetime.
+        // Reapplying an initializer to the still-open receiver need not invalidate an alias.
+        if s.fd < 0 {
+            s.installation = s.installation.wrapping_add(1);
+        }
         // A repeated base initializer replaces the number in the same socket.
         // The caller retains any previous fd, including when raw equals that fd.
         if s.tls
@@ -641,6 +647,7 @@ fn install_fd(s: &Object, raw: RawFd, blocking: bool, family: i32, kind: i32, pr
 pub(crate) fn uninitialized() -> Result<crate::ObjectOwner> {
     Socket {
         fd: -1,
+        installation: 0,
         tls: None,
         family: 0,
         kind: 0,
@@ -2156,7 +2163,7 @@ pub(crate) fn send_to(
     bytes: &[u8],
     flags: i32,
     address: &SocketAddress,
-    owner: Option<&[u8; 16]>,
+    owner: Option<&SendfileIdentity>,
 ) -> Result<usize> {
     #[cfg(not(target_vendor = "apple"))]
     let flags = flags | libc::MSG_NOSIGNAL;
@@ -2332,9 +2339,13 @@ fn duplicate_fd(raw: RawFd) -> io::Result<OwnedFd> {
     Ok(unsafe { OwnedFd::from_raw_fd(copy) })
 }
 
-/// Identify the initiating socket without occupying a caller-visible fd across callbacks.
-pub(crate) fn sendfile_identity(raw: RawFd) -> Result<[u8; 16]> {
-    let mut identity = [0; 16];
+/// The kernel socket identity followed by this receiver's descriptor installation.
+pub(crate) type SendfileIdentity = [u8; 24];
+
+pub(crate) fn sendfile_identity(socket: &Object, raw: RawFd) -> Result<SendfileIdentity> {
+    let mut identity = [0; 24];
+    let installation = state(socket, |s| s.installation);
+    identity[16..].copy_from_slice(&installation.to_ne_bytes());
     #[cfg(target_os = "linux")]
     get_option_into(raw, libc::SOL_SOCKET, libc::SO_COOKIE, &mut identity[..8])?;
     #[cfg(not(target_os = "linux"))]
@@ -2344,29 +2355,36 @@ pub(crate) fn sendfile_identity(raw: RawFd) -> Result<[u8; 16]> {
             return Err(errno_error(io::Error::from_raw_os_error(libc::ENOTSUP)));
         }
         identity[..8].copy_from_slice(&(device as u64).to_ne_bytes());
-        identity[8..].copy_from_slice(&(inode as u64).to_ne_bytes());
+        identity[8..16].copy_from_slice(&(inode as u64).to_ne_bytes());
     }
     Ok(identity)
 }
 
-pub(crate) fn check_sendfile_owner(raw: RawFd, expected: &[u8; 16]) -> Result<()> {
-    if raw < 0 || &sendfile_identity(raw)? != expected {
+pub(crate) fn check_sendfile_owner(
+    socket: &Object,
+    raw: RawFd,
+    expected: &SendfileIdentity,
+) -> Result<()> {
+    if raw < 0 || &sendfile_identity(socket, raw)? != expected {
         return Err(errno_error(io::Error::from_raw_os_error(libc::EBADF)));
     }
     Ok(())
 }
 
 /// Keep the checked description live only inside one kernel call. Drop it before dispatching signals.
-pub(crate) fn sendfile_destination(socket: &Object, expected: &[u8; 16]) -> Result<OwnedFd> {
+pub(crate) fn sendfile_destination(
+    socket: &Object,
+    expected: &SendfileIdentity,
+) -> Result<OwnedFd> {
     let owned = duplicate_fd(fd(socket)).map_err(errno_error)?;
-    check_sendfile_owner(owned.as_raw_fd(), expected)?;
+    check_sendfile_owner(socket, owned.as_raw_fd(), expected)?;
     Ok(owned)
 }
 
 /// Borrow the current socket, or pin the initiating description for this single write attempt.
 pub(crate) fn with_send_fd<T>(
     socket: &Object,
-    owner: Option<&[u8; 16]>,
+    owner: Option<&SendfileIdentity>,
     write: impl FnOnce(RawFd) -> Result<T>,
 ) -> Result<T> {
     if let Some(identity) = owner {
@@ -2380,7 +2398,7 @@ pub(crate) fn with_send_fd<T>(
 /// Use the ordinary timed send on the checked socket description for a delegated file write.
 pub(crate) fn sendfile_write(
     socket: &Object,
-    identity: &[u8; 16],
+    identity: &SendfileIdentity,
     bytes: &[u8],
     flags: i32,
 ) -> Result<usize> {

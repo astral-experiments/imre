@@ -90,3 +90,31 @@ def check_restored_descriptor():
 check(False)
 check(True)
 check_restored_descriptor()
+
+
+def check_reattached_socket(detach):
+    sender, peer = socket.socketpair()
+    with sender, peer:
+        class Source(io.BytesIO):
+            def read(self, n):
+                fd = sender.detach() if detach else sender.fileno()
+                socket.socket.__init__(sender, fileno=fd)
+                return super().read(n)
+
+        source = Source(b"private")
+        if detach:
+            try:
+                sender.sendfile(source, count=7)
+            except OSError as exc:
+                assert exc.errno == 9
+            else:
+                raise AssertionError("sent file bytes after descriptor ownership was transferred")
+        else:
+            assert sender.sendfile(source, count=7) == 7
+            assert peer.recv(7) == b"private"
+        sender.sendall(b"own")
+        assert peer.recv(3) == b"own"
+
+
+check_reattached_socket(True)
+check_reattached_socket(False)

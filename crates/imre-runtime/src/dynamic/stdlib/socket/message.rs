@@ -237,7 +237,7 @@ fn send(ctx: &mut Context, socket: &Object, receiver: Id, args: &[Id], flags: i3
             let mut control = native::message::Control::from_items(&ancillary)?;
             drop(ancillary);
             let n = retry(ctx, socket, |ctx, until| {
-                let owner = super::active_sendfile_owner(ctx, receiver);
+                let owner = super::active_sendfile_owner(ctx, receiver)?;
                 let mut scratch = IoVectors::new(streams.spans.len())?;
                 let iov = scratch.resolve(ctx, &streams.spans, false)?;
                 Ok(native::with_send_fd(socket, owner.as_ref(), |raw| {

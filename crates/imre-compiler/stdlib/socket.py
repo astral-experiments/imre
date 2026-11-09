@@ -250,8 +250,9 @@ class socket(_socket.socket):
         # localize variable access to minimize overhead
         file_read = file.read
         sock_send = self.send
+        session = None
         if wrap_send is not None:
-            sock_send = wrap_send(sock_send)
+            sock_send, session = wrap_send(sock_send)
         try:
             while True:
                 if count:
@@ -263,7 +264,7 @@ class socket(_socket.socket):
                     break  # EOF
                 while True:
                     try:
-                        sent = _socket.socket._sendfile_write(self, target, sock_send, data)
+                        sent = _socket.socket._sendfile_write(self, target, sock_send, data, session)
                     except BlockingIOError:
                         continue
                     else:

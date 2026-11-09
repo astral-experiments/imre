@@ -841,7 +841,7 @@ class SSLSocket(_socket.socket):
                     if self._session is not session:
                         raise OSError(_errno.EBADF, "TLS session changed during sendfile")
                     return send(data)
-                return checked
+                return checked, session
             return self._sendfile_transfer(file, offset, count, kernel=False, fallback=True, wrap_send=wrap_send)
         return super().sendfile(file, offset, count)
 
