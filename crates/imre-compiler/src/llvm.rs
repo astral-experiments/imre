@@ -4831,6 +4831,7 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredModuleAnnotation(_)
             | Builtin::RegisteredAnnotationStart
             | Builtin::RegisteredAnnotationInsert { .. }
+            | Builtin::BindAnnotationExpression(_)
             | Builtin::RegisteredAnnotationResult
             | Builtin::RegisteredDeleteName(..)
             | Builtin::RegisteredDefinition(_)

@@ -644,7 +644,7 @@ impl<'a> PreparedBody<'a> {
             initializer,
             program_bodies,
             bundled,
-            path,
+            path: path.into(),
             // These CPython providers implement their own call semantics in Python.
             python_annotations: provider
                 || bundled && matches!(name, "_py_warnings" | "tomllib._parser" | "typing"),
@@ -753,6 +753,7 @@ enum Body<'a> {
         Vec<(&'a str, &'a ast::Expr)>,
         Option<crate::frontend::function_scope::ClassBindings>,
     ),
+    CheckedExpression(&'a crate::frontend::RegisteredFunction),
     Expression(&'a ast::Expr),
     TypeAlias(&'a ast::Expr),
     Generator(&'a imre_ast::comprehension::Plan<'a>),
@@ -826,6 +827,7 @@ impl<'a> std::ops::Deref for SourceMap<'a> {
     }
 }
 
+#[derive(Default)]
 struct SourceInfo<'a> {
     scopes: crate::frontend::function_scope::ScopeFacts,
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
@@ -837,7 +839,7 @@ struct SourceInfo<'a> {
     initializer: Option<crate::frontend::RegisteredSuite>,
     program_bodies: ProgramBodies<'a>,
     bundled: bool,
-    path: &'a Path,
+    path: std::borrow::Cow<'a, Path>,
     python_annotations: bool,
     module_start: ruff_text_size::TextSize,
     class_keywords: Vec<ruff_text_size::TextSize>,
@@ -1056,6 +1058,7 @@ impl Output {
             ),
             class_sites: None,
             module_annotation_sites: None,
+            annotation_children: HashMap::new(),
             in_function,
             module,
             declared_globals: Default::default(),
@@ -1130,11 +1133,41 @@ impl Output {
             Body::ClassParameters(class) => f.parameterized_class(class),
             Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
             Body::Annotations(entries, class) => f.annotations(&entries, class),
-            Body::ModuleAnnotations(plan, entries) => f.prepared_function(plan, |code, run| {
-                for index in run {
-                    code.unprepared_annotation(index, entries[index]);
+            Body::ModuleAnnotations(plan, entries) => {
+                for entry in entries {
+                    if let crate::frontend::AnnotationValue::Bound(child) = &entry.value
+                        && !f.annotation_children.contains_key(&child.id)
+                    {
+                        let file = f.output.data(b"<string>");
+                        let info = SourceInfo {
+                            path: Path::new("<string>").into(),
+                            text: &child.text,
+                            has_templates: child.has_templates,
+                            ..Default::default()
+                        };
+                        let source = SourceMap {
+                            info: &info,
+                            definitions: None,
+                            unit: source.unit,
+                            positions: SourcePositions::new(&child.text, &file),
+                        };
+                        let code = f.output.code(
+                            &source,
+                            String::new(),
+                            Body::CheckedExpression(&child.body),
+                            false,
+                            None,
+                        );
+                        f.annotation_children.insert(child.id, code);
+                    }
                 }
-            }),
+                f.prepared_function(plan, |code, run| {
+                    for index in run {
+                        code.unprepared_annotation(index, entries[index]);
+                    }
+                });
+            }
+            Body::CheckedExpression(checked) => f.checked_body(checked),
             Body::Generator(plan) => f.generator_step(plan),
             Body::Expression(expr) | Body::TypeAlias(expr) => {
                 f.checkpoint(expr);
@@ -1184,6 +1217,7 @@ struct Function<'a, 'p> {
     in_function: bool,
     module: bool,
     module_annotation_sites: Option<Vec<ruff_text_size::TextSize>>,
+    annotation_children: HashMap<crate::ir::AnnotationCodeId, String>,
     class_sites: Option<statements::class_annotations::ClassSites>,
     class_locals: Option<crate::frontend::function_scope::ClassBindings>,
     annotation_values: Option<String>,
@@ -1279,19 +1313,23 @@ impl Function<'_, '_> {
             }
         });
         if let Some(code) = code {
-            if !self.output.declarations.registered_expression {
-                self.output
-                    .functions
-                    .push_str("declare void @imre_dyn_bind_expression(ptr, i64, ptr)\n");
-                self.output.declarations.registered_expression = true;
-            }
             let text = self.text(value);
-            self.line(&format!(
-                "call void @imre_dyn_bind_expression(ptr %ctx, i64 {text}, ptr {code})"
-            ));
+            self.bind_annotation_expression(&text, &code);
             return text;
         }
         self.text(value)
+    }
+
+    fn bind_annotation_expression(&mut self, text: &str, code: &str) {
+        if !self.output.declarations.registered_expression {
+            self.output
+                .functions
+                .push_str("declare void @imre_dyn_bind_expression(ptr, i64, ptr)\n");
+            self.output.declarations.registered_expression = true;
+        }
+        self.line(&format!(
+            "call void @imre_dyn_bind_expression(ptr %ctx, i64 {text}, ptr {code})"
+        ));
     }
 
     fn text(&mut self, value: &str) -> String {

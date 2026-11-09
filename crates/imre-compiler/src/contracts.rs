@@ -681,6 +681,7 @@ impl Builtin {
             | Self::RegisteredModuleAnnotation(_)
             | Self::RegisteredAnnotationStart
             | Self::RegisteredAnnotationInsert { .. }
+            | Self::BindAnnotationExpression(_)
             | Self::RegisteredAnnotationResult
             | Self::RegisteredDeleteName(..)
             | Self::RegisteredDefinition(_)
