@@ -133,6 +133,11 @@ fn operation<E>(
     mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
 ) -> StdResult<Option<Expr>, E> {
     let kind = match node {
+        ast::Expr::If(branch) => ExprKind::Conditional(
+            Box::new(child(&branch.test)?),
+            Box::new(child(&branch.body)?),
+            Box::new(child(&branch.orelse)?),
+        ),
         ast::Expr::BinOp(binary) if binary.op == ast::Operator::Add => ExprKind::Binary(
             Binary::Add,
             Box::new(child(&binary.left)?),
@@ -269,6 +274,7 @@ impl Checker<'_> {
             ExprKind::Bytes(_) => Type::Bytes,
             ExprKind::Bool(_) => Type::Bool,
             ExprKind::None => Type::None,
+            ExprKind::Conditional(_, yes, no) if yes.ty == no.ty => yes.ty,
             _ => value.ty,
         };
         Ok(Some(located(node, value)))

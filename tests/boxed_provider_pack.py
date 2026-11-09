@@ -27,6 +27,9 @@ from xml import parsers
 print('xml', xml.__all__)
 print('parsers', parsers is sys.modules['xml.parsers'], parsers.__doc__ and parsers.__doc__.splitlines()[0])
 
+from importlib.resources._itertools import only
+print('only', only([17]), only([], 41), only.__defaults__)
+
 def dormant():
     import never_loaded
 print('deferred', 'never_loaded' in sys.modules)
@@ -97,7 +100,8 @@ def main():
         ir = root / 'standalone-ir'
         subprocess.run([compiler, '--emit-bundled-provider-ir', ir], cwd=root, env=env, check=True)
         linked = provider_symbols(binary) & provider_symbols(archives / f'O{args.opt_level}/providers.a')
-        origins = (b'reprlib.py', b'xml/__init__.py', b'xml/parsers/__init__.py')
+        origins = (b'reprlib.py', b'xml/__init__.py', b'xml/parsers/__init__.py',
+                   b'importlib/resources/_itertools.py')
         providers = {origin: [] for origin in origins}
         for unit in ir.glob('*.ll'):
             body = unit.read_bytes()

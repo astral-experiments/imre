@@ -295,6 +295,12 @@ impl Function<'_, '_> {
             }
             self.checkpoint(stmt);
             self.simple_call = imre_ast::unhighlighted_call(stmt);
+            if let Some(import) =
+                crate::frontend::registered_import(stmt, &self.source.private_names)
+            {
+                self.registered_value(&import);
+                continue;
+            }
             match stmt {
                 ast::Stmt::Expr(v) => {
                     if !matches!(&*v.value, ast::Expr::StringLiteral(_)) {
@@ -426,7 +432,7 @@ impl Function<'_, '_> {
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
                     let function = self.function_definition(v, None);
-                    let function = self.apply_decorators(&decorators, &[], function);
+                    let function = self.apply_decorators(&decorators, &v.decorator_list, function);
                     self.bind(v.name.as_str(), &function);
                 }
                 ast::Stmt::ClassDef(v) => {
@@ -452,12 +458,7 @@ impl Function<'_, '_> {
                     } else {
                         self.create_class(v, None)
                     };
-                    let positions = if v.type_params.is_some() {
-                        v.decorator_list.as_slice()
-                    } else {
-                        &[]
-                    };
-                    let class = self.apply_decorators(&decorators, positions, class);
+                    let class = self.apply_decorators(&decorators, &v.decorator_list, class);
                     self.bind(v.name.as_str(), &class);
                 }
                 ast::Stmt::Return(v) => {
@@ -534,50 +535,6 @@ impl Function<'_, '_> {
                         self.unsupported("loop control outside a loop");
                     }
                 }
-                ast::Stmt::Import(v) => {
-                    for alias in &v.names {
-                        let full = alias.name.as_str();
-                        let mut module = self.import(full, "0", 0);
-                        let mut parts = full.split('.');
-                        let root = parts.next().unwrap();
-                        if alias.asname.is_some()
-                            && !self.source.private_names.imports_root(&alias.name)
-                        {
-                            for part in parts {
-                                let member = self.code_name(part);
-                                module = self.op("from", &[&module, &member]);
-                            }
-                        }
-                        let local = alias.asname.as_ref().map_or(root, ast::Identifier::as_str);
-                        self.bind(local, &module);
-                    }
-                }
-                ast::Stmt::ImportFrom(v) => {
-                    let name = v.module.as_ref().map_or("", |v| v.as_str());
-                    let fromlist = self.op("list", &[]);
-                    let names: Vec<_> = v
-                        .names
-                        .iter()
-                        .map(|alias| self.code_name(alias.name.as_str()))
-                        .collect();
-                    for attr in &names {
-                        self.op("append", &[&fromlist, attr]);
-                    }
-                    let fromlist = self.op("tuple", &[&fromlist]);
-                    let module = self.import(name, &fromlist, v.level);
-                    for (alias, attr) in v.names.iter().zip(names) {
-                        if alias.name.as_str() == "*" {
-                            self.frame
-                                .op("import_star", &[&self.scope.clone(), &module]);
-                            continue;
-                        }
-                        let value = self.op("from", &[&module, &attr]);
-                        self.bind(
-                            alias.asname.as_ref().unwrap_or(&alias.name).as_str(),
-                            &value,
-                        );
-                    }
-                }
                 ast::Stmt::Try(v) => {
                     if v.finalbody.is_empty() {
                         self.try_except(v);
@@ -617,14 +574,6 @@ impl Function<'_, '_> {
                 }
             }
         }
-    }
-
-    fn import(&mut self, name: &str, fromlist: &str, level: u32) -> String {
-        let name = self.code_name(name);
-        self.frame.checked(&format!(
-            "call i64 @imre_dyn_import_name(ptr %ctx, i64 {}, i64 {name}, i64 {fromlist}, i32 {level})",
-            self.scope
-        ))
     }
 
     fn class_position(&mut self, class: Option<&ast::StmtClassDef>) {
@@ -729,10 +678,17 @@ impl Function<'_, '_> {
     }
 
     pub(super) fn registered_definition(&mut self, start: TextSize, values: &[String]) -> String {
-        let definition = self.source.definitions.as_ref().expect("registered scope")[&start];
-        let (decorators, defaults) = values.split_at(definition.decorator_list.len());
-        let function = self.function_definition(definition, Some(defaults));
-        self.apply_decorators(decorators, &[], function)
+        match self.source.definitions.as_ref().expect("registered scope")[&start] {
+            super::DefinitionSite::Function(definition) => {
+                let (decorators, defaults) = values.split_at(definition.decorator_list.len());
+                let function = self.function_definition(definition, Some(defaults));
+                self.apply_decorators(decorators, &definition.decorator_list, function)
+            }
+            super::DefinitionSite::Class(definition) => {
+                let class = self.create_class(definition, None);
+                self.apply_decorators(values, &definition.decorator_list, class)
+            }
+        }
     }
 
     fn function_definition(
@@ -1225,9 +1181,8 @@ impl Function<'_, '_> {
         mut value: String,
     ) -> String {
         for (index, decorator) in decorators.iter().enumerate().rev() {
-            if let Some(syntax) = positions.get(index) {
-                self.set_statement_line(self.source.positions.line(syntax.expression.start()));
-            }
+            let expression = &positions[index].expression;
+            self.set_statement_line(self.source.positions.line(expression.start()));
             value = self.invoke(decorator, &[&value]);
         }
         value

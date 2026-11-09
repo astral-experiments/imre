@@ -8,6 +8,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
 use crate::CodegenUnit;
+use crate::llvm::operations::{CheckedValue, ValueJoin};
 
 mod boolean;
 pub(crate) mod checked;
@@ -391,7 +392,6 @@ pub(super) struct PreparedBody<'a> {
     body: ast::Suite,
     source: SourceInfo<'a>,
     expression: bool,
-    lower_definitions: bool,
     keep_docstrings: bool,
 }
 
@@ -499,15 +499,59 @@ impl<'a> PreparedBody<'a> {
         };
         let method_imports = imre_ast::module_imports(&body);
         let private_names = lower_source(path, source, &mut body)?;
-        // Bundled functions opt in only when their own module initializer is admitted.
-        let ordinary = !expression;
-        let initializer = if ordinary {
-            crate::frontend::registered_suite(&body, true, &replacements, has_templates)
+        let initializer = if !expression {
+            crate::frontend::registered_suite(
+                &body,
+                crate::frontend::RegisteredScope::Module,
+                &private_names,
+                &replacements,
+                has_templates,
+            )
         } else {
             None
         };
-        let lower_definitions = ordinary && (!bundled || initializer.is_some());
+        let mut function_bodies = HashMap::new();
+        let mut class_bodies = HashMap::new();
+        if !expression {
+            for (start, site) in definition_sites(&body) {
+                match site {
+                    DefinitionSite::Function(def)
+                        if def.type_params.is_none()
+                            && !program_bodies
+                                .checked
+                                .is_some_and(|sites| sites.contains_key(&start)) =>
+                    {
+                        if let Some(suite) = crate::frontend::registered_suite(
+                            &def.body,
+                            crate::frontend::RegisteredScope::Function {
+                                is_async: def.is_async,
+                            },
+                            &private_names,
+                            &replacements,
+                            has_templates,
+                        ) {
+                            function_bodies.insert(start, suite);
+                        }
+                    }
+                    DefinitionSite::Class(class) if !bundled || initializer.is_some() => {
+                        if let Some(first) = class.body.first()
+                            && let Some(suite) = crate::frontend::registered_class_body(
+                                class,
+                                &private_names,
+                                &replacements,
+                                has_templates,
+                            )
+                        {
+                            class_bodies.insert(first.start(), suite);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
         let source = SourceInfo {
+            function_bodies,
+            class_bodies,
             initializer,
             program_bodies,
             bundled,
@@ -532,7 +576,6 @@ impl<'a> PreparedBody<'a> {
             body,
             source,
             expression,
-            lower_definitions,
             keep_docstrings,
         })
     }
@@ -548,7 +591,7 @@ impl<'a> PreparedBody<'a> {
         };
         let location = SourceMap {
             info: &self.source,
-            definitions: self.lower_definitions.then(|| definition_sites(&self.body)),
+            definitions: (!self.expression).then(|| definition_sites(&self.body)),
             unit,
             positions: SourcePositions::new(self.source.text, &code_file),
         };
@@ -560,7 +603,7 @@ impl<'a> PreparedBody<'a> {
         } else {
             Body::Namespace(&self.body, false)
         };
-        let code = output.code(&location, String::new(), suite, false, false, None);
+        let code = output.code(&location, String::new(), suite, false, None);
         match output.diagnostic.take() {
             Some(diagnostic) => Err(diagnostic),
             None => Ok(code),
@@ -614,7 +657,6 @@ enum Body<'a> {
     Namespace(&'a [ast::Stmt], bool),
     ClassParameters(&'a ast::StmtClassDef),
     Statements(&'a [ast::Stmt]),
-    Checked(&'a crate::frontend::RegisteredFunction, &'a [ast::Stmt]),
     /// A suspended suite and its generator, coroutine, or async generator code flag.
     GeneratorFunction(&'a [ast::Stmt], u32),
     ModuleAnnotations(Vec<(&'a str, &'a ast::Expr)>),
@@ -649,26 +691,32 @@ enum Entry {
     Suspended,
 }
 
+#[derive(Clone, Copy)]
+enum DefinitionSite<'a> {
+    Function(&'a ast::StmtFunctionDef),
+    Class(&'a ast::StmtClassDef),
+}
+
 /// Collect declaration sites for the registered frame. Executing a definition still
 /// evaluates its header and binds its name at the source statement.
-fn definition_sites(
-    body: &[ast::Stmt],
-) -> HashMap<ruff_text_size::TextSize, &ast::StmtFunctionDef> {
+fn definition_sites(body: &[ast::Stmt]) -> HashMap<ruff_text_size::TextSize, DefinitionSite<'_>> {
     use ast::statement_visitor::{StatementVisitor, walk_stmt};
 
     #[derive(Default)]
-    struct Sites<'a>(HashMap<ruff_text_size::TextSize, &'a ast::StmtFunctionDef>);
+    struct Sites<'a>(HashMap<ruff_text_size::TextSize, DefinitionSite<'a>>);
 
     impl<'a> StatementVisitor<'a> for Sites<'a> {
         fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
             match stmt {
                 ast::Stmt::FunctionDef(def) => {
-                    self.0.insert(def.start(), def);
-                    if !def.is_async && def.type_params.is_none() {
+                    self.0.insert(def.start(), DefinitionSite::Function(def));
+                    if def.type_params.is_none() {
                         self.visit_body(&def.body);
                     }
                 }
-                ast::Stmt::ClassDef(_) => {}
+                ast::Stmt::ClassDef(class) => {
+                    self.0.insert(class.start(), DefinitionSite::Class(class));
+                }
                 _ => walk_stmt(self, stmt),
             }
         }
@@ -680,7 +728,7 @@ fn definition_sites(
 
 struct SourceMap<'a> {
     info: &'a SourceInfo<'a>,
-    definitions: Option<HashMap<ruff_text_size::TextSize, &'a ast::StmtFunctionDef>>,
+    definitions: Option<HashMap<ruff_text_size::TextSize, DefinitionSite<'a>>>,
     unit: usize,
     positions: SourcePositions<'a>,
 }
@@ -694,6 +742,8 @@ impl<'a> std::ops::Deref for SourceMap<'a> {
 }
 
 struct SourceInfo<'a> {
+    function_bodies: super::CheckedFunctions,
+    class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredFunction>,
     initializer: Option<crate::frontend::RegisteredFunction>,
     program_bodies: ProgramBodies<'a>,
     bundled: bool,
@@ -818,44 +868,7 @@ impl Output {
         } else {
             0
         };
-        let checked = source
-            .program_bodies
-            .checked
-            .and_then(|functions| functions.get(&start));
-        let native = if matches!(body, Body::Statements(_)) && checked.is_none() {
-            source
-                .program_bodies
-                .native
-                .and_then(|functions| functions.get(&start))
-        } else {
-            None
-        };
-        let lowered;
-        let body = match body {
-            Body::Statements(stmts) => {
-                let selected = if checked.is_some() {
-                    checked
-                } else if source
-                    .definitions
-                    .as_ref()
-                    .and_then(|defs| defs.get(&start))
-                    .is_some_and(|def| def.type_params.is_none())
-                {
-                    lowered = crate::frontend::registered_suite(
-                        stmts,
-                        false,
-                        &source.replacements,
-                        source.has_templates,
-                    );
-                    lowered.as_ref()
-                } else {
-                    None
-                };
-                selected.map_or(body, |function| Body::Checked(function, stmts))
-            }
-            _ => body,
-        };
-        let entry = self.code(source, prefix, body, in_function, suspended, native);
+        let entry = self.code(source, prefix, body, in_function, Some((start, entry)));
         writeln!(
             self.constants,
             "{site} = private constant %code_site {{ ptr {entry}, ptr {}, i32 {}, i32 {tag} }}",
@@ -904,9 +917,13 @@ impl Output {
         prefix: String,
         body: Body<'_>,
         in_function: bool,
-        native_suspension: bool,
-        native: Option<&crate::frontend::RegisteredNative>,
+        definition: Option<(ruff_text_size::TextSize, Entry)>,
     ) -> String {
+        let native_suspension = matches!(definition, Some((_, Entry::Suspended)));
+        let start = definition.map(|(start, _)| start);
+        let checked = start
+            .filter(|_| matches!(body, Body::Statements(_)))
+            .and_then(|key| source.program_bodies.checked?.get(&key));
         let frame = RegisteredFrame::new(self, &source.positions, native_suspension);
         let module = matches!(body, Body::Namespace(..)) && prefix.is_empty();
         let mut f = Function {
@@ -933,11 +950,16 @@ impl Output {
             loops: Vec::new(),
             exits: Vec::new(),
         };
-        if let Some(native) = native {
+        if checked.is_none()
+            && matches!(body, Body::Statements(_))
+            && let Some(native) = start.and_then(|key| source.program_bodies.native?.get(&key))
+        {
             f.select_native(native);
         }
         match body {
-            Body::Namespace(stmts, _) => {
+            Body::Namespace(stmts, _)
+            | Body::Statements(stmts)
+            | Body::GeneratorFunction(stmts, _) => {
                 if module && imre_ast::annotations::has_variable_annotation(stmts) {
                     if source.string_annotations {
                         f.frame
@@ -949,14 +971,22 @@ impl Output {
                         f.label("module_body");
                     }
                 }
-                if f.output.keep_docstrings
+                if matches!(body, Body::Namespace(..))
+                    && f.output.keep_docstrings
                     && let Some(doc) = f.source.docstring(f.prefix.trim_end_matches('.'), stmts)
                 {
                     let value = f.text(&doc);
                     f.bind("__doc__", &value);
                 }
                 f.declare_globals(stmts);
-                if module && let Some(checked) = &source.initializer {
+                let checked = match body {
+                    Body::Namespace(..) if module => source.initializer.as_ref(),
+                    Body::Namespace(..) => stmts
+                        .first()
+                        .and_then(|stmt| source.class_bodies.get(&stmt.start())),
+                    _ => checked.or_else(|| start.and_then(|key| source.function_bodies.get(&key))),
+                };
+                if let Some(checked) = checked {
                     f.checked_body(checked);
                 } else if f.class_locals.is_some() && !f.source.string_annotations {
                     f.annotated_class_body(stmts);
@@ -970,15 +1000,7 @@ impl Output {
                     f.jump("module_body");
                 }
             }
-            Body::Checked(function, stmts) => {
-                f.declare_globals(stmts);
-                f.checked_body(function);
-            }
             Body::ClassParameters(class) => f.parameterized_class(class),
-            Body::Statements(stmts) | Body::GeneratorFunction(stmts, _) => {
-                f.declare_globals(stmts);
-                f.statements(stmts);
-            }
             Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
             Body::Annotations(entries, class) => f.annotations(&entries, class, false),
             Body::ModuleAnnotations(entries) => f.annotations(&entries, None, true),
@@ -1182,26 +1204,21 @@ impl Function<'_, '_> {
 
     fn select(
         &mut self,
-        condition: &ast::Expr,
-        on_true: impl FnOnce(&mut Self) -> String,
-        on_false: impl FnOnce(&mut Self) -> String,
-    ) -> String {
-        let yes = self.name("b");
-        let no = self.name("b");
-        let done = self.name("b");
-        self.branch_expr(condition, &yes, &no);
-        self.label(&yes);
-        let left = on_true(self);
-        let left_block = self.current_block().to_owned();
-        self.jump(&done);
-        self.label(&no);
-        let right = on_false(self);
-        let right_block = self.current_block().to_owned();
-        self.jump(&done);
-        self.label(&done);
-        self.value(&format!(
-            "phi i64 [ {left}, %{left_block} ], [ {right}, %{right_block} ]"
-        ))
+        branch: impl FnOnce(&mut Self, &str, &str),
+        on_true: impl FnOnce(&mut Self) -> CheckedValue,
+        on_false: impl FnOnce(&mut Self) -> CheckedValue,
+    ) -> CheckedValue {
+        ValueJoin::select(
+            self,
+            |code| {
+                code.flush_check();
+                &mut code.body
+            },
+            branch,
+            on_true,
+            on_false,
+        )
+        .expect("value-producing registered conditional")
     }
 
     fn unsupported(&mut self, what: &str) -> String {
@@ -1278,9 +1295,9 @@ mod tests {
 
     #[test]
     fn suspended_definitions_use_native_entries_in_each_module_origin() {
-        let source = "def items(xs):\n    yield 1\n    yield from xs\npark = lambda: (yield 2)\nresume = lambda: 1 + (yield 3)\nasync def more(xs):\n    async for x in xs:\n        yield x\nasync def consume(f):\n    return await f()\n";
+        let source = "def items(xs):\n    yield 1\n    yield from xs\npark = lambda: (yield 2)\nresume = lambda: 1 + (yield 3)\nasync def more(xs):\n    async for x in xs:\n        yield x\nasync def consume(f):\n    return await f()\ndef defaults():\n    yield 0\n    def nested(first=1, second=(yield 4)):\n        return second\n    return nested\n";
         for bundled in [false, true] {
-            let (_, ir) = PreparedBody::module(
+            let prepared = PreparedBody::module(
                 "example",
                 Path::new("example.py"),
                 source,
@@ -1291,18 +1308,32 @@ mod tests {
                     ModuleOrigin::Program(ProgramBodies::default())
                 },
             )
-            .unwrap()
-            .standalone()
-            .unwrap()
             .unwrap();
+            let selected: Vec<_> = prepared
+                .body
+                .iter()
+                .filter_map(|stmt| {
+                    let def = stmt.as_function_def_stmt()?;
+                    prepared
+                        .source
+                        .function_bodies
+                        .contains_key(&def.start())
+                        .then_some(def.name.as_str())
+                })
+                .collect();
+            assert_eq!(selected, ["items", "consume"]);
+            let (_, ir) = prepared.standalone().unwrap().unwrap();
             let tag = format!(", i32 {} }}", permanent::NATIVE_SUSPENDED_BODY);
-            assert_eq!(ir.lines().filter(|line| line.ends_with(&tag)).count(), 5);
+            assert_eq!(ir.lines().filter(|line| line.ends_with(&tag)).count(), 6);
             let operations: Vec<_> = ir
                 .lines()
                 .filter(|line| line.contains("call void @imre_dyn_suspend_operands("))
                 .map(|line| line.rsplit_once(", i32 ").unwrap().1)
                 .collect();
-            assert_eq!(operations, ["0)", "3)", "0)", "0)", "2)", "1)", "2)"]);
+            assert_eq!(
+                operations,
+                ["0)", "3)", "0)", "0)", "2)", "1)", "2)", "0)", "0)"]
+            );
         }
     }
 

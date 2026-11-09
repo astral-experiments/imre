@@ -1071,6 +1071,33 @@ pub(crate) enum DictEntryKind {
     Unpack,
 }
 
+/// A statically named import that executes in a live Python namespace.
+#[derive(Clone)]
+pub(crate) enum NamespaceImport {
+    Modules(Vec<ModuleImport>),
+    From {
+        module: String,
+        level: u32,
+        names: Vec<(String, String)>,
+    },
+}
+
+#[derive(Clone)]
+pub(crate) struct ModuleImport {
+    pub(crate) name: String,
+    pub(crate) binding: String,
+    /// An explicit alias for a dotted name binds the leaf module.
+    pub(crate) bind_leaf: bool,
+}
+
+/// Suspends the current Python activation after evaluating one complete operand.
+#[derive(Clone, Copy)]
+pub(crate) enum SuspendValue {
+    Yield,
+    Delegate,
+    Await,
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
     ByteArrayNew,
@@ -1609,6 +1636,8 @@ pub(crate) enum Builtin {
     RegisteredLocation(ruff_text_size::TextRange),
     /// Construct the native function at this physical definition site from its evaluated header.
     RegisteredDefinition(ruff_text_size::TextSize),
+    RegisteredImport(NamespaceImport),
+    RegisteredSuspend(SuspendValue, ruff_text_size::TextRange),
     /// The loaded callable is followed by its positional arguments in evaluation order.
     RegisteredCall(
         ruff_text_size::TextRange,

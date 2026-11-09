@@ -22,6 +22,8 @@ impl Output {
             ));
         } else if self.declarations.checked_integer_arithmetic {
             self.functions.push_str(concat!(
+                "declare void @imre_int_retain(i64)\n",
+                "declare void @imre_int_release(i64)\n",
                 "declare i64 @imre_int_binary(i64, i64, i32)\n",
                 "declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)\n",
                 "!0 = !{!\"branch_weights\", i32 1, i32 2000}\n",

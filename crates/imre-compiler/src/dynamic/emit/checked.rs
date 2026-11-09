@@ -5,7 +5,8 @@ use ruff_text_size::{TextRange, TextSize};
 use super::{CallArguments, Function, RegisteredFrame, permanent};
 use crate::frontend::RegisteredFunction;
 use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Statement, Type};
-use crate::llvm::operations::Operations;
+use crate::llvm::body::FunctionBody;
+use crate::llvm::operations::{CheckedBody, CheckedValue};
 use std::collections::HashMap;
 
 /// Only take a body when all its operations have a lowering for the registered calling convention.
@@ -31,8 +32,10 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
             | ExprKind::Str(_)
             | ExprKind::Bytes(_) => true,
             ExprKind::Binary(Binary::Add, left, right) => {
-                left.ty == Type::Int && right.ty == Type::Int && expr.ty == Type::Int
+                expr.ty == Type::PythonObject
+                    || left.ty == Type::Int && right.ty == Type::Int && expr.ty == Type::Int
             }
+            ExprKind::Conditional(..) => true,
             ExprKind::Builtin(Builtin::RegisteredCall(..), operands) => {
                 uses_object_operation = true;
                 !operands.is_empty()
@@ -65,97 +68,145 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
 }
 
 /// The registered binder owns the scope, argument identities and frame.
-struct Frame<'f, 'a, 'p> {
+pub(crate) struct Frame<'f, 'a, 'p> {
     code: &'f mut Function<'a, 'p>,
     names: Option<&'f HashMap<usize, String>>,
 }
 
-impl Operations for Frame<'_, '_, '_> {
-    type Value = String;
-    type Operand = String;
-    type Assignment = ();
-
-    fn evaluate(&mut self, expr: &Expr) -> String {
-        self.emit_value(expr)
-    }
-    fn operand(&mut self, expr: &Expr) -> String {
-        self.emit_value(expr)
-    }
-    fn integer(&mut self, text: &str) -> String {
-        match text.parse::<i64>() {
-            Ok(n) => self.code.integer(n),
-            Err(_) => self.code.lit(0, text.as_bytes()),
-        }
-    }
-    fn float(&mut self, value: f64) -> String {
-        self.code.lit(3, &value.to_le_bytes())
-    }
-    fn string(&mut self, value: &str, _: Type) -> String {
-        self.code.text(value)
-    }
-    fn bytes(&mut self, value: &[u8]) -> String {
-        self.code.lit(2, value)
-    }
-    fn boolean(&mut self, value: bool) -> String {
-        (if value {
-            permanent::TRUE
-        } else {
-            permanent::FALSE
+impl Frame<'_, '_, '_> {
+    fn evaluate(&mut self, expr: &Expr) -> CheckedValue {
+        CheckedBody::registered(Frame {
+            code: self.code,
+            names: self.names,
         })
-        .to_string()
+        .emit_value(expr)
     }
-    fn none(&mut self) -> String {
-        "0".into()
+
+    fn evaluate_handle(&mut self, expr: &Expr) -> String {
+        let value = self.evaluate(expr);
+        self.materialize(&value)
     }
-    fn local(&mut self, slot: usize, _: &Expr) -> String {
+
+    pub(crate) fn lookup_local(&mut self, slot: usize) -> String {
         self.code
             .lookup(&self.names.expect("registered local names")[&slot])
     }
-    fn prepare_assignment(&mut self, _: usize, _: &Expr) -> Option<()> {
-        Some(())
+
+    pub(crate) fn assign(&mut self, slot: usize, value: CheckedValue) {
+        let handle = self.materialize(&value);
+        let name = &self.names.expect("registered local names")[&slot];
+        self.bind(name, &handle);
     }
-    fn assign(&mut self, slot: usize, value: String, (): ()) {
-        let name = self
-            .code
-            .code_name(&self.names.expect("registered local names")[&slot]);
-        self.code.assign_owned_name(&name, &value);
+    pub(crate) fn body(&mut self) -> &mut FunctionBody {
+        self.code.flush_check();
+        &mut self.code.body
     }
-    fn consume_expression(&mut self, expr: &Expr) -> bool {
+
+    pub(crate) fn declare_int_add(&mut self) {
+        self.code.declare_integer_arithmetic();
+    }
+
+    pub(crate) fn integer(&mut self, text: &str, integer: Option<i64>) -> CheckedValue {
+        match integer {
+            Some(n) => CheckedValue::rooted_integer(self.code.integer(n), n),
+            None => CheckedValue::handle(self.code.lit(0, text.as_bytes())),
+        }
+    }
+
+    pub(crate) fn string(&mut self, value: &str) -> CheckedValue {
+        CheckedValue::handle(self.code.text(value))
+    }
+
+    pub(crate) fn float(&mut self, value: f64) -> CheckedValue {
+        CheckedValue::handle(self.code.lit(3, &value.to_le_bytes()))
+    }
+
+    pub(crate) fn bytes(&mut self, value: &[u8]) -> CheckedValue {
+        CheckedValue::handle(self.code.lit(2, value))
+    }
+
+    pub(crate) fn boolean(&mut self, value: bool) -> CheckedValue {
+        CheckedValue::handle(
+            (if value {
+                permanent::TRUE
+            } else {
+                permanent::FALSE
+            })
+            .to_string(),
+        )
+    }
+
+    pub(crate) fn consume_expression(&mut self, expr: &Expr) -> bool {
         if let ExprKind::Builtin(Builtin::RegisteredStatement(range, simple), _) = &expr.kind {
             self.code.checkpoint(range);
             self.code.simple_call = *simple;
             true
-        } else if matches!(expr.kind, ExprKind::Builtin(Builtin::GlobalSet(_), _)) {
+        } else if matches!(
+            expr.kind,
+            ExprKind::Builtin(Builtin::GlobalSet(_) | Builtin::RegisteredImport(_), _)
+        ) {
             self.evaluate(expr);
             true
         } else {
             false
         }
     }
-    fn discard(&mut self, value: String) {
-        self.code.line(&format!(
-            "call void @imre_dyn_discard_expression(ptr %ctx, i64 {value})"
-        ));
-    }
-    fn return_result(&mut self, value: String) {
-        self.code.return_value(&value);
-    }
-    fn terminated(&self) -> bool {
-        self.code.body.terminated
-    }
-    fn binary_expression(&mut self, op: Binary, left: &Expr, right: &Expr, expr: &Expr) -> String {
-        debug_assert!(matches!(op, Binary::Add));
-        let typed = left.ty == Type::Int && right.ty == Type::Int && expr.ty == Type::Int;
-        let (left, right) = self.binary_operands(left, right);
-        if typed {
-            self.code.checked_integer_add(&left, &right)
-        } else {
-            self.code.op("+", &[&left, &right])
+
+    pub(crate) fn discard_expression(&mut self, value: &CheckedValue) {
+        // Only the Python edge can produce an unawaited coroutine.
+        let handle = match value {
+            CheckedValue::Handle { id, .. } => Some(id),
+            CheckedValue::IntOrHandle { fallback, .. } => Some(fallback),
+            CheckedValue::Native(..) => None,
+        };
+        if let Some(handle) = handle {
+            self.code.line(&format!(
+                "call void @imre_dyn_discard_expression(ptr %ctx, i64 {handle})"
+            ));
         }
     }
-    fn builtin(&mut self, op: &Builtin, operands: &[Expr], _: Type) -> String {
-        match (op, operands) {
+
+    pub(crate) fn return_result(&mut self, value: CheckedValue) {
+        let value = self.materialize(&value);
+        self.code.return_value(&value);
+    }
+
+    pub(crate) fn terminated(&self) -> bool {
+        self.code.body.terminated
+    }
+
+    pub(crate) fn release_word(&mut self, owner: usize) {
+        let word = self.code.value(&format!("load i64, ptr %int_owner{owner}"));
+        self.code
+            .line(&format!("store i64 1, ptr %int_owner{owner}"));
+        self.code
+            .line(&format!("call void @imre_int_release(i64 {word})"));
+    }
+
+    pub(crate) fn select(&mut self, test: &Expr, yes: &Expr, no: &Expr) -> CheckedValue {
+        let names = self.names;
+        self.code.select(
+            |code, yes, no| {
+                let condition = code.test_with_temporaries(|code| {
+                    let handle = Frame { code, names }.evaluate_handle(test);
+                    code.truth(&handle)
+                });
+                code.branch(&condition, yes, no);
+            },
+            |code| Frame { code, names }.evaluate(yes),
+            |code| Frame { code, names }.evaluate(no),
+        )
+    }
+
+    pub(crate) fn builtin(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
+        let handle = match (op, operands) {
             (Builtin::RegisteredName(name), []) => self.code.lookup(name),
+            (Builtin::RegisteredSuspend(kind, range), [value]) => {
+                let names = self.names;
+                self.code.suspend_value(*kind, *range, |code| {
+                    Frame { code, names }.evaluate_handle(value)
+                })
+            }
             (Builtin::RegisteredEllipsis, []) => permanent::ELLIPSIS.to_string(),
             (Builtin::RegisteredComplex(real, imag), []) => self
                 .code
@@ -170,29 +221,34 @@ impl Operations for Frame<'_, '_, '_> {
                 let value = self.evaluate(value);
                 self.code.leave_expression(previous_line);
                 self.code.current_range = previous_range;
-                value
+                return value;
             }
             (Builtin::RegisteredDefinition(site), header) => {
                 let header = header
                     .iter()
-                    .map(|value| self.evaluate(value))
+                    .map(|value| self.evaluate_handle(value))
                     .collect::<Vec<_>>();
                 self.code.registered_definition(*site, &header)
             }
+            (Builtin::RegisteredImport(import), []) => {
+                self.code.namespace_import(import);
+                "0".to_owned()
+            }
             (Builtin::GlobalSet(slot), [value]) => {
-                let value = self.evaluate(value);
-                self.assign(*slot, value, ());
-                self.none()
+                let value = self.evaluate_handle(value);
+                let name = self.names.expect("registered local names")[slot].clone();
+                self.bind(&name, &value);
+                return CheckedValue::handle("0".into());
             }
             (Builtin::RegisteredAttribute(name), [base]) => {
-                let base = self.evaluate(base);
+                let base = self.evaluate_handle(base);
                 self.code.attr(&base, name)
             }
             (Builtin::RegisteredSubscript(range, base_end), [base, key]) => {
                 let names = self.names;
                 self.code
                     .subscript(base, key, *range, *base_end, |code, expr| {
-                        Frame { code, names }.evaluate(expr)
+                        Frame { code, names }.evaluate_handle(expr)
                     })
             }
             (Builtin::RegisteredDict(entries), values) => {
@@ -203,38 +259,157 @@ impl Operations for Frame<'_, '_, '_> {
                     (key, values.next().expect("checked dictionary value"))
                 });
                 let names = self.names;
-                self.code
-                    .dict_display(items, |code, expr| Frame { code, names }.evaluate(expr))
-            }
-            (Builtin::RegisteredCall(range, callee_end, callee_name), [callee, args @ ..]) => {
-                let names = self.names;
-                self.code.positional_call(
-                    callee,
-                    args,
-                    *range,
-                    *callee_end,
-                    *callee_name,
-                    |code, expr| Frame { code, names }.evaluate(expr),
-                )
+                self.code.dict_display(items, |code, expr| {
+                    Frame { code, names }.evaluate_handle(expr)
+                })
             }
             _ => unreachable!("unsupported registered operation"),
+        };
+        CheckedValue::handle(handle)
+    }
+
+    pub(crate) fn bind(&mut self, name: &str, handle: &str) {
+        let name = self.code.code_name(name);
+        self.code.assign_owned_name(&name, handle);
+    }
+
+    pub(crate) fn call_mark(&mut self, callee_name: Option<ruff_text_size::TextRange>) -> String {
+        self.code.begin_positional_call(callee_name)
+    }
+
+    pub(crate) fn call(
+        &mut self,
+        callable: &str,
+        args: &[String],
+        mark: &str,
+        range: ruff_text_size::TextRange,
+        callee_end: ruff_text_size::TextSize,
+    ) -> String {
+        self.code
+            .finish_positional_call(callable, args, mark, range, callee_end)
+    }
+
+    pub(crate) fn exact_word(&mut self, handle: &str) -> String {
+        self.code.value(&format!(
+            "call i64 @imre_dyn_exact_int_word(ptr %ctx, i64 {handle})"
+        ))
+    }
+
+    pub(crate) fn own_word(&mut self, word: &str) -> usize {
+        let slot = self.code.integer_owners;
+        self.code.integer_owners += 1;
+        self.code
+            .line(&format!("store i64 {word}, ptr %int_owner{slot}"));
+        slot
+    }
+
+    pub(crate) fn materialize(&mut self, value: &CheckedValue) -> String {
+        match value {
+            CheckedValue::Handle { id, .. } => id.clone(),
+            CheckedValue::IntOrHandle {
+                word,
+                fallback,
+                owner,
+            } => {
+                let frame = &mut self.code;
+                let native = frame.name("box_int");
+                let done = frame.name("handle");
+                let exact = frame.value(&format!("icmp ne i64 {word}, 0"));
+                let mut join = crate::llvm::operations::ValueJoin::default();
+                frame.flush_check();
+                join.incoming(&mut frame.body, CheckedValue::handle(fallback.clone()));
+                frame.branch(&exact, &native, &done);
+                frame.label(&native);
+                let boxed = frame.move_integer(*owner, word);
+                frame.flush_check();
+                join.jump(&mut frame.body, &done, CheckedValue::handle(boxed));
+                frame.label(&done);
+                let Some(CheckedValue::Handle { id, .. }) = join.finish(&mut frame.body) else {
+                    unreachable!("both conversion edges hold Python handles")
+                };
+                id
+            }
+            CheckedValue::Native(value, owner) => {
+                let (word, small) = value.int_word(owner.is_some());
+                if let Some(slot) = owner {
+                    return self.code.move_integer(*slot, word);
+                }
+                self.code.declare_integer_arithmetic();
+                if !small {
+                    self.code
+                        .line(&format!("call void @imre_int_retain(i64 {word})"));
+                }
+                self.code.checked(&format!(
+                    "call i64 @imre_dyn_take_int(ptr %ctx, i64 {word})"
+                ))
+            }
         }
     }
-    fn other_statement(&mut self, statement: &Statement) {
-        let Statement::SetItem(receiver, index, value) = statement else {
-            unreachable!("unsupported registered statement");
-        };
-        let value = self.evaluate(value);
-        let receiver = self.evaluate(receiver);
-        let index = self.evaluate(index);
-        self.code.put_item(&receiver, &index, &value);
+
+    pub(crate) fn protocol_add(&mut self, left: &str, right: &str) -> String {
+        self.code.op("+", &[left, right])
     }
-    fn other_expression(&mut self, _: &Expr) -> String {
-        unreachable!("unsupported registered expression")
+
+    pub(crate) fn assign_item(&mut self, receiver: &Expr, index: &Expr, value: &Expr) {
+        let (receiver, index, value) = crate::llvm::operations::assignment_operands(
+            self,
+            receiver,
+            index,
+            value,
+            Self::evaluate_handle,
+        );
+        self.code.put_item(&receiver, &index, &value);
     }
 }
 
 impl Function<'_, '_> {
+    fn namespace_import(&mut self, import: &ir::NamespaceImport) {
+        match import {
+            ir::NamespaceImport::Modules(modules) => {
+                for item in modules {
+                    let mut module = self.import_name(&item.name, "0", 0);
+                    if item.bind_leaf {
+                        for part in item.name.split('.').skip(1) {
+                            let member = self.code_name(part);
+                            module = self.op("from", &[&module, &member]);
+                        }
+                    }
+                    self.bind(&item.binding, &module);
+                }
+            }
+            ir::NamespaceImport::From {
+                module,
+                level,
+                names,
+            } => {
+                let fromlist = self.op("list", &[]);
+                let members: Vec<_> = names.iter().map(|(name, _)| self.code_name(name)).collect();
+                for member in &members {
+                    self.op("append", &[&fromlist, member]);
+                }
+                let fromlist = self.op("tuple", &[&fromlist]);
+                let module = self.import_name(module, &fromlist, *level);
+                for ((name, binding), member) in names.iter().zip(members) {
+                    if name == "*" {
+                        self.frame
+                            .op("import_star", &[&self.scope.clone(), &module]);
+                    } else {
+                        let value = self.op("from", &[&module, &member]);
+                        self.bind(binding, &value);
+                    }
+                }
+            }
+        }
+    }
+
+    fn import_name(&mut self, name: &str, fromlist: &str, level: u32) -> String {
+        let name = self.code_name(name);
+        self.frame.checked(&format!(
+            "call i64 @imre_dyn_import_name(ptr %ctx, i64 {}, i64 {name}, i64 {fromlist}, i32 {level})",
+            self.scope
+        ))
+    }
+
     pub(super) fn positional_call<T>(
         &mut self,
         callee: &T,
@@ -244,24 +419,40 @@ impl Function<'_, '_> {
         suspended_name: Option<TextRange>,
         evaluate: impl FnMut(&mut Self, &T) -> String,
     ) -> String {
+        let mark = self.begin_positional_call(suspended_name);
+        let (callee, args) = crate::llvm::operations::call_arguments(self, callee, args, evaluate);
+        self.finish_positional_call(&callee, &args, &mark, range, callee_end)
+    }
+
+    fn begin_positional_call(&mut self, suspended_name: Option<TextRange>) -> String {
         let mark = self.temporary_mark();
         if self.native_suspension
             && let Some(name) = suspended_name
         {
             self.suspension_position(name);
         }
-        let (callee, args) = crate::llvm::operations::call_arguments(self, callee, args, evaluate);
-        let (array, count) = self.handle_array(&args);
+        mark
+    }
+
+    fn finish_positional_call(
+        &mut self,
+        callable: &str,
+        args: &[String],
+        mark: &str,
+        range: TextRange,
+        callee_end: TextSize,
+    ) -> String {
+        let (array, count) = self.handle_array(args);
         let span = self.expression_range_span(range, callee_end, b'(');
         self.call_position(range);
         self.call_at(
-            &callee,
+            callable,
             CallArguments::Positional {
                 array,
                 count,
                 receiver_slot: false,
             },
-            &mark,
+            mark,
             span,
         )
     }
@@ -345,50 +536,36 @@ impl Function<'_, '_> {
 
     /// Emit a registered expression whose names are resolved through this live frame.
     pub(super) fn registered_value(&mut self, expression: &Expr) -> String {
-        Frame {
+        let first = self.integer_owners;
+        let outer = self.expression_integer_start.replace(first);
+        let result = Frame {
             code: self,
             names: None,
         }
-        .evaluate(expression)
+        .evaluate_handle(expression);
+        self.expression_integer_start = outer;
+        result
     }
 
     pub(super) fn checked_body(&mut self, checked: &RegisteredFunction) {
-        Frame {
+        CheckedBody::registered(Frame {
             code: self,
             names: Some(&checked.local_names),
-        }
-        .emit_block(&checked.function.body, |_| {});
+        })
+        .emit_function(&checked.function);
     }
 }
 
 impl RegisteredFrame<'_, '_> {
-    fn checked_integer_add(&mut self, left: &str, right: &str) -> String {
-        self.output.declarations.checked_integer_arithmetic = true;
-        let a = self.value(&format!(
-            "call i64 @imre_dyn_exact_int_word(ptr %ctx, i64 {left})"
-        ));
-        let b = self.value(&format!(
-            "call i64 @imre_dyn_exact_int_word(ptr %ctx, i64 {right})"
-        ));
-        let a_exact = self.value(&format!("icmp ne i64 {a}, 0"));
-        let b_exact = self.value(&format!("icmp ne i64 {b}, 0"));
-        let exact = self.value(&format!("and i1 {a_exact}, {b_exact}"));
-        let native = self.name("int_add");
-        let object = self.name("object_add");
-        let done = self.name("sum");
-        self.branch(&exact, &native, &object);
-        self.label(&native);
-        let sum = self.value(&format!("call i64 @int_add(i64 {a}, i64 {b})"));
-        let boxed = self.checked(&format!("call i64 @imre_dyn_take_int(ptr %ctx, i64 {sum})"));
-        let native_end = self.current_block().to_owned();
-        self.jump(&done);
-        self.label(&object);
-        let dynamic = self.op("+", &[left, right]);
-        let object_end = self.current_block().to_owned();
-        self.jump(&done);
-        self.label(&done);
-        self.value(&format!(
-            "phi i64 [ {boxed}, %{native_end} ], [ {dynamic}, %{object_end} ]"
+    /// The heap takes the reference even if adding its temporary root fails.
+    fn move_integer(&mut self, slot: usize, word: &str) -> String {
+        self.line(&format!("store i64 1, ptr %int_owner{slot}"));
+        self.checked(&format!(
+            "call i64 @imre_dyn_take_int(ptr %ctx, i64 {word})"
         ))
+    }
+
+    fn declare_integer_arithmetic(&mut self) {
+        self.output.declarations.checked_integer_arithmetic = true;
     }
 }

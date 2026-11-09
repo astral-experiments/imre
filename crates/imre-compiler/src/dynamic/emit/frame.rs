@@ -5,6 +5,7 @@ use super::{
 };
 use crate::llvm::body::FunctionBody;
 use ruff_text_size::{TextRange, TextSize};
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 /// Source bytes and byte offsets shared by both forms of registered body.
@@ -49,6 +50,10 @@ pub(super) struct RegisteredFrame<'a, 'p> {
     // Handles held in native registers across statement boundaries must stay reachable.
     pub(super) live: Vec<String>,
     pub(super) max_live: usize,
+    pub(super) integer_owners: usize,
+    pub(super) expression_integer_start: Option<usize>,
+    // A caught error abandons this expression's intermediates and preserves enclosing owners.
+    integer_unwinds: BTreeMap<(usize, String), (usize, String)>,
     pub(super) caught: Vec<String>,
     pub(super) simple_call: Option<TextRange>,
     pub(super) expression_line: usize,
@@ -78,6 +83,9 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             scope: "%scope".into(),
             live: Vec::new(),
             max_live: 0,
+            integer_owners: 0,
+            expression_integer_start: None,
+            integer_unwinds: BTreeMap::new(),
             caught: Vec::new(),
             simple_call: None,
             expression_line: 0,
@@ -95,6 +103,13 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         } else {
             format!("  %live = alloca [{} x i64]\n", self.max_live)
         };
+        for slot in 0..self.integer_owners {
+            writeln!(
+                entry,
+                "  %int_owner{slot} = alloca i64\n  store i64 1, ptr %int_owner{slot}"
+            )
+            .unwrap();
+        }
         // A loaded code object owns its identifier-like strings before any statement runs.
         if module && !self.output.interned_identifiers.is_empty() {
             let names = std::mem::take(&mut self.output.interned_identifiers)
@@ -109,12 +124,21 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             )
             .unwrap();
         }
+        for ((start, target), (end, label)) in std::mem::take(&mut self.integer_unwinds) {
+            self.body.start(&label);
+            self.release_integer_owners(start..end, true);
+            self.body.jump(&target);
+        }
+        self.body.start("failed");
+        self.release_integer_owners(0..self.integer_owners, false);
         if self.native_suspension {
+            self.body
+                .line("call void @imre_dyn_suspend_return(ptr %context_slot, i64 0)");
+            self.body.jump("complete");
             writeln!(self.output.functions,
                 "define internal ptr {name}(ptr %context_slot, i64 %scope) presplitcoroutine {{\nentry:\n{entry}{}{}{} }}",
                 suspension::PROLOGUE, self.body.code, suspension::EPILOGUE).unwrap();
         } else {
-            self.body.start("failed");
             self.body.end("ret i64 0");
             writeln!(
                 self.output.functions,
@@ -124,6 +148,19 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             .unwrap();
         }
         name
+    }
+
+    fn release_integer_owners(&mut self, slots: std::ops::Range<usize>, clear: bool) {
+        for slot in slots {
+            let word = self
+                .body
+                .instruction(format!("load i64, ptr %int_owner{slot}"));
+            if clear {
+                self.body.line(format!("store i64 1, ptr %int_owner{slot}"));
+            }
+            self.body
+                .line(format!("call void @imre_int_release(i64 {word})"));
+        }
     }
 
     pub(super) fn enter_expression(&mut self, position: TextSize) -> Option<usize> {
@@ -230,8 +267,21 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     }
 
     pub(super) fn check_error(&mut self) {
+        let mut handler = self.body.error_target.clone();
+        if let Some(start) = self.expression_integer_start
+            && start < self.integer_owners
+            && handler != "failed"
+        {
+            let count = self.integer_unwinds.len();
+            let (end, label) = self
+                .integer_unwinds
+                .entry((start, handler))
+                .or_insert_with(|| (self.integer_owners, format!("int_unwind{count}")));
+            *end = self.integer_owners;
+            handler = label.clone();
+        }
         self.pending_check = Some(ErrorCheck {
-            handler: self.body.error_target.clone(),
+            handler,
             failed: self.name("%v"),
             next: self.name("b"),
         });
