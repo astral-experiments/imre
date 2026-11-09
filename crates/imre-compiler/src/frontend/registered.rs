@@ -825,22 +825,12 @@ impl statements::StatementLowering for SourceScope<'_> {
     }
 
     fn assignment(&mut self, assign: &ast::StmtAssign) -> StdResult<Vec<Statement>, ()> {
-        let [
-            target @ (ast::Expr::Name(_)
-            | ast::Expr::Subscript(_)
-            | ast::Expr::Tuple(_)
-            | ast::Expr::List(_)),
-        ] = assign.targets.as_slice()
-        else {
-            return Err(());
-        };
-        let value = if target.is_name_expr() {
-            self.operand(&assign.value)
-        } else {
-            self.ordinary_operand(&assign.value)
+        let value = match assign.targets.as_slice() {
+            [ast::Expr::Name(_)] => self.operand(&assign.value),
+            _ => self.ordinary_operand(&assign.value),
         }
         .ok_or(())?;
-        unpacking::bind_targets(self, target, value, None)
+        unpacking::bind_assignment(self, &assign.targets, value)
     }
 
     fn definition(&mut self, def: &ast::StmtFunctionDef) -> StdResult<Option<Statement>, ()> {
@@ -1847,6 +1837,34 @@ mod tests {
             })
             .collect();
         assert_eq!(sites, ["first", "obj.field", "last", "obj.tail"]);
+    }
+
+    #[test]
+    fn chained_targets_share_one_rhs_and_transfer_it_to_the_last_store() {
+        let text = "response.code = values[key()] = status()\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let literals = values::ModuleSource::new(module);
+        let checked = registered_suite(
+            &module.parsed.syntax().body,
+            RegisteredScope::Module,
+            literals.context(text),
+        )
+        .unwrap();
+        let [_, Statement::Scope { body, clear }] = checked.function.body.as_slice() else {
+            panic!("expected a checked assignment chain")
+        };
+        let [Statement::Assign(slot, _), Statement::Expr(store), Statement::SetItem(_, _, last)] =
+            body.as_slice()
+        else {
+            panic!("expected one RHS followed by the two target stores")
+        };
+        assert_eq!(clear, &[*slot]);
+        assert!(matches!(&store.kind, ExprKind::Builtin(
+            Builtin::RegisteredAttribute { action: ir::AttributeAction::Store, .. }, inputs
+        ) if matches!(inputs.first().map(|value| &value.kind), Some(ExprKind::Local(id)) if id == slot)));
+        assert!(matches!(&last.kind, ExprKind::Scope { value, clear, .. }
+            if clear == &[*slot] && matches!(&value.kind, ExprKind::Local(id) if id == slot)));
     }
 
     #[test]
