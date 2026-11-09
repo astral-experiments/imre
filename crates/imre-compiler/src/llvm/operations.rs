@@ -3,6 +3,8 @@
 mod iteration;
 pub(crate) use iteration::LoopEdges;
 mod join;
+pub(crate) mod sequences;
+use crate::ir::DisplayKind;
 pub(crate) use join::ValueJoin;
 
 use super::records;
@@ -340,6 +342,31 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     CheckedValue::handle(handle)
                 }
             },
+            ExprKind::List(items) | ExprKind::Tuple(items) => {
+                let tuple = matches!(expr.kind, ExprKind::Tuple(_));
+                match &mut self.0 {
+                    Entry::Native(emitter) if tuple => {
+                        CheckedValue::owned(emitter.tuple(expr.ty, items, None))
+                    }
+                    Entry::Native(emitter) => {
+                        CheckedValue::owned(emitter.native_sequence(expr.ty, items, false))
+                    }
+                    Entry::Registered(frame) => frame.sequence(
+                        items,
+                        if tuple {
+                            DisplayKind::Tuple
+                        } else {
+                            DisplayKind::List
+                        },
+                    ),
+                }
+            }
+            ExprKind::Set { values, .. } => match &mut self.0 {
+                Entry::Native(emitter) => {
+                    CheckedValue::owned(emitter.native_sequence(expr.ty, values, false))
+                }
+                Entry::Registered(frame) => frame.sequence(values, DisplayKind::Set),
+            },
             ExprKind::Conditional(test, yes, no) => match &mut self.0 {
                 Entry::Native(emitter) => CheckedValue::owned(emitter.conditional(test, yes, no)),
                 Entry::Registered(frame) => frame.select(test, yes, no),
@@ -358,15 +385,8 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     std::slice::from_ref(value.as_ref()),
                 )
             }
-            ExprKind::Dict { .. } | ExprKind::Set { .. } | ExprKind::List(_)
-                if matches!(self.0, Entry::Registered(_)) =>
-            {
-                let op = match expr.kind {
-                    ExprKind::List(_) => "list",
-                    ExprKind::Set { .. } => "set",
-                    _ => "dict",
-                };
-                CheckedValue::handle(self.python().op(op, &[]))
+            ExprKind::Dict { .. } if matches!(self.0, Entry::Registered(_)) => {
+                CheckedValue::handle(self.python().op("dict", &[]))
             }
             ExprKind::Builtin(
                 op @ (Builtin::RegisteredIter

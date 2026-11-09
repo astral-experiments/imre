@@ -27,6 +27,26 @@ pub(crate) struct RegisteredFunction {
     pub(crate) local_names: HashMap<usize, LocalBinding>,
 }
 
+impl RegisteredFunction {
+    /// Only IR scopes name compiler-owned storage. User-visible names stay in the Python frame.
+    pub(crate) fn private_slots(&self) -> std::collections::BTreeSet<usize> {
+        let body = &self.function.body;
+        let mut slots = std::collections::BTreeSet::new();
+        ir::walk_statements(body, &mut |stmt| {
+            if let Statement::Scope { clear, .. } = stmt {
+                slots.extend(clear);
+            }
+        });
+        ir::walk_expressions(body, &mut |expr| {
+            if let ExprKind::Scope { clear, .. } = &expr.kind {
+                slots.extend(clear);
+            }
+        });
+        slots.retain(|slot| !self.local_names.contains_key(slot));
+        slots
+    }
+}
+
 /// Storage in the function frame or in a lexically nested Python namespace.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct LocalBinding {
@@ -555,7 +575,15 @@ impl<'a> SuitePreparation<'a> {
                 local_names: scope
                     .names
                     .into_iter()
-                    .map(|(name, slot)| (slot, LocalBinding { name, namespace: None }))
+                    .map(|(name, slot)| {
+                        (
+                            slot,
+                            LocalBinding {
+                                name,
+                                namespace: None,
+                            },
+                        )
+                    })
                     .collect(),
             },
             residual,
@@ -816,7 +844,11 @@ impl statements::StatementLowering for SourceScope<'_> {
                         }
                         let field = target.as_attribute_expr()?;
                         let receiver = self.ordinary_operand(&field.value)?;
-                        Some(attribute_statement(ir::AttributeAction::Delete, field, vec![receiver]))
+                        Some(attribute_statement(
+                            ir::AttributeAction::Delete,
+                            field,
+                            vec![receiver],
+                        ))
                     })
                     .collect::<Option<_>>()
                     .ok_or(())?;
@@ -1007,7 +1039,13 @@ mod tests {
         let names = source.private_names.unwrap_or(&default_names);
         let mut operations = namespace_operations(stmts, names);
         if matches!(kind, RegisteredScope::Module) {
-            module_annotations(stmts, names.string_annotations, &mut operations, source, false);
+            module_annotations(
+                stmts,
+                names.string_annotations,
+                &mut operations,
+                source,
+                false,
+            );
         }
         SuitePreparation::new(&operations, source)
             .complete(stmts, kind)
@@ -1016,19 +1054,13 @@ mod tests {
 
     #[test]
     fn annotation_callback_numbers_physical_occurrences_and_keeps_unsupported_values_late() {
-        let text = "first: int\nsecond: list[int]\ncomplex: dict[str, int]\nforward: 'list[int]'\n";
+        let text = "first: int\nsecond: list[int]\ncomplex: dict[str, int]\nforward: 'list[int]'\ndeferred: (lambda: int)()\n";
         let graph = SourceGraph::single(text).unwrap();
         let module = &graph.modules[graph.entry];
         let stmts = &module.parsed.syntax().body;
         let literals = values::ModuleSource::new(module);
         let source = literals.context(text);
-        let sites = module_annotations(
-            stmts,
-            false,
-            &mut HashMap::new(),
-            source,
-            false,
-        );
+        let sites = module_annotations(stmts, false, &mut HashMap::new(), source, false);
         let first = &sites[&stmts[0].start()];
         let second = &sites[&stmts[1].start()];
         let whole = DeferredModuleAnnotation::prepare_body(&[first, second, first]);
@@ -1070,13 +1102,7 @@ mod tests {
                 })
                 .collect();
         assert_eq!(numbered, [(0, "first"), (1, "second"), (2, "first")]);
-        let bundled_sites = module_annotations(
-            stmts,
-            false,
-            &mut HashMap::new(),
-            source,
-            true,
-        );
+        let bundled_sites = module_annotations(stmts, false, &mut HashMap::new(), source, true);
         let quoted_site = stmts[3].start();
         assert!(
             matches!(&sites[&quoted_site].value, AnnotationValue::Forward {text, ..} if text == "list[int]")
@@ -1090,7 +1116,8 @@ mod tests {
         };
         assert_eq!(quoted.statements, 0..1);
         {
-            let unavailable = &sites[&stmts[2].start()];
+            assert!(matches!(sites[&stmts[2].start()].value, AnnotationValue::Checked(_)));
+            let unavailable = &sites[&stmts[4].start()];
             assert!(matches!(unavailable.value, AnnotationValue::Source(_)));
             let mixed = DeferredModuleAnnotation::prepare_body(&[first, unavailable, second]);
             let [gap] = mixed.residual.as_slice() else {
@@ -1104,8 +1131,11 @@ mod tests {
 
     #[test]
     fn prepared_source_runs_keep_their_order_and_namespace_ownership() {
-        let text = "from . import a\nx: int = a\nif a:\n    del a\ny: int = []\nimport z\n";
-        let mut stmts = ruff_python_parser::parse_module(text).unwrap().into_syntax().body;
+        let text = "from . import a\nx: int = a\nif a:\n    del a\ny: int = (lambda: 1)()\nimport z\n";
+        let mut stmts = ruff_python_parser::parse_module(text)
+            .unwrap()
+            .into_syntax()
+            .body;
         let names = imre_ast::lower(&mut stmts);
         let mut ops = namespace_operations(&stmts, &names);
         let replacements = HashMap::new();
@@ -1117,13 +1147,8 @@ mod tests {
             has_templates: false,
             method_imports: &imports,
         };
-        let annotations = module_annotations(
-            &stmts,
-            names.string_annotations,
-            &mut ops,
-            source,
-            false,
-        );
+        let annotations =
+            module_annotations(&stmts, names.string_annotations, &mut ops, source, false);
         assert_eq!(annotations.len(), 2);
         let mut prepare = SuitePreparation::new(&ops, source);
         let plan = prepare.suite(&stmts, RegisteredScope::Module);
@@ -1435,6 +1460,27 @@ mod tests {
     }
 
     #[test]
+    fn declared_displays_in_mixed_functions_keep_their_element_diagnostics() {
+        for (assignment, diagnostic) in [
+            (
+                "values: list[int] = [True]",
+                "expected list[int], got list[bool]",
+            ),
+            (
+                "values: tuple[str, int] = ('ok', True)",
+                "expected tuple[str, int], got tuple[str, bool]",
+            ),
+        ] {
+            let source = format!(
+                "def publish(send):\n    previous: int = 0\n    previous = send(1)\n    {assignment}\n    print(locals()['previous'])\ndef echo(value):\n    return 41\nentries = {{'publish': publish}}\nentries[input()]({{'send': echo}}[input()])\n"
+            );
+            let graph = SourceGraph::single(&source).unwrap();
+            let error = super::super::lower(&graph).err().unwrap();
+            assert!(error.contains(diagnostic), "{error}");
+        }
+    }
+
+    #[test]
     fn an_annotated_noncallable_local_keeps_its_checked_call_error() {
         let graph = SourceGraph::single("def bad(x: int, arg):\n    x(arg)\n").unwrap();
         assert!(super::super::lower(&graph).is_err());
@@ -1585,16 +1631,29 @@ mod tests {
             source.context(text),
         )
         .unwrap();
-        let sites: Vec<_> = suite.function.body.iter().filter_map(|statement| {
-            let Statement::Expr(Expr { kind: ExprKind::Builtin(op, _), .. }) = statement else {
-                return None;
-            };
-            match op {
-                Builtin::RegisteredDeleteName(_, range)
-                | Builtin::RegisteredAttribute { action: ir::AttributeAction::Delete, range, .. } => Some(&text[*range]),
-                _ => None,
-            }
-        }).collect();
+        let sites: Vec<_> = suite
+            .function
+            .body
+            .iter()
+            .filter_map(|statement| {
+                let Statement::Expr(Expr {
+                    kind: ExprKind::Builtin(op, _),
+                    ..
+                }) = statement
+                else {
+                    return None;
+                };
+                match op {
+                    Builtin::RegisteredDeleteName(_, range)
+                    | Builtin::RegisteredAttribute {
+                        action: ir::AttributeAction::Delete,
+                        range,
+                        ..
+                    } => Some(&text[*range]),
+                    _ => None,
+                }
+            })
+            .collect();
         assert_eq!(sites, ["first", "obj.field", "last", "obj.tail"]);
     }
 
@@ -1625,9 +1684,14 @@ mod tests {
                     ExprKind::Builtin(Builtin::RegisteredUnpack { count, star }, _) => {
                         snapshots.push((*count, *star))
                     }
-                    ExprKind::Builtin(Builtin::RegisteredAttribute { action: ir::AttributeAction::Store, name, .. }, _) if name == "field" => {
-                        attrs += 1
-                    }
+                    ExprKind::Builtin(
+                        Builtin::RegisteredAttribute {
+                            action: ir::AttributeAction::Store,
+                            name,
+                            ..
+                        },
+                        _,
+                    ) if name == "field" => attrs += 1,
                     _ => {}
                 });
                 ir::walk_statements(&body.function.body, &mut |stmt| {
@@ -1776,7 +1840,9 @@ mod tests {
         let mut pulls = 0;
         ir::walk_expressions(&checked.function.body, &mut |expr| match &expr.kind {
             ExprKind::Builtin(Builtin::RegisteredNamespace(_), _) => namespaces += 1,
-            ExprKind::Builtin(Builtin::RegisteredCall(call), _) if call.explicit_scope => scoped_calls += 1,
+            ExprKind::Builtin(Builtin::RegisteredCall(call), _) if call.explicit_scope => {
+                scoped_calls += 1
+            }
             _ => {}
         });
         ir::walk_statements(&checked.function.body, &mut |stmt| {

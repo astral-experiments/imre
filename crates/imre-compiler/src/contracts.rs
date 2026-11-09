@@ -688,6 +688,7 @@ impl Builtin {
             | Self::RegisteredName(_)
             | Self::RegisteredUnary(_)
             | Self::RegisteredAttribute { .. }
+            | Self::RegisteredSpread
             | Self::RegisteredDict(_)
             | Self::RegisteredSubscript(..)
             | Self::RegisteredEllipsis

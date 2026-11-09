@@ -1,5 +1,6 @@
 //! Lower values evaluated against a registered Python scope into the expression IR.
 use super::*;
+use crate::ir::DisplayKind;
 use std::collections::BTreeSet;
 
 pub(in crate::frontend) struct ModuleSource {
@@ -222,7 +223,7 @@ pub(crate) fn packed_arguments(args: &ast::Arguments) -> ir::PackedArguments {
     }
 }
 
-pub(crate) fn positional_elements(args: &[ast::Expr]) -> impl Iterator<Item = (bool, &ast::Expr)> {
+fn positional_elements(args: &[ast::Expr]) -> impl Iterator<Item = (bool, &ast::Expr)> {
     args.iter().map(|arg| match arg {
         ast::Expr::Starred(star) => (true, star.value.as_ref()),
         value => (false, value),
@@ -314,6 +315,73 @@ pub(in crate::frontend) fn call_with_target<E>(
     Ok(object_call(call, operands))
 }
 
+fn number_literal(number: &ast::Number, minus: bool) -> ExprKind {
+    match number {
+        ast::Number::Int(n) => {
+            let mut text = n.to_string();
+            if minus && text != "0" {
+                text.insert(0, '-');
+            }
+            ExprKind::Int(text)
+        }
+        ast::Number::Float(n) => ExprKind::Float(if minus { -*n } else { *n }),
+        ast::Number::Complex { real, imag } => {
+            let (real, imag) = if minus {
+                (-*real, -*imag)
+            } else {
+                (*real, *imag)
+            };
+            ExprKind::Builtin(Builtin::RegisteredComplex(real, imag), vec![])
+        }
+    }
+}
+
+/// Identify the sequence operation even when an individual operand still needs its source adapter.
+pub(crate) fn display_elements(node: &ast::Expr) -> Option<(&[ast::Expr], DisplayKind)> {
+    match node {
+        ast::Expr::List(list) => Some((&list.elts, DisplayKind::List)),
+        ast::Expr::Tuple(tuple) => Some((&tuple.elts, DisplayKind::Tuple)),
+        ast::Expr::Set(set) => Some((&set.elts, DisplayKind::Set)),
+        _ => None,
+    }
+}
+
+fn display_operands<E>(
+    items: &[ast::Expr],
+    source: RegisteredSource<'_>,
+    child: &mut impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
+) -> StdResult<Vec<Expr>, E> {
+    items
+        .iter()
+        .map(|item| {
+            if let ast::Expr::Starred(star) = item {
+                Ok(Expr {
+                    ty: Type::PythonObject,
+                    kind: ExprKind::Builtin(Builtin::RegisteredSpread, vec![child(&star.value)?]),
+                })
+            } else if let ast::Expr::UnaryOp(op) = item
+                && matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
+                && let ast::Expr::NumberLiteral(n) = &*op.operand
+            {
+                // The parser keeps the sign separate. Only an exact literal has no user slot.
+                Ok(source.located(
+                    item,
+                    Expr {
+                        ty: match n.value {
+                            ast::Number::Int(_) => Type::Int,
+                            ast::Number::Float(_) => Type::Float,
+                            ast::Number::Complex { .. } => Type::PythonObject,
+                        },
+                        kind: number_literal(&n.value, op.op == ast::UnaryOp::USub),
+                    },
+                ))
+            } else {
+                child(item)
+            }
+        })
+        .collect()
+}
+
 /// Select one registered-frame operation before requesting its operands in source order.
 pub(super) fn operation<E>(
     node: &ast::Expr,
@@ -322,6 +390,20 @@ pub(super) fn operation<E>(
     dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
     mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
 ) -> StdResult<Option<Expr>, E> {
+    if let Some((items, display)) = display_elements(node) {
+        let values = display_operands(items, source, &mut child)?;
+        return Ok(Some(Expr {
+            ty: Type::PythonObject,
+            kind: match display {
+                DisplayKind::List => ExprKind::List(values),
+                DisplayKind::Tuple => ExprKind::Tuple(values),
+                DisplayKind::Set => ExprKind::Set {
+                    element: Type::PythonObject,
+                    values,
+                },
+            },
+        }));
+    }
     if let Some(selected) = source.object_operation(node) {
         if !matches!(
             selected.opcode,
@@ -363,13 +445,7 @@ pub(super) fn operation<E>(
             }
             return Ok(Some(name_binding(&name.id)));
         }
-        ast::Expr::NumberLiteral(lit) => match &lit.value {
-            ast::Number::Int(n) => ExprKind::Int(n.to_string()),
-            ast::Number::Float(n) => ExprKind::Float(*n),
-            ast::Number::Complex { real, imag } => {
-                ExprKind::Builtin(Builtin::RegisteredComplex(*real, *imag), vec![])
-            }
-        },
+        ast::Expr::NumberLiteral(lit) => number_literal(&lit.value, false),
         ast::Expr::StringLiteral(lit) => {
             return Ok(Some(registered_string(
                 lit.value.to_str(),
@@ -427,6 +503,58 @@ pub(crate) fn registered_value(node: &ast::Expr, source: RegisteredSource<'_>) -
 }
 
 impl Checker<'_> {
+    /// A Python handle does not erase an inferred container contract. Retain a fixed shape
+    /// only when the checked operands establish its elements; otherwise keep object storage.
+    fn registered_display_type(&self, kind: &ExprKind) -> Option<Type> {
+        let items = match kind {
+            ExprKind::List(items)
+            | ExprKind::Tuple(items)
+            | ExprKind::Set { values: items, .. } => items,
+            _ => return None,
+        };
+        let tuple = matches!(kind, ExprKind::Tuple(_));
+        let set = matches!(kind, ExprKind::Set { .. });
+        let mut fields = Vec::with_capacity(items.len());
+        for item in items {
+            if let ExprKind::Builtin(Builtin::RegisteredSpread, values) = &item.kind {
+                let ty = values[0].ty;
+                if let Some(expanded) = self.types.fields(ty) {
+                    fields.extend(expanded);
+                } else if !tuple && let Some(element) = self.types.element(ty) {
+                    fields.push(element);
+                } else if set && let Some(element) = self.types.readable_set_element(ty) {
+                    fields.push(element);
+                } else {
+                    return None;
+                }
+            } else {
+                fields.push(item.ty);
+            }
+        }
+        if fields.contains(&Type::PythonObject) {
+            return None;
+        }
+        if tuple {
+            return Some(self.types.tuple(fields));
+        }
+        if set {
+            let &element = fields.first()?;
+            return (self.types.hashable_key(element) && fields.iter().all(|&ty| ty == element))
+                .then(|| self.types.set(element));
+        }
+        let element = fields.first().copied().unwrap_or(Type::Int);
+        if fields.iter().all(|&ty| ty == element) {
+            return Some(self.types.list(element));
+        }
+        if fields
+            .iter()
+            .all(|&ty| self.can_mix_list_items(element, ty))
+        {
+            return Some(self.types.list(self.types.string_or_int()));
+        }
+        None
+    }
+
     pub(in crate::frontend) fn registered_operand(
         &mut self,
         node: &ast::Expr,
@@ -500,8 +628,15 @@ impl Checker<'_> {
             ExprKind::Bool(_) => Type::Bool,
             ExprKind::None => Type::None,
             ExprKind::Conditional(_, yes, no) if yes.ty == no.ty => yes.ty,
-            _ => value.ty,
+            _ => self
+                .registered_display_type(&value.kind)
+                .unwrap_or(value.ty),
         };
+        if let ExprKind::Set { element, .. } = &mut value.kind
+            && let Some(known) = self.types.set_element(value.ty)
+        {
+            *element = known;
+        }
         Ok(Some(source.located(node, value)))
     }
 }

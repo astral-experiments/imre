@@ -6,6 +6,8 @@ use std::sync::Arc;
 
 use super::*;
 
+mod linked_literals;
+
 /// Check that specializing these name loads cannot bypass Python.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_native_bindings(
@@ -250,12 +252,12 @@ impl Context {
             }
             "linked_string_tuple" => {
                 let items = self.items(a)?;
-                Ok(self.linked_constant(|ctx| {
+                self.linked_constant(|ctx| {
                     ctx.heap
                         .linked_string_constant(b, |heap| heap.packed_tuple(items, true))
-                }))
+                })
             }
-            "linked_string" => Ok(self.heap.linked_string_constant(b, |_| a)),
+            "linked_string" => self.heap.linked_string_constant(b, |_| a),
             "match_class" => self.match_class(a, b, c),
             "match_mapping" => self.match_mapping(a, b),
             "match_mapping_keys" => self.match_mapping_keys(a, b),
@@ -464,6 +466,8 @@ impl Context {
                         list.extend_from_slice(chunk);
                         remaining = rest;
                     }
+                } else if matches!(self.heap.get(a), Value::Set { frozen: false, .. }) {
+                    builtins::update_set(self, a, b)?;
                 } else {
                     for item in self.items(b)? {
                         self.op("append", a, item, NONE)?;
@@ -1501,28 +1505,170 @@ pub(super) unsafe extern "C" fn imre_dyn_permanent_sequence(
     len: usize,
     tuple: bool,
 ) -> Id {
-    // SAFETY: generated code supplies a live context and the exact byte length.
-    let (ctx, bytes) = unsafe { (&mut *ctx, slice::from_raw_parts(data, len)) };
+    // SAFETY: the legacy entry supplies the same permanent handles as a byte count.
+    unsafe { imre_dyn_build_sequence(ctx, data.cast(), len / 2, true, tuple, std::ptr::null()) }
+}
+
+/// Build a display from evaluated handles or from linked immutable handle data.
+///
+/// # Safety
+/// The caller supplies a live context and `count` rooted native handles, or little-endian
+/// u16 permanent handles when `packed` is set. A nonnull slot identifies a constant tuple.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_build_sequence(
+    ctx: *mut Context,
+    data: *const Id,
+    count: usize,
+    packed: bool,
+    tuple: bool,
+    slot: *const u8,
+) -> Id {
+    // SAFETY: generated code supplies its active context.
+    let ctx = unsafe { &mut *ctx };
     if ctx.pending.is_some() {
         return NONE;
     }
-    let (handles, rest) = bytes.as_chunks::<2>();
-    debug_assert!(rest.is_empty());
-    let mut items = Vec::new();
-    if items.try_reserve_exact(handles.len()).is_err() {
-        return finish(ctx, Err(Error::new("MemoryError", "")));
-    }
-    items.extend(
-        handles
-            .iter()
-            .map(|&pair| Id::from(u16::from_le_bytes(pair))),
-    );
-    let id = if tuple {
-        ctx.linked_constant(|ctx| ctx.heap.packed_tuple(items, true))
-    } else {
-        ctx.alloc(Value::List(items))
+    let items = || -> Result<Vec<Id>> {
+        let mut items = Vec::new();
+        items
+            .try_reserve_exact(count)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        if packed {
+            // SAFETY: little-endian pairs in module data need not be aligned.
+            let pairs = unsafe { slice::from_raw_parts(data.cast::<[u8; 2]>(), count) };
+            items.extend(pairs.iter().map(|&pair| Id::from(u16::from_le_bytes(pair))));
+        } else {
+            // SAFETY: a zero-length display may pass null; the frame roots all other handles.
+            items.extend_from_slice(unsafe { live_handles(data, count) });
+        }
+        Ok(items)
     };
-    finish(ctx, Ok(id))
+    let result = if !slot.is_null() {
+        ctx.linked_constant(|ctx| {
+            ctx.heap
+                .cached_constant(super::value::ConstantSlot::Linked(slot.addr()), |heap| {
+                    Ok(heap.packed_tuple(items()?, true))
+                })
+        })
+    } else if tuple && packed {
+        ctx.linked_constant(|ctx| Ok(ctx.heap.packed_tuple(items()?, true)))
+    } else {
+        items().map(|items| {
+            if tuple {
+                ctx.heap.packed_tuple(items, false)
+            } else {
+                ctx.alloc(Value::List(items))
+            }
+        })
+    };
+    finish(ctx, result)
+}
+
+/// Transfer the evaluated keys to a fresh set in operand order, including the release of
+/// duplicates and, following an insertion error, the remaining keys before the partial set.
+///
+/// # Safety
+/// The compiler supplies a live context, rooted handles, and the mark before their evaluation.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_build_set(
+    ctx: *mut Context,
+    data: *const Id,
+    count: usize,
+    mark: usize,
+) -> Id {
+    // SAFETY: the caller keeps this frame and its handle array live across hash/equality callbacks.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    // SAFETY: the compiler roots each key and keeps its native operand array live for this call.
+    let keys = unsafe { live_handles(data, count) };
+    let result = (|| {
+        ctx.heap.reserve_temporaries(1 + count)?;
+        let set = ctx.op("set", NONE, NONE, NONE)?;
+        ctx.discard_temporaries(mark, std::iter::once(set).chain(keys.iter().rev().copied()));
+        let mut result = Ok(set);
+        for (index, &key) in keys.iter().enumerate() {
+            if result.is_ok() {
+                result = builtins::set_add(ctx, set, key).map(|()| set);
+            }
+            let key_mark = mark + count - index;
+            match &result {
+                Ok(_) => ctx.discard_truth(key_mark),
+                Err(error) => ctx.discard_temporaries(key_mark, error.roots()),
+            }
+        }
+        ctx.release_with_result(mark, result)
+    })();
+    finish(ctx, result)
+}
+
+/// Intern an already evaluated immutable value in its linked source unit.
+///
+/// # Safety
+/// The context and value must be live and the compiler slot must have a stable, unique address.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_linked_value(
+    ctx: *mut Context,
+    slot: *const u8,
+    value: Id,
+) -> Id {
+    // SAFETY: generated code keeps the value rooted in its live context.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let result = ctx
+        .heap
+        .cached_constant(super::value::ConstantSlot::Linked(slot.addr()), |_| {
+            Ok(value)
+        });
+    finish(ctx, result)
+}
+
+/// Insert one streamed display operand and transfer its roots to the receiving list or set.
+///
+/// # Safety
+/// The compiler passes its live context, a mutable list or set, its operand and their mark.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_display_item(
+    ctx: *mut Context,
+    list: Id,
+    item: Id,
+    mark: usize,
+    extend: bool,
+) -> Id {
+    let op = if extend { c"extend" } else { c"append" };
+    // SAFETY: this is the ordinary checked operation on the same rooted operands.
+    let result = unsafe { imre_dyn_op_at(ctx, op.as_ptr(), list, item, NONE, std::ptr::null()) };
+    if result != NONE {
+        // SAFETY: both operations return their target container on success.
+        unsafe { &mut *ctx }.discard_temporaries(mark, [result]);
+    }
+    result
+}
+
+/// Pop a failed display's operands in stack order while their Python exception stays active.
+///
+/// # Safety
+/// The context and mark must belong to the active registered frame.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_unwind_display(ctx: *mut Context, mark: usize) {
+    // SAFETY: the generated error edge is in the frame which established the mark.
+    let ctx = unsafe { &mut *ctx };
+    if (!ctx.heap.tracks_finalizers() && !ctx.heap.has_weak_values)
+        || ctx.can_skip_finalizer_sweep(mark)
+    {
+        ctx.discard_truth(mark);
+        return;
+    }
+    while ctx.heap.temporary_mark() > mark {
+        let index = ctx.heap.temporary_mark() - 1;
+        let (heap, roots) = ctx.heap_and_roots();
+        if !heap.expand_released_sequence(index, roots) {
+            ctx.discard_truth(index);
+        }
+    }
 }
 
 /// Borrow a tagged integer from an exact Python int. Zero indicates another type.
