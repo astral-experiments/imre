@@ -1,23 +1,5 @@
-//! Coroutine function flags and the identity marker from Lib/inspect.py.
+//! Native descriptor, frame and signature layout helpers for inspect.
 use super::{Context, FALSE, Id, Result, TRUE, Value};
-
-pub(super) fn marker(ctx: &mut Context) -> Id {
-    let key = "inspect._is_coroutine_mark";
-    if let Some(&value) = ctx.builtins.get(key) {
-        return value;
-    }
-    let class = ctx.builtin("object");
-    let value = ctx.instance(class, None);
-    ctx.builtins.insert(key.to_owned(), value);
-    value
-}
-
-fn attribute(ctx: &mut Context, obj: Id, name: &str) -> Result<Option<Id>> {
-    match ctx.lookup_attr(obj, name) {
-        Err(error) if ctx.is_attribute_error(&error) => Ok(None),
-        result => result.map(Some),
-    }
-}
 
 pub(super) fn call(
     ctx: &mut Context,
@@ -52,12 +34,7 @@ pub(super) fn call(
             "_static_member expects three positional arguments",
         ));
     }
-    let param = if name == "markcoroutinefunction" {
-        "func"
-    } else {
-        "obj"
-    };
-    let [mut obj] = super::required_arguments(name, [param], args, kwargs)?;
+    let [obj] = super::required_arguments(name, ["obj"], args, kwargs)?;
     match name {
         "_abstract_flags" => {
             let target = ctx.weak_proxy_target(obj)?;
@@ -78,17 +55,15 @@ pub(super) fn call(
                 // isinstance(obj, type) can also succeed through a reported __class__.
                 _ => return ctx.lookup_attr(obj, "__flags__"),
             };
-            return Ok(ctx.int(if abstract_class { 1 << 20 } else { 0 }));
+            Ok(ctx.int(if abstract_class { 1 << 20 } else { 0 }))
         }
-        "_native_data_descriptor" => {
-            return Ok(if ctx.native_data_descriptor(obj) {
-                TRUE
-            } else {
-                FALSE
-            });
-        }
+        "_native_data_descriptor" => Ok(if ctx.native_data_descriptor(obj) {
+            TRUE
+        } else {
+            FALSE
+        }),
         "_frame_position" => match *ctx.heap.get(obj) {
-            Value::Traceback { .. } => return Ok(super::traceback::tb_position(ctx, obj)),
+            Value::Traceback { .. } => Ok(super::traceback::tb_position(ctx, obj)),
             Value::PythonFrame { lineno, .. } => {
                 let fields = match ctx.frame_position(obj) {
                     Some(range) => range.map(|v| ctx.int(i64::from(v))),
@@ -99,59 +74,18 @@ pub(super) fn call(
                         super::NONE,
                     ],
                 };
-                return Ok(ctx.alloc(Value::Tuple(fields.to_vec())));
+                Ok(ctx.alloc(Value::Tuple(fields.to_vec())))
             }
-            _ => {
-                return Err(super::Error::new(
-                    "TypeError",
-                    "expected a frame or traceback",
-                ));
-            }
+            _ => Err(super::Error::new(
+                "TypeError",
+                "expected a frame or traceback",
+            )),
         },
-        "_signature_layout" => return layout(ctx, obj),
-        _ => {}
-    }
-    if name == "markcoroutinefunction" {
-        obj = attribute(ctx, obj, "__func__")?.unwrap_or(obj);
-        let mark = marker(ctx);
-        ctx.set_attr(obj, "_is_coroutine_marker", mark)?;
-        return Ok(obj);
-    }
-    // The bundled functools helper also recognizes the function produced by class access
-    // to a partialmethod. A cold import can lack the Python module or its initializer.
-    let functools = ctx.text("functools");
-    let target = if let Some(module) = ctx.registered_module(functools)?
-        && let Value::Module { scope, .. } = *ctx.heap.get(module)
-        && let Some(unwrap) = ctx.scope_name(scope, "_unwrap_partialmethod")
-    {
-        ctx.call(unwrap, vec![obj], Vec::new())?
-    } else {
-        obj
-    };
-    let target = unwrap_method_and_partial(ctx, target);
-    if let Value::Function { code, .. } = ctx.heap.get(target)
-        && ctx.code_object(*code).is_coroutine()
-    {
-        return Ok(TRUE);
-    }
-    // A marker on the sync function wrapped by an unbound partialmethod does not propagate.
-    let obj = unwrap_method_and_partial(ctx, obj);
-    let marked =
-        attribute(ctx, obj, "_is_coroutine_marker")?.is_some_and(|value| value == marker(ctx));
-    Ok(if marked { TRUE } else { FALSE })
-}
-
-fn unwrap_method_and_partial(ctx: &Context, mut obj: Id) -> Id {
-    loop {
-        match ctx.heap.get(obj) {
-            Value::Method { callable, .. }
-                if matches!(ctx.heap.get(*callable), Value::Function { .. }) =>
-            {
-                obj = *callable
-            }
-            Value::Partial { function, .. } => obj = *function,
-            _ => return obj,
-        }
+        "_signature_layout" => layout(ctx, obj),
+        _ => Err(super::Error::new(
+            "SystemError",
+            format!("unknown inspect helper {name}"),
+        )),
     }
 }
 

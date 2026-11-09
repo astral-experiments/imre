@@ -754,7 +754,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_CallableGenericAlias"
             | "_LiteralGenericAlias",
         ) => ctx.builtin(&format!("typing.{name}")),
-        ("inspect", "_is_coroutine_mark") => inspect::marker(ctx),
         #[cfg(target_os = "linux")]
         ("time", "CLOCK_REALTIME") => ctx.int(i64::from(libc::CLOCK_REALTIME)),
         ("time", "_STRUCT_TM_ITEMS") => ctx.int(11),
@@ -995,10 +994,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_string", "formatter_parser" | "formatter_field_name_split")
         | (
             "inspect",
-            "iscoroutinefunction"
-            | "_frame_position"
+            "_frame_position"
             | "_abstract_flags"
-            | "markcoroutinefunction"
             | "_descriptor_get"
             | "_native_data_descriptor"
             | "_static_member"
