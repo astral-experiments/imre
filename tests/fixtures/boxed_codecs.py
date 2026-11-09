@@ -121,6 +121,49 @@ def check_shift_jis():
     assert "☃😀☃".encode("shift_jis", "test.sjis_switch") == b"AB?"
 
 
+def check_multibyte_factories():
+    import io
+    from importlib import import_module
+
+    for name, alias, char in (("shift_jis", "s_jis", "日"), ("big5", "big5_tw", "台")):
+        provider = import_module("encodings." + name)
+        factory = provider.getregentry
+        calls = []
+
+        def record_entry():
+            entry = factory()
+            calls.append(entry)
+            return entry
+
+        provider.getregentry = record_entry
+        try:
+            entry = codecs.lookup(alias)
+            assert codecs.lookup(alias) is entry
+            assert len(calls) == 1 and calls[0] is entry
+        finally:
+            provider.getregentry = factory
+
+        assert entry.name == name and entry is not factory()
+        assert entry.encode.__self__ is entry.decode.__self__ is provider.codec
+        assert provider.Codec.decode(b"A") == ("A", 1)
+        assert entry.incrementalencoder is provider.IncrementalEncoder
+        assert entry.incrementaldecoder is provider.IncrementalDecoder
+        assert entry.streamreader is provider.StreamReader
+        assert entry.streamwriter is provider.StreamWriter
+        encoded = char.encode(name)
+        assert entry.streamreader(io.BytesIO(encoded)).read(1) == char
+        decoder = entry.incrementaldecoder()
+        assert decoder.decode(encoded[:1]) == ""
+        try:
+            decoder.decode(b"", final=True)
+        except UnicodeDecodeError as exc:
+            assert exc.encoding == name and exc.reason == "incomplete multibyte sequence"
+        else:
+            raise AssertionError("accepted a truncated multibyte lead")
+        assert decoder.getstate() == (encoded[:1], 0)
+        assert decoder.decode(encoded[1:], final=True) == char
+
+
 def check_raw_unicode_escape():
     source = "\0\n\\u1234\x1aÿĀ€\ud800\udfff😀"
     encoded = b"\0\n\\u1234\x1a\xff" + br"\u0100\u20ac\ud800\udfff\U0001f600"
@@ -340,6 +383,25 @@ def check_charmap_undefined_bytes():
 
 
 def check_charmap_factories():
+    from encodings import cp424
+    factory = cp424.getregentry
+    calls = []
+
+    def record_entry():
+        entry = factory()
+        calls.append(entry)
+        return entry
+
+    cp424.getregentry = record_entry
+    try:
+        first = codecs.lookup("csibm424")
+        assert codecs.lookup("csibm424") is first
+        second = codecs.lookup("ebcdic-cp-he")
+        assert first is not second and len(calls) == 2
+        assert first is calls[0] and second is calls[1]
+    finally:
+        cp424.getregentry = factory
+
     from encodings import cp1252
     from io import BytesIO
 
@@ -539,6 +601,7 @@ def current():
     utf16_extended_decoder()
     check_shift_jis()
     check_big5()
+    check_multibyte_factories()
     check_raw_unicode_escape()
     check_boms()
     decoder = codecs.IncrementalDecoder(errors="replace")
@@ -640,6 +703,22 @@ def current():
         text = wire.decode(name)
         assert text[128:131] == "Çüé" and text.encode(name) == wire
         assert codecs.lookup(name).name == "cp437"
+
+    koi8_r = codecs.lookup("cskoi8r")
+    assert koi8_r.name == "koi8-r"
+    assert koi8_r.incrementaldecoder().decode(b"\xa4", final=True) == "╓"
+    assert wire.decode("KOI8-R").encode("cskoi8r") == wire
+
+    from encodings import koi8_r as provider
+    fresh = provider.getregentry()
+    assert fresh is not provider.getregentry() and fresh is not koi8_r
+    assert fresh.name == koi8_r.name and fresh.encode("╓") == (b"\xa4", 1)
+    assert fresh.decode(b"\xa4") == ("╓", 1)
+    assert fresh.encode.__self__ is not fresh.decode.__self__
+    assert fresh.encode.__self__.__class__ is fresh.decode.__self__.__class__ is provider.Codec
+    assert fresh.incrementalencoder is provider.IncrementalEncoder
+    assert fresh.incrementaldecoder is provider.IncrementalDecoder
+    assert fresh.streamwriter is provider.StreamWriter and fresh.streamreader is provider.StreamReader
 
     from encodings.iso8859_2 import Codec as Latin2
     latin2 = codecs.lookup("iso.ir.101")

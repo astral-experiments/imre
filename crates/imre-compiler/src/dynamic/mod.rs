@@ -1838,7 +1838,7 @@ fn runtime_sources(
         .chain((!seen("encodings.big5")).then_some((
             "encodings.big5",
             "encodings/big5.py",
-            include_str!("../../stdlib/encodings/big5.py"),
+            include_str!("../../stdlib/encodings/multibyte.py"),
         )))
         .chain(
             RUNTIME_PROVIDERS
@@ -1942,6 +1942,7 @@ const RUNTIME_PROVIDERS: &[&str] = &[
     "encodings.cp437",
     "encodings.iso8859_2",
     "encodings.iso8859_15",
+    "encodings.koi8_r",
     "encodings.koi8_u",
     "encodings.idna",
     "encodings.shift_jis",

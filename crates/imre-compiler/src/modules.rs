@@ -115,9 +115,10 @@ pub(crate) fn charmap_provider_path(name: &str, boxed: bool) -> Option<&'static 
         "encodings.cp1252" => "encodings/cp1252.py",
         "encodings.cp424" => "encodings/cp424.py",
         "encodings.cp437" => "encodings/cp437.py",
-        // Latin-2 is available through the object importer. Exposing its source to
-        // the checked graph would send literal imports through boxed evaluation.
+        // Keep these codec modules on the object importer. Exposing their source
+        // to the checked graph would send literal imports through boxed evaluation.
         "encodings.iso8859_2" if boxed => "encodings/iso8859_2.py",
+        "encodings.koi8_r" if boxed => "encodings/koi8_r.py",
         "encodings.iso8859_15" => "encodings/iso8859_15.py",
         "encodings.koi8_u" => "encodings/koi8_u.py",
         _ => return None,
@@ -334,7 +335,10 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
             include_str!("../stdlib/encodings/utf_wide.py"),
         )),
         "encodings.idna" => bundled_source!("encodings/idna.py"),
-        "encodings.shift_jis" => bundled_source!("encodings/shift_jis.py"),
+        "encodings.shift_jis" => Some((
+            "encodings/shift_jis.py",
+            include_str!("../stdlib/encodings/multibyte.py"),
+        )),
         "codeop" => bundled_source!("codeop.py"),
         "keyword" => Some((
             "keyword.py",
@@ -527,7 +531,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "gettext" => bundled_source!("gettext.py"),
         "uuid" => bundled_source!("uuid.py"),
         _ => charmap_provider_path(name, false)
-            .map(|path| (path, include_str!("../stdlib/encodings/writer_charmap.py"))),
+            .map(|path| (path, include_str!("../stdlib/encodings/charmap.py"))),
     }
 }
 

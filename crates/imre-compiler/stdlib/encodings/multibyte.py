@@ -1,17 +1,27 @@
-"""Big5 codec backed by the native CPython Taiwan mapping."""
+"""Incremental and stream codecs for the native stateless multibyte mappings."""
 import codecs
 import sys
 from _codecs import _imre_codec_functions
 
-_encode, _decode = _imre_codec_functions("big5")
+_codec_name = __name__.rsplit(".", 1)[1]
+_encode, _decode = _imre_codec_functions(_codec_name)
+
+
+# CPython's multibyte Codec classes expose methods bound to the module's codec.
+class _MultibyteCodec:
+    def encode(self, *args, **kwargs):
+        return _encode(*args, **kwargs)
+
+    def decode(self, input, errors="strict"):
+        return _decode(input, errors)
+
+
+codec = _MultibyteCodec()
 
 
 class Codec(codecs.Codec):
-    encode = _encode
-
-    @staticmethod
-    def decode(input, errors="strict"):
-        return _decode(input, errors)
+    encode = codec.encode
+    decode = codec.decode
 
 
 class _ErrorMode:
@@ -74,7 +84,7 @@ def _pending(buffer, data, consumed):
     if consumed == len(data):
         return buffer
     if len(buffer) + len(data) - consumed > 8:
-        raise UnicodeDecodeError("big5", bytes(data), 0, len(data), "pending buffer overflow")
+        raise UnicodeDecodeError(_codec_name, bytes(data), 0, len(data), "pending buffer overflow")
     return buffer + bytes(data[consumed:])
 
 
@@ -126,7 +136,7 @@ class IncrementalDecoder(_ErrorMode, codecs.BufferedIncrementalDecoder):
         if flags.bit_length() > 64:
             raise OverflowError("int too big to convert")
         if len(buffer) > 8:
-            raise UnicodeDecodeError("big5", buffer, 0, len(buffer), "pending buffer too large")
+            raise UnicodeDecodeError(_codec_name, buffer, 0, len(buffer), "pending buffer too large")
         self.buffer = buffer
         self._state = flags
 
@@ -176,9 +186,9 @@ class StreamWriter(Codec, _ErrorMode, codecs.StreamWriter):
 
 def getregentry():
     return codecs.CodecInfo(
-        name="big5",
-        encode=Codec.encode,
-        decode=Codec.decode,
+        name=_codec_name,
+        encode=Codec().encode,
+        decode=Codec().decode,
         incrementalencoder=IncrementalEncoder,
         incrementaldecoder=IncrementalDecoder,
         streamreader=StreamReader,

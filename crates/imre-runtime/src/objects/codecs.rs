@@ -17,7 +17,6 @@ use std::sync::LazyLock;
 
 pub(crate) struct CodePage {
     index: usize,
-    pub(crate) module_name: &'static str,
     decode: Charmap,
     encode: HashMap<char, u8>,
 }
@@ -31,7 +30,6 @@ impl CodePage {
             .collect();
         Self {
             index,
-            module_name,
             decode,
             encode,
         }
@@ -66,8 +64,9 @@ static KOI8_U: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(8, "koi8_u"))
 static CP1252: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(9, "cp1252"));
 static ISO8859_15: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(10, "iso8859_15"));
 static ISO8859_2: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(12, "iso8859_2"));
+static KOI8_R: LazyLock<CodePage> = LazyLock::new(|| CodePage::new(18, "koi8_r"));
 
-const CODEC_NAMES: [&str; 18] = [
+const CODEC_NAMES: [&str; 19] = [
     "ascii",
     "iso8859-1",
     "utf-8",
@@ -86,6 +85,7 @@ const CODEC_NAMES: [&str; 18] = [
     "utf-32-le",
     "utf-32-be",
     "big5",
+    "koi8-r",
 ];
 
 thread_local! {
@@ -648,6 +648,7 @@ impl Codec {
             "cp424" | "424" | "csibm424" | "ebcdic_cp_he" | "ibm424" => Ok(Self::CodePage(&CP424)),
             "cp437" | "437" | "cspc8codepage437" | "ibm437" => Ok(Self::CodePage(&CP437)),
             "iso8859_15" | "iso_8859_15" | "l9" | "latin9" => Ok(Self::CodePage(&ISO8859_15)),
+            "koi8_r" | "cskoi8r" => Ok(Self::CodePage(&KOI8_R)),
             "koi8_u" => Ok(Self::CodePage(&KOI8_U)),
             "latin1" | "latin" | "iso8859" | "latin_1" | "l1" | "iso8859_1" | "iso_8859_1"
             | "iso_8859_1_1987" | "8859" | "cp819" | "ibm819" | "iso_ir_100" | "csisolatin1" => {
