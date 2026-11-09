@@ -538,7 +538,9 @@ fn launch(
     let worker_active = Arc::clone(&active);
     let fault_workers =
         matches!(operation, Operation::Python(_)).then(|| ctx.heap.begin_fault_worker());
+    let interpreter = fault_workers.as_ref().map(|_| ctx.finalizing.clone());
     handle.spawn(move || {
+        let _publication = interpreter.map(crate::fault_handler::FramePublication::enter);
         // A failed bootstrap publishes no identity and contributes nothing to the live count.
         let mut prefix = None;
         let mut update = None;
