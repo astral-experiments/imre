@@ -447,7 +447,7 @@ impl Function<'_, '_> {
                         v.decorator_list.first().map_or(v.start(), Ranged::start),
                         DefinitionName::Binding(&v.name),
                         Some(&v.parameters),
-                        v.returns.as_deref(),
+                        Some(v),
                         type_params,
                         body,
                     );
@@ -752,7 +752,7 @@ impl Function<'_, '_> {
         start: TextSize,
         name: DefinitionName<'_>,
         params: Option<&ast::Parameters>,
-        returns: Option<&ast::Expr>,
+        function: Option<&ast::StmtFunctionDef>,
         type_params: Option<&ast::TypeParams>,
         mut body: Body<'_>,
     ) -> String {
@@ -768,6 +768,11 @@ impl Function<'_, '_> {
         } else {
             format!("{}{name}", self.prefix)
         };
+        let returns = function.and_then(|f| f.returns.as_deref());
+        // A generic function's immediate lexical parent is its type-parameter scope,
+        // even when lowering does not materialize a separate parameter frame.
+        let generic = function.is_some_and(|f| f.type_params.is_some());
+        let nested = self.in_function || generic;
         let header = matches!(body, Body::ClassParameters(_));
         let prefix = if let Body::ClassParameters(class) = &body {
             if self.declared_globals.contains(class.name.as_str()) {
@@ -792,11 +797,8 @@ impl Function<'_, '_> {
             _ => {
                 let mut flags = self.source.function_flags(
                     params,
-                    type_params.is_some() || self.in_function,
-                    !header
-                        && type_params.is_none()
-                        && !self.prefix.is_empty()
-                        && !self.prefix.ends_with(".<locals>."),
+                    nested,
+                    self.class_locals.is_some() && !self.annotation_lookup && !header && !generic,
                 );
                 if doc.is_some() {
                     flags |= code_flags::HAS_DOCSTRING;
@@ -827,7 +829,7 @@ impl Function<'_, '_> {
             );
             let mut metadata = json!({
                 "posonly": ["format"],
-                "code_flags": self.source.function_flags(None, type_params.is_some() || self.in_function, false),
+                "code_flags": self.source.function_flags(None, nested, false),
                 "scope_reads": reads,
                 "scope_complete": true,
                 "scope_locals_complete": true,
