@@ -1752,6 +1752,19 @@ impl Context {
 }
 
 impl Value {
+    /// Use the ordinary UTF-8 layout whenever all Python code points are scalars.
+    pub(super) fn from_codepoints(points: Vec<u32>) -> Self {
+        if points.iter().any(|c| (0xd800..=0xdfff).contains(c)) {
+            Self::SurrogateStr(points)
+        } else {
+            let text: String = points
+                .into_iter()
+                .map(|c| char::from_u32(c).expect("Python code point"))
+                .collect();
+            Self::Str(text.into())
+        }
+    }
+
     pub(super) fn socket_handle(&self) -> Option<&crate::ObjectOwner> {
         match self {
             Self::Socket(s)

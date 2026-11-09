@@ -16,6 +16,19 @@ class Index:
 
 
 def current():
+    path = "/tmp/æ"
+    assert (path[:0], path[:1], path[1:]) == ("", "/", "tmp/æ")
+    assert path[:] is path
+    astral = "🙂🙂"
+    assert astral[:1] == "🙂" and astral[:2] is astral
+
+    class Text(str):
+        pass
+
+    letter = "æ"
+    for result in (letter[::-1], Text(letter)[:], (letter + "\udcff")[::2]):
+        assert type(result) is str and result == letter and result is not letter
+
     holder = [0, 1, 2, 3]
     exec("holder[::2] = [4, 5]", {"holder": holder})
     assert holder == [4, 1, 5, 3]

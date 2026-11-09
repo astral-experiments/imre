@@ -3680,19 +3680,21 @@ impl Context {
         let bounds = super::slice::sequence_components(self, parts)?;
         let len = match self.heap.get(obj) {
             Value::Str(text) if self.heap.is_ascii_str(obj) => text.len(),
-            Value::Str(text) => match bounds {
-                // A forward slice with nonnegative bounds only needs to know that
-                // its stop is in range. The iterator's lower bound proves that
-                // for short prefixes without counting the rest of the string.
-                [start, Some(stop), step]
-                    if start.unwrap_or(0) >= 0
-                        && step.unwrap_or(1) > 0
-                        && (0..=text.chars().size_hint().0 as i64).contains(&stop) =>
-                {
-                    stop as usize
+            Value::Str(text) => {
+                let lower = text.chars().size_hint().0;
+                // Only a stop strictly below this bound proves a proper prefix.
+                // At equality the slice could contain the entire string.
+                match bounds {
+                    [start, Some(stop), step]
+                        if start.unwrap_or(0) >= 0
+                            && step.unwrap_or(1) > 0
+                            && (0..lower as i64).contains(&stop) =>
+                    {
+                        lower
+                    }
+                    _ => text.chars().count(),
                 }
-                _ => text.chars().count(),
-            },
+            }
             Value::SurrogateStr(points) => points.len(),
             Value::Array(array) => array.len(),
             Value::Bytes(data) | Value::ByteArray(data) => data.len(),
@@ -3704,14 +3706,13 @@ impl Context {
         let [start, end, step] = super::slice::normalize(bounds, len as i64);
         let count = slice_count(start, end, step);
         let positions = slice_positions(start, end, step);
+        let full_forward = start == 0 && step == 1 && count == len;
         let result = match self.heap.get(obj) {
-            Value::Str(_) | Value::SurrogateStr(_)
-                if receiver == obj && start == 0 && step == 1 && count == len =>
-            {
+            Value::Str(_) | Value::SurrogateStr(_) if receiver == obj && full_forward => {
                 return Ok(obj);
             }
             Value::SurrogateStr(points) => {
-                return Ok(self.text_codepoints(sliced_values(points, positions, count)?));
+                Value::from_codepoints(sliced_values(points, positions, count)?)
             }
             Value::Str(text) => {
                 let stride = usize::try_from(step.unsigned_abs()).unwrap_or(usize::MAX);
@@ -3750,6 +3751,10 @@ impl Context {
             }
             _ => unreachable!("validated sequence"),
         };
+        // Extended slices and full subclass copies bypass the single-character cache.
+        if count == 1 && (step != 1 || full_forward) && matches!(result, Value::Str(_)) {
+            return self.heap.fresh_string(result);
+        }
         Ok(self.alloc(result))
     }
 

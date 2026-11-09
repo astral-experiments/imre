@@ -411,18 +411,8 @@ impl Context {
     fn text(&mut self, value: impl Into<crate::Str>) -> Id {
         self.heap.owned_text(value.into())
     }
-    /// Use the ordinary UTF-8 layout whenever all Python code points are scalars.
     fn text_codepoints(&mut self, points: Vec<u32>) -> Id {
-        if points.iter().any(|c| (0xd800..=0xdfff).contains(c)) {
-            self.alloc(Value::SurrogateStr(points))
-        } else {
-            self.text(
-                points
-                    .into_iter()
-                    .map(|c| char::from_u32(c).expect("Python code point"))
-                    .collect::<String>(),
-            )
-        }
+        self.alloc(Value::from_codepoints(points))
     }
 
     /// Read Python code points without converting a surrogate into U+FFFD.
