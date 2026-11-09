@@ -40,6 +40,8 @@ pub(super) struct RootPaths {
     // Dictionary slots must be interpreted the same way during discovery and validation.
     dict_keys: bool,
     retry_with_keys: bool,
+    // Set after a complete weak-root search. Unproven cohorts use the normal interval.
+    weak_backoff: Option<u8>,
 }
 
 /// Strong incoming edges that keep pending owners alive under ordinary reference decrements.
@@ -637,8 +639,18 @@ impl Heap {
                             .weak_reference()
                             .is_some_and(|wr| wr.hash.is_some())
                 });
+            // New targets can become reachable once their constructors return. After
+            // complete coverage, retry early and space out successive partial searches.
+            let weak_backoff = if paths.covers_endpoints {
+                Some(0)
+            } else {
+                self.weak_roots
+                    .weak_backoff
+                    .map(|delay| (2 * delay + 1).min(SEARCH_BACKOFF))
+            };
             self.weak_roots = RootPaths {
-                retry: SEARCH_BACKOFF,
+                retry: weak_backoff.unwrap_or(SEARCH_BACKOFF),
+                weak_backoff,
                 retry_with_keys,
                 ..paths
             };
