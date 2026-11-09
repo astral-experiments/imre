@@ -1774,13 +1774,14 @@ pub(super) fn call(
                 .unwrap_or(0);
             let addr = address(ctx, native::family(&s), peer, method)?;
             super::audit::event(ctx, "socket.sendto", &[*receiver, peer])?;
-            Ok(native::send_to(
-                &s,
-                ctx.native_buffer_bytes(data)?,
-                flags,
-                &addr,
-                active_sendfile_owner(ctx, *receiver)?.as_ref(),
-            )?)
+            let owner = active_sendfile_owner(ctx, *receiver)?;
+            retry(ctx, &s, |ctx, until| {
+                let bytes = ctx.native_buffer_bytes(data)?;
+                Ok(native::with_send_fd(&s, owner.as_ref(), |raw| {
+                    native::send_to_until(raw, bytes, flags, &addr, until)
+                        .map_err(crate::objects::errno_error)
+                })?)
+            })
         })?;
         return Ok(ctx.int(count as i64));
     }

@@ -469,18 +469,6 @@ pub(crate) fn poll_interruptible(
     }
 }
 
-/// Issue a nonblocking syscall and retry on readiness only when a timeout was requested.
-fn socket_call<T>(
-    fd: RawFd,
-    event: i16,
-    until: Option<Deadline>,
-    mut call: impl FnMut() -> io::Result<T>,
-) -> io::Result<T> {
-    retry(until, || {
-        socket_call_interruptible(fd, event, until, &mut call)
-    })
-}
-
 /// Return EINTR from either readiness polling or the syscall to the caller.
 fn socket_call_interruptible<T>(
     fd: RawFd,
@@ -2157,25 +2145,22 @@ pub(crate) fn send(socket: &Object, bytes: &[u8], flags: i32) -> Result<usize> {
     retry(until, || send_until(fd(socket), bytes, flags, until)).map_err(errno_error)
 }
 
-/// Send one message to a socket address using the socket's existing timeout policy.
-pub(crate) fn send_to(
-    s: &Object,
+/// Send one addressed message, returning EINTR to the caller for signal dispatch.
+pub(crate) fn send_to_until(
+    raw: RawFd,
     bytes: &[u8],
     flags: i32,
     address: &SocketAddress,
-    owner: Option<&SendfileIdentity>,
-) -> Result<usize> {
+    until: Option<Deadline>,
+) -> io::Result<usize> {
     #[cfg(not(target_vendor = "apple"))]
     let flags = flags | libc::MSG_NOSIGNAL;
     let (addr, len) = address.raw_parts();
-    with_send_fd(s, owner, |raw| {
-        socket_call(raw, libc::POLLOUT, deadline(s), || {
-            // SAFETY: the source slice and address live through each synchronous sendto.
-            let count =
-                unsafe { libc::sendto(raw, bytes.as_ptr().cast(), bytes.len(), flags, addr, len) };
-            usize::try_from(count).map_err(|_| io::Error::last_os_error())
-        })
-        .map_err(errno_error)
+    socket_call_interruptible(raw, libc::POLLOUT, until, || {
+        // SAFETY: the source slice and address live through this synchronous sendto.
+        let count =
+            unsafe { libc::sendto(raw, bytes.as_ptr().cast(), bytes.len(), flags, addr, len) };
+        usize::try_from(count).map_err(|_| io::Error::last_os_error())
     })
 }
 
