@@ -30,6 +30,8 @@ pub(super) struct CodeObject {
     pub varnames: Id,
     /// Captured parameters in slot order followed by cell-only locals, cached on first read.
     pub cellvars: Id,
+    /// Canonical Python tuple of free variable names, materialized on first access.
+    pub freevar_names: Id,
     /// Decoded argument metadata is shared by calls using this immutable code object.
     pub parsed_parameters: std::cell::OnceCell<std::rc::Rc<super::CallParameters>>,
     pub name: Id,
@@ -2404,6 +2406,7 @@ impl Value {
                 visit.push(code.parameters);
                 visit.push(code.varnames);
                 visit.push(code.cellvars);
+                visit.push(code.freevar_names);
                 visit.extend(code.nested.iter().map(|&(_, id)| id));
                 match code.body {
                     Body::Native(_, operands) if operands != NONE => visit.push(operands),

@@ -527,6 +527,7 @@ impl Context {
             parsed_parameters: Default::default(),
             varnames: NONE,
             cellvars: NONE,
+            freevar_names: NONE,
             body: value::Body::Native(entry, NONE),
             parameters: NONE,
             nested: Vec::new(),

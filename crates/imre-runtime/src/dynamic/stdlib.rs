@@ -2474,6 +2474,7 @@ pub(super) fn call(
             ));
         }
         let mut marked = original.clone();
+        marked.freevar_names = NONE;
         marked.flags |= imre_ast::code_flags::ITERABLE_COROUTINE;
         let marked = ctx.alloc(Value::Code(marked));
         let func = ctx.weak_proxy_target(func)?;
