@@ -618,6 +618,7 @@ impl Function<'_, '_> {
         let doc = statements
             .filter(|_| self.output.keep_docstrings)
             .and_then(|stmts| self.source.docstring(&qualname, stmts));
+        let generator_flags = body.generator_flags();
         let flags = match &body {
             Body::Namespace(..) => None,
             _ => {
@@ -632,7 +633,7 @@ impl Function<'_, '_> {
                 if doc.is_some() {
                     flags |= code_flags::HAS_DOCSTRING;
                 }
-                Some(flags | body.generator_flags())
+                Some(flags | generator_flags)
             }
         };
         let doc = doc.map_or_else(|| "0".into(), |s| self.text(&s));
@@ -705,10 +706,10 @@ impl Function<'_, '_> {
             signature["positional"] = json!([".0"]);
         }
         // A synchronous generator expression has its own compiled comprehension step.
-        let entry = match &body {
-            Body::Generator(plan) if !plan.body_suspends() => Entry::Compiled,
-            _ if body.generator_flags() != 0 => Entry::Suspended,
-            _ => Entry::Compiled,
+        let entry = match generator_flags {
+            0 => Entry::Compiled,
+            code_flags::GENERATOR if matches!(body, Body::Generator(_)) => Entry::Compiled,
+            _ => Entry::Suspended,
         };
         let scopes = &self.source.scopes;
         let scope_facts = match &body {
