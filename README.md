@@ -109,11 +109,11 @@ with Rust-competitive performance.
 
 ## Standard library test results
 
-As of November 8, 2026, Imre has a paired pass for **12,971 of 16,202 tests (80.06%)** across the 44 standard library module families tracked below.
-The paired pass rate is 78.7% (10,482 of 13,327) for the original 25 families and 86.6% (2,489 of 2,875) for the 19 additional families.
+As of November 9, 2026, Imre has a paired pass for **12,970 of 16,202 tests (80.05%)** across the 44 standard library module families tracked below.
+The paired pass rate is 78.6% (10,481 of 13,327) for the original 25 families and 86.6% (2,489 of 2,875) for the 19 additional families.
 A **paired pass** means that CPython 3.14.5 passed the original test and Imre passed it at both
 `-O0` and `-O3`. The total combines focused and intact suite runs across revisions, including
-development branches. Each original test occurrence counts once. Skipped and omitted tests remain
+development branches. The intact `dataclasses` run at `143809dd` replaces that family’s earlier count. Each original test occurrence counts once. Skipped and omitted tests remain
 in the denominator. The [omission decisions](docs/stdlib-omissions.md) cover 118 originals in these 44 families and [eight supplemental Decimal originals](docs/stdlib-omissions.md#decimal).
 The published totals at `58276705` include typed native code, boxed native code that calls the runtime, and earlier runs through the retired Python source evaluator. Use the recorded product and launch mode when reproducing a row. [Compiler design](docs/design.md#boxed-compilation) · [Evaluator removal](https://github.com/astral-experiments/imre/pull/6309)
 
@@ -121,14 +121,14 @@ The [supplemental `test_urllib2` decision](docs/stdlib-omissions.md#test_urllib2
 
 On the campaign's x86-64 Linux runner, stock CPython 3.14.5 registered **16,191** of these originals.
 It passed **15,161**, skipped 1,023, and reported 7 errors.
-Across the 44 families, **12,873 of the 15,161 stock Linux passes (84.9%)** have paired passes, leaving **772** more to reach 90%. The other 98 paired originals skipped or recorded an error in that stock run.
+Across the 44 families, **12,872 of the 15,161 stock Linux passes (84.9%)** have paired passes, leaving **773** more to reach 90%. The other 98 paired originals skipped or recorded an error in that stock run.
 
 | Module | Paired passes | Upstream tests | Omitted | How the tests ran |
 | --- | ---: | ---: | ---: | --- |
 | `argparse` | 1,887 | 1,893 | 6 | All 1,887 eligible originals have paired passes across public revisions. The translations test ran the real pygettext child and produced all 32 expected messages. Six explicitly documented compiled-entry omissions remain in the 1,893-test denominator. A complete run on one revision is tracked separately. |
 | `collections` | 641 | 659 | 9 | The async-generator ABC original passed on public #4804. All 40 originals in that ABC cohort now have a paired result or an individual omission decision. |
 | `csv` | 122 | 128 | 2 | The full suite passed 124/128 on stock and 122/128 at O0 and O3. Four cases skipped on all three engines. Two additional CPython-only cases skipped on Imre. |
-| `dataclasses` | 274 | 276 | 1 | The intact suite exited zero at O0 and O3 with 274 passes and two CPython-only skips. All five subtests that check collection of the original slotted class passed. [Class and field identity](https://github.com/astral-experiments/imre/pull/5979) |
+| `dataclasses` | 273 | 276 | 1 | At `143809dd`, the intact suite recorded 273 passes, two CPython-only skips and one error at each of O0 and O3. In `TestDocString.test_docstring_with_unsolvable_forward_ref_in_init`, the upstream `exec(textwrap.dedent(...), ns)` raised `NotImplementedError`. All five subtests that check collection of the original slotted class passed. [Upstream test](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_dataclasses/__init__.py#L2371-L2387) · [Class and field identity](https://github.com/astral-experiments/imre/pull/5979) |
 | `datetime` | 1,043 | 1,098 | 21 | Four unchanged Fast date and datetime constructor parents passed public #4751 at O0 and O3. Stock passed the matching four in its six-parent group. The [21 omissions](docs/stdlib-omissions.md#datetime) cover CPython C API requirements. [Two extension-module tests](docs/stdlib-omissions.md#datetime-extension-module-tests) remain in scope. |
 | `fnmatch` | 24 | 24 | 0 | Complete suite on `main`, all 24 passed. |
 | `functools` | 316 | 329 | 2 | With the native `_functools` provider, the earlier 325-method run recorded 315 passes, seven errors and three skips. The shared reduce implementation added the original Python reduce-initializer test when the initializer was supplied by keyword. [#5850](https://github.com/astral-experiments/imre/pull/5850) · [#5890](https://github.com/astral-experiments/imre/pull/5890) |
@@ -150,7 +150,7 @@ Across the 44 families, **12,873 of the 15,161 stock Linux passes (84.9%)** have
 | `typing` | 710 | 712 | 2 | All three ordinary module runs registered 712 parents, including the same 11 doctests with 43 examples. Stock passed 712. Each native run passed 706, errored on four and skipped two. Six named successes are new to the accumulated ledger. Upstream-defined CPython-only guards skipped two tests on Imre. Both passed on stock and have [individual omission decisions](docs/stdlib-omissions.md#typing). |
 | `unittest` | 921 | 1,090 | 0 | The matched complete suite retained its 908 passes and gained nine when native coroutines began reporting unawaited warnings. All 22 AsyncMockAssert originals passed, as did 29 async-patch and thread-mock controls. The cumulative total also includes the earlier Mock directory-listing passes. [Earlier directory checks](https://github.com/astral-experiments/imre/pull/5995) · [Coroutine warnings](https://github.com/astral-experiments/imre/pull/6050) |
 | `urllib` | 173 | 178 | 0 | The public ledger at `4ac5e885` records both unchanged scripts at O0 and O3 in ordinary and explicit `--runtime-imports` modes. All 178 tests matched stock in order, including 173 successful parents, three with only child outcomes, and two Windows skips. |
-| **Total** | **10,482** | **13,327** | **105** | **4 complete suites match stock on `main`** |
+| **Total** | **10,481** | **13,327** | **105** | **4 complete suites match stock on `main`** |
 
 See the [standard library coverage report](docs/stdlib.md) for the Linux test
 results and import coverage recorded in this repository.
