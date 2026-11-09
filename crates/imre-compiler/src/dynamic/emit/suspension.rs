@@ -98,15 +98,6 @@ impl Function<'_, '_> {
         })
     }
 
-    pub(super) fn suspension_position(&mut self, range: TextRange) {
-        let (line, col) = self.source.positions.line_and_column(range.start());
-        let (end_line, end_col) = self.source.positions.line_and_column(range.end());
-        let position = self.output.position([line, end_line, col, end_col]);
-        self.line(&format!(
-            "call void @imre_dyn_call_position(ptr %ctx, ptr {position})"
-        ));
-    }
-
     /// Once __await__ returns, only its iterator owns the pending operation.
     pub(super) fn await_at(
         &mut self,
@@ -115,7 +106,7 @@ impl Function<'_, '_> {
         range: TextRange,
         mark: &str,
     ) -> String {
-        self.suspension_position(range);
+        self.call_position(range);
         let iterator = self.op("await_iter", &[value, mode]);
         let result = self.suspend_at(&iterator, Suspension::Await, range, mark);
         self.keep_operands(mark, &result, "0");
@@ -129,7 +120,7 @@ impl Function<'_, '_> {
         range: TextRange,
         mark: &str,
     ) -> String {
-        self.suspension_position(range);
+        self.call_position(range);
         self.line(&format!(
             "call void @imre_dyn_suspend_operands(ptr %context_slot, i64 {value}, i64 {mark}, i32 {})",
             kind as i32

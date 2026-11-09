@@ -494,7 +494,7 @@ impl Function<'_, '_> {
                 if self.native_suspension
                     && let Some(name) = suspended_name
                 {
-                    self.suspension_position(*name);
+                    self.call_position(*name);
                 }
                 (evaluate(self, target), None, *end)
             }

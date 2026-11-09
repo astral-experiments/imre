@@ -1782,7 +1782,7 @@ impl Function<'_, '_> {
         self.checkpoint(&context.range);
         self.caught.pop();
         self.live.truncate(outer_roots);
-        self.suspension_position(context.range);
+        self.call_position(context.range);
         let awaitable = self.op("async_exit_context", &args);
         let mark = if exception.is_some() {
             outer_roots + 2
@@ -1793,7 +1793,7 @@ impl Function<'_, '_> {
         self.keep_operands(&mark, &awaitable, "0");
         let result = self.await_at(&awaitable, "2", context.range, &mark);
         if let Some(exc) = exception {
-            self.suspension_position(context.range);
+            self.call_position(context.range);
             let suppress = self.op("truth", &[&result]);
             self.keep_operands(&outer_roots.to_string(), exc, &suppress);
             self.op("restore_caught", &[&context.caught]);
@@ -1815,7 +1815,7 @@ impl Function<'_, '_> {
             let mode = if is_async { "2" } else { "0" };
             let lookup = |f: &mut Self, name| {
                 if is_async {
-                    f.suspension_position(range);
+                    f.call_position(range);
                 }
                 f.op(name, &[&manager, mode])
             };
@@ -1823,7 +1823,7 @@ impl Function<'_, '_> {
             let enter = lookup(f, "lookup_enter");
             let above_exit = mark.map(|mark| f.keep_operands(mark, &exit, &enter));
             if is_async {
-                f.suspension_position(range);
+                f.call_position(range);
             }
             let mut value = f.invoke(&enter, &[]);
             if let Some(mark) = &above_exit {
