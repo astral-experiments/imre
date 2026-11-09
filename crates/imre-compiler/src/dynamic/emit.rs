@@ -586,7 +586,8 @@ impl<'a> PreparedBody<'a> {
             has_templates,
             method_imports: &method_imports,
         };
-        let mut operations = crate::frontend::namespace_operations(&body, &private_names);
+        let sites = crate::frontend::registered_sites(&body, &private_names);
+        let mut operations = sites.operations;
         let module_annotations = crate::frontend::module_annotations(
             &body,
             private_names.string_annotations,
@@ -635,8 +636,26 @@ impl<'a> PreparedBody<'a> {
                 }
             }
         }
+        let mut thread_entries = HashMap::new();
+        for (def, entry) in sites.workers {
+            let start = def.start();
+            thread_entries.insert(start, entry);
+            if !program_bodies
+                .checked
+                .is_some_and(|bodies| bodies.contains_key(&start))
+            {
+                // A method or a target nested inside a class may have no prepared body yet.
+                function_bodies.entry(start).or_insert_with(|| {
+                    prepare.suite(
+                        &def.body,
+                        crate::frontend::RegisteredScope::Function { is_async: false },
+                    )
+                });
+            }
+        }
         let source = SourceInfo {
             scopes: crate::frontend::function_scope::ScopeFacts::prepare(&body, &private_names),
+            thread_entries,
             nested_bodies: prepare.nested,
             namespace_operations: operations,
             module_annotations,
@@ -831,6 +850,7 @@ impl<'a> std::ops::Deref for SourceMap<'a> {
 #[derive(Default)]
 struct SourceInfo<'a> {
     scopes: crate::frontend::function_scope::ScopeFacts,
+    thread_entries: HashMap<ruff_text_size::TextSize, imre_ast::ThreadEntry>,
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
     module_annotations:
         HashMap<ruff_text_size::TextSize, crate::frontend::DeferredModuleAnnotation>,
@@ -1430,6 +1450,65 @@ impl Function<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn physical_worker_targets_use_checked_registered_calls() {
+        use crate::ir::{self, Builtin, ExprKind, RegisteredCallTarget};
+        use imre_ast::ThreadEntry;
+
+        for (source, target, entry, calls, excluded) in [
+            (
+                include_str!("../../../../tests/fixtures/boxed_thread_bound_lock.py"),
+                "def task(",
+                ThreadEntry::Bound("gate".into()),
+                1,
+                "def replacement(",
+            ),
+            (
+                include_str!("../../../../tests/fixtures/boxed_thread_method_closure.py"),
+                "@staticmethod",
+                ThreadEntry::Captured(vec!["gate".into()]),
+                1,
+                "def make_wait(",
+            ),
+            (
+                include_str!("../../../../tests/fixtures/boxed_threading_tcp_server.py"),
+                "def acquire_on_worker(",
+                ThreadEntry::Parameters {
+                    names: vec!["started".into(), "gate".into()],
+                    lock_only: true,
+                },
+                2,
+                "def handle(",
+            ),
+        ] {
+            let prepared = PreparedBody::module(
+                "worker",
+                Path::new("worker.py"),
+                source,
+                true,
+                ModuleOrigin::Program(ProgramBodies::default()),
+            )
+            .unwrap();
+            let start = |declaration| {
+                ruff_text_size::TextSize::try_from(source.find(declaration).unwrap()).unwrap()
+            };
+            let entries = &prepared.source.thread_entries;
+            assert_eq!(entries.get(&start(target)), Some(&entry));
+            assert!(!entries.contains_key(&start(excluded)));
+            let suite = &prepared.source.function_bodies[&start(target)];
+            assert!(suite.fully_checked());
+            let mut methods = Vec::new();
+            ir::walk_expressions(&suite.checked.function.body, &mut |expr| {
+                if let ExprKind::Builtin(Builtin::RegisteredCall(call), _) = &expr.kind
+                    && let RegisteredCallTarget::Method { name, .. } = &call.target
+                {
+                    methods.push(name.as_str());
+                }
+            });
+            assert_eq!(methods, vec!["acquire"; calls]);
+        }
+    }
 
     #[test]
     fn exception_group_handlers_in_nested_generators_have_native_entries() {
