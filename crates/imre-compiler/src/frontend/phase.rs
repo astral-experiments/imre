@@ -14,6 +14,7 @@ pub(crate) type Result<T, M = String> = std::result::Result<T, Failure<M>>;
 pub(crate) enum Kind {
     Ordinary,
     ExecutionOperand(ModuleId),
+    RegisteredExecution,
     ExactType,
     DeclaredArgument,
     ReturnType,

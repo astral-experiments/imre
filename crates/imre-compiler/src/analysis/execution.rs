@@ -357,9 +357,9 @@ impl Session {
         module: usize,
         parsed: &'ast ruff_db::parsed::ParsedModuleRef,
         model: &'ast SemanticModel<'db>,
-        stmt: &'ast Stmt,
+        value: &'ast Expr,
     ) -> Option<(TextRange, String)> {
-        let call = stmt.as_expr_stmt()?.value.as_call_expr()?;
+        let call = value.as_call_expr()?;
         ExecutionIntrinsic::resolve(model, &call.func)?;
         let operand = call.arguments.args.first()?;
         let source = operand.as_call_expr()?;
@@ -395,7 +395,7 @@ impl Session {
             return None;
         }
         let mut check = self.execution_visitor(module, parsed, model);
-        check.visit_stmt(stmt);
+        check.visit_expr(value);
         check.first
     }
 

@@ -977,7 +977,9 @@ fn checked_lower_with(
     } else {
         frontend::lower_with_owners(graph)
     };
-    if let Some(error) = call_error {
+    // Registered-body admission runs after checking the application's source contracts.
+    if let Some(error) = call_error.filter(|error| error.kind != LoweringKind::RegisteredExecution)
+    {
         // Both representations reject this call. Preserve a prior annotated error at
         // its original checked location even when this file contains several failures.
         let diagnostic = match lowered {

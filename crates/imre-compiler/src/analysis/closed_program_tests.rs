@@ -615,6 +615,22 @@ fn initializer_calls_use_original_bindings_and_all_arguments() {
             })
             .map(|e| e.to_string())
     };
+    let read = "def consume():\n    exec(input('source: '))\n";
+    let imported = "from scores import consume\n";
+    let error = check(&format!("{imported}consume()\n"), read).unwrap();
+    assert!(
+        error.contains("scores.py:2:10") && error.contains("builtins.exec"),
+        "{error}"
+    );
+    for caller in [
+        "if False: consume()",
+        "def ready(): return 7\nconsume.__code__ = ready.__code__\nconsume()",
+    ] {
+        assert!(
+            check(&format!("{imported}{caller}\n"), read).is_none(),
+            "{caller}"
+        );
+    }
     let docstring = "'application setup'\nimport scores\nif False:\n    scores.take('x')\n";
     assert!(
         check(docstring, number)
