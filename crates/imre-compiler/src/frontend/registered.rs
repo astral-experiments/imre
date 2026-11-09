@@ -253,36 +253,48 @@ pub(crate) enum RegisteredScope {
     Function { is_async: bool },
 }
 
-/// Each recorded operand belongs to a physical statement or deletion target in this source.
-pub(crate) fn namespace_operations(
-    stmts: &[ast::Stmt],
+/// Source facts needed to prepare registered bodies, including definitions inside class scopes.
+#[derive(Default)]
+pub(crate) struct RegisteredSites<'a> {
+    pub(crate) operations: HashMap<TextRange, Expr>,
+    pub(crate) workers: Vec<(&'a ast::StmtFunctionDef, imre_ast::ThreadEntry)>,
+}
+
+pub(crate) fn registered_sites<'a>(
+    stmts: &'a [ast::Stmt],
     private_names: &imre_ast::Names,
-) -> HashMap<TextRange, Expr> {
+) -> RegisteredSites<'a> {
     use ast::statement_visitor::{StatementVisitor, walk_stmt};
-    struct Operations<'a> {
-        private_names: &'a imre_ast::Names,
-        by_range: HashMap<TextRange, Expr>,
+    struct Collector<'s, 'a> {
+        private_names: &'s imre_ast::Names,
+        sites: RegisteredSites<'a>,
     }
-    impl<'a> StatementVisitor<'a> for Operations<'_> {
+    impl<'a> StatementVisitor<'a> for Collector<'_, 'a> {
         fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-            if let Some(import) = registered_import(stmt, self.private_names) {
-                self.by_range.insert(stmt.range(), import);
+            if let ast::Stmt::FunctionDef(def) = stmt {
+                if let Some(entry) = imre_ast::thread_entry(def) {
+                    self.sites.workers.push((def, entry));
+                    // An admitted suite contains no imports, deletes, or declarations.
+                    return;
+                }
+            } else if let Some(import) = registered_import(stmt, self.private_names) {
+                self.sites.operations.insert(stmt.range(), import);
             } else if let ast::Stmt::Delete(delete) = stmt {
                 for target in delete_targets(delete) {
                     if let Some(binding) = registered_delete_name(target) {
-                        self.by_range.insert(target.range(), binding);
+                        self.sites.operations.insert(target.range(), binding);
                     }
                 }
             }
             walk_stmt(self, stmt);
         }
     }
-    let mut operations = Operations {
+    let mut collector = Collector {
         private_names,
-        by_range: HashMap::new(),
+        sites: RegisteredSites::default(),
     };
-    operations.visit_body(stmts);
-    operations.by_range
+    collector.visit_body(stmts);
+    collector.sites
 }
 
 pub(crate) struct DeferredModuleAnnotation {
@@ -1148,7 +1160,7 @@ mod tests {
     ) -> Option<RegisteredFunction> {
         let default_names = imre_ast::Names::default();
         let names = source.private_names.unwrap_or(&default_names);
-        let mut operations = namespace_operations(stmts, names);
+        let mut operations = registered_sites(stmts, names).operations;
         if matches!(kind, RegisteredScope::Module) {
             module_annotations(
                 stmts,
@@ -1251,7 +1263,7 @@ mod tests {
             .into_syntax()
             .body;
         let names = imre_ast::lower(&mut stmts);
-        let mut ops = namespace_operations(&stmts, &names);
+        let mut ops = registered_sites(&stmts, &names).operations;
         let replacements = HashMap::new();
         let imports = imre_ast::module_imports(&stmts);
         let source = RegisteredSource {

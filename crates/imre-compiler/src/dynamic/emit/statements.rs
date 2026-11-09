@@ -1,6 +1,5 @@
 pub(super) mod class_annotations;
 use crate::frontend::function_scope::ClassBindings;
-mod worker;
 
 use crate::ir::{ItemUpdate, Statement};
 use imre_ast::code_flags;
@@ -752,16 +751,18 @@ impl Function<'_, '_> {
             signature["scope_complete"] = json!(false);
             signature["scope_locals_complete"] = json!(true);
         }
-        if let (Body::Statements(stmts), Some(params), None) = (&body, params, returns) {
-            if let Some((names, lock_only)) = worker::parameters(stmts, params) {
-                signature["thread_parameters"] = json!(names);
-                if lock_only {
-                    signature["thread_worker_locks"] = json!(names);
+        if let Some(entry) = function.and_then(|def| self.source.thread_entries.get(&def.start())) {
+            match entry {
+                imre_ast::ThreadEntry::Parameters { names, lock_only } => {
+                    signature["thread_parameters"] = json!(names);
+                    if *lock_only {
+                        signature["thread_worker_locks"] = json!(names);
+                    }
                 }
-            } else if let Some(names) = imre_ast::captured_thread_locks(stmts, params) {
-                signature["thread_captured_locks"] = json!(names);
-            } else if let Some(field) = worker::bound_lock_field(stmts, params) {
-                signature["thread_bound_lock_field"] = json!(field);
+                imre_ast::ThreadEntry::Captured(names) => {
+                    signature["thread_captured_locks"] = json!(names);
+                }
+                imre_ast::ThreadEntry::Bound(field) => signature["thread_bound_lock_field"] = json!(field),
             }
         }
         // A type alias thunk has an implicit default for its format parameter.
