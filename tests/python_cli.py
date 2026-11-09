@@ -18,6 +18,65 @@ from pathlib import Path
 from fixture_entry import imported_fixture
 
 
+def check_registered_entry_operand(imre, root, run):
+    entry = root / "checked_operand.py"
+    functions = (
+        "def publish(a: int, b: int, send):\n    send(a + b)\n"
+        "def report(value):\n    print(value)\n"
+    )
+    setup = "send = {'send': report}[input()]\npublish(3, 5, send)\n"
+    before = functions + setup + "values: list[int] = [3]\noffset = 17\n"
+    for use in ("values.append(True)", "result = values.append(True)", "print(values.append(True))"):
+        entry.write_text(before + use + "\n")
+        result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+        column = use.index("True") + 1
+        assert result.returncode and result.stdout == b"", result
+        assert f"checked_operand.py:9:{column}: Imre: expected int, got bool".encode() in result.stderr, result
+    entry.write_text(before + "if False:\n    values.append(True)\nprint(values)\n")
+    result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"8\n[3]\n", b""), result
+
+    # The ordinary checker owns the error even when the entry lives in an archive.
+    archive = root / "checked_operand.pyz"
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("__main__.py", before + "values.append(True)\n")
+    result = run(imre, archive, stdin=b"send\n")
+    assert result.returncode and not result.stdout, result
+    assert b"__main__.py:9:15: Imre: expected int, got bool" in result.stderr, result
+
+    program = (
+        functions
+        + "def install(unused): globals()['values'] = destination\n"
+        + "def accept(self, value): print('accepted', value)\n"
+        + setup
+        + "destination = type('Destination', (), {'append': accept})()\n"
+        + "previous = type('Previous', (), {'__del__': install})\n"
+        + "values: list[int] = [3]\n"
+    )
+    for call in ("install(None)", "{'install': install}['install'](None)"):
+        entry.write_text(program + call + "\nvalues.append(True)\n")
+        result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+        assert (result.returncode, result.stdout) == (0, b"8\naccepted True\n"), result
+
+    # Selecting object operations for an imported module leaves this local contract intact.
+    (root / "checked_sibling.py").write_text(
+        "import socket, threading\n"
+        "def worker():\n"
+        "    sock = socket.socket()\n"
+        "    threading.Thread(target=sock.close).start()\n"
+    )
+    entry.write_text(
+        "import checked_sibling\n"
+        "def observe(value): pass\n"
+        "values: list[int] = []\n"
+        "observe(None)\n"
+        "values.append(True)\n"
+    )
+    result = run(imre, "-m", "checked_operand", stdin=b"")
+    assert result.returncode and not result.stdout, result
+    assert b"checked_operand.py:5:15: Imre: expected int, got bool" in result.stderr, result
+
+
 def check_module_search_root(imre, root, run):
     app = root / "application"
     app.mkdir()
@@ -1895,6 +1954,7 @@ def main():
             )
 
         check_module_search_root(imre, root, run)
+        check_registered_entry_operand(imre, root, run)
         check_tracemalloc_startup(imre, run)
         check_registered_run_path(imre, root, run)
         check_frozen_modules_startup(imre, root, run)

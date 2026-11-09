@@ -1532,7 +1532,13 @@ pub(crate) fn compile(
                                     ));
                                     if winner {
                                         let program = initial[..path0_len].contains(root);
-                                        selected_sources.push((sources.len(), program, None));
+                                        let checked = graph_file.and_then(|(graph, id)| {
+                                            let checked = &graph.modules[id];
+                                            (checked.path == member.path
+                                                && checked.original_source() == member.source)
+                                                .then_some(id)
+                                        });
+                                        selected_sources.push((sources.len(), program, checked));
                                     }
                                 }
                                 sources.push((prefix.clone(), member.path, member.source));
@@ -1984,8 +1990,11 @@ pub(crate) fn compile(
                 && !options.sitecustomize
                 && !options.stdlib_sitecustomize
                 && options.user_site_pth.is_none()
-                && module_entry
-                    .is_none_or(|name| sdk_runpy && crate::analysis::unambiguous_file_module(name))
+                && module_entry.is_none_or(|name| {
+                    sdk_runpy
+                        && (options.path_entry && name == "__main__"
+                            || crate::analysis::unambiguous_file_module(name))
+                })
                 && !startup.is_some_and(|(flags, _)| flags.has_warning_options);
             // The selected source can execute from any user search root. Only the
             // SDK winner uses bundled_root, including when its bytes come from the SDK ZIP.

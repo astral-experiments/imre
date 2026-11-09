@@ -5109,6 +5109,15 @@ impl<'a> Checker<'a> {
         })
     }
 
+    fn ordinary_entry(&self) -> Option<ModuleId> {
+        (self.module_scope
+            && self.module == self.graph.entry
+            && self.inference.is_none()
+            && self.block_depth <= 1
+            && self.reachable)
+            .then_some(self.module)
+    }
+
     fn statement(
         &mut self,
         statement: &ast::Stmt,
@@ -5136,6 +5145,7 @@ impl<'a> Checker<'a> {
                 frame.require_object(self.source, statement);
             }
         }
+        let entry = self.ordinary_entry();
         let result = self.lower_statement(statement);
         if let Err(error) = &result {
             // A boxed operation in a checked source file must not hide a bad call in
@@ -5172,7 +5182,7 @@ impl<'a> Checker<'a> {
                 return Ok((Vec::new(), true));
             }
         }
-        result
+        result.map_err(|error| error.in_entry_statement(entry, statement.start()))
     }
 
     fn lower_statement(&mut self, statement: &ast::Stmt) -> Result<(Vec<Statement>, bool), String> {
@@ -6794,7 +6804,17 @@ impl<'a> Checker<'a> {
     }
 
     fn expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        let value = self.typed_expr(expression)?;
+        // Resolve a closed callee before evaluating arguments that can replace it.
+        let python_call = self.module_scope
+            && self.globals.registered_initializers
+            && expression
+                .as_call_expr()
+                .is_some_and(|call| !self.closed_passive_call(call));
+        let checked = self.typed_expr(expression);
+        if python_call {
+            self.invalidate_called_bindings(expression, &checked);
+        }
+        let value = checked?;
         Ok(if matches!(value.ty, Type::StrLiteral(_)) {
             literals::view(value, Type::Str)
         } else {
