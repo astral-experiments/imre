@@ -678,6 +678,7 @@ impl Builtin {
             Self::ObjectCall(..)
             | Self::RegisteredImport(_)
             | Self::RegisteredSuspend(..)
+            | Self::RegisteredAssertionFailure { .. }
             | Self::RegisteredModuleAnnotation(_)
             | Self::RegisteredAnnotationStart
             | Self::RegisteredAnnotationFormat

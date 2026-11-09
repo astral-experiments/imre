@@ -16,7 +16,7 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
     let write_module = |name: &str, file: &str, source: &str| -> io::Result<()> {
         let path = Path::new("<imre stdlib>").join(file);
         let initializer =
-            emit::PreparedBody::module(name, &path, source, true, emit::ModuleOrigin::Bundled);
+            emit::PreparedBody::module(name, &path, source, 0, emit::ModuleOrigin::Bundled);
         match initializer.and_then(|body| body.standalone()) {
             Ok(Some((symbol, ir))) => fs::write(directory.join(format!("{symbol}.ll")), ir),
             Ok(None) => Ok(()),

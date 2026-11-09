@@ -292,6 +292,41 @@ pub fn debug_binding_error(expr: &ast::Expr) -> Option<&'static str> {
     }
 }
 
+/// The symbol table still checks an assertion's bindings when Python omits its code.
+pub fn assertion_binding_error(assertion: &ast::StmtAssert) -> Option<(TextRange, &'static str)> {
+    #[derive(Default)]
+    struct Scan(Option<(TextRange, &'static str)>);
+
+    impl<'ast> Visitor<'ast> for Scan {
+        fn visit_expr(&mut self, expr: &'ast ast::Expr) {
+            if self.0.is_none() {
+                if let Some(message) = debug_binding_error(expr) {
+                    self.0 = Some((expr.range(), message));
+                } else {
+                    visitor::walk_expr(self, expr);
+                }
+            }
+        }
+
+        fn visit_parameter(&mut self, parameter: &'ast ast::Parameter) {
+            if self.0.is_none() {
+                if parameter.name.as_str() == "__debug__" {
+                    self.0 = Some((parameter.range(), "cannot assign to __debug__"));
+                } else {
+                    visitor::walk_parameter(self, parameter);
+                }
+            }
+        }
+    }
+
+    let mut scan = Scan::default();
+    scan.visit_expr(&assertion.test);
+    if let Some(message) = &assertion.msg {
+        scan.visit_expr(message);
+    }
+    scan.0
+}
+
 impl BindingErrors {
     pub fn check(body: &[ast::Stmt], source: &str) -> Self {
         let mut check = Check {
@@ -370,6 +405,9 @@ impl Check<'_> {
 impl<'a> Visitor<'a> for Check<'_> {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         match stmt {
+            ast::Stmt::Assert(assertion) if self.errors.target.is_none() => {
+                self.errors.target = assertion_binding_error(assertion);
+            }
             ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => {
                 let function =
                     std::mem::replace(&mut self.in_function, stmt.is_function_def_stmt());

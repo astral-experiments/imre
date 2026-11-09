@@ -1784,6 +1784,11 @@ pub(crate) enum Builtin {
     RegisteredTypeAlias(ruff_text_size::TextSize),
     RegisteredImport(NamespaceImport),
     RegisteredSuspend(SuspendValue, ruff_text_size::TextRange),
+    /// Raise AssertionError at this site after evaluating its optional message.
+    RegisteredAssertionFailure {
+        statement: ruff_text_size::TextSize,
+        test: ruff_text_size::TextSize,
+    },
     /// A module annotation records execution at startup; its provider evaluates values on demand.
     RegisteredModuleAnnotation(ModuleAnnotation),
     RegisteredAnnotationStart,

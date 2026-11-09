@@ -4831,6 +4831,7 @@ impl Emitter<'_, '_> {
             }
             Builtin::RegisteredImport(_)
             | Builtin::RegisteredSuspend(..)
+            | Builtin::RegisteredAssertionFailure { .. }
             | Builtin::RegisteredModuleAnnotation(_)
             | Builtin::RegisteredAnnotationStart
             | Builtin::RegisteredAnnotationFormat

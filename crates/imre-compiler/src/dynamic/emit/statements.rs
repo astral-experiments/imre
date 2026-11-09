@@ -87,7 +87,16 @@ impl Function<'_, '_> {
             if !self.start_statement() {
                 break;
             }
-            self.checkpoint(stmt);
+            if let Some(statements) = self.source.assertions.get(&stmt.range()) {
+                for statement in statements {
+                    self.checked_statement(statement);
+                }
+                continue;
+            }
+            let position = stmt
+                .as_assert_stmt()
+                .map_or_else(|| stmt.range(), |assertion| assertion.test.range());
+            self.checkpoint(&position);
             self.simple_call = imre_ast::unhighlighted_call(stmt);
             if let Some(operation) = self.source.namespace_operations.get(&stmt.range()) {
                 let value = self.registered_value(operation);
@@ -387,14 +396,8 @@ impl Function<'_, '_> {
                     let fail = self.name("b");
                     self.branch_expr(&v.test, &pass, &fail);
                     self.label(&fail);
-                    let cls = self.lookup("AssertionError");
-                    let error = if let Some(msg) = &v.msg {
-                        let msg = self.expr(msg);
-                        self.invoke(&cls, &[&msg])
-                    } else {
-                        self.invoke(&cls, &[])
-                    };
-                    self.raise(&error, None, false);
+                    let message = v.msg.as_deref().map(|expr| self.expr(expr));
+                    self.assertion_failure(v.start(), v.test.start(), message.as_deref());
                     self.label(&pass);
                 }
                 _ => {
@@ -642,7 +645,7 @@ impl Function<'_, '_> {
             _ => None,
         };
         let doc = statements
-            .filter(|_| self.output.keep_docstrings)
+            .filter(|_| self.output.python_optimization < 2)
             .and_then(|stmts| self.source.docstring(&qualname, stmts));
         let generator_flags = body.generator_flags();
         let flags = match &body {
@@ -1363,6 +1366,31 @@ impl Function<'_, '_> {
         self.statements(otherwise);
         self.jump(&done);
         self.label(&done);
+    }
+
+    /// The optional message has already been evaluated on the failure edge.
+    /// Construct the exception at the keyword and raise it at the test expression.
+    pub(super) fn assertion_failure(
+        &mut self,
+        statement: TextSize,
+        test: TextSize,
+        message: Option<&str>,
+    ) {
+        let statement_line = self.source.positions.line(statement);
+        self.set_statement_line(statement_line);
+        self.expression_line = statement_line;
+        let name = self.text("AssertionError");
+        let class = self.op("builtin", &[&name]);
+        let error = match message {
+            Some(value) => self.invoke(&class, &[value]),
+            None => class,
+        };
+        let test_line = self.source.positions.line(test);
+        if test_line != statement_line {
+            self.set_statement_line(test_line);
+            self.expression_line = test_line;
+        }
+        self.raise(&error, None, false);
     }
 
     fn raise(&mut self, exc: &str, cause: Option<&str>, reraise: bool) {
