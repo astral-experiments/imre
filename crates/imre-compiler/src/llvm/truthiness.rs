@@ -20,7 +20,7 @@ impl Emitter<'_, '_> {
                         present
                     } else {
                         let (inspect, end) = (self.label(), self.label());
-                        let absent = self.current.clone();
+                        let absent = self.body.current.clone();
                         self.branch(&present, &inspect, &end);
                         self.start(&inspect);
                         let payload = if payload == Type::Float {
@@ -29,7 +29,7 @@ impl Emitter<'_, '_> {
                             self.decode_word(value.operand.clone(), payload)
                         };
                         let truth = self.truth(&payload);
-                        let inspected = self.current.clone();
+                        let inspected = self.body.current.clone();
                         self.jump(&end);
                         self.start(&end);
                         self.instruction(format!(
@@ -226,13 +226,13 @@ impl Emitter<'_, '_> {
         });
         let selected_value = self.selected_operand(selected_value, returns, !and);
         self.forget(&selected_value);
-        let selected_end = self.current.clone();
+        let selected_end = self.body.current.clone();
         self.jump(&end);
         self.start(&next);
         self.release_operand(&left);
         let right = self.expr(right);
         self.forget(&right);
-        let right_end = self.current.clone();
+        let right_end = self.body.current.clone();
         self.jump(&end);
         self.start(&end);
         Value {

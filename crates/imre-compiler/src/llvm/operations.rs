@@ -298,7 +298,7 @@ impl Operations for Emitter<'_, '_> {
     }
 
     fn terminated(&self) -> bool {
-        self.terminated
+        self.body.terminated
     }
 
     fn fused_statements(&mut self, remaining: &[Statement]) -> usize {

@@ -76,8 +76,8 @@ pub(super) enum Suspension {
 
 impl Function<'_, '_> {
     pub(super) fn suspension_position(&mut self, range: TextRange) {
-        let (line, col) = self.source.line_and_column(range.start());
-        let (end_line, end_col) = self.source.line_and_column(range.end());
+        let (line, col) = self.source.positions.line_and_column(range.start());
+        let (end_line, end_col) = self.source.positions.line_and_column(range.end());
         let position = self.output.position([line, end_line, col, end_col]);
         self.line(&format!(
             "call void @imre_dyn_call_position(ptr %ctx, ptr {position})"

@@ -161,12 +161,12 @@ impl Emitter<'_, '_> {
         if let Some(payload) = self.module.types.payload(value.ty) {
             let present = self.instruction(format!("icmp ne i64 {}, 0", value.operand));
             let (inspect, end) = (self.label(), self.label());
-            let absent = self.current.clone();
+            let absent = self.body.current.clone();
             self.branch(&present, &inspect, &end);
             self.start(&inspect);
             let payload = self.decode_word(value.operand.clone(), payload);
             let result = self.instance_test(&payload, classes);
-            let inspected = self.current.clone();
+            let inspected = self.body.current.clone();
             self.jump(&end);
             self.start(&end);
             return self.instruction(format!(
@@ -303,13 +303,13 @@ impl Emitter<'_, '_> {
                         ) || inspect_io(selected)
                         {
                             let (inspect, end) = (self.label(), self.label());
-                            let other = self.current.clone();
+                            let other = self.body.current.clone();
                             self.branch(&found, &inspect, &end);
                             self.start(&inspect);
                             let word = self.instruction(format!("and i64 {}, -8", value.operand));
                             let payload = self.decode_word(word, selected);
                             let matches = self.instance_test(&payload, &[class]);
-                            let inspected = self.current.clone();
+                            let inspected = self.body.current.clone();
                             self.jump(&end);
                             self.start(&end);
                             self.instruction(format!(

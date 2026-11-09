@@ -159,7 +159,7 @@ impl Emitter<'_, '_> {
         self.line(format!(
             "br i1 {valid}, label %{fast}, label %{slow}, !prof !1"
         ));
-        self.terminated = true;
+        self.body.terminated = true;
 
         self.start(&fast);
         let values =

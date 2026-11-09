@@ -186,7 +186,8 @@ impl Emitter<'_, '_> {
                 "true".to_owned()
             } else {
                 let (start, len) = self.line_data(slot);
-                let (before, compare, end) = (self.current.clone(), self.label(), self.label());
+                let (before, compare, end) =
+                    (self.body.current.clone(), self.label(), self.label());
                 let long = self.instruction(format!("icmp uge i64 {len}, {n}"));
                 self.branch(&long, &compare, &end);
                 self.start(&compare);

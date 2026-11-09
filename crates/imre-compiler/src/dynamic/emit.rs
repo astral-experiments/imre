@@ -13,6 +13,8 @@ mod boolean;
 pub(crate) mod checked;
 mod comprehensions;
 mod expressions;
+mod frame;
+use frame::{RegisteredFrame, SourcePositions};
 mod patterns;
 mod statements;
 mod strings;
@@ -534,12 +536,7 @@ impl Output {
             barry_as_flufl: imre_ast::future_import(&body, "barry_as_FLUFL"),
             string_annotations: private_names.string_annotations,
             private_names,
-            text: source,
-            file: &code_file,
-            newlines: source
-                .match_indices('\n')
-                .map(|(offset, _)| offset)
-                .collect(),
+            positions: SourcePositions::new(source, &code_file),
         };
         let suite = if expression {
             let [ast::Stmt::Expr(statement)] = body.as_slice() else {
@@ -571,7 +568,6 @@ enum Body<'a> {
     Namespace(&'a [ast::Stmt], bool),
     ClassParameters(&'a ast::StmtClassDef),
     Statements(&'a [ast::Stmt]),
-    Checked(&'a crate::frontend::RegisteredFunction),
     /// A suspended suite and its generator, coroutine, or async generator code flag.
     GeneratorFunction(&'a [ast::Stmt], u32),
     ModuleAnnotations(Vec<(&'a str, &'a ast::Expr)>),
@@ -620,11 +616,9 @@ struct SourceMap<'a> {
     replacements: HashMap<ruff_text_size::TextRange, Vec<u32>>,
     private_names: imre_ast::Names,
     method_imports: std::collections::BTreeSet<String>,
-    text: &'a str,
     string_annotations: bool,
     barry_as_flufl: bool,
-    file: &'a str,
-    newlines: Vec<usize>,
+    positions: SourcePositions<'a>,
 }
 
 impl SourceMap<'_> {
@@ -648,20 +642,6 @@ impl SourceMap<'_> {
                 .object_docstring(qualname)
                 .map(str::to_owned)
         })
-    }
-
-    fn line_and_column(&self, offset: ruff_text_size::TextSize) -> (usize, usize) {
-        let line = self.line(offset);
-        let start = if line == 1 {
-            0
-        } else {
-            self.newlines[line - 2] + 1
-        };
-        (line, usize::from(offset) - start)
-    }
-
-    fn line(&self, offset: ruff_text_size::TextSize) -> usize {
-        self.newlines.partition_point(|&n| n < usize::from(offset)) + 1
     }
 }
 
@@ -746,22 +726,22 @@ impl Output {
         } else {
             0
         };
-        let body = match body {
-            Body::Statements(_)
-                if let Some(function) = source
-                    .checked_functions
-                    .and_then(|functions| functions.get(&start)) =>
-            {
-                Body::Checked(function)
-            }
-            body => body,
+        let entry = if matches!(body, Body::Statements(_))
+            && let Some(checked) = source
+                .checked_functions
+                .and_then(|functions| functions.get(&start))
+        {
+            let mut frame = RegisteredFrame::new(self, &source.positions, false);
+            frame.checked_body(checked);
+            frame.finish(false)
+        } else {
+            self.code(source, prefix, body, in_function, suspended)
         };
-        let entry = self.code(source, prefix, body, in_function, suspended);
         writeln!(
             self.constants,
             "{site} = private constant %code_site {{ ptr {entry}, ptr {}, i32 {}, i32 {tag} }}",
-            source.file,
-            source.line(start)
+            source.positions.file,
+            source.positions.line(start)
         )
         .unwrap();
         site
@@ -807,18 +787,16 @@ impl Output {
         in_function: bool,
         native_suspension: bool,
     ) -> String {
-        let name = format!("@code{}", self.count);
-        self.count += 1;
+        let frame = RegisteredFrame::new(self, &source.positions, native_suspension);
         let module = matches!(body, Body::Namespace(..)) && prefix.is_empty();
         let mut f = Function {
-            output: self,
+            frame,
             source,
-            native_suspension,
+            current_range: ruff_text_size::TextRange::empty(source.module_start),
             async_generator: matches!(
                 body,
                 Body::GeneratorFunction(_, imre_ast::code_flags::ASYNC_GENERATOR)
             ),
-            current_range: ruff_text_size::TextRange::empty(source.module_start),
             class_sites: None,
             module_annotation_sites: None,
             in_function,
@@ -832,26 +810,15 @@ impl Output {
                 _ => None,
             },
             prefix,
-            ir: String::new(),
-            block: if native_suspension { "start" } else { "entry" }.into(),
-            error: "failed".into(),
-            pending_check: None,
-            scope: "%scope".into(),
-            serial: 0,
-            terminated: false,
-            live: Vec::new(),
-            max_live: 0,
             loops: Vec::new(),
             exits: Vec::new(),
-            caught: Vec::new(),
-            simple_call: None,
-            expression_line: 0,
         };
         match body {
             Body::Namespace(stmts, _) => {
                 if module && imre_ast::annotations::has_variable_annotation(stmts) {
                     if source.string_annotations {
-                        f.op("setup_module_string_annotations", &[&f.scope.clone()]);
+                        f.frame
+                            .op("setup_module_string_annotations", &[&f.scope.clone()]);
                     } else {
                         // Lower the provider after collecting the body, but run its setup first.
                         f.module_annotation_sites = Some(Vec::new());
@@ -878,7 +845,6 @@ impl Output {
                     f.jump("module_body");
                 }
             }
-            Body::Checked(function) => f.checked_body(function),
             Body::ClassParameters(class) => f.parameterized_class(class),
             Body::Statements(stmts) | Body::GeneratorFunction(stmts, _) => {
                 f.declare_globals(stmts);
@@ -898,37 +864,7 @@ impl Output {
                 f.return_value(&value);
             }
         }
-        if !f.terminated {
-            f.return_value("0");
-        }
-        let mut entry = if f.max_live == 0 {
-            String::new()
-        } else {
-            format!("  %live = alloca [{} x i64]\n", f.max_live)
-        };
-        // A loaded code object owns its identifier-like strings before any statement runs.
-        if module && !f.output.interned_identifiers.is_empty() {
-            let names = std::mem::take(&mut f.output.interned_identifiers)
-                .into_iter()
-                .collect::<Vec<_>>()
-                .join("\0");
-            let data = f.output.data(names.as_bytes());
-            writeln!(
-                entry,
-                "  call i64 @imre_dyn_lit(ptr %ctx, i32 5, ptr {data}, i64 {})",
-                names.len()
-            )
-            .unwrap();
-        }
-        if f.native_suspension {
-            writeln!(f.output.functions,
-                "define internal ptr {name}(ptr %context_slot, i64 %scope) presplitcoroutine {{\nentry:\n{entry}{}{}{} }}",
-                suspension::PROLOGUE, f.ir, suspension::EPILOGUE).unwrap();
-        } else {
-            writeln!(f.output.functions,
-                "define internal i64 {name}(ptr %ctx, i64 %scope) {{\nentry:\n{entry}{}failed:\n  ret i64 0\n}}", f.ir).unwrap();
-        }
-        name
+        f.frame.finish(module)
     }
 }
 
@@ -957,8 +893,9 @@ enum CallArguments {
 }
 
 struct Function<'a, 'p> {
-    output: &'a mut Output,
+    frame: RegisteredFrame<'a, 'p>,
     source: &'p SourceMap<'p>,
+    current_range: ruff_text_size::TextRange,
     prefix: String,
     declared_globals: std::collections::BTreeSet<String>,
     in_function: bool,
@@ -967,30 +904,23 @@ struct Function<'a, 'p> {
     class_sites: Option<statements::class_annotations::ClassSites>,
     class_locals: Option<statements::ClassBindings>,
     annotation_lookup: bool,
-    ir: String,
-    block: String,
-    error: String,
-    pending_check: Option<ErrorCheck>,
-    scope: String,
-    serial: usize,
-    terminated: bool,
-    // Handles held in native registers across statement boundaries must stay reachable.
-    live: Vec<String>,
-    max_live: usize,
     loops: Vec<LoopTarget>,
     exits: Vec<(Cleanup, String)>,
-    caught: Vec<String>,
-    simple_call: Option<ruff_text_size::TextRange>,
-    expression_line: usize,
-    native_suspension: bool,
     async_generator: bool,
-    current_range: ruff_text_size::TextRange,
 }
 
-struct ErrorCheck {
-    handler: String,
-    failed: String,
-    next: String,
+/// The syntax walker adds Python scopes and cleanup to the registered frame operations.
+impl<'a, 'p> std::ops::Deref for Function<'a, 'p> {
+    type Target = RegisteredFrame<'a, 'p>;
+    fn deref(&self) -> &Self::Target {
+        &self.frame
+    }
+}
+
+impl std::ops::DerefMut for Function<'_, '_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.frame
+    }
 }
 
 #[derive(Clone)]
@@ -1024,150 +954,9 @@ struct LoopTarget {
 }
 
 impl Function<'_, '_> {
-    fn name(&mut self, prefix: &str) -> String {
-        let n = self.serial;
-        self.serial += 1;
-        format!("{prefix}{n}")
-    }
-
-    fn line(&mut self, line: &str) {
-        self.flush_check();
-        self.instruction(line);
-    }
-
-    fn instruction(&mut self, line: &str) {
-        // A suspended activation outlives the Context borrow of any one resume. Only
-        // the slot's address is stable. Each runtime call receives the current borrow.
-        if self.native_suspension
-            && let Some((before, after)) = line.split_once("ptr %ctx")
-        {
-            let ctx = self.name("%active_ctx");
-            writeln!(self.ir, "  {ctx} = load volatile ptr, ptr %context_slot").unwrap();
-            writeln!(self.ir, "  {before}ptr {ctx}{after}").unwrap();
-        } else {
-            writeln!(self.ir, "  {line}").unwrap();
-        }
-    }
-
-    fn value(&mut self, instruction: &str) -> String {
-        let value = self.name("%v");
-        self.line(&format!("{value} = {instruction}"));
-        value
-    }
-
-    fn end(&mut self, instruction: &str) {
-        if !self.terminated {
-            self.line(instruction);
-            self.terminated = true;
-        }
-    }
-
-    fn return_value(&mut self, value: &str) {
-        if self.native_suspension {
-            if !self.terminated {
-                self.line(&format!(
-                    "call void @imre_dyn_suspend_return(ptr %context_slot, i64 {value})"
-                ));
-                self.jump("complete");
-            }
-        } else {
-            self.end(&format!("ret i64 {value}"));
-        }
-    }
-
-    fn jump(&mut self, label: &str) {
-        self.end(&format!("br label %{label}"));
-    }
-
-    fn label(&mut self, label: &str) {
-        self.flush_check();
-        writeln!(self.ir, "{label}:").unwrap();
-        self.block = label.into();
-        self.terminated = false;
-    }
-
-    fn branch(&mut self, condition: &str, yes: &str, no: &str) {
-        self.end(&format!("br i1 {condition}, label %{yes}, label %{no}"));
-    }
-
-    fn checked(&mut self, invocation: &str) -> String {
-        let result = self.value(invocation);
-        self.check_error();
-        result
-    }
-
-    fn check_error(&mut self) {
-        self.pending_check = Some(ErrorCheck {
-            handler: self.error.clone(),
-            failed: self.name("%v"),
-            next: self.name("b"),
-        });
-    }
-
-    fn flush_check(&mut self) {
-        if let Some(ErrorCheck {
-            handler,
-            failed,
-            next,
-        }) = self.pending_check.take()
-        {
-            self.instruction(&format!("{failed} = call i1 @imre_dyn_failed(ptr %ctx)"));
-            writeln!(
-                self.ir,
-                "  br i1 {failed}, label %{handler}, label %{next}\n{next}:"
-            )
-            .unwrap();
-            self.block = next;
-        }
-    }
-
-    /// A guarded successor can deliver the first failure to the same handler.
-    fn take_matching_check(&mut self) -> bool {
-        self.pending_check
-            .take_if(|check| check.handler == self.error)
-            .is_some()
-    }
-
-    /// Publish the real predecessor before referring to it in a phi.
-    fn current_block(&mut self) -> &str {
-        self.flush_check();
-        &self.block
-    }
-
-    fn op(&mut self, name: &str, args: &[&str]) -> String {
-        self.op_at(name, args, None)
-    }
-
-    fn op_at(&mut self, name: &str, args: &[&str], span: Option<[usize; 4]>) -> String {
-        if name != "take_error" {
-            self.take_matching_check();
-        }
-        let op = self.output.data(name.as_bytes());
-        let arg = |index| *args.get(index).unwrap_or(&"0");
-        let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
-        self.checked(&format!(
-            "call i64 @imre_dyn_op_at(ptr %ctx, ptr {op}, i64 {}, i64 {}, i64 {}, ptr {position})",
-            arg(0),
-            arg(1),
-            arg(2)
-        ))
-    }
-
-    fn lit(&mut self, kind: i32, bytes: &[u8]) -> String {
-        let loader = if self.take_matching_check() {
-            if !self.output.declarations.emitted_guarded_lit {
-                self.output.functions.push_str(GUARDED_LIT);
-                self.output.declarations.emitted_guarded_lit = true;
-            }
-            "@imre_boxed_guarded_lit"
-        } else {
-            "@imre_dyn_lit"
-        };
-        let literal = self.output.data(bytes);
-        self.checked(&format!(
-            "call i64 {loader}(ptr %ctx, i32 {kind}, ptr {literal}, i64 {})",
-            bytes.len()
-        ))
+    fn checkpoint(&mut self, node: &impl Ranged) {
+        self.current_range = node.range();
+        self.frame.checkpoint(self.current_range);
     }
 
     /// An annotation's text is still a normal str. Retain its native expression
@@ -1224,53 +1013,6 @@ impl Function<'_, '_> {
         }
         self.lit(1, value.as_bytes())
     }
-    /// Emit a code-object name, including a Unicode identifier that would not intern as a literal.
-    fn code_name(&mut self, name: &str) -> String {
-        self.output.interned_identifiers.insert(name.to_owned());
-        self.lit(6, name.as_bytes())
-    }
-
-    fn integer(&mut self, n: impl TryInto<i64> + ToString + Copy) -> String {
-        if let Ok(value) = n.try_into()
-            && let Some(id) = permanent::small_integer_id(value)
-        {
-            return id.to_string();
-        }
-        self.lit(0, n.to_string().as_bytes())
-    }
-
-    /// Load a code name and use it as the second operand of a boxed operation.
-    fn named_op(&mut self, op: &str, receiver: &str, name: &str, value: &str) -> String {
-        self.output.interned_identifiers.insert(name.to_owned());
-        if op == "lookup" {
-            // The runtime lookup propagates a pending exception before reading the scope.
-            self.take_matching_check();
-            let data = self.output.data(name.as_bytes());
-            return self.checked(&format!(
-                "call i64 @imre_dyn_lookup(ptr %ctx, i64 {receiver}, ptr {data}, i64 {})",
-                name.len()
-            ));
-        }
-        if !self.output.declarations.emitted_named_op {
-            self.output.functions.push_str(NAMED_OP);
-            self.output.declarations.emitted_named_op = true;
-        }
-        let operation = if self.take_matching_check() {
-            if !self.output.declarations.emitted_guarded_named_op {
-                self.output.functions.push_str(GUARDED_NAMED_OP);
-                self.output.declarations.emitted_guarded_named_op = true;
-            }
-            "@imre_boxed_guarded_named_op"
-        } else {
-            "@imre_boxed_named_op"
-        };
-        let opcode = self.output.data(op.as_bytes());
-        let data = self.output.data(name.as_bytes());
-        self.checked(&format!(
-            "call i64 {operation}(ptr %ctx, ptr {opcode}, i64 {receiver}, ptr {data}, i64 {}, i64 {value})",
-            name.len()
-        ))
-    }
 
     fn lookup(&mut self, name: &str) -> String {
         let op = match &self.class_locals {
@@ -1284,11 +1026,12 @@ impl Function<'_, '_> {
             Some(class) if class.locals.contains(name) => "lookup_class_local",
             _ => "lookup",
         };
-        self.named_op(op, &self.scope.clone(), name, "0")
+        self.frame.named_op(op, &self.scope.clone(), name, "0")
     }
 
     fn bind(&mut self, name: &str, value: &str) {
-        self.named_op("assign", &self.scope.clone(), name, value);
+        self.frame
+            .named_op("assign", &self.scope.clone(), name, value);
     }
 
     fn attr(&mut self, object: &str, name: &str) -> String {
@@ -1298,11 +1041,6 @@ impl Function<'_, '_> {
     fn truth(&mut self, value: &str) -> String {
         let boolean = self.op("truth", &[value]);
         self.value(&format!("icmp eq i64 {boolean}, 2"))
-    }
-
-    /// Save the caller's earlier operands before an expression can release a writer.
-    fn temporary_mark(&mut self) -> String {
-        self.value("call i64 @imre_dyn_truth_mark(ptr %ctx)")
     }
 
     /// End the lifetime of the operands evaluated after the mark.
@@ -1338,9 +1076,15 @@ impl Function<'_, '_> {
 
     fn unsupported(&mut self, what: &str) -> String {
         if self.native_suspension {
-            let (line, col) = self.source.line_and_column(self.current_range.start());
-            let (end_line, end_col) = self.source.line_and_column(self.current_range.end());
-            self.output.diagnostic.get_or_insert_with(|| format!(
+            let (line, col) = self
+                .source
+                .positions
+                .line_and_column(self.current_range.start());
+            let (end_line, end_col) = self
+                .source
+                .positions
+                .line_and_column(self.current_range.end());
+            self.frame.output.diagnostic.get_or_insert_with(|| format!(
                 "{}:{line}:{}: unsupported {what} in a compiled suspended function (through {end_line}:{})",
                 self.source.path.display(), col + 1, end_col + 1
             ));
@@ -1359,56 +1103,6 @@ impl Function<'_, '_> {
         self.expression_range_span(expr.range(), prefix.end(), opener)
     }
 
-    fn expression_range_span(
-        &self,
-        range: ruff_text_size::TextRange,
-        prefix_end: ruff_text_size::TextSize,
-        opener: u8,
-    ) -> Option<[usize; 4]> {
-        if self.simple_call == Some(range) {
-            return None;
-        }
-        let start = range.start().to_usize();
-        let end = range.end().to_usize();
-        let prefix_end = prefix_end.to_usize();
-        let text = self.source.text.as_bytes();
-        if text.get(start..end)?.contains(&b'\n') {
-            return None;
-        }
-        let split = imre_ast::traceback_delimiter(text, prefix_end, end, opener)?;
-        let (line, col) = self.source.line_and_column(range.start());
-        Some([line, col, col + (split - start), col + (end - start)])
-    }
-
-    /// Store the handles that must survive the next statement or assignment target.
-    fn live_handles(&mut self) -> (&'static str, usize) {
-        self.handle_array(&self.live.clone())
-    }
-
-    /// Copy evaluated handles into reusable storage in this activation's entry block.
-    fn handle_array(&mut self, values: &[impl AsRef<str>]) -> (&'static str, usize) {
-        let count = values.len();
-        self.max_live = self.max_live.max(count);
-        for (i, value) in values.iter().enumerate() {
-            let value = value.as_ref();
-            let ptr = self.value(&format!("getelementptr i64, ptr %live, i64 {i}"));
-            self.line(&format!("store i64 {value}, ptr {ptr}"));
-        }
-        (if count == 0 { "null" } else { "%live" }, count)
-    }
-
-    fn checkpoint(&mut self, node: &impl Ranged) {
-        self.current_range = node.range();
-        let (ptr, count) = self.live_handles();
-        let line = self.source.line(node.start());
-        self.expression_line = line;
-        self.line(&format!(
-            "call void @imre_dyn_statement_with_exception(ptr %ctx, ptr {ptr}, i64 {count}, ptr {}, i32 {line}, i64 {})",
-            self.source.file, self.caught.last().map_or("0", String::as_str)
-        ));
-        self.check_error();
-    }
-
     fn invoke(&mut self, callable: &str, values: &[&str]) -> String {
         let mark = self.temporary_mark();
         let (ptr, count) = self.handle_array(values);
@@ -1422,66 +1116,6 @@ impl Function<'_, '_> {
             &mark,
             None,
         )
-    }
-
-    /// A live caller retains the full range even when traceback highlighting is suppressed.
-    fn call_position(&mut self, range: ruff_text_size::TextRange) {
-        let (start_line, start_col) = self.source.line_and_column(range.start());
-        let (end_line, end_col) = self.source.line_and_column(range.end());
-        let position = self
-            .output
-            .position([start_line, end_line, start_col, end_col]);
-        self.line(&format!(
-            "call void @imre_dyn_call_position(ptr %ctx, ptr {position})"
-        ));
-    }
-
-    /// Pass the caller's temporary root boundary and optional traceback position.
-    fn call_at(
-        &mut self,
-        callable: &str,
-        operands: CallArguments,
-        mark: &str,
-        span: Option<[usize; 4]>,
-    ) -> String {
-        let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
-        let scope = &self.scope;
-        let (function, args) = match operands {
-            CallArguments::PartitionField {
-                array,
-                index,
-                get_position,
-            } => (
-                "imre_dyn_partition_field_at",
-                format!("ptr {array}, i32 {index}, ptr {get_position}"),
-            ),
-            CallArguments::FixedKeywords {
-                array,
-                positional,
-                names,
-                keywords,
-            } => (
-                "imre_dyn_keyword_call_at",
-                format!("ptr {array}, i64 {positional}, ptr {names}, i64 {keywords}"),
-            ),
-            CallArguments::Packed { args, kwargs } => (
-                "imre_dyn_scoped_call_at",
-                format!("i64 {args}, i64 {kwargs}"),
-            ),
-            CallArguments::Positional {
-                array: ptr,
-                count,
-                receiver_slot,
-            } => (
-                if receiver_slot {
-                    "imre_dyn_positional_method_at"
-                } else {
-                    "imre_dyn_positional_call_at"
-                },
-                format!("ptr {ptr}, i64 {count}"),
-            ),
-        };
-        self.checked(&format!("call i64 @{function}(ptr %ctx, i64 {callable}, {args}, i64 {mark}, ptr {position}, i64 {scope})"))
     }
 }
 

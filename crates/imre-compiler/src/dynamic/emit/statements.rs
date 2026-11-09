@@ -278,13 +278,14 @@ impl Function<'_, '_> {
         for name in globals.0 {
             self.declared_globals.insert(name.to_owned());
             let name = self.code_name(name);
-            self.op("declare_global", &[&self.scope.clone(), &name]);
+            self.frame
+                .op("declare_global", &[&self.scope.clone(), &name]);
         }
     }
 
     pub(super) fn statements(&mut self, suite: &[ast::Stmt]) {
         for stmt in suite {
-            if self.terminated {
+            if self.body.terminated {
                 if self.module_annotation_sites.is_none() {
                     break;
                 }
@@ -312,7 +313,7 @@ impl Function<'_, '_> {
                     let params = if let Some(params) = v.type_params.as_deref() {
                         self.scope = self.parameter_scope(&outer, params, false);
                         let key = self.code_name(".type_params");
-                        self.op("lookup", &[&self.scope.clone(), &key])
+                        self.frame.op("lookup", &[&self.scope.clone(), &key])
                     } else {
                         "0".into()
                     };
@@ -351,7 +352,7 @@ impl Function<'_, '_> {
                     for target in &v.targets {
                         match self.place(target) {
                             Some(Place::Name(name)) => {
-                                self.op("delname", &[&self.scope.clone(), &name]);
+                                self.frame.op("delname", &[&self.scope.clone(), &name]);
                             }
                             Some(Place::Item(obj, key)) => {
                                 self.op("delitem", &[&obj, &key]);
@@ -393,17 +394,19 @@ impl Function<'_, '_> {
                         if self.class_locals.is_some() && !self.source.string_annotations {
                             self.remember_annotation(v, name.id.as_str());
                             let offset = v.start().to_u32();
-                            self.checked(&format!("call i64 @imre_dyn_mark_class_annotation(ptr %ctx, i64 {}, i64 {key}, i32 {offset})", self.scope));
+                            self.frame.checked(&format!("call i64 @imre_dyn_mark_class_annotation(ptr %ctx, i64 {}, i64 {key}, i32 {offset})", self.scope));
                         } else if let Some(sites) = &mut self.module_annotation_sites {
                             let index = sites.len();
                             sites.push((name.id.to_string(), (*v.annotation).clone()));
                             let index = self.integer(index);
-                            self.op("mark_module_annotation", &[&self.scope.clone(), &index]);
+                            self.frame
+                                .op("mark_module_annotation", &[&self.scope.clone(), &index]);
                         } else {
                             let value = self.annotation_text(
                                 &crate::frontend::annotation_spelling(&v.annotation),
                             );
-                            self.op("annotate", &[&self.scope.clone(), &key, &value]);
+                            self.frame
+                                .op("annotate", &[&self.scope.clone(), &key, &value]);
                         }
                     }
                 }
@@ -515,7 +518,7 @@ impl Function<'_, '_> {
                     self.loop_body(&v.body, &v.orelse, Some(&iter), |f, yes, no| {
                         if f.native_suspension {
                             // A retained frame exposes the header after its final pull.
-                            f.set_statement_line(f.source.line(v.start()));
+                            f.set_statement_line(f.source.positions.line(v.start()));
                         }
                         f.enter_iteration(
                             &iter,
@@ -548,7 +551,7 @@ impl Function<'_, '_> {
                         };
                         self.run_cleanups(target.cleanup_depth, None);
                         if let Some(iter) = iterator
-                            && !self.terminated
+                            && !self.body.terminated
                         {
                             self.op("break_iter", &[&iter]);
                         }
@@ -590,7 +593,8 @@ impl Function<'_, '_> {
                     let module = self.import(name, &fromlist, v.level);
                     for (alias, attr) in v.names.iter().zip(names) {
                         if alias.name.as_str() == "*" {
-                            self.op("import_star", &[&self.scope.clone(), &module]);
+                            self.frame
+                                .op("import_star", &[&self.scope.clone(), &module]);
                             continue;
                         }
                         let value = self.op("from", &[&module, &attr]);
@@ -643,7 +647,7 @@ impl Function<'_, '_> {
 
     fn import(&mut self, name: &str, fromlist: &str, level: u32) -> String {
         let name = self.code_name(name);
-        self.checked(&format!(
+        self.frame.checked(&format!(
             "call i64 @imre_dyn_import_name(ptr %ctx, i64 {}, i64 {name}, i64 {fromlist}, i32 {level})",
             self.scope
         ))
@@ -665,8 +669,9 @@ impl Function<'_, '_> {
                     .partition_point(|&p| p < class.name.start());
                 let (line, start) = self
                     .source
+                    .positions
                     .line_and_column(self.source.class_keywords[index - 1]);
-                let (end_line, end) = self.source.line_and_column(class.end());
+                let (end_line, end) = self.source.positions.line_and_column(class.end());
                 self.expression_line = line;
                 self.output.position([line, end_line, start, end])
             },
@@ -731,7 +736,9 @@ impl Function<'_, '_> {
                 self.unsupported("class type parameter bounds and defaults");
             }
             let binding = self.code_name(param.name().as_str());
-            let name = self.code_name(self.source.private_names.definition(param.name()));
+            let name = self
+                .frame
+                .code_name(self.source.private_names.definition(param.name()));
             let declaration = match param {
                 ast::TypeParam::TypeVar(_) => name,
                 ast::TypeParam::TypeVarTuple(_) => self.op("class_typevartuple", &[&name]),
@@ -744,7 +751,7 @@ impl Function<'_, '_> {
         } else {
             "function_parameter_scope"
         };
-        self.op(op, &[outer, &names])
+        self.frame.op(op, &[outer, &names])
     }
 
     pub(super) fn define(
@@ -850,7 +857,7 @@ impl Function<'_, '_> {
                 }
             }
             let sig = self.text(&metadata.to_string());
-            let code = self.output.definition(
+            let code = self.frame.output.definition(
                 self.source,
                 String::new(),
                 Body::Annotations(entries, class),
@@ -1007,9 +1014,10 @@ impl Function<'_, '_> {
         {
             signature["return_type"] = json!(ty);
         }
-        let code = self
-            .output
-            .definition(self.source, prefix, body, start, in_function, entry);
+        let code =
+            self.frame
+                .output
+                .definition(self.source, prefix, body, start, in_function, entry);
         if let Some(p) = params {
             self.output
                 .interned_identifiers
@@ -1116,7 +1124,7 @@ impl Function<'_, '_> {
                 })
                 .to_string(),
             );
-            let code = self.output.definition(
+            let code = self.frame.output.definition(
                 self.source,
                 String::new(),
                 Body::ModuleAnnotations(entries),
@@ -1125,10 +1133,11 @@ impl Function<'_, '_> {
                 Entry::Compiled,
             );
             let name = self.text("__annotate__");
-            let provider = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {signature}, i64 0, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
+            let provider = self.frame.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {signature}, i64 0, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
             self.bind("__annotate__", &provider);
         }
-        self.op("setup_module_annotations", &[&self.scope.clone()]);
+        self.frame
+            .op("setup_module_annotations", &[&self.scope.clone()]);
     }
 
     pub(super) fn annotations(
@@ -1140,7 +1149,7 @@ impl Function<'_, '_> {
         self.check_annotation_format();
         let values = self.op("dict", &[]);
         // The public format parameter is outside the annotation expressions' lexical scope.
-        self.scope = self.op("annotation_scope", &[&self.scope.clone()]);
+        self.scope = self.frame.op("annotation_scope", &[&self.scope.clone()]);
         self.annotation_lookup = true;
         self.class_locals = class;
         for (index, &(name, expression)) in entries.iter().enumerate() {
@@ -1196,7 +1205,7 @@ impl Function<'_, '_> {
     ) {
         for (index, decorator) in decorators.iter().enumerate().rev() {
             if let Some(syntax) = positions.get(index) {
-                self.set_statement_line(self.source.line(syntax.expression.start()));
+                self.set_statement_line(self.source.positions.line(syntax.expression.start()));
             }
             value = self.invoke(decorator, &[&value]);
         }
@@ -1247,15 +1256,15 @@ impl Function<'_, '_> {
 
     fn read(&mut self, place: &Place) -> String {
         match place {
-            Place::Name(n) => self.op("lookup", &[&self.scope.clone(), n]),
-            Place::Attr(v, n) => self.op("attr", &[v, n]),
-            Place::Item(v, k) => self.op("get", &[v, k]),
+            Place::Name(n) => self.frame.op("lookup", &[&self.scope.clone(), n]),
+            Place::Attr(v, n) => self.frame.op("attr", &[v, n]),
+            Place::Item(v, k) => self.frame.op("get", &[v, k]),
         }
     }
 
     fn write(&mut self, place: &Place, value: &str) {
         match place {
-            Place::Name(n) => self.op("assign", &[&self.scope.clone(), n, value]),
+            Place::Name(n) => self.frame.op("assign", &[&self.scope.clone(), n, value]),
             Place::Attr(v, n) => self.op("setattr", &[v, n, value]),
             Place::Item(v, k) => self.op("put", &[v, k, value]),
         };
@@ -1263,11 +1272,6 @@ impl Function<'_, '_> {
 
     pub(super) fn assign(&mut self, target: &ast::Expr, value: &str) {
         self.assign_target(target, value, false);
-    }
-
-    pub(super) fn assign_owned_name(&mut self, name: &str, value: &str) {
-        let replaced = self.op("assign_target", &[&self.scope.clone(), name, value]);
-        self.release_replaced(&replaced);
     }
 
     /// Transfer unpacked items to their targets while retaining the outstanding operands.
@@ -1369,12 +1373,12 @@ impl Function<'_, '_> {
         exhausted: &str,
     ) -> String {
         let handler = self.name("b");
-        let outer = std::mem::replace(&mut self.error, handler.clone());
+        let outer = std::mem::replace(&mut self.body.error_target, handler.clone());
         let mark = self.temporary_mark();
         let next = self.op("async_next_iter", &[iter]);
         let item = self.suspend_at(&next, super::suspension::Suspension::Await, range, &mark);
         self.flush_check();
-        self.error = outer;
+        self.body.error_target = outer;
         self.jump(body);
         self.label(&handler);
         self.discard_truth(&mark);
@@ -1477,15 +1481,15 @@ impl Function<'_, '_> {
         self.line(&format!(
             "call i64 @imre_dyn_op_at(ptr %ctx, ptr {op}, i64 {exc}, i64 {cause}, i64 {explicit}, ptr null)"
         ));
-        self.jump(&self.error.clone());
+        self.frame.jump(&self.body.error_target.clone());
     }
 
     fn try_except(&mut self, stmt: &ast::StmtTry) {
         let handler = self.name("b");
         let done = self.name("b");
-        let outer = std::mem::replace(&mut self.error, handler.clone());
+        let outer = std::mem::replace(&mut self.body.error_target, handler.clone());
         self.statements(&stmt.body);
-        self.error = outer;
+        self.body.error_target = outer;
         self.statements(&stmt.orelse);
         self.jump(&done);
         self.label(&handler);
@@ -1518,13 +1522,13 @@ impl Function<'_, '_> {
             if let Some(name) = &h.name {
                 self.bind(name.as_str(), exc);
                 let failed = self.name("b");
-                let outer = std::mem::replace(&mut self.error, failed.clone());
+                let outer = std::mem::replace(&mut self.body.error_target, failed.clone());
                 self.exits
                     .push((Cleanup::ExceptionName(name.to_string()), outer.clone()));
                 self.statements(&h.body);
                 self.exits.pop();
-                self.error = outer;
-                if !self.terminated {
+                self.body.error_target = outer;
+                if !self.body.terminated {
                     self.clear_exception_name(name.as_str());
                 }
                 self.jump(done);
@@ -1576,10 +1580,10 @@ impl Function<'_, '_> {
             if let Some(name) = &handler.name {
                 self.bind(name.as_str(), &matched);
             }
-            let outer = std::mem::replace(&mut self.error, failed.clone());
+            let outer = std::mem::replace(&mut self.body.error_target, failed.clone());
             self.statements(&handler.body);
-            self.error = outer;
-            if !self.terminated
+            self.body.error_target = outer;
+            if !self.body.terminated
                 && let Some(name) = &handler.name
             {
                 self.clear_star_target(name.as_str());
@@ -1618,20 +1622,20 @@ impl Function<'_, '_> {
     fn clear_star_target(&mut self, name: &str) {
         self.bind(name, "0");
         let key = self.code_name(name);
-        self.op("delname", &[&self.scope.clone(), &key]);
+        self.frame.op("delname", &[&self.scope.clone(), &key]);
     }
 
     /// Remove a handler's binding even if it was changed or deleted by its body.
     fn clear_exception_name(&mut self, name: &str) {
         let name = self.code_name(name);
-        self.op("clearname", &[&self.scope.clone(), &name]);
+        self.frame.op("clearname", &[&self.scope.clone(), &name]);
     }
 
     /// Run the same cleanup for normal fallthrough, a pending exception and nonlocal exits.
     fn try_finally(&mut self, stmt: &ast::StmtTry) {
         let handler = self.name("b");
         let done = self.name("b");
-        let outer = std::mem::replace(&mut self.error, handler.clone());
+        let outer = std::mem::replace(&mut self.body.error_target, handler.clone());
         self.exits.push((
             Cleanup::Finally {
                 body: stmt.finalbody.as_slice().into(),
@@ -1646,8 +1650,8 @@ impl Function<'_, '_> {
             self.try_except(stmt);
         }
         self.exits.pop();
-        self.error = outer;
-        if !self.terminated || self.module_annotation_sites.is_some() {
+        self.body.error_target = outer;
+        if !self.body.terminated || self.module_annotation_sites.is_some() {
             self.statements(&stmt.finalbody);
             self.jump(&done);
         }
@@ -1661,36 +1665,31 @@ impl Function<'_, '_> {
                 value: exception.clone(),
                 enclosing_exception: Some(enclosing),
             },
-            self.error.clone(),
+            self.body.error_target.clone(),
         ));
         self.caught.push(exception.clone());
         self.statements(&stmt.finalbody);
         self.caught.pop();
         self.exits.pop();
         self.live.pop();
-        if !self.terminated {
+        if !self.body.terminated {
             self.raise(&exception, None, true);
         }
         self.label(&done);
     }
 
     /// Collect discarded owners while retaining the operands needed after the transfer.
-    fn release_replaced(&mut self, replaced: &str) {
-        let (ptr, count) = self.live_handles();
-        self.line(&format!("call void @imre_dyn_assignment_target(ptr %ctx, ptr {ptr}, i64 {count}, i64 {replaced})"));
-    }
-
     /// A return, break or continue inside a finally may replace the pending exit.
     fn run_cleanups(&mut self, depth: usize, pending: Option<&str>) {
         let active = self.exits.clone();
         let mut discarded = Vec::new();
         for index in (depth..active.len()).rev() {
-            if self.terminated {
+            if self.body.terminated {
                 break;
             }
             self.exits.truncate(index);
             let (cleanup, outer) = &active[index];
-            let previous = std::mem::replace(&mut self.error, outer.clone());
+            let previous = std::mem::replace(&mut self.body.error_target, outer.clone());
             match cleanup {
                 Cleanup::With(context) => {
                     if context.is_async {
@@ -1737,7 +1736,7 @@ impl Function<'_, '_> {
                     self.loops.extend(protected_loops);
                 }
             }
-            self.error = previous;
+            self.body.error_target = previous;
         }
         for (slot, value) in discarded.into_iter().rev() {
             self.live.insert(slot, value);
@@ -1764,7 +1763,7 @@ impl Function<'_, '_> {
             context.caught.as_str(),
         ];
         if !context.is_async {
-            self.set_statement_line(self.source.line(context.range.start()));
+            self.set_statement_line(self.source.positions.line(context.range.start()));
             return self.op("exit_context", &args);
         }
 
@@ -1836,7 +1835,7 @@ impl Function<'_, '_> {
         };
         let handler = self.name("b");
         let done = self.name("b");
-        let outer = std::mem::replace(&mut self.error, handler.clone());
+        let outer = std::mem::replace(&mut self.body.error_target, handler.clone());
         let caught = self.caught.last().cloned().unwrap_or_else(|| "0".into());
         let context = ContextExit {
             range,
@@ -1857,8 +1856,8 @@ impl Function<'_, '_> {
         self.with(rest, body, is_async);
         self.live.pop();
         self.exits.pop();
-        self.error = outer;
-        if !self.terminated {
+        self.body.error_target = outer;
+        if !self.body.terminated {
             self.exit_context(&context, None);
             self.jump(&done);
         }

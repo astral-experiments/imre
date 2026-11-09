@@ -61,7 +61,7 @@ impl Function<'_, '_> {
 
     // Equal constants are merged across nested code objects in one compilation.
     fn string_constant_slot(&mut self, constant: StringConstant) -> String {
-        let slots = &mut self.output.string_constant_slots;
+        let slots = &mut self.frame.output.string_constant_slots;
         let next = slots.len();
         let slot = *slots.entry((self.source.unit, constant)).or_insert(next);
         self.integer(slot)
@@ -156,7 +156,7 @@ impl Function<'_, '_> {
             .replacements
             .keys()
             .any(|&r| range.contains_range(r))
-            .then(|| imre_ast::strings::replacements(&self.source.text[range]).collect())
+            .then(|| imre_ast::strings::replacements(&self.source.positions.text[range]).collect())
     }
 
     pub(super) fn literal_text<'a>(

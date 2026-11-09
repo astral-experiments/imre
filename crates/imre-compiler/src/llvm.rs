@@ -19,6 +19,7 @@ use crate::types::Types;
 
 mod affine;
 mod asyncio;
+pub(crate) mod body;
 mod byte_outputs;
 mod calendar;
 mod callables;
@@ -466,7 +467,7 @@ fn emit_program(
     let mut emitter = Emitter {
         module,
         output,
-        code: String::new(),
+        body: body::FunctionBody::new("entry", ""),
         entry_allocas: String::new(),
         mapping_words: 0,
         forward_cursors: BTreeMap::new(),
@@ -495,10 +496,6 @@ fn emit_program(
         enum_members: Vec::new(),
         http_members: Vec::new(),
         literal_globals,
-        next_value: 0,
-        next_label: 0,
-        current: "entry".to_owned(),
-        terminated: false,
         loops: Vec::new(),
         locals: Vec::new(),
         directory_slot_count: 0,
@@ -523,7 +520,6 @@ fn emit_program(
         cleanup_bytes: 0,
         cleanup_limit_hit: false,
         return_exit: String::new(),
-        error_exit: String::new(),
         sanitize,
         ranges,
         effects,
@@ -557,12 +553,11 @@ fn emit_program(
         };
         if emitter.output.split() {
             // SSA names and labels are scoped to one LLVM function.
-            emitter.next_value = 0;
-            emitter.next_label = 0;
+            emitter.body.reset_names();
         }
         let frame = function_source_frame(module, &repr_methods, id);
         let params = emitter.function(function, entry, frame, &borrows[id])?;
-        bodies.push((params, std::mem::take(&mut emitter.code)));
+        bodies.push((params, std::mem::take(&mut emitter.body.code)));
     }
     emitter
         .output
@@ -746,7 +741,7 @@ fn emit_program(
 struct Emitter<'a, 'module> {
     module: &'a Module,
     output: &'a mut Output,
-    code: String,
+    body: body::FunctionBody,
     entry_allocas: String,
     mapping_words: usize,
     forward_cursors: BTreeMap<usize, ForwardCursor>,
@@ -775,10 +770,6 @@ struct Emitter<'a, 'module> {
     enum_members: Vec<[usize; 3]>,
     http_members: Vec<Option<(u64, usize, usize)>>,
     literal_globals: Vec<Option<String>>,
-    next_value: usize,
-    next_label: usize,
-    current: String,
-    terminated: bool,
     loops: Vec<LoopTarget>,
     locals: Vec<Type>,
     directory_slot_count: usize,
@@ -803,7 +794,6 @@ struct Emitter<'a, 'module> {
     cleanup_bytes: usize,
     cleanup_limit_hit: bool,
     return_exit: String,
-    error_exit: String,
     sanitize: bool,
     ranges: &'a RangeFacts<'module>,
     effects: ExceptionEffects,
@@ -857,21 +847,17 @@ fn regex_positions_may_escape(module: &crate::ir::Module, function: &Function) -
 
 impl Emitter<'_, '_> {
     fn line(&mut self, line: impl AsRef<str>) {
-        writeln!(self.code, "  {}", line.as_ref()).unwrap();
+        self.body.line(line);
     }
 
     fn instruction(&mut self, instruction: impl AsRef<str>) -> String {
-        let result = format!("%v{}", self.next_value);
-        self.next_value += 1;
-        self.line(format!("{result} = {}", instruction.as_ref()));
-        result
+        self.body.instruction(instruction)
     }
 
     /// Gives each emitted operation independent scratch with function lifetime,
     /// including operations inside loops and duplicated finally cleanup paths.
     fn entry_alloca(&mut self, ty: impl AsRef<str>) -> String {
-        let result = format!("%scratch{}", self.next_value);
-        self.next_value += 1;
+        let result = self.body.name("%scratch");
         writeln!(self.entry_allocas, "  {result} = alloca {}", ty.as_ref()).unwrap();
         result
     }
@@ -910,25 +896,19 @@ impl Emitter<'_, '_> {
     }
 
     fn label(&mut self) -> String {
-        let result = format!("b{}", self.next_label);
-        self.next_label += 1;
-        result
+        self.body.label()
     }
 
     fn start(&mut self, label: &str) {
-        writeln!(self.code, "{label}:").unwrap();
-        self.current = label.to_owned();
-        self.terminated = false;
+        self.body.start(label);
     }
 
     fn jump(&mut self, label: &str) {
-        self.line(format!("br label %{label}"));
-        self.terminated = true;
+        self.body.jump(label);
     }
 
     fn branch(&mut self, condition: &str, yes: &str, no: &str) {
-        self.line(format!("br i1 {condition}, label %{yes}, label %{no}"));
-        self.terminated = true;
+        self.body.branch(condition, yes, no);
     }
 
     fn call(&mut self, name: &str, returns: Type, args: &[&Value]) -> Value {
@@ -1116,9 +1096,7 @@ impl Emitter<'_, '_> {
             self.instruction("load atomic i8, ptr @imre_signal_tripped monotonic, align 1");
         let pending = self.instruction(format!("icmp ne i8 {tripped}, 0"));
         let (slow, next) = (self.label(), self.label());
-        self.line(format!(
-            "br i1 {pending}, label %{slow}, label %{next}, !prof !0"
-        ));
+        self.body.conditional(&pending, &slow, &next, Some(false));
         self.start(&slow);
         let raised = self.instruction("call i1 @imre_typed_interrupt()");
         self.check_failed(&raised);
@@ -1132,10 +1110,7 @@ impl Emitter<'_, '_> {
     /// Branch weights guide layout/inlining without assuming errors impossible.
     fn check_failed(&mut self, failed: &str) {
         let (error, success) = (self.label(), self.label());
-        self.line(format!(
-            "br i1 {failed}, label %{error}, label %{success}, !prof !0"
-        ));
-        self.terminated = true;
+        self.body.conditional(failed, &error, &success, Some(false));
         let temporaries = self.temporaries.clone();
         self.start(&error);
         for value in temporaries.iter().rev() {
@@ -1461,7 +1436,7 @@ impl Emitter<'_, '_> {
             .runtime_call(&LIST_BORROW_INDEX, [receiver, &at])
             .value
             .operand;
-        let slow_exit = self.current.clone();
+        let slow_exit = self.body.current.clone();
         self.jump(&end);
         self.start(&end);
         Some(self.instruction(format!(
@@ -1506,7 +1481,7 @@ impl Emitter<'_, '_> {
             .into_value(self);
         // The join takes ownership of the value acquired on this edge.
         self.forget(&ordinary);
-        let slow_exit = self.current.clone();
+        let slow_exit = self.body.current.clone();
         self.jump(&end);
         self.start(&end);
         let result = self.instruction(format!(
@@ -1780,7 +1755,7 @@ impl Emitter<'_, '_> {
     fn cached_string_length(&mut self, slot: usize, text: &Value) -> Value {
         let cached = self.instruction(format!("load i64, ptr %str_count{slot}"));
         let hit = self.instruction(format!("icmp ne i64 {cached}, 0"));
-        let from = self.current.clone();
+        let from = self.body.current.clone();
         let (miss, done) = (self.label(), self.label());
         self.branch(&hit, &done, &miss);
         self.start(&miss);
@@ -1790,7 +1765,7 @@ impl Emitter<'_, '_> {
         let immediate = self.instruction(format!("trunc i64 {word} to i1"));
         let entry = self.instruction(format!("select i1 {immediate}, i64 {word}, i64 0"));
         self.line(format!("store i64 {entry}, ptr %str_count{slot}"));
-        let miss_exit = self.current.clone();
+        let miss_exit = self.body.current.clone();
         self.jump(&done);
         self.start(&done);
         let word = self.instruction(format!(
@@ -1813,11 +1788,11 @@ impl Emitter<'_, '_> {
             receiver.operand, snapshot.receiver.operand
         ));
         let (fallback, end) = (self.label(), self.label());
-        let before = self.current.clone();
+        let before = self.body.current.clone();
         self.branch(&same, &end, &fallback);
         self.start(&fallback);
         let ordinary = self.list_length(receiver);
-        let fallback_end = self.current.clone();
+        let fallback_end = self.body.current.clone();
         self.jump(&end);
         self.start(&end);
         Some(Value {
@@ -1969,7 +1944,7 @@ impl Emitter<'_, '_> {
                     const MAX_CLEANUP_BYTES: usize = 8 * 1024 * 1024;
                     if self.cleanup_limit_hit || self.cleanup_bytes >= MAX_CLEANUP_BYTES {
                         self.cleanup_limit_hit = true;
-                        self.terminated = true;
+                        self.body.terminated = true;
                         return;
                     }
                     let depth = self.cleanups.len();
@@ -1992,13 +1967,13 @@ impl Emitter<'_, '_> {
                         None
                     };
                     self.loops = loops;
-                    let before = self.code.len();
+                    let before = self.body.code.len();
                     let previous_bytes = self.cleanup_bytes;
                     self.block(&body);
                     // Nested copies are already included in this byte range.
-                    self.cleanup_bytes = previous_bytes + (self.code.len() - before);
+                    self.cleanup_bytes = previous_bytes + (self.body.code.len() - before);
                     self.cleanups.truncate(depth);
-                    if self.terminated {
+                    if self.body.terminated {
                         return;
                     }
                     if let Some((error, previous)) = error {
@@ -2021,7 +1996,7 @@ impl Emitter<'_, '_> {
                 self.jump(&self.return_exit.clone());
             }
             Completion::Jump { label, .. } => self.jump(&label),
-            Completion::Error => self.jump(&self.error_exit.clone()),
+            Completion::Error => self.jump(&self.body.error_target.clone()),
         }
     }
 
@@ -2091,9 +2066,9 @@ impl Emitter<'_, '_> {
         if catches_error {
             self.cleanups.pop();
         }
-        if !self.terminated {
+        if !self.body.terminated {
             self.block(orelse);
-            if !self.terminated {
+            if !self.body.terminated {
                 self.route(Completion::Jump {
                     label: end.clone(),
                     depth,
@@ -2135,7 +2110,7 @@ impl Emitter<'_, '_> {
                     name: handler.name,
                 });
                 self.block(&handler.body);
-                if !self.terminated {
+                if !self.body.terminated {
                     self.route(Completion::Jump {
                         label: end.clone(),
                         depth,
@@ -2259,7 +2234,7 @@ impl Emitter<'_, '_> {
                 self.start(&failed);
                 let message = self.byte_array(b"cannot enable faulthandler\0".to_vec());
                 self.line(format!("call void @perror(ptr @{message})"));
-                self.line("ret i32 1");
+                self.body.end("ret i32 1");
                 self.start(&ready);
             }
             let filename = self.byte_array(file.as_bytes().to_vec());
@@ -2290,7 +2265,7 @@ impl Emitter<'_, '_> {
         self.directory_slot_count = directory_slots.len();
         let separate_exits = entry || !directory_slots.is_empty();
         self.return_exit = self.label();
-        self.error_exit = if separate_exits {
+        self.body.error_target = if separate_exits {
             self.label()
         } else {
             self.return_exit.clone()
@@ -2343,7 +2318,7 @@ impl Emitter<'_, '_> {
                 self.line(format!("store [4 x i64] zeroinitializer, ptr %line{slot}"));
             }
         }
-        let allocas_at = self.code.len();
+        let allocas_at = self.body.code.len();
         let mut pair_views = BTreeSet::new();
         ir::walk_expressions(&function.body, &mut |expr| {
             if let ExprKind::Builtin(Builtin::PairTable(ir::PairTableOp::Snapshot(slot)), _) =
@@ -2438,7 +2413,7 @@ impl Emitter<'_, '_> {
         }
         let command_flags = self.module.command_flags.as_ref();
         let ignore_env = command_flags.is_some_and(|flags| flags.ignore_environment);
-        let startup_at = self.code.len();
+        let startup_at = self.body.code.len();
         if entry {
             self.line(format!(
                 "call void @imre_process_config_init(i32 {}, i32 {}, i32 {})",
@@ -2494,7 +2469,7 @@ impl Emitter<'_, '_> {
             None => None,
         };
         self.int_buffer_body(function);
-        if !self.terminated {
+        if !self.body.terminated {
             self.jump(&self.return_exit.clone());
         }
         self.start(&self.return_exit.clone());
@@ -2502,10 +2477,10 @@ impl Emitter<'_, '_> {
             self.with_directory_frame(|out, frame| {
                 out.line(format!("call void @imre_object_release(ptr {frame})"));
             });
-            let returned = self.current.clone();
+            let returned = self.body.current.clone();
             let cleanup = self.label();
             self.jump(&cleanup);
-            self.start(&self.error_exit.clone());
+            self.start(&self.body.error_target.clone());
             self.with_directory_frame(|out, frame| {
                 for &slot in &directory_slots {
                     let value = out.borrow_slot(slot);
@@ -2518,7 +2493,7 @@ impl Emitter<'_, '_> {
                     "call void @imre_error_attach_directory_frame(ptr {frame})"
                 ));
             });
-            let raised = self.current.clone();
+            let raised = self.body.current.clone();
             self.jump(&cleanup);
             self.start(&cleanup);
             entry.then(|| {
@@ -2577,20 +2552,20 @@ impl Emitter<'_, '_> {
             self.branch(&failed, &error_return, &flush);
             self.start(&error_return);
             let status = self.instruction(format!("call i32 @imre_finish_unhandled(ptr {exit})"));
-            self.line(format!("ret i32 {status}"));
+            self.body.end(format!("ret i32 {status}"));
             self.start(&flush);
             let status = self.instruction("call i32 @imre_finish_stdio()");
-            self.line(format!("ret i32 {status}"));
+            self.body.end(format!("ret i32 {status}"));
         } else if function.returns == Type::None {
-            self.line("ret i8 0");
+            self.body.end("ret i8 0");
         } else {
             let value = self.instruction(format!(
                 "load {}, ptr %function_return",
                 function.returns.llvm()
             ));
-            self.line(format!("ret {returns} {value}"));
+            self.body.end(format!("ret {returns} {value}"));
         }
-        self.code.push_str("}\n");
+        self.body.code.push_str("}\n");
         // Mapping calls transfer their output words before another call can reuse them.
         for name in ["%mapping_key_word", "%mapping_value_word"]
             .into_iter()
@@ -2606,12 +2581,12 @@ impl Emitter<'_, '_> {
                 "null"
             };
             if self.has_extensions {
-                self.code.insert_str(
+                self.body.code.insert_str(
                     startup_at,
                     "  %extension_owner = call i1 @imre_extension_enter()\n",
                 );
             }
-            self.code.insert_str(
+            self.body.code.insert_str(
                 startup_at,
                 &format!(
                     "  call void @imre_typed_start(i32 {}, ptr {layout})\n",
@@ -2619,7 +2594,7 @@ impl Emitter<'_, '_> {
                 ),
             );
         }
-        self.code.insert_str(allocas_at, &self.entry_allocas);
+        self.body.code.insert_str(allocas_at, &self.entry_allocas);
         if self.cleanup_limit_hit {
             return Err(Unsupported(
                 "Imre: finally cleanup expansion exceeds the compiler limit",
@@ -2778,7 +2753,7 @@ impl Emitter<'_, '_> {
                 self.cleanups.push(Cleanup::Slots(clear.clone()));
                 self.block(body);
                 self.cleanups.pop();
-                if !self.terminated {
+                if !self.body.terminated {
                     self.clear_slots(clear);
                 }
             }
@@ -2798,8 +2773,7 @@ impl Emitter<'_, '_> {
                 }
                 // Both runtime helpers always set an error; their success edge
                 // is unreachable, but uses the same immediate-check protocol.
-                self.line("unreachable");
-                self.terminated = true;
+                self.body.end("unreachable");
             }
             Statement::IterNext {
                 iterator,
@@ -3030,20 +3004,19 @@ impl Emitter<'_, '_> {
                     self.small_locals[slot] = false;
                 }
                 self.guarded_integer_lists.truncate(prior);
-                let yes_ends = self.terminated;
+                let yes_ends = self.body.terminated;
                 if !yes_ends {
                     self.jump(&end);
                 }
                 self.start(&no_label);
                 self.block(no);
-                let no_ends = self.terminated;
+                let no_ends = self.body.terminated;
                 if !no_ends {
                     self.jump(&end);
                 }
                 self.start(&end);
                 if yes_ends && no_ends {
-                    self.line("unreachable");
-                    self.terminated = true;
+                    self.body.end("unreachable");
                 }
             }
             Statement::While(test, body, orelse) => {
@@ -3073,13 +3046,13 @@ impl Emitter<'_, '_> {
                 });
                 self.block(body);
                 self.loops.pop();
-                if !self.terminated {
+                if !self.body.terminated {
                     self.jump(&condition);
                 }
                 if !orelse.is_empty() {
                     self.start(&exhausted);
                     self.block(orelse);
-                    if !self.terminated {
+                    if !self.body.terminated {
                         self.jump(&end);
                     }
                 }
@@ -3134,7 +3107,7 @@ impl Emitter<'_, '_> {
                 self.branch(&zero.operand, &fail, &condition);
                 self.start(&fail);
                 self.checked_line("call void @imre_range_step_zero()");
-                self.line("unreachable");
+                self.body.end("unreachable");
                 self.start(&condition);
                 self.check_interrupt();
                 let mut current = self.borrow_slot(*cursor);
@@ -3166,7 +3139,7 @@ impl Emitter<'_, '_> {
                 });
                 self.block(body);
                 self.loops.pop();
-                if !self.terminated {
+                if !self.body.terminated {
                     if unit_step {
                         self.batch_modular_writes(body, *target, *cursor, *stop);
                     }
@@ -3187,7 +3160,7 @@ impl Emitter<'_, '_> {
                 if !orelse.is_empty() {
                     self.start(&exhausted);
                     self.block(orelse);
-                    if !self.terminated {
+                    if !self.body.terminated {
                         self.jump(&end);
                     }
                 }
@@ -3210,7 +3183,7 @@ impl Emitter<'_, '_> {
                 self.branch(&test.operand, &success, &fail);
                 self.start(&fail);
                 self.checked_line("call void @imre_assert_fail()");
-                self.line("unreachable");
+                self.body.end("unreachable");
                 self.start(&success);
             }
         }
@@ -4107,7 +4080,7 @@ impl Emitter<'_, '_> {
         };
         let generic = self.call(symbol, Type::Int, &[value]);
         self.forget(&generic);
-        let wide_exit = self.current.clone();
+        let wide_exit = self.body.current.clone();
         self.jump(&done);
         self.start(&done);
         let operand = self.instruction(format!(
@@ -4231,11 +4204,11 @@ impl Emitter<'_, '_> {
         self.branch(&immediate, &fast, &slow);
         self.start(&fast);
         let small = self.select_integer_extremum(order, args, true);
-        let fast_end = self.current.clone();
+        let fast_end = self.body.current.clone();
         self.jump(&done);
         self.start(&slow);
         let generic = self.select_integer_extremum(order, args, false);
-        let slow_end = self.current.clone();
+        let slow_end = self.body.current.clone();
         self.jump(&done);
         self.start(&done);
         Value {
@@ -4777,7 +4750,7 @@ impl Emitter<'_, '_> {
             self.release_operand(&left);
             if i + 1 == ops.len() {
                 self.release_operand(&right);
-                incoming.push(format!("[ {}, %{} ]", test.operand, self.current));
+                incoming.push(format!("[ {}, %{} ]", test.operand, self.body.current));
                 self.jump(&end);
             } else {
                 let (next, fail) = (self.label(), self.label());
@@ -4785,7 +4758,7 @@ impl Emitter<'_, '_> {
                 let temporaries = self.temporaries.clone();
                 self.start(&fail);
                 self.release_operand(&right);
-                incoming.push(format!("[ false, %{} ]", self.current));
+                incoming.push(format!("[ false, %{} ]", self.body.current));
                 self.jump(&end);
                 self.start(&next);
                 self.temporaries = temporaries;
@@ -4848,12 +4821,12 @@ impl Emitter<'_, '_> {
         self.start(&yes_label);
         let yes = self.expr(yes);
         self.forget(&yes);
-        let yes_end = self.current.clone();
+        let yes_end = self.body.current.clone();
         self.jump(&end);
         self.start(&no_label);
         let no = self.expr(no);
         self.forget(&no);
-        let no_end = self.current.clone();
+        let no_end = self.body.current.clone();
         self.jump(&end);
         self.start(&end);
         Value {
@@ -4879,7 +4852,7 @@ impl Emitter<'_, '_> {
         let mut incoming = Vec::new();
         for (i, expression) in values.iter().enumerate() {
             let value = self.expr(expression);
-            incoming.push(format!("[ {}, %{} ]", value.operand, self.current));
+            incoming.push(format!("[ {}, %{} ]", value.operand, self.body.current));
             if i + 1 == values.len() {
                 self.jump(&end);
             } else {
@@ -5098,7 +5071,7 @@ impl Emitter<'_, '_> {
                     "call i64 @imre_pair_table_field(ptr {}, i64 {}, i64 {}, i32 {field})",
                     args[0].value.operand, args[1].value.operand, args[2].value.operand
                 ));
-                let other = self.current.clone();
+                let other = self.body.current.clone();
                 self.jump(&done);
                 self.start(&done);
                 let value = self.instruction(format!(
@@ -9411,7 +9384,7 @@ impl Emitter<'_, '_> {
                 ));
                 let word = self.instruction(format!("load i64, ptr {ptr}"));
                 let ready = self.instruction(format!("icmp ne i64 {word}, 0"));
-                let (before, slow, end) = (self.current.clone(), self.label(), self.label());
+                let (before, slow, end) = (self.body.current.clone(), self.label(), self.label());
                 self.branch(&ready, &end, &slow);
                 self.start(&slow);
                 let fallback = if self.line_slots[slot] {
@@ -9425,7 +9398,7 @@ impl Emitter<'_, '_> {
                         args[0].value.operand
                     ))
                 };
-                let after = self.current.clone();
+                let after = self.body.current.clone();
                 self.jump(&end);
                 self.start(&end);
                 Value {
@@ -9498,13 +9471,13 @@ impl Emitter<'_, '_> {
                     ));
                     let unbound = self.instruction(format!("icmp eq ptr {keys}, null"));
                     let collect = self.instruction(format!("or i1 {hit}, {unbound}"));
-                    let empty = self.current.clone();
+                    let empty = self.body.current.clone();
                     let select = self.label();
                     let done = self.label();
                     self.branch(&collect, &select, &done);
                     self.start(&select);
                     let result = self.checked_instruction(call);
-                    let selected = self.current.clone();
+                    let selected = self.body.current.clone();
                     self.jump(&done);
                     self.start(&done);
                     self.instruction(format!("phi ptr [null, %{empty}], [{result}, %{selected}]"))
@@ -9735,7 +9708,7 @@ impl Emitter<'_, '_> {
             self.present(value, returns)
         };
         self.forget(&value);
-        let present_end = self.current.clone();
+        let present_end = self.body.current.clone();
         self.jump(&end);
         self.start(&absent);
         let default = if let Some(default) = args.get(2) {
@@ -10047,14 +10020,14 @@ impl Emitter<'_, '_> {
         self.start(&allocate);
         let layout = self.output.record_layout(previous.ty);
         let fresh = self.allocate_record(previous.ty, &layout);
-        let allocated = self.current.clone();
+        let allocated = self.body.current.clone();
         self.jump(&write);
         self.start(&cached);
         let replacement = self.checked_pointer(format!(
             "call ptr @imre_record_try_cached_result(ptr {})",
             previous.operand
         ));
-        let reused = self.current.clone();
+        let reused = self.body.current.clone();
         self.jump(&write);
         self.start(&write);
         let record = Value {

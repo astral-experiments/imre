@@ -1,6 +1,6 @@
 //! Checked operations inside a Python function with a registered frame and object arguments.
 
-use super::{CallArguments, Function, permanent};
+use super::{CallArguments, RegisteredFrame, permanent};
 use crate::frontend::RegisteredFunction;
 use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Statement, Type};
 use crate::llvm::operations::Operations;
@@ -35,7 +35,7 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
 
 /// The registered binder owns the scope, argument identities and frame.
 struct Frame<'f, 'a, 'p> {
-    code: &'f mut Function<'a, 'p>,
+    code: &'f mut RegisteredFrame<'a, 'p>,
     checked: &'f RegisteredFunction,
 }
 
@@ -68,7 +68,12 @@ impl Operations for Frame<'_, '_, '_> {
         "0".into()
     }
     fn local(&mut self, slot: usize, _: &Expr) -> String {
-        self.code.lookup(&self.checked.local_names[&slot])
+        self.code.named_op(
+            "lookup",
+            &self.code.scope.clone(),
+            &self.checked.local_names[&slot],
+            "0",
+        )
     }
     fn prepare_assignment(&mut self, _: usize, _: &Expr) -> Option<()> {
         Some(())
@@ -79,7 +84,7 @@ impl Operations for Frame<'_, '_, '_> {
     }
     fn consume_expression(&mut self, expr: &Expr) -> bool {
         if let ExprKind::Builtin(Builtin::RegisteredStatement(range, simple), _) = &expr.kind {
-            self.code.checkpoint(range);
+            self.code.checkpoint(*range);
             self.code.simple_call = *simple;
             true
         } else {
@@ -95,7 +100,7 @@ impl Operations for Frame<'_, '_, '_> {
         self.code.return_value(&value);
     }
     fn terminated(&self) -> bool {
-        self.code.terminated
+        self.code.body.terminated
     }
     fn binary_expression(&mut self, op: Binary, left: &Expr, right: &Expr, _: &Expr) -> String {
         debug_assert!(matches!(op, Binary::Add));
@@ -104,10 +109,10 @@ impl Operations for Frame<'_, '_, '_> {
     }
     fn builtin(&mut self, op: &Builtin, operands: &[Expr], _: Type) -> String {
         if let (Builtin::RegisteredLocation(position), [value]) = (op, operands) {
-            let checked = self.checked;
-            return self
-                .code
-                .with_expression_line(*position, |code| Frame { code, checked }.evaluate(value));
+            let previous = self.code.enter_expression(*position);
+            let result = self.evaluate(value);
+            self.code.leave_expression(previous);
+            return result;
         }
         let Builtin::RegisteredCall(range, callee_end) = op else {
             unreachable!("unsupported registered operation")
@@ -137,7 +142,7 @@ impl Operations for Frame<'_, '_, '_> {
     }
 }
 
-impl Function<'_, '_> {
+impl RegisteredFrame<'_, '_> {
     pub(super) fn checked_body(&mut self, checked: &RegisteredFunction) {
         Frame {
             code: self,

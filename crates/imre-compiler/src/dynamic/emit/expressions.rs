@@ -28,30 +28,9 @@ impl Function<'_, '_> {
             &self.source.method_imports,
             Some(&self.source.private_names),
         );
-        self.with_expression_line(position, |function| function.expr_inner(expr, None))
-    }
-
-    pub(super) fn with_expression_line(
-        &mut self,
-        position: ruff_text_size::TextSize,
-        emit: impl FnOnce(&mut Self) -> String,
-    ) -> String {
-        let line = self.source.line(position);
-        let previous = self.expression_line;
-        if previous == line {
-            return emit(self);
-        }
-        self.expression_line = line;
-        self.line(&format!(
-            "call void @imre_dyn_expression_line(ptr %ctx, i32 {line})"
-        ));
-        let value = emit(self);
-        self.expression_line = previous;
-        if !self.terminated {
-            self.line(&format!(
-                "call void @imre_dyn_expression_line(ptr %ctx, i32 {previous})"
-            ));
-        }
+        let previous = self.enter_expression(position);
+        let value = self.expr_inner(expr, None);
+        self.leave_expression(previous);
         value
     }
 
@@ -61,7 +40,9 @@ impl Function<'_, '_> {
         let ast::Expr::Call(call) = &*subscript.value else {
             return None;
         };
-        if self.source.line(subscript.start()) != self.source.line(subscript.end()) {
+        if self.source.positions.line(subscript.start())
+            != self.source.positions.line(subscript.end())
+        {
             return None;
         }
         let field = imre_ast::direct_method(
@@ -238,8 +219,9 @@ impl Function<'_, '_> {
                 let mark = self.temporary_mark();
                 let value = self.expr(&v.value);
                 let name = self.code_name(target.id.as_str());
-                let replaced =
-                    self.op("assign_named_target", &[&self.scope.clone(), &name, &value]);
+                let replaced = self
+                    .frame
+                    .op("assign_named_target", &[&self.scope.clone(), &name, &value]);
                 self.line(&format!("call void @imre_dyn_named_assignment(ptr %ctx, i64 {mark}, i64 {value}, i64 {replaced})"));
                 value
             }
@@ -484,7 +466,7 @@ impl Function<'_, '_> {
         body: impl FnOnce(&mut Self) -> T,
     ) -> T {
         let failed = self.name("b");
-        let outer = std::mem::replace(&mut self.error, failed.clone());
+        let outer = std::mem::replace(&mut self.body.error_target, failed.clone());
         let result = body(self);
         let ready = self.name("b");
         self.jump(&ready);
@@ -492,7 +474,7 @@ impl Function<'_, '_> {
         self.discard_truth(mark);
         self.jump(&outer);
         self.label(&ready);
-        self.error = outer;
+        self.body.error_target = outer;
         result
     }
 
