@@ -16,6 +16,7 @@ def current():
                 b: mark("second")
             a: mark("last")
 
+    assert Swapped.__annotate__.__code__.co_flags == 19
     assert effects == []
     result = Swapped.__annotations__
     assert list(result) == ["a", "b"]

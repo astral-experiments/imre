@@ -618,6 +618,18 @@ struct SourceMap<'a> {
 }
 
 impl SourceMap<'_> {
+    fn function_flags(&self, params: Option<&ast::Parameters>, nested: bool, method: bool) -> u32 {
+        use imre_ast::code_flags;
+        let mut flags = code_flags::function_flags(params, nested, method);
+        if self.string_annotations {
+            flags |= code_flags::FUTURE_ANNOTATIONS;
+        }
+        if self.barry_as_flufl {
+            flags |= code_flags::FUTURE_BARRY_AS_BDFL;
+        }
+        flags
+    }
+
     /// Keep documentation attached to the bundled definition, even when callers rebind its name.
     fn docstring(&self, qualname: &str, body: &[ast::Stmt]) -> Option<String> {
         crate::frontend::docstring(body).or_else(|| {
