@@ -1776,25 +1776,26 @@ def check_unittest_module_main(imre, root, run):
         "        failure_reason = 'deliberate failure'\n"
         "        self.fail(failure_reason)\n"
     )
+    declared = {"IMREFLAGS": f"--include-module {package.name}.sample"}
     passing = "cli_test_package.sample.Passing"
-    ok = run(imre, "-m", "unittest", "-v", passing, passing + ".test_one")
+    ok = run(imre, "-m", "unittest", "-v", passing, passing + ".test_one", extra=declared)
     assert ok.returncode == 0 and ok.stdout == (passing + ".test_one\n").encode() * 2, ok
     assert ok.stderr.count(f"test_one ({passing}.test_one) ... ok".encode()) == 2, ok
     failing = "cli_test_package.sample.Failing.test_one"
-    errors = run(imre, "-m", "unittest", "-v", failing, passing + ".test_missing")
+    errors = run(imre, "-m", "unittest", "-v", failing, passing + ".test_missing", extra=declared)
     assert errors.returncode == 1 and b"Ran 2 tests" in errors.stderr, errors
     assert f"FAIL: test_one ({failing})".encode() in errors.stderr, errors
     assert b"ERROR: test_missing (unittest.loader._FailedTest.test_missing)" in errors.stderr, errors
     assert b"FAILED (failures=1, errors=1)" in errors.stderr, errors
     local_line = b"    failure_reason = 'deliberate failure'"
     assert local_line not in errors.stderr.splitlines(), errors
-    with_locals = run(imre, "-m", "unittest", "--locals", "-v", failing, passing + ".test_missing")
+    with_locals = run(imre, "-m", "unittest", "--locals", "-v", failing, passing + ".test_missing", extra=declared)
     assert with_locals.returncode == 1 and b"FAILED (failures=1, errors=1)" in with_locals.stderr, with_locals
     assert local_line in with_locals.stderr.splitlines(), with_locals
 
     (package / "other.py").write_text("raise AssertionError('outside discovery pattern')\n")
     discovered = run(imre, "-m", "unittest", "discover", "-v", "-s", package.name, "-t", ".",
-                     "-p", "sample.py", "-k", "Passing.test_one")
+                     "-p", "sample.py", "-k", "Passing.test_one", extra=declared)
     assert discovered.returncode == 0 and discovered.stdout == (passing + ".test_one\n").encode(), discovered
     assert f"test_one ({passing}.test_one) ... ok".encode() in discovered.stderr.splitlines(), discovered
     assert b"Ran 1 test in " in discovered.stderr, discovered
