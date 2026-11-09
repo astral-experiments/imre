@@ -15,6 +15,9 @@ class Owner:
     def constant(self, x: 7):
         pass
 
+    def generic[T](self, x: T):
+        pass
+
     def class_reference(self, x: __class__):
         return super()
 
@@ -81,6 +84,8 @@ def make_cell(value):
 
 
 def current():
+    assert Owner.generic.__code__.co_flags == 19
+    assert Owner.generic.__annotate__.__code__.co_flags == 19
     during = DuringDefinition.method.__annotate__
     assert DuringDefinition.seen == DuringDefinition.before == 4
     assert during(1) == {"x": 3}
