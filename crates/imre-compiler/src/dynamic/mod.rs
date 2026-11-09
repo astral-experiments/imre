@@ -1125,7 +1125,8 @@ pub(crate) fn compile(
     let mut before_site = HashSet::new();
     let mut named_registrations = None;
     let mut ordinary_registrations = None;
-    let keep_docstrings = startup.is_none_or(|(flags, _)| flags.optimize < 2);
+    let python_optimization = startup.map_or(0, |(flags, _)| flags.optimize);
+    let keep_docstrings = python_optimization < 2;
     let mut shadowed_imports = VecDeque::new();
     let mut file_origins = Vec::new();
     let mut frozen_files: Vec<String> = Vec::new();
@@ -1936,7 +1937,7 @@ pub(crate) fn compile(
         "tracemalloc":startup.map_or(0, |(flags, _)| flags.tracemalloc),
         "unbuffered":startup.is_some_and(|(flags, _)| flags.unbuffered),
         "warn_default_encoding":startup.map(|(flags, _)| flags.warn_default_encoding),
-        "optimize":startup.map_or(0, |(flags, _)| flags.optimize),
+        "optimize":python_optimization,
         "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),
         "executable":startup.map(|(_, executable)| executable),
         "command_source":command,"path0_bytes":path0_bytes,
@@ -2092,7 +2093,7 @@ pub(crate) fn compile(
         emit::emit(
             modules,
             &config,
-            keep_docstrings,
+            python_optimization,
             Path::new(bundled_root),
             &providers,
             layout,

@@ -123,6 +123,10 @@ pub(crate) fn registered(frame: &crate::frontend::RegisteredFunction) -> Result<
                         "registered namespace write needs one operand",
                     )
                 }),
+                ExprKind::Builtin(Builtin::RegisteredAssertionFailure { .. }, args) => require(
+                    value.ty == Type::None && args.len() <= 1,
+                    "registered assertion failure takes at most one message",
+                ),
                 ExprKind::Builtin(Builtin::RegisteredLocation(..), args) => match args.as_slice() {
                     [inner] => same(value.ty, inner.ty),
                     _ => Err("registered location needs one operand".into()),
@@ -762,15 +766,13 @@ mod tests {
             method_imports: &Default::default(),
         };
         let operations = Default::default();
-        let prepare = frontend::SuitePreparation::new(&operations, source);
+        let body = &graph.modules[graph.entry].parsed.syntax().body;
+        let prepare = frontend::SuitePreparation::new(&operations, source, body, true);
         for scope in [
             frontend::RegisteredScope::Module,
             frontend::RegisteredScope::Function { is_async: false },
         ] {
-            let mut frame = prepare
-                .complete(&graph.modules[graph.entry].parsed.syntax().body, scope)
-                .unwrap()
-                .checked;
+            let mut frame = prepare.complete(body, scope).unwrap().checked;
             registered(&frame).unwrap();
             frame.local_names.clear();
             assert!(registered(&frame).unwrap_err().contains("frame slot"));

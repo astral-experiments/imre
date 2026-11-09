@@ -440,7 +440,17 @@ impl Frame<'_, '_, '_> {
     }
 
     pub(crate) fn consume_expression(&mut self, expr: &Expr) -> bool {
-        if let ExprKind::Builtin(Builtin::RegisteredStatement(range, simple), _) = &expr.kind {
+        if let ExprKind::Builtin(
+            Builtin::RegisteredAssertionFailure { statement, test },
+            operands,
+        ) = &expr.kind
+        {
+            let message = operands.first().map(|expr| self.evaluate_handle(expr));
+            self.code
+                .assertion_failure(*statement, *test, message.as_deref());
+            true
+        } else if let ExprKind::Builtin(Builtin::RegisteredStatement(range, simple), _) = &expr.kind
+        {
             self.code.checkpoint(range);
             self.code.simple_call = *simple;
             true

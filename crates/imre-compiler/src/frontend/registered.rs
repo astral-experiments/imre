@@ -396,6 +396,7 @@ impl AnnotationChild {
         // An eval expression has its own source positions and looks up names in
         // the namespace supplied by its eventual caller.
         let source = values::RegisteredSource {
+            templates: None,
             text,
             replacements: &replacements,
             has_templates,
@@ -618,22 +619,95 @@ fn plain_class_header(class: &ast::StmtClassDef) -> bool {
     class.type_params.is_none() && class.arguments.as_ref().is_none_or(|args| args.is_empty())
 }
 
+fn checked_assertion(
+    stmt: &ast::StmtAssert,
+    mut operand: impl FnMut(&ast::Expr) -> Option<Expr>,
+) -> Option<Vec<Statement>> {
+    let condition = operand(&stmt.test)?;
+    let message = match stmt.msg.as_deref() {
+        Some(message) => vec![operand(message)?],
+        None => Vec::new(),
+    };
+    let test = operation(Builtin::Bool, Type::Bool, vec![condition]);
+    let failure = operation(
+        Builtin::RegisteredAssertionFailure {
+            statement: stmt.start(),
+            test: stmt.test.start(),
+        },
+        Type::None,
+        message,
+    );
+    // The implicit truth conversion can call Python on the test's physical line.
+    Some(vec![
+        Statement::Expr(operation(
+            Builtin::RegisteredStatement(stmt.test.range(), None),
+            Type::None,
+            vec![],
+        )),
+        Statement::If(test, Vec::new(), vec![Statement::Expr(failure)]),
+    ])
+}
+
+/// Prepare only whole assertions. The physical suite owns an assertion when either
+/// operand needs source lowering, including an unsupported message on a valid test.
+fn assertion_sites(
+    body: &[ast::Stmt],
+    source: values::RegisteredSource<'_>,
+    enabled: bool,
+) -> HashMap<TextRange, Vec<Statement>> {
+    use ast::statement_visitor::{StatementVisitor, walk_stmt};
+
+    struct Sites<'a> {
+        source: values::RegisteredSource<'a>,
+        enabled: bool,
+        statements: HashMap<TextRange, Vec<Statement>>,
+    }
+
+    impl<'a> StatementVisitor<'a> for Sites<'_> {
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            if let ast::Stmt::Assert(assertion) = stmt {
+                if !self.enabled {
+                    self.statements.insert(stmt.range(), Vec::new());
+                } else if let Some(body) = checked_assertion(assertion, |expr| {
+                    values::registered_value(expr, self.source)
+                }) {
+                    self.statements.insert(stmt.range(), body);
+                }
+            } else {
+                walk_stmt(self, stmt);
+            }
+        }
+    }
+
+    let mut sites = Sites {
+        source,
+        enabled,
+        statements: HashMap::new(),
+    };
+    sites.visit_body(body);
+    sites.statements
+}
+
 /// Prepare ordered suites while the source tree and its namespace operands are available.
 pub(crate) struct SuitePreparation<'a> {
     operations: &'a HashMap<TextRange, Expr>,
     source: values::RegisteredSource<'a>,
     pub(crate) nested: HashMap<TextSize, RegisteredSuite>,
+    pub(crate) assertions: HashMap<TextRange, Vec<Statement>>,
 }
 
 impl<'a> SuitePreparation<'a> {
     pub(crate) fn new(
         operations: &'a HashMap<TextRange, Expr>,
         source: values::RegisteredSource<'a>,
+        body: &[ast::Stmt],
+        assertions_enabled: bool,
     ) -> Self {
         Self {
             operations,
             source,
             nested: HashMap::new(),
+            assertions: assertion_sites(body, source, assertions_enabled),
         }
     }
 
@@ -668,11 +742,11 @@ impl<'a> SuitePreparation<'a> {
     }
 
     fn lower(&self, stmts: &[ast::Stmt], kind: RegisteredScope) -> RegisteredSuite {
-        let module = matches!(kind, RegisteredScope::Module);
         let mut scope = SourceScope {
             kind,
             operations: self.operations,
             source: self.source,
+            assertions: &self.assertions,
             names: HashMap::new(),
             locals: Vec::new(),
             loop_depth: 0,
@@ -681,12 +755,7 @@ impl<'a> SuitePreparation<'a> {
         let mut residual: Vec<SourceRun> = Vec::new();
         for (i, stmt) in stmts.iter().enumerate() {
             let slots_before = scope.locals.len();
-            if let Ok((lowered, _)) =
-                statements::StatementLowering::source_statement(&mut scope, stmt, module)
-            {
-                body.push(checkpoint(stmt));
-                body.extend(lowered);
-            } else {
+            if scope.statement(stmt, &mut body).is_err() {
                 // A partially lowered target can allocate slots before a later operand fails.
                 if scope.locals.len() != slots_before {
                     scope.locals.truncate(slots_before);
@@ -1049,6 +1118,7 @@ fn registered_delete_name(target: &ast::Expr) -> Option<Expr> {
 
 struct SourceScope<'a> {
     kind: RegisteredScope,
+    assertions: &'a HashMap<TextRange, Vec<Statement>>,
     operations: &'a HashMap<TextRange, Expr>,
     source: values::RegisteredSource<'a>,
     names: HashMap<String, usize>,
@@ -1092,16 +1162,31 @@ impl unpacking::PatternBinder for SourceScope<'_> {
 }
 
 impl SourceScope<'_> {
+    fn statement(&mut self, stmt: &ast::Stmt, body: &mut Vec<Statement>) -> StdResult<(), ()> {
+        if let ast::Stmt::Assert(assertion) = stmt {
+            if let Some(statements) = self.assertions.get(&stmt.range()) {
+                body.extend_from_slice(statements);
+            } else {
+                // A prepared activation can also supply storage for named expressions
+                // and admit suspension at a whole operand's boundary.
+                body.extend(checked_assertion(assertion, |expr| self.operand(expr)).ok_or(())?);
+            }
+            return Ok(());
+        }
+        let (lowered, _) = statements::StatementLowering::source_statement(
+            self,
+            stmt,
+            matches!(self.kind, RegisteredScope::Module),
+        )?;
+        body.push(checkpoint(stmt));
+        body.extend(lowered);
+        Ok(())
+    }
+
     fn suite(&mut self, stmts: &[ast::Stmt]) -> StdResult<Vec<Statement>, ()> {
         let mut body = Vec::new();
         for stmt in stmts {
-            body.push(checkpoint(stmt));
-            let (lowered, _) = statements::StatementLowering::source_statement(
-                self,
-                stmt,
-                matches!(self.kind, RegisteredScope::Module),
-            )?;
-            body.extend(lowered);
+            self.statement(stmt, &mut body)?;
         }
         Ok(body)
     }
@@ -1237,9 +1322,102 @@ mod tests {
                 false,
             );
         }
-        SuitePreparation::new(&operations, source)
+        SuitePreparation::new(&operations, source, stmts, true)
             .complete(stmts, kind)
             .map(|plan| plan.checked)
+    }
+
+    #[test]
+    fn unprepared_datetime_assertion_stays_physical() {
+        let text = include_str!("../../stdlib/_pydatetime.py");
+        let module = ruff_python_parser::parse_module(text).unwrap();
+        let body = &module.syntax().body;
+        let function = body
+            .iter()
+            .filter_map(ast::Stmt::as_function_def_stmt)
+            .find(|def| def.name.as_str() == "_days_before_month")
+            .unwrap();
+        let stmt = function
+            .body
+            .iter()
+            .find(|stmt| stmt.is_assert_stmt())
+            .unwrap();
+        let assertion = stmt.as_assert_stmt().unwrap();
+        assert!(assertion.test.is_compare_expr());
+        assert!(matches!(
+            assertion.msg.as_deref(),
+            Some(ast::Expr::FString(_))
+        ));
+        let source = RegisteredSource {
+            templates: None,
+            text,
+            private_names: None,
+            method_imports: &imre_ast::module_imports(body),
+            replacements: &HashMap::new(),
+            has_templates: false,
+        };
+        let stmts = std::slice::from_ref(stmt);
+        let operations = HashMap::new();
+        let mut preparation = SuitePreparation::new(&operations, source, stmts, true);
+        let plan = preparation.suite(stmts, RegisteredScope::Function { is_async: false });
+        assert!(plan.checked.function.body.is_empty());
+        assert_eq!(plan.residual.len(), 1);
+        assert_eq!(plan.residual[0].statements, 0..1);
+    }
+
+    #[test]
+    fn assertion_admission_keeps_the_message_on_the_failure_edge() {
+        let text = "assert (lost := probe()), f'{value}'\nassert (selected := [value][0]), [message(), values[1:]]\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let body = &module.parsed.syntax().body;
+        let literals = values::ModuleSource::new(module);
+        let operations = HashMap::new();
+        let prepare = |enabled| {
+            SuitePreparation::new(&operations, literals.context(text), body, enabled)
+                .suite(body, RegisteredScope::Function { is_async: false })
+        };
+        let plan = prepare(true);
+        assert_eq!(plan.checked.local_names.len(), 1);
+        assert_eq!(plan.checked.local_names[&0].name, "selected");
+        let [physical] = plan.residual.as_slice() else {
+            panic!("expected only the f-string assertion to remain physical");
+        };
+        assert_eq!(physical.at, 0);
+        assert_eq!(physical.statements, 0..1);
+        let [_, Statement::If(test, succeeds, fails)] = plan.checked.function.body.as_slice()
+        else {
+            panic!("expected only the checked assertion checkpoint and branch");
+        };
+        assert!(succeeds.is_empty());
+        let [
+            Statement::Expr(Expr {
+                kind:
+                    ExprKind::Builtin(Builtin::RegisteredAssertionFailure { statement, .. }, message),
+                ..
+            }),
+        ] = fails.as_slice()
+        else {
+            panic!("expected an assertion failure on the false edge");
+        };
+        assert_eq!(*statement, body[1].start());
+        let call_count = |operand| {
+            let mut calls = 0;
+            ir::walk_operand_expressions(operand, &mut |expr| {
+                calls += usize::from(matches!(
+                    expr.kind,
+                    ExprKind::Builtin(Builtin::RegisteredCall(_), _)
+                ));
+            });
+            calls
+        };
+        assert_eq!(call_count(test), 0);
+        assert_eq!(message.len(), 1);
+        assert_eq!(call_count(&message[0]), 1);
+
+        let optimized = prepare(false);
+        assert!(optimized.fully_checked());
+        assert!(optimized.checked.function.body.is_empty());
     }
 
     #[test]
@@ -1351,7 +1529,7 @@ mod tests {
         let annotations =
             module_annotations(&stmts, names.string_annotations, &mut ops, source, false);
         assert_eq!(annotations.len(), 2);
-        let mut prepare = SuitePreparation::new(&ops, source);
+        let mut prepare = SuitePreparation::new(&ops, source, &stmts, true);
         let plan = prepare.suite(&stmts, RegisteredScope::Module);
         let [run] = &plan.residual[..] else {
             panic!("expected one source range")

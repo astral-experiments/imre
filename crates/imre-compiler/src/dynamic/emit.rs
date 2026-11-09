@@ -161,13 +161,13 @@ struct RootCode {
 impl RootCode {
     fn new(
         config: &str,
-        keep_docstrings: bool,
+        python_optimization: i32,
         has_zip: bool,
         has_builtins: bool,
         has_errors: bool,
     ) -> Self {
         let mut output = Output {
-            keep_docstrings,
+            python_optimization,
             ..Output::default()
         };
         let config = output.data(config.as_bytes());
@@ -240,7 +240,7 @@ impl RootCode {
 pub(super) fn emit(
     (files, builtins): (&[ModuleSource], &[ModuleSource]),
     config: &str,
-    keep_docstrings: bool,
+    python_optimization: i32,
     bundled_root: &Path,
     providers: &HashSet<String>,
     layout: crate::BoxedLayout<'_>,
@@ -263,7 +263,7 @@ pub(super) fn emit(
     let mut used_archive = false;
     let mut root = RootCode::new(
         config,
-        keep_docstrings,
+        python_optimization,
         !archive_members.is_empty(),
         !builtins.is_empty(),
         !module_errors.is_empty(),
@@ -300,7 +300,8 @@ pub(super) fn emit(
         } else {
             std::borrow::Cow::Borrowed(source.as_str())
         };
-        let initializer = PreparedBody::module(name, path, &code_source, keep_docstrings, origin)?;
+        let initializer =
+            PreparedBody::module(name, path, &code_source, python_optimization, origin)?;
         let check_archive = bundled && !providers.is_empty();
         let separate = split && unit != 0 && !source.is_empty();
         let mut external = None;
@@ -473,7 +474,7 @@ pub(super) struct PreparedBody<'a> {
     body: ast::Suite,
     source: SourceInfo<'a>,
     expression: bool,
-    keep_docstrings: bool,
+    python_optimization: i32,
 }
 
 impl<'a> PreparedBody<'a> {
@@ -481,14 +482,14 @@ impl<'a> PreparedBody<'a> {
         name: &'a str,
         path: &'a Path,
         source: &'a str,
-        keep_docstrings: bool,
+        python_optimization: i32,
         origin: ModuleOrigin<'a>,
     ) -> Result<Self, String> {
         Self::new(
             name,
             path,
             source,
-            keep_docstrings,
+            python_optimization,
             SourceBody::Module(origin),
         )
     }
@@ -497,9 +498,10 @@ impl<'a> PreparedBody<'a> {
         name: &'a str,
         path: &'a Path,
         source: &'a str,
-        keep_docstrings: bool,
+        python_optimization: i32,
         kind: SourceBody<'a>,
     ) -> Result<Self, String> {
+        let keep_docstrings = python_optimization < 2;
         let bundled = matches!(kind, SourceBody::Module(ModuleOrigin::Bundled));
         let provider = matches!(kind, SourceBody::Module(ModuleOrigin::Provider));
         let expression = matches!(&kind, SourceBody::Expression(_));
@@ -632,7 +634,12 @@ impl<'a> PreparedBody<'a> {
             values,
             bundled,
         );
-        let mut prepare = crate::frontend::SuitePreparation::new(&operations, values);
+        let mut prepare = crate::frontend::SuitePreparation::new(
+            &operations,
+            values,
+            &body,
+            python_optimization == 0,
+        );
         let initializer =
             (!expression).then(|| prepare.suite(&body, crate::frontend::RegisteredScope::Module));
         let mut function_bodies = HashMap::new();
@@ -694,6 +701,7 @@ impl<'a> PreparedBody<'a> {
             scopes,
             lambdas,
             thread_entries,
+            assertions: prepare.assertions,
             nested_bodies: prepare.nested,
             namespace_operations: operations,
             type_aliases,
@@ -725,7 +733,7 @@ impl<'a> PreparedBody<'a> {
             body,
             source,
             expression,
-            keep_docstrings,
+            python_optimization,
         })
     }
 
@@ -763,7 +771,7 @@ impl<'a> PreparedBody<'a> {
     /// Emit independent IR with private, address-significant constant slots.
     pub(super) fn standalone(&self) -> Result<Option<(String, String)>, String> {
         let mut output = Output {
-            keep_docstrings: self.keep_docstrings,
+            python_optimization: self.python_optimization,
             ..Output::default()
         };
         let filename = self.source.path.as_os_str().as_encoded_bytes();
@@ -782,7 +790,7 @@ impl<'a> PreparedBody<'a> {
             hash.update(&(field.len() as u64).to_le_bytes());
             hash.update(field);
         }
-        hash.update(&[u8::from(self.keep_docstrings)]);
+        hash.update(&[u8::from(self.python_optimization < 2)]);
         let symbol = format!("imre_provider_{}", hash.finalize().to_hex());
         writeln!(ir, "@{symbol} = alias i64 (ptr, i64), ptr {entry}").unwrap();
         Ok(Some((symbol, ir)))
@@ -906,6 +914,7 @@ struct SourceInfo<'a> {
     thread_entries: HashMap<ruff_text_size::TextSize, imre_ast::ThreadEntry>,
     lambdas: HashMap<ruff_text_size::TextSize, RegisteredLambda>,
     type_aliases: HashMap<ruff_text_size::TextSize, TypeAliasDefinition>,
+    assertions: HashMap<ruff_text_size::TextRange, Vec<crate::ir::Statement>>,
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
     module_annotations:
         HashMap<ruff_text_size::TextSize, crate::frontend::DeferredModuleAnnotation>,
@@ -987,7 +996,7 @@ struct Declarations {
 struct Output {
     declarations: Declarations,
     diagnostic: Option<String>,
-    keep_docstrings: bool,
+    python_optimization: i32,
     constant_slots: HashMap<(usize, Constant), usize>,
     strings: HashMap<Vec<u8>, u32>,
     interned_identifiers: BTreeSet<String>,
@@ -1165,7 +1174,7 @@ impl Output {
                     }
                 }
                 if matches!(body, Body::Namespace(..))
-                    && f.output.keep_docstrings
+                    && f.output.python_optimization < 2
                     && let Some(doc) = f.source.docstring(f.prefix.trim_end_matches('.'), stmts)
                 {
                     let value = f.text(&doc);
@@ -1382,7 +1391,7 @@ impl Function<'_, '_> {
                 "",
                 Path::new("<string>"),
                 value,
-                output.keep_docstrings,
+                output.python_optimization,
                 SourceBody::Expression(parsed),
             )
             .and_then(|body| body.emit(output, unit, &file))
@@ -1519,7 +1528,7 @@ mod tests {
             "query",
             Path::new("query.py"),
             r#"query = t"SELECT {client.lookup(*args, key=request.name, **options)!s:>{width}}""#,
-            true,
+            0,
             ModuleOrigin::Program(ProgramBodies::default()),
         )
         .unwrap();
@@ -1578,7 +1587,7 @@ mod tests {
             Path::new("query.py"),
             "first = t'{client.lookup(*args)}'
 second = t'{client.lookup(*args)}{v * 2}'",
-            true,
+            0,
             ModuleOrigin::Program(ProgramBodies::default()),
         )
         .unwrap();
@@ -1634,7 +1643,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
                 "worker",
                 Path::new("worker.py"),
                 source,
-                true,
+                0,
                 ModuleOrigin::Program(ProgramBodies::default()),
             )
             .unwrap();
@@ -1781,7 +1790,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
             "sample",
             Path::new("sample.py"),
             source,
-            true,
+            0,
             ModuleOrigin::Program(ProgramBodies::default()),
         )
         .unwrap()
@@ -1805,7 +1814,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
                 "example",
                 Path::new("example.py"),
                 source,
-                true,
+                0,
                 if bundled {
                     ModuleOrigin::Bundled
                 } else {
@@ -1848,7 +1857,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
             "example",
             Path::new("example.py"),
             source,
-            true,
+            0,
             ModuleOrigin::Bundled,
         )
         .unwrap()
@@ -1886,7 +1895,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
             ),
         ];
         let (name, path, source) = &modules[3];
-        let (symbol, _) = PreparedBody::module(name, path, source, true, ModuleOrigin::Bundled)
+        let (symbol, _) = PreparedBody::module(name, path, source, 0, ModuleOrigin::Bundled)
             .unwrap()
             .standalone()
             .unwrap()
@@ -1909,7 +1918,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
             emit(
                 (&modules, &[]),
                 "{}",
-                true,
+                0,
                 root,
                 &providers,
                 layout,
@@ -1937,12 +1946,11 @@ second = t'{client.lookup(*args)}{v * 2}'",
         let path = Path::new("<imre stdlib>/example.py");
         let declare = "declare void @imre_dyn_set_statement_line";
         for (source, expected) in [("value = 1", 0), ("with a, b:\n    pass", 1)] {
-            let (_, ir) =
-                PreparedBody::module("example", path, source, true, ModuleOrigin::Bundled)
-                    .unwrap()
-                    .standalone()
-                    .unwrap()
-                    .unwrap();
+            let (_, ir) = PreparedBody::module("example", path, source, 0, ModuleOrigin::Bundled)
+                .unwrap()
+                .standalone()
+                .unwrap()
+                .unwrap();
             assert_eq!(ir.matches(declare).count(), expected);
         }
     }
@@ -1952,14 +1960,14 @@ second = t'{client.lookup(*args)}{v * 2}'",
         let root = Path::new("<imre stdlib>");
         let path = root.join("example.py");
         let source = "value = t'{123}'";
-        let compiled = |name, path: &Path, src, docs| {
-            PreparedBody::module(name, path, src, docs, ModuleOrigin::Bundled)
+        let compiled = |name, path: &Path, src, optimization| {
+            PreparedBody::module(name, path, src, optimization, ModuleOrigin::Bundled)
                 .unwrap()
                 .standalone()
                 .unwrap()
                 .unwrap()
         };
-        let (symbol, ir) = compiled("example", &path, source, true);
+        let (symbol, ir) = compiled("example", &path, source, 0);
         let slot = ir
             .lines()
             .find_map(|line| line.strip_suffix(" = private constant i8 0"))
@@ -1967,13 +1975,18 @@ second = t'{client.lookup(*args)}{v * 2}'",
         assert!(ir.contains(&format!(
             "call i64 @imre_dyn_cached_handle(ptr %ctx, ptr {slot})"
         )));
-        assert_ne!(symbol, compiled("other", &path, source, true).0);
+        assert_ne!(symbol, compiled("other", &path, source, 0).0);
         assert_ne!(
             symbol,
-            compiled("example", &root.join("other.py"), source, true).0
+            compiled("example", &root.join("other.py"), source, 0).0
         );
-        assert_ne!(symbol, compiled("example", &path, "value = 2", true).0);
-        assert_ne!(symbol, compiled("example", &path, source, false).0);
+        assert_ne!(symbol, compiled("example", &path, "value = 2", 0).0);
+        assert_ne!(symbol, compiled("example", &path, source, 2).0);
+
+        assert_ne!(
+            compiled("example", &path, "assert ready()", 0).0,
+            compiled("example", &path, "assert ready()", 1).0,
+        );
 
         let bundled = ("example".into(), path, source.into());
         let project = (
@@ -1991,7 +2004,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
             let (units, used) = emit(
                 (modules, &[]),
                 "{}",
-                true,
+                0,
                 root,
                 &symbols,
                 crate::BoxedLayout::Whole,
@@ -2024,7 +2037,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
                 !emit(
                     (std::slice::from_ref(missing), &[]),
                     "{}",
-                    true,
+                    0,
                     root,
                     &symbols,
                     crate::BoxedLayout::Whole,
@@ -2039,7 +2052,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
         let (units, used) = emit(
             (&[bundled.clone(), project.clone()], &[]),
             "{}",
-            true,
+            0,
             root,
             &symbols,
             crate::BoxedLayout::Whole,
@@ -2086,7 +2099,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
         let (units, used) = emit(
             (&[bundled, project.clone(), shadow, project], &[]),
             "{}",
-            true,
+            0,
             root,
             &symbols,
             crate::BoxedLayout::Split,

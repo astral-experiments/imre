@@ -1520,7 +1520,7 @@ def exception_report(stderr: str) -> list[str]:
     ]
 
 
-def run(command: list[str], *, timeout: int = 60) -> subprocess.CompletedProcess[str]:
+def run(command: list[str], *, timeout: int | None = 60) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command,
         input="",
@@ -1530,6 +1530,37 @@ def run(command: list[str], *, timeout: int = 60) -> subprocess.CompletedProcess
         timeout=timeout,
         env={**os.environ, "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1"},
     )
+
+
+def check_stdlib_assert_import(compiler, python, flags, levels, temporary):
+    project = temporary / "stdlib_assert_import"
+    project.mkdir()
+    fixture = Path(__file__).parent / "fixtures" / "exceptions" / project.name
+    sources = [project / "main.py", project / "checks.py"]
+    for path in sources:
+        path.write_bytes((fixture / path.name).read_bytes())
+    expected = run([python, "-B", str(sources[0])])
+    assert expected.returncode == 0 and not expected.stderr, expected
+
+    binaries = []
+    for level in levels:
+        binary = project / f"saved-O{level}"
+        built = run(
+            [compiler, "build", str(sources[0]), "-o", str(binary), "--no-cache",
+             "--opt-level", level, *flags],
+            timeout=None,
+        )
+        assert built.returncode == 0, (level, built.stderr)
+        binaries.append(binary)
+
+    for path in sources:
+        path.unlink()
+    for binary in binaries:
+        actual = run([str(binary)])
+        assert (actual.returncode, actual.stdout, actual.stderr) == (
+            0, expected.stdout, "",
+        ), (binary, actual, expected)
+    return len(binaries)
 
 
 def main() -> None:
@@ -1554,6 +1585,7 @@ def main() -> None:
     passed = 0
     with tempfile.TemporaryDirectory(prefix="imre-exceptions-") as directory:
         temporary = Path(directory)
+        passed += check_stdlib_assert_import(compiler, args.python, flags, args.opt_levels, temporary)
         for name, source in REJECTED.items():
             path = temporary / f"{name}.py"
             path.write_text(dedent(source), encoding="utf-8")
