@@ -4,7 +4,44 @@ use std::io;
 
 pub(crate) const MAX_FRAMES: usize = 100;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[repr(C)]
+struct PreviousPublication {
+    slot: *mut std::ffi::c_void,
+    interpreter: *const std::sync::atomic::AtomicBool,
+}
+
+/// The existing interpreter shutdown token is shared with its native Python workers.
+pub(crate) struct FramePublication {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    previous: PreviousPublication,
+    _interpreter: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl FramePublication {
+    pub(crate) fn enter(interpreter: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Self {
+        Self {
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            // SAFETY: The token allocation lives until this thread leaves the publication.
+            previous: unsafe { imre_fault_enter(std::sync::Arc::as_ptr(&interpreter)) },
+            _interpreter: interpreter,
+        }
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+impl Drop for FramePublication {
+    fn drop(&mut self) {
+        // SAFETY: Runtime entry scopes unwind in order, on the entering pthread.
+        unsafe { imre_fault_leave(&self.previous) }
+    }
+}
+
 unsafe extern "C" {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn imre_fault_enter(interpreter: *const std::sync::atomic::AtomicBool) -> PreviousPublication;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn imre_fault_leave(previous: &PreviousPublication);
     fn imre_fault_enable(fd: c_int, all_threads: c_int, c_stack: c_int) -> c_int;
     fn imre_fault_disable() -> c_int;
     fn imre_fault_enabled() -> c_int;

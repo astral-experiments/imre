@@ -1113,6 +1113,7 @@ fn register_source(
 pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     // SAFETY: main transfers its unique allocation from imre_dyn_new exactly once.
     let mut ctx = unsafe { Box::from_raw(ctx) };
+    let _publication = crate::fault_handler::FramePublication::enter(ctx.finalizing.clone());
     let mark = ctx.heap.temporary_mark();
     let mut failed_site = false;
     // With unfrozen modules, importing site can execute a filesystem replacement for stat.
