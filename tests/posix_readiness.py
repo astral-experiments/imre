@@ -238,6 +238,8 @@ def main():
             assert require([build(source, level)]) == require([sys.executable, source]) == "selector passed\n"
             sockets = HERE / "selector_sockets.py"
             assert require([build(sockets, level)]) == require([sys.executable, sockets]) == "independent socket readiness passed\n"
+            signals = Path(__file__).parent / 'fixtures' / 'poll_signal_dispatch.py'
+            assert require([build(signals, level)]) == "poll signal dispatch passed\n"
             observations.update(selector_methods.exercise(HERE, work, level, build, require, run))
             if args.evidence_dir:
                 record_level(reports, observations, level)

@@ -310,6 +310,35 @@ mod tests {
     }
 
     #[test]
+    fn sendfile_preserves_the_checked_result_after_a_caller_edit() {
+        let dir = tempdir().unwrap();
+        let entry = dir.path().join("main.py");
+        let sockets = dir.path().join("transfers.py");
+        fs::write(
+            &sockets,
+            "import socket\ndef count() -> int:\n    return 1\ndef unused() -> int:\n    return socket.socket().sendfile(0, count=count())\n",
+        )
+        .unwrap();
+        let mut compiler = IncrementalCompiler::default();
+        for (value, diagnostic) in [
+            ("True", "expected int, got bool"),
+            (
+                "1",
+                "socket.sendfile requires native Python object operations",
+            ),
+            ("True", "expected int, got bool"),
+        ] {
+            fs::write(
+                &entry,
+                format!("import transfers\nvalues: list[int] = [1]\nvalues.append({value})\n"),
+            )
+            .unwrap();
+            let error = compiler.check_file(&entry, Some(dir.path())).unwrap_err();
+            assert!(error.contains(diagnostic), "{error}");
+        }
+    }
+
+    #[test]
     fn handler_class_slots_survive_a_cached_default_edit() {
         let directory = tempdir().unwrap();
         let root = directory.path();

@@ -261,7 +261,7 @@ enum Storage {
         filename: crate::StrOwner,
     },
     Hash(allocator_api2::boxed::Box<crate::dynamic::DigestState>),
-    Poll(Box<readiness::Poll>),
+    Poll(Rc<std::cell::RefCell<readiness::Poll>>),
     NativeModule(errno::Module),
     ModuleNamespace(Rc<errno::Registry>),
     ModuleMember(errno::Member),

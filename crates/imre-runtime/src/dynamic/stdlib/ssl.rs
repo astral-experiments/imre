@@ -1191,6 +1191,17 @@ pub(super) fn call(
                 let result = sni::drive(ctx, *handle, |ctx| {
                     let mut state = session(ctx, *handle)?.borrow_mut();
                     let session = state.as_mut().ok_or_else(closed)?;
+                    if !ctx.sendfile_writes.is_empty()
+                        && let Value::TlsSession(_, owner) = ctx.heap.get(*handle)
+                        && let Some(receiver) = owner.receiver(ctx)
+                    {
+                        super::socket::check_tls_sendfile_owner(
+                            ctx,
+                            receiver,
+                            *handle,
+                            session.socket(),
+                        )?;
+                    }
                     let data = ctx.native_buffer_bytes(*data)?;
                     Ok(if name == "sendall" {
                         session.sendall(data).map(|()| 0)

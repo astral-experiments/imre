@@ -21,6 +21,7 @@ pub(super) struct Socket {
     kind: i32,
     proto: i32,
     fd: RawFd,
+    installation: u64,
     tls: Option<Rc<TlsRegistration>>,
     // Python socket timeouts use signed nanoseconds: -1 blocks indefinitely, 0 is nonblocking.
     timeout_ns: i64,
@@ -468,18 +469,6 @@ pub(crate) fn poll_interruptible(
     }
 }
 
-/// Issue a nonblocking syscall and retry on readiness only when a timeout was requested.
-fn socket_call<T>(
-    fd: RawFd,
-    event: i16,
-    until: Option<Deadline>,
-    mut call: impl FnMut() -> io::Result<T>,
-) -> io::Result<T> {
-    retry(until, || {
-        socket_call_interruptible(fd, event, until, &mut call)
-    })
-}
-
 /// Return EINTR from either readiness polling or the syscall to the caller.
 fn socket_call_interruptible<T>(
     fd: RawFd,
@@ -622,6 +611,11 @@ fn install_owned(
 
 fn install_fd(s: &Object, raw: RawFd, blocking: bool, family: i32, kind: i32, proto: i32) {
     state(s, |s| {
+        // Restoring an alias after detach or close starts a new receiver lifetime.
+        // Reapplying an initializer to the still-open receiver need not invalidate an alias.
+        if s.fd < 0 {
+            s.installation = s.installation.wrapping_add(1);
+        }
         // A repeated base initializer replaces the number in the same socket.
         // The caller retains any previous fd, including when raw equals that fd.
         if s.tls
@@ -641,6 +635,7 @@ fn install_fd(s: &Object, raw: RawFd, blocking: bool, family: i32, kind: i32, pr
 pub(crate) fn uninitialized() -> Result<crate::ObjectOwner> {
     Socket {
         fd: -1,
+        installation: 0,
         tls: None,
         family: 0,
         kind: 0,
@@ -2150,27 +2145,31 @@ pub(crate) fn send(socket: &Object, bytes: &[u8], flags: i32) -> Result<usize> {
     retry(until, || send_until(fd(socket), bytes, flags, until)).map_err(errno_error)
 }
 
-/// Send one message to a socket address using the socket's existing timeout policy.
-pub(crate) fn send_to(
-    s: &Object,
+/// Send one addressed message, returning EINTR to the caller for signal dispatch.
+pub(crate) fn send_to_until(
+    raw: RawFd,
     bytes: &[u8],
     flags: i32,
     address: &SocketAddress,
-) -> Result<usize> {
+    until: Option<Deadline>,
+) -> io::Result<usize> {
     #[cfg(not(target_vendor = "apple"))]
     let flags = flags | libc::MSG_NOSIGNAL;
-    let raw = fd(s);
     let (addr, len) = address.raw_parts();
-    socket_call(raw, libc::POLLOUT, deadline(s), || {
-        // SAFETY: the source slice and address live through each synchronous sendto.
+    socket_call_interruptible(raw, libc::POLLOUT, until, || {
+        // SAFETY: the source slice and address live through this synchronous sendto.
         let count =
             unsafe { libc::sendto(raw, bytes.as_ptr().cast(), bytes.len(), flags, addr, len) };
         usize::try_from(count).map_err(|_| io::Error::last_os_error())
     })
-    .map_err(errno_error)
 }
 
-fn send_until(raw: RawFd, bytes: &[u8], flags: i32, until: Option<Deadline>) -> io::Result<usize> {
+pub(crate) fn send_until(
+    raw: RawFd,
+    bytes: &[u8],
+    flags: i32,
+    until: Option<Deadline>,
+) -> io::Result<usize> {
     #[cfg(not(target_vendor = "apple"))]
     let flags = flags | libc::MSG_NOSIGNAL;
     socket_call_interruptible(raw, libc::POLLOUT, until, || {
@@ -2234,11 +2233,16 @@ impl<'a> SendAll<'a> {
 
     /// The caller checks signals after every successful send (even a partial one) or EINTR.
     pub(crate) fn step(&mut self, data: &[u8]) -> Result<bool> {
+        self.step_on(fd(self.socket), data)
+    }
+
+    /// Continue a sendall on the checked description using its original deadline and byte count.
+    pub(crate) fn step_on(&mut self, raw: RawFd, data: &[u8]) -> Result<bool> {
         // The buffer remains exported, but a handler can change its contents or close the socket.
         let remaining = data
             .get(self.sent..)
             .ok_or_else(|| Error::new(Kind::SystemError, "exported socket buffer shrank"))?;
-        match send_until(fd(self.socket), remaining, self.flags, self.until) {
+        match send_until(raw, remaining, self.flags, self.until) {
             Ok(0) if !remaining.is_empty() => {
                 Err(errno_error(io::Error::from_raw_os_error(libc::EPIPE)))
             }
@@ -2323,6 +2327,62 @@ fn duplicate_fd(raw: RawFd) -> io::Result<OwnedFd> {
     let copy = checked(unsafe { libc::fcntl(raw, libc::F_DUPFD_CLOEXEC, 0) })?;
     // SAFETY: the successful duplication transferred ownership of copy.
     Ok(unsafe { OwnedFd::from_raw_fd(copy) })
+}
+
+/// The kernel socket identity followed by this receiver's descriptor installation.
+pub(crate) type SendfileIdentity = [u8; 24];
+
+pub(crate) fn sendfile_identity(socket: &Object, raw: RawFd) -> Result<SendfileIdentity> {
+    let mut identity = [0; 24];
+    let installation = state(socket, |s| s.installation);
+    identity[16..].copy_from_slice(&installation.to_ne_bytes());
+    #[cfg(target_os = "linux")]
+    get_option_into(raw, libc::SOL_SOCKET, libc::SO_COOKIE, &mut identity[..8])?;
+    #[cfg(not(target_os = "linux"))]
+    {
+        let (device, inode) = socket_file(raw).map_err(errno_error)?;
+        if inode == 0 {
+            return Err(errno_error(io::Error::from_raw_os_error(libc::ENOTSUP)));
+        }
+        identity[..8].copy_from_slice(&(device as u64).to_ne_bytes());
+        identity[8..16].copy_from_slice(&(inode as u64).to_ne_bytes());
+    }
+    Ok(identity)
+}
+
+pub(crate) fn check_sendfile_owner(
+    socket: &Object,
+    raw: RawFd,
+    expected: &SendfileIdentity,
+) -> Result<()> {
+    if raw < 0 || &sendfile_identity(socket, raw)? != expected {
+        return Err(errno_error(io::Error::from_raw_os_error(libc::EBADF)));
+    }
+    Ok(())
+}
+
+/// Keep the checked description live only inside one kernel call. Drop it before dispatching signals.
+pub(crate) fn sendfile_destination(
+    socket: &Object,
+    expected: &SendfileIdentity,
+) -> Result<OwnedFd> {
+    let owned = duplicate_fd(fd(socket)).map_err(errno_error)?;
+    check_sendfile_owner(socket, owned.as_raw_fd(), expected)?;
+    Ok(owned)
+}
+
+/// Borrow the current socket, or pin the initiating description for this single write attempt.
+pub(crate) fn with_send_fd<T>(
+    socket: &Object,
+    owner: Option<&SendfileIdentity>,
+    write: impl FnOnce(RawFd) -> Result<T>,
+) -> Result<T> {
+    if let Some(identity) = owner {
+        let output = sendfile_destination(socket, identity)?;
+        write(output.as_raw_fd())
+    } else {
+        write(fd(socket))
+    }
 }
 
 /// Duplicate the descriptor and copy the socket's timeout onto the new owner.
