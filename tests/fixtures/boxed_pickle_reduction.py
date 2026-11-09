@@ -727,7 +727,29 @@ def check_list_items(protocol):
             raise AssertionError("accepted noniterator list items")
 
 
+def check_socket_reduction():
+    import _socket
+    import socket
+
+    for factory, legacy, binary in (
+        (_socket.socket, "cannot pickle 'socket' object", "cannot pickle '_socket.socket' object"),
+        (socket.socket, "'socket' object cannot be interpreted as an integer", "cannot pickle 'socket' object"),
+    ):
+        sock = factory()
+        try:
+            for protocol, expected in ((0, legacy), (5, binary)):
+                try:
+                    pickle.dumps(sock, protocol)
+                except TypeError as error:
+                    assert str(error) == expected
+                else:
+                    raise AssertionError("pickled a live socket")
+        finally:
+            sock.close()
+
+
 def produce():
+    check_socket_reduction()
     for record in (RecordFamily.Record, FactoryRecord):
         check_namedtuple_reducer(record)
     check_object_reducer()

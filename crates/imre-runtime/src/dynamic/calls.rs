@@ -251,6 +251,7 @@ impl Context {
             && matches!(
                 kind.as_str(),
                 stdlib::datetime::TZINFO
+                    | "socket.socket"
                     | super::thread_handle::CLASS
                     | "datetime.timezone"
                     | value::ZSTD_COMPRESS_TYPE
@@ -3038,11 +3039,15 @@ impl Context {
                 Value::Native(kind)
                     if matches!(
                         kind.as_str(),
-                        "method" | "builtin_function_or_method" | "method-wrapper"
+                        "method"
+                            | "builtin_function_or_method"
+                            | "method-wrapper"
+                            | "socket.socket"
                     ) =>
                 {
                     Some(obj)
                 }
+                Value::Socket(_) => Some(self.exact_type(obj)?),
                 Value::Method { .. } | Value::Native(_)
                     if matches!(
                         self.builtin_type_name(obj),
