@@ -63,6 +63,7 @@ pub(in crate::dynamic) fn install(ctx: &mut Context, scope: Id) -> Result<()> {
         "load_cert_chain",
         "wrap",
         "is_session",
+        "check_pending_client",
         "nonzero_flags",
         "do_handshake",
         "release_session",
@@ -1042,7 +1043,7 @@ pub(super) fn call(
             socket::check_tls_mode(&raw)?;
             if !with_session {
                 return Ok(ctx.alloc(Value::TlsTransport(Box::new(
-                    socket::TlsEndpoint::new(raw).map_err(crate::objects::errno_error)?,
+                    socket::TlsEndpoint::new(raw, !server).map_err(crate::objects::errno_error)?,
                 ))));
             }
             let host = hostname.map(|id| ctx.str_value(id)).transpose()?;
@@ -1055,6 +1056,12 @@ pub(super) fn call(
                 ))),
                 Err(error) => bio_failure(ctx, error),
             }
+        }
+        ("check_pending_client", &[handle]) => {
+            if let Value::TlsTransport(endpoint) = ctx.heap.get(handle) {
+                endpoint.check_pending_client()?;
+            }
+            Ok(NONE)
         }
         ("nonzero_flags", &[flags]) => {
             if matches!(ctx.heap.get(flags), Value::Int(_) | Value::Bool(_)) {

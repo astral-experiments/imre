@@ -5,6 +5,38 @@ import ssl
 import sys
 
 
+# Listener I/O guards do not consult overridable connection queries.
+queries = []
+
+class Listener(ssl.SSLSocket):
+    def _check_connected(self):
+        queries.append("_check_connected")
+        return super()._check_connected()
+
+    def getpeername(self):
+        queries.append("getpeername")
+        return super().getpeername()
+
+
+listening = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+listening.sslsocket_class = Listener
+with socket.socket() as raw:
+    raw.bind(("127.0.0.1", 0))
+    raw.listen()
+    with listening.wrap_socket(raw, server_side=True) as listener:
+        queries.clear()
+        for operation, args in ((listener.sendto, (b"x", listener.getsockname())),
+                                (listener.recvfrom, (1,)), (listener.recvfrom_into, (bytearray(1), 1)),
+                                (listener.recv_into, (bytearray(1),))):
+            try:
+                operation(*args)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("unguarded listening socket")
+        assert not queries
+
+
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 for how in (77, "invalid"):
     raw, remote = socket.socketpair()

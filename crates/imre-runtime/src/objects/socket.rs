@@ -218,10 +218,11 @@ impl TlsRegistration {
 pub(crate) struct TlsEndpoint {
     socket: crate::ObjectOwner,
     registration: Weak<TlsRegistration>,
+    pending_client: bool,
 }
 
 impl TlsEndpoint {
-    pub(crate) fn new(socket: crate::ObjectOwner) -> io::Result<Self> {
+    pub(crate) fn new(socket: crate::ObjectOwner, pending_client: bool) -> io::Result<Self> {
         let registration = state(&socket, |s| {
             let reg = match &s.tls {
                 Some(reg) => reg,
@@ -232,7 +233,16 @@ impl TlsEndpoint {
         Ok(Self {
             socket,
             registration,
+            pending_client,
         })
+    }
+
+    /// Report the peer state of a client wrapped before TCP connect.
+    pub(crate) fn check_pending_client(&self) -> Result<()> {
+        if self.pending_client {
+            socket_name(self.socket(), true)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn transport(&self) -> Option<Rc<TlsRegistration>> {

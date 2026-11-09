@@ -878,7 +878,7 @@ class SSLSocket(_socket.socket):
             count = _call(_imre_ssl.recv, session, nbytes, flags, buffer)
             if count is not None:
                 return count
-            self._check_connected()
+            _imre_ssl.check_pending_client(session)
         if flags is not _NO_FLAGS and _imre_ssl.nonzero_flags(flags):
             raise ValueError("non-zero flags not allowed in calls to recv_into() on %s" % self.__class__)
         return self.read(nbytes, buffer)
@@ -889,8 +889,7 @@ class SSLSocket(_socket.socket):
     def _check_datagram_operation(self, name):
         session = self._session
         if session is not None:
-            if not _imre_ssl.is_session(session):
-                self._check_connected()
+            _imre_ssl.check_pending_client(session)
             raise ValueError("%s not allowed on instances of %s" % (name, self.__class__))
 
     def sendto(self, data, *args):
