@@ -455,6 +455,15 @@ pub(super) struct ModuleNamespace {
 }
 
 impl ModuleNamespace {
+    /// During signature discovery, only the initial module bindings have a
+    /// concrete owner independent of the eventual registered calling convention.
+    pub(super) fn is_unexposed(&self) -> bool {
+        self.last_python_call.is_none()
+            && !self.released_owner
+            && !self.unknown_key
+            && self.exposed.is_empty()
+    }
+
     pub(super) fn join(&mut self, other: &Self) {
         self.aliases.extend(&other.aliases);
         self.keys
@@ -548,6 +557,9 @@ impl Checker<'_> {
         if can_call_python {
             self.module_namespace.last_python_call =
                 self.module_namespace.last_python_call.max(Some(call.end()));
+            if !self.globals.registered_initializers {
+                return;
+            }
             self.module_namespace.exposed.extend(
                 self.names
                     .iter()

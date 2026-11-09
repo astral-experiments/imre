@@ -5112,7 +5112,7 @@ impl<'a> Checker<'a> {
     fn ordinary_entry(&self) -> Option<ModuleId> {
         (self.module_scope
             && self.module == self.graph.entry
-            && self.inference.is_none()
+            && (self.inference.is_none() || self.module_namespace.is_unexposed())
             && self.block_depth <= 1
             && self.reachable)
             .then_some(self.module)
@@ -6833,7 +6833,8 @@ impl<'a> Checker<'a> {
     fn expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         // Resolve a closed callee before evaluating arguments that can replace it.
         let python_call = self.module_scope
-            && self.globals.registered_initializers
+            && (self.globals.registered_initializers
+                || self.inference.is_some() && self.module == self.graph.entry)
             && expression
                 .as_call_expr()
                 .is_some_and(|call| !self.closed_passive_call(call));
