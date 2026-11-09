@@ -282,7 +282,7 @@ impl Function<'_, '_> {
                 None,
                 Body::Expression(&v.body),
             ),
-            ast::Expr::TString(v) => self.template(&v.value),
+            ast::Expr::TString(template) => self.residual_template(template),
             ast::Expr::FString(v) => {
                 let mut parts = Vec::new();
                 for part in v.value.iter() {
@@ -591,29 +591,33 @@ impl Function<'_, '_> {
         self.discard_truth(&mark);
     }
 
-    /// Capture values once, leaving conversion and formatting to the template consumer.
-    fn template(&mut self, template: &ast::TStringValue) -> String {
-        let strings = self.template_strings(template);
+    /// A residual field keeps its whole template on the original literal-spec path.
+    fn residual_template(&mut self, template: &ast::ExprTString) -> String {
+        let Some(segments) = crate::frontend::template_segments(
+            template,
+            self.source.registered_source(),
+            &self.source.template_fields,
+        ) else {
+            return self.unsupported("t-string expression spelling");
+        };
+        let strings = self.emit_string_tuple(segments);
         let parts = self.op("list", &[]);
-        for field in template.iter().flat_map(|t| t.elements.interpolations()) {
+        for field in template.value.iter().flat_map(|t| t.elements.interpolations()) {
             let spec = match imre_ast::strings::template_format_spec(field) {
-                Ok(Some(lit)) => self.format_literal(lit),
+                Ok(Some(literal)) => self.format_literal(literal),
                 Ok(None) => self.text(""),
                 Err(reason) => return self.unsupported(reason),
             };
-            let Some(spelling) = self.source.template_expressions.get(&field.start()) else {
+            let Some(spelling) = self.source.template_fields.get(&field.start()) else {
                 return self.unsupported("t-string expression spelling");
             };
-            let expression = self.text(spelling);
             let value = self.expr(&field.expression);
-            let conversion = field
-                .conversion
-                .to_char()
-                .map_or_else(|| "0".to_owned(), |c| self.text(&c.to_string()));
-            let metadata = self.op("list", &[]);
-            self.op("append", &[&metadata, &conversion]);
-            self.op("append", &[&metadata, &spec]);
-            let part = self.op("template_interpolation", &[&value, &expression, &metadata]);
+            let part = self.interpolation(
+                &value,
+                &spelling.expression,
+                field.conversion.to_char(),
+                &spec,
+            );
             self.op("append", &[&parts, &part]);
         }
         self.op("build_template", &[&strings, &parts])
@@ -634,12 +638,8 @@ impl Function<'_, '_> {
                         parts.push(self.text(debug.as_str()));
                     }
                     let mut value = self.expr(&field.expression);
-                    let conversion = field.conversion.to_char().or_else(|| {
-                        (field.debug_text.is_some() && field.format_spec.is_none()).then_some('r')
-                    });
-                    if let Some(c) = conversion {
-                        let conversion = self.text(&c.to_string());
-                        value = self.op("format_conversion", &[&value, &conversion]);
+                    if let Some(conversion) = imre_ast::strings::interpolation_conversion(field) {
+                        value = self.convert_format_value(&value, conversion);
                     }
                     let spec = match &field.format_spec {
                         Some(s) => {
@@ -649,19 +649,11 @@ impl Function<'_, '_> {
                         }
                         None => self.text(""),
                     };
-                    self.op("format", &[&value, "0", &spec])
+                    self.format_value(&value, &spec)
                 }
             };
             parts.push(value);
         }
-    }
-
-    /// Preserve a lone formatted value and bypass string-subclass addition when joining fields.
-    fn join_format_parts(&mut self, parts: Vec<String>) -> String {
-        parts
-            .into_iter()
-            .reduce(|left, right| self.op("format_concat", &[&left, &right]))
-            .unwrap_or_else(|| self.text(""))
     }
 }
 

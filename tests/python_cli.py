@@ -4444,6 +4444,7 @@ for name in ("md4", "ripemd160"):
             "boxed_typing_regex_aliases.py",
             "boxed_pprint.py",
             "boxed_formatter.py",
+            "boxed_template_client.py",
             "boxed_template_literals.py",
             "boxed_re_ascii.py",
             "boxed_re_numeric_escapes.py",

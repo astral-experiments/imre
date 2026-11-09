@@ -1801,6 +1801,19 @@ pub(crate) enum Builtin {
     RegisteredComplex(f64, f64),
     /// Little-endian Python code points preserve non-scalar values and linked literal identity.
     RegisteredString(Vec<u8>),
+    /// The immutable strings tuple has one more segment than there are interpolation operands.
+    RegisteredTemplate(Vec<Vec<u8>>),
+    /// Capture the evaluated value and format spec without formatting the value.
+    RegisteredInterpolation {
+        expression: String,
+        conversion: Option<char>,
+    },
+    /// Convert one Python object before evaluating a nested format spec.
+    RegisteredFormatConversion(char),
+    /// Format an evaluated Python object with its evaluated format spec.
+    RegisteredFormat,
+    /// Join formatted parts using Python's string formatting semantics.
+    RegisteredFormatJoin,
     /// Acquire an iterator through the Python protocol on the original heap object.
     RegisteredIter,
     /// Snapshot a sequence for ordered target stores, including the optional starred remainder.

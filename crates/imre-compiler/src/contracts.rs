@@ -698,6 +698,11 @@ impl Builtin {
             | Self::RegisteredEllipsis
             | Self::RegisteredComplex(..)
             | Self::RegisteredString(_)
+            | Self::RegisteredTemplate(_)
+            | Self::RegisteredInterpolation { .. }
+            | Self::RegisteredFormatConversion(_)
+            | Self::RegisteredFormat
+            | Self::RegisteredFormatJoin
             | Self::RegisteredNamespace(_)
             | Self::RegisteredUnpack { .. }
             | Self::RegisteredIter

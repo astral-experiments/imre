@@ -122,7 +122,8 @@ pub(crate) use registered::values::{
 pub(crate) use registered::{
     AnnotationValue, DeferredModuleAnnotation, RegisteredFunction, RegisteredScope, RegisteredSuite,
     SuitePreparation, annotation_expression, attribute_effects, delete_item, delete_targets,
-    module_annotations, registered_index_target, registered_sites,
+    module_annotations, prepare_templates, registered_index_target, registered_sites,
+    template_segments,
 };
 pub(crate) use retained::RegisteredNative;
 mod sequences;

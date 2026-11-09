@@ -34,25 +34,7 @@ pub(super) fn interned_spelling(value: &str) -> bool {
 }
 
 impl Function<'_, '_> {
-    pub(super) fn template_strings(&mut self, template: &ast::TStringValue) -> String {
-        let mut segments = Vec::new();
-        let mut segment = Vec::new();
-        for part in template.elements() {
-            match part {
-                ast::InterpolatedStringElement::Literal(lit) => {
-                    let replacements = self.format_replacements(lit);
-                    push_codepoints(&mut segment, &lit.value, replacements.as_deref());
-                }
-                ast::InterpolatedStringElement::Interpolation(_) => {
-                    segments.push(std::mem::take(&mut segment));
-                }
-            }
-        }
-        segments.push(segment);
-        self.emit_string_tuple(segments)
-    }
-
-    fn emit_string_tuple(&mut self, segments: Vec<Vec<u8>>) -> String {
+    pub(super) fn emit_string_tuple(&mut self, segments: Vec<Vec<u8>>) -> String {
         let slot = self.constant_slot(Constant::Tuple(
             segments.iter().cloned().map(Constant::Text).collect(),
         ));
@@ -104,30 +86,33 @@ impl Function<'_, '_> {
         ))
     }
 
+    pub(super) fn convert_format_value(&mut self, value: &str, conversion: char) -> String {
+        let conversion = self.text(&conversion.to_string());
+        self.op("format_conversion", &[value, &conversion])
+    }
+
+    pub(super) fn format_value(&mut self, value: &str, spec: &str) -> String {
+        self.op("format", &[value, "0", spec])
+    }
+
+    /// Preserve a lone formatted value and bypass string-subclass addition when joining fields.
+    pub(super) fn join_format_parts(&mut self, parts: Vec<String>) -> String {
+        parts
+            .into_iter()
+            .reduce(|left, right| self.op("format_concat", &[&left, &right]))
+            .unwrap_or_else(|| self.text(""))
+    }
+
     pub(super) fn format_literal(
         &mut self,
         literal: &ast::InterpolatedStringLiteralElement,
     ) -> String {
-        if let Some(points) = self.format_replacements(literal) {
+        if let Some(points) = self.source.registered_source().format_replacements(literal) {
             let mut bytes = Vec::new();
             push_codepoints(&mut bytes, &literal.value, Some(&points));
             self.lit(7, &bytes)
         } else {
             self.text(&literal.value)
         }
-    }
-
-    fn format_replacements(
-        &self,
-        literal: &ast::InterpolatedStringLiteralElement,
-    ) -> Option<Vec<u32>> {
-        let range = literal.range();
-        // Escaped braces may join multiple middle tokens into one literal
-        // element. Decode its replacement positions in original source order.
-        self.source
-            .replacements
-            .keys()
-            .any(|&r| range.contains_range(r))
-            .then(|| imre_ast::strings::replacements(&self.source.positions.text[range]).collect())
     }
 }
