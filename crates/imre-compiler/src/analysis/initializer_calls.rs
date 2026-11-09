@@ -176,8 +176,9 @@ impl Session {
                     }
                     break;
                 }
-                if let Some((site, reason)) =
-                    self.external_source_execution(module, &parsed, &model, stmt)
+                if let Some(stmt) = stmt.as_expr_stmt()
+                    && let Some((site, reason)) =
+                        self.external_source_execution(module, &parsed, &model, &stmt.value)
                 {
                     let text = ruff_db::source::source_text(&self.db, file);
                     return Some(
@@ -186,10 +187,15 @@ impl Session {
                             .classified(Kind::ExecutionOperand(module)),
                     );
                 }
-                if let Some(error) = self
-                    .initializer_statement_error(module, &parsed, &model, stmt, &imports, resident)
-                {
-                    return Some(error.with_path(path));
+                if let Some(error) = self.initializer_statement_error(
+                    (module, path),
+                    &parsed,
+                    &model,
+                    stmt,
+                    &imports,
+                    resident,
+                ) {
+                    return Some(error);
                 }
                 if !passive(stmt) {
                     break;
@@ -234,13 +240,14 @@ impl Session {
 
     fn initializer_statement_error(
         &self,
-        module: usize,
+        source: (usize, &Path),
         parsed: &ruff_db::parsed::ParsedModuleRef,
         model: &SemanticModel<'_>,
         stmt: &Stmt,
         imports: &[(TextRange, usize)],
         resident: (usize, TextSize),
     ) -> Option<Diagnostic> {
+        let (module, path) = source;
         let file = self.files[module];
         let call = statement_call(stmt, |name| {
             self.reaching_binding(module, name).is_some()
@@ -271,11 +278,11 @@ impl Session {
             )),
             _ => return None,
         };
-        let def = if let Some((site, name)) = member {
+        let (def, owner_module) = if let Some((site, name)) = member {
             let owner = imports.iter().find(|(r, _)| *r == site)?.1;
-            self.initialized_function(owner, name, resident)?
+            (self.initialized_function(owner, name, resident)?, owner)
         } else {
-            binding
+            (binding, module)
         };
         let DefinitionKind::Function(function) = def.kind(&self.db) else {
             return None;
@@ -283,10 +290,7 @@ impl Session {
         let owner = def.file(&self.db);
         let owner_ast = self.parsed(owner);
         let function = function.node(&owner_ast);
-        if !function.decorator_list.is_empty()
-            || function.type_params.is_some()
-            || !function.parameters.iter().any(|p| p.annotation().is_some())
-        {
+        if !function.decorator_list.is_empty() || function.type_params.is_some() {
             return None;
         }
         let bound = crate::frontend::fixed_call_arguments(call, &function.parameters)?;
@@ -305,10 +309,38 @@ impl Session {
                 && let Some(error) =
                     self.scalar_argument_error(module, model, expected, value, origin)
             {
-                return Some(error);
+                return Some(error.with_path(path));
             }
         }
-        None
+        // Read the body only after the real initializer and its passive arguments have
+        // selected this function. Literal guards above are also checked for scalar contracts.
+        if owner == file || function.is_async || !matches!(stmt, Stmt::Expr(_) | Stmt::Assign(_)) {
+            return None;
+        }
+        let first = after_docstring(&function.body)
+            .iter()
+            .find(|stmt| !passive(stmt))?;
+        let expression = match first {
+            Stmt::Expr(stmt) => &*stmt.value,
+            Stmt::Assign(stmt) => &*stmt.value,
+            Stmt::Return(stmt) => stmt.value.as_deref()?,
+            _ => return None,
+        };
+        let (site, message) =
+            self.external_source_execution(owner_module, &owner_ast, &owner_model, expression)?;
+        let index = ty_python_core::semantic_index(&self.db, self.db.program_file(owner));
+        if index
+            .try_node_scope(ty_python_core::scope::NodeWithScopeRef::Function(function))?
+            .is_generator_function(index)
+        {
+            return None;
+        }
+        let text = ruff_db::source::source_text(&self.db, owner);
+        Some(
+            Diagnostic::at(text.as_str(), &site, message)
+                .with_path(owner.path(&self.db).as_system_path()?.as_std_path())
+                .classified(Kind::RegisteredExecution),
+        )
     }
 
     fn initialized_function(
