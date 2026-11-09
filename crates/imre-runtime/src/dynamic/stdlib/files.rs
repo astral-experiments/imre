@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, IntoRawFd};
 use std::os::unix::fs::MetadataExt;
 
 use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, argument, os_error};
@@ -301,7 +301,9 @@ pub(super) fn binary_method(
     }
     let mut slot = slot.borrow_mut();
     if matches!(name, "__exit__" | "close") {
-        slot.take();
+        if let Some(reader) = slot.take() {
+            crate::objects::os::close(reader.into_inner().into_raw_fd())?;
+        }
         return Ok(NONE);
     }
     let reader = slot.as_mut().ok_or_else(|| {
