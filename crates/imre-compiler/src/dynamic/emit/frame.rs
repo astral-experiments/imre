@@ -109,7 +109,11 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             format!("  %live = alloca [{} x i64]\n", self.max_live)
         };
         for slot in 0..self.private_slot_count {
-            writeln!(entry, "  %ir_slot{slot} = alloca i64\n  store i64 0, ptr %ir_slot{slot}").unwrap();
+            writeln!(
+                entry,
+                "  %ir_slot{slot} = alloca i64\n  store i64 0, ptr %ir_slot{slot}"
+            )
+            .unwrap();
         }
         for slot in 0..self.integer_owners {
             writeln!(
@@ -566,7 +570,13 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     }
 
     /// Keep the expression result rooted while releasing the previous binding.
-    pub(super) fn assign_expression_name(&mut self, scope: &str, name: &str, value: &str, mark: &str) {
+    pub(super) fn assign_expression_name(
+        &mut self,
+        scope: &str,
+        name: &str,
+        value: &str,
+        mark: &str,
+    ) {
         let replaced = self.op("assign_named_target", &[scope, name, value]);
         self.release_replaced(&replaced, Some((mark, value)));
     }
