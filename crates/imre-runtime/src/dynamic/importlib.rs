@@ -531,6 +531,7 @@ impl Context {
         };
         let name_id = self.text("<module>");
         Ok(self.alloc(Value::Code(value::CodeObject {
+            compilation_constants: Default::default(),
             parsed_parameters: Default::default(),
             varnames: NONE,
             cellvars: NONE,

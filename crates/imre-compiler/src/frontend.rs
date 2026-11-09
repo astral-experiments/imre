@@ -116,12 +116,13 @@ mod registered;
 mod retained;
 pub(crate) use registered::values::{
     RegisteredSource, display_elements, literal_replacements, packed_arguments, push_codepoints,
-    registered_arguments, registered_string, registered_value,
+    registered_arguments, registered_constant_key, registered_index_key, registered_string,
+    registered_value,
 };
 pub(crate) use registered::{
     AnnotationValue, DeferredModuleAnnotation, RegisteredFunction, RegisteredScope,
-    RegisteredSuite, SuitePreparation, annotation_expression, attribute_effects, delete_targets,
-    module_annotations, namespace_operations,
+    RegisteredSuite, SuitePreparation, annotation_expression, attribute_effects, delete_item,
+    delete_targets, module_annotations, namespace_operations, registered_index_target,
 };
 pub(crate) use retained::RegisteredNative;
 mod sequences;
@@ -5257,6 +5258,21 @@ impl<'a> Checker<'a> {
             ast::Stmt::AugAssign(assign) => {
                 if let ast::Expr::Subscript(target) = &*assign.target {
                     let list = self.expr(&target.value)?;
+                    if self.registered.is_some() && list.ty == Type::PythonObject {
+                        let key = registered::values::index_key(&target.slice, &mut |expr| {
+                            self.expr(expr)
+                        })?;
+                        let rhs = self.expr(&assign.value)?;
+                        return Ok((
+                            vec![Statement::AugmentItem(
+                                list,
+                                key,
+                                ir::ItemUpdate::Protocol(assign.op.as_str()),
+                                rhs,
+                            )],
+                            true,
+                        ));
+                    }
                     let list = self.json_mutation_receiver(list, target)?;
                     let (key, element) = if let Some(mapping) = self.types.mapping(list.ty) {
                         mapping
@@ -5286,7 +5302,12 @@ impl<'a> Checker<'a> {
                     let value = Self::integer_addend(assign.op, value, element);
                     let (op, result) = self.binary_op(assign.op, element, value.ty, statement)?;
                     self.expect(element, result, statement)?;
-                    Some(Statement::AugmentItem(list, index, op, value))
+                    Some(Statement::AugmentItem(
+                        list,
+                        index,
+                        ir::ItemUpdate::Fixed(op),
+                        value,
+                    ))
                 } else if let ast::Expr::Attribute(target) = &*assign.target {
                     let receiver = Self::weak_target(self.expr(&target.value)?);
                     if let Some(class) = self.writable_property(receiver.ty, target) {
@@ -5476,6 +5497,13 @@ impl<'a> Checker<'a> {
                         continue;
                     }
                     let receiver = self.expr(&target.value)?;
+                    if self.registered.is_some() && receiver.ty == Type::PythonObject {
+                        let key = registered::values::index_key(&target.slice, &mut |expr| {
+                            self.expr(expr)
+                        })?;
+                        statements.push(Statement::Expr(registered::delete_item(receiver, key)));
+                        continue;
+                    }
                     if matches!(receiver.ty, Type::Deque(_)) {
                         let index = self.integer_index(&target.slice)?;
                         statements.push(Statement::Expr(Expr {

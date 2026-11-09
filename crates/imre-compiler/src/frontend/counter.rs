@@ -426,7 +426,7 @@ impl Checker<'_> {
                     Ok(vec![Statement::AugmentItem(
                         checker.local(target),
                         element,
-                        operation,
+                        ir::ItemUpdate::Fixed(operation),
                         delta,
                     )])
                 })?,
@@ -441,7 +441,7 @@ impl Checker<'_> {
                     ty: Type::Str,
                     kind: ExprKind::Str(name),
                 },
-                operation,
+                ir::ItemUpdate::Fixed(operation),
                 self.local(slot),
             ));
         }

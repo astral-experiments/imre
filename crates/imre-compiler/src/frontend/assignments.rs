@@ -468,6 +468,10 @@ impl ModuleNamespace {
     fn key(&self, value: &Expr) -> Option<String> {
         match &value.kind {
             ExprKind::Str(name) => Some(name.clone()),
+            ExprKind::Builtin(
+                Builtin::RegisteredLocation(..) | Builtin::RegisteredIndexConstant(_),
+                args,
+            ) => self.key(args.first()?),
             ExprKind::Local(slot) => self.keys.get(slot).cloned(),
             _ => None,
         }

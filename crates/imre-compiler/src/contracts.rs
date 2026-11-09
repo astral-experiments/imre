@@ -692,6 +692,9 @@ impl Builtin {
             | Self::RegisteredSpread
             | Self::RegisteredDict(_)
             | Self::RegisteredSubscript(..)
+            | Self::RegisteredIndexConstant(_)
+            | Self::RegisteredSlice
+            | Self::RegisteredDeleteItem
             | Self::RegisteredEllipsis
             | Self::RegisteredComplex(..)
             | Self::RegisteredString(_)

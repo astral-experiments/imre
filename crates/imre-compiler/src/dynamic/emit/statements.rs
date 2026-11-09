@@ -2,6 +2,7 @@ pub(super) mod class_annotations;
 use crate::frontend::function_scope::ClassBindings;
 mod worker;
 
+use crate::ir::{ItemUpdate, Statement};
 use imre_ast::code_flags;
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextSize};
@@ -141,6 +142,16 @@ impl Function<'_, '_> {
                     self.bind(name.id.as_str(), &alias);
                 }
                 ast::Stmt::Assign(v) => {
+                    if let [target] = v.targets.as_slice()
+                        && let Some((receiver, key)) = self.checked_index_target(target)
+                        && let Some(rhs) = crate::frontend::registered_value(
+                            &v.value,
+                            self.source.registered_source(),
+                        )
+                    {
+                        self.checked_statement(&Statement::SetItem(receiver, key, rhs));
+                        continue;
+                    }
                     let value = self.expr(&v.value);
                     let chained = v.targets.len() > 1;
                     if chained {
@@ -175,9 +186,15 @@ impl Function<'_, '_> {
                             );
                             continue;
                         }
+                        if let Some((receiver, key)) = self.checked_index_target(target) {
+                            self.checked_statement(&Statement::Expr(crate::frontend::delete_item(
+                                receiver, key,
+                            )));
+                            continue;
+                        }
                         match self.place(target) {
                             Some(Place::Item(obj, key)) => {
-                                self.op("delitem", &[&obj, &key]);
+                                self.delete_item(&obj, &key);
                             }
                             _ => {
                                 self.unsupported("deletion target");
@@ -230,12 +247,26 @@ impl Function<'_, '_> {
                     }
                 }
                 ast::Stmt::AugAssign(v) => {
+                    if let Some((receiver, key)) = self.checked_index_target(&v.target) {
+                        if let Some(rhs) = crate::frontend::registered_value(
+                            &v.value,
+                            self.source.registered_source(),
+                        ) {
+                            self.checked_statement(&Statement::AugmentItem(
+                                receiver,
+                                key,
+                                ItemUpdate::Protocol(v.op.as_str()),
+                                rhs,
+                            ));
+                            continue;
+                        }
+                        let receiver = self.registered_value(&receiver);
+                        let key = self.registered_value(&key);
+                        self.update_item(receiver, key, v.op.as_str(), |code| code.expr(&v.value));
+                        continue;
+                    }
                     if let Some(target) = self.place(&v.target) {
-                        let left = self.read(&target);
-                        let right = self.expr(&v.value);
-                        let op = format!("inplace:{}", v.op.as_str());
-                        let value = self.op(&op, &[&left, &right]);
-                        self.write(&target, &value);
+                        self.update_place(&target, v.op.as_str(), |code| code.expr(&v.value));
                     }
                 }
                 ast::Stmt::FunctionDef(v) => {
@@ -1021,12 +1052,29 @@ impl Function<'_, '_> {
         }
     }
 
+    pub(super) fn index_operand(&mut self, key: &ast::Expr) -> String {
+        if let Some(key) =
+            crate::frontend::registered_index_key(key, self.source.registered_source())
+        {
+            self.registered_value(&key)
+        } else {
+            self.expr(key)
+        }
+    }
+
+    fn checked_index_target(
+        &self,
+        target: &ast::Expr,
+    ) -> Option<(crate::ir::Expr, crate::ir::Expr)> {
+        crate::frontend::registered_index_target(target, self.source.registered_source())
+    }
+
     fn place(&mut self, target: &ast::Expr) -> Option<Place> {
         Some(match target {
             ast::Expr::Name(n) => Place::Name(self.code_name(n.id.as_str())),
             ast::Expr::Subscript(s) => {
                 let obj = self.expr(&s.value);
-                Place::Item(obj, self.expr(&s.slice))
+                Place::Item(obj, self.index_operand(&s.slice))
             }
             _ => {
                 self.unsupported("assignment target");
@@ -1049,6 +1097,28 @@ impl Function<'_, '_> {
         };
     }
 
+    fn update_place(&mut self, place: &Place, op: &str, rhs: impl FnOnce(&mut Self) -> String) {
+        let left = self.read(place);
+        let right = rhs(self);
+        let value = self.op(&format!("inplace:{op}"), &[&left, &right]);
+        self.write(place, &value);
+    }
+
+    /// Keep the evaluated receiver and key through the read, RHS and in-place protocol.
+    pub(super) fn update_item(
+        &mut self,
+        receiver: String,
+        key: String,
+        op: &str,
+        rhs: impl FnOnce(&mut Self) -> String,
+    ) {
+        self.update_place(&Place::Item(receiver, key), op, rhs)
+    }
+
+    pub(super) fn delete_item(&mut self, receiver: &str, key: &str) -> String {
+        self.op("delitem", &[receiver, key])
+    }
+
     pub(super) fn put_item(&mut self, receiver: &str, index: &str, value: &str) -> String {
         self.op("put", &[receiver, index, value])
     }
@@ -1059,6 +1129,15 @@ impl Function<'_, '_> {
 
     /// Transfer unpacked items to their targets while retaining the outstanding operands.
     fn assign_target(&mut self, target: &ast::Expr, value: &str, owned: bool) {
+        if let Some((receiver, key)) = self.checked_index_target(target) {
+            let receiver = self.registered_value(&receiver);
+            let key = self.registered_value(&key);
+            self.put_item(&receiver, &key, value);
+            if owned {
+                self.release_target(None);
+            }
+            return;
+        }
         let elements = match target {
             ast::Expr::Tuple(t) => &t.elts,
             ast::Expr::List(l) => &l.elts,

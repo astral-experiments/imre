@@ -27,7 +27,8 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
             | Statement::Continue
             | Statement::Exhaust => true,
             Statement::Scope { body, .. } => !suspends(body),
-            Statement::SetItem(receiver, _, _) => {
+            Statement::SetItem(receiver, _, _)
+            | Statement::AugmentItem(receiver, _, ir::ItemUpdate::Protocol(_), _) => {
                 uses_python_protocol |= receiver.ty == Type::PythonObject;
                 matches!(receiver.ty, Type::Dict(_) | Type::PythonObject)
             }
@@ -95,6 +96,12 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
             ExprKind::Builtin(Builtin::RegisteredIter, args) => {
                 uses_python_protocol = true;
                 args.len() == 1
+            }
+            ExprKind::Builtin(Builtin::RegisteredIndexConstant(_), args) => args.len() == 1,
+            ExprKind::Builtin(Builtin::RegisteredSlice, args) => matches!(args.len(), 2 | 3),
+            ExprKind::Builtin(Builtin::RegisteredDeleteItem, args) => {
+                uses_python_protocol = true;
+                args.len() == 2
             }
             ExprKind::Builtin(Builtin::RegisteredStatement(..), _) => true,
             ExprKind::Builtin(Builtin::RegisteredLocation(..), operands) => operands.len() == 1,
@@ -449,7 +456,8 @@ impl Frame<'_, '_, '_> {
                     | Builtin::RegisteredAttribute {
                         action: ir::AttributeAction::Delete | ir::AttributeAction::InPlace(_),
                         ..
-                    },
+                    }
+                    | Builtin::RegisteredDeleteItem,
                 _
             )
         ) {
@@ -582,10 +590,25 @@ impl Frame<'_, '_, '_> {
                 self.bind(&name, &value);
                 return CheckedValue::handle("0".into());
             }
+            (Builtin::RegisteredIndexConstant(key), [value]) => self.index_constant(key, value),
+            (Builtin::RegisteredSlice, bounds) => {
+                let names = self.names;
+                self.code.slice_object(
+                    [bounds.first(), bounds.get(1), bounds.get(2)],
+                    |code, expr| Frame { code, names }.evaluate_handle(expr),
+                )
+            }
+            (Builtin::RegisteredDeleteItem, [base, key]) => {
+                let base = self.evaluate_handle(base);
+                let key = self.evaluate_handle(key);
+                self.code.delete_item(&base, &key)
+            }
             (Builtin::RegisteredSubscript(range, base_end), [base, key]) => {
                 let names = self.names;
+                let base = self.evaluate_handle(base);
+                let key = super::IndexKey::checked(key);
                 self.code
-                    .subscript(base, key, Some((*range, *base_end)), |code, expr| {
+                    .subscript(&base, key, *range, *base_end, |code, expr| {
                         Frame { code, names }.evaluate_handle(expr)
                     })
             }
@@ -682,8 +705,52 @@ impl Frame<'_, '_, '_> {
         }
     }
 
+    fn index_constant(&mut self, key: &ir::Constant, candidate: &Expr) -> String {
+        if matches!(candidate.kind, ExprKind::Tuple(_)) {
+            return self.evaluate_handle(candidate);
+        }
+        let slot = self.code.constant_slot(key.clone());
+        let names = self.names;
+        self.code.cached_tuple(&slot, |code| {
+            let value = Frame { code, names }.evaluate_handle(candidate);
+            code.checked(&format!(
+                "call i64 @imre_dyn_linked_value(ptr %ctx, ptr {slot}, i64 {value})"
+            ))
+        })
+    }
+
     pub(crate) fn protocol_add(&mut self, left: &str, right: &str) -> String {
         self.code.op("+", &[left, right])
+    }
+
+    pub(crate) fn augment_item(&mut self, receiver: &Expr, key: &Expr, op: &str, rhs: &Expr) {
+        let receiver = self.evaluate_handle(receiver);
+        let key = self.evaluate_handle(key);
+        let names = self.names;
+        self.code.update_item(receiver, key, op, |code| {
+            Frame { code, names }.evaluate_handle(rhs)
+        });
+    }
+}
+
+impl<'a> super::IndexKey<'a, Expr> {
+    fn checked(key: &'a Expr) -> Self {
+        if let ExprKind::Builtin(Builtin::RegisteredLocation(..), located) = &key.kind
+            && let [value] = located.as_slice()
+        {
+            let (value, constant) = match &value.kind {
+                ExprKind::Builtin(Builtin::RegisteredIndexConstant(identity), args) => {
+                    (&args[0], Some(identity))
+                }
+                _ => (value, None),
+            };
+            if let ExprKind::Builtin(Builtin::RegisteredSlice, bounds) = &value.kind
+                && let [lower, upper] = bounds.as_slice()
+            {
+                return Self::Bounds(Some(lower), Some(upper), constant);
+            }
+        }
+        Self::Object(key)
     }
 }
 
@@ -964,18 +1031,48 @@ impl Function<'_, '_> {
         kwargs
     }
 
-    pub(super) fn subscript<T>(
+    pub(super) fn slice_object<T>(
         &mut self,
-        base: &T,
-        key: &T,
-        site: Option<(TextRange, TextSize)>,
+        bounds: [Option<&T>; 3],
         mut evaluate: impl FnMut(&mut Self, &T) -> String,
     ) -> String {
-        let base = evaluate(self, base);
-        let key = evaluate(self, key);
-        let span =
-            site.and_then(|(range, base_end)| self.expression_range_span(range, base_end, b'['));
-        self.op_at("get", &[&base, &key], span)
+        let [start, stop, step] =
+            bounds.map(|bound| bound.map_or_else(|| "0".into(), |bound| evaluate(self, bound)));
+        self.op("slice_object", &[&start, &stop, &step])
+    }
+
+    pub(super) fn subscript<T>(
+        &mut self,
+        base: &str,
+        key: super::IndexKey<'_, T>,
+        range: TextRange,
+        base_end: TextSize,
+        mut evaluate: impl FnMut(&mut Self, &T) -> String,
+    ) -> String {
+        let span = self.expression_range_span(range, base_end, b'[');
+        match key {
+            super::IndexKey::Object(key) => {
+                let key = evaluate(self, key);
+                self.op_at("get", &[base, &key], span)
+            }
+            super::IndexKey::Prepared(key) => {
+                let key = self.registered_value(key);
+                self.op_at("get", &[base, &key], span)
+            }
+            super::IndexKey::Bounds(lower, upper, constant) => {
+                let [start, stop] = [lower, upper]
+                    .map(|bound| bound.map_or_else(|| "0".into(), |bound| evaluate(self, bound)));
+                self.take_matching_check();
+                let position =
+                    span.map_or_else(|| "null".into(), |span| self.output.position(span));
+                if let Some(key) = constant {
+                    let slot = self.constant_slot(key.clone());
+                    self.checked(&format!("call i64 @imre_dyn_get_linked_slice_at(ptr %ctx, i64 {base}, i64 {start}, i64 {stop}, ptr {slot}, ptr {position})"))
+                } else {
+                    self.checked(&format!("call i64 @imre_dyn_get_slice_at(ptr %ctx, i64 {base}, i64 {start}, i64 {stop}, ptr {position})"))
+                }
+            }
+        }
     }
 
     /// Construct a Python dictionary with CPython's BUILD_MAP, MAP_ADD and DICT_UPDATE order.
@@ -1042,16 +1139,23 @@ impl Function<'_, '_> {
     }
 
     /// Emit a registered expression whose names are resolved through this live frame.
-    pub(super) fn registered_value(&mut self, expression: &Expr) -> String {
+    fn with_checked_frame<R>(&mut self, emit: impl FnOnce(Frame<'_, '_, '_>) -> R) -> R {
         let first = self.integer_owners;
         let outer = self.expression_integer_start.replace(first);
-        let result = Frame {
+        let result = emit(Frame {
             code: self,
             names: None,
-        }
-        .evaluate_handle(expression);
+        });
         self.expression_integer_start = outer;
         result
+    }
+
+    pub(super) fn checked_statement(&mut self, stmt: &Statement) {
+        self.with_checked_frame(|frame| CheckedBody::registered(frame).emit_statement(stmt))
+    }
+
+    pub(super) fn registered_value(&mut self, expression: &Expr) -> String {
+        self.with_checked_frame(|mut frame| frame.evaluate_handle(expression))
     }
 
     pub(super) fn checked_block(&mut self, statements: &[Statement], checked: &RegisteredFunction) {

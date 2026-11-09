@@ -1175,6 +1175,54 @@ pub(crate) enum SuspendValue {
     Await,
 }
 
+/// Identity of an immutable subscription operand within one compiled Python source.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum Constant {
+    None,
+    Ellipsis,
+    Bool(bool),
+    Int(String),
+    Float(u64),
+    Complex(u64, u64),
+    Text(Vec<u8>),
+    Bytes(Vec<u8>),
+    Tuple(Vec<Self>),
+    Slice(Box<[Self; 3]>),
+}
+
+impl Constant {
+    /// A constant key contains only immutable literals and distinguishes Python types and float bits.
+    pub(crate) fn from_expr(value: &Expr) -> Option<Self> {
+        Some(match &value.kind {
+            ExprKind::Builtin(Builtin::RegisteredLocation(..), args) => {
+                return Self::from_expr(&args[0]);
+            }
+            ExprKind::Builtin(Builtin::RegisteredIndexConstant(key), _) => key.clone(),
+            ExprKind::None => Constant::None,
+            ExprKind::Bool(b) => Constant::Bool(*b),
+            ExprKind::Int(n) => Constant::Int(n.clone()),
+            ExprKind::Float(n) => Constant::Float(n.to_bits()),
+            ExprKind::Bytes(b) => Constant::Bytes(b.clone()),
+            ExprKind::Str(text) => Constant::Text(
+                text.chars()
+                    .flat_map(|c| u32::from(c).to_le_bytes())
+                    .collect(),
+            ),
+            ExprKind::Builtin(Builtin::RegisteredString(points), _) => {
+                Constant::Text(points.clone())
+            }
+            ExprKind::Builtin(Builtin::RegisteredComplex(r, i), _) => {
+                Constant::Complex(r.to_bits(), i.to_bits())
+            }
+            ExprKind::Builtin(Builtin::RegisteredEllipsis, _) => Constant::Ellipsis,
+            ExprKind::Tuple(items) => {
+                Constant::Tuple(items.iter().map(Self::from_expr).collect::<Option<_>>()?)
+            }
+            _ => return None,
+        })
+    }
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
     ByteArrayNew,
@@ -1744,6 +1792,11 @@ pub(crate) enum Builtin {
     RegisteredSpread,
     /// Object and key operands, with the original subscript and end of its receiver.
     RegisteredSubscript(ruff_text_size::TextRange, ruff_text_size::TextSize),
+    /// Two bounds represent a simple slice. A third operand is its explicit stride.
+    RegisteredSlice,
+    RegisteredIndexConstant(Constant),
+    /// Multiple subscript arguments form one tuple key. Markers identify starred inputs.
+    RegisteredDeleteItem,
     RegisteredEllipsis,
     RegisteredComplex(f64, f64),
     /// Little-endian Python code points preserve non-scalar values and linked literal identity.
@@ -2873,6 +2926,14 @@ pub(crate) enum IterNextKind {
     Utf8Byte,
 }
 
+/// A fixed-layout update has a checked arithmetic operation. A live Python item
+/// uses its in-place protocol, including the fallback to the binary operator.
+#[derive(Clone, Copy)]
+pub(crate) enum ItemUpdate {
+    Fixed(Binary),
+    Protocol(&'static str),
+}
+
 #[derive(Clone)]
 pub(crate) enum Statement {
     Assign(usize, Expr),
@@ -2886,7 +2947,7 @@ pub(crate) enum Statement {
         clear: Vec<usize>,
     },
     SetItem(Expr, Expr, Expr),
-    AugmentItem(Expr, Expr, Binary, Expr),
+    AugmentItem(Expr, Expr, ItemUpdate, Expr),
     SetField(Expr, usize, Expr),
     AugmentField(Expr, usize, Binary, Expr),
     Expr(Expr),

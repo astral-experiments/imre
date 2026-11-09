@@ -28,7 +28,9 @@ pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
 pub(super) type ResumeCode =
     unsafe extern "C" fn(*mut super::native_suspension::Activation, Id) -> *mut std::ffi::c_void;
 
-/// Immutable executable and argument layout shared by functions from one Python definition.
+/// Sibling code objects share physical literal slots for the lifetime of this compilation.
+pub(super) type CompilationConstants = std::rc::Rc<RefCell<HashMap<usize, Id>>>;
+
 #[derive(Clone)]
 pub(super) struct CodeObject {
     pub body: Body,
@@ -53,6 +55,7 @@ pub(super) struct CodeObject {
     pub flags_complete: bool,
     pub generator_lambda: bool,
     pub nested: Vec<(usize, Id)>,
+    pub compilation_constants: Option<CompilationConstants>,
     pub freevars: Vec<String>,
     pub closure_supported: bool,
 }
@@ -2129,6 +2132,10 @@ impl Value {
 
     /// Changing a traced child of these values requires a mutable borrow of the heap slot.
     fn directly_stores_children(&self) -> bool {
+        // A sibling can publish another literal through the same compilation pool.
+        if matches!(self, Self::Code(code) if code.compilation_constants.is_some()) {
+            return false;
+        }
         matches!(
             self,
             Self::List(_)
@@ -2398,6 +2405,10 @@ impl Value {
                 fields.children(visit);
             }
             Self::Code(code) => {
+                if let Some(keys) = &code.compilation_constants {
+                    visit.extend(keys.borrow().values().copied());
+                }
+
                 visit.push(code.name);
                 visit.push(code.qualname);
                 visit.push(code.doc);
@@ -4168,6 +4179,17 @@ impl Heap {
     }
 
     pub(super) fn constant_at(&self, key: &ConstantSlot) -> Option<Id> {
+        if let ConstantSlot::Linked(slot) = key
+            && let Some(frame) = self.frames.last()
+            && let Value::Code(code) = self.get(frame.code)
+        {
+            return code
+                .compilation_constants
+                .as_ref()?
+                .borrow()
+                .get(slot)
+                .copied();
+        }
         self.linked_constants.get(key).copied()
     }
 
@@ -4177,6 +4199,21 @@ impl Heap {
         build: impl FnOnce(&mut Self) -> Result<Id>,
     ) -> Result<Id> {
         if let Some(value) = self.constant_at(&key) {
+            return Ok(value);
+        }
+        if let ConstantSlot::Linked(slot) = key
+            && let Some(code) = self.frames.last().map(|frame| frame.code)
+            && let Value::Code(code) = self.get_mut(code)
+        {
+            let pool = code
+                .compilation_constants
+                .get_or_insert_with(Default::default)
+                .clone();
+            pool.borrow_mut()
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            let value = build(self)?;
+            pool.borrow_mut().insert(slot, value);
             return Ok(value);
         }
         self.linked_constants

@@ -356,7 +356,13 @@ impl Checker<'_> {
                 }
                 let receiver = self.expr(&subscript.value)?;
                 if receiver.ty == Type::PythonObject {
-                    let index = self.expr(&subscript.slice)?;
+                    let index = if self.registered.is_some() {
+                        registered::values::index_key(&subscript.slice, &mut |expr| {
+                            self.expr(expr)
+                        })?
+                    } else {
+                        self.expr(&subscript.slice)?
+                    };
                     if self.module_scope && self.is_module_namespace(&receiver) {
                         self.namespace_item_store(&index, &value);
                     }

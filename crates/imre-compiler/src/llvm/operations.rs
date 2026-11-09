@@ -406,7 +406,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         }
     }
 
-    pub(super) fn emit_statement(&mut self, stmt: &Statement) {
+    pub(crate) fn emit_statement(&mut self, stmt: &Statement) {
         match stmt {
             Statement::Assign(slot, expr) => {
                 let previous_small = match &mut self.0 {
@@ -423,6 +423,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     Entry::Native(emitter) => emitter.assign_native(*slot, value, previous_small),
                     Entry::Registered(frame) => frame.assign(*slot, value),
                 }
+            }
+            Statement::AugmentItem(receiver, key, crate::ir::ItemUpdate::Protocol(op), rhs) => {
+                self.python().augment_item(receiver, key, op, rhs);
             }
             Statement::Expr(expr) => {
                 let consumed = match &mut self.0 {

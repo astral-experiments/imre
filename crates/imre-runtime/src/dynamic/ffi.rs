@@ -1912,12 +1912,30 @@ pub(super) unsafe extern "C" fn imre_dyn_get_slice_at(
     stop: Id,
     span: *const [u32; 4],
 ) -> Id {
+    // SAFETY: all original handles are forwarded without a linked constant marker.
+    unsafe { imre_dyn_get_linked_slice_at(ctx, receiver, start, stop, std::ptr::null(), span) }
+}
+
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_get_linked_slice_at(
+    ctx: *mut Context,
+    receiver: Id,
+    start: Id,
+    stop: Id,
+    marker: *const u8,
+    span: *const [u32; 4],
+) -> Id {
     // SAFETY: generated native code owns its context and supplies a static span or null.
     let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
     if ctx.pending.is_some() {
         return NONE;
     }
-    let result = ctx.get_slice(receiver, start, stop);
+    let result = ctx.get_slice(
+        receiver,
+        start,
+        stop,
+        (!marker.is_null()).then_some(marker as usize),
+    );
     finish_at(ctx, result, span)
 }
 
@@ -2370,6 +2388,14 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
             unreachable!()
         };
         parent.nested.push((key, code));
+        let constants = parent
+            .compilation_constants
+            .get_or_insert_with(Default::default)
+            .clone();
+        let Value::Code(child) = ctx.heap.get_mut(code) else {
+            unreachable!()
+        };
+        child.compilation_constants = Some(constants);
         code
     };
     let result = ctx.define_function(
@@ -2539,6 +2565,7 @@ impl Context {
             .as_u64()
             .and_then(|v| u32::try_from(v).ok());
         self.alloc(Value::Code(value::CodeObject {
+            compilation_constants: Default::default(),
             parsed_parameters: Default::default(),
             varnames: NONE,
             cellvars: NONE,

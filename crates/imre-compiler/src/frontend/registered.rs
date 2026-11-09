@@ -769,6 +769,26 @@ pub(crate) fn attribute_effects(stmt: &ast::Stmt) -> Option<Vec<AttributeEffect<
     }])
 }
 
+/// Prepare only an indexed target's receiver and key. Its caller owns RHS evaluation
+/// or unpacking, and retains each finished target when a later target raises.
+pub(crate) fn registered_index_target(
+    target: &ast::Expr,
+    source: values::RegisteredSource<'_>,
+) -> Option<(Expr, Expr)> {
+    let index = target.as_subscript_expr()?;
+    let base = values::registered_value(&index.value, source)?;
+    let key = values::registered_index_key(&index.slice, source)?;
+    Some((base, key))
+}
+
+pub(crate) fn delete_item(receiver: Expr, key: Expr) -> Expr {
+    operation(
+        Builtin::RegisteredDeleteItem,
+        Type::None,
+        vec![receiver, key],
+    )
+}
+
 impl statements::StatementLowering for SourceScope<'_> {
     type Error = ();
 
@@ -791,8 +811,12 @@ impl statements::StatementLowering for SourceScope<'_> {
     }
 
     fn assignment(&mut self, assign: &ast::StmtAssign) -> StdResult<Vec<Statement>, ()> {
-        let [target @ (ast::Expr::Name(_) | ast::Expr::Tuple(_) | ast::Expr::List(_))] =
-            assign.targets.as_slice()
+        let [
+            target @ (ast::Expr::Name(_)
+            | ast::Expr::Subscript(_)
+            | ast::Expr::Tuple(_)
+            | ast::Expr::List(_)),
+        ] = assign.targets.as_slice()
         else {
             return Err(());
         };
@@ -863,6 +887,20 @@ impl statements::StatementLowering for SourceScope<'_> {
 
     fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<statements::Block, ()> {
         match stmt {
+            ast::Stmt::AugAssign(assign) => {
+                let (receiver, key) =
+                    registered_index_target(&assign.target, self.source).ok_or(())?;
+                let rhs = self.ordinary_operand(&assign.value).ok_or(())?;
+                Ok((
+                    vec![Statement::AugmentItem(
+                        receiver,
+                        key,
+                        ir::ItemUpdate::Protocol(assign.op.as_str()),
+                        rhs,
+                    )],
+                    true,
+                ))
+            }
             ast::Stmt::ClassDef(class) if plain_class_header(class) => {
                 let decorators = class
                     .decorator_list
@@ -905,6 +943,14 @@ impl statements::StatementLowering for SourceScope<'_> {
                     .map(|target| {
                         if let Some(op) = self.operations.get(&target.range()) {
                             return Some(Statement::Expr(op.clone()));
+                        }
+                        if let Some(sub) = target.as_subscript_expr() {
+                            let receiver = self.ordinary_operand(&sub.value)?;
+                            let key = values::index_key(&sub.slice, &mut |e| {
+                                self.ordinary_operand(e).ok_or(())
+                            })
+                            .ok()?;
+                            return Some(Statement::Expr(delete_item(receiver, key)));
                         }
                         let field = target.as_attribute_expr()?;
                         let receiver = self.ordinary_operand(&field.value)?;
@@ -971,7 +1017,8 @@ impl unpacking::PatternBinder for SourceScope<'_> {
             }
             ast::Expr::Subscript(sub) => {
                 let receiver = self.ordinary_operand(&sub.value).ok_or(())?;
-                let key = self.ordinary_operand(&sub.slice).ok_or(())?;
+                let key =
+                    values::index_key(&sub.slice, &mut |e| self.ordinary_operand(e).ok_or(()))?;
                 Ok(Statement::SetItem(receiver, key, value))
             }
             _ => Err(()),
@@ -1226,6 +1273,41 @@ mod tests {
         assert_eq!(run.at, 5);
         assert_eq!(plan.checked.function.body.len(), 7);
         assert!(prepare.nested.values().all(RegisteredSuite::fully_checked));
+    }
+
+    #[test]
+    fn extended_index_statements_keep_their_operands_and_source_order() {
+        let graph =
+            SourceGraph::single("recv()[lo():hi():-1, *keys()] = rhs()\ndel recv()[lo():hi()]\n")
+                .unwrap();
+        let entry = &graph.modules[graph.entry];
+        let plan = registered_suite(
+            &entry.parsed.syntax().body,
+            RegisteredScope::Module,
+            values::ModuleSource::new(entry).context(&entry.source),
+        )
+        .unwrap();
+        let [
+            _,
+            Statement::SetItem(receiver, key, rhs),
+            _,
+            Statement::Expr(deletion),
+        ] = plan.function.body.as_slice()
+        else {
+            panic!("expected an item store and delete")
+        };
+        let mut evaluated = Vec::new();
+        for expr in [rhs, receiver, key] {
+            ir::walk_operand_expressions(expr, &mut |child| {
+                if let ExprKind::Builtin(Builtin::RegisteredName(name), _) = &child.kind {
+                    evaluated.push(name.clone());
+                }
+            });
+        }
+        assert_eq!(evaluated, ["rhs", "recv", "lo", "hi", "keys"]);
+        assert!(
+            matches!(&deletion.kind, ExprKind::Builtin(Builtin::RegisteredDeleteItem, inputs) if inputs.len()==2)
+        );
     }
 
     #[test]
@@ -1691,10 +1773,9 @@ mod tests {
     fn partial_regions_preserve_specialized_and_unsupported_operands() {
         for source in [
             "s.partition('-')[1]",
-            "s[:2]",
             "f(*(x for x in items))",
             "f(k=lambda: value)",
-            "{'key': recv.method(*args[:1])}",
+            "{'key': recv.method(*(x for x in args))}",
         ] {
             let graph = SourceGraph::single(source).unwrap();
             let ast::Stmt::Expr(statement) = &graph.modules[graph.entry].parsed.syntax().body[0]
