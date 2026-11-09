@@ -999,13 +999,13 @@ pub(super) fn call(
                 raw,
                 hostname,
                 side,
-                connected,
+                with_session,
                 public_context,
                 weak_owner,
             ],
         ) => {
             let owner = Owner::new(*handle, *public_context, *weak_owner);
-            let connected = ctx.truth(*connected)?;
+            let with_session = ctx.truth(*with_session)?;
             let server = ctx.truth(*side)?;
             let configuration = context_for_role(ctx, *handle, server)?;
             let hostname = if *hostname == NONE {
@@ -1039,8 +1039,8 @@ pub(super) fn call(
                 return Err(Error::new("TypeError", "expected a socket"));
             };
             let raw = raw.clone();
-            socket::check_tls_mode(&raw, connected)?;
-            if !connected {
+            socket::check_tls_mode(&raw)?;
+            if !with_session {
                 return Ok(ctx.alloc(Value::TlsTransport(Box::new(
                     socket::TlsEndpoint::new(raw).map_err(crate::objects::errno_error)?,
                 ))));

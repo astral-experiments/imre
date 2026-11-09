@@ -147,21 +147,17 @@ pub(crate) fn fileno(s: &Object) -> Result<RawFd> {
 
 /// Check that OpenSSL can use this socket's current descriptor and timeout.
 #[cfg(unix)]
-pub(crate) fn check_tls_mode(socket: &Object, connected: bool) -> Result<()> {
+pub(crate) fn check_tls_mode(socket: &Object) -> Result<()> {
     state(socket, |s| {
         // SAFETY: this query only reads the flags of the socket-owned descriptor.
         let flags = checked(unsafe { libc::fcntl(s.transport_fd(), libc::F_GETFL) })
             .map_err(errno_error)?;
         // A finite timeout uses a nonblocking fd so OpenSSL can yield to poll.
         let nonblocking = flags & libc::O_NONBLOCK != 0;
-        let supported = match s.timeout_ns {
-            -1 => !nonblocking,
-            _ => connected && nonblocking,
-        };
-        if !supported {
+        if nonblocking != (s.timeout_ns >= 0) {
             return Err(Error::new(
                 Kind::NotImplementedError,
-                "TLS requires a blocking socket or a connected socket in the requested timeout mode",
+                "socket blocking mode does not match the requested TLS timeout",
             ));
         }
         Ok(())
