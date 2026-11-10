@@ -3,8 +3,7 @@ use super::{CheckedBody, CheckedValue, Entry, Value, ValueJoin};
 use crate::ir::control::{Context, Depth, Edges, Target, edges};
 use crate::ir::{Builtin, Expr, ExprKind, Type};
 
-/// A logical plan is driven by either checked IR or by an enclosing residual
-/// source operation. The backend accepts outcomes; it never invokes an operand callback.
+/// A logical plan owns the short-circuit edges and the selected value join.
 pub(crate) struct Logical {
     edges: Edges,
     labels: Vec<String>,
@@ -20,14 +19,26 @@ enum ResultEdges {
     },
 }
 
-pub(crate) enum LogicalOperand {
+/// A checked leaf, or the result of emitting an irreducible input in its source frame.
+pub(crate) enum LogicalInput<'a> {
+    Checked(&'a Expr),
+    Handle(String),
     Predicate(String),
-    Selected(CheckedValue),
-    Tested {
-        value: CheckedValue,
-        truth: String,
-        mark: Option<String>,
-    },
+}
+
+pub(crate) trait LogicalEmitter<I> {
+    fn logical_input<'a>(&mut self, input: &'a I, context: Context) -> LogicalInput<'a>;
+    fn with_logical_body<R>(&mut self, emit: impl FnOnce(&mut CheckedBody) -> R) -> R;
+}
+
+impl LogicalEmitter<&Expr> for CheckedBody<'_, '_, '_, '_> {
+    fn logical_input<'a>(&mut self, input: &'a &Expr, _: Context) -> LogicalInput<'a> {
+        LogicalInput::Checked(input)
+    }
+
+    fn with_logical_body<R>(&mut self, emit: impl FnOnce(&mut CheckedBody) -> R) -> R {
+        emit(self)
+    }
 }
 
 impl Logical {
@@ -66,18 +77,52 @@ impl Logical {
         )
     }
 
-    pub(crate) fn block(&self, i: usize) -> Option<&str> {
-        self.labels.get(i).map(String::as_str)
+    /// Request each input on its own CFG edge. The last operand in value context
+    /// is returned directly, without a truth callback.
+    pub(crate) fn emit<I>(
+        mut self,
+        code: &mut impl LogicalEmitter<I>,
+        inputs: &[I],
+    ) -> Option<CheckedValue> {
+        let context = match self.result {
+            ResultEdges::Branch(..) => Context::Condition,
+            ResultEdges::Value { .. } => Context::Value,
+        };
+        for (i, leaf) in inputs.iter().enumerate().rev() {
+            let tested = context == Context::Value && !self.final_value(i);
+            let mark = code.with_logical_body(|code| {
+                if let Some(block) = self.labels.get(i) {
+                    code.body().start(block);
+                }
+                if tested { code.root_mark() } else { None }
+            });
+            let leaf = code.logical_input(leaf, context);
+            code.with_logical_body(|code| self.accept(code, i, leaf, mark));
+        }
+        match self.result {
+            ResultEdges::Branch(..) => None,
+            ResultEdges::Value { done, join, .. } => code.with_logical_body(|code| {
+                let body = code.body();
+                body.start(&done);
+                join.finish(body)
+            }),
+        }
     }
 
-    pub(crate) fn final_value(&self, i: usize) -> bool {
+    fn final_value(&self, i: usize) -> bool {
         let (yes, no) = self.edges.0[i];
         matches!(self.result, ResultEdges::Value { .. })
             && !matches!(yes, Target::Step(_))
             && !matches!(no, Target::Step(_))
     }
 
-    pub(crate) fn accept(&mut self, code: &mut CheckedBody, i: usize, operand: LogicalOperand) {
+    fn accept(
+        &mut self,
+        code: &mut CheckedBody,
+        i: usize,
+        input: LogicalInput,
+        mark: Option<String>,
+    ) {
         let (t, f) = self.edges.0[i];
         let label = |target, yes, no| match target {
             Target::Step(i) => self.labels[i].as_str(),
@@ -86,8 +131,10 @@ impl Logical {
         };
         let (done, join, result_type) = match &mut self.result {
             ResultEdges::Branch(yes, no) => {
-                let LogicalOperand::Predicate(bit) = operand else {
-                    unreachable!()
+                let bit = match input {
+                    LogicalInput::Checked(expr) => code.test_operand(expr),
+                    LogicalInput::Predicate(bit) => bit,
+                    LogicalInput::Handle(_) => unreachable!("expected a predicate"),
                 };
                 code.body()
                     .branch(&bit, label(t, yes, no), label(f, yes, no));
@@ -101,14 +148,27 @@ impl Logical {
         };
         let yes = label(t, done, done);
         let no = label(f, done, done);
-        let (value, truth, mark) = match operand {
-            LogicalOperand::Selected(value) => {
-                code.transfer(&value);
-                join.jump(code.body(), done, value);
-                return;
+        if yes == done && no == done {
+            let value = match input {
+                LogicalInput::Checked(expr) => code.evaluate(expr),
+                LogicalInput::Handle(id) => CheckedValue::handle(id),
+                LogicalInput::Predicate(_) => unreachable!("expected a value"),
+            };
+            code.transfer(&value);
+            join.jump(code.body(), done, value);
+            return;
+        }
+        let (value, truth) = match input {
+            LogicalInput::Checked(expr) => {
+                let value = code.operand(expr);
+                let truth = code.operand_truth(expr, &value, None);
+                (value, truth)
             }
-            LogicalOperand::Tested { value, truth, mark } => (value, truth, mark),
-            LogicalOperand::Predicate(_) => unreachable!(),
+            LogicalInput::Handle(id) => {
+                let truth = code.python().truth(&id);
+                (CheckedValue::handle(id), truth)
+            }
+            LogicalInput::Predicate(_) => unreachable!("expected a value"),
         };
         if yes != done && no != done {
             code.release_input(value);
@@ -159,15 +219,6 @@ impl Logical {
             (_, value) => value,
         };
         join.jump(code.body(), done, value);
-    }
-
-    pub(crate) fn finish(self, body: &mut super::FunctionBody) -> CheckedValue {
-        let ResultEdges::Value { done, join, .. } = self.result else {
-            unreachable!()
-        };
-        body.start(&done);
-        join.finish(body)
-            .expect("a selected operand reaches the join")
     }
 }
 
@@ -313,14 +364,7 @@ impl CheckedBody<'_, '_, '_, '_> {
 
     pub(crate) fn branch_condition(&mut self, expr: &Expr, yes: &str, no: &str) {
         let (edges, inputs) = edges(expr, Context::Condition, Depth::All);
-        let mut plan = Logical::branch(self.body(), edges, yes, no);
-        for (i, leaf) in inputs.into_iter().enumerate().rev() {
-            if let Some(block) = plan.block(i) {
-                self.body().start(block);
-            }
-            let truth = self.test_operand(leaf);
-            plan.accept(self, i, LogicalOperand::Predicate(truth));
-        }
+        Logical::branch(self.body(), edges, yes, no).emit(self, &inputs);
     }
 
     pub(super) fn condition(&mut self, expr: &Expr, yes: &str, no: &str) {
@@ -354,22 +398,9 @@ impl CheckedBody<'_, '_, '_, '_> {
             Depth::All
         };
         let (edges, inputs) = edges(expr, Context::Value, depth);
-        let mut plan = Logical::value(self.body(), edges, expr.ty);
-        for (i, leaf) in inputs.into_iter().enumerate().rev() {
-            if let Some(block) = plan.block(i) {
-                self.body().start(block);
-            }
-            let operand = if plan.final_value(i) {
-                LogicalOperand::Selected(self.evaluate(leaf))
-            } else {
-                let mark = self.root_mark();
-                let value = self.operand(leaf);
-                let truth = self.operand_truth(leaf, &value, None);
-                LogicalOperand::Tested { value, truth, mark }
-            };
-            plan.accept(self, i, operand);
-        }
-        plan.finish(self.body())
+        Logical::value(self.body(), edges, expr.ty)
+            .emit(self, &inputs)
+            .expect("a selected operand reaches the join")
     }
 
     pub(super) fn conditional_value(&mut self, test: &Expr, yes: &Expr, no: &Expr) -> CheckedValue {

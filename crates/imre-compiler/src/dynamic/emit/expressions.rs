@@ -5,8 +5,33 @@ use super::FrameEmitter;
 use super::{Body, Function, permanent};
 use crate::frontend::{RegisteredScope, SourceOperand, prepare_boolean};
 use crate::ir::control::Context as BooleanContext;
-use crate::llvm::operations::branches::{Logical, LogicalOperand};
-use crate::llvm::operations::{CheckedValue, ComparisonChain, ValueJoin};
+use crate::llvm::operations::branches::{Logical, LogicalEmitter, LogicalInput};
+use crate::llvm::operations::{CheckedBody, CheckedValue, ComparisonChain, ValueJoin};
+
+impl LogicalEmitter<SourceOperand<'_>> for Function<'_, '_> {
+    fn logical_input<'a>(
+        &mut self,
+        leaf: &'a SourceOperand<'_>,
+        context: BooleanContext,
+    ) -> LogicalInput<'a> {
+        match leaf {
+            SourceOperand::Checked(value) => {
+                self.prepare_checked_value(value);
+                LogicalInput::Checked(value)
+            }
+            SourceOperand::Residual(expr) if context == BooleanContext::Condition => {
+                LogicalInput::Predicate(self.test_operand(expr))
+            }
+            SourceOperand::Residual(expr) => LogicalInput::Handle(self.expr(expr)),
+        }
+    }
+
+    fn with_logical_body<R>(&mut self, emit: impl FnOnce(&mut CheckedBody) -> R) -> R {
+        self.frame.with_checked_frame(&self.sites, None, |frame| {
+            emit(&mut CheckedBody::registered(frame))
+        })
+    }
+}
 
 impl Function<'_, '_> {
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
@@ -122,6 +147,16 @@ impl Function<'_, '_> {
             let left = self.expr(left);
             let right = self.expr(right);
             self.binary_handles(op, &left, &right)
+        } else if let Some((edges, inputs)) = self
+            .source
+            .logicals
+            .value(expr, self.source.registered_source())
+        {
+            let value = Logical::value(&mut self.frame.body, edges, crate::ir::Type::PythonObject)
+                .emit(self, &inputs)
+                .expect("a selected operand reaches the join");
+            self.frame
+                .with_checked_frame(&self.sites, None, |mut frame| frame.materialize(&value))
         } else if let Some([test, yes, no]) = self.source.logicals.conditional(expr) {
             ValueJoin::select(
                 self,
@@ -190,7 +225,6 @@ impl Function<'_, '_> {
                 v.items.iter().map(|item| (item.key.as_ref(), &item.value)),
                 Self::expr,
             ),
-            ast::Expr::BoolOp(_) => self.boolean_value(expr),
             ast::Expr::Compare(v) => self.source_comparison(v, false),
             ast::Expr::Named(v) => {
                 let ast::Expr::Name(target) = &*v.target else {
@@ -247,59 +281,7 @@ impl Function<'_, '_> {
             self.source.registered_source(),
             &self.source.logicals,
         );
-        let mut plan = Logical::branch(&mut self.frame.body, edges, yes, no);
-        self.logical_inputs(&mut plan, inputs, BooleanContext::Condition);
-    }
-
-    fn boolean_value(&mut self, expr: &ast::Expr) -> String {
-        let (edges, inputs) = prepare_boolean(
-            expr,
-            BooleanContext::Value,
-            self.source.registered_source(),
-            &self.source.logicals,
-        );
-        let mut plan = Logical::value(&mut self.frame.body, edges, crate::ir::Type::PythonObject);
-        self.logical_inputs(&mut plan, inputs, BooleanContext::Value);
-        self.flush_check();
-        plan.finish(&mut self.frame.body).into_handle()
-    }
-
-    fn logical_inputs(
-        &mut self,
-        plan: &mut Logical,
-        inputs: Vec<SourceOperand<'_>>,
-        context: BooleanContext,
-    ) {
-        for (i, leaf) in inputs.into_iter().enumerate().rev() {
-            if let Some(block) = plan.block(i) {
-                self.label(block);
-            }
-            let operand = if context == BooleanContext::Condition {
-                let bit = match leaf {
-                    SourceOperand::Checked(value) => {
-                        self.prepare_checked_value(&value);
-                        self.frame.registered_expression(&value, &self.sites, true)
-                    }
-                    SourceOperand::Residual(expr) => self.test_operand(expr),
-                };
-                LogicalOperand::Predicate(bit)
-            } else {
-                let mark = (!plan.final_value(i)).then(|| self.temporary_mark());
-                let value = self.source_operand(leaf);
-                match mark {
-                    Some(mark) => {
-                        let truth = self.truth(&value);
-                        LogicalOperand::Tested {
-                            value: CheckedValue::handle(value),
-                            truth,
-                            mark: Some(mark),
-                        }
-                    }
-                    None => LogicalOperand::Selected(CheckedValue::handle(value)),
-                }
-            };
-            self.frame.logical_operand(plan, i, operand);
-        }
+        Logical::branch(&mut self.frame.body, edges, yes, no).emit(self, &inputs);
     }
 
     fn test_operand(&mut self, expr: &ast::Expr) -> String {
