@@ -189,11 +189,15 @@ impl RegisteredFrame<'_, '_> {
     }
 }
 
-/// The registered activation owns the exit stack across both statement emitters.
-pub(crate) trait RegionEmitter<'a, 'p>: FrameEmitter<'a, 'p> {
-    fn emit_finally(&mut self, suite: &Finally<'p>);
+impl<'p> Frame<'_, '_, 'p> {
+    pub(super) fn emit_finally(&mut self, suite: &Finally<'p>) {
+        match suite {
+            Finally::Checked(statements) => self.emit_suite(statements),
+            Finally::Prepared(body) => super::emit_prepared_suite(self.code.prepared_owner(), body),
+        }
+    }
 
-    fn return_from_regions(&mut self, value: String) {
+    pub(super) fn return_from_regions(&mut self, value: String) {
         self.live.push(value.clone());
         self.exit_regions(0, Some(&value));
         self.live.pop();
@@ -202,7 +206,7 @@ pub(crate) trait RegionEmitter<'a, 'p>: FrameEmitter<'a, 'p> {
         }
     }
 
-    fn unwind_loop(&mut self, stmt: &Statement) {
+    pub(super) fn unwind_loop(&mut self, stmt: &Statement) {
         let target = self.loops.last().expect("loop transfer");
         let (label, depth) = match stmt {
             Statement::Break => (&target.edges.done, target.exit_depth),
@@ -349,14 +353,5 @@ impl Frame<'_, '_, '_> {
             unreachable!("active context region")
         };
         self.end_context(exit, outer);
-    }
-}
-
-impl<'a, 'p> RegionEmitter<'a, 'p> for Frame<'_, 'a, 'p> {
-    fn emit_finally(&mut self, suite: &Finally<'p>) {
-        match suite {
-            Finally::Checked(statements) => self.emit_suite(statements),
-            Finally::Prepared(body) => super::emit_prepared_suite(self.code.prepared_owner(), body),
-        }
     }
 }

@@ -18,7 +18,7 @@ pub(crate) use frame::{AnnotationScope, FrameEmitter, RegisteredFrame, SourcePos
 use sites::CheckedSites;
 
 use crate::llvm::operations::{CheckedBody, CheckedValue, LoopEdges};
-use context::{Region, RegionEmitter};
+use context::Region;
 use std::cell::Cell;
 use std::collections::HashMap;
 
