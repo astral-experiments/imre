@@ -231,6 +231,16 @@ fn inspect(
             Statement::Expr(value) | Statement::Return(value) | Statement::Assert(value) => {
                 inspect_expression(value, candidates, producers);
             }
+            Statement::Match(_, cases) => {
+                statement.operands(|value| inspect_expression(value, candidates, producers));
+                for case in cases {
+                    for &slot in &case.captures {
+                        candidates[slot].eligible = false;
+                    }
+                    inspect(&case.body, candidates, producers, &mut HashSet::new());
+                }
+                fresh.clear();
+            }
             Statement::If(condition, yes, no) => {
                 inspect_expression(condition, candidates, producers);
                 inspect(yes, candidates, producers, fresh);

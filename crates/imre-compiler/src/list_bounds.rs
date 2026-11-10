@@ -132,6 +132,19 @@ impl Analysis<'_> {
                 Statement::Expr(value) | Statement::Return(value) | Statement::Assert(value) => {
                     self.expression(value, state);
                 }
+                Statement::Match(..) => {
+                    // A failed equality or guard may have mutated any live list.
+                    ir::statement_children_mut(statement, |child| {
+                        state.fill(None);
+                        match child {
+                            ir::ChildMut::Expression(expr) => {
+                                self.expression(expr, state);
+                            }
+                            ir::ChildMut::Suite(body) => self.block(body, state),
+                        }
+                    });
+                    state.fill(None);
+                }
                 Statement::If(test, yes, no) => {
                     self.expression(test, state);
                     let mut other = state.clone();

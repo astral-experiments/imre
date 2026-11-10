@@ -37,6 +37,45 @@ impl PatternFlags {
 }
 
 impl Context {
+    /// Like Python's match-self type flag, this property follows the physical
+    /// layout base. Virtual subclass registration does not transfer it.
+    pub(super) fn class_matches_self(&mut self, mut class: Id) -> super::Result<bool> {
+        loop {
+            if let Value::Native(name) = self.heap.get(class) {
+                let mut name = name.as_str();
+                loop {
+                    if matches!(
+                        name,
+                        "bool"
+                            | "bytearray"
+                            | "bytes"
+                            | "dict"
+                            | "float"
+                            | "frozenset"
+                            | "int"
+                            | "list"
+                            | "set"
+                            | "str"
+                            | "tuple"
+                    ) {
+                        return Ok(true);
+                    }
+                    let Some(base) = Self::native_base(name) else {
+                        return Ok(false);
+                    };
+                    name = base;
+                }
+            }
+            let Some(bases) = self.class_bases_tuple(class) else {
+                return Ok(false);
+            };
+            if bases.is_empty() {
+                return Ok(false);
+            }
+            class = self.member_layout_base(&bases)?;
+        }
+    }
+
     pub(super) fn class_pattern_flags(&self, class: Id) -> PatternFlags {
         match self.heap.get(class) {
             Value::Native(name) => PatternFlags::native(name),

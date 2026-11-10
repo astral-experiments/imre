@@ -445,6 +445,73 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     }
 
     /// Evaluate Python truthiness and produce the LLVM branch condition.
+    pub(crate) fn exact_word(&mut self, object: &str) -> String {
+        self.output.declarations.reads_exact_int_word = true;
+        self.value(&format!(
+            "call i64 @imre_dyn_exact_int_word(ptr %ctx, i64 {object})"
+        ))
+    }
+
+    pub(crate) fn enter_test(
+        &mut self,
+        range: TextRange,
+        anchor: TextSize,
+    ) -> (TextRange, Option<usize>) {
+        let previous = std::mem::replace(&mut self.current_range, range);
+        (previous, self.enter_expression(anchor))
+    }
+
+    pub(crate) fn leave_test(&mut self, (range, line): (TextRange, Option<usize>)) {
+        self.leave_expression(line);
+        self.current_range = range;
+    }
+
+    pub(crate) fn boolean_result(&mut self, bit: &str, negate: bool) -> super::CheckedValue {
+        let (yes, no) = if negate {
+            (permanent::FALSE, permanent::TRUE)
+        } else {
+            (permanent::TRUE, permanent::FALSE)
+        };
+        super::CheckedValue::handle(self.value(&format!("select i1 {bit}, i64 {yes}, i64 {no}")))
+    }
+
+    pub(crate) fn begin_operand_scope(&mut self) -> (String, String) {
+        let failed = self.name("b");
+        let outer = std::mem::replace(&mut self.body.error_target, failed.clone());
+        (failed, outer)
+    }
+
+    fn finish_unwind(
+        &mut self,
+        (failed, outer): (String, String),
+        release: impl FnOnce(&mut Self),
+    ) {
+        let ready = self.name("b");
+        self.jump(&ready);
+        self.label(&failed);
+        release(self);
+        self.jump(&outer);
+        self.label(&ready);
+        self.body.error_target = outer;
+    }
+
+    pub(crate) fn finish_operand_scope(&mut self, mark: &str, targets: (String, String)) {
+        self.finish_unwind(targets, |frame| frame.discard_truth(mark));
+    }
+
+    /// Keep the exact comparison result alive while releasing either operand.
+    pub(crate) fn comparison_result(
+        &mut self,
+        mark: &str,
+        op: &str,
+        left: &str,
+        right: &str,
+    ) -> String {
+        let result = self.op(op, &[left, right]);
+        self.keep_operands(mark, &result, "0");
+        result
+    }
+
     pub(crate) fn truth(&mut self, value: &str) -> String {
         self.truth_at(value, None)
     }
@@ -1064,8 +1131,8 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         }
     }
 
-    fn begin_operand_scope(&mut self) -> (String, (String, String)) {
-        (self.temporary_mark(), self.open_operand_unwind())
+    fn begin_unary(&mut self) -> (String, (String, String)) {
+        (self.temporary_mark(), self.begin_operand_scope())
     }
 
     /// Consume an evaluated operand using the temporary roots established before its evaluation.
@@ -1082,7 +1149,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         } else {
             self.discard_truth(&mark);
         }
-        self.close_unwind(edge, |frame| frame.discard_truth(&mark));
+        self.finish_operand_scope(&mark, edge);
         result
     }
 
@@ -1351,29 +1418,13 @@ pub(crate) trait FrameEmitter<'a, 'p>:
 
     fn unwind_with<T>(
         &mut self,
-        release: impl FnOnce(&mut Self),
+        release: impl FnOnce(&mut RegisteredFrame<'a, 'p>),
         body: impl FnOnce(&mut Self) -> T,
     ) -> T {
-        let edge = self.open_operand_unwind();
+        let targets = self.begin_operand_scope();
         let result = body(self);
-        self.close_unwind(edge, release);
+        self.finish_unwind(targets, release);
         result
-    }
-
-    fn open_operand_unwind(&mut self) -> (String, String) {
-        let failed = self.name("b");
-        let outer = std::mem::replace(&mut self.body.error_target, failed.clone());
-        (failed, outer)
-    }
-
-    fn close_unwind(&mut self, (failed, outer): (String, String), release: impl FnOnce(&mut Self)) {
-        let ready = self.name("b");
-        self.jump(&ready);
-        self.label(&failed);
-        release(self);
-        self.jump(&outer);
-        self.label(&ready);
-        self.body.error_target = outer;
     }
 
     fn checked_sequence(
@@ -1458,7 +1509,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
     ) -> String {
         let tuple = display == DisplayKind::Tuple;
         let mark = self.temporary_mark();
-        let unwind = |code: &mut Self| {
+        let unwind = |code: &mut RegisteredFrame<'a, 'p>| {
             code.line(&format!(
                 "call void @imre_dyn_unwind_display(ptr %ctx, i64 {mark})"
             ));

@@ -561,6 +561,17 @@ impl Analyzer {
                 state.0[*target] = value;
             }
             Statement::Clear(slot) => state.0[*slot] = self.cleared[*slot],
+            Statement::Match(_, cases) => {
+                let unknown = State::unknown(state.0.len());
+                statement.operands(|value| {
+                    self.expression(value, &mut unknown.clone(), record);
+                });
+                let mut flow = Flow::next(unknown.clone());
+                for case in cases {
+                    flow = flow.join(self.block(&case.body, unknown.clone(), record));
+                }
+                return flow;
+            }
             Statement::Scope { body, clear } => {
                 let mut flow = self.block(body, state, record);
                 for state in [

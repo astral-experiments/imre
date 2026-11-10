@@ -193,63 +193,9 @@ impl Emitter<'_, '_> {
         }
     }
 
-    /// Only the selected predecessor transfers ownership to the result phi.
-    /// The discarded operand is released before the RHS, including its errors.
-    pub(super) fn boolean_value(
-        &mut self,
-        and: bool,
-        left: &Expr,
-        right: &Expr,
-        returns: Type,
-    ) -> Value {
-        let left = self.operand(left);
-        if let Some(truth) = self.module.types.truthiness(left.value.ty) {
-            if truth == and {
-                self.release_operand(&left);
-                return self.expr(right);
-            }
-            let left = self.own_operand(left);
-            return self.selected_operand(left, returns, !and);
-        }
-        let test = self.truth(&left.value);
-        let (selected, next, end) = (self.label(), self.label(), self.label());
-        if and {
-            self.branch(&test.operand, &next, &selected);
-        } else {
-            self.branch(&test.operand, &selected, &next);
-        }
-        self.forget(&left.value);
-        self.start(&selected);
-        let selected_value = self.own_operand(Operand {
-            value: left.value.clone(),
-            ownership: left.ownership,
-        });
-        let selected_value = self.selected_operand(selected_value, returns, !and);
-        self.forget(&selected_value);
-        let selected_end = self.body.current.clone();
-        self.jump(&end);
-        self.start(&next);
-        self.release_operand(&left);
-        let right = self.expr(right);
-        self.forget(&right);
-        let right_end = self.body.current.clone();
-        self.jump(&end);
-        self.start(&end);
-        Value {
-            ty: returns,
-            operand: self.instruction(format!(
-                "phi {} [ {}, %{selected_end} ], [ {}, %{right_end} ]",
-                returns.llvm(),
-                selected_value.operand,
-                right.operand
-            )),
-            small_integer: selected_value.small_integer && right.small_integer,
-        }
-    }
-
     /// Converts the already-selected value using the checker's truth-branch
     /// proof. Nullable floats need an unbox; other payloads transfer their word.
-    fn selected_operand(&mut self, value: Value, returns: Type, truth: bool) -> Value {
+    pub(super) fn selected_operand(&mut self, value: Value, returns: Type, truth: bool) -> Value {
         if value.ty == returns {
             return value;
         }
