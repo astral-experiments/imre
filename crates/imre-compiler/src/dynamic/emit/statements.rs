@@ -206,11 +206,6 @@ impl<'p> Function<'_, 'p> {
             return;
         }
         match effect {
-            SourceEffect::LoopTransfer(range, transfer) => {
-                self.checkpoint(range);
-                self.simple_call = None;
-                self.unwind_loop(transfer);
-            }
             SourceEffect::Assertion(site) => self.emit_assertion_inputs(site),
             SourceEffect::Class {
                 site,
