@@ -1179,9 +1179,9 @@ fn statement_sites(
 }
 
 #[derive(Clone, Copy)]
-enum SuiteSelection {
+enum SuiteSelection<'a> {
     All,
-    Physical,
+    Physical(&'a dyn Fn(TextSize) -> bool),
 }
 
 /// Prepare ordered suites while the source tree and its namespace operands are available.
@@ -1288,9 +1288,10 @@ impl<'a> SuitePreparation<'a> {
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
         suspends: bool,
+        has_ordinary_header: &dyn Fn(TextSize) -> bool,
     ) -> RegisteredSuite {
         let children = if suspends {
-            SuiteSelection::Physical
+            SuiteSelection::Physical(has_ordinary_header)
         } else {
             SuiteSelection::All
         };
@@ -1304,15 +1305,21 @@ impl<'a> SuitePreparation<'a> {
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
         suspended: bool,
+        has_ordinary_header: &dyn Fn(TextSize) -> bool,
     ) {
-        self.nested_suite(stmts, kind, SuiteSelection::Physical, suspended);
+        self.nested_suite(
+            stmts,
+            kind,
+            SuiteSelection::Physical(has_ordinary_header),
+            suspended,
+        );
     }
 
     fn nested_suite(
         &mut self,
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
-        select: SuiteSelection,
+        select: SuiteSelection<'_>,
         suspended: bool,
     ) {
         if let Some(first) = stmts.first() {
@@ -1330,8 +1337,8 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
-        select: SuiteSelection,
-        child_selection: SuiteSelection,
+        select: SuiteSelection<'_>,
+        child_selection: SuiteSelection<'_>,
         suspended: bool,
     ) -> RegisteredSuite {
         use ast::statement_visitor::{StatementVisitor, walk_stmt};
@@ -1339,7 +1346,7 @@ impl<'a> SuitePreparation<'a> {
         struct Children<'p, 's> {
             prepare: &'p mut SuitePreparation<'s>,
             kind: RegisteredScope,
-            select: SuiteSelection,
+            select: SuiteSelection<'p>,
             suspended: bool,
         }
         impl<'a> StatementVisitor<'a> for Children<'_, '_> {
@@ -1498,12 +1505,14 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         expr: &ast::Expr,
         kind: RegisteredScope,
-        selection: SuiteSelection,
+        selection: SuiteSelection<'_>,
         suspended: bool,
     ) -> PhysicalOperand {
         let operand =
             RegisteredOperand::prepare_with(self.source, kind, |scope| match (kind, selection) {
-                (RegisteredScope::Function { .. }, SuiteSelection::Physical) => scope.operand(expr),
+                (RegisteredScope::Function { .. }, SuiteSelection::Physical(_)) => {
+                    scope.operand(expr)
+                }
                 _ => scope.ordinary_operand(expr),
             });
         match operand {
@@ -1538,7 +1547,7 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
-        selection: SuiteSelection,
+        selection: SuiteSelection<'_>,
         suspended: bool,
     ) -> PhysicalSuite {
         PhysicalSuite::new(
@@ -1551,7 +1560,7 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         stmt: &ast::StmtWith,
         kind: RegisteredScope,
-        selection: SuiteSelection,
+        selection: SuiteSelection<'_>,
         suspended: bool,
     ) -> PreparedContext {
         let inputs = stmt
@@ -1581,7 +1590,7 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         loop_: &ast::StmtFor,
         kind: RegisteredScope,
-        selection: SuiteSelection,
+        selection: SuiteSelection<'_>,
         suspended: bool,
     ) -> PreparedFor {
         let iterable = self.physical_operand(&loop_.iter, kind, selection, suspended);
@@ -1604,7 +1613,7 @@ impl<'a> SuitePreparation<'a> {
         &self,
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
-        select: SuiteSelection,
+        select: SuiteSelection<'_>,
         suspended: bool,
     ) -> RegisteredSuite {
         let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
@@ -1637,7 +1646,9 @@ impl<'a> SuitePreparation<'a> {
             let slots_before = scope.locals.len();
             let lowered = match select {
                 SuiteSelection::All => scope.statement(stmt, &mut body),
-                SuiteSelection::Physical => scope.physical_statement(stmt, &mut body),
+                SuiteSelection::Physical(has_ordinary_header) => {
+                    scope.physical_statement(stmt, &mut body, has_ordinary_header)
+                }
             };
             if lowered.is_ok() {
                 continue;
@@ -2505,6 +2516,7 @@ impl SourceScope<'_> {
         &mut self,
         stmt: &ast::Stmt,
         body: &mut Vec<Statement>,
+        has_ordinary_header: &dyn Fn(TextSize) -> bool,
     ) -> StdResult<bool, ()> {
         if let ast::Stmt::Assign(assign) = stmt {
             // The physical frame owns an assignment that yields or awaits its value.
@@ -2521,6 +2533,7 @@ impl SourceScope<'_> {
                 .is_some_and(|ann| ann.value.is_none() && !ann.target.is_name_expr())
             || stmt.is_aug_assign_stmt()
             || stmt.is_raise_stmt()
+            || stmt.is_function_def_stmt() && has_ordinary_header(stmt.start())
             || attribute_write(stmt).is_some()
         {
             return self.statement(stmt, body);
