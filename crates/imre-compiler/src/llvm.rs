@@ -36,6 +36,7 @@ mod paths;
 mod posixpath;
 mod processes;
 mod records;
+pub(crate) mod registered;
 mod runtime;
 mod socket;
 mod stdlib;

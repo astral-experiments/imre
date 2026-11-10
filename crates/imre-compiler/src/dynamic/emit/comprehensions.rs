@@ -1,6 +1,7 @@
 //! Lower the comprehension plan's branches to LLVM. Eager displays keep their
 //! iterators in SSA values. A generator keeps them in its frame across yields.
 
+use super::FrameEmitter;
 use imre_ast::comprehension::{Output, Plan, Step};
 use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
@@ -29,7 +30,9 @@ impl Function<'_, '_> {
         } else {
             self.iteration_cursor(plan.outer, plan.outer_async)
         };
-        let targets = self.text(&self.source.scopes.comprehension_targets[&expr.start()]);
+        let targets = self
+            .frame
+            .text(&self.source.scopes.comprehension_targets[&expr.start()]);
         if let ast::Expr::Generator(generator) = expr {
             let function = self.define(
                 generator.start(),
@@ -86,7 +89,7 @@ impl Function<'_, '_> {
         if self.native_suspension {
             self.checkpoint(plan.output.value());
         }
-        let outer = self.lookup(if self.native_suspension {
+        let outer = self.frame.lookup(if self.frame.native_suspension {
             ".0"
         } else {
             ".iterator"

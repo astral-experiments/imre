@@ -1,26 +1,23 @@
 pub(super) mod class_annotations;
 use crate::frontend::function_scope::ClassBindings;
+mod declarations;
+use super::sites::{CompiledDefinition, CompiledProvider};
 
+use super::FrameEmitter;
 use crate::ir::{ItemUpdate, Statement};
+use crate::llvm::registered::{Place, with_checked_slots};
 use imre_ast::code_flags;
 use ruff_python_ast as ast;
-use ruff_text_size::{Ranged, TextSize};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 use serde_json::json;
 
 use super::{Body, Cleanup, ContextExit, DefinitionName, Entry, Function, LoopTarget};
-
-enum Place {
-    Name(String),
-    Item(String, String),
-}
 
 impl Function<'_, '_> {
     pub(super) fn declare_globals(&mut self, globals: &std::collections::BTreeSet<String>) {
         for name in globals {
             self.declared_globals.insert(name.to_owned());
-            let name = self.code_name(name);
-            self.frame
-                .op("declare_global", &[&self.scope.clone(), &name]);
+            self.frame.declare_global(name);
         }
     }
 
@@ -44,10 +41,53 @@ impl Function<'_, '_> {
         emit_source: impl FnMut(&mut Self, std::ops::Range<usize>),
     ) {
         if prepared.fully_checked() {
-            self.checked_body(&prepared.checked);
+            let sites = self.prepare_checked_sites(&prepared.checked.function.body);
+            super::RegisteredFrame::checked_body(&mut self.frame, &prepared.checked, &sites);
         } else {
             self.checked_runs(prepared, emit_source);
         }
+    }
+
+    fn checked_statement(&mut self, statement: &Statement) {
+        let sites = self.prepare_checked_sites(std::slice::from_ref(statement));
+        self.frame.checked_statement(statement, &sites);
+    }
+
+    fn checked_block(
+        &mut self,
+        statements: &[crate::ir::Statement],
+        checked: &crate::frontend::RegisteredFunction,
+    ) {
+        let sites = self.prepare_checked_sites(statements);
+        if self.exits.is_empty() {
+            self.frame.checked_block(statements, checked, &sites);
+            return;
+        }
+        self.cleanup_returns = Some(Vec::new());
+        self.frame.checked_block(statements, checked, &sites);
+        let returns = self.cleanup_returns.take().expect("active cleanup region");
+        if returns.is_empty() {
+            return;
+        }
+        let resume = (!self.body.terminated).then(|| self.name("b"));
+        if let Some(label) = &resume {
+            self.jump(label);
+        }
+        let range = self.current_range;
+        for (label, value, site) in returns {
+            self.label(&label);
+            self.current_range = site;
+            self.return_from_scope(value);
+        }
+        self.current_range = range;
+        if let Some(label) = resume {
+            self.label(&label);
+        }
+    }
+
+    pub(super) fn registered_value(&mut self, value: &crate::ir::Expr) -> String {
+        let sites = self.prepare_checked_value(value);
+        self.frame.registered_value(value, &sites)
     }
 
     pub(super) fn checked_runs(
@@ -55,7 +95,7 @@ impl Function<'_, '_> {
         prepared: &crate::frontend::RegisteredSuite,
         mut emit_source: impl FnMut(&mut Self, std::ops::Range<usize>),
     ) {
-        self.with_checked_slots(&prepared.checked, |code| {
+        with_checked_slots(self, &prepared.checked, |code| {
             let body = &prepared.checked.function.body;
             let mut offset = 0;
             for run in &prepared.residual {
@@ -128,7 +168,7 @@ impl Function<'_, '_> {
                     _,
                 ) = &operation.kind
                 {
-                    self.bind(&self.source.type_aliases[site].name, &value);
+                    self.frame.bind(&self.source.type_aliases[site].name, &value);
                 }
                 continue;
             }
@@ -149,7 +189,9 @@ impl Function<'_, '_> {
                 ast::Stmt::TypeAlias(v) if self.class_locals.is_none() => {
                     let alias = &self.source.type_aliases[&v.start()];
                     debug_assert!(alias.body.is_none());
-                    let value = self.type_alias(v.start(), super::AliasValue::Residual(&v.value));
+                    let compiled =
+                        self.compile_type_alias(v.start(), super::AliasValue::Residual(&v.value));
+                    let value = compiled.instantiate(&mut self.frame);
                     self.bind(&alias.name, &value);
                 }
                 ast::Stmt::Assign(v) => {
@@ -286,7 +328,7 @@ impl Function<'_, '_> {
                         .iter()
                         .map(|d| self.expr(&d.expression))
                         .collect::<Vec<_>>();
-                    let function = self.function_definition(v, None);
+                    let function = self.function_definition(v);
                     let function = self.apply_decorators(&decorators, &v.decorator_list, function);
                     self.bind(v.name.as_str(), &function);
                 }
@@ -338,7 +380,8 @@ impl Function<'_, '_> {
                     self.loop_body(&v.body, &v.orelse, Some(&iter), |f, yes, no| {
                         if f.native_suspension {
                             // A retained frame exposes the header after its final pull.
-                            f.set_statement_line(f.source.positions.line(v.start()));
+                            f.frame
+                                .set_statement_line(f.source.positions.line(v.start()));
                         }
                         f.enter_iteration(
                             &iter,
@@ -405,7 +448,8 @@ impl Function<'_, '_> {
                     self.branch_expr(&v.test, &pass, &fail);
                     self.label(&fail);
                     let message = v.msg.as_deref().map(|expr| self.expr(expr));
-                    self.assertion_failure(v.start(), v.test.start(), message.as_deref());
+                    self.frame
+                        .assertion_failure(v.start(), v.test.start(), message.as_deref());
                     self.label(&pass);
                 }
                 _ => {
@@ -496,95 +540,23 @@ impl Function<'_, '_> {
     fn parameter_scope(&mut self, outer: &str, params: &ast::TypeParams, class: bool) -> String {
         let params =
             crate::frontend::registered_type_parameters(params, &self.source.private_names);
-        self.checked_parameter_scope(outer, &params, class)
+        self.check_suspended_parameters(&params, self.current_range);
+        self.frame.checked_parameter_scope(outer, &params, class)
     }
 
-    fn checked_parameter_scope(
+    fn check_suspended_parameters(
         &mut self,
-        outer: &str,
         params: &[crate::ir::RegisteredTypeParameter],
-        class: bool,
-    ) -> String {
-        use crate::ir::TypeParameterKind;
-        let names = self.op("dict", &[]);
-        for param in params {
-            if param.has_bound_or_default {
-                self.unsupported("class type parameter bounds and defaults");
-            }
-            let binding = self.code_name(&param.binding);
-            let name = self.code_name(&param.name);
-            let declaration = match param.kind {
-                TypeParameterKind::TypeVar => name,
-                TypeParameterKind::TypeVarTuple => self.op("class_typevartuple", &[&name]),
-                TypeParameterKind::ParamSpec => self.op("class_paramspec", &[&name]),
-            };
-            self.op("put", &[&names, &binding, &declaration]);
-        }
-        let op = if class {
-            "class_parameter_frame"
-        } else {
-            "function_parameter_scope"
-        };
-        self.op(op, &[outer, &names])
-    }
-
-    pub(super) fn registered_type_alias(&mut self, start: TextSize) -> String {
-        let body = self.source.type_aliases[&start]
-            .body
-            .as_ref()
-            .expect("checked alias value");
-        self.type_alias(start, super::AliasValue::Checked(body))
-    }
-
-    fn type_alias(&mut self, start: TextSize, value: super::AliasValue<'_>) -> String {
-        let alias = &self.source.type_aliases[&start];
-        let outer = self.scope.clone();
-        let parameters = if let Some(parameters) = &alias.parameters {
-            self.scope = self.checked_parameter_scope(&outer, parameters, false);
-            let key = self.code_name(".type_params");
-            self.frame.op("lookup", &[&self.scope.clone(), &key])
-        } else {
-            "0".into()
-        };
-        let evaluator = self.define(
-            start,
-            DefinitionName::Plain(&alias.name),
-            None,
-            None,
-            None,
-            Body::AliasEvaluator(value),
-        );
-        self.scope = outer;
-        let name = self.code_name(&alias.name);
-        self.op("type_alias", &[&name, &evaluator, &parameters])
-    }
-
-    pub(super) fn registered_definition(&mut self, start: TextSize, values: &[String]) -> String {
-        match self.source.definitions.as_ref().expect("registered scope")[&start] {
-            super::DefinitionSite::Function(definition) => {
-                let (decorators, defaults) = values.split_at(definition.decorator_list.len());
-                let function = self.function_definition(definition, Some(defaults));
-                self.apply_decorators(decorators, &definition.decorator_list, function)
-            }
-            super::DefinitionSite::Class(definition) => {
-                let class = self.create_class(definition, None);
-                self.apply_decorators(values, &definition.decorator_list, class)
-            }
+        range: TextRange,
+    ) {
+        if self.native_suspension && params.iter().any(|param| param.has_bound_or_default) {
+            self.with_expression_range(range, |code| {
+                code.unsupported("class type parameter bounds and defaults")
+            });
         }
     }
 
-    fn function_definition(
-        &mut self,
-        v: &ast::StmtFunctionDef,
-        defaults: Option<&[String]>,
-    ) -> String {
-        let generator = code_flags::is_generator(&v.body);
-        let body = match (v.is_async, generator) {
-            (false, false) => Body::Statements(&v.body),
-            (false, true) => Body::GeneratorFunction(&v.body, code_flags::GENERATOR),
-            (true, false) => Body::GeneratorFunction(&v.body, code_flags::COROUTINE),
-            (true, true) => Body::GeneratorFunction(&v.body, code_flags::ASYNC_GENERATOR),
-        };
+    fn function_definition(&mut self, v: &ast::StmtFunctionDef) -> String {
         // A method's lazy annotations also need its defining class namespace.
         let type_params = if self.class_locals.is_some() && !self.source.string_annotations {
             None
@@ -600,9 +572,9 @@ impl Function<'_, '_> {
             v.decorator_list.first().map_or(v.start(), Ranged::start),
             DefinitionName::Binding(&v.name),
             Some(&v.parameters),
-            Some((v, defaults)),
+            Some(v),
             type_params,
-            body,
+            Body::function(v),
         )
     }
 
@@ -611,14 +583,45 @@ impl Function<'_, '_> {
         start: TextSize,
         name: DefinitionName<'_>,
         params: Option<&ast::Parameters>,
-        definition: Option<(&ast::StmtFunctionDef, Option<&[String]>)>,
+        function: Option<&ast::StmtFunctionDef>,
         type_params: Option<&ast::TypeParams>,
         body: Body<'_>,
     ) -> String {
-        let function = definition.map(|(function, _)| function);
-        let mut evaluated_defaults = definition
-            .and_then(|(_, defaults)| defaults)
-            .map(<[_]>::iter);
+        let compiled = self.compile_definition(start, name, params, function, type_params, body);
+        let doc = compiled.doc(&mut self.frame);
+        let outer = self.scope.clone();
+        let scope = type_params
+            .map(|params| self.parameter_scope(&outer, params, false))
+            .unwrap_or(outer);
+        let operands = compiled.operands(&mut self.frame, &scope, doc);
+        if let Some(params) = params {
+            for arg in params.iter_non_variadic_params() {
+                if let Some(default) = &arg.default {
+                    let value = self.expr(default);
+                    operands.default(&mut self.frame, arg.parameter.name.as_str(), &value);
+                }
+            }
+        }
+        let function = compiled.instantiate(&mut self.frame, &scope, operands);
+        if type_params.is_some() {
+            let key = self.code_name(".type_params");
+            let params = self.op("lookup", &[&scope, &key]);
+            let key = self.code_name("__type_params__");
+            self.op("setattr", &[&function, &key, &params]);
+        }
+        function
+    }
+
+    /// Compile the body and its annotation provider with the declaring lexical scope.
+    fn compile_definition(
+        &mut self,
+        start: TextSize,
+        name: DefinitionName<'_>,
+        params: Option<&ast::Parameters>,
+        function: Option<&ast::StmtFunctionDef>,
+        type_params: Option<&ast::TypeParams>,
+        body: Body<'_>,
+    ) -> CompiledDefinition {
         let (name, global) = match name {
             DefinitionName::Binding(identifier) => (
                 self.source.private_names.definition(identifier),
@@ -653,7 +656,7 @@ impl Function<'_, '_> {
             _ => None,
         };
         let doc = statements
-            .filter(|_| self.output.python_optimization < 2)
+            .filter(|_| self.output.keep_docstrings)
             .and_then(|stmts| self.source.docstring(&qualname, stmts));
         let generator_flags = body.generator_flags();
         let flags = match &body {
@@ -673,16 +676,11 @@ impl Function<'_, '_> {
                 Some(flags | generator_flags)
             }
         };
-        let doc = doc.map_or_else(|| "0".into(), |s| self.text(&s));
         let entries = params.map_or_else(Vec::new, |p| {
             crate::frontend::parameter_annotations(p, returns)
         });
-        let outer = self.scope.clone();
-        let scope = type_params
-            .map(|params| self.parameter_scope(&outer, params, false))
-            .unwrap_or(outer);
-        let annotate = if entries.is_empty() {
-            "0".into()
+        let provider = if entries.is_empty() {
+            None
         } else {
             let class = self
                 .class_locals
@@ -715,20 +713,19 @@ impl Function<'_, '_> {
                     }
                 }
             }
-            let sig = self.text(&metadata.to_string());
-            let code = self.frame.output.definition(
-                self.source,
+            let code = self.source.definition(
+                self.frame.output,
                 String::new(),
                 Body::Annotations(entries, class),
                 params.map_or(start, Ranged::start),
                 false,
                 Entry::Compiled,
             );
-            let aname = self.text("__annotate__");
-            let aqname = self.text(&format!("{qualname}.__annotate__"));
-            self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {aname}, i64 {sig}, i64 0, i64 {aqname}, i64 0, i64 0, i1 true)", scope))
+            Some(CompiledProvider {
+                code,
+                signature: metadata.to_string(),
+            })
         };
-        let qualname = self.text(&qualname);
         let mut signature = json!({});
         if let Some(flags) = flags {
             signature["code_flags"] = json!(flags);
@@ -797,21 +794,11 @@ impl Function<'_, '_> {
             }
         }
         // A type alias thunk has an implicit default for its format parameter.
-        let defaults = if matches!(body, Body::AliasEvaluator(_))
-            || params.is_some_and(|p| {
-                p.iter_non_variadic_params()
-                    .any(|arg| arg.default.is_some())
-            }) {
-            self.op("dict", &[])
-        } else {
-            "0".into()
-        };
-        if matches!(body, Body::AliasEvaluator(_)) {
+        let type_alias = matches!(body, Body::AliasEvaluator(_));
+        if type_alias {
             signature["posonly"] = json!([".format"]);
-            let format = self.text(".format");
-            let value_format = self.integer(1);
-            self.op("put", &[&defaults, &format, &value_format]);
         }
+        let mut default_names = Vec::new();
         let in_function = self.in_function || !matches!(body, Body::Namespace(..));
         // A generator call returns a suspended frame, before it yields or returns a value.
         let scalar = |expr: &ast::Expr| {
@@ -828,9 +815,8 @@ impl Function<'_, '_> {
             signature["return_type"] = json!(ty);
         }
         let code =
-            self.frame
-                .output
-                .definition(self.source, prefix, body, start, in_function, entry);
+            self.source
+                .definition(self.frame.output, prefix, body, start, in_function, entry);
         if let Some(p) = params {
             self.output
                 .interned_identifiers
@@ -853,13 +839,8 @@ impl Function<'_, '_> {
                         }
                     }
                     names.push(name);
-                    if let Some(default) = &arg.default {
-                        let default = match &mut evaluated_defaults {
-                            Some(values) => values.next().expect("lowered default").clone(),
-                            None => self.expr(default),
-                        };
-                        let name = self.code_name(name);
-                        self.op("put", &[&defaults, &name, &default]);
+                    if arg.default.is_some() {
+                        default_names.push(name.to_owned());
                     }
                 }
                 if !names.is_empty() {
@@ -872,49 +853,16 @@ impl Function<'_, '_> {
                 }
             }
         }
-        debug_assert!(evaluated_defaults.is_none_or(|mut rest| rest.next().is_none()));
-        let sig = self.text(&signature.to_string());
-        let name = self.code_name(name);
-        let function = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {sig}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 {header})", scope));
-        if type_params.is_some() {
-            let key = self.code_name(".type_params");
-            let params = self.op("lookup", &[&scope, &key]);
-            let key = self.code_name("__type_params__");
-            self.op("setattr", &[&function, &key, &params]);
-        }
-        function
-    }
-
-    fn check_annotation_format(&mut self) {
-        let format = self.lookup("format");
-        self.op("annotation_format", &[&format]);
-    }
-
-    pub(super) fn registered_module_annotation(
-        &mut self,
-        annotation: &crate::ir::ModuleAnnotation,
-    ) {
-        match annotation {
-            crate::ir::ModuleAnnotation::Deferred(site) => {
-                let name = &self.source.module_annotations[site].name;
-                self.code_name(name);
-                let sites = self
-                    .module_annotation_sites
-                    .as_mut()
-                    .expect("module annotation provider");
-                // A finally suite can emit the same declaration on several independent paths.
-                let index = sites.len();
-                sites.push(*site);
-                let index = self.integer(index);
-                self.frame
-                    .op("mark_module_annotation", &[&self.scope.clone(), &index]);
-            }
-            crate::ir::ModuleAnnotation::String { name, spelling } => {
-                let name = self.code_name(name);
-                let value = self.text(spelling);
-                self.frame
-                    .op("annotate", &[&self.scope.clone(), &name, &value]);
-            }
+        CompiledDefinition {
+            code,
+            signature: signature.to_string(),
+            name: name.to_owned(),
+            qualname,
+            doc,
+            provider,
+            default_names,
+            header,
+            type_alias,
         }
     }
 
@@ -928,15 +876,15 @@ impl Function<'_, '_> {
                 .map(|site| &self.source.module_annotations[site])
                 .collect();
             let plan = crate::frontend::DeferredModuleAnnotation::prepare_body(&entries);
-            let signature = self.text(
+            let signature = self.frame.text(
                 &json!({
                     "posonly": ["format"], "scope_complete": true, "scope_locals_complete": true,
                     "code_flags": self.source.function_flags(None, false, false),
                 })
                 .to_string(),
             );
-            let code = self.frame.output.definition(
-                self.source,
+            let code = self.source.definition(
+                self.frame.output,
                 String::new(),
                 Body::ModuleAnnotations(&plan, &entries),
                 self.source.module_start,
@@ -949,51 +897,6 @@ impl Function<'_, '_> {
         }
         self.frame
             .op("setup_module_annotations", &[&self.scope.clone()]);
-    }
-
-    pub(super) fn begin_annotations(&mut self, class: Option<ClassBindings>) {
-        self.check_annotation_format();
-        self.annotation_values = Some(self.op("dict", &[]));
-        // Annotation expressions resolve outside the provider's public format parameter.
-        self.scope = self.frame.op("annotation_scope", &[&self.scope.clone()]);
-        self.class_locals = class;
-    }
-
-    pub(super) fn insert_annotation(
-        &mut self,
-        index: Option<usize>,
-        name: &str,
-        evaluate: impl FnOnce(&mut Self) -> String,
-    ) {
-        let after = index.map(|index| {
-            let active = self.lookup("__conditional_annotations__");
-            let index = self.integer(index);
-            let present = self.op("in", &[&index, &active]);
-            let condition = self.truth(&present);
-            let yes = self.name("b");
-            let after = self.name("b");
-            self.branch(&condition, &yes, &after);
-            self.label(&yes);
-            after
-        });
-        let key = self.code_name(name);
-        let value = evaluate(self);
-        let values = self
-            .annotation_values
-            .as_ref()
-            .expect("annotation dictionary")
-            .clone();
-        self.op("put", &[&values, &key, &value]);
-        if let Some(after) = after {
-            self.jump(&after);
-            self.label(&after);
-        }
-    }
-
-    pub(super) fn take_annotation_result(&mut self) -> String {
-        self.annotation_values
-            .take()
-            .expect("annotation dictionary")
     }
 
     pub(super) fn unprepared_annotation(
@@ -1051,14 +954,12 @@ impl Function<'_, '_> {
         &mut self,
         decorators: &[String],
         positions: &[ast::Decorator],
-        mut value: String,
+        value: String,
     ) -> String {
-        for (index, decorator) in decorators.iter().enumerate().rev() {
-            let expression = &positions[index].expression;
-            self.set_statement_line(self.source.positions.line(expression.start()));
-            value = self.invoke(decorator, &[&value]);
-        }
-        value
+        let lines = positions
+            .iter()
+            .map(|d| self.source.positions.line(d.expression.start()));
+        self.frame.decorate(decorators, lines, value)
     }
 
     fn discard_annotation_operand(&mut self, expr: &ast::Expr) {
@@ -1114,46 +1015,6 @@ impl Function<'_, '_> {
                 return None;
             }
         })
-    }
-
-    fn read(&mut self, place: &Place) -> String {
-        match place {
-            Place::Name(n) => self.frame.op("lookup", &[&self.scope.clone(), n]),
-            Place::Item(v, k) => self.frame.op("get", &[v, k]),
-        }
-    }
-
-    fn write(&mut self, place: &Place, value: &str) {
-        match place {
-            Place::Name(n) => self.frame.op("assign", &[&self.scope.clone(), n, value]),
-            Place::Item(v, k) => self.put_item(v, k, value),
-        };
-    }
-
-    fn update_place(&mut self, place: &Place, op: &str, rhs: impl FnOnce(&mut Self) -> String) {
-        let left = self.read(place);
-        let right = rhs(self);
-        let value = self.op(&format!("inplace:{op}"), &[&left, &right]);
-        self.write(place, &value);
-    }
-
-    /// Keep the evaluated receiver and key through the read, RHS and in-place protocol.
-    pub(super) fn update_item(
-        &mut self,
-        receiver: String,
-        key: String,
-        op: &str,
-        rhs: impl FnOnce(&mut Self) -> String,
-    ) {
-        self.update_place(&Place::Item(receiver, key), op, rhs)
-    }
-
-    pub(super) fn delete_item(&mut self, receiver: &str, key: &str) -> String {
-        self.op("delitem", &[receiver, key])
-    }
-
-    pub(super) fn put_item(&mut self, receiver: &str, index: &str, value: &str) -> String {
-        self.op("put", &[receiver, index, value])
     }
 
     pub(super) fn assign(&mut self, target: &ast::Expr, value: &str) {
@@ -1374,44 +1235,6 @@ impl Function<'_, '_> {
         self.statements(otherwise);
         self.jump(&done);
         self.label(&done);
-    }
-
-    /// The optional message has already been evaluated on the failure edge.
-    /// Construct the exception at the keyword and raise it at the test expression.
-    pub(super) fn assertion_failure(
-        &mut self,
-        statement: TextSize,
-        test: TextSize,
-        message: Option<&str>,
-    ) {
-        let statement_line = self.source.positions.line(statement);
-        self.set_statement_line(statement_line);
-        self.expression_line = statement_line;
-        let name = self.text("AssertionError");
-        let class = self.op("builtin", &[&name]);
-        let error = match message {
-            Some(value) => self.invoke(&class, &[value]),
-            None => class,
-        };
-        let test_line = self.source.positions.line(test);
-        if test_line != statement_line {
-            self.set_statement_line(test_line);
-            self.expression_line = test_line;
-        }
-        self.raise(&error, None, false);
-    }
-
-    fn raise(&mut self, exc: &str, cause: Option<&str>, reraise: bool) {
-        // Raising always transfers control to the enclosing handler.
-        let op = self
-            .output
-            .data(if reraise { b"reraise" } else { b"raise" });
-        let explicit = if cause.is_some() { 2 } else { 0 };
-        let cause = cause.unwrap_or("0");
-        self.line(&format!(
-            "call i64 @imre_dyn_op_at(ptr %ctx, ptr {op}, i64 {exc}, i64 {cause}, i64 {explicit}, ptr null)"
-        ));
-        self.frame.jump(&self.body.error_target.clone());
     }
 
     fn try_except(&mut self, stmt: &ast::StmtTry) {
@@ -1681,18 +1504,6 @@ impl Function<'_, '_> {
         self.exits = active;
     }
 
-    fn set_statement_line(&mut self, line: usize) {
-        if !self.output.declarations.declared_statement_line {
-            self.output
-                .functions
-                .push_str("declare void @imre_dyn_set_statement_line(ptr, i32)\n");
-            self.output.declarations.declared_statement_line = true;
-        }
-        self.line(&format!(
-            "call void @imre_dyn_set_statement_line(ptr %ctx, i32 {line})"
-        ));
-    }
-
     fn exit_context(&mut self, context: &ContextExit, exception: Option<&str>) -> String {
         let args = [
             context.callable.as_str(),
@@ -1700,7 +1511,8 @@ impl Function<'_, '_> {
             context.caught.as_str(),
         ];
         if !context.is_async {
-            self.set_statement_line(self.source.positions.line(context.range.start()));
+            self.frame
+                .set_statement_line(self.source.positions.line(context.range.start()));
             return self.op("exit_context", &args);
         }
 

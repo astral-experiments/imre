@@ -10,7 +10,7 @@ pub(crate) use join::ValueJoin;
 use super::records;
 use super::{Binary, Builtin, Expr, ExprKind, Statement, Type};
 use super::{Emitter, Value, none, small};
-use crate::dynamic::CheckedFrame;
+use crate::llvm::registered::Frame as CheckedFrame;
 
 use super::{Operand, Ownership, body::FunctionBody};
 
@@ -187,7 +187,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
 
     fn declare_int_add(&mut self) {
         if let Entry::Registered(frame) = &mut self.0 {
-            frame.declare_int_add();
+            frame.declare_integer_arithmetic();
         }
     }
 
@@ -212,7 +212,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         let frame = self.python();
         let lhs = frame.materialize(left);
         let rhs = frame.materialize(right);
-        CheckedValue::handle(frame.protocol_add(&lhs, &rhs))
+        CheckedValue::handle(frame.op("+", &[&lhs, &rhs]))
     }
 
     fn add_integers(&mut self, left: &CheckedValue, right: &CheckedValue) -> CheckedValue {
@@ -336,7 +336,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     CheckedValue::owned(emitter.bind_value(*slot, rhs, Ownership::Owned))
                 }
                 Entry::Registered(frame) => {
-                    let mark = frame.mark();
+                    let mark = frame.temporary_mark();
                     let handle = frame.evaluate_handle(rhs);
                     frame.bind_expression(*slot, &mark, &handle);
                     CheckedValue::handle(handle)

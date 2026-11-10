@@ -1,13 +1,20 @@
 //! Checked operations inside a Python function with a registered frame and object arguments.
 
-use super::{CallArguments, Function, RegisteredFrame, permanent};
+mod abi;
+mod frame;
+mod sequences;
+pub(crate) mod sites;
+pub(crate) mod suspension;
 use crate::frontend::RegisteredFunction;
 use crate::ir::DisplayKind;
 use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Statement, Type};
 use crate::llvm::body::FunctionBody;
+pub(crate) use abi::{ABI, CallArguments, Output, permanent};
+use abi::{GUARDED_LIT, GUARDED_NAMED_OP, NAMED_OP};
+pub(crate) use frame::{FrameEmitter, Place, RegisteredFrame, SourcePositions};
+use sites::CheckedSites;
 
 use crate::llvm::operations::{CheckedBody, CheckedValue, LoopEdges};
-use ruff_text_size::{TextRange, TextSize};
 use std::collections::BTreeSet;
 
 /// Only take a body when all its operations have a lowering for the registered calling convention.
@@ -177,14 +184,29 @@ pub(super) struct IterationState {
 
 /// The registered binder owns the scope, argument identities and frame.
 pub(crate) struct Frame<'f, 'a, 'p> {
-    code: &'f mut Function<'a, 'p>,
+    code: &'f mut RegisteredFrame<'a, 'p>,
+    sites: &'f CheckedSites,
     names: Option<&'f RegisteredFunction>,
+}
+
+impl<'a, 'p> std::ops::Deref for Frame<'_, 'a, 'p> {
+    type Target = RegisteredFrame<'a, 'p>;
+    fn deref(&self) -> &Self::Target {
+        self.code
+    }
+}
+
+impl std::ops::DerefMut for Frame<'_, '_, '_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.code
+    }
 }
 
 impl Frame<'_, '_, '_> {
     fn evaluate(&mut self, expr: &Expr) -> CheckedValue {
         CheckedBody::registered(Frame {
             code: self.code,
+            sites: self.sites,
             names: self.names,
         })
         .emit_value(expr)
@@ -196,13 +218,9 @@ impl Frame<'_, '_, '_> {
     }
 
     pub(crate) fn sequence(&mut self, values: &[Expr], display: DisplayKind) -> CheckedValue {
-        let names = self.names;
-        CheckedValue::handle(
-            self.code
-                .checked_sequence(values, display, |code, operand| {
-                    Frame { code, names }.evaluate_handle(operand)
-                }),
-        )
+        CheckedValue::handle(self.checked_sequence(values, display, |code, operand| {
+            code.evaluate_handle(operand)
+        }))
     }
 
     pub(crate) fn lookup_local(&mut self, slot: usize) -> String {
@@ -271,23 +289,11 @@ impl Frame<'_, '_, '_> {
     pub(crate) fn invert(&mut self, value: &str) -> String {
         self.code.value(&format!("xor i1 {value}, true"))
     }
-    pub(crate) fn mark(&mut self) -> String {
-        self.code.temporary_mark()
-    }
     pub(crate) fn target_mark(&mut self) -> Option<String> {
-        self.code.iteration.in_expression.then(|| self.mark())
-    }
-    pub(crate) fn drop_truth(&mut self, mark: &str) {
-        self.code.discard_truth(mark);
-    }
-    pub(crate) fn truth(&mut self, value: &str) -> String {
-        self.code.truth(value)
-    }
-    pub(crate) fn target_release(&mut self, mark: Option<&str>) {
-        self.code.release_target(mark);
-    }
-    pub(crate) fn op(&mut self, operation: &str, operands: &[&str]) -> String {
-        self.code.op(operation, operands)
+        self.code
+            .iteration
+            .in_expression
+            .then(|| self.temporary_mark())
     }
     pub(crate) fn unpack(&mut self, value: &str, count: usize, star: Option<usize>) -> String {
         let count = self.code.integer(count);
@@ -305,7 +311,7 @@ impl Frame<'_, '_, '_> {
     }
     pub(crate) fn start_expression(&mut self) -> (String, bool) {
         (
-            self.mark(),
+            self.temporary_mark(),
             std::mem::replace(&mut self.code.iteration.in_expression, true),
         )
     }
@@ -405,9 +411,6 @@ impl Frame<'_, '_, '_> {
         let item = self.code.op("next", &[cursor]);
         self.store_private(key, &item);
     }
-    pub(crate) fn declare_int_add(&mut self) {
-        self.code.declare_integer_arithmetic();
-    }
 
     pub(crate) fn integer(&mut self, text: &str, integer: Option<i64>) -> CheckedValue {
         match integer {
@@ -451,7 +454,8 @@ impl Frame<'_, '_, '_> {
             true
         } else if let ExprKind::Builtin(Builtin::RegisteredStatement(range, simple), _) = &expr.kind
         {
-            self.code.checkpoint(range);
+            self.code.current_range = *range;
+            self.code.checkpoint(*range);
             self.code.simple_call = *simple;
             true
         } else if matches!(
@@ -466,7 +470,7 @@ impl Frame<'_, '_, '_> {
         ) {
             let mark = self.target_mark();
             self.evaluate(expr);
-            self.target_release(mark.as_deref());
+            self.release_target(mark.as_deref());
             true
         } else if matches!(
             expr.kind,
@@ -507,7 +511,17 @@ impl Frame<'_, '_, '_> {
 
     pub(crate) fn return_result(&mut self, value: CheckedValue) {
         let value = self.materialize(&value);
-        self.code.return_from_scope(value);
+        if self.code.cleanup_returns.is_some() {
+            let label = self.code.name("return_cleanup");
+            self.code.jump(&label);
+            self.code.cleanup_returns.as_mut().unwrap().push((
+                label,
+                value,
+                self.code.current_range,
+            ));
+        } else {
+            self.code.return_value(&value);
+        }
     }
 
     pub(crate) fn terminated(&self) -> bool {
@@ -523,18 +537,20 @@ impl Frame<'_, '_, '_> {
     }
 
     pub(crate) fn select(&mut self, test: &Expr, yes: &Expr, no: &Expr) -> CheckedValue {
-        let names = self.names;
-        self.code.select(
+        crate::llvm::operations::ValueJoin::select(
+            self,
+            Self::body,
             |code, yes, no| {
                 let condition = code.test_with_temporaries(|code| {
-                    let handle = Frame { code, names }.evaluate_handle(test);
+                    let handle = code.evaluate_handle(test);
                     code.truth(&handle)
                 });
                 code.branch(&condition, yes, no);
             },
-            |code| Frame { code, names }.evaluate(yes),
-            |code| Frame { code, names }.evaluate(no),
+            |code| code.evaluate(yes),
+            |code| code.evaluate(no),
         )
+        .expect("value-producing registered conditional")
     }
 
     pub(crate) fn builtin(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
@@ -545,10 +561,7 @@ impl Frame<'_, '_, '_> {
                 self.code.named_op("lookup", &scope, name, "0")
             }
             (Builtin::RegisteredSuspend(kind, range), [value]) => {
-                let names = self.names;
-                self.code.suspend_value(*kind, *range, |code| {
-                    Frame { code, names }.evaluate_handle(value)
-                })
+                self.suspend_value(*kind, *range, |code| code.evaluate_handle(value))
             }
             (Builtin::RegisteredEllipsis, []) => permanent::ELLIPSIS.to_string(),
             (Builtin::RegisteredComplex(real, imag), []) => self
@@ -610,23 +623,18 @@ impl Frame<'_, '_, '_> {
                 let defaults = operands
                     .map(|value| self.evaluate_handle(value))
                     .collect::<Vec<_>>();
-                let lambda = &self.code.source.lambdas[site];
-                let body = lambda.body.as_ref().expect("checked lambda body");
-                self.code.bind_lambda(
-                    *site,
-                    &scope,
-                    &defaults,
-                    super::Body::CheckedExpression(body),
-                )
+                self.sites.bind_lambda(self.code, *site, &scope, &defaults)
             }
             (Builtin::RegisteredDefinition(site), header) => {
                 let header = header
                     .iter()
                     .map(|value| self.evaluate_handle(value))
                     .collect::<Vec<_>>();
-                self.code.registered_definition(*site, &header)
+                self.sites.definition(self.code, *site, &header)
             }
-            (Builtin::RegisteredTypeAlias(site), []) => self.code.registered_type_alias(*site),
+            (Builtin::RegisteredTypeAlias(site), []) => {
+                self.sites.aliases[site].instantiate(self.code)
+            }
             (Builtin::RegisteredImport(import), []) => {
                 self.code.namespace_import(import);
                 "0".to_owned()
@@ -640,10 +648,7 @@ impl Frame<'_, '_, '_> {
                 "0".to_owned()
             }
             (Builtin::RegisteredAnnotationInsert { index, name }, [value]) => {
-                let names = self.names;
-                self.code.insert_annotation(Some(*index), name, |code| {
-                    Frame { code, names }.evaluate_handle(value)
-                });
+                self.insert_annotation(Some(*index), name, |code| code.evaluate_handle(value));
                 "0".to_owned()
             }
             (Builtin::BindAnnotationExpression(id), [text]) => {
@@ -654,16 +659,15 @@ impl Frame<'_, '_, '_> {
             }
             (Builtin::RegisteredAnnotationResult, []) => self.code.take_annotation_result(),
             (Builtin::RegisteredModuleAnnotation(annotation), []) => {
-                self.code.registered_module_annotation(annotation);
+                self.code.module_annotation(annotation);
                 "0".to_owned()
             }
             (Builtin::RegisteredDeleteName(name, range), []) => {
                 let name = self.code.code_name(name);
                 let scope = self.code.scope.clone();
-                let (line, start) = self.code.source.positions.line_and_column(range.start());
-                let (_, end) = self.code.source.positions.line_and_column(range.end());
+                let (line, start) = self.code.positions.line_and_column(range.start());
+                let (_, end) = self.code.positions.line_and_column(range.end());
                 self.code
-                    .frame
                     .op_at("delname", &[&scope, &name], Some([line, start, start, end]))
             }
             (Builtin::GlobalSet(slot), [value]) => {
@@ -675,26 +679,19 @@ impl Frame<'_, '_, '_> {
                 return CheckedValue::handle("0".into());
             }
             (Builtin::RegisteredIndexConstant(key), [value]) => self.index_constant(key, value),
-            (Builtin::RegisteredSlice, bounds) => {
-                let names = self.names;
-                self.code.slice_object(
-                    [bounds.first(), bounds.get(1), bounds.get(2)],
-                    |code, expr| Frame { code, names }.evaluate_handle(expr),
-                )
-            }
+            (Builtin::RegisteredSlice, bounds) => self.slice_object(
+                [bounds.first(), bounds.get(1), bounds.get(2)],
+                Self::evaluate_handle,
+            ),
             (Builtin::RegisteredDeleteItem, [base, key]) => {
                 let base = self.evaluate_handle(base);
                 let key = self.evaluate_handle(key);
                 self.code.delete_item(&base, &key)
             }
             (Builtin::RegisteredSubscript(range, base_end), [base, key]) => {
-                let names = self.names;
                 let base = self.evaluate_handle(base);
-                let key = super::IndexKey::checked(key);
-                self.code
-                    .subscript(&base, key, *range, *base_end, |code, expr| {
-                        Frame { code, names }.evaluate_handle(expr)
-                    })
+                let key = IndexKey::checked(key);
+                self.subscript(&base, key, *range, *base_end, Self::evaluate_handle)
             }
             (Builtin::RegisteredDict(entries), values) => {
                 let mut values = values.iter();
@@ -703,10 +700,7 @@ impl Frame<'_, '_, '_> {
                         .then(|| values.next().expect("checked dictionary key"));
                     (key, values.next().expect("checked dictionary value"))
                 });
-                let names = self.names;
-                self.code.dict_display(items, |code, expr| {
-                    Frame { code, names }.evaluate_handle(expr)
-                })
+                self.dict_display(items, |code, expr| code.evaluate_handle(expr))
             }
             _ => unreachable!("unsupported registered operation"),
         };
@@ -723,12 +717,9 @@ impl Frame<'_, '_, '_> {
         let (target, args) = operands
             .split_first()
             .expect("checked object operation has a target");
-        let names = self.names;
-        let handle = self
-            .code
-            .object_operation(op, target, args.iter(), |code, expr| {
-                Frame { code, names }.evaluate_handle(expr)
-            });
+        let handle = FrameEmitter::object_operation(self, op, target, args.iter(), |code, expr| {
+            code.evaluate_handle(expr)
+        });
         CheckedValue::handle(handle)
     }
 
@@ -794,30 +785,32 @@ impl Frame<'_, '_, '_> {
             return self.evaluate_handle(candidate);
         }
         let slot = self.code.constant_slot(key.clone());
-        let names = self.names;
-        self.code.cached_tuple(&slot, |code| {
-            let value = Frame { code, names }.evaluate_handle(candidate);
+        self.cached_tuple(&slot, |code| {
+            let value = code.evaluate_handle(candidate);
             code.checked(&format!(
                 "call i64 @imre_dyn_linked_value(ptr %ctx, ptr {slot}, i64 {value})"
             ))
         })
     }
 
-    pub(crate) fn protocol_add(&mut self, left: &str, right: &str) -> String {
-        self.code.op("+", &[left, right])
-    }
-
     pub(crate) fn augment_item(&mut self, receiver: &Expr, key: &Expr, op: &str, rhs: &Expr) {
         let receiver = self.evaluate_handle(receiver);
         let key = self.evaluate_handle(key);
-        let names = self.names;
-        self.code.update_item(receiver, key, op, |code| {
-            Frame { code, names }.evaluate_handle(rhs)
-        });
+        self.update_item(receiver, key, op, |code| code.evaluate_handle(rhs));
     }
 }
 
-impl<'a> super::IndexKey<'a, Expr> {
+pub(crate) enum IndexKey<'a, E> {
+    Object(&'a E),
+    Bounds(
+        Option<&'a E>,
+        Option<&'a E>,
+        Option<&'a crate::ir::Constant>,
+    ),
+    Prepared(String),
+}
+
+impl<'a> IndexKey<'a, Expr> {
     fn checked(key: &'a Expr) -> Self {
         if let ExprKind::Builtin(Builtin::RegisteredLocation(..), located) = &key.kind
             && let [value] = located.as_slice()
@@ -838,9 +831,15 @@ impl<'a> super::IndexKey<'a, Expr> {
     }
 }
 
-impl Function<'_, '_> {
+impl RegisteredFrame<'_, '_> {
+    pub(crate) fn discard_handle(&mut self, handle: &str) {
+        self.line(&format!(
+            "call void @imre_dyn_discard_expression(ptr %ctx, i64 {handle})"
+        ));
+    }
+
     /// Construct an interpolation from evaluated handles and its constant source spelling.
-    pub(super) fn interpolation(
+    pub(crate) fn interpolation(
         &mut self,
         value: &str,
         expression: &str,
@@ -855,527 +854,39 @@ impl Function<'_, '_> {
         self.op("template_interpolation", &[value, &expression, &metadata])
     }
 
-    fn namespace_import(&mut self, import: &ir::NamespaceImport) {
-        match import {
-            ir::NamespaceImport::Modules(modules) => {
-                for item in modules {
-                    let mut module = self.import_name(&item.name, "0", 0);
-                    if item.bind_leaf {
-                        for part in item.name.split('.').skip(1) {
-                            let member = self.code_name(part);
-                            module = self.op("from", &[&module, &member]);
-                        }
-                    }
-                    self.bind(&item.binding, &module);
-                }
-            }
-            ir::NamespaceImport::From {
-                module,
-                level,
-                names,
-            } => {
-                let fromlist = self.op("list", &[]);
-                let members: Vec<_> = names.iter().map(|(name, _)| self.code_name(name)).collect();
-                for member in &members {
-                    self.op("append", &[&fromlist, member]);
-                }
-                let fromlist = self.op("tuple", &[&fromlist]);
-                let module = self.import_name(module, &fromlist, *level);
-                for ((name, binding), member) in names.iter().zip(members) {
-                    if name == "*" {
-                        self.frame
-                            .op("import_star", &[&self.scope.clone(), &module]);
-                    } else {
-                        let value = self.op("from", &[&module, &member]);
-                        self.bind(binding, &value);
-                    }
-                }
-            }
-        }
-    }
-
-    fn import_name(&mut self, name: &str, fromlist: &str, level: u32) -> String {
-        let name = self.code_name(name);
-        self.frame.checked(&format!(
-            "call i64 @imre_dyn_import_name(ptr %ctx, i64 {}, i64 {name}, i64 {fromlist}, i32 {level})",
-            self.scope
-        ))
-    }
-
-    pub(super) fn object_operation<'e, T: 'e>(
-        &mut self,
-        op: &Builtin,
-        target: &'e T,
-        args: impl Iterator<Item = &'e T>,
-        mut evaluate: impl FnMut(&mut Self, &T) -> String,
-    ) -> String {
-        match op {
-            Builtin::RegisteredCall(call) => self.call_value(call, target, args, None, evaluate),
-            Builtin::RegisteredUnary(op) => self.unary_value(*op, |f| evaluate(f, target)),
-            Builtin::RegisteredAttribute {
-                action,
-                name,
-                range,
-            } => self.attribute_operation(
-                *action,
-                name,
-                *range,
-                std::iter::once(target).chain(args),
-                evaluate,
-            ),
-            _ => unreachable!("selected Python object operation"),
-        }
-    }
-
-    pub(super) fn unary_value(
-        &mut self,
-        op: ir::ObjectUnary,
-        evaluate: impl FnOnce(&mut Self) -> String,
-    ) -> String {
-        let mark = self.temporary_mark();
-        self.unwind_operands(&mark, |f| {
-            let operand = evaluate(f);
-            let name = match op {
-                ir::ObjectUnary::Positive => "pos",
-                ir::ObjectUnary::Negative => "neg",
-                ir::ObjectUnary::Invert => "~",
-                ir::ObjectUnary::Not => "not",
-            };
-            let value = f.op(name, &[&operand]);
-            if op == ir::ObjectUnary::Not {
-                f.discard_truth(&mark);
-            } else {
-                f.keep_operands(&mark, &value, "0");
-            }
-            value
+    pub(crate) fn emit_string_tuple(&mut self, segments: Vec<Vec<u8>>) -> String {
+        let slot = self.constant_slot(ir::Constant::Tuple(
+            segments.iter().cloned().map(ir::Constant::Text).collect(),
+        ));
+        let mut frame = self;
+        frame.cached_tuple(&slot, |code| {
+            let values = segments
+                .into_iter()
+                .map(|segment| code.linked_string(segment))
+                .collect::<Vec<_>>();
+            code.build_sequence(&values, true, Some(&slot))
         })
     }
 
-    /// Evaluate the callable before its arguments. A lone *iterable is converted
-    /// at invocation, after the keywords; a mixed positional list expands each * in place.
-    pub(super) fn call_value<'e, T: 'e>(
-        &mut self,
-        call: &ir::RegisteredCall,
-        target: &T,
-        mut args: impl Iterator<Item = &'e T>,
-        partition: Option<(u32, String)>,
-        mut evaluate: impl FnMut(&mut Self, &T) -> String,
-    ) -> String {
-        use ir::{RegisteredArguments, RegisteredCallTarget};
-
-        let mark = self.temporary_mark();
-        if self.native_suspension
-            && let RegisteredCallTarget::Callable {
-                suspended_name: Some(name),
-                ..
-            } = &call.target
-        {
-            self.call_position(*name);
-        }
-        let (scope, target) = if call.explicit_scope {
-            let scope = evaluate(self, target);
-            (scope, args.next().expect("scoped call has a target"))
-        } else {
-            (self.scope.clone(), target)
-        };
-        let (callable, receiver, callee_end) = match &call.target {
-            RegisteredCallTarget::Callable { end, .. } => (evaluate(self, target), None, *end),
-            RegisteredCallTarget::Method { name, attribute } => self.unwind_operands(&mark, |f| {
-                let receiver = evaluate(f, target);
-                let direct = matches!(call.arguments, RegisteredArguments::Positional);
-                let (callee, bound) = f.method_target(&receiver, name, *attribute, direct);
-                f.keep_operands(&mark, &callee, bound.as_deref().unwrap_or("0"));
-                (callee, bound, attribute.end())
-            }),
-        };
-        let operands = match &call.arguments {
-            RegisteredArguments::Positional => {
-                let receiver_slot = receiver.is_some();
-                let values: Vec<_> = receiver
-                    .into_iter()
-                    .chain(args.map(|a| evaluate(self, a)))
-                    .collect();
-                let (array, count) = self.handle_array(&values);
-                if let Some((index, get_position)) = partition {
-                    debug_assert!(receiver_slot && count == 2);
-                    CallArguments::PartitionField {
-                        array,
-                        index,
-                        get_position,
-                    }
-                } else {
-                    CallArguments::Positional {
-                        array,
-                        count,
-                        receiver_slot,
-                    }
-                }
-            }
-            RegisteredArguments::Keywords { positional, names } => {
-                let values: Vec<_> = args.map(|a| evaluate(self, a)).collect();
-                let (array, _) = self.handle_array(&values);
-                CallArguments::FixedKeywords {
-                    array,
-                    positional: *positional,
-                    keywords: names.len(),
-                    names: self.output.data(names.join("\0").as_bytes()),
-                }
-            }
-            RegisteredArguments::Packed(pack) => self.unwind_operands(&mark, |f| {
-                let (args, kwargs) = f.argument_pack(pack, args, Some(&callable), &mut evaluate);
-                CallArguments::Packed { args, kwargs }
-            }),
-        };
-        let span = self.expression_range_span(call.range, callee_end, b'(');
-        self.call_position(call.range);
-        self.call_in_scope(&callable, operands, &mark, span, &scope)
+    pub(crate) fn convert_format_value(&mut self, value: &str, conversion: char) -> String {
+        let conversion = self.text(&conversion.to_string());
+        self.op("format_conversion", &[value, &conversion])
     }
 
-    /// Python calls convert a lone starred operand after the keywords. Class bases
-    /// and mixed positional operands are expanded before the following operand.
-    pub(super) fn argument_pack<'e, T: 'e>(
-        &mut self,
-        layout: &ir::PackedArguments,
-        mut args: impl Iterator<Item = &'e T>,
-        callable: Option<&str>,
-        evaluate: &mut impl FnMut(&mut Self, &T) -> String,
-    ) -> (String, String) {
-        let (positional, deferred) =
-            if let Some(callee) = callable.filter(|_| layout.starred.as_slice() == [true]) {
-                let mark = self.temporary_mark();
-                let iterable = evaluate(self, args.next().expect("single starred operand"));
-                (iterable, Some((callee, mark)))
-            } else {
-                let values = self.op("list", &[]);
-                self.pack_positionals(
-                    &values,
-                    layout.starred.iter().copied().zip(&mut args),
-                    evaluate,
-                );
-                (values, None)
-            };
-        let kwargs = self.pack_keywords(
-            layout.keywords.iter().map(Option::as_deref).zip(args),
-            callable,
-            evaluate,
-        );
-        if let Some((callee, mark)) = deferred {
-            let values = self.pack_operand("spread_arguments", &[&positional, callee]);
-            self.keep_operands(&mark, &values, &kwargs);
-            (values, kwargs)
-        } else {
-            (positional, kwargs)
-        }
+    pub(crate) fn format_value(&mut self, value: &str, spec: &str) -> String {
+        self.op("format", &[value, "0", spec])
     }
 
-    pub(super) fn pack_positionals<'e, T: 'e>(
-        &mut self,
-        list: &str,
-        args: impl Iterator<Item = (bool, &'e T)>,
-        evaluate: &mut impl FnMut(&mut Self, &T) -> String,
-    ) {
-        for (starred, operand) in args {
-            if starred {
-                self.extend_operand(list, |f| evaluate(f, operand));
-            } else {
-                let value = evaluate(self, operand);
-                self.op("append", &[list, &value]);
-            }
-        }
-    }
-
-    /// Each explicit group after ** is evaluated before merging and checking for duplicates.
-    fn pack_keywords<'n, 'e, T: 'e>(
-        &mut self,
-        keywords: impl Iterator<Item = (Option<&'n str>, &'e T)>,
-        callable: Option<&str>,
-        evaluate: &mut impl FnMut(&mut Self, &T) -> String,
-    ) -> String {
-        let mut keywords = keywords.peekable();
-        if keywords.peek().is_none() {
-            return "0".into();
-        }
-        let (merge, callable) = match callable {
-            Some(callable) => ("keywords", callable),
-            None => ("class_keywords", "0"),
-        };
-        let kwargs = self.op("dict", &[]);
-        let mut unpacked = false;
-        while let Some((name, _)) = keywords.peek() {
-            if name.is_none() {
-                let (_, operand) = keywords.next().unwrap();
-                let mark = self.temporary_mark();
-                self.unwind_operands(&mark, |f| {
-                    let value = evaluate(f, operand);
-                    f.pack_operand(merge, &[&kwargs, &value, callable]);
-                    // The merged dictionary now owns the keyword values.
-                    f.discard_truth(&mark);
-                });
-                unpacked = true;
-            } else {
-                let group = if unpacked {
-                    self.op("dict", &[])
-                } else {
-                    kwargs.clone()
-                };
-                while let Some((Some(name), operand)) = keywords.next_if(|(name, _)| name.is_some())
-                {
-                    let value = evaluate(self, operand);
-                    self.named_op("keyword", &group, name, &value);
-                }
-                if unpacked {
-                    self.pack_operand(merge, &[&kwargs, &group, callable]);
-                }
-            }
-        }
-        kwargs
-    }
-
-    pub(super) fn slice_object<T>(
-        &mut self,
-        bounds: [Option<&T>; 3],
-        mut evaluate: impl FnMut(&mut Self, &T) -> String,
-    ) -> String {
-        let [start, stop, step] =
-            bounds.map(|bound| bound.map_or_else(|| "0".into(), |bound| evaluate(self, bound)));
-        self.op("slice_object", &[&start, &stop, &step])
-    }
-
-    pub(super) fn subscript<T>(
-        &mut self,
-        base: &str,
-        key: super::IndexKey<'_, T>,
-        range: TextRange,
-        base_end: TextSize,
-        mut evaluate: impl FnMut(&mut Self, &T) -> String,
-    ) -> String {
-        let span = self.expression_range_span(range, base_end, b'[');
-        match key {
-            super::IndexKey::Object(key) => {
-                let key = evaluate(self, key);
-                self.op_at("get", &[base, &key], span)
-            }
-            super::IndexKey::Prepared(key) => {
-                let key = self.registered_value(key);
-                self.op_at("get", &[base, &key], span)
-            }
-            super::IndexKey::Bounds(lower, upper, constant) => {
-                let [start, stop] = [lower, upper]
-                    .map(|bound| bound.map_or_else(|| "0".into(), |bound| evaluate(self, bound)));
-                self.take_matching_check();
-                let position =
-                    span.map_or_else(|| "null".into(), |span| self.output.position(span));
-                if let Some(key) = constant {
-                    let slot = self.constant_slot(key.clone());
-                    self.checked(&format!("call i64 @imre_dyn_get_linked_slice_at(ptr %ctx, i64 {base}, i64 {start}, i64 {stop}, ptr {slot}, ptr {position})"))
-                } else {
-                    self.checked(&format!("call i64 @imre_dyn_get_slice_at(ptr %ctx, i64 {base}, i64 {start}, i64 {stop}, ptr {position})"))
-                }
-            }
-        }
-    }
-
-    /// Construct a Python dictionary with CPython's BUILD_MAP, MAP_ADD and DICT_UPDATE order.
-    pub(super) fn dict_display<'e, T: 'e>(
-        &mut self,
-        items: impl Iterator<Item = (Option<&'e T>, &'e T)>,
-        mut evaluate: impl FnMut(&mut Self, &T) -> String,
-    ) -> String {
-        // CPython's codegen_dict flushes on the pair *after* the buffered operands exceed
-        // its stack-use guideline. codegen_subdict streams any chunk over that guideline.
-        const STACK_USE_GUIDELINE: usize = 30;
-        let mut items = items.peekable();
-        if items.peek().is_none() {
-            return self.op("dict", &[]);
-        }
-
-        let mark = self.temporary_mark();
-        self.unwind_operands(&mark, |f| {
-            let mut result = None;
-            while let Some((key, value)) = items.next() {
-                let Some(key) = key else {
-                    let dict = result.get_or_insert_with(|| f.op("dict", &[]));
-                    let mapping = evaluate(f, value);
-                    f.op("update", &[dict, &mapping]);
-                    f.keep_operands(&mark, dict, "0");
-                    continue;
-                };
-
-                let mut chunk = vec![(key, value)];
-                while chunk.len() < STACK_USE_GUIDELINE / 2 + 2
-                    && let Some((Some(key), value)) = items.next_if(|(key, _)| key.is_some())
-                {
-                    chunk.push((key, value));
-                }
-                let streamed = (2 * chunk.len() > STACK_USE_GUIDELINE).then(|| f.op("dict", &[]));
-                let mut pending = Vec::new();
-                for (key, value) in chunk {
-                    let key = evaluate(f, key);
-                    let value = evaluate(f, value);
-                    if let Some(part) = &streamed {
-                        f.op("put", &[part, &key, &value]);
-                        f.keep_operands(&mark, part, result.as_deref().unwrap_or("0"));
-                    } else {
-                        pending.push((key, value));
-                    }
-                }
-                let part = streamed.unwrap_or_else(|| {
-                    let part = f.op("dict", &[]);
-                    for (key, value) in pending {
-                        f.op("put", &[&part, &key, &value]);
-                    }
-                    f.keep_operands(&mark, &part, result.as_deref().unwrap_or("0"));
-                    part
-                });
-                if let Some(dict) = &result {
-                    f.op("update", &[dict, &part]);
-                    f.keep_operands(&mark, dict, "0");
-                } else {
-                    result = Some(part);
-                }
-            }
-            result.expect("nonempty dictionary display")
-        })
-    }
-
-    pub(super) fn bind_lambda(
-        &mut self,
-        site: TextSize,
-        scope: &str,
-        defaults: &[String],
-        body: super::Body<'_>,
-    ) -> String {
-        let lambda = &self.source.lambdas[&site];
-        let metadata = &lambda.metadata;
-        let qualname = format!("{}<lambda>", self.prefix);
-        let existing = self.source.lambda_code.borrow().get(&site).cloned();
-        let code = existing.unwrap_or_else(|| {
-            let entry = if metadata.generator {
-                super::Entry::Suspended
-            } else {
-                super::Entry::Compiled
-            };
-            let code = self.frame.output.definition(
-                self.source,
-                format!("{qualname}.<locals>."),
-                body,
-                site,
-                true,
-                entry,
-            );
-            self.source
-                .lambda_code
-                .borrow_mut()
-                .insert(site, code.clone());
-            code
-        });
-        let mut future_flags = 0;
-        if self.source.string_annotations {
-            future_flags |= imre_ast::code_flags::FUTURE_ANNOTATIONS;
-        }
-        if self.source.barry_as_flufl {
-            future_flags |= imre_ast::code_flags::FUTURE_BARRY_AS_BDFL;
-        }
-        let method = self.class_locals.is_some() && self.annotation_values.is_none();
-        let signature = metadata.signature(self.in_function, method, future_flags);
-        self.output
-            .interned_identifiers
-            .extend(metadata.parameter_names().map(str::to_owned));
-        assert_eq!(metadata.defaults.len(), defaults.len());
-        let defaults = if defaults.is_empty() {
-            "0".to_owned()
-        } else {
-            let dict = self.op("dict", &[]);
-            for (key, value) in metadata.defaults.iter().zip(defaults) {
-                let key = self.code_name(key);
-                self.op("put", &[&dict, &key, value]);
-            }
-            dict
-        };
-        let signature = self.text(&signature.to_string());
-        let name = self.code_name("<lambda>");
-        let qualname = self.text(&qualname);
-        self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {scope}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {qualname}, i64 0, i64 0, i1 false)"))
-    }
-
-    /// Emit a registered expression whose names are resolved through this live frame.
-    fn with_checked_frame<R>(&mut self, emit: impl FnOnce(Frame<'_, '_, '_>) -> R) -> R {
-        let first = self.integer_owners;
-        let outer = self.expression_integer_start.replace(first);
-        let result = emit(Frame {
-            code: self,
-            names: None,
-        });
-        self.expression_integer_start = outer;
-        result
-    }
-
-    pub(super) fn checked_statement(&mut self, stmt: &Statement) {
-        self.with_checked_frame(|frame| CheckedBody::registered(frame).emit_statement(stmt))
-    }
-
-    pub(super) fn registered_value(&mut self, expression: &Expr) -> String {
-        self.with_checked_frame(|mut frame| frame.evaluate_handle(expression))
-    }
-
-    pub(super) fn checked_block(&mut self, statements: &[Statement], checked: &RegisteredFunction) {
-        CheckedBody::registered(Frame {
-            code: self,
-            names: Some(checked),
-        })
-        .emit_block(statements);
-    }
-
-    /// Give each prepared suite private storage in the prologue of its physical function.
-    /// Residual source can enter another prepared suite before returning to this one.
-    pub(super) fn with_checked_slots(
-        &mut self,
-        checked: &RegisteredFunction,
-        emit: impl FnOnce(&mut Self),
-    ) {
-        #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
-        if let Err(error) = crate::verify::registered(checked) {
-            self.output.diagnostic = Some(format!(
-                "internal compiler error: invalid registered IR: {error}"
-            ));
-            return;
-        }
-        let enclosing = std::mem::take(&mut self.iteration);
-        let roots = self.live_slots.len();
-        let first = self.private_slot_count;
-        self.iteration.private_slots = checked.private_slots().into_iter().collect();
-        self.iteration.first_slot = first;
-        let end = first + self.iteration.private_slots.len();
-        self.private_slot_count = end;
-        self.live_slots.extend(first..end);
-        ir::walk_statements(&checked.function.body, &mut |stmt| {
-            if let Statement::IterNext { iterator, .. } = stmt {
-                self.iteration.cursors.insert(*iterator);
-            }
-        });
-        emit(self);
-        self.live_slots.truncate(roots);
-        self.iteration = enclosing;
-    }
-
-    pub(super) fn checked_body(&mut self, checked: &RegisteredFunction) {
-        self.with_checked_slots(checked, |code| {
-            CheckedBody::registered(Frame {
-                code,
-                names: Some(checked),
-            })
-            .emit_function(&checked.function);
-        });
+    /// Preserve a lone formatted value and bypass string-subclass addition when joining fields.
+    pub(crate) fn join_format_parts(&mut self, parts: Vec<String>) -> String {
+        parts
+            .into_iter()
+            .reduce(|left, right| self.op("format_concat", &[&left, &right]))
+            .unwrap_or_else(|| self.text(""))
     }
 }
 
 impl RegisteredFrame<'_, '_> {
-    pub(super) fn discard_handle(&mut self, handle: &str) {
-        self.line(&format!(
-            "call void @imre_dyn_discard_expression(ptr %ctx, i64 {handle})"
-        ));
-    }
-
     /// The heap takes the reference even if adding its temporary root fails.
     fn move_integer(&mut self, slot: usize, word: &str) -> String {
         self.line(&format!("store i64 1, ptr %int_owner{slot}"));
@@ -1384,7 +895,100 @@ impl RegisteredFrame<'_, '_> {
         ))
     }
 
-    fn declare_integer_arithmetic(&mut self) {
+    pub(crate) fn declare_integer_arithmetic(&mut self) {
         self.output.declarations.checked_integer_arithmetic = true;
     }
 }
+
+/// Give each prepared suite private storage in the prologue of its physical function.
+/// Residual source can enter another prepared suite before returning to this one.
+pub(crate) fn with_checked_slots<'a, 'p, E: FrameEmitter<'a, 'p>>(
+    code: &mut E,
+    checked: &RegisteredFunction,
+    emit: impl FnOnce(&mut E),
+) {
+    #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+    if let Err(error) = crate::verify::registered(checked) {
+        code.output.diagnostic = Some(format!(
+            "internal compiler error: invalid registered IR: {error}"
+        ));
+        return;
+    }
+    let enclosing = std::mem::take(&mut code.iteration);
+    let roots = code.live_slots.len();
+    let first = code.private_slot_count;
+    code.iteration.private_slots = checked.private_slots().into_iter().collect();
+    code.iteration.first_slot = first;
+    let end = first + code.iteration.private_slots.len();
+    code.private_slot_count = end;
+    code.live_slots.extend(first..end);
+    ir::walk_statements(&checked.function.body, &mut |stmt| {
+        if let Statement::IterNext { iterator, .. } = stmt {
+            code.iteration.cursors.insert(*iterator);
+        }
+    });
+    emit(code);
+    code.live_slots.truncate(roots);
+    code.iteration = enclosing;
+}
+
+impl RegisteredFrame<'_, '_> {
+    /// Emit a registered expression whose names are resolved through this live frame.
+    fn with_checked_frame<R>(
+        &mut self,
+        sites: &CheckedSites,
+        emit: impl FnOnce(Frame<'_, '_, '_>) -> R,
+    ) -> R {
+        let first = self.integer_owners;
+        let outer = self.expression_integer_start.replace(first);
+        let result = emit(Frame {
+            code: self,
+            names: None,
+            sites,
+        });
+        self.expression_integer_start = outer;
+        result
+    }
+
+    pub(crate) fn checked_statement(&mut self, stmt: &Statement, sites: &CheckedSites) {
+        self.with_checked_frame(sites, |frame| {
+            CheckedBody::registered(frame).emit_statement(stmt)
+        })
+    }
+
+    pub(crate) fn registered_value(&mut self, expression: &Expr, sites: &CheckedSites) -> String {
+        self.with_checked_frame(sites, |mut frame| frame.evaluate_handle(expression))
+    }
+
+    pub(crate) fn checked_block(
+        &mut self,
+        statements: &[Statement],
+        checked: &RegisteredFunction,
+        sites: &CheckedSites,
+    ) {
+        CheckedBody::registered(Frame {
+            code: self,
+            names: Some(checked),
+            sites,
+        })
+        .emit_block(statements);
+    }
+
+    pub(crate) fn checked_body(
+        mut code: &mut Self,
+        checked: &RegisteredFunction,
+        sites: &CheckedSites,
+    ) {
+        with_checked_slots(&mut code, checked, |code| {
+            CheckedBody::registered(Frame {
+                code,
+                names: Some(checked),
+                sites,
+            })
+            .emit_function(&checked.function);
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests;

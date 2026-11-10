@@ -1,0 +1,1679 @@
+//! Object-frame ABI operations used by registered LLVM code.
+
+use super::sequences::{permanent_handle, spread};
+use super::{
+    CallArguments, GUARDED_LIT, GUARDED_NAMED_OP, NAMED_OP, Output, permanent, suspension,
+};
+use super::{IndexKey, suspension::Suspension};
+use crate::frontend::function_scope::ClassBindings;
+use crate::frontend::push_codepoints;
+use crate::ir;
+use crate::ir::{Builtin, Constant, DisplayKind, Expr};
+use crate::llvm::body::FunctionBody;
+use ruff_text_size::{TextRange, TextSize};
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::Write as _;
+
+pub(crate) enum Place {
+    Name(String),
+    Item(String, String),
+}
+
+/// Source bytes and byte offsets shared by both forms of registered body.
+pub(crate) struct SourcePositions<'a> {
+    pub(crate) text: &'a str,
+    pub(crate) file: &'a str,
+    newlines: Vec<usize>,
+}
+
+impl<'a> SourcePositions<'a> {
+    pub(crate) fn new(text: &'a str, file: &'a str) -> Self {
+        Self {
+            text,
+            file,
+            newlines: text.match_indices('\n').map(|(offset, _)| offset).collect(),
+        }
+    }
+
+    pub(crate) fn line(&self, offset: TextSize) -> usize {
+        self.newlines.partition_point(|&n| n < usize::from(offset)) + 1
+    }
+
+    pub(crate) fn line_and_column(&self, offset: TextSize) -> (usize, usize) {
+        let line = self.line(offset);
+        let start = if line == 1 {
+            0
+        } else {
+            self.newlines[line - 2] + 1
+        };
+        (line, usize::from(offset) - start)
+    }
+}
+
+/// The registered calling convention supplies object handles, scoped roots and pending errors.
+pub(crate) struct RegisteredFrame<'a, 'p> {
+    pub(crate) output: &'a mut Output,
+    pub(crate) positions: &'p SourcePositions<'p>,
+    pub(crate) unit: usize,
+    pub(super) iteration: super::IterationState,
+    pub(crate) current_range: TextRange,
+    /// A mixed block branches to its enclosing finally/with cleanup in the syntax visitor.
+    pub(crate) cleanup_returns: Option<Vec<(String, String, TextRange)>>,
+    pub(crate) async_generator: bool,
+    pub(crate) class_locals: Option<ClassBindings>,
+    pub(crate) annotation_values: Option<String>,
+    pub(crate) annotation_children: HashMap<ir::AnnotationCodeId, String>,
+    pub(crate) module_annotation_sites: Option<Vec<TextSize>>,
+    pub(crate) body: FunctionBody,
+    id: u32,
+    pending_check: Option<ErrorCheck>,
+    pub(crate) scope: String,
+    // Handles held in native registers across statement boundaries must stay reachable.
+    pub(crate) live: Vec<String>,
+    /// Addressable IR temporaries whose contents survive Python statement boundaries.
+    pub(crate) live_slots: Vec<usize>,
+    pub(crate) private_slot_count: usize,
+    pub(crate) max_live: usize,
+    pub(crate) integer_owners: usize,
+    pub(crate) expression_integer_start: Option<usize>,
+    // A caught error abandons this expression's intermediates and preserves enclosing owners.
+    integer_unwinds: BTreeMap<(usize, String), (usize, String)>,
+    pub(crate) caught: Vec<String>,
+    pub(crate) simple_call: Option<TextRange>,
+    pub(crate) expression_line: usize,
+    pub(crate) native_suspension: bool,
+}
+
+struct ErrorCheck {
+    handler: String,
+    failed: String,
+    next: String,
+}
+
+impl<'a, 'p> RegisteredFrame<'a, 'p> {
+    pub(crate) fn new(
+        output: &'a mut Output,
+        positions: &'p SourcePositions<'p>,
+        native_suspension: bool,
+        unit: usize,
+        start: TextSize,
+    ) -> Self {
+        let id = output.count;
+        output.count += 1;
+        Self {
+            output,
+            positions,
+            unit,
+            iteration: Default::default(),
+            current_range: TextRange::empty(start),
+            cleanup_returns: None,
+            async_generator: false,
+            class_locals: None,
+            annotation_values: None,
+            annotation_children: HashMap::new(),
+            module_annotation_sites: None,
+            id,
+            body: FunctionBody::new(if native_suspension { "start" } else { "entry" }, "failed"),
+            pending_check: None,
+            scope: "%scope".into(),
+            live: Vec::new(),
+            live_slots: Vec::new(),
+            private_slot_count: 0,
+            max_live: 0,
+            integer_owners: 0,
+            expression_integer_start: None,
+            integer_unwinds: BTreeMap::new(),
+            caught: Vec::new(),
+            simple_call: None,
+            expression_line: 0,
+            native_suspension,
+        }
+    }
+
+    pub(crate) fn finish(mut self, module: bool) -> String {
+        let name = format!("@code{}", self.id);
+        if !self.body.terminated {
+            self.return_value("0");
+        }
+        let mut entry = if self.max_live == 0 {
+            String::new()
+        } else {
+            format!("  %live = alloca [{} x i64]\n", self.max_live)
+        };
+        for slot in 0..self.private_slot_count {
+            writeln!(
+                entry,
+                "  %ir_slot{slot} = alloca i64\n  store i64 0, ptr %ir_slot{slot}"
+            )
+            .unwrap();
+        }
+        for slot in 0..self.integer_owners {
+            writeln!(
+                entry,
+                "  %int_owner{slot} = alloca i64\n  store i64 1, ptr %int_owner{slot}"
+            )
+            .unwrap();
+        }
+        // A loaded code object owns its identifier-like strings before any statement runs.
+        if module && !self.output.interned_identifiers.is_empty() {
+            let names = std::mem::take(&mut self.output.interned_identifiers)
+                .into_iter()
+                .collect::<Vec<_>>()
+                .join("\0");
+            let data = self.output.data(names.as_bytes());
+            writeln!(
+                entry,
+                "  call i64 @imre_dyn_lit(ptr %ctx, i32 5, ptr {data}, i64 {})",
+                names.len()
+            )
+            .unwrap();
+        }
+        for ((start, target), (end, label)) in std::mem::take(&mut self.integer_unwinds) {
+            self.body.start(&label);
+            self.release_integer_owners(start..end, true);
+            self.body.jump(&target);
+        }
+        self.body.start("failed");
+        self.release_integer_owners(0..self.integer_owners, false);
+        if self.native_suspension {
+            self.body
+                .line("call void @imre_dyn_suspend_return(ptr %context_slot, i64 0)");
+            self.body.jump("complete");
+            writeln!(self.output.functions,
+                "define internal ptr {name}(ptr %context_slot, i64 %scope) presplitcoroutine {{\nentry:\n{entry}{}{}{} }}",
+                suspension::PROLOGUE, self.body.code, suspension::EPILOGUE).unwrap();
+        } else {
+            self.body.end("ret i64 0");
+            writeln!(
+                self.output.functions,
+                "define internal i64 {name}(ptr %ctx, i64 %scope) {{\nentry:\n{entry}{}}}",
+                self.body.code
+            )
+            .unwrap();
+        }
+        name
+    }
+
+    fn release_integer_owners(&mut self, slots: std::ops::Range<usize>, clear: bool) {
+        for slot in slots {
+            let word = self
+                .body
+                .instruction(format!("load i64, ptr %int_owner{slot}"));
+            if clear {
+                self.body.line(format!("store i64 1, ptr %int_owner{slot}"));
+            }
+            self.body
+                .line(format!("call void @imre_int_release(i64 {word})"));
+        }
+    }
+
+    pub(crate) fn enter_expression(&mut self, position: TextSize) -> Option<usize> {
+        let line = self.positions.line(position);
+        let previous = self.expression_line;
+        if previous == line {
+            return None;
+        }
+        self.expression_line = line;
+        self.line(&format!(
+            "call void @imre_dyn_expression_line(ptr %ctx, i32 {line})"
+        ));
+        Some(previous)
+    }
+
+    pub(crate) fn leave_expression(&mut self, previous: Option<usize>) {
+        if let Some(line) = previous {
+            self.expression_line = line;
+            if !self.body.terminated {
+                self.line(&format!(
+                    "call void @imre_dyn_expression_line(ptr %ctx, i32 {line})"
+                ));
+            }
+        }
+    }
+
+    pub(crate) fn name(&mut self, prefix: &str) -> String {
+        self.body.name(prefix)
+    }
+
+    pub(crate) fn line(&mut self, line: &str) {
+        self.flush_check();
+        self.instruction(line);
+    }
+
+    fn instruction(&mut self, line: &str) {
+        // A suspended activation outlives the Context borrow of any one resume. Only
+        // the slot's address is stable. Each runtime call receives the current borrow.
+        if self.native_suspension
+            && let Some((before, after)) = line.split_once("ptr %ctx")
+        {
+            let ctx = self.name("%active_ctx");
+            self.body
+                .line(format!("{ctx} = load volatile ptr, ptr %context_slot"));
+            self.body.line(format!("{before}ptr {ctx}{after}"));
+        } else {
+            self.body.line(line);
+        }
+    }
+
+    pub(crate) fn value(&mut self, instruction: &str) -> String {
+        if !self.native_suspension {
+            self.flush_check();
+            return self.body.instruction(instruction);
+        }
+        let value = self.name("%v");
+        self.line(&format!("{value} = {instruction}"));
+        value
+    }
+
+    pub(crate) fn end(&mut self, instruction: &str) {
+        if !self.body.terminated {
+            self.flush_check();
+            self.body.end(instruction);
+        }
+    }
+
+    pub(crate) fn return_value(&mut self, value: &str) {
+        if self.native_suspension {
+            if !self.body.terminated {
+                self.line(&format!(
+                    "call void @imre_dyn_suspend_return(ptr %context_slot, i64 {value})"
+                ));
+                self.jump("complete");
+            }
+        } else {
+            self.end(&format!("ret i64 {value}"));
+        }
+    }
+
+    pub(crate) fn jump(&mut self, label: &str) {
+        if !self.body.terminated {
+            self.flush_check();
+            self.body.jump(label);
+        }
+    }
+
+    pub(crate) fn label(&mut self, label: &str) {
+        self.flush_check();
+        self.body.start(label);
+    }
+
+    pub(crate) fn branch(&mut self, condition: &str, yes: &str, no: &str) {
+        if !self.body.terminated {
+            self.flush_check();
+            self.body.branch(condition, yes, no);
+        }
+    }
+
+    pub(crate) fn checked(&mut self, invocation: &str) -> String {
+        let result = self.value(invocation);
+        self.check_error();
+        result
+    }
+
+    pub(crate) fn check_error(&mut self) {
+        let mut handler = self.body.error_target.clone();
+        if let Some(start) = self.expression_integer_start
+            && start < self.integer_owners
+            && handler != "failed"
+        {
+            let count = self.integer_unwinds.len();
+            let (end, label) = self
+                .integer_unwinds
+                .entry((start, handler))
+                .or_insert_with(|| (self.integer_owners, format!("int_unwind{count}")));
+            *end = self.integer_owners;
+            handler = label.clone();
+        }
+        self.pending_check = Some(ErrorCheck {
+            handler,
+            failed: self.name("%v"),
+            next: self.name("b"),
+        });
+    }
+
+    pub(crate) fn flush_check(&mut self) {
+        if let Some(ErrorCheck {
+            handler,
+            failed,
+            next,
+        }) = self.pending_check.take()
+        {
+            self.instruction(&format!("{failed} = call i1 @imre_dyn_failed(ptr %ctx)"));
+            self.body.branch(&failed, &handler, &next);
+            self.body.start(&next);
+        }
+    }
+
+    /// A guarded successor can deliver the first failure to the same handler.
+    pub(crate) fn take_matching_check(&mut self) -> bool {
+        self.pending_check
+            .take_if(|check| check.handler == self.body.error_target)
+            .is_some()
+    }
+
+    /// Publish the real predecessor before referring to it in a phi.
+    pub(crate) fn current_block(&mut self) -> &str {
+        self.flush_check();
+        &self.body.current
+    }
+
+    pub(crate) fn op(&mut self, name: &str, args: &[&str]) -> String {
+        self.op_at(name, args, None)
+    }
+
+    pub(crate) fn op_at(&mut self, name: &str, args: &[&str], span: Option<[usize; 4]>) -> String {
+        if name != "take_error" {
+            self.take_matching_check();
+        }
+        let op = self.output.data(name.as_bytes());
+        let arg = |index| *args.get(index).unwrap_or(&"0");
+        let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
+        self.checked(&format!(
+            "call i64 @imre_dyn_op_at(ptr %ctx, ptr {op}, i64 {}, i64 {}, i64 {}, ptr {position})",
+            arg(0),
+            arg(1),
+            arg(2)
+        ))
+    }
+
+    pub(crate) fn lit(&mut self, kind: i32, bytes: &[u8]) -> String {
+        let loader = if self.take_matching_check() {
+            if !self.output.declarations.emitted_guarded_lit {
+                self.output.functions.push_str(GUARDED_LIT);
+                self.output.declarations.emitted_guarded_lit = true;
+            }
+            "@imre_boxed_guarded_lit"
+        } else {
+            "@imre_dyn_lit"
+        };
+        let literal = self.output.data(bytes);
+        self.checked(&format!(
+            "call i64 {loader}(ptr %ctx, i32 {kind}, ptr {literal}, i64 {})",
+            bytes.len()
+        ))
+    }
+
+    /// Emit a code-object name, including a Unicode identifier that would not intern as a literal.
+    pub(crate) fn code_name(&mut self, name: &str) -> String {
+        self.output.interned_identifiers.insert(name.to_owned());
+        self.lit(6, name.as_bytes())
+    }
+
+    pub(crate) fn integer(&mut self, n: impl TryInto<i64> + ToString + Copy) -> String {
+        if let Ok(value) = n.try_into()
+            && let Some(id) = permanent::small_integer_id(value)
+        {
+            return id.to_string();
+        }
+        self.lit(0, n.to_string().as_bytes())
+    }
+
+    /// Load a code name and use it as the second operand of a boxed operation.
+    pub(crate) fn named_op(&mut self, op: &str, receiver: &str, name: &str, value: &str) -> String {
+        self.output.interned_identifiers.insert(name.to_owned());
+        if op == "lookup" {
+            // The runtime lookup propagates a pending exception before reading the scope.
+            self.take_matching_check();
+            let data = self.output.data(name.as_bytes());
+            return self.checked(&format!(
+                "call i64 @imre_dyn_lookup(ptr %ctx, i64 {receiver}, ptr {data}, i64 {})",
+                name.len()
+            ));
+        }
+        if !self.output.declarations.emitted_named_op {
+            self.output.functions.push_str(NAMED_OP);
+            self.output.declarations.emitted_named_op = true;
+        }
+        let operation = if self.take_matching_check() {
+            if !self.output.declarations.emitted_guarded_named_op {
+                self.output.functions.push_str(GUARDED_NAMED_OP);
+                self.output.declarations.emitted_guarded_named_op = true;
+            }
+            "@imre_boxed_guarded_named_op"
+        } else {
+            "@imre_boxed_named_op"
+        };
+        let opcode = self.output.data(op.as_bytes());
+        let data = self.output.data(name.as_bytes());
+        self.checked(&format!(
+            "call i64 {operation}(ptr %ctx, ptr {opcode}, i64 {receiver}, ptr {data}, i64 {}, i64 {value})",
+            name.len()
+        ))
+    }
+
+    /// Evaluate Python truthiness and produce the LLVM branch condition.
+    pub(crate) fn truth(&mut self, value: &str) -> String {
+        let boolean = self.op("truth", &[value]);
+        self.value(&format!("icmp eq i64 {boolean}, 2"))
+    }
+
+    /// End the lifetime of the operands evaluated after the mark.
+    pub(crate) fn discard_truth(&mut self, mark: &str) {
+        self.line(&format!(
+            "call void @imre_dyn_discard_truth(ptr %ctx, i64 {mark})"
+        ));
+    }
+
+    /// Keep just the live stack operands when Python may observe their release.
+    pub(crate) fn keep_operands(&mut self, mark: &str, first: &str, second: &str) -> String {
+        self.value(&format!(
+            "call i64 @imre_dyn_keep_operands(ptr %ctx, i64 {mark}, i64 {first}, i64 {second})"
+        ))
+    }
+
+    /// Save the caller's earlier operands before an expression can release a writer.
+    pub(crate) fn temporary_mark(&mut self) -> String {
+        self.value("call i64 @imre_dyn_truth_mark(ptr %ctx)")
+    }
+
+    pub(crate) fn expression_range_span(
+        &self,
+        range: TextRange,
+        prefix_end: TextSize,
+        opener: u8,
+    ) -> Option<[usize; 4]> {
+        if self.simple_call == Some(range) {
+            return None;
+        }
+        let start = range.start().to_usize();
+        let end = range.end().to_usize();
+        let prefix_end = prefix_end.to_usize();
+        let text = self.positions.text.as_bytes();
+        if text.get(start..end)?.contains(&b'\n') {
+            return None;
+        }
+        let split = imre_ast::traceback_delimiter(text, prefix_end, end, opener)?;
+        let (line, col) = self.positions.line_and_column(range.start());
+        Some([line, col, col + (split - start), col + (end - start)])
+    }
+
+    /// Store the handles that must survive the next statement or assignment target.
+    fn live_handles(&mut self) -> (&'static str, usize) {
+        let mut live = self.live.clone();
+        for i in 0..self.live_slots.len() {
+            let slot = self.live_slots[i];
+            live.push(self.value(&format!("load i64, ptr %ir_slot{slot}")));
+        }
+        self.handle_array(&live)
+    }
+
+    /// Copy evaluated handles into reusable storage in this activation's entry block.
+    pub(crate) fn handle_array(&mut self, values: &[impl AsRef<str>]) -> (&'static str, usize) {
+        let count = values.len();
+        self.max_live = self.max_live.max(count);
+        for (i, value) in values.iter().enumerate() {
+            let value = value.as_ref();
+            let ptr = self.value(&format!("getelementptr i64, ptr %live, i64 {i}"));
+            self.line(&format!("store i64 {value}, ptr {ptr}"));
+        }
+        (if count == 0 { "null" } else { "%live" }, count)
+    }
+
+    pub(crate) fn checkpoint(&mut self, range: TextRange) {
+        let (ptr, count) = self.live_handles();
+        let line = self.positions.line(range.start());
+        self.expression_line = line;
+        self.line(&format!(
+            "call void @imre_dyn_statement_with_exception(ptr %ctx, ptr {ptr}, i64 {count}, ptr {}, i32 {line}, i64 {})",
+            self.positions.file, self.caught.last().map_or("0", String::as_str)
+        ));
+        self.check_error();
+    }
+
+    /// A live caller retains the full range even when traceback highlighting is suppressed.
+    pub(crate) fn call_position(&mut self, range: TextRange) {
+        let (start_line, start_col) = self.positions.line_and_column(range.start());
+        let (end_line, end_col) = self.positions.line_and_column(range.end());
+        let position = self
+            .output
+            .position([start_line, end_line, start_col, end_col]);
+        self.line(&format!(
+            "call void @imre_dyn_call_position(ptr %ctx, ptr {position})"
+        ));
+    }
+
+    /// Pass the caller's temporary root boundary and optional traceback position.
+    pub(crate) fn call_at(
+        &mut self,
+        callable: &str,
+        operands: CallArguments,
+        mark: &str,
+        span: Option<[usize; 4]>,
+    ) -> String {
+        self.call_in_scope(callable, operands, mark, span, &self.scope.clone())
+    }
+
+    pub(crate) fn call_in_scope(
+        &mut self,
+        callable: &str,
+        operands: CallArguments,
+        mark: &str,
+        span: Option<[usize; 4]>,
+        scope: &str,
+    ) -> String {
+        let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
+        let (function, args) = match operands {
+            CallArguments::PartitionField {
+                array,
+                index,
+                get_position,
+            } => (
+                "imre_dyn_partition_field_at",
+                format!("ptr {array}, i32 {index}, ptr {get_position}"),
+            ),
+            CallArguments::FixedKeywords {
+                array,
+                positional,
+                names,
+                keywords,
+            } => (
+                "imre_dyn_keyword_call_at",
+                format!("ptr {array}, i64 {positional}, ptr {names}, i64 {keywords}"),
+            ),
+            CallArguments::Packed { args, kwargs } => (
+                "imre_dyn_scoped_call_at",
+                format!("i64 {args}, i64 {kwargs}"),
+            ),
+            CallArguments::Positional {
+                array: ptr,
+                count,
+                receiver_slot,
+            } => (
+                if receiver_slot {
+                    "imre_dyn_positional_method_at"
+                } else {
+                    "imre_dyn_positional_call_at"
+                },
+                format!("ptr {ptr}, i64 {count}"),
+            ),
+        };
+        self.checked(&format!("call i64 @{function}(ptr %ctx, i64 {callable}, {args}, i64 {mark}, ptr {position}, i64 {scope})"))
+    }
+
+    pub(crate) fn assign_owned_name(
+        &mut self,
+        scope: &str,
+        name: &str,
+        value: &str,
+        mark: Option<&str>,
+    ) {
+        let replaced = self.op("assign_target", &[scope, name, value]);
+        self.release_replaced(&replaced, mark.map(|mark| (mark, value)));
+    }
+
+    /// Keep the expression result rooted while releasing the previous binding.
+    pub(crate) fn assign_expression_name(
+        &mut self,
+        scope: &str,
+        name: &str,
+        value: &str,
+        mark: &str,
+    ) {
+        let replaced = self.op("assign_named_target", &[scope, name, value]);
+        self.release_replaced(&replaced, Some((mark, value)));
+    }
+
+    /// An item/attribute setter can replace an owner without reporting which object it dropped.
+    pub(crate) fn release_target(&mut self, mark: Option<&str>) {
+        self.release_replaced("2", mark.map(|mark| (mark, "0")));
+    }
+
+    /// Preserve earlier expression operands when present, or the statement's explicit live handles.
+    pub(crate) fn release_replaced(&mut self, replaced: &str, expression: Option<(&str, &str)>) {
+        if let Some((mark, value)) = expression {
+            self.line(&format!("call void @imre_dyn_named_assignment(ptr %ctx, i64 {mark}, i64 {value}, i64 {replaced})"));
+        } else {
+            let (ptr, count) = self.live_handles();
+            self.line(&format!("call void @imre_dyn_assignment_target(ptr %ctx, ptr {ptr}, i64 {count}, i64 {replaced})"));
+        }
+    }
+}
+
+impl RegisteredFrame<'_, '_> {
+    pub(crate) fn text(&mut self, value: &str) -> String {
+        if !value.is_empty() && interned_spelling(value) {
+            self.output.interned_identifiers.insert(value.to_owned());
+        }
+        self.lit(1, value.as_bytes())
+    }
+
+    pub(crate) fn lookup(&mut self, name: &str) -> String {
+        let op = match &self.class_locals {
+            Some(class) if self.annotation_values.is_some() && class.globals.contains(name) => {
+                "lookup_annotation_global"
+            }
+            Some(class) if self.annotation_values.is_some() && class.locals.contains(name) => {
+                "lookup_class_annotation_global"
+            }
+            Some(_) if self.annotation_values.is_some() => "lookup_class_annotation",
+            Some(class) if class.locals.contains(name) => "lookup_class_local",
+            _ => "lookup",
+        };
+        self.named_op(op, &self.scope.clone(), name, "0")
+    }
+
+    pub(crate) fn bind(&mut self, name: &str, value: &str) {
+        self.named_op("assign", &self.scope.clone(), name, value);
+    }
+
+    pub(crate) fn attr(&mut self, object: &str, name: &str) -> String {
+        self.named_op("attr", object, name, "0")
+    }
+
+    pub(crate) fn namespace_import(&mut self, import: &ir::NamespaceImport) {
+        match import {
+            ir::NamespaceImport::Modules(modules) => {
+                for item in modules {
+                    let mut module = self.import_name(&item.name, "0", 0);
+                    if item.bind_leaf {
+                        for part in item.name.split('.').skip(1) {
+                            let member = self.code_name(part);
+                            module = self.op("from", &[&module, &member]);
+                        }
+                    }
+                    self.bind(&item.binding, &module);
+                }
+            }
+            ir::NamespaceImport::From {
+                module,
+                level,
+                names,
+            } => {
+                let fromlist = self.op("list", &[]);
+                let members: Vec<_> = names.iter().map(|(name, _)| self.code_name(name)).collect();
+                for member in &members {
+                    self.op("append", &[&fromlist, member]);
+                }
+                let fromlist = self.op("tuple", &[&fromlist]);
+                let module = self.import_name(module, &fromlist, *level);
+                for ((name, binding), member) in names.iter().zip(members) {
+                    if name == "*" {
+                        self.op("import_star", &[&self.scope.clone(), &module]);
+                    } else {
+                        let value = self.op("from", &[&module, &member]);
+                        self.bind(binding, &value);
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn import_name(&mut self, name: &str, fromlist: &str, level: u32) -> String {
+        let name = self.code_name(name);
+        self.checked(&format!(
+            "call i64 @imre_dyn_import_name(ptr %ctx, i64 {}, i64 {name}, i64 {fromlist}, i32 {level})",
+            self.scope
+        ))
+    }
+
+    pub(crate) fn check_annotation_format(&mut self) {
+        let format = self.lookup("format");
+        self.op("annotation_format", &[&format]);
+    }
+
+    pub(crate) fn begin_annotations(&mut self, class: Option<ClassBindings>) {
+        self.check_annotation_format();
+        self.annotation_values = Some(self.op("dict", &[]));
+        // Annotation expressions resolve outside the provider's public format parameter.
+        self.scope = self.op("annotation_scope", &[&self.scope.clone()]);
+        self.class_locals = class;
+    }
+
+    pub(crate) fn take_annotation_result(&mut self) -> String {
+        self.annotation_values
+            .take()
+            .expect("annotation dictionary")
+    }
+
+    // Equal constants are merged across nested code objects in one compilation.
+    pub(crate) fn await_at(
+        &mut self,
+        value: &str,
+        mode: &str,
+        range: TextRange,
+        mark: &str,
+    ) -> String {
+        self.call_position(range);
+        let iterator = self.op("await_iter", &[value, mode]);
+        let result = self.suspend_at(&iterator, Suspension::Await, range, mark);
+        self.keep_operands(mark, &result, "0");
+        result
+    }
+
+    pub(crate) fn suspend_at(
+        &mut self,
+        value: &str,
+        kind: Suspension,
+        range: TextRange,
+        mark: &str,
+    ) -> String {
+        self.call_position(range);
+        self.line(&format!(
+            "call void @imre_dyn_suspend_operands(ptr %context_slot, i64 {value}, i64 {mark}, i32 {})",
+            kind as i32
+        ));
+        let saved = self.value("call token @llvm.coro.save(ptr %handle)");
+        let branch = self.value(&format!(
+            "call i8 @llvm.coro.suspend(token {saved}, i1 false)"
+        ));
+        let resume = self.name("b");
+        self.end(&format!(
+            "switch i8 {branch}, label %parked [ i8 0, label %{resume} i8 1, label %discard ]"
+        ));
+        self.label(&resume);
+        self.checked("call i64 @imre_dyn_resume_input(ptr %context_slot)")
+    }
+}
+
+/// Share operand ordering and unwind edges while each caller supplies its own operand emitter.
+pub(crate) trait FrameEmitter<'a, 'p>:
+    std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>> + Sized
+{
+    fn test_with_temporaries(&mut self, test: impl FnOnce(&mut Self) -> String) -> String {
+        let mark = self.temporary_mark();
+        let condition = test(self);
+        self.discard_truth(&mark);
+        condition
+    }
+
+    fn unwind_operands<T>(&mut self, mark: &str, body: impl FnOnce(&mut Self) -> T) -> T {
+        self.unwind_with(|f| f.discard_truth(mark), body)
+    }
+
+    fn insert_annotation(
+        &mut self,
+        index: Option<usize>,
+        name: &str,
+        evaluate: impl FnOnce(&mut Self) -> String,
+    ) {
+        let after = index.map(|index| {
+            let active = self.lookup("__conditional_annotations__");
+            let index = self.integer(index);
+            let present = self.op("in", &[&index, &active]);
+            let condition = self.truth(&present);
+            let yes = self.name("b");
+            let after = self.name("b");
+            self.branch(&condition, &yes, &after);
+            self.label(&yes);
+            after
+        });
+        let key = self.code_name(name);
+        let value = evaluate(self);
+        let values = self
+            .annotation_values
+            .as_ref()
+            .expect("annotation dictionary")
+            .clone();
+        self.op("put", &[&values, &key, &value]);
+        if let Some(after) = after {
+            self.jump(&after);
+            self.label(&after);
+        }
+    }
+
+    fn suspend_value(
+        &mut self,
+        kind: crate::ir::SuspendValue,
+        range: TextRange,
+        evaluate: impl FnOnce(&mut Self) -> String,
+    ) -> String {
+        let mark = self.temporary_mark();
+        self.unwind_operands(&mark, |code| {
+            let value = evaluate(code);
+            match kind {
+                crate::ir::SuspendValue::Await => code.await_at(&value, "0", range, &mark),
+                crate::ir::SuspendValue::Delegate => {
+                    code.suspend_at(&value, Suspension::Delegate, range, &mark)
+                }
+                crate::ir::SuspendValue::Yield => {
+                    let mode = if code.async_generator {
+                        Suspension::AsyncYield
+                    } else {
+                        Suspension::Yield
+                    };
+                    code.suspend_at(&value, mode, range, &mark)
+                }
+            }
+        })
+    }
+
+    fn slice_object<T>(
+        &mut self,
+        bounds: [Option<&T>; 3],
+        mut evaluate: impl FnMut(&mut Self, &T) -> String,
+    ) -> String {
+        let [start, stop, step] =
+            bounds.map(|bound| bound.map_or_else(|| "0".into(), |bound| evaluate(self, bound)));
+        self.op("slice_object", &[&start, &stop, &step])
+    }
+
+    fn subscript<T>(
+        &mut self,
+        base: &str,
+        key: IndexKey<'_, T>,
+        range: TextRange,
+        base_end: TextSize,
+        mut evaluate: impl FnMut(&mut Self, &T) -> String,
+    ) -> String {
+        let span = self.expression_range_span(range, base_end, b'[');
+        match key {
+            IndexKey::Object(key) => {
+                let key = evaluate(self, key);
+                self.op_at("get", &[base, &key], span)
+            }
+            IndexKey::Prepared(key) => self.op_at("get", &[base, &key], span),
+            IndexKey::Bounds(lower, upper, constant) => {
+                let [start, stop] = [lower, upper]
+                    .map(|bound| bound.map_or_else(|| "0".into(), |bound| evaluate(self, bound)));
+                self.take_matching_check();
+                let position =
+                    span.map_or_else(|| "null".into(), |span| self.output.position(span));
+                if let Some(key) = constant {
+                    let slot = self.constant_slot(key.clone());
+                    self.checked(&format!("call i64 @imre_dyn_get_linked_slice_at(ptr %ctx, i64 {base}, i64 {start}, i64 {stop}, ptr {slot}, ptr {position})"))
+                } else {
+                    self.checked(&format!("call i64 @imre_dyn_get_slice_at(ptr %ctx, i64 {base}, i64 {start}, i64 {stop}, ptr {position})"))
+                }
+            }
+        }
+    }
+
+    fn read(&mut self, place: &Place) -> String {
+        match place {
+            Place::Name(n) => {
+                let scope = self.scope.clone();
+                self.op("lookup", &[&scope, n])
+            }
+            Place::Item(v, k) => self.op("get", &[v, k]),
+        }
+    }
+
+    fn write(&mut self, place: &Place, value: &str) {
+        match place {
+            Place::Name(n) => {
+                let scope = self.scope.clone();
+                self.op("assign", &[&scope, n, value])
+            }
+            Place::Item(v, k) => self.put_item(v, k, value),
+        };
+    }
+
+    fn update_place(&mut self, place: &Place, op: &str, rhs: impl FnOnce(&mut Self) -> String) {
+        let left = self.read(place);
+        let right = rhs(self);
+        let value = self.op(&format!("inplace:{op}"), &[&left, &right]);
+        self.write(place, &value);
+    }
+
+    fn update_item(
+        &mut self,
+        receiver: String,
+        key: String,
+        op: &str,
+        rhs: impl FnOnce(&mut Self) -> String,
+    ) {
+        self.update_place(&Place::Item(receiver, key), op, rhs)
+    }
+
+    fn delete_item(&mut self, receiver: &str, key: &str) -> String {
+        self.op("delitem", &[receiver, key])
+    }
+
+    fn put_item(&mut self, receiver: &str, index: &str, value: &str) -> String {
+        self.op("put", &[receiver, index, value])
+    }
+
+    /// Construct a Python dictionary with CPython's BUILD_MAP, MAP_ADD and DICT_UPDATE order.
+    fn dict_display<'e, T: 'e>(
+        &mut self,
+        items: impl Iterator<Item = (Option<&'e T>, &'e T)>,
+        mut evaluate: impl FnMut(&mut Self, &T) -> String,
+    ) -> String {
+        // CPython's codegen_dict flushes on the pair *after* the buffered operands exceed
+        // its stack-use guideline. codegen_subdict streams any chunk over that guideline.
+        const STACK_USE_GUIDELINE: usize = 30;
+        let mut items = items.peekable();
+        if items.peek().is_none() {
+            return self.op("dict", &[]);
+        }
+
+        let mark = self.temporary_mark();
+        self.unwind_operands(&mark, |f| {
+            let mut result = None;
+            while let Some((key, value)) = items.next() {
+                let Some(key) = key else {
+                    let dict = result.get_or_insert_with(|| f.op("dict", &[]));
+                    let mapping = evaluate(f, value);
+                    f.op("update", &[dict, &mapping]);
+                    f.keep_operands(&mark, dict, "0");
+                    continue;
+                };
+
+                let mut chunk = vec![(key, value)];
+                while chunk.len() < STACK_USE_GUIDELINE / 2 + 2
+                    && let Some((Some(key), value)) = items.next_if(|(key, _)| key.is_some())
+                {
+                    chunk.push((key, value));
+                }
+                let streamed = (2 * chunk.len() > STACK_USE_GUIDELINE).then(|| f.op("dict", &[]));
+                let mut pending = Vec::new();
+                for (key, value) in chunk {
+                    let key = evaluate(f, key);
+                    let value = evaluate(f, value);
+                    if let Some(part) = &streamed {
+                        f.op("put", &[part, &key, &value]);
+                        f.keep_operands(&mark, part, result.as_deref().unwrap_or("0"));
+                    } else {
+                        pending.push((key, value));
+                    }
+                }
+                let part = streamed.unwrap_or_else(|| {
+                    let part = f.op("dict", &[]);
+                    for (key, value) in pending {
+                        f.op("put", &[&part, &key, &value]);
+                    }
+                    f.keep_operands(&mark, &part, result.as_deref().unwrap_or("0"));
+                    part
+                });
+                if let Some(dict) = &result {
+                    f.op("update", &[dict, &part]);
+                    f.keep_operands(&mark, dict, "0");
+                } else {
+                    result = Some(part);
+                }
+            }
+            result.expect("nonempty dictionary display")
+        })
+    }
+
+    fn object_operation<'e, T: 'e>(
+        &mut self,
+        op: &Builtin,
+        target: &'e T,
+        args: impl Iterator<Item = &'e T>,
+        mut evaluate: impl FnMut(&mut Self, &T) -> String,
+    ) -> String {
+        match op {
+            Builtin::RegisteredCall(call) => self.call_value(call, target, args, None, evaluate),
+            Builtin::RegisteredUnary(op) => self.unary_value(*op, |f| evaluate(f, target)),
+            Builtin::RegisteredAttribute {
+                action,
+                name,
+                range,
+            } => self.attribute_operation(
+                *action,
+                name,
+                *range,
+                std::iter::once(target).chain(args),
+                evaluate,
+            ),
+            _ => unreachable!("selected Python object operation"),
+        }
+    }
+
+    fn unary_value(
+        &mut self,
+        op: ir::ObjectUnary,
+        evaluate: impl FnOnce(&mut Self) -> String,
+    ) -> String {
+        let mark = self.temporary_mark();
+        self.unwind_operands(&mark, |f| {
+            let operand = evaluate(f);
+            let name = match op {
+                ir::ObjectUnary::Positive => "pos",
+                ir::ObjectUnary::Negative => "neg",
+                ir::ObjectUnary::Invert => "~",
+                ir::ObjectUnary::Not => "not",
+            };
+            let value = f.op(name, &[&operand]);
+            if op == ir::ObjectUnary::Not {
+                f.discard_truth(&mark);
+            } else {
+                f.keep_operands(&mark, &value, "0");
+            }
+            value
+        })
+    }
+
+    /// Evaluate the callable before its arguments. A lone *iterable is converted
+    /// at invocation, after the keywords; a mixed positional list expands each * in place.
+    fn call_value<'e, T: 'e>(
+        &mut self,
+        call: &ir::RegisteredCall,
+        target: &T,
+        mut args: impl Iterator<Item = &'e T>,
+        partition: Option<(u32, String)>,
+        mut evaluate: impl FnMut(&mut Self, &T) -> String,
+    ) -> String {
+        use ir::{RegisteredArguments, RegisteredCallTarget};
+
+        let mark = self.temporary_mark();
+        if self.native_suspension
+            && let RegisteredCallTarget::Callable {
+                suspended_name: Some(name),
+                ..
+            } = &call.target
+        {
+            self.call_position(*name);
+        }
+        let (scope, target) = if call.explicit_scope {
+            let scope = evaluate(self, target);
+            (scope, args.next().expect("scoped call has a target"))
+        } else {
+            (self.scope.clone(), target)
+        };
+        let (callable, receiver, callee_end) = match &call.target {
+            RegisteredCallTarget::Callable { end, .. } => (evaluate(self, target), None, *end),
+            RegisteredCallTarget::Method { name, attribute } => self.unwind_operands(&mark, |f| {
+                let receiver = evaluate(f, target);
+                let direct = matches!(call.arguments, RegisteredArguments::Positional);
+                let (callee, bound) = f.method_target(&receiver, name, *attribute, direct);
+                f.keep_operands(&mark, &callee, bound.as_deref().unwrap_or("0"));
+                (callee, bound, attribute.end())
+            }),
+        };
+        let operands = match &call.arguments {
+            RegisteredArguments::Positional => {
+                let receiver_slot = receiver.is_some();
+                let values: Vec<_> = receiver
+                    .into_iter()
+                    .chain(args.map(|a| evaluate(self, a)))
+                    .collect();
+                let (array, count) = self.handle_array(&values);
+                if let Some((index, get_position)) = partition {
+                    debug_assert!(receiver_slot && count == 2);
+                    CallArguments::PartitionField {
+                        array,
+                        index,
+                        get_position,
+                    }
+                } else {
+                    CallArguments::Positional {
+                        array,
+                        count,
+                        receiver_slot,
+                    }
+                }
+            }
+            RegisteredArguments::Keywords { positional, names } => {
+                let values: Vec<_> = args.map(|a| evaluate(self, a)).collect();
+                let (array, _) = self.handle_array(&values);
+                CallArguments::FixedKeywords {
+                    array,
+                    positional: *positional,
+                    keywords: names.len(),
+                    names: self.output.data(names.join("\0").as_bytes()),
+                }
+            }
+            RegisteredArguments::Packed(pack) => self.unwind_operands(&mark, |f| {
+                let (args, kwargs) = f.argument_pack(pack, args, Some(&callable), &mut evaluate);
+                CallArguments::Packed { args, kwargs }
+            }),
+        };
+        let span = self.expression_range_span(call.range, callee_end, b'(');
+        self.call_position(call.range);
+        self.call_in_scope(&callable, operands, &mark, span, &scope)
+    }
+
+    /// Python calls convert a lone starred operand after the keywords. Class bases
+    /// and mixed positional operands are expanded before the following operand.
+    fn argument_pack<'e, T: 'e>(
+        &mut self,
+        layout: &ir::PackedArguments,
+        mut args: impl Iterator<Item = &'e T>,
+        callable: Option<&str>,
+        evaluate: &mut impl FnMut(&mut Self, &T) -> String,
+    ) -> (String, String) {
+        let (positional, deferred) =
+            if let Some(callee) = callable.filter(|_| layout.starred.as_slice() == [true]) {
+                let mark = self.temporary_mark();
+                let iterable = evaluate(self, args.next().expect("single starred operand"));
+                (iterable, Some((callee, mark)))
+            } else {
+                let values = self.op("list", &[]);
+                self.pack_positionals(
+                    &values,
+                    layout.starred.iter().copied().zip(&mut args),
+                    evaluate,
+                );
+                (values, None)
+            };
+        let kwargs = self.pack_keywords(
+            layout.keywords.iter().map(Option::as_deref).zip(args),
+            callable,
+            evaluate,
+        );
+        if let Some((callee, mark)) = deferred {
+            let values = self.pack_operand("spread_arguments", &[&positional, callee]);
+            self.keep_operands(&mark, &values, &kwargs);
+            (values, kwargs)
+        } else {
+            (positional, kwargs)
+        }
+    }
+
+    fn pack_positionals<'e, T: 'e>(
+        &mut self,
+        list: &str,
+        args: impl Iterator<Item = (bool, &'e T)>,
+        evaluate: &mut impl FnMut(&mut Self, &T) -> String,
+    ) {
+        for (starred, operand) in args {
+            if starred {
+                self.extend_operand(list, |f| evaluate(f, operand));
+            } else {
+                let value = evaluate(self, operand);
+                self.op("append", &[list, &value]);
+            }
+        }
+    }
+
+    /// Each explicit group after ** is evaluated before merging and checking for duplicates.
+    fn pack_keywords<'n, 'e, T: 'e>(
+        &mut self,
+        keywords: impl Iterator<Item = (Option<&'n str>, &'e T)>,
+        callable: Option<&str>,
+        evaluate: &mut impl FnMut(&mut Self, &T) -> String,
+    ) -> String {
+        let mut keywords = keywords.peekable();
+        if keywords.peek().is_none() {
+            return "0".into();
+        }
+        let (merge, callable) = match callable {
+            Some(callable) => ("keywords", callable),
+            None => ("class_keywords", "0"),
+        };
+        let kwargs = self.op("dict", &[]);
+        let mut unpacked = false;
+        while let Some((name, _)) = keywords.peek() {
+            if name.is_none() {
+                let (_, operand) = keywords.next().unwrap();
+                let mark = self.temporary_mark();
+                self.unwind_operands(&mark, |f| {
+                    let value = evaluate(f, operand);
+                    f.pack_operand(merge, &[&kwargs, &value, callable]);
+                    // The merged dictionary now owns the keyword values.
+                    f.discard_truth(&mark);
+                });
+                unpacked = true;
+            } else {
+                let group = if unpacked {
+                    self.op("dict", &[])
+                } else {
+                    kwargs.clone()
+                };
+                while let Some((Some(name), operand)) = keywords.next_if(|(name, _)| name.is_some())
+                {
+                    let value = evaluate(self, operand);
+                    self.named_op("keyword", &group, name, &value);
+                }
+                if unpacked {
+                    self.pack_operand(merge, &[&kwargs, &group, callable]);
+                }
+            }
+        }
+        kwargs
+    }
+
+    /// Execute a descriptor operation at the original target, using the same live receiver
+    /// for both halves of augmented assignment. A mutation releases its operand window on
+    /// success and unwinds it before transferring an exception to the handler.
+    fn attribute_operation<'e, T: 'e>(
+        &mut self,
+        action: ir::AttributeAction,
+        name: &str,
+        range: ruff_text_size::TextRange,
+        mut operands: impl Iterator<Item = &'e T>,
+        mut evaluate: impl FnMut(&mut Self, &T) -> String,
+    ) -> String {
+        use ir::AttributeAction;
+        let first = operands.next().expect("attribute operand");
+        let mark = self.temporary_mark();
+        if action == AttributeAction::Load {
+            return self.unwind_operands(&mark, |code| {
+                let receiver = evaluate(code, first);
+                let value = code.attribute_value(&receiver, name, range);
+                code.keep_operands(&mark, &value, "0");
+                value
+            });
+        }
+        self.unwind_operands(&mark, |code| {
+            match action {
+                AttributeAction::Store => {
+                    let value = evaluate(code, first);
+                    code.store_attribute(name, range, &value, |code| {
+                        evaluate(code, operands.next().expect("attribute receiver"))
+                    });
+                }
+                AttributeAction::Delete => {
+                    let receiver = evaluate(code, first);
+                    code.write_attribute(&receiver, name, range, None);
+                }
+                AttributeAction::InPlace(op) => {
+                    let receiver = evaluate(code, first);
+                    let right_mark = code.temporary_mark();
+                    let value = code.unwind_operands(&right_mark, |code| {
+                        let left = code.attribute_value(&receiver, name, range);
+                        let right = evaluate(code, operands.next().expect("in-place RHS"));
+                        let value = code.op(&format!("inplace:{op}"), &[&left, &right]);
+                        // The binary operation consumed both operands before STORE_ATTR.
+                        code.keep_operands(&right_mark, &value, "0");
+                        value
+                    });
+                    // STORE_ATTR consumes its receiver before the value being stored.
+                    let receiver_mark = code.keep_operands(&mark, &value, &receiver);
+                    code.unwind_operands(&receiver_mark, |code| {
+                        code.write_attribute(&receiver, name, range, Some(&value));
+                        code.discard_truth(&receiver_mark);
+                    });
+                }
+                AttributeAction::Load => unreachable!(),
+            }
+            code.discard_truth(&mark);
+        });
+        permanent::NONE.to_string()
+    }
+
+    fn store_attribute(
+        &mut self,
+        name: &str,
+        range: ruff_text_size::TextRange,
+        value: &str,
+        receiver: impl FnOnce(&mut Self) -> String,
+    ) {
+        // The RHS is already owned and must outlive evaluation and disposal of the receiver.
+        let mark = self.temporary_mark();
+        self.unwind_operands(&mark, |code| {
+            let receiver = receiver(code);
+            code.write_attribute(&receiver, name, range, Some(value));
+            code.discard_truth(&mark);
+        });
+    }
+
+    fn extend_operand(&mut self, target: &str, evaluate: impl FnOnce(&mut Self) -> String) {
+        let mark = self.temporary_mark();
+        let value = evaluate(self);
+        self.pack_operand("extend", &[target, &value]);
+        // The target owns the expanded items. Drop the iterable before the next operand.
+        self.discard_truth(&mark);
+    }
+
+    fn unwind_with<T>(
+        &mut self,
+        release: impl FnOnce(&mut Self),
+        body: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let failed = self.name("b");
+        let outer = std::mem::replace(&mut self.body.error_target, failed.clone());
+        let result = body(self);
+        let ready = self.name("b");
+        self.jump(&ready);
+        self.label(&failed);
+        release(self);
+        self.jump(&outer);
+        self.label(&ready);
+        self.body.error_target = outer;
+        result
+    }
+
+    fn checked_sequence(
+        &mut self,
+        values: &[Expr],
+        display: DisplayKind,
+        evaluate: impl FnMut(&mut Self, &Expr) -> String,
+    ) -> String {
+        let tuple = display == DisplayKind::Tuple;
+        if display == DisplayKind::Set {
+            return self.sequence_display(values, display, None, spread, evaluate);
+        }
+        if values.is_empty() {
+            return if tuple {
+                permanent::EMPTY_TUPLE.to_string()
+            } else {
+                self.op("list", &[])
+            };
+        }
+        let slot = tuple
+            .then(|| {
+                values
+                    .iter()
+                    .map(Constant::from_expr)
+                    .collect::<Option<Vec<_>>>()
+            })
+            .flatten()
+            .map(|keys| self.constant_slot(Constant::Tuple(keys)));
+        if let Some(handles) = values
+            .iter()
+            .map(permanent_handle)
+            .collect::<Option<Vec<_>>>()
+        {
+            let data = self.output.data(
+                &handles
+                    .iter()
+                    .flat_map(|id| id.to_le_bytes())
+                    .collect::<Vec<_>>(),
+            );
+            let slot = slot.as_deref().unwrap_or("null");
+            let count = handles.len();
+            return self.checked(&format!("call i64 @imre_dyn_build_sequence(ptr %ctx, ptr {data}, i64 {count}, i1 true, i1 {tuple}, ptr {slot})"));
+        }
+        let build = |code: &mut Self| {
+            code.sequence_display(values, display, slot.as_deref(), spread, evaluate)
+        };
+        let Some(slot) = slot.as_deref() else {
+            return build(self);
+        };
+        self.cached_tuple(slot, build)
+    }
+
+    fn cached_tuple(&mut self, slot: &str, build: impl FnOnce(&mut Self) -> String) -> String {
+        // A loaded tuple is a constant of the code unit. Reuse it before evaluating
+        // any literal loaders or allocating a temporary container.
+        let cached = self.value(&format!(
+            "call i64 @imre_dyn_cached_handle(ptr %ctx, ptr {slot})"
+        ));
+        let hit = self.value(&format!("icmp ne i64 {cached}, 0"));
+        let previous = self.current_block().to_owned();
+        let load = self.name("b");
+        let done = self.name("b");
+        self.branch(&hit, &done, &load);
+        self.label(&load);
+        let result = build(self);
+        let loaded = self.current_block().to_owned();
+        self.jump(&done);
+        self.label(&done);
+        self.value(&format!(
+            "phi i64 [ {cached}, %{previous} ], [ {result}, %{loaded} ]"
+        ))
+    }
+
+    /// Evaluate small prefixes before allocating. Once built, the list owns every consumed operand.
+    fn sequence_display<T>(
+        &mut self,
+        items: &[T],
+        display: DisplayKind,
+        slot: Option<&str>,
+        spread: impl Fn(&T) -> Option<&T>,
+        mut evaluate: impl FnMut(&mut Self, &T) -> String,
+    ) -> String {
+        let tuple = display == DisplayKind::Tuple;
+        let mark = self.temporary_mark();
+        let unwind = |code: &mut Self| {
+            code.line(&format!(
+                "call void @imre_dyn_unwind_display(ptr %ctx, i64 {mark})"
+            ));
+        };
+        self.unwind_with(unwind, |code| {
+            let initial = |code: &mut Self, values: Vec<String>, complete| {
+                let slot = if complete { slot } else { None };
+                let container = if display == DisplayKind::Set {
+                    let (data, count) = code.handle_array(&values);
+                    code.checked(&format!("call i64 @imre_dyn_build_set(ptr %ctx, ptr {data}, i64 {count}, i64 {mark})"))
+                } else {
+                    code.build_sequence(&values, tuple && complete, slot)
+                };
+                if !complete {
+                    code.keep_operands(&mark, &container, "0");
+                }
+                container
+            };
+            let append = |code: &mut Self, list: &String, _, value: String, extend| {
+                if extend && code.native_suspension {
+                    let range = code.current_range;
+                    code.call_position(range);
+                }
+                code.take_matching_check();
+                code.checked(&format!("call i64 @imre_dyn_display_item(ptr %ctx, i64 {list}, i64 {value}, i64 {mark}, i1 {extend})"));
+            };
+            let (mut result, complete) = crate::llvm::operations::sequences::build(
+                code, items, spread, &mut evaluate, initial, append,
+            );
+            if !complete && tuple {
+                let operation = if slot.is_some() { "constant_tuple" } else { "tuple" };
+                result = code.op(operation, &[&result]);
+                if let Some(slot) = slot {
+                    result = code.checked(&format!("call i64 @imre_dyn_linked_value(ptr %ctx, ptr {slot}, i64 {result})"));
+                }
+            }
+            code.keep_operands(&mark, &result, "0");
+            result
+        })
+    }
+}
+
+impl<'a, 'p, T> FrameEmitter<'a, 'p> for T where
+    T: std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>>
+{
+}
+
+impl RegisteredFrame<'_, '_> {
+    pub(crate) fn declare_global(&mut self, name: &str) {
+        let name = self.code_name(name);
+        self.op("declare_global", &[&self.scope.clone(), &name]);
+    }
+}
+
+impl RegisteredFrame<'_, '_> {
+    pub(crate) fn invoke(&mut self, callable: &str, values: &[&str]) -> String {
+        let mark = self.temporary_mark();
+        let (ptr, count) = self.handle_array(values);
+        self.call_at(
+            callable,
+            CallArguments::Positional {
+                array: ptr,
+                count,
+                receiver_slot: false,
+            },
+            &mark,
+            None,
+        )
+    }
+
+    /// The optional message has already been evaluated on the failure edge.
+    /// Construct the exception at the keyword and raise it at the test expression.
+    pub(crate) fn assertion_failure(
+        &mut self,
+        statement: TextSize,
+        test: TextSize,
+        message: Option<&str>,
+    ) {
+        let statement_line = self.positions.line(statement);
+        self.set_statement_line(statement_line);
+        self.expression_line = statement_line;
+        let name = self.text("AssertionError");
+        let class = self.op("builtin", &[&name]);
+        let error = match message {
+            Some(value) => self.invoke(&class, &[value]),
+            None => class,
+        };
+        let test_line = self.positions.line(test);
+        if test_line != statement_line {
+            self.set_statement_line(test_line);
+            self.expression_line = test_line;
+        }
+        self.raise(&error, None, false);
+    }
+
+    pub(crate) fn raise(&mut self, exc: &str, cause: Option<&str>, reraise: bool) {
+        // Raising always transfers control to the enclosing handler.
+        let op = self
+            .output
+            .data(if reraise { b"reraise" } else { b"raise" });
+        let explicit = if cause.is_some() { 2 } else { 0 };
+        let cause = cause.unwrap_or("0");
+        self.line(&format!(
+            "call i64 @imre_dyn_op_at(ptr %ctx, ptr {op}, i64 {exc}, i64 {cause}, i64 {explicit}, ptr null)"
+        ));
+        self.jump(&self.body.error_target.clone());
+    }
+
+    pub(crate) fn set_statement_line(&mut self, line: usize) {
+        if !self.output.declarations.declared_statement_line {
+            self.output
+                .functions
+                .push_str("declare void @imre_dyn_set_statement_line(ptr, i32)\n");
+            self.output.declarations.declared_statement_line = true;
+        }
+        self.line(&format!(
+            "call void @imre_dyn_set_statement_line(ptr %ctx, i32 {line})"
+        ));
+    }
+}
+
+impl RegisteredFrame<'_, '_> {
+    pub(crate) fn attribute_position(&mut self, range: ruff_text_size::TextRange) {
+        if self.native_suspension {
+            self.call_position(range);
+        }
+    }
+
+    pub(crate) fn attribute_value(
+        &mut self,
+        receiver: &str,
+        name: &str,
+        range: ruff_text_size::TextRange,
+    ) -> String {
+        self.attribute_position(range);
+        self.attr(receiver, name)
+    }
+
+    pub(crate) fn write_attribute(
+        &mut self,
+        receiver: &str,
+        name: &str,
+        range: ruff_text_size::TextRange,
+        value: Option<&str>,
+    ) -> String {
+        self.attribute_position(range);
+        match value {
+            Some(value) => self.named_op("setattr", receiver, name, value),
+            None => self.named_op("delattr", receiver, name, "0"),
+        }
+    }
+
+    /// Resolve the descriptor before evaluating the call arguments. A direct target
+    /// also supplies its receiver through the frame's reusable scratch slot.
+    pub(crate) fn method_target(
+        &mut self,
+        receiver: &str,
+        name: &str,
+        range: ruff_text_size::TextRange,
+        direct: bool,
+    ) -> (String, Option<String>) {
+        self.attribute_position(range);
+        let lookup = if direct && name == "get" {
+            Some(format!(
+                "call i64 @imre_dyn_dict_get_target(ptr %ctx, i64 {receiver}, ptr %live)"
+            ))
+        } else if direct && !name.starts_with('_') && imre_ast::strings::STR_METHODS.contains(&name)
+        {
+            let symbol = self.output.data(format!("str.{name}").as_bytes());
+            Some(format!(
+                "call i64 @imre_dyn_string_method_target(ptr %ctx, i64 {receiver}, ptr {symbol}, ptr %live)"
+            ))
+        } else if direct && !name.starts_with("__") {
+            let symbol = self.output.data(name.as_bytes());
+            Some(format!(
+                "call i64 @imre_dyn_builtin_method_target(ptr %ctx, i64 {receiver}, ptr {symbol}, ptr %live)"
+            ))
+        } else {
+            None
+        };
+        if let Some(lookup) = lookup {
+            let target = self.checked(&lookup);
+            // Nested argument calls can reuse the entry-block scratch space.
+            let bound = self.value("load i64, ptr %live");
+            (target, Some(bound))
+        } else {
+            (self.named_op("method", receiver, name, "0"), None)
+        }
+    }
+
+    pub(crate) fn pack_operand(&mut self, operation: &str, args: &[&str]) -> String {
+        if self.native_suspension {
+            self.call_position(self.current_range);
+        }
+        self.op(operation, args)
+    }
+
+    /// Equal literals share a slot within a source unit. The address remains distinct after linking
+    /// independently compiled providers, and the runtime holds its value in the current heap.
+    pub(crate) fn constant_slot(&mut self, key: Constant) -> String {
+        let output = &mut self.output;
+        let next = output.constant_slots.len();
+        let index = *output
+            .constant_slots
+            .entry((self.unit, key))
+            .or_insert(next);
+        if index == next {
+            writeln!(
+                output.constants,
+                "@const_slot{index} = private constant i8 0"
+            )
+            .unwrap();
+        }
+        format!("@const_slot{index}")
+    }
+
+    pub(crate) fn build_sequence(
+        &mut self,
+        values: &[String],
+        tuple: bool,
+        slot: Option<&str>,
+    ) -> String {
+        let (array, count) = self.handle_array(values);
+        let slot = slot.unwrap_or("null");
+        self.checked(&format!("call i64 @imre_dyn_build_sequence(ptr %ctx, ptr {array}, i64 {count}, i1 false, i1 {tuple}, ptr {slot})"))
+    }
+
+    pub(crate) fn source_text(&mut self, text: &str, points: Option<Vec<u8>>) -> String {
+        let mut chars = text.chars();
+        let short = chars
+            .next()
+            .is_none_or(|ch| ch <= '\u{ff}' && chars.next().is_none());
+        if short || interned_spelling(text) {
+            return self.text(text);
+        }
+        let points = points.unwrap_or_else(|| {
+            let mut points = Vec::new();
+            push_codepoints(&mut points, text, None);
+            points
+        });
+        let data = self.output.data(text.as_bytes());
+        self.cached_string(1, data, text.len(), points)
+    }
+
+    pub(crate) fn linked_string(&mut self, points: Vec<u8>) -> String {
+        let (chunks, remainder) = points.as_chunks::<4>();
+        debug_assert!(remainder.is_empty());
+        let text = chunks
+            .iter()
+            .map(|bytes| char::from_u32(u32::from_le_bytes(*bytes)))
+            .collect::<Option<String>>();
+        if let Some(text) = text {
+            return self.source_text(&text, Some(points));
+        }
+        let data = self.output.data(&points);
+        self.cached_string(7, data, points.len(), points)
+    }
+
+    pub(crate) fn cached_string(
+        &mut self,
+        kind: i32,
+        data: String,
+        len: usize,
+        points: Vec<u8>,
+    ) -> String {
+        let slot = self.constant_slot(Constant::Text(points));
+        self.take_matching_check();
+        self.checked(&format!(
+            "call i64 @imre_dyn_linked_string(ptr %ctx, ptr {slot}, i32 {kind}, ptr {data}, i64 {len})"
+        ))
+    }
+}
+
+pub(crate) fn interned_spelling(value: &str) -> bool {
+    value
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
