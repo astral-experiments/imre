@@ -743,8 +743,6 @@ pub(crate) struct FunctionSite<'a> {
 
 pub(crate) struct ClassSite<'a> {
     pub(crate) def: &'a ast::StmtClassDef,
-    enclosing: RegisteredScope,
-    enclosing_function: Option<TextSize>,
     parameters: Option<Vec<ir::RegisteredTypeParameter>>,
 }
 
@@ -754,17 +752,13 @@ pub(crate) struct RegisteredClass {
     pub(crate) doc: Option<String>,
     pub(crate) decorator_offsets: Vec<TextSize>,
     pub(crate) body: RegisteredSuite,
-    pub(crate) header: ClassHeader,
+    pub(crate) header: Option<ClassHeader>,
 }
 
-/// Decorators use the enclosing activation. Generic bases and keywords use the
-/// type-parameter activation. Nongeneric bases and keywords use the enclosing operands.
+/// The type-parameter scope evaluates generic bases and keywords.
 pub(crate) struct ClassHeader {
-    pub(crate) function: Option<CheckedProvider>,
-    pub(crate) parameters: Option<Vec<ir::RegisteredTypeParameter>>,
-    pub(crate) layout: ir::PackedArguments,
-    pub(crate) operands: Vec<PhysicalOperand>,
-    pub(crate) decorators: Vec<PhysicalOperand>,
+    pub(crate) parameters: Vec<ir::RegisteredTypeParameter>,
+    pub(crate) body: CheckedProvider,
 }
 
 /// The module retains its checked fields until its physical marker order is known.
@@ -811,7 +805,6 @@ pub(crate) fn registered_sites<'a>(
         annotations: SourceScope<'s>,
         scope: RegisteredScope,
         in_unprepared_generic: bool,
-        function: Option<TextSize>,
         output: RegisteredSites<'a>,
     }
     impl<'a> StatementVisitor<'a> for Collector<'_, 'a> {
@@ -823,8 +816,6 @@ pub(crate) fn registered_sites<'a>(
                 ast::Stmt::ClassDef(class) => {
                     self.output.classes.push(ClassSite {
                         def: class,
-                        enclosing: self.scope,
-                        enclosing_function: self.function,
                         parameters: class
                             .type_params
                             .as_deref()
@@ -838,9 +829,7 @@ pub(crate) fn registered_sites<'a>(
                         self.annotations.sites,
                     );
                     let outer_annotations = std::mem::replace(&mut self.annotations, child);
-                    let function = self.function.take();
                     walk_stmt(self, stmt);
-                    self.function = function;
                     self.scope = outer;
                     let child = std::mem::replace(&mut self.annotations, outer_annotations);
                     if !child.locals.is_empty() {
@@ -895,9 +884,7 @@ pub(crate) fn registered_sites<'a>(
                             is_async: def.is_async,
                         },
                     );
-                    let function = self.function.replace(def.start());
                     walk_stmt(self, stmt);
-                    self.function = function;
                     self.scope = outer;
                     self.in_unprepared_generic = outer_generic;
                 }
@@ -969,7 +956,6 @@ pub(crate) fn registered_sites<'a>(
         ),
         scope: RegisteredScope::Module,
         in_unprepared_generic: false,
-        function: None,
         output: RegisteredSites::default(),
     };
     sites.visit_body(body);
@@ -1001,8 +987,12 @@ pub(crate) enum ValueStatement {
 }
 
 pub(crate) enum SourceEffect {
-    /// Bind the prepared class after evaluating its decorators and header operands.
-    Class(TextSize),
+    /// An ordinary class interleaves argument expansion with its remaining physical operands.
+    Class {
+        site: TextSize,
+        layout: ir::PackedArguments,
+        inputs: Vec<PhysicalOperand>,
+    },
     /// Consume this statement's value operands in the frame that owns them.
     Value(ValueStatement, Vec<PhysicalOperand>),
     /// Evaluate and release each operand of an annotation without an assigned value.
@@ -1223,21 +1213,13 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         classes: Vec<ClassSite<'_>>,
         class_keywords: &[TextSize],
-        suspends: impl Fn(TextSize) -> bool,
     ) -> HashMap<TextSize, RegisteredClass> {
         classes
             .into_iter()
             .map(|site| {
                 let class = site.def;
-                let suspended = site.enclosing_function.is_some_and(&suspends);
                 let start = class.start();
-                let decorators = imre_ast::decorator_expressions(&class.decorator_list)
-                    .map(|expr| self.registered_operand(expr, site.enclosing, suspended))
-                    .collect();
-                let arguments = class.arguments.as_deref();
-                let layout = arguments.map(packed_arguments).unwrap_or_default();
-                let values = arguments.into_iter().flat_map(imre_ast::argument_values);
-                let (function, operands) = if site.parameters.is_some() {
+                let header = site.parameters.map(|parameters| {
                     let mut scope = SourceScope::new(
                         RegisteredScope::Function { is_async: false },
                         self.source,
@@ -1245,7 +1227,11 @@ impl<'a> SuitePreparation<'a> {
                         &self.sites,
                     );
                     scope.report_child_refusals = true;
-                    let args = values
+                    let args = class
+                        .arguments
+                        .as_deref()
+                        .into_iter()
+                        .flat_map(imre_ast::argument_values)
                         .map(|expr| {
                             scope.refusal = None;
                             scope.operand(expr).ok_or_else(|| {
@@ -1257,26 +1243,14 @@ impl<'a> SuitePreparation<'a> {
                         .collect::<StdResult<Vec<_>, _>>();
                     let body = args.map(|args| {
                         let value = operation(
-                            Builtin::RegisteredClassNamespace(start, layout.clone()),
+                            Builtin::RegisteredClassNamespace(start, class_argument_layout(class)),
                             Type::PythonObject,
                             args,
                         );
                         scope.finish(RegisteredFunction::returning(class.name.range(), value))
                     });
-                    (Some(body), Vec::new())
-                } else {
-                    let operands = values
-                        .map(|expr| self.registered_operand(expr, site.enclosing, suspended))
-                        .collect();
-                    (None, operands)
-                };
-                let header = ClassHeader {
-                    parameters: site.parameters,
-                    layout,
-                    operands,
-                    decorators,
-                    function,
-                };
+                    ClassHeader { parameters, body }
+                });
                 let keyword = class_keywords.partition_point(|&p| p < class.name.start()) - 1;
                 let range = TextRange::new(class_keywords[keyword], class.end());
                 let body = self.suite(&class.body, RegisteredScope::Class);
@@ -1662,15 +1636,6 @@ impl<'a> SuitePreparation<'a> {
                 continue;
             }
             scope.truncate_locals(slots_before);
-            if let ast::Stmt::ClassDef(class) = stmt {
-                body.push(checkpoint(stmt));
-                residual.push(PendingStatement {
-                    at: body.len(),
-                    source: stmt,
-                    effect: Some(SourceEffect::Class(class.start())),
-                });
-                continue;
-            }
             if let ast::Stmt::Assert(assertion) = stmt {
                 let site = AssertionSite {
                     statement: assertion.start(),
@@ -1685,19 +1650,51 @@ impl<'a> SuitePreparation<'a> {
                 });
                 continue;
             }
-            if let ast::Stmt::FunctionDef(def) = stmt {
-                // The binding stays checked even if one header operand needs its physical frame.
-                // Store them in order so an exception or suspension precedes all later operands.
+            let declaration = match stmt {
+                ast::Stmt::FunctionDef(def) => Some((
+                    def.name.as_str(),
+                    ir::DefinitionSite::Function(def.start()),
+                    imre_ast::function_definition_expressions(def)
+                        .map(frame_value)
+                        .collect::<Vec<_>>(),
+                )),
+                ast::Stmt::ClassDef(class) => {
+                    let inputs = imre_ast::class_definition_expressions(class)
+                        .map(|expr| self.registered_operand(expr, kind, suspended))
+                        .collect();
+                    if class.type_params.is_none()
+                        && let Some(args) = class.arguments.as_deref()
+                        && !args.is_empty()
+                    {
+                        // Expand each ordinary class argument before evaluating the next operand.
+                        body.push(checkpoint(stmt));
+                        residual.push(PendingStatement {
+                            at: body.len(),
+                            source: stmt,
+                            effect: Some(SourceEffect::Class {
+                                site: class.start(),
+                                layout: packed_arguments(args),
+                                inputs,
+                            }),
+                        });
+                        continue;
+                    }
+                    Some((class.name.as_str(), class_site(class), inputs))
+                }
+                _ => None,
+            };
+            if let Some((name, site, inputs)) = declaration {
                 body.push(checkpoint(stmt));
-                let header = imre_ast::function_definition_expressions(def)
-                    .map(|expr| {
+                let header = inputs
+                    .into_iter()
+                    .map(|input| {
                         let slot = scope.hidden(Type::PythonObject);
                         residual.push(PendingStatement {
                             at: body.len(),
                             source: stmt,
                             effect: Some(SourceEffect::Value(
                                 ValueStatement::Store(slot),
-                                vec![frame_value(expr)],
+                                vec![input],
                             )),
                         });
                         unpacking::take_pattern_temporary(
@@ -1706,7 +1703,7 @@ impl<'a> SuitePreparation<'a> {
                         )
                     })
                     .collect();
-                body.push(scope.bind_function(def, header));
+                body.push(scope.bind_definition(name, site, header));
                 continue;
             }
             let output = match stmt {
@@ -2096,7 +2093,11 @@ impl statements::StatementLowering for SourceScope<'_> {
             prepare_header(self)
         }
         .ok_or(())?;
-        Ok(Some(self.bind_function(def, header)))
+        Ok(Some(self.bind_definition(
+            def.name.as_str(),
+            ir::DefinitionSite::Function(def.start()),
+            header,
+        )))
     }
 
     fn effect(&mut self, value: &ast::Expr) -> StdResult<(Option<Statement>, bool), ()> {
@@ -2172,27 +2173,16 @@ impl statements::StatementLowering for SourceScope<'_> {
             )),
             ast::Stmt::Match(branch) => self.match_statement(branch),
             ast::Stmt::ClassDef(class) => {
-                let operands = imre_ast::class_definition_expressions(class)
-                    .map(|expr| self.ordinary_operand(expr))
-                    .collect::<Option<Vec<_>>>()
+                let operands = self
+                    .with_binding_operands(|scope| {
+                        imre_ast::class_definition_expressions(class)
+                            .map(|expr| scope.ordinary_operand(expr))
+                            .collect::<Option<_>>()
+                    })
                     .ok_or(())?;
-                let arguments = class.type_params.is_none().then(|| {
-                    class
-                        .arguments
-                        .as_deref()
-                        .map(packed_arguments)
-                        .unwrap_or_default()
-                });
-                let site = ir::DefinitionSite::Class {
-                    start: class.start(),
-                    arguments,
-                };
-                let value = operation(
-                    Builtin::RegisteredDefinition(site),
-                    Type::PythonObject,
-                    operands,
-                );
-                Ok((vec![self.store(class.name.as_str(), value)], true))
+                let binding =
+                    self.bind_definition(class.name.as_str(), class_site(class), operands);
+                Ok((vec![binding], true))
             }
             ast::Stmt::Try(region) => {
                 let body = self.suite(&region.body)?;
@@ -2548,14 +2538,37 @@ impl PhysicalRegion {
     }
 }
 
+fn class_argument_layout(class: &ast::StmtClassDef) -> ir::PackedArguments {
+    class
+        .arguments
+        .as_deref()
+        .map(packed_arguments)
+        .unwrap_or_default()
+}
+
+fn class_site(class: &ast::StmtClassDef) -> ir::DefinitionSite {
+    ir::DefinitionSite::Class {
+        start: class.start(),
+        arguments: class
+            .type_params
+            .is_none()
+            .then(|| class_argument_layout(class)),
+    }
+}
+
 impl SourceScope<'_> {
-    fn bind_function(&mut self, def: &ast::StmtFunctionDef, header: Vec<Expr>) -> Statement {
-        let function = operation(
-            Builtin::RegisteredDefinition(ir::DefinitionSite::Function(def.start())),
+    fn bind_definition(
+        &mut self,
+        name: &str,
+        site: ir::DefinitionSite,
+        header: Vec<Expr>,
+    ) -> Statement {
+        let value = operation(
+            Builtin::RegisteredDefinition(site),
             Type::PythonObject,
             header,
         );
-        self.store(def.name.as_str(), function)
+        self.store(name, value)
     }
 
     fn assignment_targets(

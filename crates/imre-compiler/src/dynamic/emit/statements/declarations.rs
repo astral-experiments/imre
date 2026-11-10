@@ -269,10 +269,10 @@ impl CallableSites<'_, '_> {
         }
         let namespace = self.compile_class_namespace(start);
         let class = &self.source.class_bodies[&start];
-        let parameters = class.header.parameters.clone().expect("generic class");
+        let parameters = &class.header.as_ref().expect("generic class").parameters;
         self.sites
             .class_namespaces
-            .insert(start, (namespace, parameters, class.range));
+            .insert(start, (namespace, parameters.clone(), class.range));
     }
 
     pub(super) fn place_definition(&mut self, start: TextSize) {
@@ -287,9 +287,9 @@ impl CallableSites<'_, '_> {
         if self.sites.definitions.contains_key(&start) {
             return;
         }
-        let definition = if let Some(header) = &class.header.function {
+        let definition = if let Some(header) = &class.header {
             let name = format!("<generic parameters of {}>", class.name);
-            let body = Body::CheckedProvider(header, AnnotationScope::Plain);
+            let body = Body::CheckedProvider(&header.body, AnnotationScope::Plain);
             self.compile_definition(start, DefinitionName::ClassHeader(&name), body)
         } else {
             self.compile_class_namespace(start)
