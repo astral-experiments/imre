@@ -1442,17 +1442,19 @@ struct SourceScope<'a> {
 pub(crate) fn inline_operand(
     expr: &ast::Expr,
     source: values::RegisteredSource<'_>,
+    kind: RegisteredScope,
 ) -> Option<RegisteredOperand> {
     if !matches!(
         expr,
-        ast::Expr::ListComp(_)
+        ast::Expr::Dict(_)
+            | ast::Expr::ListComp(_)
             | ast::Expr::SetComp(_)
             | ast::Expr::DictComp(_)
             | ast::Expr::FString(_)
     ) {
         return None;
     }
-    RegisteredOperand::prepare(expr, source, RegisteredScope::Function { is_async: false })
+    RegisteredOperand::prepare(expr, source, kind)
 }
 
 impl unpacking::PatternBinder for SourceScope<'_> {
@@ -2447,6 +2449,29 @@ mod tests {
             }
         });
         assert_eq!(headers, 1);
+    }
+
+    #[test]
+    fn standalone_dictionary_uses_the_current_async_scope() {
+        let text = "async def gather(stream, mapping):\n    return {0: (saved := [item async for item in stream]), **mapping}\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let def = module.parsed.syntax().body[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let value = def.body[0]
+            .as_return_stmt()
+            .unwrap()
+            .value
+            .as_deref()
+            .unwrap();
+        let literals = values::ModuleSource::new(module);
+        let source = literals.context(text);
+        let prepare = |is_async| inline_operand(value, source, RegisteredScope::Function { is_async });
+        assert!(prepare(false).is_none());
+        let operand = prepare(true).unwrap();
+        crate::verify::registered(operand.region()).unwrap();
+        assert!(operand.local_names.values().any(|binding| binding.name == "saved"));
     }
 
     #[test]
