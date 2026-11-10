@@ -730,7 +730,7 @@ fn checked_assertion(
 pub(crate) struct StatementSites {
     pub(crate) assertions: HashMap<TextRange, Vec<Statement>>,
     pub(crate) ifs: HashMap<TextRange, Vec<SourceGuard>>,
-    pub(crate) matches: HashMap<TextRange, patterns::SourceMatch>,
+    pub(crate) matches: HashMap<TextRange, Option<patterns::SourceMatch>>,
     pub(crate) contexts: HashMap<TextRange, ir::ContextSite>,
 }
 
@@ -775,10 +775,11 @@ fn statement_sites(
                     self.sites.contexts.insert(site.range, site);
                 }
             }
-            if let ast::Stmt::Match(branch) = stmt
-                && let Some(plan) = patterns::SourceMatch::prepare(branch, self.source)
-            {
-                self.sites.matches.insert(stmt.range(), plan);
+            if let ast::Stmt::Match(branch) = stmt {
+                self.sites.matches.insert(
+                    stmt.range(),
+                    patterns::SourceMatch::prepare(branch, self.source),
+                );
             }
             if let ast::Stmt::If(branch) = stmt {
                 let guard = |expr: &ast::Expr| {
@@ -899,6 +900,24 @@ impl<'a> SuitePreparation<'a> {
         };
         for run in &plan.residual {
             for stmt in &stmts[run.statements.clone()] {
+                if let ast::Stmt::Match(branch) = stmt
+                    && let Some(mut site) = children
+                        .prepare
+                        .sites
+                        .matches
+                        .get_mut(&branch.range())
+                        .and_then(Option::take)
+                {
+                    for (case, input) in site.cases.iter_mut().zip(&branch.cases) {
+                        case.body = Some(children.prepare.suite(&input.body, kind));
+                    }
+                    children
+                        .prepare
+                        .sites
+                        .matches
+                        .insert(branch.range(), Some(site));
+                    continue;
+                }
                 // A declaration opens a separate activation with its own scope and admission.
                 if !matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)) {
                     walk_stmt(&mut children, stmt);
@@ -1646,6 +1665,7 @@ impl SourceScope<'_> {
             .sites
             .matches
             .get(&branch.range())
+            .and_then(Option::as_ref)
             .ok_or(())?
             .cases;
         for (case, planned) in branch.cases.iter().zip(patterns) {

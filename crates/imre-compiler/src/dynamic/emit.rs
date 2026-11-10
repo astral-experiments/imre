@@ -1341,6 +1341,61 @@ mod tests {
     }
 
     #[test]
+    fn a_registered_match_renders_after_its_checked_input_syntax_is_erased() {
+        let source = concat!(
+            "match subject():\n",
+            "    case 1 as item if allow(item):\n        keep(item)\n",
+            "    case other:\n        before(other)\n        consume(x for x in other)\n        after(other)\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        fn emit(prepared: &PreparedBody) -> String {
+            let mut out = Output::default();
+            let file = out.data(b"example.py");
+            prepared.emit(&mut out, 0, &file).unwrap();
+            out.functions
+        }
+        let original = emit(&prepared);
+        let ast::Stmt::Match(branch) = &mut prepared.body[0] else {
+            panic!("expected match")
+        };
+        let site = prepared.source.statement_sites.matches[&branch.range()]
+            .as_ref()
+            .unwrap();
+        assert!(site.subject.is_some());
+        assert_eq!(site.cases[0].pattern.names, ["item"]);
+        assert!(matches!(
+            site.cases[0].guard,
+            Some(crate::frontend::MatchGuard::Checked(_))
+        ));
+        assert!(site.cases[0].body.as_ref().unwrap().fully_checked());
+        let mixed = site.cases[1].body.as_ref().unwrap();
+        assert_eq!(mixed.residual[0].statements, 1..2);
+        *branch.subject = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+            range: branch.subject.range(),
+            node_index: Default::default(),
+        });
+        branch.cases[0].guard = None;
+        branch.cases[0].pattern = branch.cases[1].pattern.clone();
+        branch.cases[0].body.clear();
+        let pass = ruff_python_parser::parse_module("pass")
+            .unwrap()
+            .into_syntax()
+            .body
+            .pop()
+            .unwrap();
+        branch.cases[1].body[0] = pass.clone();
+        branch.cases[1].body[2] = pass;
+        assert_eq!(emit(&prepared), original);
+    }
+
+    #[test]
     fn prepared_template_emits_after_source_body_is_dropped() {
         let mut prepared = PreparedBody::module(
             "query",
