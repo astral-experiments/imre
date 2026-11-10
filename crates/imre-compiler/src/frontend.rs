@@ -132,7 +132,7 @@ pub(crate) use registered::values::{
 };
 pub(crate) use registered::{
     AnnotationValue, DeferredModuleAnnotation, PreparedStrings, RegisteredFunction, RegisteredLambda,
-    RegisteredScope, RegisteredSuite, StatementSites, SuitePreparation, annotation_expression, attribute_effects,
+    RegisteredScope, RegisteredSuite, StatementSites, SuitePreparation, annotation_expression, attribute_write,
     delete_targets, module_annotations, prepare_strings, registered_index_target,
     registered_sites, registered_type_alias, registered_type_parameters,
 };

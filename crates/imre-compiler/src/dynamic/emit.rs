@@ -1999,7 +1999,7 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
     #[test]
     fn physical_deletion_uses_the_complete_checked_statement_after_targets_are_dropped() {
         let source = concat!(
-            "del first, [(owner := obj).field, obj[lo:hi]], last\n",
+            "del first, [(owner := obj).field, obj[lo:hi]], obj[[key for key in keys if key]], last\n",
             "del rejected, (orphan := obj)[(key for key in keys if key)]\n",
         );
         let mut prepared = PreparedBody::module(
