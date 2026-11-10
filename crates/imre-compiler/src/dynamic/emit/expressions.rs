@@ -129,7 +129,7 @@ impl Function<'_, '_> {
         {
             self.suspend_value(*kind, expr.range(), |code| code.expr(child))
         } else if let Some(inputs) = physical {
-            self.physical_value(expr, inputs)
+            self.physical_value(inputs)
         } else if let Some(ExpressionSelection::Mixed {
             value: Some(plan), ..
         }) = self.source.statement_sites.expressions.get(expr)
@@ -171,13 +171,9 @@ impl Function<'_, '_> {
         value
     }
 
-    fn physical_value(
-        &mut self,
-        node: &ast::Expr,
-        inputs: &crate::frontend::PhysicalInputs,
-    ) -> String {
+    fn physical_value(&mut self, inputs: &crate::frontend::PhysicalInputs) -> String {
         use crate::ir::{Builtin, ExprKind};
-        let mut operands = inputs.operands(node, self.native_suspension);
+        let mut operands = inputs.operands(self.native_suspension);
         match &inputs.operation.kind {
             ExprKind::Builtin(Builtin::RegisteredUnary(op), _) => {
                 let scope = self.begin_unary();

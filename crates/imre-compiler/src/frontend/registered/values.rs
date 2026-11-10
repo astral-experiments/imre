@@ -257,16 +257,14 @@ pub(crate) fn packed_arguments(args: &ast::Arguments) -> ir::PackedArguments {
     }
 }
 
-pub(crate) fn registered_argument_at(args: &ast::Arguments, index: usize) -> &ast::Expr {
-    match args.args.get(index) {
-        Some(ast::Expr::Starred(star)) => &star.value,
-        Some(value) => value,
-        None => &args.keywords[index - args.args.len()].value,
-    }
-}
-
 pub(crate) fn registered_arguments(args: &ast::Arguments) -> impl Iterator<Item = &ast::Expr> {
-    (0..args.len()).map(move |index| registered_argument_at(args, index))
+    args.args
+        .iter()
+        .map(|arg| match arg {
+            ast::Expr::Starred(star) => star.value.as_ref(),
+            value => value,
+        })
+        .chain(args.keywords.iter().map(|keyword| &keyword.value))
 }
 
 impl From<ast::UnaryOp> for ir::ObjectUnary {
@@ -641,7 +639,6 @@ fn slice_key<'a, E>(
 pub(super) struct IndexOperands<'a> {
     pub(super) value: Expr,
     pub(super) inputs: Vec<(&'a ast::Expr, Option<Expr>)>,
-    pub(super) split_slice: bool,
 }
 
 pub(super) fn index_operands<'a>(
@@ -671,7 +668,6 @@ pub(super) fn index_operands<'a>(
     } else {
         registered_index_key(key, source)
     };
-    let split_slice = read.is_some() && slice.is_some() && checked.is_none();
     let value = if let Some(checked) = checked {
         input(key, Some(checked))
     } else if let Some(slice) = slice {
@@ -688,11 +684,7 @@ pub(super) fn index_operands<'a>(
         Some((index, receiver)) => subscript(index, receiver, value, source.text),
         None => value,
     };
-    Some(IndexOperands {
-        value,
-        inputs,
-        split_slice,
-    })
+    Some(IndexOperands { value, inputs })
 }
 
 pub(super) fn collection_item<E>(
