@@ -62,11 +62,7 @@ fn prepare_pattern(
             name.to_string()
         }
 
-        fn operand(
-            &self,
-            node: &ast::Expr,
-            reason: &'static str,
-        ) -> PatternResult<Expr> {
+        fn operand(&self, node: &ast::Expr, reason: &'static str) -> PatternResult<Expr> {
             let invalid = (node.range(), reason);
             let kind = match node {
                 ast::Expr::Name(name) => {
