@@ -210,7 +210,25 @@ impl Checker<'_> {
                 vec![text("builtins"), text(n.id.as_str())],
             ));
         }
-        let f = self.expr(argument)?;
+        // Discovery needs only a named function's identity for lookup. A later direct
+        // call can supply its signature before the final pass lowers the callable.
+        let f = if self.inference.is_some()
+            && intrinsic == Intrinsic::GetOverloads
+            && let ast::Expr::Name(name) = argument
+            && !self.names.contains_key(name.id.as_str())
+            && let Some(Binding::Definition(definition)) = self.resolve(argument)
+            && let Some(signature) = self.functions.get(&definition)
+        {
+            Expr {
+                ty: Type::FunctionRef,
+                kind: ExprKind::Callable {
+                    function: signature.id,
+                    receiver: None,
+                },
+            }
+        } else {
+            self.expr(argument)?
+        };
         if !matches!(f.ty, Type::Callable(_) | Type::FunctionRef) {
             return Err(error(
                 self.source,
