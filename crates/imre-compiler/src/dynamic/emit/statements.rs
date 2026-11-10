@@ -37,7 +37,7 @@ impl<'p> Function<'_, 'p> {
     pub(super) fn prepared_function(
         &mut self,
         prepared: &crate::frontend::RegisteredSuite,
-        emit_source: impl FnMut(&mut Self, std::ops::Range<usize>),
+        emit_source: impl FnMut(&mut Self, &crate::frontend::SourceRun),
     ) {
         if prepared.fully_checked() {
             self.prepare_checked_sites(&prepared.checked.function.body);
@@ -97,7 +97,7 @@ impl<'p> Function<'_, 'p> {
     pub(super) fn checked_runs(
         &mut self,
         prepared: &crate::frontend::RegisteredSuite,
-        mut emit_source: impl FnMut(&mut Self, std::ops::Range<usize>),
+        mut emit_source: impl FnMut(&mut Self, &crate::frontend::SourceRun),
     ) {
         let Some(enclosing) = self.frame.enter_checked_slots(prepared.checked.region()) else {
             return;
@@ -108,7 +108,7 @@ impl<'p> Function<'_, 'p> {
             if offset < run.at && self.start_statement() {
                 self.checked_block(&body[offset..run.at], &prepared.checked);
             }
-            emit_source(self, run.statements.clone());
+            emit_source(self, run);
             offset = run.at;
         }
         if offset < body.len() && self.start_statement() {
@@ -122,9 +122,22 @@ impl<'p> Function<'_, 'p> {
             .first()
             .and_then(|s| self.source.nested_bodies.get(&s.start()))
         {
-            self.checked_runs(plan, |code, run| code.source_statements(&suite[run]));
+            self.checked_runs(plan, |code, run| code.source_run(suite, run));
         } else {
             self.source_statements(suite);
+        }
+    }
+
+    pub(super) fn source_run(&mut self, suite: &[ast::Stmt], run: &crate::frontend::SourceRun) {
+        let statements = &suite[run.statements.clone()];
+        if let Some(slot) = run.assignment_input {
+            if self.start_statement() {
+                let assignment = statements[0].as_assign_stmt().expect("assignment RHS");
+                let value = self.expr(&assignment.value);
+                self.frame.store_private(slot, &value);
+            }
+        } else {
+            self.source_statements(statements);
         }
     }
 
@@ -161,8 +174,8 @@ impl<'p> Function<'_, 'p> {
                     failed,
                 ),
                 MatchRegion::Body(case) => match &site.cases[case].body {
-                    Some(suite) => self.checked_runs(suite, |code, range| {
-                        code.source_statements(&source.cases[case].body[range]);
+                    Some(suite) => self.checked_runs(suite, |code, run| {
+                        code.source_run(&source.cases[case].body, run);
                     }),
                     None => self.source_statements(&source.cases[case].body),
                 },

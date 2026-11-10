@@ -101,3 +101,17 @@ def current():
             pass
 
     print(Assignment.whole, record.saved, mapping.data["ok"], events)
+
+    def unpack(rows):
+        whole = mark("receiver", record).field, (mark("table", mapping)[mark("key", "ok")], last) = (
+            value for value in mark("rhs", rows)
+        )
+        return list(whole), last
+
+    events.clear()
+    print(unpack((10, (11, 12))), record.saved, mapping.data["ok"], events)
+    events.clear()
+    try:
+        unpack((20, (21,)))
+    except ValueError as error:
+        print(str(error), record.saved, mapping.data["ok"], events)

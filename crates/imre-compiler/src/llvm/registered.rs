@@ -561,23 +561,9 @@ impl Frame<'_, '_, '_> {
         };
         self.code.keep_operands(&mark, handle, "0");
     }
-    fn physical_slot(&self, slot: usize) -> usize {
-        let frame = &self.code.iteration;
-        frame.first_slot
-            + frame
-                .private_slots
-                .binary_search(&slot)
-                .expect("checked private slot")
-    }
-
     fn load_private(&mut self, slot: usize) -> String {
         let slot = self.physical_slot(slot);
         self.code.value(&format!("load i64, ptr %ir_slot{slot}"))
-    }
-    fn store_private(&mut self, slot: usize, value: &str) {
-        let slot = self.physical_slot(slot);
-        self.code
-            .line(&format!("store i64 {value}, ptr %ir_slot{slot}"));
     }
     /// A nested handler inside the scope keeps its cursor. Only a transfer to
     /// the scope's enclosing error target abandons these physical root words.
@@ -1286,6 +1272,20 @@ impl RegisteredFrame<'_, '_> {
     pub(crate) fn restore_checked_slots(&mut self, enclosing: EnclosingSlots) {
         self.live_slots.truncate(enclosing.live_roots);
         self.iteration = enclosing.iteration;
+    }
+
+    fn physical_slot(&self, slot: usize) -> usize {
+        self.iteration.first_slot
+            + self
+                .iteration
+                .private_slots
+                .binary_search(&slot)
+                .expect("checked private slot")
+    }
+
+    pub(crate) fn store_private(&mut self, slot: usize, value: &str) {
+        let slot = self.physical_slot(slot);
+        self.line(&format!("store i64 {value}, ptr %ir_slot{slot}"));
     }
 
     /// Emit a registered expression whose names are resolved through this live frame.
