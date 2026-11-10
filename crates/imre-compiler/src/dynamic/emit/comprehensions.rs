@@ -161,10 +161,13 @@ impl Function<'_, '_> {
                         } else {
                             self.lookup(&slot(depth))
                         };
-                        let more = self.op("more", &[&iter]);
-                        let ready = self.value(&format!("icmp eq i64 {more}, 2"));
-                        self.branch(&ready, &body, &labels[exhausted]);
-                        self.label(&body);
+                        self.frame.enter_sync_iteration(
+                            &iter,
+                            false,
+                            false,
+                            &body,
+                            &labels[exhausted],
+                        );
                         // The generator's statement boundary precedes target
                         // assignment: release the previous pull's temporaries.
                         self.checkpoint(plan.output.value());

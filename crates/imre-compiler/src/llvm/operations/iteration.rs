@@ -85,16 +85,34 @@ impl CheckedBody<'_, '_, '_, '_> {
     }
 
     pub(super) fn scoped_suite(&mut self, statements: &[Statement], clear: &[usize]) {
-        match &mut self.0 {
-            Entry::Native(e) => e.cleanups.push(Cleanup::Slots(clear.to_vec())),
-            Entry::Registered(f) => f.enter_scope(clear),
-        }
+        let cursor_unwind = match &mut self.0 {
+            Entry::Native(e) => {
+                e.cleanups.push(Cleanup::Slots(clear.to_vec()));
+                None
+            }
+            Entry::Registered(f) => {
+                let unwind = f.owns_sync_cursor(clear).then(|| f.begin_operand_scope());
+                f.enter_scope(clear);
+                unwind
+            }
+        };
         self.emit_block(statements);
         match &mut self.0 {
             Entry::Native(e) => {
                 e.cleanups.pop();
             }
-            Entry::Registered(f) => f.leave_scope(),
+            Entry::Registered(f) => {
+                f.leave_scope();
+                if let Some(unwind) = cursor_unwind {
+                    // The landing block clears this loop's slots. Publish the
+                    // surviving roots before the enclosing cleanup runs.
+                    let terminated = f.terminated();
+                    f.finish_unwind(unwind, |code| code.release_target(None));
+                    if terminated {
+                        f.end("unreachable");
+                    }
+                }
+            }
         }
         if !self.body().terminated {
             self.clear_iteration_slots(clear);
@@ -220,14 +238,8 @@ impl CheckedBody<'_, '_, '_, '_> {
             e.iter_next(iterator, key, value, ready, kind);
             return;
         }
-        if let IterNextKind::Async(pull) = kind {
-            debug_assert!(value.is_none());
-            self.python().pull_async(iterator, key, ready, pull);
-            return;
-        }
-        debug_assert!(value.is_none() && matches!(kind, IterNextKind::Generic));
-        let (cursor, condition) = self.python().pull_ready(iterator, ready);
-        self.when(&condition, |this| this.python().pull_item(&cursor, key));
+        debug_assert!(value.is_none());
+        self.python().pull(iterator, key, ready, kind);
     }
 
     pub(super) fn loop_transfer(&mut self, statement: &Statement) {

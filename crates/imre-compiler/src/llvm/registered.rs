@@ -21,7 +21,7 @@ use sites::CheckedSites;
 
 use crate::llvm::operations::{CheckedBody, CheckedValue, LoopEdges};
 use context::Region;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 /// Only take a body when all its operations have a lowering for the registered calling convention.
 pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
@@ -234,7 +234,7 @@ fn suspends(body: &[Statement]) -> bool {
 pub(super) struct IterationState {
     private_slots: Vec<usize>,
     first_slot: usize,
-    cursors: BTreeSet<usize>,
+    cursors: HashMap<usize, ir::IterNextKind>,
     scopes: Vec<Region>,
     loops: Vec<(LoopEdges, usize)>,
     in_expression: bool,
@@ -597,6 +597,13 @@ impl Frame<'_, '_, '_> {
         }
     }
 
+    pub(super) fn owns_sync_cursor(&self, slots: &[usize]) -> bool {
+        !self.code.iteration.in_expression
+            && slots.iter().any(|slot| {
+                self.code.iteration.cursors.get(slot) == Some(&ir::IterNextKind::Generic)
+            })
+    }
+
     pub(crate) fn enter_scope(&mut self, clear: &[usize]) {
         self.unwind_scope(clear);
         self.code
@@ -612,13 +619,16 @@ impl Frame<'_, '_, '_> {
             if self.names.is_some_and(|n| n.contains_key(&slot)) {
                 continue;
             }
-            if self.code.iteration.cursors.contains(&slot) {
+            if self.code.iteration.cursors.contains_key(&slot) {
                 let old = self.load_private(slot);
                 self.store_private(slot, "0");
                 self.code.op("break_iter", &[&old]);
             } else {
                 self.store_private(slot, "0");
             }
+        }
+        if self.owns_sync_cursor(slots) {
+            self.release_target(None);
         }
     }
     pub(crate) fn enter_loop(&mut self, edges: &LoopEdges) {
@@ -644,45 +654,42 @@ impl Frame<'_, '_, '_> {
             "call void @imre_dyn_comprehension_step(ptr %ctx, i64 {mark})"
         ));
     }
-    pub(crate) fn pull_async(
+    pub(crate) fn pull(
         &mut self,
         iterator: usize,
         key: usize,
         ready: usize,
-        pull: ir::AsyncPull,
+        kind: ir::IterNextKind,
     ) {
         let cursor = self.load_private(iterator);
         let item_block = self.code.name("b");
         let done = self.code.name("b");
         self.store_private(ready, &permanent::FALSE.to_string());
-        let item = self.code.async_pull(&cursor, pull, &item_block, &done);
-        self.code.label(&item_block);
+        let item = match kind {
+            ir::IterNextKind::Generic => {
+                let header = self.code.current_range.start();
+                self.code.retained_loop_header(header);
+                let has_else = self
+                    .code
+                    .iteration
+                    .loops
+                    .last()
+                    .is_some_and(|(edges, _)| edges.exhausted != edges.done);
+                self.code
+                    .enter_sync_iteration(&cursor, has_else, false, &item_block, &done);
+                self.code.op("next", &[&cursor])
+            }
+            ir::IterNextKind::Async(pull) => {
+                let item = self.code.async_pull(&cursor, pull, &item_block, &done);
+                self.code.label(&item_block);
+                item
+            }
+            _ => unreachable!("registered iterator kind"),
+        };
         self.store_private(key, &item);
         self.store_private(ready, &permanent::TRUE.to_string());
         self.code.jump(&done);
         self.code.label(&done);
-    }
-
-    pub(crate) fn pull_ready(&mut self, iterator: usize, ready: usize) -> (String, String) {
-        let cursor = self.load_private(iterator);
-        let has_else = self
-            .code
-            .iteration
-            .loops
-            .last()
-            .is_some_and(|(edges, _)| edges.exhausted != edges.done);
-        let more = self
-            .code
-            .op(if has_else { "more_else" } else { "more" }, &[&cursor]);
-        self.store_private(ready, &more);
-        let available = self
-            .code
-            .value(&format!("icmp eq i64 {more}, {}", permanent::TRUE));
-        (cursor, available)
-    }
-    pub(crate) fn pull_item(&mut self, cursor: &str, key: usize) {
-        let item = self.code.op("next", &[cursor]);
-        self.store_private(key, &item);
     }
     pub(crate) fn declare_integer_arithmetic(&mut self, op: Binary) {
         match op {
@@ -1266,8 +1273,8 @@ impl RegisteredFrame<'_, '_> {
         self.private_slot_count = end;
         self.live_slots.extend(first..end);
         checked.walk(&mut |node, _| {
-            if let ir::Node::Statement(Statement::IterNext { iterator, .. }) = node {
-                self.iteration.cursors.insert(*iterator);
+            if let ir::Node::Statement(Statement::IterNext { iterator, kind, .. }) = node {
+                self.iteration.cursors.insert(*iterator, *kind);
             }
         });
         Some(EnclosingSlots {
