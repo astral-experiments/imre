@@ -60,6 +60,7 @@ impl FunctionBody {
     ) -> super::Value {
         let helper = match op {
             super::Binary::Add => "int_add",
+            super::Binary::Subtract => "int_sub",
             super::Binary::Multiply => "int_mul",
             _ => unreachable!("expected checked integer operation"),
         };

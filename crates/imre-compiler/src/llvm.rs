@@ -3674,13 +3674,12 @@ impl Emitter<'_, '_> {
                 left.ty,
                 &[left, right],
             ),
-            Binary::Add | Binary::Multiply => {
+            Binary::Add | Binary::Subtract | Binary::Multiply => {
                 let result = self
                     .body
                     .integer_arithmetic(op, &left.operand, &right.operand);
                 self.owned(result)
             }
-            Binary::Subtract => self.call("int_sub", Type::Int, &[left, right]),
             Binary::Divide => self.call("imre_int_true_divide", Type::Float, &[left, right]),
             Binary::FloorDivide => self.call("int_floordiv", Type::Int, &[left, right]),
             Binary::Modulo => self.call("int_mod", Type::Int, &[left, right]),

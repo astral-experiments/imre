@@ -47,6 +47,48 @@ fn captured_publish_emits_its_registered_callback_and_error_return() {
 }
 
 #[test]
+fn checked_subtraction_selects_integer_arithmetic_in_both_calling_conventions() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("difference.py");
+    std::fs::write(
+        &path,
+        "def difference(a: int, b: int) -> int:\n    return a - b\nprint(difference(int(input()), int(input())))\n",
+    )
+    .unwrap();
+    let fixed = crate::compile_file(&path, None, &crate::CompileOptions::default()).unwrap();
+    let (_, function) = fixed
+        .llvm_ir
+        .split_once("define internal i64 @fn_0(")
+        .unwrap();
+    let (body, _) = function.split_once("\n}").unwrap();
+    let subtract = "call i64 @int_sub(";
+    assert_eq!(body.matches(subtract).count(), 1);
+
+    for (signature, checked_integers) in [("a: int, b: int", true), ("a, b", false)] {
+        let source =
+            format!("def publish({signature}, send):\n    total = a - b\n    send(total)\n");
+        let mut output = emit_captured_body(&source);
+        let minus = output.data(b"-");
+        let protocol = format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {minus},");
+        let body = &output.functions;
+        assert_eq!(
+            body.matches(subtract).count(),
+            usize::from(checked_integers)
+        );
+        assert_eq!(
+            body.contains("call i64 @imre_dyn_exact_int_word("),
+            checked_integers
+        );
+        assert_eq!(body.matches(&protocol).count(), 1);
+        assert_eq!(
+            body.matches("call i64 @imre_dyn_positional_call_at(")
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
 fn captured_unpack_roots_its_private_slot_in_the_function_frame() {
     let output =
         emit_captured_body("def post(row, book, read):\n    book[0], book[read()] = row\n");
