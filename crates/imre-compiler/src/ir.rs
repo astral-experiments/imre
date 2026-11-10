@@ -1257,6 +1257,8 @@ impl Builtin {
 /// A call evaluates its callable or method receiver before the argument binder runs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RegisteredCall {
+    /// The outer get position for an immediately indexed partition method call.
+    pub(crate) partition_field: Option<(u32, ruff_text_size::TextRange)>,
     pub(crate) range: ruff_text_size::TextRange,
     pub(crate) target: RegisteredCallTarget,
     pub(crate) arguments: RegisteredArguments,

@@ -1190,15 +1190,6 @@ impl Function<'_, '_> {
         let what = self.text(what);
         self.op("unsupported", &[&what])
     }
-
-    fn expression_span(
-        &self,
-        expr: &ast::Expr,
-        prefix: &ast::Expr,
-        opener: u8,
-    ) -> Option<[usize; 4]> {
-        self.expression_range_span(expr.range(), prefix.end(), opener)
-    }
 }
 
 #[cfg(test)]

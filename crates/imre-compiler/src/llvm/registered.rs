@@ -851,10 +851,12 @@ impl Frame<'_, '_, '_> {
                 return CheckedValue::handle("0".into());
             }
             (Builtin::RegisteredIndexConstant(key), [value]) => self.index_constant(key, value),
-            (Builtin::RegisteredSlice, bounds) => self.slice_object(
-                [bounds.first(), bounds.get(1), bounds.get(2)],
-                Self::evaluate_handle,
-            ),
+            (Builtin::RegisteredSlice, bounds) => {
+                let bounds = [bounds.first(), bounds.get(1), bounds.get(2)].map(|value| {
+                    value.map_or_else(|| "0".into(), |value| self.evaluate_handle(value))
+                });
+                self.slice_object(bounds)
+            }
             (Builtin::RegisteredInPlace(op), [left, right]) => {
                 let left = self.evaluate_handle(left);
                 let right = self.evaluate_handle(right);
@@ -867,8 +869,8 @@ impl Frame<'_, '_, '_> {
             }
             (Builtin::RegisteredSubscript(range, base_end), [base, key]) => {
                 let base = self.evaluate_handle(base);
-                let key = IndexKey::checked(key);
-                self.subscript(&base, key, *range, *base_end, Self::evaluate_handle)
+                let key = self.read_key(key);
+                self.read_item(&base, key, *range, *base_end)
             }
             (Builtin::RegisteredDict(entries), values) => {
                 let mut values = values.iter();
@@ -964,25 +966,7 @@ impl Frame<'_, '_, '_> {
         })
     }
 
-    pub(crate) fn augment_item(&mut self, receiver: &Expr, key: &Expr, op: &str, rhs: &Expr) {
-        let receiver = self.evaluate_handle(receiver);
-        let key = self.evaluate_handle(key);
-        self.update_item(receiver, key, op, |code| code.evaluate_handle(rhs));
-    }
-}
-
-pub(crate) enum IndexKey<'a, E> {
-    Object(&'a E),
-    Bounds(
-        Option<&'a E>,
-        Option<&'a E>,
-        Option<&'a crate::ir::Constant>,
-    ),
-    Prepared(String),
-}
-
-impl<'a> IndexKey<'a, Expr> {
-    fn checked(key: &'a Expr) -> Self {
+    fn read_key(&mut self, key: &Expr) -> ReadKey {
         if let ExprKind::Builtin(Builtin::RegisteredLocation(..), located) = &key.kind
             && let [value] = located.as_slice()
         {
@@ -995,11 +979,29 @@ impl<'a> IndexKey<'a, Expr> {
             if let ExprKind::Builtin(Builtin::RegisteredSlice, bounds) = &value.kind
                 && let [lower, upper] = bounds.as_slice()
             {
-                return Self::Bounds(Some(lower), Some(upper), constant);
+                let start = self.evaluate_handle(lower);
+                let stop = self.evaluate_handle(upper);
+                let slot = constant.map(|value| self.constant_slot(value.clone()));
+                return ReadKey::Bounds { start, stop, slot };
             }
         }
-        Self::Object(key)
+        ReadKey::Object(self.evaluate_handle(key))
     }
+
+    pub(crate) fn augment_item(&mut self, receiver: &Expr, key: &Expr, op: &str, rhs: &Expr) {
+        let receiver = self.evaluate_handle(receiver);
+        let key = self.evaluate_handle(key);
+        self.update_item(receiver, key, op, |code| code.evaluate_handle(rhs));
+    }
+}
+
+pub(crate) enum ReadKey {
+    Object(String),
+    Bounds {
+        start: String,
+        stop: String,
+        slot: Option<String>,
+    },
 }
 
 impl RegisteredFrame<'_, '_> {

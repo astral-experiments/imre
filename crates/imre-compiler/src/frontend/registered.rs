@@ -2744,7 +2744,7 @@ mod tests {
     #[test]
     fn partial_regions_preserve_specialized_and_unsupported_operands() {
         for source in [
-            "s.partition('-')[1]",
+            "s.partition((sep for sep in separators))[1]",
             "f(*(x for x in items))",
             "f(k=lambda: value)",
             "{'key': recv.method(*(x for x in args))}",

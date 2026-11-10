@@ -98,24 +98,6 @@ impl RegisteredSource<'_> {
         })
     }
 
-    /// Preserve the fused get only for one single-line partition method call with a constant index.
-    pub(crate) fn partition_index(self, subscript: &ast::ExprSubscript) -> Option<u32> {
-        let call = subscript.value.as_call_expr()?;
-        let field = self.direct_method(call)?;
-        if !matches!(field.attr.as_str(), "partition" | "rpartition")
-            || !call.arguments.keywords.is_empty()
-            || !matches!(call.arguments.args.as_ref(), [arg] if !arg.is_starred_expr())
-            || self.text[subscript.range()].contains('\n')
-        {
-            return None;
-        }
-        let ast::Number::Int(index) = &subscript.slice.as_number_literal_expr()?.value else {
-            return None;
-        };
-        let index = u32::try_from(index.as_i64()?).ok()?;
-        (index < 3).then_some(index)
-    }
-
     pub(super) fn located(self, node: &ast::Expr, value: Expr) -> Expr {
         let position = imre_ast::expression_position(node, self.method_imports, self.private_names);
         located(node.range(), position, value)
@@ -304,7 +286,35 @@ pub(in crate::frontend) fn loaded_attribute(field: &ast::ExprAttribute, receiver
     located(field.range(), field.attr.start(), value)
 }
 
-pub(in crate::frontend) fn subscript(index: &ast::ExprSubscript, value: Expr, key: Expr) -> Expr {
+pub(in crate::frontend) fn subscript(
+    index: &ast::ExprSubscript,
+    mut value: Expr,
+    key: Expr,
+    source: &str,
+) -> Expr {
+    // Attach the projection to the call the normal operand checker already bound.
+    // Keep its location and any explicit comprehension namespace.
+    if index.value.is_call_expr()
+        && let Some(number) = index.slice.as_number_literal_expr()
+        && let ast::Number::Int(number) = &number.value
+        && let Some(field @ 0..=2) = number.as_i64()
+        && !source[index.range()].contains('\n')
+    {
+        let call = match &mut value.kind {
+            ExprKind::Builtin(Builtin::RegisteredLocation(..), operands) => &mut operands[0].kind,
+            kind => kind,
+        };
+        if let ExprKind::Builtin(Builtin::RegisteredCall(call), operands) = call
+            && call.range == index.value.range()
+            && let ir::RegisteredCallTarget::Method { name, .. } = &call.target
+            && matches!(name.as_str(), "partition" | "rpartition")
+            && matches!(call.arguments, ir::RegisteredArguments::Positional)
+            && operands.len() == 2 + usize::from(call.explicit_scope)
+        {
+            call.partition_field = Some((field as u32, index.range()));
+            return value;
+        }
+    }
     super::operation(
         Builtin::RegisteredSubscript(index.range(), index.value.end()),
         Type::PythonObject,
@@ -332,6 +342,7 @@ fn call_site(call: &ast::ExprCall, target: ir::RegisteredCallTarget) -> ir::Regi
         range: call.range(),
         target,
         arguments: registered_argument_layout(&call.arguments),
+        partition_field: None,
         explicit_scope: false,
     }
 }
@@ -697,11 +708,12 @@ pub(super) fn operation<E>(
             }
             ExprKind::Builtin(Builtin::RegisteredDict(entries), operands)
         }
-        ast::Expr::Subscript(index) if source.partition_index(index).is_none() => {
+        ast::Expr::Subscript(index) => {
             return Ok(Some(subscript(
                 index,
                 child(&index.value)?,
                 index_key(&index.slice, &mut child)?,
+                source.text,
             )));
         }
         _ => return Ok(None),
@@ -1248,13 +1260,26 @@ mod tests {
                 method_imports: &imports,
                 private_names: None,
             };
+            let value = registered_value(&stmt.value, source).unwrap();
+            let mut calls = Vec::new();
+            ir::walk_operand_expressions(&value, &mut |expr| {
+                if let ExprKind::Builtin(Builtin::RegisteredCall(call), operands) = &expr.kind {
+                    calls.push((call.range, call.partition_field, operands.len()));
+                }
+            });
+            let subscript = stmt.value.as_subscript_expr().unwrap();
             assert_eq!(
-                source.partition_index(stmt.value.as_subscript_expr().unwrap()),
-                fused
+                calls,
+                [(
+                    subscript.value.range(),
+                    fused.map(|i| (i, subscript.range())),
+                    2
+                )]
             );
+            let (operation, _, _) = operation_and_position(&value);
             assert_eq!(
-                registered_value(&stmt.value, source).is_none(),
-                fused.is_some()
+                matches!(operation, Builtin::RegisteredSubscript(..)),
+                fused.is_none()
             );
         }
     }
