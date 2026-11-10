@@ -845,6 +845,8 @@ pub(crate) enum SourceEffect {
     Discard(Vec<PhysicalOperand>),
     /// The enclosing suite owns any source inputs on their test or failure edge.
     Assertion(Box<AssertionSite>),
+    /// A target operand that failed to prepare retains its original diagnostic site.
+    RefusedTargetOperand(TextRange, &'static str),
     /// Evaluate the operands at their place in the operation, in the current frame.
     ObjectOperation(Box<Builtin>, Vec<PhysicalOperand>),
     /// The enclosing loop supplies the destination and cleanup depth.
@@ -903,6 +905,7 @@ impl PhysicalSuite {
                         | SourceEffect::ObjectOperation(..)
                         | SourceEffect::Discard(_)
                         | SourceEffect::Value(..)
+                        | SourceEffect::RefusedTargetOperand(..)
                 )
             ) {
                 sources.extend_from_slice(&stmts[run.statements.clone()]);
@@ -1644,6 +1647,7 @@ impl<'a> SuitePreparation<'a> {
                 continue;
             }
             let slots_before = scope.locals.len();
+            scope.refusal = None;
             let lowered = match select {
                 SuiteSelection::All => scope.statement(stmt, &mut body),
                 SuiteSelection::Physical(has_ordinary_header) => {
@@ -1722,17 +1726,32 @@ impl<'a> SuitePreparation<'a> {
                     Expr::local(input, Type::PythonObject),
                     input,
                 );
-                if let Ok(targets) = scope.assignment_targets(&assign.targets, value) {
-                    body.push(checkpoint(stmt));
-                    residual.push(SourceRun {
-                        at: body.len(),
-                        statements: i..i + 1,
-                        effect: Some(SourceEffect::AssignmentInput(input)),
-                    });
-                    body.extend(targets);
-                    continue;
-                }
-                scope.truncate_locals(slots_before);
+                let first_refusal = scope.refusal.take();
+                scope.diagnostic_suspension = Some(suspended);
+                let targets = scope.assignment_targets(&assign.targets, value);
+                scope.diagnostic_suspension = None;
+                let (effect, targets) = match targets {
+                    Ok(targets) => (SourceEffect::AssignmentInput(input), targets),
+                    Err(()) => {
+                        scope.truncate_locals(slots_before);
+                        let (range, reason) = scope.refusal.or(first_refusal).unwrap_or((
+                            assign.range(),
+                            "cannot compile this assignment target ahead of time",
+                        ));
+                        (
+                            SourceEffect::RefusedTargetOperand(range, reason),
+                            Vec::new(),
+                        )
+                    }
+                };
+                body.push(checkpoint(stmt));
+                residual.push(SourceRun {
+                    at: body.len(),
+                    statements: i..i + 1,
+                    effect: Some(effect),
+                });
+                body.extend(targets);
+                continue;
             } else if let ast::Stmt::Delete(delete) = stmt {
                 // A missing operand keeps its place between the other targets' checked effects.
                 body.push(checkpoint(stmt));
@@ -2301,9 +2320,9 @@ struct SourceScope<'a> {
     loop_scope: LoopScope,
     suspending_operands: bool,
     refusal: Option<(TextRange, &'static str)>,
-    // A dictionary reports its first unprepared comprehension. A Named operand
-    // also preserves terminal errors from its RHS, in the enclosing frame.
-    named_suspension: Option<bool>,
+    // A dictionary reports its first unprepared comprehension. Named expressions and assignment
+    // targets preserve terminal operand errors in their enclosing frame.
+    diagnostic_suspension: Option<bool>,
 }
 
 /// Prepare an inline expression that can require private slots in the enclosing activation.
@@ -2321,7 +2340,7 @@ pub(crate) fn inline_operand(
                 if is_dict {
                     scope.suspending_operands = native_suspension;
                 } else {
-                    scope.named_suspension = Some(native_suspension);
+                    scope.diagnostic_suspension = Some(native_suspension);
                 }
                 let value = scope.operand(expr);
                 refusal = scope.refusal;
@@ -2404,7 +2423,7 @@ impl<'a> SourceScope<'a> {
             loop_scope: LoopScope::Outside,
             suspending_operands: false,
             refusal: None,
-            named_suspension: None,
+            diagnostic_suspension: None,
         }
     }
 
@@ -2803,11 +2822,11 @@ impl SourceScope<'_> {
 
     fn lower_operand(&mut self, expr: &ast::Expr, whole: bool) -> Option<Expr> {
         if expr.is_dict_expr()
-            && let Some(suspended) = self.named_suspension.take()
+            && let Some(suspended) = self.diagnostic_suspension.take()
         {
             // A dictionary owns its own diagnostic, including inside a Named RHS.
             let value = self.checked_operand(expr, whole);
-            self.named_suspension = Some(suspended);
+            self.diagnostic_suspension = Some(suspended);
             if value.is_none() {
                 self.refusal.get_or_insert((
                     expr.range(),
@@ -2818,7 +2837,7 @@ impl SourceScope<'_> {
         }
 
         let value = self.checked_operand(expr, whole);
-        if value.is_none() && self.named_suspension.is_some() {
+        if value.is_none() && self.diagnostic_suspension.is_some() {
             let reason = match expr {
                 ast::Expr::FString(_) => "cannot compile this formatted string ahead of time",
                 ast::Expr::Generator(_) => "cannot compile this generator expression ahead of time",
@@ -2859,7 +2878,7 @@ impl SourceScope<'_> {
             }) {
                 Ok(value) => value,
                 Err(reason) => {
-                    if self.named_suspension == Some(true)
+                    if self.diagnostic_suspension == Some(true)
                         && let Some(reason) = reason
                     {
                         self.refusal = Some((expr.range(), reason));
@@ -2893,7 +2912,7 @@ impl SourceScope<'_> {
             self.suspend_operand(ir::SuspendValue::Await, Some(&awaited.value), expr.range())?
         } else if let ast::Expr::Lambda(lambda) = expr {
             if !values::has_checked_lambda_body(lambda, self.source) {
-                if self.named_suspension.is_some() {
+                if self.diagnostic_suspension.is_some() {
                     self.refusal = Some((
                         expr.range(),
                         "cannot compile this lambda body ahead of time",

@@ -4605,6 +4605,41 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
+    fn grouped_assignment_keeps_its_starred_comprehension_key_after_target_erasure() {
+        let source = concat!(
+            "def run(ok, xs, table):\n",
+            r#"    earlier = first, [receiver()[key((saved := (17 if ok else t"{[*x for x in xs]=}")))], *rest] = rhs()"#,
+            "\n",
+            r#"    a = table[(saved := 17 if ok else t"{(*x for x in xs)=}")] = 41"#,
+            "\n    return earlier, first, saved, rest, a\n",
+            // Retain the module syntax so the assignment targets can be withdrawn.
+            "state: int = 0\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let before = prepared.standalone().unwrap().unwrap();
+        let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        assert!(
+            prepared.source.function_bodies[&def.start()]
+                .suite()
+                .unwrap()
+                .fully_checked()
+        );
+        for assignment in &mut def.body[..2] {
+            assignment.as_assign_stmt_mut().unwrap().targets.clear();
+        }
+        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+    }
+
+    #[test]
     fn annotated_class_interleaves_checked_targets_with_physical_statements() {
         let source = concat!(
             "def outer[T]():\n",
@@ -4612,7 +4647,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             "        member: int\n",
             "        receiver().field = [item.copy() for item in items]\n",
             "        saved = [receiver().field, (table()[key()], *tail)] = (lambda: items)()\n",
-            "        select(lambda: rows).field = fallback()\n",
+            "        select(lambda: rows).field: int = fallback()\n",
             "        del receiver().field\n",
             "        saved = (first, [receiver().field, table()[key()], *rest]) = rows()\n",
             "        def read(self): return self.member\n",
