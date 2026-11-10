@@ -133,6 +133,34 @@ fn checkpoints_preserve_the_selected_roots_of_nested_regions() {
 }
 
 #[test]
+fn checkpoint_batches_active_slots_after_the_register_prefix() {
+    let mut output = Output::default();
+    let file = output.data(b"nested.py");
+    let positions = SourcePositions::new("", &file);
+    let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
+    frame.live.push("%exception".into());
+    frame.live_slots = vec![0, 1, 4, 5, 6];
+    frame.checkpoint(Default::default());
+
+    let body = &frame.body.code;
+    let (_, suffix) = body.split_once("store i64 %exception,").unwrap();
+    let (_, suffix) = suffix
+        .split_once("getelementptr i64, ptr %live, i64 1")
+        .unwrap();
+    let (_, suffix) = suffix
+        .split_once("ptr %ir_slot0, i64 16, i1 false)")
+        .unwrap();
+    let (_, suffix) = suffix
+        .split_once("getelementptr i64, ptr %live, i64 3")
+        .unwrap();
+    let (_, suffix) = suffix
+        .split_once("ptr %ir_slot4, i64 24, i1 false)")
+        .unwrap();
+    assert!(suffix.contains("ptr %live, i64 6,"));
+    assert_eq!(body.matches("call void @llvm.memcpy").count(), 2);
+}
+
+#[test]
 fn checked_assertion_message_and_raise_use_the_failure_edge() {
     use crate::ir::{Builtin, Expr, ExprKind, Statement, Type};
 
