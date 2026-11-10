@@ -638,6 +638,16 @@ fn initializer_calls_use_original_bindings_and_all_arguments() {
             "{caller}"
         );
     }
+    let generator = "def rows():\n    yield eval(input())\n";
+    let caller = "from scores import rows\nfor value in rows(): pass\n";
+    let message = check(caller, generator).unwrap();
+    assert!(
+        message.contains("scores.py:2:16")
+            && message.contains("builtins.eval without a linked body"),
+        "{message}"
+    );
+    let replaced = "import scores\ninstall_hook()\nfor value in scores.rows(): pass\n";
+    assert!(check(replaced, generator).is_none());
     let docstring = "'application setup'\nimport scores\nif False:\n    scores.take('x')\n";
     assert!(
         check(docstring, number)
