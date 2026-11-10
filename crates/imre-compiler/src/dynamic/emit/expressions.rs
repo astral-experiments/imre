@@ -1,4 +1,3 @@
-use crate::llvm::registered::ReadKey;
 use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
@@ -104,6 +103,16 @@ impl Function<'_, '_> {
         // The display itself is covered even if an operand still needs the syntax adapter.
         let value = if let Some((items, display)) = crate::frontend::display_elements(expr) {
             self.sequence_display(items, display, None, ast_spread, Self::expr)
+        } else if let Some(index) =
+            crate::frontend::index_operands(expr, self.source.registered_source())
+        {
+            let inputs = index
+                .inputs
+                .into_iter()
+                .map(|operand| self.source_operand(operand))
+                .collect::<Vec<_>>();
+            self.frame
+                .registered_with_inputs(&index.value, &inputs, &self.sites)
         } else if let Some((op, [left, right])) = crate::frontend::binary_operands(expr) {
             let left = self.expr(left);
             let right = self.expr(right);
@@ -172,35 +181,6 @@ impl Function<'_, '_> {
             });
         }
         match expr {
-            ast::Expr::Subscript(v) => {
-                let base = self.expr(&v.value);
-                let key = if let ast::Expr::Slice(slice) = &*v.slice
-                    && slice.step.is_none()
-                {
-                    let [start, stop] =
-                        [slice.lower.as_deref(), slice.upper.as_deref()].map(|bound| {
-                            bound.map_or_else(|| "0".into(), |bound| self.index_operand(bound))
-                        });
-                    let slot = crate::frontend::registered_constant_key(
-                        &v.slice,
-                        self.source.registered_source(),
-                    )
-                    .map(|(key, _)| self.constant_slot(key));
-                    ReadKey::Bounds { start, stop, slot }
-                } else {
-                    ReadKey::Object(self.index_operand(&v.slice))
-                };
-                self.read_item(&base, key, v.range(), v.value.end())
-            }
-            ast::Expr::Slice(slice) => {
-                let bounds = [
-                    slice.lower.as_deref(),
-                    slice.upper.as_deref(),
-                    slice.step.as_deref(),
-                ]
-                .map(|bound| bound.map_or_else(|| "0".into(), |bound| self.index_operand(bound)));
-                self.slice_object(bounds)
-            }
             ast::Expr::Dict(v) => self.dict_display(
                 v.items.iter().map(|item| (item.key.as_ref(), &item.value)),
                 Self::expr,

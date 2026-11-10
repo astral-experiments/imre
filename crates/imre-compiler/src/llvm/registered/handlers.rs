@@ -316,11 +316,6 @@ impl Frame<'_, '_, '_> {
     }
 
     pub(super) fn emit_suite(&mut self, suite: &[Statement]) {
-        CheckedBody::registered(Frame {
-            code: self.code,
-            sites: self.sites,
-            names: self.names,
-        })
-        .emit_block(suite);
+        CheckedBody::registered(self.reborrow()).emit_block(suite);
     }
 }
