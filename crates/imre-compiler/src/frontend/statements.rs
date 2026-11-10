@@ -4,10 +4,21 @@ use super::*;
 
 pub(super) type Block = (Vec<Statement>, bool);
 
+pub(super) fn if_arms(
+    arms: Vec<(Expr, Vec<Statement>)>,
+    mut otherwise: Vec<Statement>,
+) -> Vec<Statement> {
+    for (test, body) in arms.into_iter().rev() {
+        otherwise = vec![Statement::If(test, body, otherwise)];
+    }
+    otherwise
+}
+
 pub(super) trait StatementLowering {
     type Error;
 
     fn assignment(&mut self, assign: &ast::StmtAssign) -> StdResult<Vec<Statement>, Self::Error>;
+    fn branch(&mut self, branch: &ast::StmtIf) -> StdResult<Block, Self::Error>;
     fn definition(
         &mut self,
         def: &ast::StmtFunctionDef,
@@ -15,6 +26,9 @@ pub(super) trait StatementLowering {
     fn effect(&mut self, value: &ast::Expr) -> StdResult<(Option<Statement>, bool), Self::Error>;
     fn returned(&mut self, ret: &ast::StmtReturn) -> StdResult<Expr, Self::Error>;
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> StdResult<Block, Self::Error>;
+    fn async_iteration(&self) -> bool {
+        false
+    }
     fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<Block, Self::Error>;
 
     fn attribute_statements(
@@ -32,12 +46,15 @@ pub(super) trait StatementLowering {
         }
         let (statement, continues) = match stmt {
             ast::Stmt::Assign(assign) => return Ok((self.assignment(assign)?, true)),
+            ast::Stmt::If(branch) => return self.branch(branch),
             ast::Stmt::FunctionDef(def) => (self.definition(def)?, true),
             ast::Stmt::Expr(expr) => self.effect(&expr.value)?,
             ast::Stmt::Return(ret) if !module => {
                 (Some(Statement::Return(self.returned(ret)?)), false)
             }
-            ast::Stmt::For(loop_) if !loop_.is_async => return self.for_loop(loop_),
+            ast::Stmt::For(loop_) if !loop_.is_async || self.async_iteration() => {
+                return self.for_loop(loop_);
+            }
             ast::Stmt::Pass(_) => (None, true),
             _ => return self.other_statement(stmt),
         };
@@ -84,6 +101,10 @@ impl StatementLowering for Checker<'_> {
             ));
         }
         Ok(Some(statements))
+    }
+
+    fn branch(&mut self, branch: &ast::StmtIf) -> Result<Block, String> {
+        self.if_chain(branch)
     }
 
     fn assignment(&mut self, assign: &ast::StmtAssign) -> Result<Vec<Statement>, String> {
@@ -143,9 +164,17 @@ impl StatementLowering for Checker<'_> {
                 _ => {}
             }
         }
+        if self.checked_callback_effects
+            && let Some(value) = self.registered_callback_effect(expr)?
+        {
+            return Ok((Some(Statement::Expr(value)), true));
+        }
         let value = self.expr(expr)?;
         // Only a direct call selects one implementation; a dispatched override may return.
         let continues = !matches!(&value.kind, ExprKind::Call(id, _) if self.classes.raising_methods.contains(id));
+        if let Some(sites) = &mut self.fixed_sites {
+            sites.statement(expr.range(), FixedNode::Effect);
+        }
         Ok((Some(Statement::Expr(value)), continues))
     }
 
@@ -176,7 +205,11 @@ impl StatementLowering for Checker<'_> {
             types.push(value.ty);
             Ok(value)
         } else {
-            self.coerce_return(value, self.returns, ret)
+            let value = self.coerce_return(value, self.returns, ret)?;
+            if let (Some(sites), Some(operand)) = (&mut self.fixed_sites, &ret.value) {
+                sites.statement(operand.range(), FixedNode::Return);
+            }
+            Ok(value)
         }
     }
 

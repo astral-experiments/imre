@@ -245,16 +245,19 @@ impl Context {
                 let Value::DictIterator(state) = self.heap.get(cursor) else {
                     unreachable!("ordered dictionary iterator reduction");
                 };
-                // Walking a copy preserves the live cursor, including when iteration raises.
-                let snapshot = self.alloc(Value::DictIterator(*state));
-                let remaining = self.items(snapshot)?;
-                let items = self.alloc(Value::List(remaining));
-                let args = self.alloc(Value::Tuple(vec![items]));
-                let iter = self.builtin("iter");
-                Ok(self.alloc(Value::Tuple(vec![iter, args])))
+                self.reduce_iterator_copy(Value::DictIterator(*state))
             }
             _ => unreachable!("iterator slot"),
         }
+    }
+
+    /// Walking a copy preserves the live cursor, including when iteration raises.
+    pub(super) fn reduce_iterator_copy(&mut self, copy: Value) -> Result<Id> {
+        let snapshot = self.alloc(copy);
+        let items = super::builtins::call(self, "list", &[snapshot], &[])?;
+        let args = self.alloc(Value::Tuple(vec![items]));
+        let iter = self.builtin("iter");
+        Ok(self.alloc(Value::Tuple(vec![iter, args])))
     }
 }
 

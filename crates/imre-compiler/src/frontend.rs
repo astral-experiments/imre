@@ -18,8 +18,13 @@ pub(crate) mod phase;
 // Terminal-only validation and the graph driver use the standard Result.
 use phase::{Diagnostic, Failure, Kind, Result};
 
+mod annotation_operands;
 mod annotations;
+pub(crate) use annotation_operands::{
+    AnnotationBody, AnnotationCode, PreparedAnnotation, annotation_operands,
+};
 pub(crate) use annotations::{parameter_annotations, spelling as annotation_spelling};
+pub(crate) use function_scope::ClassAnnotations;
 mod argparse;
 mod ascii;
 mod assertion_syntax;
@@ -59,11 +64,15 @@ mod errno;
 mod exception_forwarders;
 mod expandtabs;
 mod expansions;
+mod fixed_body_source;
+pub(crate) use fixed_body_source::{FixedBodySource, FixedNode};
 mod fixed_tuples;
 mod fnmatch;
 mod format_cursors;
 mod fractions;
 mod fromkeys;
+mod fstrings;
+use fstrings::FStringLiteral;
 mod fspath;
 mod function_caches;
 pub(crate) mod function_scope;
@@ -91,6 +100,7 @@ mod logging_records;
 mod mapping_abc;
 mod mapping_choice;
 mod matching;
+pub(crate) mod module_source;
 mod module_specs;
 mod module_values;
 mod namedtuples;
@@ -113,20 +123,33 @@ mod record_inputs;
 mod records;
 mod regex;
 mod registered;
-mod retained;
-pub(crate) use registered::type_alias::type_alias_body;
+pub(crate) use registered::booleans::{
+    ExpressionSites, Selection as ExpressionSelection, SourceOperand, prepare_boolean,
+};
+#[cfg(test)]
+pub(crate) use registered::inline_operand;
+pub(crate) use registered::patterns::{MatchGuard, SourceMatch};
+pub(crate) use registered::type_alias_body;
+#[cfg(test)]
+pub(crate) use registered::values::registered_value;
 pub(crate) use registered::values::{
-    RegisteredSource, ValueStatement, display_elements, lambda_defaults, literal_replacements,
-    packed_arguments, push_codepoints, registered_arguments, registered_constant_key,
-    registered_index_key, registered_string, registered_value, value_statement,
+    RegisteredSource, display_elements, literal_replacements, module_literal_replacements,
+    packed_arguments, push_codepoints, registered_argument_at, registered_arguments,
 };
 pub(crate) use registered::{
-    AnnotationValue, DeferredModuleAnnotation, RegisteredFunction, RegisteredLambda,
-    RegisteredScope, RegisteredSuite, SuitePreparation, annotation_expression, attribute_effects,
-    delete_item, delete_targets, module_annotations, prepare_templates, registered_index_target,
-    registered_sites, registered_type_alias, registered_type_parameters, template_segments,
+    AnnotationValue, AssertionSite, DeferredAnnotation, ParameterAnnotations, PhysicalOperand,
+    PreparedStrings, RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope,
+    RegisteredSites, RegisteredSuite, SourceEffect, SourceRun, StatementSites, SuitePreparation,
+    ValueStatement, annotation_expression, attribute_write, place_fixed_function, registered_sites,
+    registered_type_alias, registered_type_parameters,
 };
-pub(crate) use retained::RegisteredNative;
+pub(crate) use registered::{
+    LambdaBinding, LambdaDefault, LocalBinding, PreparedTemplate, RegisteredClass,
+    RegisteredOperand, RegisteredRegion, TemplateField,
+};
+pub(crate) use registered::{
+    PhysicalBinding, PhysicalSuite, PreparedContext, PreparedFor, PreparedTry, SourceGuard,
+};
 mod sequences;
 mod shutil;
 mod sign_parameters;
@@ -627,12 +650,32 @@ fn lower_current(
     result
 }
 
+/// A body without its native representation still has checked neighbors. Keep its
+/// original diagnostic for backend selection after their source contracts have run.
+fn checked_region<T>(
+    result: Result<T, String>,
+    graph: &SourceGraph,
+    module: ModuleId,
+    unavailable: &mut Option<Diagnostic>,
+) -> StdResult<Option<T>, Diagnostic> {
+    match result {
+        Ok(body) => Ok(Some(body)),
+        Err(failure)
+            if graph.modules[module].is_program_source() && failure.is_representation() =>
+        {
+            unavailable.get_or_insert_with(|| failure.terminal_in(graph, module));
+            Ok(None)
+        }
+        Err(failure) => Err(failure.terminal_in(graph, module)),
+    }
+}
+
 fn lower_graph(
     graph: &SourceGraph,
     mut cache: Option<&mut CallerCache>,
     key_reprs: &mut HashSet<DefinitionId>,
 ) -> StdResult<crate::CheckedProgram, Diagnostic> {
-    graph.native_functions.borrow_mut().clear();
+    graph.clear_registered_functions();
     let types = Types::default();
     typing::collect_sites(graph, &types);
     namedtuples::collect(graph, &types)?;
@@ -642,6 +685,10 @@ fn lower_graph(
     let inference = inference::Inference::default();
     let mut definitions = Vec::new();
     let mut callable_definitions = Vec::new();
+    // Native wrapper links can prefer registered frames only when a bound
+    // callable has a Type::Class receiver. Without classes no definition transfers.
+    let can_transfer_frames = !classes.declarations.definitions.is_empty();
+    let mut frame_declarations = HashMap::new();
     for (module_id, module) in graph.modules.iter().enumerate() {
         for (name, binding) in &module.bindings {
             if reserved(name)
@@ -680,6 +727,19 @@ fn lower_graph(
                         continue;
                     }
                     let cached = function_caches::policy(graph, module_id, function)?;
+                    let physical_entry = (can_transfer_frames
+                        && module.is_program_source()
+                        && module.archive.is_none()
+                        && !function.is_async
+                        && function.decorator_list.is_empty()
+                        && function.type_params.is_none()
+                        && function.parameters.vararg.is_none()
+                        && function.parameters.kwarg.is_none()
+                        && function
+                            .parameters
+                            .iter_non_variadic_params()
+                            .all(|p| p.default.is_none()))
+                        .then(|| function.start());
                     let mut function = function.clone();
                     if module.overloads.contains(&statement_id) {
                         graph.runtime_overload(module_id, function.name.range());
@@ -709,6 +769,8 @@ fn lower_graph(
                     } else {
                         keyword_forwarding::prepare(graph, module_id, &mut function)
                     };
+                    let frame_entry = physical_entry
+                        .filter(|_| element.is_none() && defaults.forwarded.is_none());
                     let signature = signature(
                         &function,
                         graph,
@@ -746,6 +808,9 @@ fn lower_graph(
                         },
                         signature.clone(),
                     );
+                    if let Some(start) = frame_entry {
+                        frame_declarations.insert(signature.id, start);
+                    }
                     definitions.push((module_id, function.clone(), signature));
                     callable_definitions.push(DefinitionId {
                         module: module_id,
@@ -910,13 +975,21 @@ fn lower_graph(
     if closed_calls::has_keyword_displays(graph) {
         inference.discover_packed_arguments();
     }
-    for (module, function, _) in &mut definitions {
-        assignments::alias_builtin_parameters(function, graph, *module);
-        if closed_calls::prepare(function, graph, *module) {
+    for (module, function, signature) in &mut definitions {
+        let renamed = assignments::alias_builtin_parameters(function, graph, *module);
+        let (dispatch, packed) = closed_calls::prepare(function, graph, *module);
+        if renamed || dispatch || packed {
+            frame_declarations.remove(&signature.id);
+        }
+        if packed {
             inference.discover_packed_arguments();
         }
     }
-    let registered_parameters = inference.solve(
+    let inference::Solution {
+        registered_parameters,
+        mut checked_bodies,
+        registered_generators,
+    } = inference.solve(
         graph,
         &mut definitions,
         &mut signatures,
@@ -969,13 +1042,21 @@ fn lower_graph(
             }
         }
     }
-    let initializer_start = definitions.len();
     let entry_declarations = classes.declarations.has_class_values(graph.entry)
         || graph.modules[graph.entry].parsed.syntax().body.iter().any(|stmt| {
             matches!(stmt, ast::Stmt::FunctionDef(def) if inspect::marks_function(graph, graph.entry, def))
         });
     let helpers = Helpers::new(definitions.len() + graph.initializers(entry_declarations).count());
-    let needs_registered_entry = signatures.values().any(Signature::registered_frame);
+    let needs_registered_entry =
+        !registered_generators.is_empty() || signatures.values().any(Signature::registered_frame);
+    if needs_registered_entry {
+        checked_bodies.retain(|&id| {
+            let (module, definition, _) = &definitions[id];
+            graph.modules[*module].parsed.syntax().body[callable_definitions[id].statement]
+                .as_function_def_stmt()
+                == Some(definition)
+        });
+    }
     let globals = ModuleValues::for_initializers(needs_registered_entry);
     // Fixed FILE compilations need no secondary body. A registered launch or an
     // actual representation failure can still use functions whose signatures solved.
@@ -989,7 +1070,11 @@ fn lower_graph(
                 &types,
                 &inference,
                 &globals,
-                false,
+                if needs_registered_entry {
+                    registered::Capture::Entry(&checked_bodies)
+                } else {
+                    registered::Capture::Solved
+                },
             );
         }
     };
@@ -1001,7 +1086,6 @@ fn lower_graph(
     let mut literals = HashMap::new();
     let mut source_checks = registered::SourceChecks::default();
     if needs_registered_entry {
-        graph.set_registered_functions(HashMap::new());
         // A checked body or a real function-value read can establish the registered binding.
         globals.missing_bindings.borrow_mut().extend(
             registered_parameters
@@ -1011,6 +1095,7 @@ fn lower_graph(
         );
     }
     let mut initializations = Vec::new();
+    let mut unavailable = None;
     let mut available = HashSet::new();
     for (module_id, range) in graph.initializers(entry_declarations) {
         let checker = Checker::new(
@@ -1022,19 +1107,23 @@ fn lower_graph(
             &helpers,
             &globals,
         );
-        initializations.push(
-            Initialization::lower(checker, &mut available, range)
-                .inspect_err(capture_on_object)
-                .map_err(|failure| failure.terminal_in(graph, module_id))?,
-        );
+        let result = Initialization::lower(
+            checker,
+            &mut available,
+            range,
+            (!needs_registered_entry).then_some(&mut initializations),
+        )
+        .inspect_err(capture_on_object);
+        checked_region(result, graph, module_id, &mut unavailable)?;
     }
-    if graph.registered_startup && !needs_registered_entry {
+    if graph.registered_startup || needs_registered_entry {
         capture();
     }
     if let Some(cache) = cache.as_deref_mut() {
         cache.validate_abi(&definitions, &globals);
     }
     let mut functions = Vec::new();
+    let mut frame_sources = HashMap::new();
     let mut refused_body = None;
     let mut zip_sums = Vec::new();
     let mut owners = Vec::new();
@@ -1043,7 +1132,7 @@ fn lower_graph(
     let mut recursion_errors = Vec::new();
     for (module_id, definition, signature) in &definitions {
         let module = &graph.modules[*module_id];
-        let checker = Checker::new(
+        let mut checker = Checker::new(
             graph,
             *module_id,
             &signatures,
@@ -1053,6 +1142,9 @@ fn lower_graph(
             &globals,
         );
         let original = registered_parameters.get(&signature.id);
+        if registered_generators.contains(&signature.id) {
+            continue;
+        }
         let accepted =
             signature.registered_frame() && source_checks.accepts(graph, *module_id, definition);
         if accepted || original.is_some() {
@@ -1077,7 +1169,7 @@ fn lower_graph(
                     let report = error.terminal_in(graph, *module_id);
                     let id = callable_definitions[signature.id];
                     if graph.registered_startup
-                        && *module_id == graph.entry
+                        && module.checks_source_contracts()
                         && signature.method.is_none()
                         && let Some(operand) = report.exact_operand()
                         && let Some(function) =
@@ -1097,43 +1189,49 @@ fn lower_graph(
             }
             continue;
         }
+        // This graph will emit registered frames. Inference already checked this exact
+        // definition with the settled signature; recovery owns its executable checked body.
         if needs_registered_entry
-            && module.is_program_source()
-            && signature.method.is_none()
-            && let Some(original) = module.parsed.syntax().body
-                [callable_definitions[signature.id].statement]
-                .as_function_def_stmt()
+            && checked_bodies.contains(&signature.id)
+            && graph
+                .registered_functions()
+                .get(module_id)
+                .is_some_and(|bodies| bodies.contains_key(&definition.start()))
         {
-            let private = Helpers::new(inference.len());
-            let owner = Checker::new(
-                graph,
-                *module_id,
-                &signatures,
-                &classes,
-                &types,
-                &private,
-                &globals,
-            );
-            let same_body = original == definition;
-            if retained::capture(owner, original, signature, inference.len(), same_body)
-                && same_body
-            {
-                continue;
-            }
+            continue;
         }
+        checker.fixed_sites = (!needs_registered_entry
+            && frame_declarations.contains_key(&signature.id))
+        .then(Default::default);
         let result = match cache.as_deref_mut() {
             Some(cache) if signature.method.is_none() => cache.body(checker, definition, signature),
             _ => lower_body(checker, definition, signature),
         };
-        let (body, sums) = result
-            .inspect_err(capture_on_object)
-            .map_err(|failure| failure.terminal_in(graph, *module_id))?;
+        let Some((body, sums)) = checked_region(
+            result.inspect_err(capture_on_object),
+            graph,
+            *module_id,
+            &mut unavailable,
+        )?
+        else {
+            continue;
+        };
+        if needs_registered_entry {
+            // The fixed-layout checks have supplied their diagnostics. Registered
+            // definitions and the registered initializer already own this program.
+            continue;
+        }
         let LoweredBody {
             function,
             calls,
             class_reads: mut reads,
             ..
         } = body;
+        if let Some(source) = body.source
+            && let Some(&start) = frame_declarations.get(&signature.id)
+        {
+            frame_sources.insert(functions.len(), (start, source));
+        }
         graph.ordered_reads(*module_id, &definition.body, true, &mut reads);
         let (function, calls, reads) = if let Some(&policy) = classes.cached.get(&signature.id) {
             let raw = helpers.reserve();
@@ -1169,6 +1267,7 @@ fn lower_graph(
         ));
     }
     let mut entry = None;
+    let mut startup = Vec::new();
     for (module_id, module) in graph.modules.iter().enumerate() {
         if module_id != graph.entry {
             continue;
@@ -1195,47 +1294,39 @@ fn lower_graph(
                 definition,
                 entry_site: None,
             }));
-            let _ = graph.try_complete_body(module_id, false, || {
-                checker.block(&statements).ok().map(drop)
+            let _ = graph.try_registered_body(module_id, || {
+                checker.lower_block(&statements, None).ok().map(drop)
             });
             if let Some((statement, call)) =
                 checker.observed_definition.and_then(|seen| seen.entry_site)
             {
-                report.reached_in_entry(module_id, statement, call);
+                report.reached_in_entry(module_id, definition.module, statement, call);
             }
             return Err(report);
         }
-        let (mut body, _) = checker
-            .block(&statements)
-            .inspect_err(capture_on_object)
-            .map_err(|failure| failure.terminal_in(graph, module_id))?;
-        if module_id == graph.entry {
-            let mut startup = (0..initializations.len())
-                .map(|index| {
-                    Statement::Expr(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::Call(
-                            initializer_start + index,
-                            ir::CallArgs::positional(Vec::new()),
-                        ),
-                    })
-                })
-                .collect::<Vec<_>>();
+        let mut fixed_entry = (!needs_registered_entry).then(Vec::new);
+        let result = checker.lower_block(&statements, fixed_entry.as_mut());
+        let result = checker.finish_region(result).inspect_err(capture_on_object);
+        if checked_region(result, graph, module_id, &mut unavailable)?.is_some()
+            && let Some(body) = fixed_entry
+        {
             checker.fault_frame(&mut startup, "<module>", TextSize::default());
-            startup.append(&mut body);
             entry = Some(ir::Function {
                 params: Vec::new(),
                 returns: Type::None,
                 locals: checker.locals,
-                body: startup,
+                body,
             });
         }
+    }
+    if let Some(reason) = unavailable {
+        return Err(reason);
     }
     if let Some((_, reason)) = globals.missing_bindings.borrow_mut().pop_first() {
         return Err(reason);
     }
     if needs_registered_entry {
-        return Ok(crate::CheckedProgram::Registered);
+        return Ok(crate::CheckedProgram::Registered(None));
     }
     if let Some(error) = graph.deferred_object_error.take() {
         if error.kind.is_object() {
@@ -1247,46 +1338,16 @@ fn lower_graph(
         .command_startup
         .as_ref()
         .is_some_and(|(flags, _)| flags.faulthandler);
-    for initialization in &initializations {
-        let module = &graph.modules[initialization.module];
-        let mut body = initialization.function.body.clone();
-        if module.archive.is_some() {
-            body.insert(
-                0,
-                Statement::Expr(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(
-                        Builtin::ExtensionImport(
-                            module.name.rsplit('.').next().unwrap().to_owned(),
-                        ),
-                        vec![],
-                    ),
-                }),
-            );
-        }
-        if fault_enabled && initialization.module != graph.entry && module.archive.is_none() {
-            body.insert(
-                0,
-                fault_frame_statement(
-                    graph
-                        .module_filename(initialization.module)
-                        .to_string_lossy()
-                        .into_owned(),
-                    "<module>",
-                    1,
-                ),
-            );
-        }
-        owners.push(initialization.module);
-        functions.push(ir::Function {
-            params: Vec::new(),
-            returns: Type::None,
-            locals: initialization.function.locals.clone(),
-            body,
-        });
-        call_graph.push(initialization.calls.clone());
+    let initializer_ids = functions.len()..functions.len() + initializations.len();
+    let mut initialization_order = Vec::with_capacity(initializations.len());
+    for initialization in initializations {
+        let module_id = initialization.order.module;
+        functions.push(initialization.function);
+        call_graph.push(initialization.calls);
+        initialization_order.push(initialization.order);
+        owners.push(module_id);
         class_reads.push(HashSet::new());
-        let module = &graph.modules[initialization.module];
+        let module = &graph.modules[module_id];
         recursion_errors
             .push(module.error(module.parsed.syntax(), "recursive module initialization"));
     }
@@ -1323,8 +1384,9 @@ fn lower_graph(
     if let Some(id) = recursive_call_root(&call_graph) {
         return Err(recursion_errors.swap_remove(id).into());
     }
-    for initialization in &initializations {
-        initialization.validate(
+    for (id, order) in initializer_ids.clone().zip(initialization_order) {
+        order.validate(
+            id,
             graph,
             &functions,
             &class_reads,
@@ -1351,29 +1413,8 @@ fn lower_graph(
     }
     // The native call graph is acyclic. Programs that cannot inspect frames,
     // lower their limit, or reach the default depth need no tracking at all.
-    let source_frames =
-        if fault_enabled || names || count || source_functions + generator_sites > 1000 {
-            python_frames
-                .into_iter()
-                .zip(owners.iter().copied().chain([graph.entry]))
-                .map(|(frame, module)| {
-                    frame.then(|| {
-                        if names {
-                            ir::SourceFrame::Module(if module == graph.entry {
-                                "__main__".to_owned()
-                            } else {
-                                graph.modules[module].name.clone()
-                            })
-                        } else {
-                            ir::SourceFrame::Depth
-                        }
-                    })
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
-    if generator_sites != 0 && source_frames.is_empty() {
+    let track_frames = fault_enabled || names || count || source_functions + generator_sites > 1000;
+    if generator_sites != 0 && !track_frames {
         for function in functions.iter_mut().chain([&mut entry]) {
             ir::walk_expressions_mut(&mut function.body, &mut |value| {
                 if matches!(
@@ -1393,20 +1434,97 @@ fn lower_graph(
     }
     let json_records = json::schemas(graph, &classes, &types, &functions, &entry)?;
     // Fusing adjacent sums also inlines their generator bodies and scalar calls.
-    if source_frames.is_empty() {
+    if !track_frames {
         for (id, sums) in zip_sums {
             zip_sums::fuse(&mut functions, id, &sums);
         }
     }
+    if let Some(cache) = cache {
+        cache.finish(&types);
+    }
+    if needs_object_string_order(&functions, &entry) {
+        graph.needs_object_runtime.set(true);
+        let diagnostic = Diagnostic::plain(
+            " Imre: ordering strings from chr() with possible surrogate values requires native Python object operations".to_owned(),
+        )
+        .with_path(&graph.modules[graph.entry].path)
+        .classified(Kind::ScopedObject);
+        return Err(diagnostic);
+    }
+    // The checked functions and module statements have supplied their graph diagnostics.
+    // Only the fixed startup links initializer calls and allocates native module metadata.
+    if graph.registered_startup {
+        return Ok(crate::CheckedProgram::Registered(None));
+    }
+    if let Some(reason) = graph
+        .runtime_initializer
+        .clone()
+        .map(Into::into)
+        .or_else(|| required_object_diagnostic(graph, &functions, &entry))
+    {
+        return Ok(crate::CheckedProgram::Registered(Some(reason)));
+    }
+    // Checkpoints above refer to the source operations. Insert native startup
+    // bookkeeping into these same bodies only after their source order is checked.
+    for id in initializer_ids {
+        let module_id = owners[id];
+        let module = &graph.modules[module_id];
+        let prefix = if module.archive.is_some() {
+            Some(Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(
+                    Builtin::ExtensionImport(module.name.rsplit('.').next().unwrap().to_owned()),
+                    vec![],
+                ),
+            }))
+        } else if fault_enabled && module_id != graph.entry {
+            Some(fault_frame_statement(
+                graph
+                    .module_filename(module_id)
+                    .to_string_lossy()
+                    .into_owned(),
+                "<module>",
+                1,
+            ))
+        } else {
+            None
+        };
+        if let Some(prefix) = prefix {
+            functions[id].body.insert(0, prefix);
+        }
+        startup.push(Statement::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Call(id, ir::CallArgs::positional(Vec::new())),
+        }));
+    }
+    entry.body.splice(..0, startup);
+    let source_frames = if track_frames {
+        python_frames
+            .into_iter()
+            .zip(owners.iter().copied().chain([graph.entry]))
+            .map(|(frame, module)| {
+                frame.then(|| {
+                    if names {
+                        ir::SourceFrame::Module(if module == graph.entry {
+                            "__main__".to_owned()
+                        } else {
+                            graph.modules[module].name.clone()
+                        })
+                    } else {
+                        ir::SourceFrame::Depth
+                    }
+                })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     globals
         .class_data
         .borrow_mut()
         .extend_layouts(&mut classes.fields);
     let mut globals = globals.into_types();
     types.reserve_constructor_globals(&mut globals, &functions, &entry);
-    if let Some(cache) = cache {
-        cache.finish(&types);
-    }
     let lowered = (
         ir::Module {
             builtin_module_sources: uses_builtin_module_names
@@ -1427,24 +1545,41 @@ fn lower_graph(
         },
         owners,
     );
-    if needs_object_string_order(&lowered.0) {
-        graph.needs_object_runtime.set(true);
-        let diagnostic = Diagnostic::plain(
-            " Imre: ordering strings from chr() with possible surrogate values requires native Python object operations".to_owned(),
+    Ok(crate::CheckedProgram::Native(Box::new(crate::FixedProgram {
+        ir: lowered,
+        frame_sources,
+    })))
+}
+
+fn required_object_diagnostic(
+    graph: &SourceGraph,
+    functions: &[ir::Function],
+    entry: &ir::Function,
+) -> Option<Diagnostic> {
+    let (id, operand, call) = ir::required_object_call(functions.iter().chain([entry]))?;
+    let (name, kind) = match call {
+        ir::ObjectCall::ExecText => ("exec", Kind::ScopedObject),
+        ir::ObjectCall::FormatField => ("this f-string field", Kind::Ordinary),
+        ir::ObjectCall::SocketSendfile => ("socket.sendfile", Kind::Object),
+    };
+    let source = &graph.modules[id];
+    Some(
+        Diagnostic::at(
+            &source.source,
+            &operand,
+            format!("{name} requires native Python object operations"),
         )
-        .with_path(&graph.modules[graph.entry].path)
-        .classified(Kind::ScopedObject);
-        return Err(diagnostic);
-    }
-    Ok(crate::CheckedProgram::Native(Box::new(lowered)))
+        .with_path(&source.path)
+        .classified(kind),
+    )
 }
 
 /// Native text is UTF-8. Use object comparisons when a call to `chr` could
 /// construct a lone surrogate.
-fn needs_object_string_order(module: &ir::Module) -> bool {
+fn needs_object_string_order(functions: &[ir::Function], entry: &ir::Function) -> bool {
     let mut orders_strings = false;
     let mut code_points = Vec::new();
-    for function in module.functions.iter().chain([&module.entry]) {
+    for function in functions.iter().chain([entry]) {
         ir::walk_expressions(&function.body, &mut |expr| match &expr.kind {
             ExprKind::Builtin(Builtin::Chr, args) => code_points.push(&args[0]),
             ExprKind::Compare(values, operators) => {
@@ -1459,7 +1594,7 @@ fn needs_object_string_order(module: &ir::Module) -> bool {
     if !orders_strings || code_points.is_empty() {
         return false;
     }
-    let ranges = crate::ranges::analyze(module);
+    let ranges = crate::ranges::analyze_functions(functions.iter().chain([entry]));
     code_points.into_iter().any(|value| {
         ranges
             .integer(value)
@@ -1470,6 +1605,7 @@ fn needs_object_string_order(module: &ir::Module) -> bool {
 #[derive(Clone)]
 struct LoweredBody {
     function: ir::Function,
+    source: Option<FixedBodySource>,
     calls: HashSet<usize>,
     class_reads: HashSet<DefinitionId>,
     default_reads: Option<Vec<caller_cache::DefaultId>>,
@@ -1491,10 +1627,7 @@ fn lower_function(
     signature: &Signature,
     registered_locals: Option<&mut HashMap<usize, registered::LocalBinding>>,
 ) -> BodyResult {
-    debug_assert_eq!(
-        checker.registered.is_some(),
-        registered_locals.is_some() && !checker.native_activation
-    );
+    debug_assert_eq!(checker.registered.is_some(), registered_locals.is_some());
     #[cfg(test)]
     caller_cache::record_lowering(definition.name.as_str());
     let module = &checker.graph.modules[checker.module];
@@ -1572,7 +1705,10 @@ fn lower_function(
         // The generated initializer stores the normalized field on all input paths.
         (vec![], true)
     } else {
-        checker.function_body(&definition.body)?
+        match checker.function_body(&definition.body) {
+            Ok(body) => body,
+            Err(failure) => return checker.finish_region(Err(failure)),
+        }
     };
     if let Some(context) = signature.method
         && let class = &classes.declarations.definitions[context.class]
@@ -1603,13 +1739,8 @@ fn lower_function(
     if classes.generators.contains(&signature.id) {
         body = checker.generator_body(body);
     }
-    if let Some(error) = checker
-        .registered
-        .as_mut()
-        .and_then(|frame| frame.deferred.get_mut().take())
-    {
-        return Err(error);
-    }
+    checker.finish_region(Ok(()))?;
+    let mut source = None;
     if let Some(names) = registered_locals {
         names.extend(checker.namespace_bindings);
         names.extend(checker.names.into_iter().map(|(name, slot)| {
@@ -1623,9 +1754,13 @@ fn lower_function(
         }));
     } else if module.archive.is_none() {
         checker.fault_frame(&mut body, definition.name.as_str(), definition.start());
+        if let Some(sites) = checker.fixed_sites {
+            source = sites.finish(definition.body.len(), &body, checker.names, &checker.locals);
+        }
     }
     Ok((
         LoweredBody {
+            source,
             function: ir::Function {
                 params,
                 returns: signature.returns,
@@ -2055,15 +2190,17 @@ fn annotation_with_aliases(
     }
     if let Some(Binding::TypeAlias(origin, index)) = graph.resolve_type(module, expression) {
         let module = &graph.modules[origin];
-        return annotation_with_aliases(
-            &module.aliases[index].value,
-            graph,
-            (origin, &module.source),
-            classes,
-            types,
-            owner,
-            alias_depth + 1,
-        );
+        if let Some(value) = module.aliases[index].annotation_value(module) {
+            return annotation_with_aliases(
+                value,
+                graph,
+                (origin, &module.source),
+                classes,
+                types,
+                owner,
+                alias_depth + 1,
+            );
+        }
     }
     if let ast::Expr::StringLiteral(value) = expression {
         check_string(value, source)?;
@@ -2683,13 +2820,16 @@ struct CalledDefinition {
 }
 
 struct Checker<'a> {
+    fixed_sites: Option<fixed_body_source::SourceSites>,
     observed_definition: Option<Box<CalledDefinition>>,
     /// Locals in this body are bound in an existing Python activation.
-    registered: Option<registered::Frame<'a>>,
+    registered: Option<&'a registered::values::ModuleSource>,
+    checked_callback_effects: bool,
+    /// The first operation whose execution requires a different representation. All
+    /// later source operations still see the facts from the ordinary checker.
+    unrepresented: std::cell::RefCell<Option<Failure>>,
     namespace_calls: HashSet<ruff_text_size::TextRange>,
     module_namespace: assignments::ModuleNamespace,
-    /// Keep source checkpoints while lowering the ordinary fixed-layout operations.
-    native_activation: bool,
     /// The actual namespace supplied to Python calls in the current lexical region.
     namespace: Option<usize>,
     namespace_bindings: HashMap<usize, registered::LocalBinding>,
@@ -2770,11 +2910,13 @@ impl<'a> Checker<'a> {
         globals: &'a ModuleValues,
     ) -> Self {
         Self {
+            fixed_sites: None,
             observed_definition: None,
             registered: None,
+            checked_callback_effects: false,
+            unrepresented: Default::default(),
             namespace_calls: HashSet::new(),
             module_namespace: Default::default(),
-            native_activation: false,
             namespace: None,
             namespace_bindings: HashMap::new(),
             interactive_names: false,
@@ -2841,7 +2983,7 @@ impl<'a> Checker<'a> {
     fn parameter_shadows_binding(&self, name: &str, ty: Type, bound: bool) -> bool {
         self.mapping_class_import(name)
             || match self.graph.modules[self.module].bindings.get(name) {
-                Some(Binding::Value(_)) => bound && !self.module_scope,
+                Some(Binding::Value(_) | Binding::TypeAlias(..)) => bound && !self.module_scope,
                 Some(Binding::Definition(id)) => {
                     matches!(ty, Type::Callable(_)) && self.functions.contains_key(id)
                 }
@@ -3193,11 +3335,23 @@ impl<'a> Checker<'a> {
 
     /// Optional and finite-union promotions are explicit; containers stay invariant.
     fn coerce(&self, value: Expr, expected: Type, node: &impl Ranged) -> Result<Expr, String> {
+        if matches!(&value.kind, ExprKind::Builtin(Builtin::Unrepresented, _)) {
+            return Ok(Expr {
+                ty: expected,
+                ..value
+            });
+        }
         // PythonObject describes the selected binder's storage, never an annotation.
         // The operand retains its checked type while the registered call supplies a handle.
         if expected == Type::PythonObject || value.ty == Type::PythonObject {
-            self.expect(expected, value.ty, node)?;
-            return Ok(value);
+            return match self.expect(expected, value.ty, node) {
+                Ok(()) => Ok(value),
+                Err(failure) if self.missing_operation(&failure) => Ok(Expr {
+                    ty: expected,
+                    ..Expr::unrepresented()
+                }),
+                Err(failure) => Err(failure),
+            };
         }
         if value.ty == Type::FunctionRef && matches!(expected, Type::Callable(_)) {
             return Ok(typing::typed_function(value, expected));
@@ -4028,18 +4182,13 @@ impl<'a> Checker<'a> {
         // expression's narrower result when those original values agree.
         let yes = assignments::unpromoted(yes);
         let no = assignments::unpromoted(no);
-        let ty = if yes.ty == Type::PythonObject || no.ty == Type::PythonObject {
-            // The registered value path produces a Python handle for either selected arm.
-            Type::PythonObject
-        } else {
-            self.types.join(yes.ty, no.ty).ok_or_else(|| {
-                error(
-                    self.source,
-                    value,
-                    "conditional branches require the same concrete type or its optional form",
-                )
-            })?
-        };
+        let ty = self.types.join_results(yes.ty, no.ty).ok_or_else(|| {
+            error(
+                self.source,
+                value,
+                "conditional branches require the same concrete type or its optional form",
+            )
+        })?;
         let yes = self.coerce(yes, ty, &*value.body)?;
         let no = self.coerce(no, ty, &*value.orelse)?;
         Ok(Expr {
@@ -4381,7 +4530,7 @@ impl<'a> Checker<'a> {
             };
             let cursor = Expr {
                 ty: Type::PythonObject,
-                kind: ExprKind::Builtin(Builtin::RegisteredIter, vec![value]),
+                kind: ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::Loop), vec![value]),
             };
             return Ok(Iteration::Prepared(self.prepare_cursor(cursor, element)));
         }
@@ -4420,6 +4569,12 @@ impl<'a> Checker<'a> {
         items: bool,
         node: &impl Ranged,
     ) -> Result<Iteration, String> {
+        if iterable.ty == Type::PythonObject && self.graph.modules[self.module].is_program_source()
+        {
+            return Ok(Iteration::Prepared(
+                self.prepare_object_iteration(iterable, node),
+            ));
+        }
         if let Some(prepared) = self.record_iteration(&iterable, node)? {
             return Ok(Iteration::Prepared(prepared));
         }
@@ -4709,11 +4864,16 @@ impl<'a> Checker<'a> {
             .types
             .iteration_element(iterable.ty, items)
             .ok_or_else(|| {
-                error(
+                let reason = error(
                     self.source,
                     target,
                     "iteration requires a concrete list, dictionary, set, string, bytes, or range",
-                )
+                );
+                if iterable.ty == Type::PythonObject {
+                    reason.classify(Kind::ScopedObject)
+                } else {
+                    reason
+                }
             })?;
         // A private forward cursor can borrow the UTF-8 bytes of an exact string.
         let (iterable, encoded_bytes) = match iterable {
@@ -4973,23 +5133,38 @@ impl<'a> Checker<'a> {
 
     /// Checks dead syntax too, but merges definite assignment only from reachable exits.
     fn block(&mut self, statements: &[ast::Stmt]) -> Result<(Vec<Statement>, bool), String> {
+        let mut body = Vec::new();
+        let falls_through = self.lower_block(statements, Some(&mut body))?;
+        Ok((body, falls_through))
+    }
+
+    /// Keep binding, flow and diagnostic evidence for every statement. Only the
+    /// owner of an executable body collects instructions and frame checkpoints.
+    fn lower_block(
+        &mut self,
+        statements: &[ast::Stmt],
+        mut output: Option<&mut Vec<Statement>>,
+    ) -> Result<bool, String> {
         if let Some(reason) = statements.first().and_then(|first| {
             self.graph
                 .entry_profile
                 .excluded(self.module, first.start())
         }) {
-            let message = Expr {
-                ty: Type::Str,
-                kind: ExprKind::Str(reason.to_owned()),
-            };
-            let exception = Expr {
-                ty: Type::Exception,
-                kind: ExprKind::Exception {
-                    kind: exception_kind("ValueError").unwrap(),
-                    message: Some(Box::new(message)),
-                },
-            };
-            return Ok((vec![Statement::Raise(Some(exception))], false));
+            if let Some(body) = output {
+                let message = Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Str(reason.to_owned()),
+                };
+                let exception = Expr {
+                    ty: Type::Exception,
+                    kind: ExprKind::Exception {
+                        kind: exception_kind("ValueError").unwrap(),
+                        message: Some(Box::new(message)),
+                    },
+                };
+                body.push(Statement::Raise(Some(exception)));
+            }
+            return Ok(false);
         }
 
         if self.block_depth == 0 && !self.module_scope {
@@ -5026,7 +5201,6 @@ impl<'a> Checker<'a> {
             }
         }
         self.block_depth += 1;
-        let mut body = Vec::new();
         let mut falls_through = true;
         let reachable = self.reachable;
         let enclosing_sum = self.zip_sum_rhs;
@@ -5082,6 +5256,7 @@ impl<'a> Checker<'a> {
             previous_sum = sum.is_some();
             let tuple = length_guard.and_then(|guard| self.guarded_tuple(statement, guard));
             let enclosing_tuple = std::mem::replace(&mut self.fixed_tuple, tuple);
+            let parent = self.fixed_sites.as_mut().and_then(|sites| sites.enter(statement.range()));
             let (mut lowered, continues) = if !self.module_scope
                 && self.block_depth == 1
                 && fresh.is_some()
@@ -5090,7 +5265,7 @@ impl<'a> Checker<'a> {
             {
                 (vec![self.assign(target, parser)?], true)
             } else {
-                self.statement(statement, &statements[index + 1..])?
+                self.statement(statement)?
             };
             self.fixed_tuple = enclosing_tuple;
             if !self.module_scope
@@ -5107,19 +5282,59 @@ impl<'a> Checker<'a> {
             {
                 lowered.push(Statement::Assign(*flag, Expr::boolean(true)));
             }
-            if self.registered.is_some() || self.native_activation {
-                // Even a pass has a Python frame checkpoint for pending signals and exceptions.
-                body.push(registered::checkpoint(statement));
-            } else if !lowered.is_empty() && self.fault_enabled() {
-                body.push(self.fault_line(statement));
+            if let Some(sites) = &mut self.fixed_sites
+                && !sites.leave(parent)
+            {
+                self.fixed_sites = None;
             }
-            body.extend(lowered);
+            if let Some(body) = output.as_deref_mut() {
+                if self.registered.is_some() {
+                    // Even a pass has a Python frame checkpoint for pending signals and exceptions.
+                    body.push(registered::checkpoint(statement));
+                } else if !lowered.is_empty() && self.fault_enabled() {
+                    body.push(self.fault_line(statement));
+                }
+                body.extend(lowered);
+            }
             falls_through &= continues;
         }
         self.reachable = reachable;
         self.zip_sum_rhs = enclosing_sum;
         self.block_depth -= 1;
-        Ok((body, falls_through))
+        Ok(falls_through)
+    }
+
+    fn require_registered_operation(&self, site: &impl Ranged) {
+        self.unrepresented.borrow_mut().get_or_insert_with(|| {
+            self.classified_error(
+                Kind::ScopedObject,
+                site,
+                "operation requires its compiled object representation",
+            )
+        });
+    }
+
+    fn missing_operation(&self, failure: &Failure) -> bool {
+        if !failure.is_representation() || !self.graph.modules[self.module].is_program_source() {
+            return false;
+        }
+        self.unrepresented
+            .borrow_mut()
+            .get_or_insert_with(|| failure.clone());
+        true
+    }
+
+    /// Check-only operands cannot leave the source region in an executable body.
+    fn finish_region<T>(&self, result: Result<T, String>) -> Result<T, String> {
+        match (result, self.unrepresented.take()) {
+            (Ok(_), Some(failure)) => Err(failure),
+            (Err(later), Some(first)) if later.is_representation() => Err(first),
+            (
+                Err(Failure::PendingSignature { .. }),
+                Some(first @ Failure::PendingSignature { .. }),
+            ) => Err(first),
+            (result, _) => result,
+        }
     }
 
     /// Defer an opaque operation only when its result need not enter typed storage.
@@ -5130,11 +5345,8 @@ impl<'a> Checker<'a> {
         if !error.is_object() {
             return false;
         }
-        if let Some(frame) = &self.registered {
-            // Continue normal checking without installing a body with a missing operation.
-            // The complete registered body will still perform the original store and effects.
-            frame
-                .deferred
+        if self.registered.is_some() {
+            self.unrepresented
                 .borrow_mut()
                 .get_or_insert_with(|| error.clone());
         } else if self.inference.is_none() {
@@ -5146,16 +5358,6 @@ impl<'a> Checker<'a> {
         true
     }
 
-    fn checked_optional_name(&self, expression: &ast::Expr) -> bool {
-        expression.as_name_expr().is_some_and(|name| {
-            self.graph.modules[self.module]
-                .optional_imports
-                .values()
-                .flatten()
-                .any(|alias| alias == name.id.as_str())
-        })
-    }
-
     fn ordinary_entry(&self) -> Option<ModuleId> {
         (self.module_scope
             && self.module == self.graph.entry
@@ -5165,12 +5367,8 @@ impl<'a> Checker<'a> {
             .then_some(self.module)
     }
 
-    fn statement(
-        &mut self,
-        statement: &ast::Stmt,
-        later: &[ast::Stmt],
-    ) -> Result<(Vec<Statement>, bool), String> {
-        if let Some(frame) = &self.registered {
+    fn statement(&mut self, statement: &ast::Stmt) -> Result<(Vec<Statement>, bool), String> {
+        if self.registered.is_some() {
             // Fixed layouts can erase Python stores (for example, a local += becomes +).
             // Keep every operation in this frame explicit until it has an object-ABI lowering.
             let supported = match statement {
@@ -5183,13 +5381,13 @@ impl<'a> Checker<'a> {
                 }
                 ast::Stmt::For(loop_) => !loop_.is_async,
                 ast::Stmt::While(_) => true,
-                ast::Stmt::If(branch) => branch.elif_else_clauses.is_empty(),
+                ast::Stmt::If(_) => true,
                 ast::Stmt::Break(_) | ast::Stmt::Continue(_) => true,
                 ast::Stmt::Return(_) | ast::Stmt::Expr(_) | ast::Stmt::Pass(_) => true,
                 _ => false,
             };
             if !supported {
-                frame.require_object(self.source, statement);
+                self.require_registered_operation(statement);
             }
         }
         let entry = self.ordinary_entry();
@@ -5204,29 +5402,40 @@ impl<'a> Checker<'a> {
             {
                 self.graph.require_fallback_calls();
             }
-            let discarded = match statement {
-                ast::Stmt::Expr(expr) => narrowing::expression_assignments(&expr.value).is_empty(),
-                // At function scope this suffix includes every later use of the binding.
-                ast::Stmt::Assign(assign) if self.block_depth == 1 && !self.module_scope => {
-                    matches!(assign.targets.as_slice(), [ast::Expr::Name(target)]
-                    if narrowing::expression_assignments(&assign.value).is_empty()
-                    && !ast::helpers::any_over_body(later, |expr| matches!(
-                        expr, ast::Expr::Name(name) if name.id == target.id
-                    )))
+            match statement {
+                ast::Stmt::Expr(expression)
+                    if matches!(error, Failure::PendingSignature { .. })
+                        && self.inference.is_some()
+                        && self.graph.modules[self.module].is_program_source()
+                        && narrowing::expression_assignments(&expression.value).is_empty() =>
+                {
+                    // The value is discarded. Check independent later statements, but keep
+                    // this dependency for the next inference round.
+                    let mut blocked = self.unrepresented.borrow_mut();
+                    if !matches!(*blocked, Some(Failure::PendingSignature { .. })) {
+                        *blocked = Some(error.clone());
+                    }
+                    return Ok((Vec::new(), true));
                 }
-                // The complete assertion runs in the object program. A pure presence
-                // check has no result or binding needed by the following statements.
-                ast::Stmt::Assert(a) if self.module_scope && a.msg.is_none() => {
-                    matches!(&*a.test, ast::Expr::Compare(test)
-                        if matches!(test.ops.as_ref(), [ast::CmpOp::Is | ast::CmpOp::IsNot])
-                        && matches!(test.operands.as_ref(),
-                            [name, ast::Expr::NoneLiteral(_)] | [ast::Expr::NoneLiteral(_), name]
-                            if self.checked_optional_name(name)))
+                ast::Stmt::Expr(_) | ast::Stmt::Assert(_) if self.missing_operation(error) => {
+                    return Ok((Vec::new(), true));
                 }
-                _ => false,
-            };
-            if discarded && self.defer_object_error(error) {
-                return Ok((Vec::new(), true));
+                ast::Stmt::Assign(assign)
+                    if let [ast::Expr::Name(target)] = assign.targets.as_slice()
+                        && self.missing_operation(error) =>
+                {
+                    // Only the representation of the store failed. Normal successors see
+                    // its binding, including the type required by a prior declaration.
+                    let name = target.id.as_str();
+                    let ty = self
+                        .names
+                        .get(name)
+                        .map_or(Type::PythonObject, |&slot| self.locals[slot]);
+                    let slot = self.declare(name, ty, target)?;
+                    self.assigned_value(slot, &Expr::unrepresented());
+                    return Ok((Vec::new(), true));
+                }
+                _ => {}
             }
         }
         result.map_err(|error| error.in_entry_statement(entry, statement.start()))
@@ -5579,7 +5788,6 @@ impl<'a> Checker<'a> {
                 }
                 return Ok((statements, true));
             }
-            ast::Stmt::If(branch) => return self.if_chain(branch),
             ast::Stmt::Match(branch) => return self.match_statement(branch),
             ast::Stmt::While(loop_) => {
                 self.invalidate_loop_facts(&loop_.body, None)?;
@@ -5683,6 +5891,10 @@ impl<'a> Checker<'a> {
             }
             ast::Stmt::With(with_) if self.asynchronous => {
                 return self.async_with(&with_.items, &with_.body);
+            }
+            ast::Stmt::Raise(raise) if self.registered.is_some() => {
+                let raised = registered::raised(raise, |value| self.expr(value))?;
+                return Ok((vec![raised], false));
             }
             ast::Stmt::Raise(raise) => {
                 let mut value = raise
@@ -5884,11 +6096,19 @@ impl<'a> Checker<'a> {
                 &item.context_expr,
                 "with requires a supported file, socket, ZIP archive, or directory context",
             );
-            return Err(if manager.ty == Type::PythonObject {
-                failure.classify(Kind::ScopedObject)
-            } else {
-                failure
-            });
+            if manager.ty == Type::PythonObject {
+                let failure = failure.classify(Kind::ScopedObject);
+                if self.missing_operation(&failure) {
+                    // __enter__ supplies the optional target. Its storage is unknown,
+                    // but the same checker can bind it and check the protected suite.
+                    if let Some(target) = &item.optional_vars {
+                        self.assign_value(target, Expr::unrepresented())?;
+                    }
+                    return self.with_items(remaining, body);
+                }
+                return Err(failure);
+            }
+            return Err(failure);
         }
         let captured = self.hidden(manager.ty);
         let mut protected = Vec::new();
@@ -6323,7 +6543,7 @@ impl<'a> Checker<'a> {
                 self.merge_exit(&mut normal_exit);
             }
             handlers.push(ir::ExceptHandler {
-                kinds,
+                matcher: crate::ir::ExceptionMatcher::Categories(kinds),
                 name,
                 body: handler_body,
             });
@@ -6487,7 +6707,7 @@ impl<'a> Checker<'a> {
             }
             arms.push((condition, yes));
         }
-        let (mut no, no_falls) = if let Some(tail) = clauses.last().filter(|c| c.test.is_none()) {
+        let (no, no_falls) = if let Some(tail) = clauses.last().filter(|c| c.test.is_none()) {
             let guards = self.namespace_guards.len();
             let last_test = clauses
                 .iter()
@@ -6508,10 +6728,7 @@ impl<'a> Checker<'a> {
         if let Some(joined) = joined {
             self.restore_state(joined);
         }
-        for (condition, yes) in arms.into_iter().rev() {
-            no = vec![Statement::If(condition, yes, no)];
-        }
-        Ok((no, falls))
+        Ok((statements::if_arms(arms, no), falls))
     }
 
     /// A call or expression can supply its own concrete collection layout.
@@ -6611,7 +6828,27 @@ impl<'a> Checker<'a> {
         } else {
             (self.expr(&binary.left)?, self.expr(&binary.right)?)
         };
-        self.binary_operands(binary, left, right)
+        // Scalar arithmetic keeps both operands in the checked operation. The
+        // registered emitter guards their actual handles, including subclasses.
+        // Power has a distinct fixed operation selected from the exponent.
+        let scalar = binary.op != ast::Operator::Pow
+            && matches!(left.ty, Type::Int | Type::Float)
+            && matches!(right.ty, Type::Int | Type::Float);
+        if self.registered.is_none() || scalar {
+            return self.binary_operands(binary, left, right);
+        }
+        // Other fixed layouts can convert operands or select a builtin. Check the
+        // contract and keep the original handles for the Python operation.
+        let ty = if left.ty == Type::PythonObject || right.ty == Type::PythonObject {
+            Type::PythonObject
+        } else {
+            self.binary_operands(binary, left.clone(), right.clone())?
+                .ty
+        };
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Binary(binary.op.into(), Box::new(left), Box::new(right)),
+        })
     }
 
     fn binary_operands(
@@ -6711,7 +6948,7 @@ impl<'a> Checker<'a> {
     }
 
     fn binary_expr(
-        &self,
+        &mut self,
         op: ast::Operator,
         left: Expr,
         right: Expr,
@@ -6775,6 +7012,9 @@ impl<'a> Checker<'a> {
         let left = Self::integer_addend(op, left, right.ty);
         let right = Self::integer_addend(op, right, left.ty);
         let (op, ty) = self.binary_op(op, left.ty, right.ty, node)?;
+        if let Some(sites) = &mut self.fixed_sites {
+            sites.expression(node.range(), FixedNode::Binary(op, ty));
+        }
         Ok(Expr {
             ty,
             kind: ExprKind::Binary(op, Box::new(left), Box::new(right)),
@@ -6970,6 +7210,19 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn unsupported_comparison(&self, expression: &ast::Expr, left: Type, right: Type) -> Failure {
+        if left == Type::PythonObject || right == Type::PythonObject {
+            // The checked Python operation owns comparisons without a fixed operand layout.
+            self.scoped_builtin_error("comparing Python objects", expression)
+        } else {
+            error(
+                self.source,
+                expression,
+                "unsupported comparison for these types",
+            )
+        }
+    }
+
     /// Select the object provider only when this precise diagnostic reaches the driver.
     fn scoped_builtin_error(&self, name: &str, node: &impl Ranged) -> Failure {
         self.object_export_error(name, node)
@@ -7019,18 +7272,30 @@ impl<'a> Checker<'a> {
     }
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        let parent = self.fixed_sites.as_mut().and_then(|sites| sites.enter(expression.range()));
+        let value = match self.lower_expression(expression) {
+            Err(failure) if self.missing_operation(&failure) => Expr::unrepresented(),
+            result => result?,
+        };
+        if let Some(sites) = &mut self.fixed_sites
+            && !sites.leave(parent)
+        {
+            self.fixed_sites = None;
+        }
+        Ok(value)
+    }
+
+    fn lower_expression(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         if let Some(value) = self.live_module_binding(expression) {
             return Ok(value);
         }
-        if let Some(literals) = self.registered.as_ref().map(|frame| frame.literals) {
+        if let Some(literals) = self.registered {
             if let Some(value) = self.registered_operand(expression, literals)? {
                 return Ok(value);
             }
-            // Preserve this operation in the complete object body after its operands are checked.
-            self.registered
-                .as_ref()
-                .unwrap()
-                .require_object(self.source, expression);
+            // The public registered operand selector owns the receiver and call proof.
+            // Continue checking the source even when this activation cannot emit the operation.
+            self.require_registered_operation(expression);
         }
         self.fixed_expr(expression)
     }
@@ -7195,9 +7460,20 @@ impl<'a> Checker<'a> {
             ));
         }
         self.reject_class_receiver_value(expression)?;
-        if let Some(binding) = self.local_function_binding(expression) {
+        if let Some(name) = expression.as_name_expr()
+            && let Some(binding) = self.local_functions.get(name.id.as_str())
+        {
             if let Some(slot) = binding.value_slot {
                 return Ok(self.local(slot));
+            }
+            if binding.is_bound() {
+                // A value read needs the callable created by this execution of def,
+                // including its particular closure and its Python identity.
+                let failure = self.scoped_builtin_error("a local function value", expression);
+                if self.missing_operation(&failure) {
+                    return Ok(registered::values::name_binding(name.id.as_str()));
+                }
+                return Err(failure);
             }
             return Err(error(
                 self.source,
@@ -7233,7 +7509,7 @@ impl<'a> Checker<'a> {
             return self.shutil_function_value(op, None, expression);
         }
         if let Some(Binding::Value(definition)) = self.resolve(expression) {
-            let (slot, ty) = self.globals.get(definition).ok_or_else(|| {
+            let (slot, ty) = self.globals.read(definition)?.ok_or_else(|| {
                 error(
                     self.source,
                     expression,
@@ -7282,7 +7558,13 @@ impl<'a> Checker<'a> {
         }
         if binding == Some(Binding::ConditionalValue) {
             let operation = "a value selected by a module guard";
-            if self.checked_optional_name(expression) {
+            if expression.as_name_expr().is_some_and(|name| {
+                self.graph.modules[self.module]
+                    .optional_imports
+                    .values()
+                    .flatten()
+                    .any(|alias| alias == name.id.as_str())
+            }) {
                 return Err(self.object_export_error(operation, expression));
             }
             return Err(self.object_runtime_export(operation, expression));
@@ -7599,6 +7881,11 @@ impl<'a> Checker<'a> {
             ast::Expr::If(value) => return self.conditional(value, None),
             ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
             ast::Expr::Name(_) | ast::Expr::Attribute(_)
+                if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::Callable)) =>
+            {
+                return Err(self.scoped_builtin_error("the Callable object", expression));
+            }
+            ast::Expr::Name(_) | ast::Expr::Attribute(_)
                 if matches!(
                     self.resolve(expression),
                     Some(Binding::Intrinsic(Intrinsic::NamedHash(
@@ -7709,7 +7996,19 @@ impl<'a> Checker<'a> {
                     {
                         return Err(self.scoped_builtin_error(name, expression));
                     }
-                    if let Some(Binding::Definition(_)) = self.resolve(expression) {
+                    if matches!(
+                        self.resolve(expression),
+                        Some(Binding::IntrinsicModule(
+                            crate::modules::IntrinsicModule::Builtins
+                        ))
+                    ) {
+                        return Err(
+                            self.scoped_builtin_error("the builtin module as a value", expression)
+                        );
+                    }
+                    if let Some(Binding::Definition(_) | Binding::TypeAlias(..)) =
+                        self.resolve(expression)
+                    {
                         return Err(self.classified_error(
                             Kind::ScopedObject,
                             expression,
@@ -7734,7 +8033,14 @@ impl<'a> Checker<'a> {
                         "local may be uninitialized on this path",
                     ));
                 }
-                return Ok(self.read_local(slot));
+                let value = self.read_local(slot);
+                if let Some(sites) = &mut self.fixed_sites
+                    && matches!(value.kind, ExprKind::Local(read) if read == slot)
+                    && value.ty == self.locals[slot]
+                {
+                    sites.expression(expression.range(), FixedNode::Read(slot, value.ty));
+                }
+                return Ok(value);
             }
             ast::Expr::List(list) => {
                 if list
@@ -8393,11 +8699,7 @@ impl<'a> Checker<'a> {
                         ast::CmpOp::Gt if ordered => Compare::Greater,
                         ast::CmpOp::GtE if ordered => Compare::GreaterEqual,
                         _ => {
-                            return Err(error(
-                                self.source,
-                                expression,
-                                "unsupported comparison for these types",
-                            ));
+                            return Err(self.unsupported_comparison(expression, ty, right));
                         }
                     };
                     if matches!(ty, Type::Patch(_)) {
@@ -8490,11 +8792,7 @@ impl<'a> Checker<'a> {
                         | Type::BytesIO
                         | Type::BinaryIO => true,
                         _ => {
-                            return Err(error(
-                                self.source,
-                                expression,
-                                "unsupported comparison for these types",
-                            ));
+                            return Err(self.unsupported_comparison(expression, ty, right));
                         }
                     };
                     if !comparable {
@@ -8539,7 +8837,21 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
+                if self.resolve(&subscript.value) == Some(Binding::Intrinsic(Intrinsic::Callable)) {
+                    return Err(self.object_builtin_error_with_checked_calls(
+                        "a parameterized Callable",
+                        subscript,
+                    ));
+                }
                 let list = Self::enum_text(self.expr(&subscript.value)?);
+                if list.ty == Type::PythonObject && !subscript.slice.is_slice_expr() {
+                    let key = self.expr(&subscript.slice)?;
+                    return Ok(registered::values::located(
+                        expression.range(),
+                        expression.start(),
+                        registered::values::subscript(subscript, list, key, self.source),
+                    ));
+                }
                 if self.dict_or_record(list.ty).is_some() {
                     return self.dict_or_record_item(list, &subscript.slice, expression);
                 }
@@ -8560,12 +8872,9 @@ impl<'a> Checker<'a> {
                     });
                 }
                 if list.ty == Type::BuiltinClass {
-                    // Python evaluates type arguments before invoking __class_getitem__.
-                    self.expr(&subscript.slice)?;
-                    return Err(error(
-                        self.source,
+                    return Err(self.object_builtin_error_with_checked_calls(
+                        "a runtime generic alias",
                         subscript,
-                        "runtime generic aliases of builtin classes are unsupported",
                     ));
                 }
                 if list.ty == Type::Context {
@@ -8852,6 +9161,9 @@ impl<'a> Checker<'a> {
                     return self.class_attribute(attribute, class, None, None);
                 }
                 let receiver = self.expr(&attribute.value)?;
+                if receiver.ty == Type::PythonObject {
+                    return Ok(registered::values::loaded_attribute(attribute, receiver));
+                }
                 if receiver.ty == Type::Float
                     && matches!(attribute.attr.as_str(), "real" | "imag")
                     && self.graph.float_components.get() != crate::modules::FloatComponents::Boxed
@@ -9450,6 +9762,14 @@ impl<'a> Checker<'a> {
                     "generator expressions require an immediate for, comprehension, list, sum, min, max, any, or all consumer",
                 ));
             }
+            ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => {
+                return Err(error(
+                    self.source,
+                    expression,
+                    "generator suspension requires a registered frame",
+                )
+                .classify(Kind::GeneratorSuspension));
+            }
             _ => {
                 return Err(error(
                     self.source,
@@ -9471,57 +9791,6 @@ impl<'a> Checker<'a> {
         Ok(Expr { ty, kind })
     }
 
-    /// Preserves the complete adjacent-part sequence and converts each field
-    /// before evaluating the next. Sealed conversions never resolve a local `str`.
-    fn fstring(&mut self, value: &ast::ExprFString) -> Result<Expr, String> {
-        let mut parts = Vec::new();
-        for part in value.value.iter() {
-            match part {
-                ast::FStringPartRef::Literal(literal) => {
-                    check_string_literal(literal, self.source)?;
-                    parts.push(Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Str(literal.value.to_string()),
-                    });
-                }
-                ast::FStringPartRef::FString(fstring) => {
-                    for element in &fstring.elements {
-                        let part = match element {
-                            ast::InterpolatedStringElement::Literal(literal) => {
-                                if !matches!(
-                                    fstring.flags.prefix(),
-                                    ast::str_prefix::FStringPrefix::Raw { .. }
-                                ) {
-                                    check_string_escapes(literal.range(), self.source)?;
-                                }
-                                Expr {
-                                    ty: Type::Str,
-                                    kind: ExprKind::Str(literal.value.to_string()),
-                                }
-                            }
-                            ast::InterpolatedStringElement::Interpolation(field) => {
-                                self.formatted_scalar(field)?
-                            }
-                        };
-                        parts.push(part);
-                    }
-                }
-            }
-        }
-        // A formatted string evaluates every interpolation before joining them.
-        Ok(parts
-            .into_iter()
-            .rev()
-            .reduce(|right, left| Expr {
-                ty: Type::Str,
-                kind: ExprKind::Binary(Binary::Concat, Box::new(left), Box::new(right)),
-            })
-            .unwrap_or_else(|| Expr {
-                ty: Type::Str,
-                kind: ExprKind::Str(String::new()),
-            }))
-    }
-
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
         let live = match &*call.func {
             ast::Expr::Attribute(field) => self
@@ -9530,7 +9799,7 @@ impl<'a> Checker<'a> {
             target => self.live_module_binding(target),
         };
         if let Some(callee) = live {
-            let value = registered::values::call_with_target(call, callee, |arg| self.expr(arg))?;
+            let value = self.call_with_target(call, callee)?;
             self.graph.checked_live_call(self.module, call);
             return Ok(value);
         }
@@ -9541,10 +9810,7 @@ impl<'a> Checker<'a> {
         {
             // A registered initializer already owns the namespace returned by globals().
             self.namespace_calls.insert(call.range());
-            return Ok(registered::values::object_call(
-                call,
-                vec![registered::values::name_binding("globals")],
-            ));
+            return Ok(registered::values::name_call(call, "globals", vec![]));
         }
         if self.unshadowed_builtin(&call.func, "range") {
             return self.range_value(call);
@@ -10170,9 +10436,7 @@ impl<'a> Checker<'a> {
                 };
                 if object.ty == Type::PythonObject {
                     let method = registered::values::loaded_attribute(method, object);
-                    return registered::values::call_with_target(call, method, |arg| {
-                        self.expr(arg)
-                    });
+                    return self.call_with_target(call, method);
                 }
                 if let Type::Class(class)
                 | Type::IntEnum(class)
@@ -10371,7 +10635,10 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::TypeAlias(module, index))
-                if self.graph.modules[module].aliases[index].constructor =>
+                if matches!(
+                    self.graph.modules[module].aliases[index],
+                    crate::modules::TypeAlias::NewType(_)
+                ) =>
             {
                 self.reject_builtin_keywords(call)?;
                 let [value] = call.arguments.args.as_ref() else {
@@ -11467,7 +11734,7 @@ impl<'a> Checker<'a> {
             };
             if receiver.ty == Type::PythonObject {
                 let method = registered::values::loaded_attribute(attribute, receiver);
-                return registered::values::call_with_target(call, method, |arg| self.expr(arg));
+                return self.call_with_target(call, method);
             }
             self.check_namedtuple_asdict(attribute, Some(receiver.ty))?;
             if let Some(result) =
@@ -12198,6 +12465,8 @@ impl<'a> Checker<'a> {
     }
 
     fn named_builtin_call(&mut self, call: &ast::ExprCall, name: &str) -> Result<Expr, String> {
+        const UNSUPPORTED_ARGUMENTS: &str = "unknown function or unsupported builtin arguments";
+
         // Passing stderr as a positional value displays the open text stream.
         if matches!(name, "print" | "repr" | "str")
             && call.arguments.keywords.is_empty()
@@ -13049,37 +13318,36 @@ impl<'a> Checker<'a> {
             "set" | "frozenset" if self.unshadowed_builtin(&call.func, name) => {
                 return Err(self.object_builtin_error(name, call));
             }
-            name if self.unshadowed_builtin(&call.func, name)
-                && registered::values::fixed_positional_arguments(call)
-                && (name == "print" && args.iter().any(|value| value.ty == Type::PythonObject)
-                    || annotations::is_builtin_type(name)
-                        && args
-                            .iter()
-                            .any(|value| self.types.stores_python_object(value.ty))) =>
+            "exec" | "eval"
+                if self.graph.session.is_stdlib_function(
+                    self.module,
+                    &call.func,
+                    "builtins",
+                    name,
+                ) =>
             {
-                let mut operands = args;
-                operands.insert(0, registered::values::name_binding(name));
-                return Ok(registered::values::object_call(call, operands));
-            }
-            _ => {
-                let diagnostic = Diagnostic::at(
-                    self.source,
+                return Err(self.classified_error(
+                    Kind::ExecutionOperand(self.module),
                     call,
-                    "unknown function or unsupported builtin arguments".to_owned(),
-                );
-                return Err(if matches!(name, "exec" | "eval")
-                    && self.graph.session.is_stdlib_function(
-                        self.module,
-                        &call.func,
-                        "builtins",
-                        name,
-                    ) {
-                    diagnostic.classified(Kind::ExecutionOperand(self.module))
-                } else {
-                    diagnostic
-                }
-                .into());
+                    UNSUPPORTED_ARGUMENTS,
+                ));
             }
+            name if (imre_ast::providers::BUILTIN_FUNCTIONS.contains(&name)
+                || imre_ast::providers::BUILTIN_TYPES.contains(&name))
+                && self.unshadowed_builtin(&call.func, name)
+                && registered::values::fixed_positional_arguments(call)
+                && args
+                    .iter()
+                    .any(|value| self.types.stores_python_object(value.ty)) =>
+            {
+                // A fixed-only caller can check the remaining operands and source
+                // operations. The actual call requires its registered Python frame.
+                if self.registered.is_none() && !self.globals.registered_initializers {
+                    self.missing_operation(&self.scoped_builtin_error(name, call));
+                }
+                return Ok(registered::values::name_call(call, name, args));
+            }
+            _ => return Err(error(self.source, call, UNSUPPORTED_ARGUMENTS)),
         };
         Ok(Expr {
             ty,
@@ -13344,6 +13612,51 @@ mod tests {
             let graph = SourceGraph::single_with_mode(source, true).unwrap();
             let error = super::lower(&graph).err().expect("invalid fixed open");
             assert!(error.contains(expected), "{source}: {error}");
+        }
+    }
+
+    #[test]
+    fn an_opaque_operand_cannot_hide_an_independent_bad_write() {
+        for earlier in [
+            "manager.value",
+            "manager[0]",
+            "lambda item: item + manager",
+            "lambda item=None, *args, **kwargs: (item, args, kwargs)",
+        ] {
+            let source = format!(
+                "def check(manager):\n    earlier = {earlier}\n    items: list[int] = [3]\n    items.append(True)\ndef produce():\n    return set()\ncheck(produce())\n"
+            );
+            let mut graph = crate::modules::SourceGraph::single(&source).unwrap();
+            let Err(error) = super::lower_with_caller_cache(&mut graph, None) else {
+                panic!("expected to reject the bad write after {earlier}");
+            };
+            assert_eq!(error.kind, super::Kind::ExactType);
+            assert!(error.to_string().contains(":4:18:"));
+        }
+    }
+
+    #[test]
+    fn a_python_context_still_checks_its_body_and_successors() {
+        for (body, line) in [
+            (
+                "        items: list[int] = [3]\n        items.append(True)\n",
+                4,
+            ),
+            (
+                "        pass\n    items: list[int] = [3]\n    items.append(True)\n",
+                5,
+            ),
+        ] {
+            let source = format!(
+                "def check(manager):\n    with manager as stream:\n{body}def get_context():\n    return set()\ncheck(get_context())\n"
+            );
+            let mut graph = crate::modules::SourceGraph::single(&source).unwrap();
+            let Err(error) = super::lower_with_caller_cache(&mut graph, None) else {
+                panic!("expected the independent list operand to fail");
+            };
+            assert_eq!(error.kind, super::Kind::ExactType);
+            assert!(error.to_string().contains(&format!(":{line}:")));
+            assert!(error.to_string().contains("expected int, got bool"));
         }
     }
 

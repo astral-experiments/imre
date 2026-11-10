@@ -342,7 +342,7 @@ impl Checker<'_> {
         let handlers = if ty == Type::TaskGroup {
             let error = self.hidden(Type::Exception);
             vec![ir::ExceptHandler {
-                kinds: vec![0],
+                matcher: crate::ir::ExceptionMatcher::Categories(vec![0]),
                 name: Some(error),
                 body: vec![
                     Statement::Expr(operation(

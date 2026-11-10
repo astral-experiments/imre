@@ -1903,13 +1903,27 @@ pub(super) fn declared_pack(ctx: &mut Context, name: Id) -> Id {
 /// Create the lexical scope for a declaration's type parameters.
 pub(super) fn parameter_scope(ctx: &mut Context, outer: Id, names: Id, class: bool) -> Result<Id> {
     let enclosing = ctx.scope_data(outer);
-    let parent = if enclosing.class_body.is_some() {
+    let in_class = enclosing.class_body.is_some();
+    let parent = if in_class {
         enclosing.parent.unwrap_or(outer)
     } else {
         outer
     };
     let module = enclosing.module.clone();
+    let class_cell = enclosing.class_cell;
     let scope = ctx.scope(&module, Some(parent));
+    if in_class && !class {
+        // A method body skips the class, but its annotation thunk observes that class's live dictionary.
+        let dictionary = ctx.class_annotation_dict_cell(outer);
+        let Value::Scope(parameters) = ctx.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        parameters
+            .closure
+            .cells
+            .insert("__classdict__".to_owned(), dictionary);
+        parameters.class_cell = class_cell;
+    }
     initialize_parameters(ctx, scope, names, class)
 }
 

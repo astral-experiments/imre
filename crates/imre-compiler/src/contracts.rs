@@ -679,37 +679,42 @@ impl Builtin {
             | Self::RegisteredImport(_)
             | Self::RegisteredSuspend(..)
             | Self::RegisteredAssertionFailure { .. }
-            | Self::RegisteredModuleAnnotation(_)
+            | Self::RegisteredNamespaceAnnotation(_)
             | Self::RegisteredAnnotationStart
             | Self::RegisteredAnnotationFormat
-            | Self::RegisteredAnnotationInsert { .. }
+            | Self::RegisteredAnnotationInsert(_)
             | Self::BindAnnotationExpression(_)
             | Self::RegisteredAnnotationResult
             | Self::RegisteredDeleteName(..)
             | Self::RegisteredDefinition(_)
             | Self::RegisteredLambda(..)
+            | Self::RegisteredGenerator(..)
             | Self::RegisteredTypeAlias(_)
             | Self::RegisteredStatement(..)
+            | Self::RegisteredDiscard
             | Self::RegisteredName(_)
+            | Self::RegisteredCompare(_)
+            | Self::RegisteredContainsLiteral(_)
             | Self::RegisteredUnary(_)
+            | Self::RegisteredInPlace(_)
             | Self::RegisteredAttribute { .. }
             | Self::RegisteredSpread
             | Self::RegisteredDict(_)
+            | Self::Unrepresented
             | Self::RegisteredSubscript(..)
             | Self::RegisteredIndexConstant(_)
             | Self::RegisteredSlice
             | Self::RegisteredDeleteItem
             | Self::RegisteredEllipsis
             | Self::RegisteredComplex(..)
+            | Self::FormatConversion(_)
+            | Self::FormatField(_)
             | Self::RegisteredString(_)
             | Self::RegisteredTemplate(_)
             | Self::RegisteredInterpolation { .. }
-            | Self::RegisteredFormatConversion(_)
-            | Self::RegisteredFormat
-            | Self::RegisteredFormatJoin
             | Self::RegisteredNamespace(_)
             | Self::RegisteredUnpack { .. }
-            | Self::RegisteredIter
+            | Self::RegisteredIter(_)
             | Self::RegisteredCall(..)
             | Self::SortByComparator => Contract::new(true, Unknown),
             Self::ListReserveRange | Self::StructCyclePrefix => Contract::new(false, PreservesOwners),
@@ -718,6 +723,7 @@ impl Builtin {
             | Self::BinaryRead
             | Self::BinaryReadSize
             | Self::Ndiff
+            | Self::FormatJoin
             | Self::StringListCopy
             | Self::JoinedSplitLines
             | Self::StringListSortSuffix(_)
@@ -1178,7 +1184,9 @@ impl Binary {
     /// Conservative operation effect before operand-specific conversion checks.
     pub(crate) fn may_raise(self) -> bool {
         match self {
-            Self::Divide
+            Self::Power
+            | Self::MatrixMultiply
+            | Self::Divide
             | Self::FloorDivide
             | Self::Modulo
             | Self::Repeat
@@ -1197,6 +1205,8 @@ impl Binary {
     /// Includes checked byte concatenation and conversion of mixed integer/float operands.
     pub(crate) fn may_raise_with_operands(self, left: Type, right: Type) -> bool {
         self.may_raise()
+            || left == Type::PythonObject
+            || right == Type::PythonObject
             || (matches!(self, Self::Concat) && matches!(left, Type::Str | Type::Bytes))
             || matches!(
                 (left, right),

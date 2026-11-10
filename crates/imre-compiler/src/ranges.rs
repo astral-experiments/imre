@@ -32,14 +32,14 @@ impl IntRange {
     }
 }
 
-/// Expression identities remain valid while this immutable module borrow lives.
+/// Expression identities remain valid while the analyzed functions are borrowed.
 /// Missing facts, including unreachable or arbitrary-precision expressions, must
 /// use the ordinary checked lowering path.
 pub(crate) struct RangeFacts<'ir> {
     intervals: IntegerFacts,
     cursors: HashMap<*const Statement, Interval>,
     guarded_entries: HashMap<*const Statement, Vec<bool>>,
-    module: PhantomData<&'ir Module>,
+    ir: PhantomData<&'ir Function>,
 }
 
 pub(crate) struct IntegerFacts(HashMap<*const Expr, Interval>);
@@ -169,15 +169,21 @@ impl RangeFacts<'_> {
 /// Computes facts after ownership-preserving IR rewrites have finished. Loop
 /// bodies are recorded only after their entry invariant reaches a fixed point.
 pub(crate) fn analyze(module: &Module) -> RangeFacts<'_> {
+    analyze_functions(module.functions.iter().chain([&module.entry]))
+}
+
+pub(crate) fn analyze_functions<'ir>(
+    functions: impl Iterator<Item = &'ir Function>,
+) -> RangeFacts<'ir> {
     let mut analyzer = Analyzer::default();
-    for function in module.functions.iter().chain([&module.entry]) {
+    for function in functions {
         analyzer.function(function);
     }
     RangeFacts {
         intervals: IntegerFacts(analyzer.intervals),
         cursors: analyzer.cursors,
         guarded_entries: analyzer.guarded_entries,
-        module: PhantomData,
+        ir: PhantomData,
     }
 }
 
@@ -396,7 +402,11 @@ impl Interval {
                     max: self.max.map(|value| value >> shift.min(127)),
                 }
             }
-            Binary::Divide | Binary::Repeat | Binary::Concat => Self::UNKNOWN,
+            Binary::Power
+            | Binary::MatrixMultiply
+            | Binary::Divide
+            | Binary::Repeat
+            | Binary::Concat => Self::UNKNOWN,
         }
     }
 }
@@ -515,7 +525,12 @@ impl Analyzer {
         self.block(&function.body, State::unknown(function.locals.len()), true);
     }
 
-    fn block(&mut self, statements: &[Statement], state: State, record: bool) -> Flow {
+    fn block<'s>(
+        &mut self,
+        statements: impl IntoIterator<Item = &'s Statement>,
+        state: State,
+        record: bool,
+    ) -> Flow {
         let mut flow = Flow::next(state);
         for statement in statements {
             let Some(state) = flow.next.take() else { break };
@@ -557,6 +572,17 @@ impl Analyzer {
                 state.0[*target] = value;
             }
             Statement::Clear(slot) => state.0[*slot] = self.cleared[*slot],
+            Statement::Match(_, cases) => {
+                let unknown = State::unknown(state.0.len());
+                statement.operands(|value| {
+                    self.expression(value, &mut unknown.clone(), record);
+                });
+                let mut flow = Flow::next(unknown.clone());
+                for case in cases {
+                    flow = flow.join(self.block(&case.body, unknown.clone(), record));
+                }
+                return flow;
+            }
             Statement::Scope { body, clear } => {
                 let mut flow = self.block(body, state, record);
                 for state in [
@@ -572,6 +598,19 @@ impl Analyzer {
                         state.0[slot] = self.cleared[slot];
                     }
                 }
+                return flow;
+            }
+            Statement::With {
+                manager,
+                binding,
+                body,
+                ..
+            } => {
+                self.expression(manager, &mut state, record);
+                let unknown = State::unknown(state.0.len());
+                let protected = binding.iter().flat_map(|binding| &binding.body).chain(body);
+                let mut flow = self.block(protected, unknown.clone(), record);
+                flow.next = Some(unknown);
                 return flow;
             }
             Statement::Try {

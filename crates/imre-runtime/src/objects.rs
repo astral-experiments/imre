@@ -66,6 +66,7 @@ pub(crate) mod fnmatch;
 mod format_cursors;
 mod functools;
 mod hashlib;
+pub(crate) mod scalar_format;
 pub(crate) use hashlib::{
     State as HashState, hex_text as hash_hex, hex_with_separator, uppercase_hex_bytes,
 };
@@ -231,7 +232,7 @@ enum Storage {
     ContextVar(Rc<contextvars::Variable>),
     ContextToken(Rc<contextvars::Token>),
     TokenMissing,
-    Socket(socket::Socket),
+    Socket(allocator_api2::boxed::Box<socket::Socket>),
     StrDescriptor(u32),
     Sequence(Words),
     JoinBuffer(allocator_api2::boxed::Box<join_buffer::JoinBuffer>),

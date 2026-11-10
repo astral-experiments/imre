@@ -13,6 +13,8 @@ pub(crate) type Result<T, M = String> = std::result::Result<T, Failure<M>>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
     Ordinary,
+    UnsupportedRepresentation,
+    GeneratorSuspension,
     UnresolvedParameter(ModuleId, ruff_text_size::TextSize),
     ExecutionOperand(ModuleId),
     RegisteredExecution,
@@ -25,10 +27,19 @@ pub(crate) enum Kind {
     ScopedClassLayout,
 }
 
+/// The entry operand and physical source containing its checked diagnostic.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct EntryOperand {
+    pub(crate) module: ModuleId,
+    pub(crate) body: ModuleId,
+    pub(crate) statement: TextSize,
+    pub(crate) operand: TextRange,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Position {
     range: TextRange,
-    entry_statement: Option<(ModuleId, TextSize, TextRange)>,
+    entry_statement: Option<Box<EntryOperand>>,
     line: usize,
     column: usize,
 }
@@ -84,8 +95,8 @@ impl<M> Diagnostic<M> {
         self
     }
 
-    pub(crate) fn entry_operand(&self) -> Option<(ModuleId, TextSize, TextRange)> {
-        let entry = self.position.as_ref()?.entry_statement?;
+    pub(crate) fn entry_operand(&self) -> Option<EntryOperand> {
+        let entry = *self.position.as_ref()?.entry_statement.as_deref()?;
         (self.kind == Kind::ExactType).then_some(entry)
     }
 
@@ -96,11 +107,17 @@ impl<M> Diagnostic<M> {
     pub(super) fn reached_in_entry(
         &mut self,
         module: ModuleId,
+        body: ModuleId,
         statement: TextSize,
         call: TextRange,
     ) {
         if let Some(position) = &mut self.position {
-            position.entry_statement = Some((module, statement, call));
+            position.entry_statement = Some(Box::new(EntryOperand {
+                module,
+                body,
+                statement,
+                operand: call,
+            }));
         }
     }
 
@@ -174,6 +191,10 @@ impl From<&str> for Diagnostic {
 }
 
 impl Kind {
+    pub(super) fn is_representation(self) -> bool {
+        self == Self::UnsupportedRepresentation || self.is_object()
+    }
+
     pub(super) fn is_object(self) -> bool {
         matches!(self, Self::Object | Self::ScopedObject) || self.is_class_layout()
     }
@@ -223,9 +244,9 @@ impl Failure<&'static str> {
                 module,
                 range,
             },
-            Self::Diagnostic(report) => {
-                Diagnostic::at(source, site, report.message.to_owned()).into()
-            }
+            Self::Diagnostic(report) => Diagnostic::at(source, site, report.message.to_owned())
+                .classified(report.kind)
+                .into(),
         }
     }
 }
@@ -240,9 +261,14 @@ impl Failure {
             && report.kind == Kind::ExactType
             && let Some(position) = &mut report.position
         {
-            position
-                .entry_statement
-                .get_or_insert((module, statement, position.range));
+            position.entry_statement.get_or_insert_with(|| {
+                Box::new(EntryOperand {
+                    module,
+                    body: module,
+                    statement,
+                    operand: position.range,
+                })
+            });
         }
         self
     }
@@ -267,6 +293,10 @@ impl Failure {
             d.kind = kind;
         }
         self
+    }
+
+    pub(super) fn is_representation(&self) -> bool {
+        matches!(self, Self::Diagnostic(d) if d.kind.is_representation())
     }
 
     pub(super) fn is_object(&self) -> bool {

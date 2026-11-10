@@ -1249,11 +1249,24 @@ class Unused:
             pass
 print(42)
 "#;
-        reachable(source).unwrap();
-        // Reading an attribute on a shadowed name or evaluating a default
-        // may raise while defining the class, even when it is never used.
-        assert!(reachable(&source.replace("    if", "    sys = 1\n    if")).is_err());
-        assert!(reachable(&source.replace("method(self)", "method(self, x=globals())")).is_err());
+        // A shadowed attribute lookup and a method default both run while the
+        // module defines the class, even when nothing instantiates it.
+        for (source, retained) in [
+            (source.to_owned(), false),
+            (source.replace("    if", "    sys = 1\n    if"), true),
+            (
+                source.replace("method(self)", "method(self, x=globals())"),
+                true,
+            ),
+        ] {
+            let graph = super::SourceGraph::single_with_mode(&source, true).unwrap();
+            let class = super::DefinitionId {
+                module: graph.entry,
+                statement: 1,
+            };
+            assert_eq!(graph.includes(class), retained, "{source}");
+            reachable(&source).unwrap();
+        }
     }
 
     #[test]

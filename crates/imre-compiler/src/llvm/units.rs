@@ -8,9 +8,6 @@ use crate::CodegenUnit;
 pub(super) struct Output {
     /// Whether a reference to this named type also needs its destruction descriptor.
     pub(super) record_types: HashMap<Type, bool>,
-    pub(super) registered: Option<usize>,
-    pub(super) frame_lists: Vec<(usize, String, usize)>,
-    pub(super) statement_lines: HashMap<ruff_text_size::TextSize, usize>,
     units: Vec<String>,
     common: Option<String>,
     pub entry: usize,
@@ -35,9 +32,6 @@ impl Output {
             .collect();
         Self {
             record_types: HashMap::new(),
-            registered: None,
-            frame_lists: vec![],
-            statement_lines: HashMap::new(),
             units: vec![String::new(); count],
             common: split.then(|| "source_filename = \"imre-unit\"\n".to_owned()),
             entry,
@@ -91,14 +85,7 @@ impl Output {
     }
 
     pub fn function_name(&self, id: usize) -> String {
-        if let Some(site) = self.registered {
-            return format!("imre_registered_{site}_{id}");
-        }
         self.numbered("fn", id, self.functions[id])
-    }
-
-    pub(super) fn has_local_helpers(&self) -> bool {
-        !self.local_helpers.is_empty()
     }
 
     pub fn adapter_name(&self, id: usize, bound: bool) -> String {
@@ -265,9 +252,10 @@ pub(crate) fn emit_units(
     functions: &[usize],
     names: &[String],
     entry: usize,
-) -> Result<(Vec<CodegenUnit>, bool), super::Unsupported> {
+    program: NativeProgram,
+) -> Result<Vec<CodegenUnit>, super::Unsupported> {
     let mut output = Output::new(functions, names.len(), entry, true);
-    let prefer_objects = emit_program(module, ranges, sanitize, &mut output)?;
+    emit_program(module, ranges, sanitize, &mut output, program)?;
     let units = names
         .iter()
         .zip(output.finish())
@@ -276,7 +264,7 @@ pub(crate) fn emit_units(
             llvm_ir,
         })
         .collect();
-    Ok((units, prefer_objects))
+    Ok(units)
 }
 
 #[cfg(test)]

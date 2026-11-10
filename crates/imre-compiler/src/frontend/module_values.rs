@@ -10,7 +10,11 @@ type ClassLiteral = (Option<ModuleId>, Rc<[String]>);
 
 #[derive(Default)]
 pub(super) struct ModuleValues {
+    /// A reached initializer may still be waiting for a callee during this inference round.
+    waiting: RefCell<HashMap<DefinitionId, Failure>>,
     pub(super) registered_initializers: bool,
+    /// Ordered first stores whose checked RHS kept the live entry namespace intact.
+    pub(super) checked_entry_stores: RefCell<HashSet<usize>>,
     /// A concrete source read supplies the registered function's ordinary Python binding.
     pub(super) missing_bindings: RefCell<std::collections::BTreeMap<usize, Diagnostic>>,
     pub(super) class_data: RefCell<class_data::Storage>,
@@ -122,6 +126,13 @@ impl ModuleValues {
     }
 
     /// Resolves storage only after the defining initializer has been checked.
+    pub(super) fn read(&self, definition: DefinitionId) -> Result<Option<(usize, Type)>, String> {
+        if let Some(wait) = self.waiting.borrow().get(&definition) {
+            return Err(wait.clone());
+        }
+        Ok(self.get(definition))
+    }
+
     pub fn get(&self, definition: DefinitionId) -> Option<(usize, Type)> {
         self.definitions.borrow().get(&definition).copied()
     }
@@ -168,6 +179,28 @@ struct Checkpoint {
     binding_reads: HashSet<DefinitionId>,
 }
 
+impl Checkpoint {
+    fn record(
+        output: Option<&mut Vec<Self>>,
+        statement: usize,
+        body: Range<usize>,
+        initialized: usize,
+        available: &HashSet<DefinitionId>,
+        reads: &mut HashSet<DefinitionId>,
+    ) {
+        let binding_reads = std::mem::take(reads);
+        if let Some(checkpoints) = output {
+            checkpoints.push(Self {
+                statement,
+                body,
+                initialized,
+                definitions: available.clone(),
+                binding_reads,
+            });
+        }
+    }
+}
+
 impl Checker<'_> {
     /// Execute assignments in the class namespace at the definition's source position.
     /// A class local is visible to later initializers, but inherited names are not.
@@ -177,7 +210,7 @@ impl Checker<'_> {
         class_id: usize,
         available: &HashSet<DefinitionId>,
         body: &mut Vec<Statement>,
-        checkpoints: &mut Vec<Checkpoint>,
+        mut checkpoints: Option<&mut Vec<Checkpoint>>,
     ) -> Result<(), String> {
         use crate::classes::ClassValue;
         let class = &self.classes.declarations.definitions[class_id];
@@ -215,13 +248,14 @@ impl Checker<'_> {
                     kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![value]),
                 }));
             }
-            checkpoints.push(Checkpoint {
-                statement: definition.statement,
-                body: start..body.len(),
+            Checkpoint::record(
+                checkpoints.as_deref_mut(),
+                definition.statement,
+                start..body.len(),
                 initialized,
-                definitions: available.clone(),
-                binding_reads: std::mem::take(self.class_reads.get_mut()),
-            });
+                available,
+                self.class_reads.get_mut(),
+            );
         }
         if !class
             .static_bindings
@@ -297,13 +331,14 @@ impl Checker<'_> {
             self.class_lexical.insert(name.to_owned());
             self.assigned.insert(temporary);
             locals.push((name.to_owned(), temporary, previous));
-            checkpoints.push(Checkpoint {
-                statement: definition.statement,
-                body: start..body.len(),
+            Checkpoint::record(
+                checkpoints.as_deref_mut(),
+                definition.statement,
+                start..body.len(),
                 initialized,
-                definitions: available.clone(),
-                binding_reads: std::mem::take(self.class_reads.get_mut()),
-            });
+                available,
+                self.class_reads.get_mut(),
+            );
         }
         for (name, slot, previous) in locals.into_iter().rev() {
             self.class_lexical.remove(&name);
@@ -411,7 +446,8 @@ impl Checker<'_> {
                 self.source,
                 statement,
                 "imported module values cannot contain callable values",
-            ));
+            )
+            .classify(Kind::UnsupportedRepresentation));
         }
         let value = if rebound.is_some() {
             if !class_data_type(value.ty, self.types) {
@@ -419,7 +455,8 @@ impl Checker<'_> {
                     self.source,
                     statement,
                     "a rebindable module value requires plain scalar or container storage",
-                ));
+                )
+                .classify(Kind::UnsupportedRepresentation));
             }
             Expr {
                 ty: self.types.list(value.ty),
@@ -490,9 +527,14 @@ fn class_scoped_child(value: &ast::Expr) -> bool {
 }
 
 pub(super) struct Initialization {
-    pub module: ModuleId,
     pub function: ir::Function,
     pub calls: HashSet<usize>,
+    pub order: InitializationOrder,
+}
+
+/// Source-order checks index the original statements of the module initializer.
+pub(super) struct InitializationOrder {
+    pub module: ModuleId,
     checkpoints: Vec<Checkpoint>,
 }
 
@@ -502,13 +544,20 @@ impl Initialization {
         mut checker: Checker<'_>,
         available: &mut HashSet<DefinitionId>,
         range: Range<usize>,
-    ) -> Result<Self, String> {
+        output: Option<&mut Vec<Self>>,
+    ) -> Result<(), String> {
         checker.module_scope = true;
         let module = &checker.graph.modules[checker.module];
         let mut body = Vec::new();
-        let mut checkpoints = Vec::new();
+        let mut checkpoints = output.as_ref().map(|_| Vec::new());
+        let mut pending = None;
         let complete = range.end == module.parsed.syntax().body.len();
         for index in range {
+            // Inference and registered modules need the effects on bindings and types.
+            // Keep only the current statement's work until it has supplied those facts.
+            if output.is_none() {
+                body.clear();
+            }
             let statement = &module.parsed.syntax().body[index];
             let definition = DefinitionId {
                 module: checker.module,
@@ -519,21 +568,23 @@ impl Initialization {
             {
                 continue;
             }
-            let mut imports = HashSet::new();
-            checker.graph.ordered_reads(
-                checker.module,
-                std::slice::from_ref(statement),
-                false,
-                &mut imports,
-            );
-            if !imports.is_empty() {
-                checkpoints.push(Checkpoint {
-                    statement: index,
-                    body: body.len()..body.len(),
-                    initialized: checker.globals.types.borrow().len(),
-                    definitions: available.clone(),
-                    binding_reads: imports,
-                });
+            if let Some(checkpoints) = &mut checkpoints {
+                let mut imports = HashSet::new();
+                checker.graph.ordered_reads(
+                    checker.module,
+                    std::slice::from_ref(statement),
+                    false,
+                    &mut imports,
+                );
+                if !imports.is_empty() {
+                    checkpoints.push(Checkpoint {
+                        statement: index,
+                        body: body.len()..body.len(),
+                        initialized: checker.globals.types.borrow().len(),
+                        definitions: available.clone(),
+                        binding_reads: imports,
+                    });
+                }
             }
             if module.type_guards.binary_search(&index).is_ok()
                 || local_functions::type_variable(checker.graph, checker.module, statement)
@@ -559,7 +610,7 @@ impl Initialization {
                             class,
                             available,
                             &mut body,
-                            &mut checkpoints,
+                            checkpoints.as_mut(),
                         )?;
                     }
                     available.insert(definition);
@@ -602,13 +653,14 @@ impl Initialization {
                             .checked_builtin_import(checker.module, alias.range());
                         checker.check_errno_import(alias.name.as_str())
                     }));
-                    checkpoints.push(Checkpoint {
-                        statement: index,
-                        body: start..body.len(),
-                        initialized: checker.globals.types.borrow().len(),
-                        definitions: available.clone(),
-                        binding_reads: std::mem::take(checker.class_reads.get_mut()),
-                    });
+                    Checkpoint::record(
+                        checkpoints.as_mut(),
+                        index,
+                        start..body.len(),
+                        checker.globals.types.borrow().len(),
+                        available,
+                        checker.class_reads.get_mut(),
+                    );
                     continue;
                 }
                 ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_)
@@ -639,9 +691,45 @@ impl Initialization {
                 || crate::modules::value_name(statement).is_some()
             {
                 match checker.initialize_global(statement, definition) {
-                    Ok(value) => body.push(value),
-                    // Each module binding has one initializer. Leave its layout unknown
-                    // and continue discovering calls that do not read this binding.
+                    Ok(value) => {
+                        if checker.graph.registered_startup
+                            && checker.module == checker.graph.entry
+                            && checker.inference.is_none()
+                            && checker.module_namespace.is_unexposed()
+                            && checker.unrepresented.borrow().is_none()
+                            && checker.graph.deferred_object_error.borrow().is_none()
+                            && matches!(
+                                &value,
+                                Statement::Expr(Expr {
+                                    kind: ExprKind::Builtin(Builtin::GlobalSet(_), _),
+                                    ..
+                                })
+                            )
+                        {
+                            checker
+                                .globals
+                                .checked_entry_stores
+                                .borrow_mut()
+                                .insert(index);
+                        }
+                        body.push(value);
+                    }
+
+                    Err(wait @ Failure::PendingSignature { .. }) => {
+                        checker
+                            .globals
+                            .waiting
+                            .borrow_mut()
+                            .insert(definition, wait.clone());
+                        pending.get_or_insert(wait);
+                    }
+                    // The binding exists even when its initializer needs Python storage.
+                    // Preserve a real use-before-initialization error for unreached stores.
+                    Err(error) if checker.missing_operation(&error) => {
+                        if checker.globals.get(definition).is_none() {
+                            checker.globals.insert(definition, Type::PythonObject);
+                        }
+                    }
                     Err(error) if checker.defer_object_error(&error) => continue,
                     Err(error) => {
                         return Err(
@@ -650,7 +738,7 @@ impl Initialization {
                     }
                 }
             } else {
-                let (checked, _) = checker.statement(statement, &[])?;
+                let (checked, _) = checker.statement(statement)?;
                 // An imported module's __main__ block must type-check, but it
                 // cannot read definitions that are still being initialized.
                 if checker.module != checker.graph.entry
@@ -665,13 +753,14 @@ impl Initialization {
             if checker.fault_enabled() && body.len() > start {
                 body.insert(start, checker.fault_line(statement));
             }
-            checkpoints.push(Checkpoint {
-                statement: index,
-                body: start..body.len(),
+            Checkpoint::record(
+                checkpoints.as_mut(),
+                index,
+                start..body.len(),
                 initialized,
-                definitions: available.clone(),
-                binding_reads: std::mem::take(checker.class_reads.get_mut()),
-            });
+                available,
+                checker.class_reads.get_mut(),
+            );
         }
         if complete && checker.graph.has_ordered_imports() {
             available.insert(DefinitionId {
@@ -679,23 +768,32 @@ impl Initialization {
                 statement: module.parsed.syntax().body.len(),
             });
         }
-        Ok(Self {
-            module: checker.module,
-            function: ir::Function {
-                params: Vec::new(),
-                returns: Type::None,
-                locals: checker.locals,
-                body,
-            },
-            calls: checker.calls,
-            checkpoints,
-        })
+        checker.finish_region(pending.map_or(Ok(()), Err))?;
+        if let (Some(output), Some(checkpoints)) = (output, checkpoints) {
+            output.push(Self {
+                order: InitializationOrder {
+                    module: checker.module,
+                    checkpoints,
+                },
+                function: ir::Function {
+                    params: Vec::new(),
+                    returns: Type::None,
+                    locals: checker.locals,
+                    body,
+                },
+                calls: checker.calls,
+            });
+        }
+        Ok(())
     }
+}
 
+impl InitializationOrder {
     /// Rejects early direct and transitive reads, including hidden comprehensions.
     /// Requiring every potential callee to be available is deliberately conservative.
     pub fn validate(
         &self,
+        initializer: usize,
         graph: &SourceGraph,
         functions: &[ir::Function],
         binding_reads: &[HashSet<DefinitionId>],
@@ -710,7 +808,7 @@ impl Initialization {
             let mut visited = HashSet::new();
             let mut required_bindings = checkpoint.binding_reads.clone();
             collect(
-                &self.function.body[checkpoint.body.clone()],
+                &functions[initializer].body[checkpoint.body.clone()],
                 &mut reads,
                 &mut calls,
                 &mut references,
@@ -806,6 +904,7 @@ fn collect(
         ExprKind::Builtin(Builtin::GlobalGet(slot), _) => {
             reads.insert(*slot);
         }
+        ExprKind::Builtin(Builtin::FormatField(reprs), _) => calls.extend(reprs.iter().copied()),
         ExprKind::Call(id, _)
         | ExprKind::Builtin(
             Builtin::Process(

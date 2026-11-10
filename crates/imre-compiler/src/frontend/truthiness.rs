@@ -60,10 +60,7 @@ impl Checker<'_> {
     pub(super) fn test_truth(&mut self, value: Expr, at: &impl Ranged) -> Result<Expr, String> {
         if self.registered.is_some() {
             // A recorded parameter type does not replace the object's live truth protocol.
-            return Ok(Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Builtin(Builtin::Bool, vec![value]),
-            });
+            return Ok(registered::truth(value));
         }
         let value = Self::weak_target(value);
         if !self.needs_truth_dispatch(value.ty) {
@@ -242,7 +239,7 @@ impl Checker<'_> {
             } else if known == Some(!and) {
                 selected
             } else {
-                self.types.join(selected, right.ty).ok_or_else(|| {
+                self.types.join_results(selected, right.ty).ok_or_else(|| {
                     error(
                         self.source,
                         first,

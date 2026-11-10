@@ -158,7 +158,9 @@ impl Checker<'_> {
         let mut pull = vec![Statement::Try {
             body: pull,
             handlers: vec![ir::ExceptHandler {
-                kinds: vec![exception_kind("StopIteration").unwrap()],
+                matcher: crate::ir::ExceptionMatcher::Categories(vec![
+                    exception_kind("StopIteration").unwrap(),
+                ]),
                 name: None,
                 body: vec![Statement::Assign(ready, Expr::boolean(false))],
             }],

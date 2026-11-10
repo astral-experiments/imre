@@ -199,7 +199,8 @@ pub unsafe extern "C" fn imre_exception_formatter_result(
             Kind::TypeError,
             format!(
                 "{hook} returned non-string (type {})",
-                type_name(kind, word)
+                // SAFETY: the field view roots the projected word throughout display.
+                unsafe { type_name(kind, word) }
             ),
         )
         .returning(std::ptr::null())
@@ -342,7 +343,12 @@ pub unsafe extern "C" fn imre_exception_field_repr(value: *const Object) -> *con
     }
 }
 
-fn type_name(kind: WordKind, word: usize) -> std::borrow::Cow<'static, str> {
+/// # Safety
+/// The caller roots the concrete word of the supplied kind throughout inspection.
+pub(in crate::objects) unsafe fn type_name(
+    kind: WordKind,
+    word: usize,
+) -> std::borrow::Cow<'static, str> {
     let plain = match kind.raw() {
         0 => "NoneType",
         1 => "bool",
@@ -406,7 +412,10 @@ pub unsafe extern "C" fn imre_exception_field_len(value: *const Object) -> usize
         Err(error) => error.returning(0),
         Ok(None) => Error::new(
             Kind::TypeError,
-            format!("object of type '{}' has no len()", type_name(kind, word)),
+            // SAFETY: the field view roots the projected word through this lookup.
+            format!("object of type '{}' has no len()", unsafe {
+                type_name(kind, word)
+            }),
         )
         .returning(0),
     }

@@ -2,7 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ir::{self, ExprKind, Module, Type};
+#[cfg(test)]
+use crate::ir::Module;
+use crate::ir::{self, ExprKind, Type};
 
 /// Bound targets use the callable record's receiver as the first native argument.
 /// Their effects still come from the ordinary function, never a fresh initializer.
@@ -15,45 +17,61 @@ pub(crate) struct Target {
 #[derive(Default)]
 pub(crate) struct Targets(HashMap<Type, Vec<Target>>);
 
-impl Targets {
-    /// Join constructions of each signature across returns, forwarding and selection.
-    /// A signature originating in the runtime has an open set of targets.
-    pub(crate) fn analyze(module: &Module) -> Self {
-        let mut targets = Self::default();
-        let mut open = HashSet::new();
-        for function in module.functions.iter().chain([&module.entry]) {
-            ir::walk_expressions(&function.body, &mut |value| {
-                if matches!(
-                    value.kind,
-                    ExprKind::Builtin(
-                        ir::Builtin::BuiltinsLen | ir::Builtin::FnmatchFunction { .. },
-                        _
-                    )
-                ) {
-                    // These builtins have runtime entry points. A singleton Python
-                    // function of this signature cannot prove the target of a live lookup.
-                    open.insert(value.ty);
-                }
-                if let ExprKind::Callable { function, receiver } = &value.kind {
-                    let target = Target {
-                        function: *function,
-                        bound: receiver.is_some(),
-                    };
-                    targets.0.entry(value.ty).or_default().push(target);
-                    if let Some(signature) = module.types.wrapped_signature(value.ty) {
-                        // A wrapper can cross a plain Callable parameter or return
-                        // without losing its real invocation target.
-                        targets.0.entry(signature).or_default().push(target);
-                    }
-                }
-            });
+/// Collect closed targets and open runtime entries during the checked module inventory.
+#[derive(Default)]
+pub(crate) struct TargetCollector {
+    targets: Targets,
+    open: HashSet<Type>,
+}
+
+impl TargetCollector {
+    pub(crate) fn inspect(&mut self, types: &crate::types::Types, value: &ir::Expr) {
+        if matches!(
+            value.kind,
+            ExprKind::Builtin(
+                ir::Builtin::BuiltinsLen | ir::Builtin::FnmatchFunction { .. },
+                _
+            )
+        ) {
+            // These builtins have runtime entry points. A singleton Python
+            // function of this signature cannot prove the target of a live lookup.
+            self.open.insert(value.ty);
         }
+        if let ExprKind::Callable { function, receiver } = &value.kind {
+            let target = Target {
+                function: *function,
+                bound: receiver.is_some(),
+            };
+            self.targets.0.entry(value.ty).or_default().push(target);
+            if let Some(signature) = types.wrapped_signature(value.ty) {
+                // A wrapper can cross a plain Callable parameter or return
+                // without losing its real invocation target.
+                self.targets.0.entry(signature).or_default().push(target);
+            }
+        }
+    }
+
+    pub(crate) fn finish(self) -> Targets {
+        let Self { mut targets, open } = self;
         targets.0.retain(|ty, _| !open.contains(ty));
         for values in targets.0.values_mut() {
             values.sort_unstable();
             values.dedup();
         }
         targets
+    }
+}
+
+impl Targets {
+    #[cfg(test)]
+    pub(crate) fn analyze(module: &Module) -> Self {
+        let mut collector = TargetCollector::default();
+        for function in module.functions.iter().chain([&module.entry]) {
+            ir::walk_expressions(&function.body, &mut |value| {
+                collector.inspect(&module.types, value);
+            });
+        }
+        collector.finish()
     }
 
     /// An empty set is unknown, not proof that an invocation is unreachable.

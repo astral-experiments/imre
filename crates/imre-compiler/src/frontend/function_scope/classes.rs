@@ -20,6 +20,7 @@ impl ClassBindings {
 }
 
 pub(crate) struct ClassScope {
+    pub(crate) annotations: super::ClassAnnotations,
     pub(crate) bindings: ClassBindings,
     pub(crate) namespace: FunctionScope,
     pub(crate) frame_reads: BTreeSet<String>,
@@ -39,6 +40,7 @@ impl ClassScope {
         let (frame_reads, method_reads) =
             class_metadata::capture(&mut declarations, class, string_annotations);
         Self {
+            annotations: Default::default(),
             bindings,
             namespace: FunctionScope::new(
                 ClosureNames {

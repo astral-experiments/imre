@@ -114,8 +114,13 @@ fn protocol_snapshot(
         items: Vec::with_capacity(count),
     };
     for index in 0..count {
+        // Python packs the starred remainder into a list even when its items are opaque.
         let item = builtin(
-            Type::PythonObject,
+            if star == Some(index) {
+                sequence_type
+            } else {
+                Type::PythonObject
+            },
             Builtin::ListGet,
             vec![binder.pattern_local(root), Expr::integer(index)],
         );
@@ -124,7 +129,7 @@ fn protocol_snapshot(
     snapshot
 }
 
-fn take_pattern_temporary(value: Expr, slot: usize) -> Expr {
+pub(super) fn take_pattern_temporary(value: Expr, slot: usize) -> Expr {
     Expr {
         ty: value.ty,
         kind: ExprKind::Scope {
@@ -329,6 +334,12 @@ impl Checker<'_> {
                 value
             };
             let statement = self.assign_value(target, value)?;
+            if let Some(sites) = &mut self.fixed_sites
+                && local.is_some()
+                && let Statement::Assign(slot, _) = &statement
+            {
+                sites.statement(assignment.value.range(), FixedNode::Store(*slot));
+            }
             return Ok(vec![statement]);
         }
         let context = assignment
@@ -952,7 +963,12 @@ impl PatternBinder for Checker<'_> {
         value: Expr,
         stable: Option<usize>,
     ) -> StdResult<PatternSnapshot, Self::Error> {
-        if self.registered.is_some() && value.ty == Type::PythonObject {
+        if value.ty == Type::PythonObject
+            && (self.registered.is_some() || self.graph.modules[self.module].is_program_source())
+        {
+            if self.registered.is_none() {
+                self.require_registered_operation(target);
+            }
             let sequence = self.types.list(Type::PythonObject);
             return Ok(protocol_snapshot(
                 self,

@@ -753,77 +753,6 @@ pub(in super::super) fn zeroed_bytes(size: i64) -> Result<Vec<u8>> {
     Ok(data)
 }
 
-struct FixedFloatSpec {
-    sign: u8,
-    width: usize,
-    zero: bool,
-    precision: u32,
-    percent: bool,
-}
-
-impl FixedFloatSpec {
-    /// Parse the supported sign, decimal width and bounded precision for f and %.
-    fn parse(spec: &str) -> Result<Option<Self>> {
-        let Some(prefix) = spec.strip_suffix(['f', '%']) else {
-            return Ok(None);
-        };
-        let (digits, sign) = match prefix.as_bytes().first() {
-            Some(&sign @ (b'+' | b' ')) => (&prefix[1..], sign),
-            Some(b'-') => (&prefix[1..], 0),
-            _ => (prefix, 0),
-        };
-        let (width, places) = digits.split_once('.').unwrap_or((digits, "6"));
-        let Ok(precision) = places.parse::<u32>() else {
-            return Ok(None);
-        };
-        if precision > 1000
-            || !width
-                .bytes()
-                .chain(places.bytes())
-                .all(|b| b.is_ascii_digit())
-        {
-            return Ok(None);
-        }
-        let zero = width.starts_with('0');
-        let width = if width.is_empty() {
-            0
-        } else {
-            width
-                .parse::<isize>()
-                .map_err(|_| Error::new("ValueError", "Too many decimal digits in format string"))?
-                as usize
-        };
-        Ok(Some(Self {
-            sign,
-            width,
-            zero,
-            precision,
-            percent: spec.ends_with('%'),
-        }))
-    }
-
-    /// Pad the rounded ASCII result, keeping a numeric sign ahead of zero fill.
-    fn render(&self, number: f64) -> Result<String> {
-        let text =
-            crate::objects::format_fixed_float(number, self.precision, self.percent, self.sign)?;
-        if self.width <= text.len() {
-            return Ok(text.into_string());
-        }
-        let head = usize::from(self.zero && text.starts_with(['+', '-', ' ']));
-        let mut padded = String::new();
-        padded
-            .try_reserve_exact(self.width)
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        padded.push_str(&text[..head]);
-        padded.extend(std::iter::repeat_n(
-            if self.zero { '0' } else { ' ' },
-            self.width - text.len(),
-        ));
-        padded.push_str(&text[head..]);
-        Ok(padded)
-    }
-}
-
 /// Convert a numeric formatting operand to binary64, checking large integers first.
 fn float_operand(ctx: &Context, value: Id) -> Result<Option<f64>> {
     Ok(match ctx.heap.get(ctx.scalar_value(value)) {
@@ -903,6 +832,9 @@ pub(super) fn builtin_format(
         Some(id) => ctx.str_value(id)?,
         None => "",
     };
+    if owner == "object" {
+        crate::objects::scalar_format::check_object_spec(spec, ctx.type_name(value))?;
+    }
     if spec.is_empty() {
         if let Value::Int(number) = ctx.heap.get(value) {
             let text = super::super::operators::rendered_integer(number)?;
@@ -910,19 +842,23 @@ pub(super) fn builtin_format(
         }
         return super::call(ctx, "str", &[value], &[]);
     }
-    if owner == "object" {
-        return Err(type_error(format!(
-            "unsupported format string passed to {}.__format__",
-            ctx.type_name(value)
-        )));
-    }
     if let Some(storage) = ctx.string_storage(value) {
-        let field = crate::format_grammar::FormatPrefix::parse(spec, '<', true)
-            .map_err(|e| Error::new("ValueError", e))?;
-        let precision = field.string_precision(
-            surrogate_fill.is_none().then_some(spec),
+        let (field, precision) = crate::objects::scalar_format::string_field(
+            spec,
+            surrogate_fill.is_none(),
             ctx.type_name(value),
         )?;
+        if surrogate_fill.is_none()
+            && let Value::Str(text) = ctx.heap.get(storage)
+        {
+            return Ok(
+                match crate::objects::scalar_format::utf8_field(text, &field, precision)? {
+                    Some(text) => ctx.alloc(Value::Str(text)),
+                    None if text.is_empty() => storage,
+                    None => value,
+                },
+            );
+        }
         let alignment = match field.align {
             Some('>') => "rjust",
             Some('^') => "format-center",
@@ -950,21 +886,19 @@ pub(super) fn builtin_format(
             padded
         });
     }
-    if let Some(field) = FixedFloatSpec::parse(spec)? {
-        let number = float_operand(ctx, value)?
-            .ok_or_else(|| type_error(format!("unsupported format string {spec:?}")))?;
-        return Ok(ctx.text(field.render(number)?));
-    }
     if let Value::Float(number) = ctx.heap.get(ctx.scalar_value(value)) {
-        let text = crate::objects::brace_float_field(spec, *number, ctx.type_name(value))?;
+        let text = crate::objects::scalar_format::float_field(spec, *number, ctx.type_name(value))?;
         return Ok(ctx.text(text));
     }
     if matches!(
         ctx.heap.get(ctx.scalar_value(value)),
         Value::Bool(_) | Value::Int(_)
     ) {
-        let text =
-            crate::objects::brace_integer_field(spec, ctx.as_int(value)?, ctx.type_name(value))?;
+        let text = crate::objects::scalar_format::integer_field(
+            spec,
+            ctx.as_int(value)?,
+            ctx.type_name(value),
+        )?;
         return Ok(ctx.text(text));
     }
     Err(type_error(format!("unsupported format string {spec:?}")))
@@ -2256,16 +2190,12 @@ fn justify_string(
     let result = if let Value::Str(s) = source
         && let Some(ch) = char::from_u32(fill).or((margin == 0).then_some(' '))
     {
-        let size = margin
-            .checked_mul(ch.len_utf8())
-            .and_then(|bytes| bytes.checked_add(s.len()))
-            .ok_or_else(memory_error)?;
-        let mut padded = String::new();
-        padded.try_reserve_exact(size).map_err(|_| memory_error())?;
-        padded.extend(std::iter::repeat_n(ch, left));
-        padded.push_str(s);
-        padded.extend(std::iter::repeat_n(ch, margin - left));
-        Value::Str(padded.into())
+        Value::Str(crate::objects::scalar_format::padded_text(
+            s,
+            ch,
+            left,
+            margin - left,
+        )?)
     } else {
         let mut points = Vec::new();
         points

@@ -82,9 +82,11 @@ impl Checker<'_> {
                     body: vec![Statement::Try {
                         body: vec![Statement::Assign(slot, text)],
                         handlers: vec![ir::ExceptHandler {
-                            kinds: ["TypeError", "AttributeError", "BytesWarning"]
-                                .map(|s| exception_kind(s).unwrap())
-                                .to_vec(),
+                            matcher: crate::ir::ExceptionMatcher::Categories(
+                                ["TypeError", "AttributeError", "BytesWarning"]
+                                    .map(|s| exception_kind(s).unwrap())
+                                    .to_vec(),
+                            ),
                             name: None,
                             body: vec![Statement::Raise(Some(error))],
                         }],
@@ -121,7 +123,9 @@ impl Checker<'_> {
                     Statement::Try {
                         body: vec![Statement::Assign(result, glob(text))],
                         handlers: vec![ir::ExceptHandler {
-                            kinds: vec![exception_kind("ValueError").unwrap()],
+                            matcher: crate::ir::ExceptionMatcher::Categories(vec![
+                                exception_kind("ValueError").unwrap(),
+                            ]),
                             name: None,
                             body: vec![Statement::Assign(invalid, Expr::boolean(true))],
                         }],

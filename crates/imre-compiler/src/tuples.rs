@@ -231,6 +231,16 @@ fn inspect(
             Statement::Expr(value) | Statement::Return(value) | Statement::Assert(value) => {
                 inspect_expression(value, candidates, producers);
             }
+            Statement::Match(_, cases) => {
+                statement.operands(|value| inspect_expression(value, candidates, producers));
+                for case in cases {
+                    for &slot in &case.captures {
+                        candidates[slot].eligible = false;
+                    }
+                    inspect(&case.body, candidates, producers, &mut HashSet::new());
+                }
+                fresh.clear();
+            }
             Statement::If(condition, yes, no) => {
                 inspect_expression(condition, candidates, producers);
                 inspect(yes, candidates, producers, fresh);
@@ -240,6 +250,19 @@ fn inspect(
                 inspect_expression(condition, candidates, producers);
                 inspect(body, candidates, producers, &mut HashSet::new());
                 inspect(orelse, candidates, producers, fresh);
+            }
+            Statement::With {
+                manager,
+                binding,
+                body,
+                ..
+            } => {
+                inspect_expression(manager, candidates, producers);
+                if let Some(binding) = binding {
+                    candidates[binding.entered].eligible = false;
+                    inspect(&binding.body, candidates, producers, fresh);
+                }
+                inspect(body, candidates, producers, fresh);
             }
             Statement::Scope { body, .. } => inspect(body, candidates, producers, fresh),
             Statement::Try {
@@ -529,6 +552,7 @@ mod tests {
             kind: ExprKind::Call(
                 0,
                 crate::ir::CallArgs {
+                    python_site: None,
                     exhaustive_enum_match: false,
                     values: vec![
                         Expr {

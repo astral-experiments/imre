@@ -2,11 +2,17 @@
 
 use super::*;
 
+pub(super) mod booleans;
+mod eager;
+mod generators;
+pub(crate) use generators::RegisteredGenerator;
 mod lambdas;
-pub(crate) use lambdas::RegisteredLambda;
+pub(crate) use lambdas::{LambdaBinding, LambdaDefault, RegisteredLambda};
 mod templates;
-pub(crate) use templates::{prepare_templates, template_segments};
-pub(super) mod type_alias;
+pub(crate) use templates::{PreparedStrings, PreparedTemplate, TemplateField};
+pub(super) mod patterns;
+mod placement;
+pub(crate) use placement::place_fixed_function;
 pub(super) mod values;
 
 /// Prepare the bindings installed by the existing type-parameter frame constructor.
@@ -34,55 +40,116 @@ pub(crate) fn registered_type_parameters(
         .collect()
 }
 
-pub(super) struct Frame<'a> {
-    pub(super) literals: &'a values::ModuleSource,
-    pub(super) deferred: std::cell::RefCell<Option<Failure>>,
+/// An expression can own private slots without introducing another Python function.
+pub(crate) struct RegisteredOperand {
+    pub(crate) value: Expr,
+    #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+    locals: Vec<Type>,
+    pub(crate) local_names: HashMap<usize, LocalBinding>,
 }
 
-impl<'a> Frame<'a> {
-    pub(super) fn new(literals: &'a values::ModuleSource) -> Self {
-        Self {
-            literals,
-            deferred: Default::default(),
+#[derive(Clone, Copy)]
+enum RegionRoot<'a> {
+    Suite(&'a [Statement]),
+    Operand(&'a Expr),
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct RegisteredRegion<'a> {
+    #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+    pub(crate) locals: &'a [Type],
+    #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+    pub(crate) params: &'a [usize],
+    pub(crate) local_names: &'a HashMap<usize, LocalBinding>,
+    root: RegionRoot<'a>,
+}
+
+impl<'a> RegisteredRegion<'a> {
+    pub(crate) fn walk(self, visit: &mut impl FnMut(ir::Node<'a>, Option<&'a Expr>)) {
+        match self.root {
+            RegionRoot::Suite(body) => ir::walk_nodes(body, visit),
+            RegionRoot::Operand(value) => ir::walk_operand_nodes(value, visit),
         }
     }
 
-    pub(super) fn require_object(&self, source: &str, site: &impl Ranged) {
-        self.deferred.borrow_mut().get_or_insert_with(|| {
-            error(
-                source,
-                site,
-                "operation requires its compiled object representation",
-            )
-            .classify(Kind::ScopedObject)
+    pub(crate) fn private_slots(self) -> std::collections::BTreeSet<usize> {
+        let mut slots = std::collections::BTreeSet::new();
+        self.walk(&mut |node, _| match node {
+            ir::Node::Statement(Statement::Scope { clear, .. })
+            | ir::Node::Expression(Expr {
+                kind: ExprKind::Scope { clear, .. },
+                ..
+            }) => {
+                slots.extend(clear);
+            }
+            _ => {}
         });
+        slots.retain(|slot| !self.local_names.contains_key(slot));
+        slots
+    }
+}
+
+impl RegisteredOperand {
+    /// Lower an inline value with its lexical bindings and compiler-owned slots.
+    pub(crate) fn prepare(
+        expr: &ast::Expr,
+        source: values::RegisteredSource<'_>,
+        kind: RegisteredScope,
+    ) -> Option<Self> {
+        Self::prepare_with(source, kind, |scope| scope.operand(expr))
+    }
+
+    fn prepare_with(
+        source: values::RegisteredSource<'_>,
+        kind: RegisteredScope,
+        lower: impl FnOnce(&mut SourceScope<'_>) -> Option<Expr>,
+    ) -> Option<Self> {
+        let operations = HashMap::new();
+        let sites = StatementSites::default();
+        let mut scope = SourceScope::new(kind, source, &operations, &sites);
+        let value = lower(&mut scope)?;
+        Some(Self::from_scope(value, scope))
+    }
+
+    fn from_scope(value: Expr, scope: SourceScope<'_>) -> Self {
+        let (_locals, local_names) = scope.bindings();
+        Self {
+            value,
+            #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+            locals: _locals,
+            local_names,
+        }
+    }
+
+    pub(crate) fn region(&self) -> RegisteredRegion<'_> {
+        RegisteredRegion {
+            #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+            locals: &self.locals,
+            #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+            params: &[],
+            local_names: &self.local_names,
+            root: RegionRoot::Operand(&self.value),
+        }
     }
 }
 
 pub(crate) struct RegisteredFunction {
+    /// Physical positions for the unchanged fixed operations, in checked node order.
+    pub(crate) fixed_sites: Vec<TextRange>,
     pub(crate) function: ir::Function,
     pub(crate) local_names: HashMap<usize, LocalBinding>,
 }
 
 impl RegisteredFunction {
-    fn expression(range: TextRange, value: Expr) -> Self {
-        Self::expression_with_prologue(range, value, None)
-    }
-
-    fn expression_with_prologue(
-        range: TextRange,
-        value: Expr,
-        prologue: Option<Statement>,
-    ) -> Self {
+    pub(super) fn expression(range: TextRange, value: Expr) -> Self {
         let checkpoint = operation(
             Builtin::RegisteredStatement(range, None),
             Type::None,
             vec![],
         );
-        let mut body = vec![Statement::Expr(checkpoint)];
-        body.extend(prologue);
-        body.push(Statement::Return(value));
+        let body = vec![Statement::Expr(checkpoint), Statement::Return(value)];
         Self {
+            fixed_sites: Vec::new(),
             function: ir::Function {
                 params: vec![],
                 returns: Type::PythonObject,
@@ -93,40 +160,63 @@ impl RegisteredFunction {
         }
     }
 
-    /// Only IR scopes name compiler-owned storage. User-visible names stay in the Python frame.
-    pub(crate) fn private_slots(&self) -> std::collections::BTreeSet<usize> {
-        let body = &self.function.body;
-        let mut slots = std::collections::BTreeSet::new();
-        ir::walk_statements(body, &mut |stmt| {
-            if let Statement::Scope { clear, .. } = stmt {
-                slots.extend(clear);
-            }
-        });
-        ir::walk_expressions(body, &mut |expr| {
-            if let ExprKind::Scope { clear, .. } = &expr.kind {
-                slots.extend(clear);
-            }
-        });
-        slots.retain(|slot| !self.local_names.contains_key(slot));
-        slots
+    pub(crate) fn region(&self) -> RegisteredRegion<'_> {
+        RegisteredRegion {
+            #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+            locals: &self.function.locals,
+            #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+            params: &self.function.params,
+            local_names: &self.local_names,
+            root: RegionRoot::Suite(&self.function.body),
+        }
     }
 }
 
 /// Storage in the function frame or in a lexically nested Python namespace.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LocalBinding {
     pub(crate) name: String,
     pub(crate) namespace: Option<usize>,
 }
 
 /// Lower a definition whose binder supplies Python object handles in its normal function scope.
+/// A call to a generator returns its resumable frame. Keep the actual checked body
+/// so emission can bind the same instructions that established this calling convention.
+pub(super) fn generator_body(
+    module: &crate::modules::SourceModule,
+    definition: &ast::StmtFunctionDef,
+    optimization: i32,
+    source: &values::ModuleSource,
+) -> Option<RegisteredFunction> {
+    let physical = module.parsed.syntax().body.iter().find_map(|stmt| {
+        stmt.as_function_def_stmt()
+            .filter(|original| original.start() == definition.start())
+    })?;
+    if physical.is_async || !imre_ast::code_flags::is_generator(&physical.body) {
+        return None;
+    }
+    let operations = HashMap::new();
+    let preparation = SuitePreparation::new(
+        &operations,
+        source.context(&module.source),
+        &physical.body,
+        optimization == 0,
+    );
+    preparation
+        .complete(
+            &physical.body,
+            RegisteredScope::Function { is_async: false },
+        )
+        .map(|suite| suite.checked)
+}
+
 pub(super) fn lower_definition<'a>(
     mut checker: Checker<'a>,
     definition: &ast::StmtFunctionDef,
     signature: &Signature,
     literals: &'a values::ModuleSource,
 ) -> Result<RegisteredFunction, String> {
-    checker.registered = Some(Frame::new(literals));
+    checker.registered = Some(literals);
     let source = checker.source;
     let helpers = checker.helpers;
     let first_helper = helpers.len();
@@ -141,10 +231,11 @@ pub(super) fn lower_definition<'a>(
         .classify(Kind::ScopedObject));
     }
     let function = RegisteredFunction {
+        fixed_sites: Vec::new(),
         function: body.function,
         local_names,
     };
-    if !crate::dynamic::supports_registered_function(&function) {
+    if !crate::llvm::registered::supports(&function) {
         return Err(error(
             source,
             definition,
@@ -184,6 +275,43 @@ impl SourceChecks {
     }
 }
 
+/// Both operands are already Python handles. A heterogeneous selection needs no conversion.
+fn selected_type(left: Type, right: Type) -> Type {
+    if left == right {
+        left
+    } else {
+        Type::PythonObject
+    }
+}
+
+pub(super) fn truth(value: Expr) -> Expr {
+    operation(Builtin::Bool, Type::Bool, vec![value])
+}
+
+pub(super) fn select(condition: Expr, yes: Expr, no: Expr) -> Expr {
+    Expr {
+        ty: selected_type(yes.ty, no.ty),
+        kind: ExprKind::Conditional(Box::new(condition), Box::new(yes), Box::new(no)),
+    }
+}
+
+pub(super) fn selected_operands(and: bool, mut operands: Vec<Expr>) -> Expr {
+    let mut result = operands.pop().expect("boolean operands are nonempty");
+    for left in operands.into_iter().rev() {
+        result = Expr {
+            ty: selected_type(left.ty, result.ty),
+            kind: ExprKind::BooleanValue(and, Box::new(left), Box::new(result)),
+        };
+    }
+    result
+}
+
+pub(super) enum Capture<'a> {
+    Solved,
+    IncludeLive,
+    Entry(&'a HashSet<usize>),
+}
+
 pub(super) fn capture(
     graph: &SourceGraph,
     signatures: &HashMap<DefinitionId, Signature>,
@@ -191,57 +319,95 @@ pub(super) fn capture(
     types: &Types,
     inference: &inference::Inference,
     globals: &ModuleValues,
-    retain_live_parameters: bool,
+    mode: Capture<'_>,
 ) {
-    let mut registered = HashMap::<ModuleId, HashMap<TextSize, RegisteredFunction>>::new();
     let mut sources = HashMap::new();
     let mut checks = SourceChecks::default();
-    for (&owner, signature) in signatures {
+    let mut pending = inference.pending_bodies.borrow_mut();
+    let owners = pending.get_or_insert_with(|| {
+        // Inference can request recovery before signatures settle.
+        signatures
+            .keys()
+            .copied()
+            .filter(|owner| graph.modules[owner.module].is_program_source())
+            .collect()
+    });
+    owners.retain(|&owner| {
+        let signature = &signatures[&owner];
         let id = owner.module;
         let module = &graph.modules[id];
-        if !module.is_program_source() {
-            continue;
-        }
         // Use the original definition. The registered binder retains its names, defaults and frame.
         let Some(function) = module.parsed.syntax().body[owner.statement].as_function_def_stmt()
         else {
-            continue;
+            return false;
         };
-        let Some(signature) = inference.registered_signature(signature) else {
-            if let Some(signature) = inference.checked_signature(signature) {
-                let helpers = Helpers::new(inference.len());
-                let checker =
-                    Checker::new(graph, id, signatures, classes, types, &helpers, globals);
-                retained::capture(checker, function, &signature, inference.len(), false);
-            }
-            continue;
-        };
-        if !retain_live_parameters {
-            continue;
+        // Recovery may follow an owning definition that has already checked this site.
+        if graph
+            .registered_functions()
+            .get(&id)
+            .is_some_and(|bodies| bodies.contains_key(&function.start()))
+        {
+            return false;
         }
+        let (signature, solved) = if let Some(signature) = inference.registered_signature(signature)
+        {
+            if !matches!(mode, Capture::IncludeLive) {
+                return true;
+            }
+            (signature, false)
+        } else if let Some(mut signature) = inference.checked_signature(signature)
+            && signature.params.iter().all(|p| p.ty != Type::PythonObject)
+        {
+            // The fixed-layout checker owns the source return contract. The Python
+            // activation returns a handle, including the result of an open call.
+            signature.returns = Type::PythonObject;
+            (signature, true)
+        } else {
+            return true;
+        };
         let helpers = Helpers::new(inference.len());
-        let checker = Checker::new(graph, id, signatures, classes, types, &helpers, globals);
+        // A solved definition reads names from the Python namespace. Its trial
+        // must not establish a native caller or consume a missing binding.
+        let private = solved.then(ModuleValues::default);
+        let mut checker = Checker::new(
+            graph,
+            id,
+            signatures,
+            classes,
+            types,
+            &helpers,
+            private.as_ref().unwrap_or(globals),
+        );
+        // The fixed checker validated this physical signature in the settled round.
+        checker.checked_callback_effects =
+            solved && matches!(mode, Capture::Entry(checked) if checked.contains(&signature.id));
         let literals = sources
             .entry(id)
             .or_insert_with(|| values::ModuleSource::new(module));
-        if let Ok(body) = lower_definition(checker, function, &signature, literals) {
-            if !checks.accepts(graph, id, function) {
-                continue;
-            }
-            registered
-                .entry(id)
-                .or_default()
-                .insert(function.start(), body);
+        let lower = || lower_definition(checker, function, &signature, literals).ok();
+        let body = if solved {
+            graph.try_registered_body(id, lower)
+        } else {
+            lower()
+        };
+        if let Some(body) = body
+            && checks.accepts(graph, id, function)
+        {
+            graph.register_function(id, function.start(), body);
+            return false;
         }
-    }
-    if retain_live_parameters {
-        graph.set_registered_functions(registered);
-    }
+        true
+    });
 }
 
 pub(super) fn checkpoint(stmt: &ast::Stmt) -> Statement {
+    // Truth conversion can call Python after the condition's last operand returns.
+    let range = match stmt {
+        ast::Stmt::If(branch) => branch.test.range(),
+        _ => stmt.range(),
+    };
     Statement::Expr(operation(
-        Builtin::RegisteredStatement(stmt.range(), imre_ast::unhighlighted_call(stmt)),
+        Builtin::RegisteredStatement(range, imre_ast::unhighlighted_call(stmt)),
         Type::None,
         vec![],
     ))
@@ -252,6 +418,28 @@ fn operation(op: Builtin, ty: Type, operands: Vec<Expr>) -> Expr {
         ty,
         kind: ExprKind::Builtin(op, operands),
     }
+}
+
+/// The implicit format argument is checked in the lazy evaluator, before its RHS.
+pub(crate) fn type_alias_body(
+    value: &ast::Expr,
+    source: values::RegisteredSource<'_>,
+) -> Option<AnnotationCode> {
+    let mut code = AnnotationCode::prepare(value, source)?;
+    let format = operation(
+        Builtin::RegisteredAnnotationFormat,
+        Type::None,
+        vec![values::name_binding(".format")],
+    );
+    code.operand.value = Expr {
+        ty: code.operand.value.ty,
+        kind: ExprKind::Scope {
+            body: vec![Statement::Expr(format)],
+            value: Box::new(code.operand.value),
+            clear: Vec::new(),
+        },
+    };
+    Some(code)
 }
 
 pub(crate) fn registered_type_alias(site: TextSize) -> Expr {
@@ -316,101 +504,8 @@ fn registered_import(stmt: &ast::Stmt, private_names: &imre_ast::Names) -> Optio
 pub(crate) enum RegisteredScope {
     Module,
     Class,
+    Lambda,
     Function { is_async: bool },
-}
-
-/// Source facts needed to prepare registered bodies, including definitions inside class scopes.
-#[derive(Default)]
-pub(crate) struct RegisteredSites<'a> {
-    pub(crate) operations: HashMap<TextRange, Expr>,
-    pub(crate) workers: Vec<(&'a ast::StmtFunctionDef, imre_ast::ThreadEntry)>,
-}
-
-pub(crate) fn registered_sites<'a>(
-    stmts: &'a [ast::Stmt],
-    private_names: &imre_ast::Names,
-) -> RegisteredSites<'a> {
-    use ast::statement_visitor::{StatementVisitor, walk_stmt};
-    struct Collector<'s, 'a> {
-        private_names: &'s imre_ast::Names,
-        sites: RegisteredSites<'a>,
-    }
-    impl<'a> StatementVisitor<'a> for Collector<'_, 'a> {
-        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-            if let ast::Stmt::FunctionDef(def) = stmt {
-                if let Some(entry) = imre_ast::thread_entry(def) {
-                    self.sites.workers.push((def, entry));
-                    // An admitted suite contains no imports, deletes, or declarations.
-                    return;
-                }
-            } else if let Some(import) = registered_import(stmt, self.private_names) {
-                self.sites.operations.insert(stmt.range(), import);
-            } else if let ast::Stmt::Delete(delete) = stmt {
-                for target in delete_targets(delete) {
-                    if let Some(binding) = registered_delete_name(target) {
-                        self.sites.operations.insert(target.range(), binding);
-                    }
-                }
-            }
-            walk_stmt(self, stmt);
-        }
-    }
-    let mut collector = Collector {
-        private_names,
-        sites: RegisteredSites::default(),
-    };
-    collector.visit_body(stmts);
-    collector.sites
-}
-
-pub(crate) struct DeferredModuleAnnotation {
-    pub(crate) name: String,
-    pub(crate) value: AnnotationValue,
-}
-
-pub(crate) enum AnnotationValue {
-    Checked(Expr),
-    Bound(Box<AnnotationChild>),
-    Source(ast::Expr),
-}
-
-pub(crate) struct AnnotationChild {
-    pub(crate) id: ir::AnnotationCodeId,
-    pub(crate) text: String,
-    pub(crate) body: RegisteredFunction,
-    pub(crate) has_templates: bool,
-}
-
-impl AnnotationChild {
-    fn new(
-        id: ir::AnnotationCodeId,
-        text: &str,
-        parsed: &ruff_python_parser::Parsed<ast::ModExpression>,
-    ) -> Option<Self> {
-        let expression = &parsed.syntax().body;
-        let tokens = parsed.tokens();
-        let replacements = values::literal_replacements(text, tokens);
-        let has_templates = tokens
-            .iter()
-            .any(|token| token.kind() == ast::token::TokenKind::TStringStart);
-        // An eval expression has its own source positions and looks up names in
-        // the namespace supplied by its eventual caller.
-        let source = values::RegisteredSource {
-            text,
-            replacements: &replacements,
-            has_templates,
-            method_imports: &Default::default(),
-            private_names: None,
-            templates: None,
-        };
-        let value = values::registered_value(expression, source)?;
-        Some(Self {
-            id,
-            text: text.to_owned(),
-            has_templates,
-            body: RegisteredFunction::expression(expression.range(), value),
-        })
-    }
 }
 
 /// Only compound, valid strings outside the bundled library get a separately bound
@@ -424,71 +519,131 @@ pub(crate) fn annotation_expression(
     (!expr.is_name_expr() && !expr.is_literal_expr()).then_some(parsed)
 }
 
-impl DeferredModuleAnnotation {
-    fn new(
-        id: ir::AnnotationCodeId,
-        name: String,
-        expression: &ast::Expr,
+pub(crate) struct DeferredAnnotation {
+    pub(crate) range: TextRange,
+    pub(crate) name: String,
+    pub(crate) value: AnnotationValue,
+}
+
+pub(crate) struct ParameterAnnotations {
+    pub(crate) entries: Vec<ir::AnnotationOccurrence>,
+    pub(crate) body: RegisteredSuite,
+    pub(crate) references: HashMap<String, String>,
+}
+
+impl ParameterAnnotations {
+    fn prepare<R>(
+        def: &ast::StmtFunctionDef,
         source: values::RegisteredSource<'_>,
-        bundled: bool,
-    ) -> Self {
-        let value = if let ast::Expr::StringLiteral(literal) = expression
-            && !source.has_templates
-            && source.replacements.is_empty()
-        {
-            let text = literal.value.to_str();
-            if !bundled && let Some(parsed) = annotation_expression(text) {
-                AnnotationChild::new(id, text, &parsed).map_or_else(
-                    || AnnotationValue::Source(expression.clone()),
-                    |child| AnnotationValue::Bound(Box::new(child)),
-                )
-            } else {
-                // annotation_text returns an unpositioned normal str on this path.
-                AnnotationValue::Checked(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Str(text.to_owned()),
-                })
+        operands: &HashMap<TextSize, PreparedAnnotation<R>>,
+        sites: &mut HashMap<TextSize, DeferredAnnotation>,
+    ) -> Option<Self> {
+        let annotations = parameter_annotations(&def.parameters, def.returns.as_deref());
+        if annotations.is_empty() {
+            return None;
+        }
+        let mut entries = Vec::with_capacity(annotations.len());
+        let mut references = HashMap::new();
+        let operations = HashMap::new();
+        let statement_sites = StatementSites::default();
+        // Each annotation is evaluated in the same provider activation.
+        let mut scope = SourceScope::new(
+            RegisteredScope::Function { is_async: false },
+            source,
+            &operations,
+            &statement_sites,
+        );
+        for (name, expression) in annotations {
+            let site = expression.start();
+            if let Some(reference) = scalar_reference(expression) {
+                references.insert(name.to_owned(), reference);
             }
-        } else {
-            values::Region::Suite
-                .operand(expression, source)
-                .map_or_else(
-                    || AnnotationValue::Source(expression.clone()),
-                    AnnotationValue::Checked,
-                )
-        };
-        Self { name, value }
+            let value = operands
+                .get(&site)
+                .map(|operand| operand.operand(site))
+                .or_else(|| {
+                    if !matches!(
+                        expression,
+                        ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_)
+                    ) {
+                        return None;
+                    }
+                    let start = scope.locals.len();
+                    let value = scope.operand(expression);
+                    if value.is_none() {
+                        scope.truncate_locals(start);
+                    }
+                    value
+                });
+            sites.insert(
+                site,
+                DeferredAnnotation::new(name.to_owned(), expression, value),
+            );
+            entries.push(ir::AnnotationOccurrence { site, index: None });
+        }
+        let mut body = DeferredAnnotation::prepare_body(sites, &entries);
+        (body.checked.function.locals, body.checked.local_names) = scope.bindings();
+        Some(Self {
+            entries,
+            body,
+            references,
+        })
+    }
+}
+
+/// Names that can refer directly to a type without calling Python.
+fn scalar_reference(expr: &ast::Expr) -> Option<String> {
+    match expr {
+        ast::Expr::NoneLiteral(_) => Some("None".to_owned()),
+        ast::Expr::Name(name) if !name.id.starts_with("__") => Some(name.id.to_string()),
+        ast::Expr::Attribute(attr) => {
+            let module = attr.value.as_name_expr()?;
+            (!module.id.starts_with("__") && !attr.attr.starts_with("__"))
+                .then(|| format!("{}.{}", module.id, attr.attr))
+        }
+        _ => None,
+    }
+}
+
+pub(crate) enum AnnotationValue {
+    Checked(Expr),
+    Source(ast::Expr),
+}
+
+impl DeferredAnnotation {
+    fn new(name: String, expression: &ast::Expr, checked: Option<Expr>) -> Self {
+        let value = checked.map_or_else(
+            || AnnotationValue::Source(expression.clone()),
+            AnnotationValue::Checked,
+        );
+        Self {
+            name,
+            range: expression.range(),
+            value,
+        }
     }
 
     /// Number already-checked operands in physical marker order, including repeated finally edges.
-    pub(crate) fn prepare_body(entries: &[&Self]) -> RegisteredSuite {
+    pub(crate) fn prepare_body(
+        sites: &HashMap<TextSize, Self>,
+        entries: &[ir::AnnotationOccurrence],
+    ) -> RegisteredSuite {
         let mut residual = Vec::new();
         let mut body = vec![Statement::Expr(operation(
             Builtin::RegisteredAnnotationStart,
             Type::None,
             vec![],
         ))];
-        for (index, entry) in entries.iter().enumerate() {
-            let value = match &entry.value {
+        for (index, occurrence) in entries.iter().enumerate() {
+            let value = match &sites[&occurrence.site].value {
                 AnnotationValue::Checked(value) => value.clone(),
-                AnnotationValue::Bound(child) => operation(
-                    Builtin::BindAnnotationExpression(child.id),
-                    Type::Str,
-                    vec![Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Str(child.text.clone()),
-                    }],
-                ),
                 AnnotationValue::Source(_) => {
                     SourceRun::record(&mut residual, index, body.len());
                     continue;
                 }
             };
             body.push(Statement::Expr(operation(
-                Builtin::RegisteredAnnotationInsert {
-                    index,
-                    name: entry.name.clone(),
-                },
+                Builtin::RegisteredAnnotationInsert(*occurrence),
                 Type::None,
                 vec![value],
             )));
@@ -500,6 +655,7 @@ impl DeferredModuleAnnotation {
         )));
         RegisteredSuite {
             checked: RegisteredFunction {
+                fixed_sites: Vec::new(),
                 function: ir::Function {
                     params: vec![],
                     returns: Type::PythonObject,
@@ -513,72 +669,198 @@ impl DeferredModuleAnnotation {
     }
 }
 
-/// Prepare module markers and the delayed operands of their native annotation callback.
-pub(crate) fn module_annotations(
-    body: &[ast::Stmt],
-    string_annotations: bool,
-    operations: &mut HashMap<TextRange, Expr>,
+/// Physical source operands shared by namespace initialization and lazy annotation providers.
+pub(crate) struct FunctionSite<'a> {
+    pub(crate) def: &'a ast::StmtFunctionDef,
+    pub(crate) prepare_entry: bool,
+    pub(crate) thread_entry: Option<imre_ast::ThreadEntry>,
+}
+
+pub(crate) struct ClassSite<'a> {
+    pub(crate) def: &'a ast::StmtClassDef,
+    enclosing: RegisteredScope,
+    enclosing_function: Option<TextSize>,
+    parameters: Option<Vec<ir::RegisteredTypeParameter>>,
+}
+
+pub(crate) struct RegisteredClass {
+    pub(crate) body: RegisteredSuite,
+    pub(crate) header: ClassHeader,
+}
+
+/// Decorators use the enclosing activation. Generic bases and keywords use the
+/// type-parameter activation. A missing operand keeps its individual source callback.
+pub(crate) struct ClassHeader {
+    pub(crate) parameters: Option<Vec<ir::RegisteredTypeParameter>>,
+    pub(crate) layout: ir::PackedArguments,
+    pub(crate) operands: Vec<Option<RegisteredOperand>>,
+    pub(crate) decorators: Vec<Option<RegisteredOperand>>,
+}
+
+#[derive(Default)]
+pub(crate) struct RegisteredSites<'a> {
+    pub(crate) operations: HashMap<TextRange, Expr>,
+    pub(crate) functions: Vec<FunctionSite<'a>>,
+    pub(crate) classes: Vec<ClassSite<'a>>,
+    pub(crate) annotations: HashMap<TextSize, DeferredAnnotation>,
+    pub(crate) parameter_annotations: HashMap<TextSize, ParameterAnnotations>,
+}
+
+pub(crate) fn registered_sites<'a, R>(
+    body: &'a [ast::Stmt],
+    names: &imre_ast::Names,
     source: values::RegisteredSource<'_>,
-    bundled: bool,
-) -> HashMap<TextSize, DeferredModuleAnnotation> {
+    operands: &HashMap<TextSize, PreparedAnnotation<R>>,
+) -> RegisteredSites<'a> {
     use ast::statement_visitor::{StatementVisitor, walk_stmt};
-    struct Annotations<'a> {
-        string_annotations: bool,
-        operations: &'a mut HashMap<TextRange, Expr>,
-        deferred: HashMap<TextSize, DeferredModuleAnnotation>,
-        source: values::RegisteredSource<'a>,
-        bundled: bool,
+    struct Collector<'s, 'a, R> {
+        names: &'s imre_ast::Names,
+        source: values::RegisteredSource<'s>,
+        operands: &'s HashMap<TextSize, PreparedAnnotation<R>>,
+        scope: RegisteredScope,
+        in_unprepared_generic: bool,
+        function: Option<TextSize>,
+        output: RegisteredSites<'a>,
     }
-    impl<'a> StatementVisitor<'a> for Annotations<'_> {
+    impl<'a, R> StatementVisitor<'a> for Collector<'_, 'a, R> {
         fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            if let Some(import) = registered_import(stmt, self.names) {
+                self.output.operations.insert(stmt.range(), import);
+            }
             match stmt {
-                ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => {}
-                ast::Stmt::AnnAssign(ann) => {
-                    if ann.simple
-                        && let Some(name) = ann.target.as_name_expr()
-                    {
-                        let name = name.id.to_string();
-                        let annotation = if self.string_annotations {
-                            let spelling = super::annotation_spelling(&ann.annotation);
-                            if !self.bundled && annotation_expression(&spelling).is_some() {
-                                // The source statement still binds an evaluable string to its native code.
-                                return;
-                            }
-                            ir::ModuleAnnotation::String { name, spelling }
-                        } else {
-                            let site = DeferredModuleAnnotation::new(
-                                ir::AnnotationCodeId(self.deferred.len()),
-                                name,
-                                &ann.annotation,
-                                self.source,
-                                self.bundled,
-                            );
-                            self.deferred.insert(ann.start(), site);
-                            ir::ModuleAnnotation::Deferred(ann.start())
-                        };
-                        self.operations.insert(
-                            ann.target.range(),
+                ast::Stmt::ClassDef(class) => {
+                    self.output.classes.push(ClassSite {
+                        def: class,
+                        enclosing: self.scope,
+                        enclosing_function: self.function,
+                        parameters: class
+                            .type_params
+                            .as_deref()
+                            .map(|params| registered_type_parameters(params, self.names)),
+                    });
+                    let outer = std::mem::replace(&mut self.scope, RegisteredScope::Class);
+                    let function = self.function.take();
+                    walk_stmt(self, stmt);
+                    self.function = function;
+                    self.scope = outer;
+                }
+                ast::Stmt::FunctionDef(def) => {
+                    if let Some(provider) = ParameterAnnotations::prepare(
+                        def,
+                        self.source,
+                        self.operands,
+                        &mut self.output.annotations,
+                    ) {
+                        self.output
+                            .parameter_annotations
+                            .insert(def.parameters.start(), provider);
+                    }
+                    let generic_binding = !matches!(self.scope, RegisteredScope::Function { .. })
+                        && super::function_scope::type_parameter_scope(
+                            def,
+                            self.names.string_annotations,
+                            matches!(self.scope, RegisteredScope::Class),
+                            Some(self.names),
+                        )
+                        .is_some();
+                    if generic_binding {
+                        self.output.operations.insert(
+                            def.name.range(),
                             operation(
-                                Builtin::RegisteredModuleAnnotation(annotation),
-                                Type::None,
-                                vec![],
+                                Builtin::RegisteredDefinition(ir::DefinitionSite::Function(
+                                    def.start(),
+                                )),
+                                Type::PythonObject,
+                                Vec::new(),
                             ),
                         );
                     }
+                    // Nested ordinary functions of an admitted definition take the
+                    // same preparation path as any other lexical function.
+                    let unprepared = !generic_binding
+                        && (self.in_unprepared_generic || def.type_params.is_some());
+                    let thread_entry = imre_ast::thread_entry(def);
+                    let worker = thread_entry.is_some();
+                    self.output.functions.push(FunctionSite {
+                        def,
+                        prepare_entry: !unprepared || worker,
+                        thread_entry,
+                    });
+                    if worker {
+                        // A proven worker contains no nested declarations or namespace effects.
+                        return;
+                    }
+                    let outer_generic =
+                        std::mem::replace(&mut self.in_unprepared_generic, unprepared);
+                    let outer = std::mem::replace(
+                        &mut self.scope,
+                        RegisteredScope::Function {
+                            is_async: def.is_async,
+                        },
+                    );
+                    let function = self.function.replace(def.start());
+                    walk_stmt(self, stmt);
+                    self.function = function;
+                    self.scope = outer;
+                    self.in_unprepared_generic = outer_generic;
+                }
+                ast::Stmt::AnnAssign(ann)
+                    if !matches!(self.scope, RegisteredScope::Function { .. }) && ann.simple =>
+                {
+                    let Some(name) = ann.target.as_name_expr() else {
+                        return;
+                    };
+
+                    let name = name.id.to_string();
+                    let (annotation, values) = if self.names.string_annotations {
+                        let site = ann.annotation.start();
+                        (
+                            ir::NamespaceAnnotation::String { name },
+                            vec![self.operands[&site].operand(site)],
+                        )
+                    } else {
+                        self.output.annotations.insert(
+                            ann.start(),
+                            DeferredAnnotation::new(
+                                name.clone(),
+                                &ann.annotation,
+                                self.operands
+                                    .get(&ann.annotation.start())
+                                    .map(|operand| operand.operand(ann.annotation.start())),
+                            ),
+                        );
+                        (
+                            ir::NamespaceAnnotation::Deferred {
+                                site: ann.start(),
+                                name,
+                            },
+                            Vec::new(),
+                        )
+                    };
+                    self.output.operations.insert(
+                        ann.target.range(),
+                        operation(
+                            Builtin::RegisteredNamespaceAnnotation(annotation),
+                            Type::None,
+                            values,
+                        ),
+                    );
                 }
                 _ => walk_stmt(self, stmt),
             }
         }
     }
-    let mut annotations = Annotations {
-        string_annotations,
-        operations,
-        deferred: HashMap::new(),
+    let mut sites = Collector {
+        names,
         source,
-        bundled,
+        operands,
+        scope: RegisteredScope::Module,
+        in_unprepared_generic: false,
+        function: None,
+        output: RegisteredSites::default(),
     };
-    annotations.visit_body(body);
-    annotations.deferred
+    sites.visit_body(body);
+    sites.output
 }
 
 /// Checked instructions retain their canonical function layout. Source runs are owned
@@ -586,11 +868,108 @@ pub(crate) fn module_annotations(
 pub(crate) struct SourceRun {
     pub(crate) at: usize,
     pub(crate) statements: std::ops::Range<usize>,
+    pub(crate) effect: Option<SourceEffect>,
+}
+
+pub(crate) enum ValueStatement {
+    /// Retain the RHS once for the checked assignment targets that follow.
+    Store(usize),
+    Return,
+    Expression,
+    Raise,
+}
+
+pub(crate) enum SourceEffect {
+    /// Transfer control or discard a value using operands prepared in this frame.
+    Value(ValueStatement, Vec<PhysicalOperand>),
+    /// Evaluate and release each operand of an annotation without an assigned value.
+    Discard(Vec<PhysicalOperand>),
+    /// The enclosing suite owns any source inputs on their test or failure edge.
+    Assertion(Box<AssertionSite>),
+    /// A target operand that failed to prepare retains its original diagnostic site.
+    RefusedTargetOperand(TextRange, &'static str),
+    /// Evaluate the operands at their place in the operation, in the current frame.
+    ObjectOperation(Box<Builtin>, Vec<PhysicalOperand>),
+    /// The enclosing loop supplies the destination and cleanup depth.
+    LoopTransfer(TextRange, &'static Statement),
+    /// A mixed loop needs its source suites. A literal false test runs only the else suite.
+    While(SourceGuard<Box<RegisteredOperand>>),
+    /// Exception matchers and all control-flow children belong to this protected region.
+    Try(Box<PreparedTry>),
+    /// The manager, binding and protected child are prepared together.
+    Context(Box<PreparedContext>),
+    /// A loop whose checked lowering left one or more physical inputs or suites.
+    For(Box<PreparedFor>),
+}
+
+fn loop_transfer(stmt: &ast::Stmt) -> Option<&'static Statement> {
+    match stmt {
+        ast::Stmt::Break(_) => Some(&Statement::Break),
+        ast::Stmt::Continue(_) => Some(&Statement::Continue),
+        _ => None,
+    }
+}
+
+pub(crate) struct PreparedFor {
+    pub(crate) range: TextRange,
+    pub(crate) iterable_range: TextRange,
+    pub(crate) acquire: ir::IteratorOp,
+    pub(crate) pull: ir::IterNextKind,
+    pub(crate) iterable: PhysicalOperand,
+    pub(crate) target: PhysicalBinding,
+    pub(crate) body: PhysicalSuite,
+    pub(crate) otherwise: Option<PhysicalSuite>,
+}
+
+pub(crate) enum PhysicalBinding {
+    Checked {
+        entered: usize,
+        binding: Box<RegisteredFunction>,
+    },
+    Refused(TextRange, &'static str),
+}
+
+pub(crate) struct PhysicalSuite {
+    pub(crate) plan: RegisteredSuite,
+    pub(crate) sources: Vec<ast::Stmt>,
+}
+
+impl PhysicalSuite {
+    fn new(mut plan: RegisteredSuite, stmts: &[ast::Stmt]) -> Self {
+        let mut sources = Vec::new();
+        for run in &mut plan.residual {
+            let start = sources.len();
+            if !matches!(
+                run.effect,
+                Some(
+                    SourceEffect::For(_)
+                        | SourceEffect::Context(_)
+                        | SourceEffect::Try(_)
+                        | SourceEffect::LoopTransfer(..)
+                        | SourceEffect::ObjectOperation(..)
+                        | SourceEffect::Discard(_)
+                        | SourceEffect::Value(..)
+                        | SourceEffect::RefusedTargetOperand(..)
+                )
+            ) {
+                sources.extend_from_slice(&stmts[run.statements.clone()]);
+            }
+            run.statements = start..sources.len();
+        }
+        Self { plan, sources }
+    }
+}
+
+pub(crate) enum PhysicalOperand {
+    Checked(Box<RegisteredOperand>),
+    Source(Box<ast::Expr>),
 }
 
 impl SourceRun {
     fn record(runs: &mut Vec<Self>, source_index: usize, checked_offset: usize) {
         if let Some(run) = runs.last_mut()
+            && run.effect.is_none()
+            && run.at == checked_offset
             && run.statements.end == source_index
         {
             run.statements.end += 1;
@@ -598,6 +977,7 @@ impl SourceRun {
             runs.push(Self {
                 at: checked_offset,
                 statements: source_index..source_index + 1,
+                effect: None,
             });
         }
     }
@@ -614,77 +994,241 @@ impl RegisteredSuite {
     }
 }
 
-fn plain_class_header(class: &ast::StmtClassDef) -> bool {
-    class.type_params.is_none() && class.arguments.as_ref().is_none_or(|args| args.is_empty())
+pub(crate) struct AssertionSite {
+    pub(crate) body: Vec<Statement>,
+    pub(crate) external_test: bool,
+    pub(crate) external_message: bool,
 }
 
-fn checked_assertion(
-    stmt: &ast::StmtAssert,
-    mut operand: impl FnMut(&ast::Expr) -> Option<Expr>,
-) -> Option<Vec<Statement>> {
-    let condition = operand(&stmt.test)?;
-    let message = match stmt.msg.as_deref() {
-        Some(message) => vec![operand(message)?],
-        None => Vec::new(),
-    };
-    let test = operation(Builtin::Bool, Type::Bool, vec![condition]);
-    let failure = operation(
-        Builtin::RegisteredAssertionFailure {
-            statement: stmt.start(),
-            test: stmt.test.start(),
-        },
-        Type::None,
-        message,
-    );
-    // The implicit truth conversion can call Python on the test's physical line.
-    Some(vec![
-        Statement::Expr(operation(
-            Builtin::RegisteredStatement(stmt.test.range(), None),
+impl AssertionSite {
+    fn prepare(
+        stmt: &ast::StmtAssert,
+        mut operand: impl FnMut(&ast::Expr) -> Option<Expr>,
+    ) -> Self {
+        let condition = operand(&stmt.test);
+        let external_test = condition.is_none();
+        let message = stmt.msg.as_deref().map(&mut operand);
+        let external_message = matches!(message, Some(None));
+        let input = || Expr::local(0, Type::PythonObject);
+        let test = operation(
+            Builtin::Bool,
+            Type::Bool,
+            vec![condition.unwrap_or_else(input)],
+        );
+        let failure = operation(
+            Builtin::RegisteredAssertionFailure {
+                statement: stmt.start(),
+                test: stmt.test.start(),
+            },
             Type::None,
-            vec![],
-        )),
-        Statement::If(test, Vec::new(), vec![Statement::Expr(failure)]),
-    ])
-}
-
-/// Prepare only whole assertions. The physical suite owns an assertion when either
-/// operand needs source lowering, including an unsupported message on a valid test.
-fn assertion_sites(
-    body: &[ast::Stmt],
-    source: values::RegisteredSource<'_>,
-    enabled: bool,
-) -> HashMap<TextRange, Vec<Statement>> {
-    use ast::statement_visitor::{StatementVisitor, walk_stmt};
-
-    struct Sites<'a> {
-        source: values::RegisteredSource<'a>,
-        enabled: bool,
-        statements: HashMap<TextRange, Vec<Statement>>,
-    }
-
-    impl<'a> StatementVisitor<'a> for Sites<'_> {
-        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-            if let ast::Stmt::Assert(assertion) = stmt {
-                if !self.enabled {
-                    self.statements.insert(stmt.range(), Vec::new());
-                } else if let Some(body) = checked_assertion(assertion, |expr| {
-                    values::registered_value(expr, self.source)
-                }) {
-                    self.statements.insert(stmt.range(), body);
-                }
-            } else {
-                walk_stmt(self, stmt);
-            }
+            message
+                .into_iter()
+                .map(|value| value.unwrap_or_else(input))
+                .collect(),
+        );
+        // The implicit truth conversion can call Python on the test's physical line.
+        Self {
+            body: vec![
+                Statement::Expr(operation(
+                    Builtin::RegisteredStatement(stmt.test.range(), None),
+                    Type::None,
+                    vec![],
+                )),
+                Statement::If(test, Vec::new(), vec![Statement::Expr(failure)]),
+            ],
+            external_test,
+            external_message,
         }
     }
 
-    let mut sites = Sites {
+    pub(crate) fn complete(&self) -> bool {
+        !self.external_test && !self.external_message
+    }
+}
+
+/// Physical source locations and semantic operations shared by complete and residual suites.
+#[derive(Default)]
+pub(crate) struct StatementSites {
+    pub(crate) expressions: booleans::ExpressionSites,
+    omit_assertions: bool,
+    pub(crate) ifs: HashMap<TextRange, SourceConditional>,
+    pub(crate) matches: HashMap<TextRange, Option<patterns::SourceMatch>>,
+    pub(crate) contexts: HashMap<TextRange, Vec<ir::ContextSite>>,
+}
+
+pub(crate) struct PreparedTry {
+    pub(crate) range: TextRange,
+    pub(crate) is_star: bool,
+    pub(crate) body: PhysicalSuite,
+    pub(crate) handlers: Vec<PreparedHandler>,
+    pub(crate) otherwise: PhysicalSuite,
+    pub(crate) finalbody: Option<PhysicalSuite>,
+}
+
+pub(crate) struct PreparedHandler {
+    pub(crate) matcher: Option<(TextRange, PhysicalOperand)>,
+    pub(crate) name: Option<String>,
+    pub(crate) body: PhysicalSuite,
+}
+
+pub(crate) struct PreparedContext {
+    pub(crate) range: TextRange,
+    pub(crate) inputs: Vec<ContextInput>,
+    pub(crate) body: PhysicalSuite,
+}
+
+pub(crate) struct ContextInput {
+    pub(crate) site: ir::ContextSite,
+    pub(crate) manager: PhysicalOperand,
+    pub(crate) target: Option<PhysicalBinding>,
+}
+
+fn for_pull(loop_: &ast::StmtFor) -> Option<ir::AsyncPull> {
+    loop_.is_async.then(|| ir::AsyncPull {
+        range: loop_.iter.range(),
+        header: Some(loop_.start()),
+    })
+}
+
+fn iteration_protocol(
+    iterable: TextRange,
+    pull: Option<ir::AsyncPull>,
+) -> (ir::IteratorOp, ir::IterNextKind) {
+    match pull {
+        Some(pull) => (
+            ir::IteratorOp::Async(iterable),
+            ir::IterNextKind::Async(pull),
+        ),
+        None => (ir::IteratorOp::Loop, ir::IterNextKind::Generic),
+    }
+}
+
+/// Source sites for a statement which could not be lowered as a complete checked block.
+pub(crate) struct SourceConditional(Vec<SourceIfArm>);
+
+pub(crate) struct SourceIfArm {
+    clause: Option<usize>,
+    pub(crate) body_start: Option<TextSize>,
+    guard: Option<SourceGuard>,
+}
+
+pub(crate) enum SourceGuard<T = Expr> {
+    Literal(bool),
+    Checked(T),
+    Residual,
+}
+
+impl SourceIfArm {
+    pub(crate) fn test<'a>(&self, source: &'a ast::StmtIf) -> &'a ast::Expr {
+        match self.clause {
+            Some(index) => source.elif_else_clauses[index]
+                .test
+                .as_ref()
+                .expect("conditional guard"),
+            None => &source.test,
+        }
+    }
+
+    pub(crate) fn body<'a>(&self, source: &'a ast::StmtIf) -> &'a [ast::Stmt] {
+        match self.clause {
+            Some(index) => &source.elif_else_clauses[index].body,
+            None => &source.body,
+        }
+    }
+}
+
+impl SourceConditional {
+    /// Dead literal arms in a suspended frame have no resume entry.
+    pub(crate) fn arms(
+        &self,
+        suspended: bool,
+    ) -> impl Iterator<Item = (Option<&SourceGuard>, &SourceIfArm)> {
+        self.0.iter().filter_map(move |arm| {
+            let test = match &arm.guard {
+                Some(SourceGuard::Literal(false)) if suspended => return None,
+                Some(SourceGuard::Literal(true)) if suspended => None,
+                guard => guard.as_ref(),
+            };
+            Some((test, arm))
+        })
+    }
+}
+
+fn if_clauses(branch: &ast::StmtIf) -> impl Iterator<Item = (Option<&ast::Expr>, &[ast::Stmt])> {
+    std::iter::once((Some(branch.test.as_ref()), branch.body.as_slice())).chain(
+        branch
+            .elif_else_clauses
+            .iter()
+            .map(|clause| (clause.test.as_ref(), clause.body.as_slice())),
+    )
+}
+
+fn statement_sites(
+    body: &[ast::Stmt],
+    source: values::RegisteredSource<'_>,
+    assertions_enabled: bool,
+) -> StatementSites {
+    use ast::statement_visitor::{StatementVisitor, walk_stmt};
+
+    struct Collector<'a> {
+        source: values::RegisteredSource<'a>,
+        sites: StatementSites,
+    }
+
+    impl<'a> StatementVisitor<'a> for Collector<'_> {
+        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            if let ast::Stmt::With(with) = stmt {
+                let inputs = with
+                    .items
+                    .iter()
+                    .map(|item| context_site(self.source.text, &item.context_expr, with.is_async))
+                    .collect();
+                self.sites.contexts.insert(stmt.range(), inputs);
+            }
+            if let ast::Stmt::Match(branch) = stmt {
+                self.sites.matches.insert(
+                    stmt.range(),
+                    patterns::SourceMatch::prepare(branch, self.source),
+                );
+            }
+            if let ast::Stmt::If(branch) = stmt {
+                let guard = |expr: &ast::Expr| {
+                    if let ast::Expr::BooleanLiteral(literal) = expr {
+                        SourceGuard::Literal(literal.value)
+                    } else {
+                        values::registered_value(expr, self.source)
+                            .map_or(SourceGuard::Residual, SourceGuard::Checked)
+                    }
+                };
+                let arms = if_clauses(branch)
+                    .enumerate()
+                    .map(|(index, (test, body))| SourceIfArm {
+                        clause: index.checked_sub(1),
+                        body_start: body.first().map(Ranged::start),
+                        guard: test.map(guard),
+                    })
+                    .collect();
+                self.sites.ifs.insert(stmt.range(), SourceConditional(arms));
+            }
+            walk_stmt(self, stmt);
+        }
+    }
+
+    let mut collector = Collector {
         source,
-        enabled,
-        statements: HashMap::new(),
+        sites: StatementSites {
+            omit_assertions: !assertions_enabled,
+            ..StatementSites::default()
+        },
     };
-    sites.visit_body(body);
-    sites.statements
+    collector.visit_body(body);
+    collector.sites
+}
+
+#[derive(Clone, Copy)]
+enum SuiteSelection<'a> {
+    All,
+    Physical(&'a dyn Fn(TextSize) -> bool),
 }
 
 /// Prepare ordered suites while the source tree and its namespace operands are available.
@@ -692,7 +1236,7 @@ pub(crate) struct SuitePreparation<'a> {
     operations: &'a HashMap<TextRange, Expr>,
     source: values::RegisteredSource<'a>,
     pub(crate) nested: HashMap<TextSize, RegisteredSuite>,
-    pub(crate) assertions: HashMap<TextRange, Vec<Statement>>,
+    pub(crate) sites: StatementSites,
 }
 
 impl<'a> SuitePreparation<'a> {
@@ -706,31 +1250,305 @@ impl<'a> SuitePreparation<'a> {
             operations,
             source,
             nested: HashMap::new(),
-            assertions: assertion_sites(body, source, assertions_enabled),
+            sites: statement_sites(body, source, assertions_enabled),
         }
     }
 
+    pub(crate) fn class_suites(
+        &mut self,
+        classes: Vec<ClassSite<'_>>,
+        suspends: impl Fn(TextSize) -> bool,
+    ) -> HashMap<TextSize, RegisteredClass> {
+        classes
+            .into_iter()
+            .map(|site| {
+                let class = site.def;
+                let suspended = site.enclosing_function.is_some_and(&suspends);
+                let start = class
+                    .decorator_list
+                    .first()
+                    .map_or(class.start(), Ranged::start);
+                let decorators = class
+                    .decorator_list
+                    .iter()
+                    .map(|decorator| {
+                        let expr = &decorator.expression;
+                        let operand = RegisteredOperand::prepare(expr, self.source, site.enclosing);
+                        if operand.is_none() {
+                            self.sites.expressions.prepare_input(
+                                expr,
+                                self.source,
+                                site.enclosing,
+                                suspended,
+                            );
+                        }
+                        operand
+                    })
+                    .collect();
+                let bases_scope = if site.parameters.is_some() {
+                    RegisteredScope::Function { is_async: false }
+                } else {
+                    site.enclosing
+                };
+                let (layout, operands) =
+                    class
+                        .arguments
+                        .as_deref()
+                        .map_or_else(Default::default, |args| {
+                            let operands = registered_arguments(args)
+                                .map(|expr| {
+                                    let operand =
+                                        RegisteredOperand::prepare(expr, self.source, bases_scope);
+                                    if operand.is_none() {
+                                        self.sites.expressions.prepare_input(
+                                            expr,
+                                            self.source,
+                                            bases_scope,
+                                            suspended && site.parameters.is_none(),
+                                        );
+                                    }
+                                    operand
+                                })
+                                .collect();
+                            (packed_arguments(args), operands)
+                        });
+                let header = ClassHeader {
+                    parameters: site.parameters,
+                    layout,
+                    operands,
+                    decorators,
+                };
+                let body = self.suite(&class.body, RegisteredScope::Class);
+                (start, RegisteredClass { body, header })
+            })
+            .collect()
+    }
+
     pub(crate) fn suite(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope) -> RegisteredSuite {
+        self.selected_suite(stmts, kind, SuiteSelection::All, SuiteSelection::All, false)
+    }
+
+    /// A residual statement in a suspended function owns its cursor and pending exits.
+    /// Its child suites retain their physical-frame contract while its siblings use checked runs.
+    pub(crate) fn function_suite(
+        &mut self,
+        stmts: &[ast::Stmt],
+        kind: RegisteredScope,
+        suspends: bool,
+        has_ordinary_header: &dyn Fn(TextSize) -> bool,
+    ) -> RegisteredSuite {
+        let children = if suspends {
+            SuiteSelection::Physical(has_ordinary_header)
+        } else {
+            SuiteSelection::All
+        };
+        self.selected_suite(stmts, kind, SuiteSelection::All, children, suspends)
+    }
+
+    /// Keep the enclosing physical frame's entry and cleanup. Its complete target effects
+    /// share one slot layout per suite, including when another statement must run from source.
+    pub(crate) fn physical_body(
+        &mut self,
+        stmts: &[ast::Stmt],
+        kind: RegisteredScope,
+        suspended: bool,
+        has_ordinary_header: &dyn Fn(TextSize) -> bool,
+    ) {
+        self.nested_suite(
+            stmts,
+            kind,
+            SuiteSelection::Physical(has_ordinary_header),
+            suspended,
+        );
+    }
+
+    fn nested_suite(
+        &mut self,
+        stmts: &[ast::Stmt],
+        kind: RegisteredScope,
+        select: SuiteSelection<'_>,
+        suspended: bool,
+    ) {
+        if let Some(first) = stmts.first() {
+            let plan = self.selected_suite(stmts, kind, select, select, suspended);
+            // An optimized-away assertion has no instructions and still owns its source slot.
+            if !matches!(plan.residual.as_slice(), [run]
+                if run.effect.is_none() && run.statements == (0..stmts.len()))
+            {
+                self.nested.insert(first.start(), plan);
+            }
+        }
+    }
+
+    fn selected_suite(
+        &mut self,
+        stmts: &[ast::Stmt],
+        kind: RegisteredScope,
+        select: SuiteSelection<'_>,
+        child_selection: SuiteSelection<'_>,
+        suspended: bool,
+    ) -> RegisteredSuite {
         use ast::statement_visitor::{StatementVisitor, walk_stmt};
-        let plan = self.lower(stmts, kind);
+        let mut plan = self.lower(stmts, kind, select, suspended);
         struct Children<'p, 's> {
             prepare: &'p mut SuitePreparation<'s>,
             kind: RegisteredScope,
+            select: SuiteSelection<'p>,
+            suspended: bool,
         }
         impl<'a> StatementVisitor<'a> for Children<'_, '_> {
             fn visit_body(&mut self, stmts: &'a [ast::Stmt]) {
-                if let Some(first) = stmts.first() {
-                    let plan = self.prepare.suite(stmts, self.kind);
-                    self.prepare.nested.insert(first.start(), plan);
-                }
+                self.prepare
+                    .nested_suite(stmts, self.kind, self.select, self.suspended);
             }
         }
         let mut children = Children {
             prepare: self,
             kind,
+            select: child_selection,
+            suspended,
         };
         for run in &plan.residual {
+            let source = children.prepare.source;
+            let sites = &mut children.prepare.sites.expressions;
             for stmt in &stmts[run.statements.clone()] {
+                match &run.effect {
+                    Some(
+                        SourceEffect::ObjectOperation(_, inputs)
+                        | SourceEffect::Discard(inputs)
+                        | SourceEffect::Value(_, inputs),
+                    ) => {
+                        for input in inputs {
+                            if let PhysicalOperand::Source(expr) = input {
+                                sites.prepare_input(expr, source, kind, suspended);
+                            }
+                        }
+                    }
+                    Some(SourceEffect::Assertion(site)) => {
+                        let assertion = stmt.as_assert_stmt().expect("prepared assertion");
+                        if site.external_test {
+                            sites.prepare_input(&assertion.test, source, kind, suspended);
+                        }
+                        if site.external_message {
+                            let message = assertion
+                                .msg
+                                .as_deref()
+                                .expect("external assertion message");
+                            sites.prepare_input(message, source, kind, suspended);
+                        }
+                    }
+                    Some(SourceEffect::While(SourceGuard::Residual)) => {
+                        if let ast::Stmt::While(loop_) = stmt {
+                            sites.prepare_input(&loop_.test, source, kind, suspended);
+                        }
+                    }
+                    None if !matches!(
+                        stmt,
+                        ast::Stmt::Match(_)
+                            | ast::Stmt::With(_)
+                            | ast::Stmt::For(_)
+                            | ast::Stmt::Try(_)
+                    ) =>
+                    {
+                        sites.prepare_inputs(stmt, source, kind, suspended);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for run in std::mem::take(&mut plan.residual) {
+            if run.effect.is_some() {
+                if matches!(run.effect, Some(SourceEffect::While(_))) {
+                    walk_stmt(&mut children, &stmts[run.statements.start]);
+                }
+                plan.residual.push(run);
+                continue;
+            }
+            for index in run.statements {
+                let stmt = &stmts[index];
+                if let ast::Stmt::For(loop_) = stmt {
+                    let region =
+                        children
+                            .prepare
+                            .prepare_for(loop_, kind, child_selection, suspended);
+                    plan.residual.push(SourceRun {
+                        at: run.at,
+                        statements: index..index + 1,
+                        effect: Some(SourceEffect::For(Box::new(region))),
+                    });
+                    continue;
+                }
+                if let ast::Stmt::Try(protected) = stmt {
+                    let region =
+                        children
+                            .prepare
+                            .prepare_try(protected, kind, child_selection, suspended);
+                    plan.residual.push(SourceRun {
+                        at: run.at,
+                        statements: index..index + 1,
+                        effect: Some(SourceEffect::Try(Box::new(region))),
+                    });
+                    continue;
+                }
+                if let ast::Stmt::With(with) = stmt {
+                    let context =
+                        children
+                            .prepare
+                            .prepare_context(with, kind, child_selection, suspended);
+                    plan.residual.push(SourceRun {
+                        at: run.at,
+                        statements: index..index + 1,
+                        effect: Some(SourceEffect::Context(Box::new(context))),
+                    });
+                    continue;
+                }
+                SourceRun::record(&mut plan.residual, index, run.at);
+                if let ast::Stmt::Match(branch) = stmt
+                    && let Some(mut site) = children
+                        .prepare
+                        .sites
+                        .matches
+                        .get_mut(&branch.range())
+                        .and_then(Option::take)
+                {
+                    site.subject =
+                        RegisteredOperand::prepare_with(children.prepare.source, kind, |scope| {
+                            scope.frame_value(&branch.subject)
+                        });
+                    if site.subject.is_none() {
+                        children.prepare.sites.expressions.prepare_input(
+                            &branch.subject,
+                            children.prepare.source,
+                            kind,
+                            suspended,
+                        );
+                    }
+                    for (case, input) in site.cases.iter_mut().zip(&branch.cases) {
+                        if matches!(case.guard, Some(patterns::MatchGuard::Residual))
+                            && let Some(guard) = &input.guard
+                        {
+                            children.prepare.sites.expressions.prepare_input(
+                                guard,
+                                children.prepare.source,
+                                kind,
+                                suspended,
+                            );
+                        }
+                        case.body = Some(children.prepare.selected_suite(
+                            &input.body,
+                            kind,
+                            SuiteSelection::All,
+                            SuiteSelection::All,
+                            suspended,
+                        ));
+                    }
+                    children
+                        .prepare
+                        .sites
+                        .matches
+                        .insert(branch.range(), Some(site));
+                    continue;
+                }
                 // A declaration opens a separate activation with its own scope and admission.
                 if !matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)) {
                     walk_stmt(&mut children, stmt);
@@ -740,52 +1558,354 @@ impl<'a> SuitePreparation<'a> {
         plan
     }
 
-    fn lower(&self, stmts: &[ast::Stmt], kind: RegisteredScope) -> RegisteredSuite {
-        let mut scope = SourceScope {
-            kind,
-            operations: self.operations,
-            source: self.source,
-            assertions: &self.assertions,
-            names: HashMap::new(),
-            locals: Vec::new(),
-            loop_depth: 0,
-        };
-        let mut body = Vec::new();
-        let mut residual: Vec<SourceRun> = Vec::new();
-        for (i, stmt) in stmts.iter().enumerate() {
-            let slots_before = scope.locals.len();
-            if scope.statement(stmt, &mut body).is_err() {
-                // A partially lowered target can allocate slots before a later operand fails.
-                if scope.locals.len() != slots_before {
-                    scope.locals.truncate(slots_before);
-                    scope.names.retain(|_, slot| *slot < slots_before);
+    fn physical_operand(
+        &mut self,
+        expr: &ast::Expr,
+        kind: RegisteredScope,
+        selection: SuiteSelection<'_>,
+        suspended: bool,
+    ) -> PhysicalOperand {
+        let operand =
+            RegisteredOperand::prepare_with(self.source, kind, |scope| match (kind, selection) {
+                (RegisteredScope::Function { .. }, SuiteSelection::Physical(_)) => {
+                    scope.operand(expr)
                 }
-                SourceRun::record(&mut residual, i, body.len());
+                _ => scope.ordinary_operand(expr),
+            });
+        match operand {
+            Some(operand) => PhysicalOperand::Checked(Box::new(operand)),
+            None => {
+                self.sites
+                    .expressions
+                    .prepare_input(expr, self.source, kind, suspended);
+                PhysicalOperand::Source(Box::new(expr.clone()))
             }
         }
-        let locals = scope.locals;
-        RegisteredSuite {
-            checked: RegisteredFunction {
-                function: ir::Function {
-                    params: Vec::new(),
-                    returns: Type::PythonObject,
-                    locals,
-                    body,
-                },
-                local_names: scope
-                    .names
-                    .into_iter()
-                    .map(|(name, slot)| {
-                        (
-                            slot,
-                            LocalBinding {
-                                name,
-                                namespace: None,
-                            },
-                        )
-                    })
-                    .collect(),
+    }
+
+    fn physical_binding(
+        &self,
+        target: &ast::Expr,
+        kind: RegisteredScope,
+        suspended: bool,
+    ) -> PhysicalBinding {
+        let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
+        scope.diagnostic_suspension = Some(suspended);
+        match scope.with_binding(target) {
+            Ok(ir::ContextBinding { entered, body }) => PhysicalBinding::Checked {
+                entered,
+                binding: Box::new(scope.finish(body)),
             },
+            Err(()) => {
+                let (range, reason) = scope.refusal.unwrap_or((
+                    target.range(),
+                    "cannot compile this assignment target ahead of time",
+                ));
+                PhysicalBinding::Refused(range, reason)
+            }
+        }
+    }
+
+    fn physical_suite(
+        &mut self,
+        stmts: &[ast::Stmt],
+        kind: RegisteredScope,
+        selection: SuiteSelection<'_>,
+        suspended: bool,
+    ) -> PhysicalSuite {
+        PhysicalSuite::new(
+            self.selected_suite(stmts, kind, selection, selection, suspended),
+            stmts,
+        )
+    }
+
+    fn prepare_try(
+        &mut self,
+        stmt: &ast::StmtTry,
+        kind: RegisteredScope,
+        selection: SuiteSelection<'_>,
+        suspended: bool,
+    ) -> PreparedTry {
+        let body = self.physical_suite(&stmt.body, kind, selection, suspended);
+        let handlers = stmt
+            .handlers
+            .iter()
+            .map(|ast::ExceptHandler::ExceptHandler(handler)| {
+                let matcher = handler.type_.as_deref().map(|class| {
+                    let range = if stmt.is_star {
+                        handler.range()
+                    } else {
+                        class.range()
+                    };
+                    (
+                        range,
+                        self.physical_operand(class, kind, selection, suspended),
+                    )
+                });
+                PreparedHandler {
+                    matcher,
+                    name: handler.name.as_ref().map(|name| name.as_str().to_owned()),
+                    body: self.physical_suite(&handler.body, kind, selection, suspended),
+                }
+            })
+            .collect();
+        PreparedTry {
+            range: stmt.range(),
+            is_star: stmt.is_star,
+            body,
+            handlers,
+            otherwise: self.physical_suite(&stmt.orelse, kind, selection, suspended),
+            finalbody: (!stmt.finalbody.is_empty())
+                .then(|| self.physical_suite(&stmt.finalbody, kind, selection, suspended)),
+        }
+    }
+
+    fn prepare_context(
+        &mut self,
+        stmt: &ast::StmtWith,
+        kind: RegisteredScope,
+        selection: SuiteSelection<'_>,
+        suspended: bool,
+    ) -> PreparedContext {
+        let inputs = stmt
+            .items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                let site = self.sites.contexts[&stmt.range()][index];
+                ContextInput {
+                    site,
+                    manager: self.physical_operand(&item.context_expr, kind, selection, suspended),
+                    target: item
+                        .optional_vars
+                        .as_ref()
+                        .map(|target| self.physical_binding(target, kind, suspended)),
+                }
+            })
+            .collect();
+        PreparedContext {
+            range: stmt.range(),
+            inputs,
+            body: self.physical_suite(&stmt.body, kind, selection, suspended),
+        }
+    }
+
+    fn prepare_for(
+        &mut self,
+        loop_: &ast::StmtFor,
+        kind: RegisteredScope,
+        selection: SuiteSelection<'_>,
+        suspended: bool,
+    ) -> PreparedFor {
+        let iterable = self.physical_operand(&loop_.iter, kind, selection, suspended);
+        let target = self.physical_binding(&loop_.target, kind, suspended);
+        let (acquire, pull) = iteration_protocol(loop_.iter.range(), for_pull(loop_));
+        PreparedFor {
+            range: loop_.range(),
+            iterable_range: loop_.iter.range(),
+            acquire,
+            pull,
+            iterable,
+            target,
+            body: self.physical_suite(&loop_.body, kind, selection, suspended),
+            otherwise: (!loop_.orelse.is_empty())
+                .then(|| self.physical_suite(&loop_.orelse, kind, selection, suspended)),
+        }
+    }
+
+    fn lower(
+        &self,
+        stmts: &[ast::Stmt],
+        kind: RegisteredScope,
+        select: SuiteSelection<'_>,
+        suspended: bool,
+    ) -> RegisteredSuite {
+        let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
+        let mut body = Vec::new();
+        let mut residual: Vec<SourceRun> = Vec::new();
+        let frame_value = |expr: &ast::Expr| {
+            let checked = RegisteredOperand::prepare_with(self.source, kind, |scope| {
+                if suspended {
+                    scope.frame_value(expr)
+                } else {
+                    scope.ordinary_operand(expr)
+                }
+            });
+            match checked {
+                Some(value) => PhysicalOperand::Checked(Box::new(value)),
+                None => PhysicalOperand::Source(Box::new(expr.clone())),
+            }
+        };
+        for (i, stmt) in stmts.iter().enumerate() {
+            if let Some(transfer) = loop_transfer(stmt) {
+                residual.push(SourceRun {
+                    at: body.len(),
+                    statements: i..i + 1,
+                    effect: Some(SourceEffect::LoopTransfer(stmt.range(), transfer)),
+                });
+                continue;
+            }
+            if let ast::Stmt::Assert(assertion) = stmt {
+                if !self.sites.omit_assertions {
+                    let site = scope.assertion(assertion);
+                    if site.complete() {
+                        body.extend(site.body);
+                    } else {
+                        residual.push(SourceRun {
+                            at: body.len(),
+                            statements: i..i + 1,
+                            effect: Some(SourceEffect::Assertion(Box::new(site))),
+                        });
+                    }
+                }
+                continue;
+            }
+            let slots_before = scope.locals.len();
+            scope.refusal = None;
+            let lowered = match select {
+                SuiteSelection::All => scope.statement(stmt, &mut body),
+                SuiteSelection::Physical(has_ordinary_header) => {
+                    scope.physical_statement(stmt, &mut body, has_ordinary_header)
+                }
+            };
+            if lowered.is_ok() {
+                continue;
+            }
+            scope.truncate_locals(slots_before);
+            let output = match stmt {
+                ast::Stmt::Return(ret) => {
+                    Some((ValueStatement::Return, [ret.value.as_deref(), None]))
+                }
+                ast::Stmt::Expr(value) if !value.value.is_string_literal_expr() => Some((
+                    ValueStatement::Expression,
+                    [Some(value.value.as_ref()), None],
+                )),
+                ast::Stmt::Raise(raise) => Some((
+                    ValueStatement::Raise,
+                    [raise.exc.as_deref(), raise.cause.as_deref()],
+                )),
+                _ => None,
+            };
+            if let Some((output, inputs)) = output {
+                let inputs = inputs.into_iter().flatten().map(frame_value).collect();
+                body.push(checkpoint(stmt));
+                residual.push(SourceRun {
+                    at: body.len(),
+                    statements: i..i + 1,
+                    effect: Some(SourceEffect::Value(output, inputs)),
+                });
+                continue;
+            }
+            if let ast::Stmt::AnnAssign(ann) = stmt
+                && ann.value.is_none()
+                && let Some(inputs) = values::bare_target_operands(&ann.target)
+            {
+                body.push(checkpoint(stmt));
+                residual.push(SourceRun {
+                    at: body.len(),
+                    statements: i..i + 1,
+                    effect: Some(SourceEffect::Discard(
+                        inputs
+                            .into_iter()
+                            .map(
+                                |expr| match RegisteredOperand::prepare(expr, self.source, kind) {
+                                    Some(value) => PhysicalOperand::Checked(Box::new(value)),
+                                    None => PhysicalOperand::Source(Box::new(expr.clone())),
+                                },
+                            )
+                            .collect(),
+                    )),
+                });
+                continue;
+            }
+            if let ast::Stmt::Assign(assign) = stmt {
+                let input = scope.hidden(Type::PythonObject);
+                let value = unpacking::take_pattern_temporary(
+                    Expr::local(input, Type::PythonObject),
+                    input,
+                );
+                let first_refusal = scope.refusal.take();
+                scope.diagnostic_suspension = Some(suspended);
+                let targets = scope.assignment_targets(&assign.targets, value);
+                scope.diagnostic_suspension = None;
+                let (effect, targets) = match targets {
+                    Ok(targets) => (
+                        SourceEffect::Value(
+                            ValueStatement::Store(input),
+                            vec![frame_value(&assign.value)],
+                        ),
+                        targets,
+                    ),
+                    Err(()) => {
+                        scope.truncate_locals(slots_before);
+                        let (range, reason) = scope.refusal.or(first_refusal).unwrap_or((
+                            assign.range(),
+                            "cannot compile this assignment target ahead of time",
+                        ));
+                        (
+                            SourceEffect::RefusedTargetOperand(range, reason),
+                            Vec::new(),
+                        )
+                    }
+                };
+                body.push(checkpoint(stmt));
+                residual.push(SourceRun {
+                    at: body.len(),
+                    statements: i..i + 1,
+                    effect: Some(effect),
+                });
+                body.extend(targets);
+                continue;
+            } else if let ast::Stmt::Delete(delete) = stmt {
+                // A missing operand keeps its place between the other targets' checked effects.
+                body.push(checkpoint(stmt));
+                for target in delete_targets(delete) {
+                    let (op, inputs) = deletion(target);
+                    let slots = scope.locals.len();
+                    if let Some(values) = inputs
+                        .clone()
+                        .map(|input| input.lower(&mut scope))
+                        .collect()
+                    {
+                        body.push(Statement::Expr(operation(op, Type::None, values)));
+                    } else {
+                        scope.truncate_locals(slots);
+                        residual.push(SourceRun {
+                            at: body.len(),
+                            statements: i..i + 1,
+                            effect: Some(SourceEffect::ObjectOperation(
+                                Box::new(op),
+                                inputs
+                                    .map(|input| input.physical(self.source, kind))
+                                    .collect(),
+                            )),
+                        });
+                    }
+                }
+                continue;
+            }
+            if let ast::Stmt::While(loop_) = stmt {
+                let condition = match &*loop_.test {
+                    ast::Expr::BooleanLiteral(value) => SourceGuard::Literal(value.value),
+                    test => RegisteredOperand::prepare_with(self.source, kind, |scope| {
+                        scope.while_condition(test)
+                    })
+                    .map_or(SourceGuard::Residual, |operand| {
+                        SourceGuard::Checked(Box::new(operand))
+                    }),
+                };
+                body.push(checkpoint(stmt));
+                residual.push(SourceRun {
+                    at: body.len(),
+                    statements: i..i + 1,
+                    effect: Some(SourceEffect::While(condition)),
+                });
+                continue;
+            }
+            SourceRun::record(&mut residual, i, body.len());
+        }
+        RegisteredSuite {
+            checked: scope.finish(body),
             residual,
         }
     }
@@ -795,22 +1915,8 @@ impl<'a> SuitePreparation<'a> {
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
     ) -> Option<RegisteredSuite> {
-        let plan = self.lower(stmts, kind);
+        let plan = self.lower(stmts, kind, SuiteSelection::All, false);
         plan.fully_checked().then_some(plan)
-    }
-
-    pub(crate) fn class_body(&self, class: &ast::StmtClassDef) -> Option<RegisteredSuite> {
-        if !plain_class_header(class)
-            || !class.body.iter().all(|stmt| {
-                matches!(
-                    stmt,
-                    ast::Stmt::Assign(_) | ast::Stmt::Expr(_) | ast::Stmt::Pass(_)
-                )
-            })
-        {
-            return None;
-        }
-        self.complete(&class.body, RegisteredScope::Class)
     }
 }
 
@@ -841,18 +1947,22 @@ pub(super) fn attribute_statement(
     values: Vec<Expr>,
 ) -> Statement {
     Statement::Expr(operation(
-        Builtin::RegisteredAttribute {
-            action,
-            name: field.attr.to_string(),
-            range: field.range(),
-        },
+        attribute_opcode(action, field),
         Type::None,
         values,
     ))
 }
 
+fn attribute_opcode(action: ir::AttributeAction, field: &ast::ExprAttribute) -> Builtin {
+    Builtin::RegisteredAttribute {
+        action,
+        name: field.attr.to_string(),
+        range: field.range(),
+    }
+}
+
 /// Deletion groups evaluate their leaves from left to right without constructing a tuple or list.
-pub(crate) fn delete_targets(delete: &ast::StmtDelete) -> Vec<&ast::Expr> {
+fn delete_targets(delete: &ast::StmtDelete) -> Vec<&ast::Expr> {
     let mut remaining: Vec<_> = delete.targets.iter().rev().collect();
     let mut leaves = Vec::new();
     while let Some(target) = remaining.pop() {
@@ -865,8 +1975,34 @@ pub(crate) fn delete_targets(delete: &ast::StmtDelete) -> Vec<&ast::Expr> {
     leaves
 }
 
-pub(crate) fn attribute_effects(stmt: &ast::Stmt) -> Option<Vec<AttributeEffect<'_>>> {
-    use ir::AttributeAction::{Delete, InPlace, Store};
+/// Resolve the implicit manager protocol's source anchor while its syntax and
+/// original source text are available. LLVM only converts accepted offsets to columns.
+fn context_site(source: &str, manager: &ast::Expr, is_async: bool) -> ir::ContextSite {
+    let range = manager.range();
+    let delimiter = match manager {
+        ast::Expr::Call(call) => Some((call.func.end(), b'(')),
+        ast::Expr::Subscript(index) => Some((index.value.end(), b'[')),
+        _ => None,
+    };
+    let anchor = delimiter
+        .and_then(|(prefix, opener)| {
+            imre_ast::traceback_delimiter(
+                source.as_bytes(),
+                usize::from(prefix),
+                usize::from(range.end()),
+                opener,
+            )
+        })
+        .map_or(range.start(), |offset| TextSize::try_from(offset).unwrap());
+    ir::ContextSite {
+        is_async,
+        range,
+        anchor,
+    }
+}
+
+pub(crate) fn attribute_write(stmt: &ast::Stmt) -> Option<AttributeEffect<'_>> {
+    use ir::AttributeAction::{InPlace, Store};
     let (target, action, value) = match stmt {
         ast::Stmt::Assign(assign) => {
             let [target] = assign.targets.as_slice() else {
@@ -884,37 +2020,29 @@ pub(crate) fn attribute_effects(stmt: &ast::Stmt) -> Option<Vec<AttributeEffect<
             InPlace(assign.op.as_str()),
             Some(assign.value.as_ref()),
         ),
-        ast::Stmt::Delete(delete) => {
-            return delete_targets(delete)
-                .into_iter()
-                .map(|target| {
-                    Some(AttributeEffect {
-                        action: Delete,
-                        field: target.as_attribute_expr()?,
-                        value: None,
-                    })
-                })
-                .collect();
-        }
         _ => return None,
     };
-    Some(vec![AttributeEffect {
+    Some(AttributeEffect {
         action,
         field: target.as_attribute_expr()?,
         value,
-    }])
+    })
 }
 
-/// Prepare only an indexed target's receiver and key. Its caller owns RHS evaluation
-/// or unpacking, and retains each finished target when a later target raises.
-pub(crate) fn registered_index_target(
-    target: &ast::Expr,
-    source: values::RegisteredSource<'_>,
-) -> Option<(Expr, Expr)> {
-    let index = target.as_subscript_expr()?;
-    let base = values::registered_value(&index.value, source)?;
-    let key = values::registered_index_key(&index.slice, source)?;
-    Some((base, key))
+pub(super) fn attribute_effects(stmt: &ast::Stmt) -> Option<Vec<AttributeEffect<'_>>> {
+    let ast::Stmt::Delete(delete) = stmt else {
+        return Some(vec![attribute_write(stmt)?]);
+    };
+    delete_targets(delete)
+        .into_iter()
+        .map(|target| {
+            Some(AttributeEffect {
+                action: ir::AttributeAction::Delete,
+                field: target.as_attribute_expr()?,
+                value: None,
+            })
+        })
+        .collect()
 }
 
 pub(crate) fn delete_item(receiver: Expr, key: Expr) -> Expr {
@@ -925,39 +2053,80 @@ pub(crate) fn delete_item(receiver: Expr, key: Expr) -> Expr {
     )
 }
 
+pub(super) fn raised<E>(
+    raise: &ast::StmtRaise,
+    mut operand: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
+) -> StdResult<Statement, E> {
+    let exception = raise.exc.as_deref().map(&mut operand).transpose()?;
+    let value = match (exception, raise.cause.as_deref()) {
+        (Some(value), Some(cause)) => Some(operation(
+            Builtin::ExceptionWithCause,
+            Type::Exception,
+            vec![value, operand(cause)?],
+        )),
+        (value, _) => value,
+    };
+    Ok(Statement::Raise(value))
+}
+
 impl statements::StatementLowering for SourceScope<'_> {
     type Error = ();
 
     fn attribute_statements(&mut self, stmt: &ast::Stmt) -> StdResult<Option<Vec<Statement>>, ()> {
-        let Some(effects) = attribute_effects(stmt) else {
+        if stmt.is_assign_stmt() {
+            return Ok(None);
+        }
+        let Some(effect) = attribute_write(stmt) else {
             return Ok(None);
         };
-        effects
-            .iter()
-            .map(|effect| {
-                let values = effect
-                    .operands()
-                    .map(|node| self.ordinary_operand(node))
-                    .collect::<Option<_>>()
-                    .ok_or(())?;
-                Ok(attribute_statement(effect.action, effect.field, values))
-            })
-            .collect::<StdResult<Vec<_>, _>>()
-            .map(Some)
+        let values = effect
+            .operands()
+            .map(|node| self.ordinary_operand(node))
+            .collect::<Option<_>>()
+            .ok_or(())?;
+        Ok(Some(vec![attribute_statement(
+            effect.action,
+            effect.field,
+            values,
+        )]))
     }
 
     fn assignment(&mut self, assign: &ast::StmtAssign) -> StdResult<Vec<Statement>, ()> {
-        let value = match assign.targets.as_slice() {
-            [ast::Expr::Name(_)] => self.operand(&assign.value),
-            _ => self.ordinary_operand(&assign.value),
+        let value = self.frame_value(&assign.value).ok_or(())?;
+        self.assignment_targets(&assign.targets, value)
+    }
+
+    fn branch(&mut self, branch: &ast::StmtIf) -> StdResult<statements::Block, ()> {
+        let mut arms = Vec::new();
+        let mut otherwise = (Vec::new(), true);
+        let mut falls = false;
+        for (test, suite) in if_clauses(branch) {
+            if let Some(test) = test {
+                let condition = truth(self.operand(test).ok_or(())?);
+                let (body, continues) = self.block(suite)?;
+                arms.push((condition, body));
+                falls |= continues;
+            } else {
+                otherwise = self.block(suite)?;
+            }
         }
-        .ok_or(())?;
-        unpacking::bind_assignment(self, &assign.targets, value)
+        Ok((statements::if_arms(arms, otherwise.0), falls || otherwise.1))
     }
 
     fn definition(&mut self, def: &ast::StmtFunctionDef) -> StdResult<Option<Statement>, ()> {
         if def.type_params.is_some() {
-            return Err(());
+            let binding = self.operations.get(&def.name.range()).ok_or(())?;
+            if matches!(self.kind, RegisteredScope::Class) {
+                if !def.decorator_list.is_empty()
+                    || def
+                        .parameters
+                        .iter_non_variadic_params()
+                        .any(|p| p.default.is_some())
+                {
+                    return Err(());
+                }
+                return Ok(Some(self.store(def.name.as_str(), binding.clone())));
+            }
         }
         let decorators = def.decorator_list.iter().map(|d| &d.expression);
         let defaults = def
@@ -973,7 +2142,7 @@ impl statements::StatementLowering for SourceScope<'_> {
             .collect::<Option<_>>()
             .ok_or(())?;
         let function = operation(
-            Builtin::RegisteredDefinition(def.start()),
+            Builtin::RegisteredDefinition(ir::DefinitionSite::Function(def.start())),
             Type::PythonObject,
             header,
         );
@@ -984,38 +2153,53 @@ impl statements::StatementLowering for SourceScope<'_> {
         let effect = if value.is_string_literal_expr() {
             None
         } else {
-            Some(Statement::Expr(self.operand(value).ok_or(())?))
+            Some(Statement::Expr(self.frame_value(value).ok_or(())?))
         };
         Ok((effect, true))
     }
 
     fn returned(&mut self, ret: &ast::StmtReturn) -> StdResult<Expr, ()> {
         match ret.value.as_deref() {
-            Some(value) => self.operand(value).ok_or(()),
+            Some(value) => self.frame_value(value).ok_or(()),
             None => Ok(Expr::none()),
         }
     }
 
+    fn async_iteration(&self) -> bool {
+        matches!(self.kind, RegisteredScope::Function { is_async: true })
+    }
+
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> StdResult<statements::Block, ()> {
-        let source = self.ordinary_operand(&loop_.iter).ok_or(())?;
-        let cursor = operation(Builtin::RegisteredIter, Type::PythonObject, vec![source]);
-        let input = pipelines::Prepared::cursor(cursor, Type::PythonObject, |ty| self.hidden(ty));
-        let binding = unpacking::bind_targets(
-            self,
-            &loop_.target,
-            Expr::local(input.value, Type::PythonObject),
-            None,
-        )?;
-        let body = self.loop_body(&loop_.body)?;
+        let input = self
+            .iteration_input(&loop_.iter, for_pull(loop_))
+            .ok_or(())?;
+        let (binding, body) =
+            self.iteration_body(&loop_.target, &input, |scope| scope.suite(&loop_.body))?;
         let otherwise = self.suite(&loop_.orelse)?;
         Ok((input.for_suite(binding, body, otherwise, Vec::new()), true))
     }
 
     fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<statements::Block, ()> {
+        if let Some(transfer) = loop_transfer(stmt) {
+            return (self.loop_scope != LoopScope::Outside)
+                .then(|| (vec![transfer.clone()], false))
+                .ok_or(());
+        }
         match stmt {
             ast::Stmt::AugAssign(assign) => {
-                let (receiver, key) =
-                    registered_index_target(&assign.target, self.source).ok_or(())?;
+                if let Some(name) = assign.target.as_name_expr() {
+                    let left = self.ordinary_operand(&assign.target).ok_or(())?;
+                    let right = self.ordinary_operand(&assign.value).ok_or(())?;
+                    let value = operation(
+                        Builtin::RegisteredInPlace(assign.op.as_str()),
+                        Type::PythonObject,
+                        vec![left, right],
+                    );
+                    return Ok((vec![self.store(name.id.as_str(), value)], true));
+                }
+                let target = assign.target.as_subscript_expr().ok_or(())?;
+                let receiver = TargetInput::Receiver(&target.value).lower(self).ok_or(())?;
+                let key = TargetInput::Index(&target.slice).lower(self).ok_or(())?;
                 let rhs = self.ordinary_operand(&assign.value).ok_or(())?;
                 Ok((
                     vec![Statement::AugmentItem(
@@ -1032,64 +2216,127 @@ impl statements::StatementLowering for SourceScope<'_> {
                 let name = alias.name.as_name_expr().ok_or(())?;
                 Ok((vec![self.store(name.id.as_str(), value)], true))
             }
-            ast::Stmt::ClassDef(class) if plain_class_header(class) => {
-                let decorators = class
+            ast::Stmt::Raise(raise) => Ok((
+                vec![raised(raise, |value| {
+                    self.ordinary_operand(value).ok_or(())
+                })?],
+                false,
+            )),
+            ast::Stmt::Match(branch) => self.match_statement(branch),
+            ast::Stmt::ClassDef(class) => {
+                let mut operands = class
                     .decorator_list
                     .iter()
                     .map(|d| self.ordinary_operand(&d.expression))
-                    .collect::<Option<_>>()
+                    .collect::<Option<Vec<_>>>()
                     .ok_or(())?;
+                let arguments = if class.type_params.is_some() {
+                    None
+                } else {
+                    let mut layout = ir::PackedArguments::default();
+                    if let Some(arguments) = &class.arguments {
+                        layout = super::packed_arguments(arguments);
+                        for operand in super::registered_arguments(arguments) {
+                            operands.push(self.ordinary_operand(operand).ok_or(())?);
+                        }
+                    }
+                    Some(layout)
+                };
+                let site = ir::DefinitionSite::Class {
+                    start: class.start(),
+                    arguments,
+                };
                 let value = operation(
-                    Builtin::RegisteredDefinition(class.start()),
+                    Builtin::RegisteredDefinition(site),
                     Type::PythonObject,
-                    decorators,
+                    operands,
                 );
                 Ok((vec![self.store(class.name.as_str(), value)], true))
             }
+            ast::Stmt::Try(region) => {
+                let body = self.suite(&region.body)?;
+                let mut handlers = Vec::with_capacity(region.handlers.len());
+                for ast::ExceptHandler::ExceptHandler(handler) in &region.handlers {
+                    let matcher = match handler.type_.as_deref() {
+                        None => ir::ExceptionMatcher::Categories(Vec::new()),
+                        Some(class) => {
+                            let operand = Box::new(self.ordinary_operand(class).ok_or(())?);
+                            if region.is_star {
+                                ir::ExceptionMatcher::Subgroup(handler.range(), operand)
+                            } else {
+                                ir::ExceptionMatcher::Object(class.range(), operand)
+                            }
+                        }
+                    };
+                    handlers.push(ir::ExceptHandler {
+                        matcher,
+                        name: handler.name.as_ref().map(|name| self.slot(name.as_str())),
+                        body: self.suite(&handler.body)?,
+                    });
+                }
+                let orelse = self.suite(&region.orelse)?;
+                let finalbody = self.suite(&region.finalbody)?;
+                Ok((
+                    vec![Statement::Try {
+                        body,
+                        handlers,
+                        orelse,
+                        finalbody,
+                    }],
+                    true,
+                ))
+            }
+            ast::Stmt::With(stmt) if !stmt.is_async || self.async_iteration() => Ok((
+                self.with_items(&stmt.items, &self.sites.contexts[&stmt.range()], &stmt.body)?,
+                true,
+            )),
             ast::Stmt::While(loop_) => {
-                let condition = self.ordinary_operand(&loop_.test).ok_or(())?;
-                let body = self.loop_body(&loop_.body)?;
+                let condition = self.while_condition(&loop_.test).ok_or(())?;
+                let body = if matches!(&*loop_.test, ast::Expr::BooleanLiteral(value) if !value.value)
+                {
+                    Vec::new()
+                } else {
+                    self.in_loop(LoopScope::While, |scope| scope.suite(&loop_.body))?
+                };
                 let otherwise = self.suite(&loop_.orelse)?;
                 Ok((vec![Statement::While(condition, body, otherwise)], true))
             }
-            ast::Stmt::Break(_) if self.loop_depth != 0 => Ok((vec![Statement::Break], false)),
-            ast::Stmt::Continue(_) if self.loop_depth != 0 => {
-                Ok((vec![Statement::Continue], false))
-            }
             ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => Ok((Vec::new(), true)),
-            ast::Stmt::AnnAssign(ann) if matches!(self.kind, RegisteredScope::Module) => {
-                let marker = self.operations.get(&ann.target.range()).ok_or(())?.clone();
+            ast::Stmt::AnnAssign(ann) => {
+                if ann.value.is_none()
+                    && let Some(inputs) = values::bare_target_operands(&ann.target)
+                {
+                    let operands = inputs
+                        .into_iter()
+                        .map(|expr| self.operand(expr))
+                        .collect::<Option<_>>()
+                        .ok_or(())?;
+                    let effect = operation(Builtin::RegisteredDiscard, Type::None, operands);
+                    return Ok((vec![Statement::Expr(effect)], true));
+                }
+                let name = ann.target.as_name_expr().ok_or(())?;
                 let mut body = Vec::new();
                 if let Some(value) = &ann.value {
-                    let name = ann.target.as_name_expr().ok_or(())?;
                     let value = self.operand(value).ok_or(())?;
                     body.push(self.store(name.id.as_str(), value));
                 }
-                body.push(Statement::Expr(marker));
+                // A function-local annotation has no runtime operand. A simple
+                // namespace annotation records its declaration for later evaluation.
+                if !matches!(self.kind, RegisteredScope::Function { .. }) && ann.simple {
+                    let marker = self.operations.get(&ann.target.range()).ok_or(())?;
+                    body.push(Statement::Expr(marker.clone()));
+                }
                 Ok((body, true))
             }
             ast::Stmt::Delete(delete) => {
                 let body = delete_targets(delete)
                     .into_iter()
                     .map(|target| {
-                        if let Some(op) = self.operations.get(&target.range()) {
-                            return Some(Statement::Expr(op.clone()));
-                        }
-                        if let Some(sub) = target.as_subscript_expr() {
-                            let receiver = self.ordinary_operand(&sub.value)?;
-                            let key = values::index_key(&sub.slice, &mut |e| {
-                                self.ordinary_operand(e).ok_or(())
-                            })
-                            .ok()?;
-                            return Some(Statement::Expr(delete_item(receiver, key)));
-                        }
-                        let field = target.as_attribute_expr()?;
-                        let receiver = self.ordinary_operand(&field.value)?;
-                        Some(attribute_statement(
-                            ir::AttributeAction::Delete,
-                            field,
-                            vec![receiver],
-                        ))
+                        let (op, inputs) = deletion(target);
+                        let values = inputs
+                            .map(|input| input.lower(self))
+                            .collect::<Option<_>>()?;
+                        Some(Statement::Expr(operation(op, Type::None, values)))
                     })
                     .collect::<Option<_>>()
                     .ok_or(())?;
@@ -1105,24 +2352,124 @@ impl statements::StatementLowering for SourceScope<'_> {
     }
 }
 
-/// Attribute and subscript targets retain their ordinary receiver evaluation.
-fn registered_delete_name(target: &ast::Expr) -> Option<Expr> {
-    let name = target.as_name_expr()?;
-    Some(operation(
-        Builtin::RegisteredDeleteName(name.id.to_string(), name.range()),
-        Type::None,
-        vec![],
-    ))
+#[derive(Clone, Copy)]
+enum TargetInput<'a> {
+    Receiver(&'a ast::Expr),
+    Index(&'a ast::Expr),
+}
+
+impl TargetInput<'_> {
+    fn lower(self, scope: &mut SourceScope<'_>) -> Option<Expr> {
+        match self {
+            Self::Receiver(expr) => scope.ordinary_operand(expr),
+            Self::Index(key) => {
+                values::index_key(key, &mut |expr| scope.ordinary_operand(expr).ok_or(())).ok()
+            }
+        }
+    }
+
+    fn physical(
+        self,
+        source: values::RegisteredSource<'_>,
+        kind: RegisteredScope,
+    ) -> PhysicalOperand {
+        if let Some(value) =
+            RegisteredOperand::prepare_with(source, kind, |scope| self.lower(scope))
+        {
+            PhysicalOperand::Checked(Box::new(value))
+        } else {
+            let (Self::Receiver(expr) | Self::Index(expr)) = self;
+            PhysicalOperand::Source(Box::new(expr.clone()))
+        }
+    }
+}
+
+fn deletion(target: &ast::Expr) -> (Builtin, impl Iterator<Item = TargetInput<'_>> + Clone) {
+    use TargetInput::{Index, Receiver};
+    let (op, inputs) = match target {
+        ast::Expr::Name(name) => (
+            Builtin::RegisteredDeleteName(name.id.to_string(), name.range()),
+            [None, None],
+        ),
+        ast::Expr::Attribute(field) => (
+            attribute_opcode(ir::AttributeAction::Delete, field),
+            [Some(Receiver(&field.value)), None],
+        ),
+        ast::Expr::Subscript(sub) => (
+            Builtin::RegisteredDeleteItem,
+            [Some(Receiver(&sub.value)), Some(Index(&sub.slice))],
+        ),
+        _ => unreachable!("validated deletion target"),
+    };
+    (op, inputs.into_iter().flatten())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LoopScope {
+    Outside,
+    While,
+    WithCursor,
 }
 
 struct SourceScope<'a> {
     kind: RegisteredScope,
-    assertions: &'a HashMap<TextRange, Vec<Statement>>,
+    sites: &'a StatementSites,
     operations: &'a HashMap<TextRange, Expr>,
     source: values::RegisteredSource<'a>,
     names: HashMap<String, usize>,
+    namespaces: HashMap<usize, LocalBinding>,
+    comprehension: Option<eager::Namespace>,
+    generator_expression: bool,
     locals: Vec<Type>,
-    loop_depth: usize,
+    loop_scope: LoopScope,
+    suspending_operands: bool,
+    refusal: Option<(TextRange, &'static str)>,
+    // A dictionary reports its first unprepared comprehension. Named expressions and assignment
+    // targets preserve terminal operand errors in their enclosing frame.
+    diagnostic_suspension: Option<bool>,
+}
+
+/// Prepare an inline expression that can require private slots in the enclosing activation.
+pub(crate) fn inline_operand(
+    expr: &ast::Expr,
+    source: values::RegisteredSource<'_>,
+    kind: RegisteredScope,
+    native_suspension: bool,
+) -> StdResult<Option<RegisteredOperand>, (TextRange, &'static str)> {
+    match expr {
+        ast::Expr::Dict(_) | ast::Expr::Named(_) => {
+            let is_dict = expr.is_dict_expr();
+            let mut refusal = None;
+            let operand = RegisteredOperand::prepare_with(source, kind, |scope| {
+                if is_dict {
+                    scope.suspending_operands = native_suspension;
+                } else {
+                    scope.diagnostic_suspension = Some(native_suspension);
+                }
+                let value = scope.operand(expr);
+                refusal = scope.refusal;
+                value
+            });
+            operand.map(Some).ok_or_else(|| {
+                refusal.unwrap_or_else(|| {
+                    (
+                        expr.range(),
+                        if is_dict {
+                            "cannot compile this dictionary display ahead of time"
+                        } else {
+                            "cannot compile this assignment expression ahead of time"
+                        },
+                    )
+                })
+            })
+        }
+        ast::Expr::ListComp(_)
+        | ast::Expr::SetComp(_)
+        | ast::Expr::DictComp(_)
+        | ast::Expr::Generator(_)
+        | ast::Expr::FString(_) => Ok(RegisteredOperand::prepare(expr, source, kind)),
+        _ => Ok(None),
+    }
 }
 
 impl unpacking::PatternBinder for SourceScope<'_> {
@@ -1160,40 +2507,278 @@ impl unpacking::PatternBinder for SourceScope<'_> {
     fn multiple_stars(&self, _: &ast::Expr) {}
 }
 
-impl SourceScope<'_> {
-    fn statement(&mut self, stmt: &ast::Stmt, body: &mut Vec<Statement>) -> StdResult<(), ()> {
-        if let ast::Stmt::Assert(assertion) = stmt {
-            if let Some(statements) = self.assertions.get(&stmt.range()) {
-                body.extend_from_slice(statements);
-            } else {
-                // A prepared activation can also supply storage for named expressions
-                // and admit suspension at a whole operand's boundary.
-                body.extend(checked_assertion(assertion, |expr| self.operand(expr)).ok_or(())?);
-            }
-            return Ok(());
+impl<'a> SourceScope<'a> {
+    fn new(
+        kind: RegisteredScope,
+        source: values::RegisteredSource<'a>,
+        operations: &'a HashMap<TextRange, Expr>,
+        sites: &'a StatementSites,
+    ) -> Self {
+        Self {
+            kind,
+            source,
+            operations,
+            sites,
+            names: HashMap::new(),
+            namespaces: HashMap::new(),
+            comprehension: None,
+            generator_expression: false,
+            locals: Vec::new(),
+            loop_scope: LoopScope::Outside,
+            suspending_operands: false,
+            refusal: None,
+            diagnostic_suspension: None,
         }
-        let (lowered, _) = statements::StatementLowering::source_statement(
-            self,
-            stmt,
-            matches!(self.kind, RegisteredScope::Module),
-        )?;
+    }
+
+    fn bindings(self) -> (Vec<Type>, HashMap<usize, LocalBinding>) {
+        let names = self
+            .names
+            .into_iter()
+            .map(|(name, slot)| {
+                (
+                    slot,
+                    LocalBinding {
+                        name,
+                        namespace: None,
+                    },
+                )
+            })
+            .chain(self.namespaces)
+            .collect();
+        (self.locals, names)
+    }
+
+    /// Discard bindings allocated by operands before a later operand failed to lower.
+    fn truncate_locals(&mut self, len: usize) {
+        if self.locals.len() != len {
+            self.locals.truncate(len);
+            self.names.retain(|_, slot| *slot < len);
+            self.namespaces.retain(|slot, _| *slot < len);
+        }
+    }
+
+    fn finish(self, body: Vec<Statement>) -> RegisteredFunction {
+        let (locals, local_names) = self.bindings();
+        RegisteredFunction {
+            fixed_sites: Vec::new(),
+            function: ir::Function {
+                params: Vec::new(),
+                returns: Type::PythonObject,
+                locals,
+                body,
+            },
+            local_names,
+        }
+    }
+}
+
+/// Which control transfers a checked region can handle inside a physical frame.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PhysicalRegion {
+    Fallthrough,
+    Loop,
+    Protected,
+}
+
+impl PhysicalRegion {
+    fn accepts(self, body: &[Statement]) -> bool {
+        let mut self_contained = true;
+        ir::walk_nodes(body, &mut |node, _| match node {
+            // Named definitions in loops and protected regions still need their source headers.
+            ir::Node::Expression(Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredDefinition(_), _),
+                ..
+            }) if self != Self::Fallthrough => self_contained = false,
+            ir::Node::Statement(Statement::Break | Statement::Continue | Statement::Exhaust)
+                if self != Self::Loop =>
+            {
+                self_contained = false;
+            }
+            ir::Node::Statement(Statement::Return(_) | Statement::Raise(_))
+                if self != Self::Protected =>
+            {
+                self_contained = false;
+            }
+            ir::Node::Statement(Statement::IterNext {
+                kind: ir::IterNextKind::Async(_),
+                ..
+            })
+            | ir::Node::Statement(Statement::With {
+                site: ir::ContextSite { is_async: true, .. },
+                ..
+            }) => self_contained = false,
+            ir::Node::Expression(Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredSuspend(kind, _), _),
+                ..
+            }) => {
+                // A checked await resumes at the error target of its enclosing try.
+                self_contained &=
+                    self == Self::Protected && matches!(kind, ir::SuspendValue::Await);
+            }
+            _ => {}
+        });
+        self_contained
+    }
+}
+
+impl SourceScope<'_> {
+    fn assignment_targets(
+        &mut self,
+        targets: &[ast::Expr],
+        value: Expr,
+    ) -> StdResult<Vec<Statement>, ()> {
+        self.with_assignment_operands(|scope| unpacking::bind_assignment(scope, targets, value))
+    }
+
+    fn with_assignment_operands<T>(&mut self, lower: impl FnOnce(&mut Self) -> T) -> T {
+        if self.loop_scope == LoopScope::WithCursor
+            && matches!(self.kind, RegisteredScope::Function { is_async: true })
+        {
+            return lower(self);
+        }
+        self.with_suspending_operands(lower)
+    }
+
+    fn physical_statement(
+        &mut self,
+        stmt: &ast::Stmt,
+        body: &mut Vec<Statement>,
+        has_ordinary_header: &dyn Fn(TextSize) -> bool,
+    ) -> StdResult<bool, ()> {
+        if let ast::Stmt::Assign(assign) = stmt {
+            // The physical frame owns an assignment that yields or awaits its value.
+            if ir::SuspendValue::operand(&assign.value).is_some() {
+                return Err(());
+            }
+            return self.statement(stmt, body);
+        }
+        if stmt.is_return_stmt()
+            || stmt.is_expr_stmt()
+            || stmt.is_delete_stmt()
+            || stmt
+                .as_ann_assign_stmt()
+                .is_some_and(|ann| ann.value.is_none() && !ann.target.is_name_expr())
+            || stmt.is_aug_assign_stmt()
+            || stmt.is_raise_stmt()
+            || stmt.is_function_def_stmt() && has_ordinary_header(stmt.start())
+            || attribute_write(stmt).is_some()
+        {
+            return self.statement(stmt, body);
+        }
+        if !matches!(self.kind, RegisteredScope::Function { .. }) {
+            return Err(());
+        }
+        let region = match stmt {
+            ast::Stmt::If(_) => PhysicalRegion::Fallthrough,
+            ast::Stmt::While(_) => PhysicalRegion::Loop,
+            ast::Stmt::For(loop_) if !loop_.is_async => PhysicalRegion::Loop,
+            ast::Stmt::Try(region) if !region.is_star => PhysicalRegion::Protected,
+            _ => return Err(()),
+        };
+        let begin = body.len();
+        let continues = self.statement(stmt, body)?;
+        if !region.accepts(&body[begin..]) {
+            body.truncate(begin);
+            return Err(());
+        }
+        Ok(continues)
+    }
+
+    fn assertion(&mut self, stmt: &ast::StmtAssert) -> AssertionSite {
+        AssertionSite::prepare(stmt, |expr| {
+            let before = self.locals.len();
+            let value = self.operand(expr);
+            if value.is_none() {
+                self.truncate_locals(before);
+            }
+            value
+        })
+    }
+
+    fn statement(&mut self, stmt: &ast::Stmt, body: &mut Vec<Statement>) -> StdResult<bool, ()> {
+        if let ast::Stmt::Assert(assertion) = stmt {
+            if !self.sites.omit_assertions {
+                let site = self.assertion(assertion);
+                if !site.complete() {
+                    return Err(());
+                }
+                body.extend(site.body);
+            }
+            return Ok(true);
+        }
+        let lower = |scope: &mut Self| {
+            statements::StatementLowering::source_statement(
+                scope,
+                stmt,
+                matches!(scope.kind, RegisteredScope::Module),
+            )
+        };
+        let (lowered, continues) = if stmt.is_aug_assign_stmt() {
+            self.with_suspending_operands(lower)
+        } else {
+            lower(self)
+        }?;
         body.push(checkpoint(stmt));
         body.extend(lowered);
-        Ok(())
+        Ok(continues)
     }
 
     fn suite(&mut self, stmts: &[ast::Stmt]) -> StdResult<Vec<Statement>, ()> {
-        let mut body = Vec::new();
-        for stmt in stmts {
-            self.statement(stmt, &mut body)?;
-        }
-        Ok(body)
+        self.block(stmts).map(|(body, _)| body)
     }
 
-    fn loop_body(&mut self, statements: &[ast::Stmt]) -> StdResult<Vec<Statement>, ()> {
-        self.loop_depth += 1;
-        let body = self.suite(statements);
-        self.loop_depth -= 1;
+    fn with_binding(&mut self, target: &ast::Expr) -> StdResult<ir::ContextBinding, ()> {
+        let slot = self.hidden(Type::PythonObject);
+        let value = Expr::local(slot, Type::PythonObject);
+        // Unpacking consumes the container before any individual target can suspend.
+        let value = if pattern_elements(target).is_some() {
+            unpacking::take_pattern_temporary(value, slot)
+        } else {
+            value
+        };
+        let body = self.assignment_targets(std::slice::from_ref(target), value)?;
+        Ok(ir::ContextBinding {
+            entered: slot,
+            body: vec![Statement::Scope {
+                body,
+                clear: vec![slot],
+            }],
+        })
+    }
+
+    fn with_items(
+        &mut self,
+        items: &[ast::WithItem],
+        inputs: &[ir::ContextSite],
+        suite: &[ast::Stmt],
+    ) -> StdResult<Vec<Statement>, ()> {
+        let Some((item, rest)) = items.split_first() else {
+            return self.suite(suite);
+        };
+        let manager = self.ordinary_operand(&item.context_expr).ok_or(())?;
+        let (input, remaining) = inputs.split_first().expect("with input");
+        let binding = item
+            .optional_vars
+            .as_ref()
+            .map(|target| self.with_binding(target))
+            .transpose()?;
+        let body = self.with_items(rest, remaining, suite)?;
+        Ok(vec![Statement::With {
+            manager,
+            site: *input,
+            binding,
+            body,
+        }])
+    }
+
+    fn in_loop<T>(&mut self, kind: LoopScope, lower: impl FnOnce(&mut Self) -> T) -> T {
+        let enclosing = self.loop_scope;
+        if enclosing != LoopScope::WithCursor {
+            self.loop_scope = kind;
+        }
+        let body = lower(self);
+        self.loop_scope = enclosing;
         body
     }
 
@@ -1201,6 +2786,52 @@ impl SourceScope<'_> {
         let slot = self.locals.len();
         self.locals.push(ty);
         slot
+    }
+
+    fn match_statement(&mut self, branch: &ast::StmtMatch) -> StdResult<statements::Block, ()> {
+        let mut cases = Vec::with_capacity(branch.cases.len());
+        let mut falls = false;
+        let mut exhaustive = false;
+        let patterns = &self
+            .sites
+            .matches
+            .get(&branch.range())
+            .and_then(Option::as_ref)
+            .ok_or(())?
+            .cases;
+        for (case, planned) in branch.cases.iter().zip(patterns) {
+            if exhaustive {
+                return Err(());
+            }
+            let pattern = planned.pattern.clone();
+            let captures = pattern.names.iter().map(|name| self.slot(name)).collect();
+            let guard = case
+                .guard
+                .as_deref()
+                .map(|value| self.operand(value).map(truth).ok_or(()))
+                .transpose()?;
+            exhaustive = guard.is_none() && case.pattern.is_irrefutable();
+            let (body, continues) = self.block(&case.body)?;
+            cases.push(ir::MatchCase {
+                pattern,
+                captures,
+                guard,
+                body,
+            });
+            falls |= continues;
+        }
+        // Only a complete match owns its subject in this suite's slot layout.
+        let subject = self.frame_value(&branch.subject).ok_or(())?;
+        Ok((vec![Statement::Match(subject, cases)], falls || !exhaustive))
+    }
+
+    fn block(&mut self, stmts: &[ast::Stmt]) -> StdResult<statements::Block, ()> {
+        let mut body = Vec::new();
+        let mut falls = true;
+        for stmt in stmts {
+            falls &= self.statement(stmt, &mut body)?;
+        }
+        Ok((body, falls))
     }
 
     fn slot(&mut self, name: &str) -> usize {
@@ -1213,6 +2844,13 @@ impl SourceScope<'_> {
     }
 
     fn store(&mut self, name: &str, value: Expr) -> Statement {
+        if let Some(slot) = self
+            .comprehension
+            .as_ref()
+            .and_then(|scope| scope.targets.get(name))
+        {
+            return Statement::Assign(*slot, value);
+        }
         let slot = self.slot(name);
         if matches!(self.kind, RegisteredScope::Module) {
             Statement::Expr(operation(Builtin::GlobalSet(slot), Type::None, vec![value]))
@@ -1221,11 +2859,181 @@ impl SourceScope<'_> {
         }
     }
 
+    fn iteration_body(
+        &mut self,
+        target: &ast::Expr,
+        input: &pipelines::Prepared,
+        body: impl FnOnce(&mut Self) -> StdResult<Vec<Statement>, ()>,
+    ) -> StdResult<(Vec<Statement>, Vec<Statement>), ()> {
+        let binding = unpacking::bind_targets(
+            self,
+            target,
+            Expr::local(input.value, Type::PythonObject),
+            None,
+        )?;
+        let body = self.in_loop(LoopScope::WithCursor, body)?;
+        Ok((binding, body))
+    }
+
+    fn iteration_input(
+        &mut self,
+        iterable: &ast::Expr,
+        pull: Option<ir::AsyncPull>,
+    ) -> Option<pipelines::Prepared> {
+        let value = self.ordinary_operand(iterable)?;
+        let (acquire, kind) = iteration_protocol(iterable.range(), pull);
+        let cursor = operation(
+            Builtin::RegisteredIter(acquire),
+            Type::PythonObject,
+            vec![value],
+        );
+        Some(pipelines::Prepared::pull_cursor(
+            cursor,
+            Type::PythonObject,
+            kind,
+            |ty| self.hidden(ty),
+        ))
+    }
+
+    /// The activation owns the complete value before a return, discard or store.
+    /// Its temporary roots keep earlier arguments live across a later suspension.
+    fn frame_value(&mut self, expr: &ast::Expr) -> Option<Expr> {
+        if matches!(self.kind, RegisteredScope::Function { .. }) {
+            self.with_assignment_operands(|scope| scope.operand(expr))
+        } else {
+            self.operand(expr)
+        }
+    }
+
+    fn operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
+        self.lower_operand(expr, true)
+    }
+
+    fn while_condition(&mut self, test: &ast::Expr) -> Option<Expr> {
+        self.with_suspending_operands(|scope| scope.operand(test))
+    }
+
+    fn with_suspending_operands<T>(&mut self, lower: impl FnOnce(&mut Self) -> T) -> T {
+        let previous = std::mem::replace(&mut self.suspending_operands, true);
+        let value = lower(self);
+        self.suspending_operands = previous;
+        value
+    }
+
+    fn lambda_binding(&mut self, lambda: &ast::ExprLambda) -> Option<Expr> {
+        let defaults = values::lambda_defaults(lambda)
+            .map(|default| self.ordinary_operand(default))
+            .collect::<Option<_>>()?;
+        Some(values::lambda_binding(lambda, defaults))
+    }
+
     fn ordinary_operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
-        let value = if let ast::Expr::Lambda(lambda) = expr {
-            let binding = values::checked_binding(lambda, self.source)?;
-            if self.loop_depth != 0 {
-                // A default may suspend while its surrounding iteration cursor is live.
+        self.lower_operand(expr, false)
+    }
+
+    fn lower_operand(&mut self, expr: &ast::Expr, whole: bool) -> Option<Expr> {
+        if expr.is_dict_expr()
+            && let Some(suspended) = self.diagnostic_suspension.take()
+        {
+            // A dictionary owns its own diagnostic, including inside a Named RHS.
+            let value = self.checked_operand(expr, whole);
+            self.diagnostic_suspension = Some(suspended);
+            if value.is_none() {
+                self.refusal.get_or_insert((
+                    expr.range(),
+                    "cannot compile this dictionary display ahead of time",
+                ));
+            }
+            return value;
+        }
+
+        let value = self.checked_operand(expr, whole);
+        if value.is_none() && self.diagnostic_suspension.is_some() {
+            let reason = match expr {
+                ast::Expr::FString(_) => "cannot compile this formatted string ahead of time",
+                ast::Expr::Generator(_) => "cannot compile this generator expression ahead of time",
+                _ => return None,
+            };
+            self.refusal = Some((expr.range(), reason));
+        }
+        value
+    }
+
+    fn checked_operand(&mut self, expr: &ast::Expr, whole: bool) -> Option<Expr> {
+        // A generator lambda can resume within its return expression. Eager
+        // display bodies use their own iteration and operand boundaries.
+        let suspension = match self.kind {
+            RegisteredScope::Function { is_async } if whole || self.suspending_operands => {
+                Some(is_async)
+            }
+            RegisteredScope::Lambda if self.comprehension.is_none() => Some(false),
+            _ => None,
+        };
+        let mut value = if let Some(is_async) = suspension
+            && let Some((kind, value)) = ir::SuspendValue::operand(expr)
+            && !matches!(
+                (kind, is_async),
+                (ir::SuspendValue::Await, false) | (ir::SuspendValue::Delegate, true)
+            ) {
+            self.suspend_operand(kind, value, expr.range())?
+        } else if let ast::Expr::TString(template) = expr {
+            match self.with_suspending_operands(|scope| {
+                scope.source.template(
+                    template,
+                    matches!(
+                        scope.kind,
+                        RegisteredScope::Function { .. } | RegisteredScope::Lambda
+                    ),
+                    |child| scope.ordinary_operand(child),
+                )
+            }) {
+                Ok(value) => value,
+                Err(reason) => {
+                    if self.diagnostic_suspension == Some(true)
+                        && let Some(reason) = reason
+                    {
+                        self.refusal = Some((expr.range(), reason));
+                    }
+                    return None;
+                }
+            }
+        } else if let ast::Expr::FString(formatted) = expr {
+            self.with_suspending_operands(|scope| {
+                fstrings::registered_fstring(formatted, scope.source, |child| {
+                    scope.ordinary_operand(child).ok_or(())
+                })
+            })
+            .ok()?
+        } else if matches!(
+            expr,
+            ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_)
+        ) {
+            let value = self.eager_comprehension(expr);
+            if value.is_none() {
+                self.refusal = Some((
+                    expr.range(),
+                    "cannot compile this comprehension ahead of time",
+                ));
+            }
+            value?
+        } else if (self.comprehension.is_some() || self.generator_expression)
+            && matches!(self.kind, RegisteredScope::Function { is_async: true })
+            && let ast::Expr::Await(awaited) = expr
+        {
+            self.suspend_operand(ir::SuspendValue::Await, Some(&awaited.value), expr.range())?
+        } else if let ast::Expr::Lambda(lambda) = expr {
+            if !values::has_checked_lambda_body(lambda, self.source) {
+                if self.diagnostic_suspension.is_some() {
+                    self.refusal = Some((
+                        expr.range(),
+                        "cannot compile this lambda body ahead of time",
+                    ));
+                }
+                return None;
+            }
+            let binding = self.lambda_binding(lambda)?;
+            // A generator expression retains its own clause cursors across an awaited default.
+            if self.loop_scope != LoopScope::Outside && !self.generator_expression {
                 let mut suspends = false;
                 ir::walk_operand_expressions(&binding, &mut |child| {
                     suspends |= matches!(
@@ -1240,7 +3048,8 @@ impl SourceScope<'_> {
             binding
         } else if let ast::Expr::Named(named) = expr {
             let target = named.target.as_name_expr()?;
-            let value = self.ordinary_operand(&named.value)?;
+            let value =
+                self.with_assignment_operands(|scope| scope.lower_operand(&named.value, whole))?;
             Expr {
                 ty: value.ty,
                 kind: ExprKind::Bind(self.slot(&target.id), Box::new(value)),
@@ -1250,41 +3059,46 @@ impl SourceScope<'_> {
                 expr,
                 self.source,
                 None,
+                matches!(self.kind, RegisteredScope::Class),
                 |_| true,
-                |child| self.ordinary_operand(child).ok_or(()),
+                |child| {
+                    match expr {
+                        ast::Expr::Generator(_) => {
+                            self.creating_iterable(|scope| scope.ordinary_operand(child))
+                        }
+                        // The dictionary retains earlier operands while a key, value or spread suspends.
+                        ast::Expr::Dict(_) => self.operand(child),
+                        ast::Expr::Set(_) | ast::Expr::Subscript(_) if child.is_await_expr() => {
+                            self.operand(child)
+                        }
+                        _ => self.ordinary_operand(child),
+                    }
+                    .ok_or(())
+                },
             )
             .ok()??
         };
+        if let Some(scope) = &self.comprehension {
+            values::in_namespace(&mut value, Expr::local(scope.slot, Type::PythonObject));
+        }
         Some(self.source.located(expr, value))
     }
 
-    fn operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
-        // The current loop cursor lives in this native activation; a suspension
-        // across a pull needs a persisted cursor in the generator frame.
-        if self.loop_depth == 0
-            && let RegisteredScope::Function { is_async } = self.kind
-            && let Some((kind, value)) = ir::SuspendValue::operand(expr)
-            && !matches!(
-                (kind, is_async),
-                (ir::SuspendValue::Await, false) | (ir::SuspendValue::Delegate, true)
-            )
-        {
-            // Admit a suspension only at this whole-expression boundary. All previous
-            // statements have committed their owners to the observable frame.
-            let value = match value {
-                Some(value) => self.ordinary_operand(value)?,
-                None => Expr::none(),
-            };
-            return Some(self.source.located(
-                expr,
-                operation(
-                    Builtin::RegisteredSuspend(kind, expr.range()),
-                    Type::PythonObject,
-                    vec![value],
-                ),
-            ));
-        }
-        self.ordinary_operand(expr)
+    fn suspend_operand(
+        &mut self,
+        kind: ir::SuspendValue,
+        operand: Option<&ast::Expr>,
+        range: TextRange,
+    ) -> Option<Expr> {
+        let value = match operand {
+            Some(operand) => self.ordinary_operand(operand)?,
+            None => Expr::none(),
+        };
+        Some(operation(
+            Builtin::RegisteredSuspend(kind, range),
+            Type::PythonObject,
+            vec![value],
+        ))
     }
 }
 
@@ -1304,30 +3118,55 @@ impl ir::SuspendValue {
 mod tests {
     use super::*;
 
-    fn registered_suite(
+    fn prepared_sites<'a>(
+        stmts: &'a [ast::Stmt],
+        source: values::RegisteredSource<'_>,
+        bundled: bool,
+    ) -> RegisteredSites<'a> {
+        let default_names = imre_ast::Names::default();
+        let names = source.private_names.unwrap_or(&default_names);
+        let strings = annotation_operands(
+            stmts,
+            names.string_annotations,
+            source,
+            bundled,
+            crate::frontend::annotation_operands::test_annotation_body,
+            &mut HashMap::new(),
+        );
+        registered_sites(stmts, names, source, &strings)
+    }
+
+    pub(super) fn registered_suite(
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
         source: values::RegisteredSource<'_>,
     ) -> Option<RegisteredFunction> {
-        let default_names = imre_ast::Names::default();
-        let names = source.private_names.unwrap_or(&default_names);
-        let mut operations = registered_sites(stmts, names).operations;
-        if matches!(kind, RegisteredScope::Module) {
-            module_annotations(
-                stmts,
-                names.string_annotations,
-                &mut operations,
-                source,
-                false,
-            );
-        }
+        let operations = prepared_sites(stmts, source, false).operations;
         SuitePreparation::new(&operations, source, stmts, true)
             .complete(stmts, kind)
             .map(|plan| plan.checked)
     }
 
     #[test]
-    fn unprepared_datetime_assertion_stays_physical() {
+    fn generic_method_closure_uses_ordinary_function_sites() {
+        let source = "class Box:\n    def capture[T](self, __value: T):\n        def get():\n            return __value\n        return get\n";
+        let graph = SourceGraph::single(source).unwrap();
+        let module = &graph.modules[graph.entry];
+        let mut body = module.parsed.syntax().body.clone();
+        let names = imre_ast::lower(&mut body);
+        let literals = values::ModuleSource::new(module);
+        let sites =
+            registered_sites::<()>(&body, &names, literals.context(source), &HashMap::new());
+        let [method, closure] = sites.functions.as_slice() else {
+            panic!("expected the method and its lexical function");
+        };
+        assert!(method.prepare_entry && closure.prepare_entry);
+        assert!(sites.operations.contains_key(&method.def.name.range()));
+        assert_eq!(closure.def.name.as_str(), "get");
+    }
+
+    #[test]
+    fn datetime_assertion_formats_its_message_on_the_failure_edge() {
         let text = include_str!("../../stdlib/_pydatetime.py");
         let module = ruff_python_parser::parse_module(text).unwrap();
         let body = &module.syntax().body;
@@ -1348,7 +3187,9 @@ mod tests {
             Some(ast::Expr::FString(_))
         ));
         let source = RegisteredSource {
-            templates: None,
+            template_fields: None,
+            generators: None,
+            lambdas: None,
             text,
             private_names: None,
             method_imports: &imre_ast::module_imports(body),
@@ -1359,14 +3200,27 @@ mod tests {
         let operations = HashMap::new();
         let mut preparation = SuitePreparation::new(&operations, source, stmts, true);
         let plan = preparation.suite(stmts, RegisteredScope::Function { is_async: false });
-        assert!(plan.checked.function.body.is_empty());
-        assert_eq!(plan.residual.len(), 1);
-        assert_eq!(plan.residual[0].statements, 0..1);
+        assert!(plan.fully_checked());
+        let [_, Statement::If(_, succeeds, fails)] = plan.checked.function.body.as_slice() else {
+            panic!("expected the checked assertion checkpoint and branch");
+        };
+        assert!(succeeds.is_empty());
+        let mut fields = 0;
+        ir::walk_nodes(fails, &mut |node, _| {
+            if let ir::Node::Expression(Expr {
+                kind: ExprKind::Builtin(Builtin::FormatField(_), _),
+                ..
+            }) = node
+            {
+                fields += 1;
+            }
+        });
+        assert_eq!(fields, 1);
     }
 
     #[test]
     fn assertion_admission_keeps_the_message_on_the_failure_edge() {
-        let text = "assert (lost := probe()), f'{value}'\nassert (selected := [value][0]), [message(), values[1:]]\n";
+        let text = "assert (early := probe()), f'{(unused := 1)}{(item for item in values)}'\nassert (selected := [value][0]), [message(), values[1:]]\n";
         let graph = SourceGraph::single(text).unwrap();
         let module = &graph.modules[graph.entry];
         let body = &module.parsed.syntax().body;
@@ -1377,13 +3231,18 @@ mod tests {
                 .suite(body, RegisteredScope::Function { is_async: false })
         };
         let plan = prepare(true);
-        assert_eq!(plan.checked.local_names.len(), 1);
-        assert_eq!(plan.checked.local_names[&0].name, "selected");
+        assert_eq!(plan.checked.local_names.len(), 2);
+        assert_eq!(plan.checked.local_names[&0].name, "early");
+        assert_eq!(plan.checked.local_names[&1].name, "selected");
         let [physical] = plan.residual.as_slice() else {
-            panic!("expected only the f-string assertion to remain physical");
+            panic!("expected the generator-expression message to remain physical");
         };
         assert_eq!(physical.at, 0);
         assert_eq!(physical.statements, 0..1);
+        assert!(matches!(
+            &physical.effect,
+            Some(SourceEffect::Assertion(site)) if !site.external_test && site.external_message
+        ));
         let [_, Statement::If(test, succeeds, fails)] = plan.checked.function.body.as_slice()
         else {
             panic!("expected only the checked assertion checkpoint and branch");
@@ -1403,10 +3262,7 @@ mod tests {
         let call_count = |operand| {
             let mut calls = 0;
             ir::walk_operand_expressions(operand, &mut |expr| {
-                calls += usize::from(matches!(
-                    expr.kind,
-                    ExprKind::Builtin(Builtin::RegisteredCall(_), _)
-                ));
+                calls += usize::from(expr.is_registered_invoke());
             });
             calls
         };
@@ -1420,17 +3276,89 @@ mod tests {
     }
 
     #[test]
+    fn prepared_raise_keeps_both_callback_operands_in_the_shared_body() {
+        let text = "def deliver(make, cause):\n    raise make() from cause()\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let definition = module.parsed.syntax().body[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let literals = values::ModuleSource::new(module);
+        let checked = registered_suite(
+            &definition.body,
+            RegisteredScope::Function { is_async: false },
+            literals.context(text),
+        )
+        .expect("the whole raise suite uses checked operations");
+        assert!(crate::llvm::registered::supports(&checked));
+        let Some(Statement::Raise(Some(value))) = checked.function.body.last() else {
+            panic!("expected a terminal raise");
+        };
+        let (exception, cause) = value.explicit_cause().unwrap();
+        for operand in [exception, cause] {
+            let mut calls = 0;
+            ir::walk_operand_expressions(operand, &mut |value| {
+                calls += usize::from(value.is_registered_invoke());
+            });
+            assert_eq!(calls, 1);
+        }
+    }
+
+    #[test]
+    fn parameter_annotation_callback_preserves_field_order_and_string_operands() {
+        let text =
+            "def f(a: mod.T, /, b: 'list[T]', *args: int, c: bool, **kw: bytes) -> None: pass\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let stmts = &module.parsed.syntax().body;
+        let sites = prepared_sites(
+            stmts,
+            values::ModuleSource::new(module).context(text),
+            false,
+        );
+        let def = stmts[0].as_function_def_stmt().unwrap();
+        let provider = &sites.parameter_annotations[&def.parameters.start()];
+        assert!(provider.body.fully_checked());
+        let fields: Vec<_> = provider
+            .entries
+            .iter()
+            .map(|entry| &sites.annotations[&entry.site])
+            .collect();
+        let names: Vec<_> = fields.iter().map(|field| field.name.as_str()).collect();
+        assert_eq!(names, ["b", "a", "args", "c", "kw", "return"]);
+        assert!(matches!(
+            &fields[0].value,
+            AnnotationValue::Checked(Expr {
+                kind: ExprKind::Builtin(Builtin::BindAnnotationExpression(site), _), ..
+            }) if *site == fields[0].range.start()
+        ));
+        assert_eq!(provider.references["a"], "mod.T");
+        assert_eq!(provider.references["return"], "None");
+        assert!(!provider.references.contains_key("b"));
+    }
+
+    #[test]
     fn annotation_callback_numbers_physical_occurrences_and_keeps_unsupported_values_late() {
-        let text = "first: int\nsecond: list[int]\ncomplex: dict[str, int]\nforward: 'list[int]'\nprepared: (lambda: int)()\ndeferred: next(t for t in (int,))\n";
+        let text = "first: int\nsecond: list[int]\ncomplex: dict[str, int]\nforward: 'list[int]'\nprepared: (lambda: int)()\ndeferred: next(t for t in (int,))\nquoted: '(lambda: Child)()'\n";
         let graph = SourceGraph::single(text).unwrap();
         let module = &graph.modules[graph.entry];
         let stmts = &module.parsed.syntax().body;
         let literals = values::ModuleSource::new(module);
         let source = literals.context(text);
-        let sites = module_annotations(stmts, false, &mut HashMap::new(), source, false);
-        let first = &sites[&stmts[0].start()];
-        let second = &sites[&stmts[1].start()];
-        let whole = DeferredModuleAnnotation::prepare_body(&[first, second, first]);
+        let prepared = |bundled| prepared_sites(stmts, source, bundled).annotations;
+        let sites = prepared(false);
+        let callback = |occurrences: &[usize]| {
+            let entries: Vec<_> = occurrences
+                .iter()
+                .enumerate()
+                .map(|(index, slot)| ir::AnnotationOccurrence {
+                    site: stmts[*slot].start(),
+                    index: Some(index),
+                })
+                .collect();
+            DeferredAnnotation::prepare_body(&sites, &entries)
+        };
+        let whole = callback(&[0, 1, 0]);
         assert!(whole.fully_checked());
         let checked = &whole.checked;
         let [
@@ -1456,7 +3384,7 @@ mod tests {
                     let Statement::Expr(Expr {
                         kind:
                             ExprKind::Builtin(
-                                Builtin::RegisteredAnnotationInsert { index, name },
+                                Builtin::RegisteredAnnotationInsert(occurrence),
                                 operands,
                             ),
                         ..
@@ -1465,26 +3393,28 @@ mod tests {
                         panic!("expected a guarded annotation insertion")
                     };
                     assert_eq!(operands.len(), 1);
-                    (*index, name.as_str())
+                    (occurrence.index, sites[&occurrence.site].name.as_str())
                 })
                 .collect();
-        assert_eq!(numbered, [(0, "first"), (1, "second"), (2, "first")]);
-        let bundled_sites = module_annotations(stmts, false, &mut HashMap::new(), source, true);
+        assert_eq!(
+            numbered,
+            [(Some(0), "first"), (Some(1), "second"), (Some(2), "first")]
+        );
+        let bundled_sites = prepared(true);
         let quoted_site = stmts[3].start();
         assert!(
-            matches!(&sites[&quoted_site].value, AnnotationValue::Bound(child) if child.text == "list[int]")
+            matches!(&sites[&quoted_site].value, AnnotationValue::Checked(Expr { kind: ExprKind::Builtin(Builtin::BindAnnotationExpression(site), _), .. }) if *site == stmts[3].as_ann_assign_stmt().unwrap().annotation.start())
         );
         assert!(
             matches!(&bundled_sites[&quoted_site].value, AnnotationValue::Checked(Expr {kind: ExprKind::Str(text), ..}) if text == "list[int]")
         );
-        let forward = DeferredModuleAnnotation::prepare_body(&[&sites[&quoted_site]]);
+        let forward = callback(&[3]);
         assert!(forward.fully_checked());
         assert!(matches!(&forward.checked.function.body[1],
             Statement::Expr(Expr { kind: ExprKind::Builtin(
-                Builtin::RegisteredAnnotationInsert { index: 0, .. }, values), .. })
+                Builtin::RegisteredAnnotationInsert(ir::AnnotationOccurrence { index: Some(0), .. }), values), .. })
                 if matches!(values.as_slice(), [Expr { kind: ExprKind::Builtin(
-                    Builtin::BindAnnotationExpression(id), args), .. }] if *id == ir::AnnotationCodeId(3) &&
-                    matches!(args.as_slice(), [Expr { kind: ExprKind::Str(text), .. }] if text == "list[int]"))));
+                    Builtin::BindAnnotationExpression(site), _), .. }] if *site == stmts[3].as_ann_assign_stmt().unwrap().annotation.start())));
         {
             assert!(matches!(
                 sites[&stmts[2].start()].value,
@@ -1496,7 +3426,11 @@ mod tests {
             ));
             let unavailable = &sites[&stmts[5].start()];
             assert!(matches!(unavailable.value, AnnotationValue::Source(_)));
-            let mixed = DeferredModuleAnnotation::prepare_body(&[first, unavailable, second]);
+            assert!(matches!(
+                sites[&stmts[6].start()].value,
+                AnnotationValue::Checked(_)
+            ));
+            let mixed = callback(&[0, 5, 1]);
             let [gap] = mixed.residual.as_slice() else {
                 panic!("expected one unprepared operand")
             };
@@ -1514,29 +3448,142 @@ mod tests {
             .into_syntax()
             .body;
         let names = imre_ast::lower(&mut stmts);
-        let mut ops = registered_sites(&stmts, &names).operations;
         let replacements = HashMap::new();
         let imports = imre_ast::module_imports(&stmts);
         let source = RegisteredSource {
-            templates: None,
+            template_fields: None,
+            generators: None,
+            lambdas: None,
             text,
             private_names: Some(&names),
             replacements: &replacements,
             has_templates: false,
             method_imports: &imports,
         };
-        let annotations =
-            module_annotations(&stmts, names.string_annotations, &mut ops, source, false);
+        let operands = prepared_sites(&stmts, source, false);
+        let ops = operands.operations;
+        let annotations = operands.annotations;
         assert_eq!(annotations.len(), 2);
         let mut prepare = SuitePreparation::new(&ops, source, &stmts, true);
         let plan = prepare.suite(&stmts, RegisteredScope::Module);
         let [run] = &plan.residual[..] else {
             panic!("expected one source range")
         };
-        assert_eq!(run.statements, 2..4);
-        assert_eq!(run.at, 5);
-        assert_eq!(plan.checked.function.body.len(), 7);
-        assert!(prepare.nested.values().all(RegisteredSuite::fully_checked));
+        // Only the annotated list assignment remains in the source run. The branch
+        // now owns the delete operation, and the last import still follows the run.
+        assert_eq!(run.statements, 3..4);
+        let (before, after) = plan.checked.function.body.split_at(run.at);
+        let Some(Statement::If(_, yes, no)) = before.last() else {
+            panic!("expected the checked conditional immediately before y")
+        };
+        assert!(no.is_empty());
+        assert!(matches!(yes.as_slice(), [_, Statement::Expr(Expr {
+            kind: ExprKind::Builtin(Builtin::RegisteredDeleteName(name, _), _), ..
+        })] if name == "a"));
+        assert!(matches!(
+            after,
+            [
+                _,
+                Statement::Expr(Expr {
+                    kind: ExprKind::Builtin(Builtin::RegisteredImport(_), _),
+                    ..
+                })
+            ]
+        ));
+        assert!(prepare.nested.is_empty());
+    }
+
+    #[test]
+    fn prepared_match_retains_the_guard_capture_and_both_conditional_arms() {
+        let text = concat!(
+            "if enabled:\n",
+            "    match subject:\n",
+            "        case Row(value=item) if accept(item):\n",
+            "            record(item if choose else other)\n",
+            "else:\n",
+            "    record(other)\n",
+        );
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let source = values::ModuleSource::new(module);
+        let body = registered_suite(
+            &module.parsed.syntax().body,
+            RegisteredScope::Module,
+            source.context(text),
+        )
+        .unwrap();
+        assert!(crate::llvm::registered::supports(&body));
+        let mut matched = false;
+        ir::walk_statements(&body.function.body, &mut |stmt| {
+            if let Statement::Match(_, cases) = stmt {
+                let [case] = cases.as_slice() else {
+                    panic!("expected one match case")
+                };
+                assert_eq!(case.pattern.names, ["item"]);
+                assert_eq!(case.captures.len(), 1);
+                assert!(case.guard.is_some());
+                let mut selected = false;
+                ir::walk_expressions(&case.body, &mut |expr| {
+                    selected |= matches!(expr.kind, ExprKind::Conditional(..));
+                });
+                assert!(selected);
+                matched = true;
+            }
+        });
+        assert!(matched);
+    }
+
+    #[test]
+    fn registered_branches_keep_selected_operands_and_live_bool_calls() {
+        let graph = SourceGraph::single(concat!(
+            "def choose(flag: int, left, right, sink):\n",
+            "    if flag and left:\n",
+            "        sink(left if flag else right)\n",
+            "    else:\n",
+            "        sink(bool(flag), (left and right) or flag)\n",
+        ))
+        .unwrap();
+        assert!(super::super::lower(&graph).is_err());
+        let bodies = graph.registered_functions();
+        let body = &bodies[&graph.entry][&TextSize::default()].function.body;
+        assert!(body.iter().any(|stmt| matches!(stmt, Statement::If(..))));
+        let mut counts = [0; 6];
+        ir::walk_expressions(body, &mut |expr| match &expr.kind {
+            ExprKind::Conditional(..) => counts[0] += 1,
+            ExprKind::Boolean(..) => counts[1] += 1,
+            ExprKind::BooleanValue(..) => counts[2] += 1,
+            ExprKind::Builtin(Builtin::RegisteredName(name), _) if name == "bool" => counts[3] += 1,
+            ExprKind::Builtin(Builtin::RegisteredCall(..), _) => counts[4] += 1,
+            ExprKind::Invoke { .. } => counts[5] += 1,
+            _ => {}
+        });
+        assert_eq!(counts, [1, 1, 2, 1, 0, 3]);
+    }
+
+    #[test]
+    fn name_updates_compile_to_a_load_and_an_inplace_operation() {
+        let graph = SourceGraph::single("result += operand()\n").unwrap();
+        let entry = &graph.modules[graph.entry];
+        for scope in [
+            RegisteredScope::Module,
+            RegisteredScope::Function { is_async: false },
+        ] {
+            let plan = registered_suite(
+                &entry.parsed.syntax().body,
+                scope,
+                values::ModuleSource::new(entry).context(&entry.source),
+            )
+            .expect("the whole update has a checked representation");
+            let mut operations = Vec::new();
+            ir::walk_expressions(&plan.function.body, &mut |expr| {
+                if let ExprKind::Builtin(Builtin::RegisteredInPlace(operator), operands) =
+                    &expr.kind
+                {
+                    operations.push((*operator, operands.len()));
+                }
+            });
+            assert_eq!(operations, [("+", 2)]);
+        }
     }
 
     #[test]
@@ -1657,6 +3704,194 @@ mod tests {
     }
 
     #[test]
+    fn starred_class_header_carries_its_argument_layout() {
+        let graph = SourceGraph::single("@dec\nclass C(*bases, metaclass=meta, **options): pass\n")
+            .unwrap();
+        let entry = &graph.modules[graph.entry];
+        let source = values::ModuleSource::new(entry);
+        let suite = registered_suite(
+            &entry.parsed.syntax().body,
+            RegisteredScope::Module,
+            source.context(&entry.source),
+        )
+        .unwrap();
+        let mut headers = 0;
+        ir::walk_expressions(&suite.function.body, &mut |expr| {
+            if let ExprKind::Builtin(
+                Builtin::RegisteredDefinition(ir::DefinitionSite::Class {
+                    arguments: Some(arguments),
+                    ..
+                }),
+                operands,
+            ) = &expr.kind
+            {
+                headers += 1;
+                assert_eq!(arguments.starred, [true]);
+                assert_eq!(arguments.keywords, [Some("metaclass".into()), None]);
+                assert_eq!(operands.len(), 4);
+            }
+        });
+        assert_eq!(headers, 1);
+    }
+
+    #[test]
+    fn inline_bind_uses_the_assigning_frame() {
+        let prepare = |expr: &str, is_async| {
+            let prefix = if is_async { "async " } else { "" };
+            let text = format!("{prefix}def run(value):\n    return {expr}\n");
+            let graph = SourceGraph::single(&text).unwrap();
+            let module = &graph.modules[graph.entry];
+            let def = module.parsed.syntax().body[0]
+                .as_function_def_stmt()
+                .unwrap();
+            let expr = def.body[0]
+                .as_return_stmt()
+                .unwrap()
+                .value
+                .as_deref()
+                .unwrap();
+            let literals = values::ModuleSource::new(module);
+            inline_operand(
+                expr,
+                literals.context(&text),
+                RegisteredScope::Function { is_async },
+                true,
+            )
+            .ok()
+            .flatten()
+        };
+        let operand = prepare("(saved := (inner := await value))", true).unwrap();
+        crate::verify::registered(operand.region()).unwrap();
+        assert_eq!(operand.local_names.len(), 2);
+        assert!(prepare("(saved := await value)", false).is_none());
+        let operand = prepare(
+            r#"{"eager": [item for item in [1]], "value": keep((bound := (yield "nested")))}"#,
+            false,
+        )
+        .unwrap();
+        crate::verify::registered(operand.region()).unwrap();
+        assert!(
+            operand
+                .local_names
+                .values()
+                .any(|local| local.name == "bound")
+        );
+    }
+
+    #[test]
+    fn list_and_set_comprehensions_unpack_into_their_result() {
+        let text = "result = ([*row for row in rows], {*row for row in rows})\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let source = values::ModuleSource::new(module);
+        let suite = registered_suite(
+            &module.parsed.syntax().body,
+            RegisteredScope::Module,
+            source.context(text),
+        )
+        .unwrap();
+        crate::verify::registered(suite.region()).unwrap();
+        let mut collectors = Vec::new();
+        ir::walk_expressions(&suite.function.body, &mut |expr| {
+            if let ExprKind::Builtin(op @ (Builtin::Append | Builtin::SetAdd), args) = &expr.kind {
+                let [out, item] = args.as_slice() else {
+                    panic!("expected accumulator and projection");
+                };
+                assert!(matches!(out.kind, ExprKind::Local(_)));
+                assert!(matches!(
+                    &item.kind,
+                    ExprKind::Builtin(Builtin::RegisteredSpread, inner) if inner.len() == 1
+                ));
+                collectors.push(matches!(op, Builtin::SetAdd));
+            }
+        });
+        assert_eq!(collectors, [false, true]);
+    }
+
+    #[test]
+    fn standalone_dictionary_uses_the_current_async_scope() {
+        let text = concat!(
+            "async def gather(stream, first, second, nested, mapping):\n",
+            "    return {0: (saved := [item async for item in stream]),\n",
+            "            1: {await first, await second}, 2: keep([await nested]), **await mapping}\n",
+        );
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let def = module.parsed.syntax().body[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let value = def.body[0]
+            .as_return_stmt()
+            .unwrap()
+            .value
+            .as_deref()
+            .unwrap();
+        let literals = values::ModuleSource::new(module);
+        let source = literals.context(text);
+        let prepare = |is_async, suspended| {
+            inline_operand(
+                value,
+                source,
+                RegisteredScope::Function { is_async },
+                suspended,
+            )
+        };
+        assert!(prepare(false, true).is_err());
+        assert!(prepare(true, false).is_err());
+        let operand = prepare(true, true).unwrap().unwrap();
+        crate::verify::registered(operand.region()).unwrap();
+        assert!(
+            operand
+                .local_names
+                .values()
+                .any(|binding| binding.name == "saved")
+        );
+        let mut awaits = Vec::new();
+        ir::walk_operand_expressions(&operand.value, &mut |value| {
+            if let ExprKind::Builtin(
+                Builtin::RegisteredSuspend(ir::SuspendValue::Await, range),
+                _,
+            ) = &value.kind
+            {
+                awaits.push(&text[*range]);
+            }
+        });
+        assert_eq!(
+            awaits,
+            [
+                "await first",
+                "await second",
+                "await nested",
+                "await mapping"
+            ]
+        );
+    }
+
+    #[test]
+    fn eager_first_iterable_can_delegate_before_the_cursor_exists() {
+        let text = "def gather():\n    return [value for value in ((yield from rows) or ())]\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let function = module.parsed.syntax().body[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let expr = function.body[0]
+            .as_return_stmt()
+            .unwrap()
+            .value
+            .as_deref()
+            .unwrap();
+        let literals = values::ModuleSource::new(module);
+        let source = literals.context(text);
+        let prepare = |kind, suspended| inline_operand(expr, source, kind, suspended).unwrap();
+        let value = prepare(RegisteredScope::Function { is_async: false }, true)
+            .expect("the creating generator owns the outer yield");
+        crate::verify::registered(value.region()).unwrap();
+        assert!(prepare(RegisteredScope::Module, false).is_none());
+        assert!(prepare(RegisteredScope::Function { is_async: true }, true).is_none());
+    }
+
+    #[test]
     fn module_and_function_stores_share_the_registered_dictionary_operand() {
         let graph = SourceGraph::single("out = {key: callback(arg), **more}[index]\n").unwrap();
         let entry = &graph.modules[graph.entry];
@@ -1735,7 +3970,15 @@ mod tests {
             .join("../../tests/fixtures/registered_imported_callback");
         let entry = project.join("callable_effect.py");
         let mut graph = SourceGraph::load(&entry, Some(&project), &[]).unwrap();
-        let result = crate::checked_lower_with(&mut graph, None, false).unwrap();
+        let error = crate::initializer_call_error(&graph, false);
+        let (result, lowered) = caller_cache::observe_lowerings(|| {
+            crate::checked_lower_with(&mut graph, None, error.as_ref()).unwrap()
+        });
+        assert_eq!(
+            lowered.iter().filter(|name| *name == "publish").count(),
+            1,
+            "{lowered:?}"
+        );
         if let crate::CheckedProgram::Runtime(reason) = result {
             panic!("{reason}");
         }
@@ -1749,10 +3992,240 @@ mod tests {
         let mut callbacks = 0;
         ir::walk_expressions(&body.body, &mut |expr| match expr.kind {
             ExprKind::Binary(Binary::Add, ..) => adds += 1,
-            ExprKind::Builtin(Builtin::RegisteredCall(..), _) => callbacks += 1,
+            ExprKind::Invoke { .. } => callbacks += 1,
             _ => {}
         });
         assert_eq!((adds, callbacks), (1, 1));
+    }
+
+    #[test]
+    fn recovery_reuses_the_solved_body_and_lowers_the_missing_callback() {
+        let graph = SourceGraph::single(concat!(
+            "def square(n: int) -> int:\n    return n * n\n",
+            "def publish(send) -> None:\n    send(1)\n",
+        ))
+        .unwrap();
+        let module = graph.entry;
+        let definitions = &graph.modules[module].parsed.syntax().body;
+        let types = Types::default();
+        let classes = ClassInfo::new(&graph, &types).unwrap();
+        let inference = inference::Inference::default();
+        let mut signatures = HashMap::new();
+        for (statement, definition) in definitions.iter().enumerate() {
+            let signature = signature(
+                definition.as_function_def_stmt().unwrap(),
+                &graph,
+                keyword_forwarding::Defaults::local(module),
+                &classes.declarations,
+                &types,
+                None,
+                &inference,
+            )
+            .unwrap();
+            signatures.insert(DefinitionId { module, statement }, signature);
+        }
+        let globals = ModuleValues::default();
+        let capture_bodies = |live| {
+            caller_cache::observe_lowerings(|| {
+                capture(
+                    &graph,
+                    &signatures,
+                    &classes,
+                    &types,
+                    &inference,
+                    &globals,
+                    if live {
+                        Capture::IncludeLive
+                    } else {
+                        Capture::Solved
+                    },
+                )
+            })
+            .1
+        };
+
+        assert_eq!(capture_bodies(false), ["square"]);
+        assert!(graph.registered_functions()[&module].contains_key(&definitions[0].start()));
+        assert_eq!(capture_bodies(true), ["publish"]);
+        let bodies = graph.registered_functions();
+        assert!(
+            definitions
+                .iter()
+                .all(|def| bodies[&module].contains_key(&def.start()))
+        );
+    }
+
+    #[test]
+    fn solved_reduction_keeps_the_registered_loop_and_python_calls() {
+        let graph = SourceGraph::single(concat!(
+            "def send_result(x: int, sink):\n    sink(x)\n",
+            "def reduction(s: str) -> int:\n",
+            "    values = list(map(int, s))\n",
+            "    return sum([n * (n + 1) for n in values])\n",
+        ))
+        .unwrap();
+        let (result, lowered) = caller_cache::observe_lowerings(|| super::super::lower(&graph));
+        assert!(result.is_err());
+        assert_eq!(
+            lowered.iter().filter(|name| *name == "reduction").count(),
+            1,
+            "{lowered:?}"
+        );
+        let registered = graph.registered_functions();
+        let site = graph.modules[graph.entry].parsed.syntax().body[1].start();
+        let body = &registered[&graph.entry][&site].function.body;
+        let mut calls = 0;
+        let mut multiplies = 0;
+        let mut advances = 0;
+        ir::walk_expressions(body, &mut |expr| match &expr.kind {
+            ExprKind::Binary(Binary::Multiply, ..) => multiplies += 1,
+            ExprKind::Builtin(Builtin::RegisteredCall(_), _) | ExprKind::Invoke { .. } => {
+                calls += 1
+            }
+            _ => {}
+        });
+        ir::walk_statements(body, &mut |stmt| {
+            if matches!(stmt, Statement::IterNext { .. }) {
+                advances += 1;
+            }
+        });
+        assert_eq!((calls, multiplies, advances), (3, 1, 1));
+    }
+
+    #[test]
+    fn imported_reduction_and_callback_lower_once_at_their_owning_definitions() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = concat!(
+            "def reduction(s: str) -> int:\n",
+            "    values = list(map(int, s))\n",
+            "    return sum([n * (n + 1) for n in values])\n",
+            include_str!("../../../../tests/fixtures/registered_imported_callback/publish.py"),
+        );
+        std::fs::write(dir.path().join("publish.py"), source).unwrap();
+        let entry = dir.path().join("app.py");
+        let caller = concat!(
+            "from publish import reduction\n",
+            include_str!(
+                "../../../../tests/fixtures/registered_imported_callback/callable_effect.py"
+            ),
+            "\nprint(reduction(input()))\n",
+        );
+        std::fs::write(&entry, caller).unwrap();
+        let mut graph = SourceGraph::load(&entry, Some(dir.path()), &[]).unwrap();
+        let error = crate::initializer_call_error(&graph, false);
+        let (result, lowered) = caller_cache::observe_lowerings(|| {
+            crate::checked_lower_with(&mut graph, None, error.as_ref()).unwrap()
+        });
+        if let crate::CheckedProgram::Runtime(reason) = result {
+            panic!("{reason}");
+        }
+        let provider = graph.python_file("publish").unwrap();
+        let registered = graph.registered_functions();
+        for stmt in &graph.modules[provider].parsed.syntax().body[..2] {
+            let name = stmt.as_function_def_stmt().unwrap().name.as_str();
+            assert!(registered[&provider].contains_key(&stmt.start()), "{name}");
+            assert_eq!(
+                lowered.iter().filter(|n| *n == name).count(),
+                1,
+                "{name}: {lowered:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn representation_failure_keeps_its_original_diagnostic() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("app.py");
+        std::fs::write(
+            &main,
+            concat!(
+                "import types\n",
+                "def bump(x: int) -> int:\n    return x + 1\n",
+                "Active = types.new_class('Active')\n",
+                "print(bump(7))\n",
+            ),
+        )
+        .unwrap();
+        let graph = SourceGraph::load(&main, None, &[]).unwrap();
+        let Err(report) = super::super::lower(&graph) else {
+            panic!("a registered class factory is required")
+        };
+        assert!(
+            report.contains("types.new_class requires native Python object operations"),
+            "{report}"
+        );
+    }
+
+    #[test]
+    fn ordinary_generator_calls_retain_their_checked_body_and_typed_neighbor() {
+        let graph = SourceGraph::single(concat!(
+            "def bump(value: int) -> int:\n",
+            "    return value + 1\n",
+            "def values():\n",
+            "    for item in (1, 2):\n",
+            "        yield item\n",
+            "for value in values(): print(bump(5), value)\n",
+        ))
+        .unwrap();
+        let _ = super::super::lower(&graph);
+        let module = &graph.modules[graph.entry];
+        let table = graph.registered_functions();
+        let bodies = &table[&graph.entry];
+        let body = &bodies[&module.parsed.syntax().body[1].start()]
+            .function
+            .body;
+        let mut suspension = false;
+        ir::walk_expressions(body, &mut |expr| {
+            suspension |= matches!(
+                expr.kind,
+                ExprKind::Builtin(Builtin::RegisteredSuspend(..), _)
+            )
+        });
+        assert!(suspension);
+        let body = &bodies[&module.parsed.syntax().body[0].start()]
+            .function
+            .body;
+        let mut addition = false;
+        ir::walk_expressions(body, &mut |expr| {
+            addition |=
+                expr.ty == Type::Int && matches!(expr.kind, ExprKind::Binary(ir::Binary::Add, ..))
+        });
+        assert!(addition);
+    }
+
+    #[test]
+    fn solved_scalar_arithmetic_uses_the_registered_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("__main__.py");
+        std::fs::write(
+            &main,
+            "def bump(x: int) -> int:\n    return x + 1\n\nprint(bump(7))\n",
+        )
+        .unwrap();
+        let options = crate::CompileOptions {
+            path_entry: true,
+            module_entry: Some("__main__".to_owned()),
+            ..crate::CompileOptions::default()
+        };
+        let ir = crate::compile_file(dir.path(), None, &options)
+            .unwrap()
+            .llvm_ir;
+        let file = ir
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(" = private unnamed_addr constant ")?;
+                value.ends_with(r#"__main__.py\00""#).then_some(name)
+            })
+            .unwrap();
+        let statement = format!("ptr {file}, i32 2, i64 0)");
+        let bump = ir
+            .split("\ndefine internal i64 @code")
+            .skip(1)
+            .filter_map(|code| code.split_once("\n}").map(|(body, _)| body))
+            .find(|body| body.contains(&statement))
+            .unwrap();
+        assert!(bump.contains("call i64 @int_add("));
+        assert!(bump.contains("call i64 @imre_dyn_exact_int_word("));
     }
 
     #[test]
@@ -1770,17 +4243,84 @@ mod tests {
         );
         let mut checkpoints = Vec::new();
         let mut checked_adds = 0;
-        let mut object_calls = 0;
+        let mut invokes = 0;
         ir::walk_expressions(&body.body, &mut |expr| match expr.kind {
             ExprKind::Builtin(Builtin::RegisteredStatement(range, _), _) => {
                 checkpoints.push(&graph.modules[graph.entry].source[range]);
             }
             ExprKind::Binary(Binary::Add, ..) => checked_adds += 1,
-            ExprKind::Builtin(Builtin::RegisteredCall(..), _) => object_calls += 1,
+            ExprKind::Invoke { ref args, .. } => {
+                let site = args.python_site.as_ref().unwrap();
+                let source = &graph.modules[graph.entry].source;
+                assert_eq!(&source[site.range], "sink(answer)");
+                let name = site.suspended_name.unwrap();
+                assert_eq!(&source[name], "sink");
+                assert_eq!(name.end(), site.callee_end);
+                assert_eq!(args.order, [0]);
+                assert_eq!(expr.ty, Type::PythonObject);
+                invokes += 1;
+            }
             _ => {}
         });
         assert_eq!(checkpoints, ["answer = x + y", "pass", "sink(answer)"]);
-        assert_eq!((checked_adds, object_calls), (1, 1));
+        assert_eq!((checked_adds, invokes), (1, 1));
+    }
+
+    #[test]
+    fn computed_positional_calls_bind_the_evaluated_callee() {
+        let source = concat!(
+            "def apply(factory, obj, value):\n",
+            "    factory()(value)\n",
+            "    (obj.action if value else factory)(value)\n",
+            "    obj.action(value)\n",
+            "    factory(*value)\n",
+        );
+        let graph = SourceGraph::single(source).unwrap();
+        let _ = super::super::lower(&graph);
+        let functions = graph.registered_functions();
+        let checked = &functions[&graph.entry][&TextSize::default()];
+        assert!(crate::llvm::registered::supports(checked));
+        let mut calls = Vec::new();
+        ir::walk_expressions(&checked.function.body, &mut |expr| match &expr.kind {
+            ExprKind::Invoke { callable, args } => {
+                let site = args.python_site.as_ref().unwrap();
+                let ExprKind::Builtin(Builtin::RegisteredLocation(range, _), callee) =
+                    &callable.kind
+                else {
+                    panic!("expected the checked callable operand");
+                };
+                assert_eq!(site.callee_end, range.end());
+                let kind = match &callee[0].kind {
+                    ExprKind::Local(_) => "local",
+                    ExprKind::Invoke { .. } => "result",
+                    ExprKind::Conditional(..) => "conditional",
+                    _ => panic!("unexpected positional callable"),
+                };
+                calls.push((&source[site.range], kind));
+            }
+            ExprKind::Builtin(Builtin::RegisteredCall(site), _) => {
+                let kind = match (&site.target, &site.arguments) {
+                    (
+                        ir::RegisteredCallTarget::Method { .. },
+                        ir::RegisteredArguments::Positional,
+                    ) => "method",
+                    (_, ir::RegisteredArguments::Packed(_)) => "packed",
+                    _ => panic!("unexpected registered call"),
+                };
+                calls.push((&source[site.range], kind));
+            }
+            _ => {}
+        });
+        assert_eq!(
+            calls,
+            [
+                ("factory()(value)", "result"),
+                ("factory()", "local"),
+                ("(obj.action if value else factory)(value)", "conditional"),
+                ("obj.action(value)", "method"),
+                ("factory(*value)", "packed"),
+            ]
+        );
     }
 
     #[test]
@@ -1791,7 +4331,7 @@ mod tests {
         assert!(super::super::lower(&graph).is_err());
         let functions = graph.registered_functions();
         let checked = &functions[&graph.entry][&TextSize::default()];
-        assert!(crate::dynamic::supports_registered_function(checked));
+        assert!(crate::llvm::registered::supports(checked));
         let mut additions = Vec::new();
         ir::walk_expressions(&checked.function.body, &mut |expr| {
             if let ExprKind::Binary(Binary::Add, ref left, ref right) = expr.kind {
@@ -1817,7 +4357,7 @@ mod tests {
         assert!(super::super::lower(&graph).is_err());
         let bodies = graph.registered_functions();
         let checked = &bodies[&graph.entry][&TextSize::default()];
-        assert!(crate::dynamic::supports_registered_function(checked));
+        assert!(crate::llvm::registered::supports(checked));
         let mut branches = Vec::new();
         ir::walk_expressions(&checked.function.body, &mut |expr| {
             if let ExprKind::Conditional(test, yes, no) = &expr.kind {
@@ -1861,7 +4401,22 @@ mod tests {
                 operations.push("name")
             }
             ExprKind::Builtin(Builtin::RegisteredSubscript(..), _) => operations.push("get"),
-            ExprKind::Builtin(Builtin::RegisteredCall(..), _) => operations.push("call"),
+            ExprKind::Invoke { callable, args } => {
+                let ExprKind::Builtin(Builtin::RegisteredLocation(_, _), operands) = &callable.kind
+                else {
+                    panic!("expected the located callback");
+                };
+                assert!(matches!(
+                    operands.as_slice(),
+                    [Expr {
+                        kind: ExprKind::Builtin(Builtin::RegisteredSubscript(..), _),
+                        ..
+                    }]
+                ));
+                assert_eq!(args.values.len(), 1);
+                assert_eq!(args.order, [0]);
+                operations.push("call");
+            }
             ExprKind::Binary(Binary::Add, left, right) => {
                 assert_eq!(
                     (left.ty, right.ty, value.ty),
@@ -1923,6 +4478,34 @@ mod tests {
         let graph = SourceGraph::single("def bad(x: int, arg):\n    x(arg)\n").unwrap();
         assert!(super::super::lower(&graph).is_err());
         assert!(graph.registered_functions().is_empty());
+    }
+
+    #[test]
+    fn registered_arithmetic_keeps_scalar_types_and_original_protocol_operands() {
+        let source = concat!(
+            "def deliver(a: int, b: int, flag: bool, send):\n",
+            "    send(a * b)\n",
+            "    send(a + flag)\n",
+            "    send(a ** flag)\n",
+        );
+        let graph = SourceGraph::single(source).unwrap();
+        assert!(super::super::lower(&graph).is_err());
+        let functions = graph.registered_functions();
+        let body = &functions[&graph.entry][&TextSize::default()].function.body;
+        let mut operations = Vec::new();
+        ir::walk_expressions(body, &mut |expr| {
+            if let ExprKind::Binary(op, left, right) = &expr.kind {
+                operations.push((op.protocol(), left.ty, right.ty, expr.ty));
+            }
+        });
+        assert_eq!(
+            operations,
+            [
+                ("*", Type::Int, Type::Int, Type::Int),
+                ("+", Type::Int, Type::Bool, Type::Int),
+                ("**", Type::Int, Type::Bool, Type::Int),
+            ]
+        );
     }
 
     #[test]
@@ -1989,7 +4572,7 @@ mod tests {
         let graph = SourceGraph::single(positive).unwrap();
         let selected = super::super::lower_current(&graph, None, &mut HashSet::new());
         match selected {
-            Ok(crate::CheckedProgram::Registered) => {}
+            Ok(crate::CheckedProgram::Registered(None)) => {}
             Err(error) | Ok(crate::CheckedProgram::Runtime(error)) => {
                 assert!(
                     matches!(error.kind, Kind::UnresolvedParameter(owner, start)
@@ -2035,7 +4618,7 @@ mod tests {
     #[test]
     fn partial_regions_preserve_specialized_and_unsupported_operands() {
         for source in [
-            "s.partition('-')[1]",
+            "s.partition((sep for sep in separators))[1]",
             "f(*(x for x in items))",
             "f(k=lambda: value)",
             "{'key': recv.method(*(x for x in args))}",
@@ -2109,8 +4692,11 @@ mod tests {
         let [_, Statement::Scope { body, clear }] = checked.function.body.as_slice() else {
             panic!("expected a checked assignment chain")
         };
-        let [Statement::Assign(slot, _), Statement::Expr(store), Statement::SetItem(_, _, last)] =
-            body.as_slice()
+        let [
+            Statement::Assign(slot, _),
+            Statement::Expr(store),
+            Statement::SetItem(_, _, last),
+        ] = body.as_slice()
         else {
             panic!("expected one RHS followed by the two target stores")
         };
@@ -2120,6 +4706,179 @@ mod tests {
         ) if matches!(inputs.first().map(|value| &value.kind), Some(ExprKind::Local(id)) if id == slot)));
         assert!(matches!(&last.kind, ExprKind::Scope { value, clear, .. }
             if clear == &[*slot] && matches!(&value.kind, ExprKind::Local(id) if id == slot)));
+    }
+
+    #[test]
+    fn subgroup_and_context_target_share_the_prepared_body() {
+        let graph = SourceGraph::single(concat!(
+            "try:\n",
+            "    with resource as (left, right):\n",
+            "        send(left, right)\n",
+            "except* select() as group:\n",
+            "    send(group)\n",
+        ))
+        .unwrap();
+        let module = &graph.modules[graph.entry];
+        let checked = registered_suite(
+            &module.parsed.syntax().body,
+            RegisteredScope::Function { is_async: false },
+            values::ModuleSource::new(module).context(&module.source),
+        )
+        .expect("complete protected body");
+        let mut targets = 0;
+        let mut filters = 0;
+        ir::walk_statements(&checked.function.body, &mut |stmt| match stmt {
+            Statement::With {
+                binding: Some(binding),
+                ..
+            } => {
+                assert!(
+                    matches!(binding.body.as_slice(), [Statement::Scope { clear, .. }] if clear == &[binding.entered])
+                );
+                targets += 1;
+            }
+            Statement::Try { handlers, .. } => {
+                assert!(
+                    matches!(handlers.as_slice(), [handler] if matches!(handler.matcher, ir::ExceptionMatcher::Subgroup(..)))
+                );
+                filters += 1;
+            }
+            _ => {}
+        });
+        assert_eq!((targets, filters), (1, 1));
+    }
+
+    #[test]
+    fn loop_exit_through_finally_keeps_a_prepared_region() {
+        let source =
+            "for item in items:\n    try:\n        break\n    finally:\n        emit(item)\n";
+        let graph = SourceGraph::single(source).unwrap();
+        let module = &graph.modules[graph.entry];
+        let checked = registered_suite(
+            &module.parsed.syntax().body,
+            RegisteredScope::Function { is_async: false },
+            values::ModuleSource::new(module).context(&module.source),
+        )
+        .expect("complete registered loop");
+        let mut found = false;
+        ir::walk_statements(&checked.function.body, &mut |stmt| {
+            if let Statement::Try {
+                body,
+                handlers,
+                finalbody,
+                ..
+            } = stmt
+            {
+                assert!(handlers.is_empty() && !finalbody.is_empty());
+                assert!(matches!(body.last(), Some(Statement::Break)));
+                found = true;
+            }
+        });
+        assert!(found);
+    }
+
+    #[test]
+    fn named_handler_keeps_its_live_filter_and_original_binding() {
+        let text = "try:\n    run()\nexcept choose() as fault:\n    handle(fault)\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let checked = registered_suite(
+            &module.parsed.syntax().body,
+            RegisteredScope::Function { is_async: false },
+            values::ModuleSource::new(module).context(&module.source),
+        )
+        .expect("prepared live match");
+        let [_, Statement::Try { handlers, .. }] = checked.function.body.as_slice() else {
+            panic!("expected registered protected region");
+        };
+        let ir::ExceptionMatcher::Object(range, _) = &handlers[0].matcher else {
+            panic!("expected a Python object filter");
+        };
+        assert_eq!(&text[*range], "choose()");
+        assert_eq!(
+            checked.local_names[&handlers[0].name.unwrap()].name,
+            "fault"
+        );
+        assert!(crate::llvm::registered::supports(&checked));
+    }
+
+    #[test]
+    fn context_sites_are_prepared_for_every_manager_before_lowering() {
+        let text = "async def capture():\n    async with manager:\n        pass\nwith λ[0], install(2):\n    pass\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let sites = statement_sites(
+            &module.parsed.syntax().body,
+            values::ModuleSource::new(module).context(text),
+            true,
+        );
+        let mut anchors: Vec<_> = sites
+            .contexts
+            .values()
+            .flatten()
+            .map(|site| {
+                (
+                    &text[site.range],
+                    &text[site.range.start().to_usize()..site.anchor.to_usize()],
+                )
+            })
+            .collect();
+        anchors.sort_unstable();
+        assert_eq!(
+            anchors,
+            [("install(2)", "install"), ("manager", ""), ("λ[0]", "λ")]
+        );
+    }
+
+    #[test]
+    fn bare_handler_has_checked_body_and_distinct_else() {
+        let graph =
+            SourceGraph::single("try:\n    run()\nexcept:\n    failed()\nelse:\n    clean()\n")
+                .unwrap();
+        let module = &graph.modules[graph.entry];
+        let checked = registered_suite(
+            &module.parsed.syntax().body,
+            RegisteredScope::Function { is_async: false },
+            values::ModuleSource::new(module).context(&module.source),
+        )
+        .expect("complete registered try");
+        let [
+            _,
+            Statement::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            },
+        ] = checked.function.body.as_slice()
+        else {
+            panic!("expected one prepared protected region");
+        };
+        assert_eq!(
+            (body.len(), handlers[0].body.len(), orelse.len()),
+            (2, 2, 2)
+        );
+        assert!(finalbody.is_empty() && crate::llvm::registered::supports(&checked));
+    }
+
+    #[test]
+    fn local_annotation_uses_only_the_assigned_value() {
+        let graph = SourceGraph::single("header: missing() = ()\nother: missing()\n").unwrap();
+        let entry = &graph.modules[graph.entry];
+        let checked = registered_suite(
+            &entry.parsed.syntax().body,
+            RegisteredScope::Function { is_async: false },
+            values::ModuleSource::new(entry).context(&entry.source),
+        )
+        .expect("function-local annotations need no execution-time provider");
+        let mut calls = 0;
+        ir::walk_expressions(&checked.function.body, &mut |value| {
+            calls += usize::from(matches!(
+                value.kind,
+                ExprKind::Invoke { .. } | ExprKind::Builtin(Builtin::RegisteredCall(_), _)
+            ));
+        });
+        assert_eq!(calls, 0);
     }
 
     #[test]
@@ -2169,22 +4928,114 @@ mod tests {
     }
 
     #[test]
-    fn suspending_loop_keeps_its_resumable_generator_body() {
-        let graph =
-            SourceGraph::single("def sales(rows):\n    for row in rows:\n        yield row\n")
+    fn traceback_while_suspends_without_a_for_cursor() {
+        fn prepare(text: &str, name: &str) -> Option<RegisteredFunction> {
+            let module = ruff_python_parser::parse_module(text).unwrap();
+            let body = &module.syntax().body;
+            let function = body
+                .iter()
+                .filter_map(ast::Stmt::as_function_def_stmt)
+                .find(|def| def.name.as_str() == name)
                 .unwrap();
-        let definition = graph.modules[graph.entry].parsed.syntax().body[0]
+            let source = RegisteredSource {
+                template_fields: None,
+                generators: None,
+                lambdas: None,
+                text,
+                private_names: None,
+                method_imports: &imre_ast::module_imports(body),
+                replacements: &HashMap::new(),
+                has_templates: false,
+            };
+            registered_suite(
+                &function.body,
+                RegisteredScope::Function { is_async: false },
+                source,
+            )
+        }
+
+        let checked = prepare(include_str!("../../stdlib/traceback.py"), "walk_tb").unwrap();
+        let mut yields_per_loop = Vec::new();
+        ir::walk_statements(&checked.function.body, &mut |stmt| {
+            if let Statement::While(_, body, _) = stmt {
+                let mut yields = 0;
+                ir::walk_expressions(body, &mut |value| {
+                    if matches!(
+                        value.kind,
+                        ExprKind::Builtin(
+                            Builtin::RegisteredSuspend(ir::SuspendValue::Yield, _),
+                            _
+                        )
+                    ) {
+                        yields += 1;
+                    }
+                });
+                yields_per_loop.push(yields);
+            }
+        });
+        assert_eq!(yields_per_loop, [1]);
+        let nested = "def walk(rows, test):\n    for row in rows:\n        while test(row):\n            yield row\n";
+        assert!(prepare(nested, "walk").is_some());
+    }
+
+    #[test]
+    fn synchronous_suspensions_retain_the_checked_loop_cursor() {
+        let source = concat!(
+            "def sales(rows):\n",
+            "    for row in rows:\n",
+            "        received = yield row\n",
+            "        yield from received\n",
+        );
+        assert_cursor_suspensions(source, &["yield row", "yield from received"]);
+    }
+
+    #[test]
+    fn awaited_calls_retain_the_checked_loop_cursor() {
+        let source =
+            "async def visit(rows, call):\n    for row in rows:\n        await call(row)\n";
+        assert_cursor_suspensions(source, &["await call(row)"]);
+    }
+
+    #[test]
+    fn awaited_subscription_binds_its_result_in_the_checked_loop() {
+        let source = concat!(
+            "async def visit(rows, key):\n",
+            "    for result in rows:\n",
+            "        left, right = (await result)[await key()]\n",
+        );
+        assert_cursor_suspensions(source, &["await result", "await key()"]);
+    }
+
+    fn assert_cursor_suspensions(source: &str, expected: &[&str]) {
+        let graph = SourceGraph::single(source).unwrap();
+        let module = &graph.modules[graph.entry];
+        let definition = module.parsed.syntax().body[0]
             .as_function_def_stmt()
             .unwrap();
-        assert!(
-            registered_suite(
-                &definition.body,
-                RegisteredScope::Function { is_async: false },
-                values::ModuleSource::new(&graph.modules[graph.entry])
-                    .context(&graph.modules[graph.entry].source)
-            )
-            .is_none()
-        );
+        let checked = registered_suite(
+            &definition.body,
+            RegisteredScope::Function {
+                is_async: definition.is_async,
+            },
+            values::ModuleSource::new(module).context(&module.source),
+        )
+        .expect("complete suspended body");
+        let mut cursors = Vec::new();
+        let mut suspensions = Vec::new();
+        ir::walk_statements(&checked.function.body, &mut |stmt| {
+            if let Statement::IterNext { iterator, .. } = stmt {
+                cursors.push(*iterator);
+            }
+        });
+        ir::walk_expressions(&checked.function.body, &mut |expr| {
+            if let ExprKind::Builtin(Builtin::RegisteredSuspend(kind, range), _) = &expr.kind {
+                assert_eq!(matches!(kind, ir::SuspendValue::Await), definition.is_async);
+                suspensions.push(&source[*range]);
+            }
+        });
+        assert_eq!(cursors.len(), 1);
+        assert!(checked.region().private_slots().contains(&cursors[0]));
+        assert_eq!(suspensions, expected);
     }
 
     #[test]
@@ -2270,8 +5121,8 @@ mod tests {
         let mut opens = 0;
         let mut calls = 0;
         ir::walk_expressions(&function.body, &mut |expr| match &expr.kind {
-            ExprKind::Builtin(Builtin::RegisteredIter, _) => opens += 1,
-            ExprKind::Builtin(Builtin::RegisteredCall(..), _) => calls += 1,
+            ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::Loop), _) => opens += 1,
+            ExprKind::Invoke { .. } => calls += 1,
             _ => {}
         });
         let mut pulls = 0;
@@ -2295,6 +5146,7 @@ mod tests {
             "    sink([project(rows) for rows in rows if accept(rows)])\n",
             "    sink({project(x) for x in rows})\n",
             "    sink({project(x): project(x) for x in rows})\n",
+            "    sink([(locals if observed else globals)() for observed in rows])\n",
         ))
         .unwrap();
         let _ = super::super::lower(&graph);
@@ -2302,25 +5154,40 @@ mod tests {
         let checked = &bodies[&graph.entry][&TextSize::default()];
         let mut namespaces = 0;
         let mut scoped_calls = 0;
+        let mut observers = 0;
         let mut pulls = 0;
         ir::walk_expressions(&checked.function.body, &mut |expr| match &expr.kind {
             ExprKind::Builtin(Builtin::RegisteredNamespace(_), _) => namespaces += 1,
-            ExprKind::Builtin(Builtin::RegisteredCall(call), _) if call.explicit_scope => {
-                scoped_calls += 1
+            ExprKind::Invoke { args, .. }
+                if let Some(site) = &args.python_site
+                    && let Some(scope) = &site.scope =>
+            {
+                let ExprKind::Local(namespace) = scope.kind else {
+                    panic!("expected the comprehension's namespace slot")
+                };
+                scoped_calls += 1;
+                if &graph.modules[graph.entry].source[site.range]
+                    == "(locals if observed else globals)()"
+                {
+                    assert!(checked.local_names.values().any(|binding| {
+                        binding.name == "observed" && binding.namespace == Some(namespace)
+                    }));
+                    observers += 1;
+                }
             }
             _ => {}
         });
         ir::walk_statements(&checked.function.body, &mut |stmt| {
             pulls += usize::from(matches!(stmt, Statement::IterNext { .. }));
         });
-        assert_eq!((namespaces, scoped_calls, pulls), (3, 5, 3));
+        assert_eq!((namespaces, scoped_calls, observers, pulls), (4, 6, 1, 4));
         assert_eq!(
             checked
                 .local_names
                 .values()
                 .filter(|binding| binding.namespace.is_some())
                 .count(),
-            3
+            4
         );
     }
 
