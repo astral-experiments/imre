@@ -251,6 +251,7 @@ impl PhysicalPreparation<'_, '_> {
                 self.source,
                 None,
                 false,
+                ir::control::boolean_literal,
                 |_| true,
                 |child| Ok::<_, std::convert::Infallible>(self.logical_operation(child, inputs)),
             )
@@ -258,8 +259,14 @@ impl PhysicalPreparation<'_, '_> {
             .expect("a logical or comparison expression has a checked operation");
             return self.source.located(node, value);
         }
+        let input = match self.ordinary_input(node) {
+            PreparedInput::Checked(value) if ir::control::boolean_literal(&value).is_some() => {
+                return value;
+            }
+            input => input,
+        };
         let slot = inputs.len();
-        inputs.push(self.ordinary_input(node));
+        inputs.push(input);
         self.source
             .located(node, ir::Expr::local(slot, ir::Type::PythonObject))
     }

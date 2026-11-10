@@ -120,22 +120,28 @@ fn imported_operand_refusal_precedes_llvm_emission() {
 }
 
 #[test]
-fn enclosing_class_header_reports_its_boolean_child_before_llvm() {
+fn conditional_operands_refuse_only_on_reachable_edges() {
     let project = tempfile::tempdir().unwrap();
-    let entry = project.path().join("class_boolean_refused.py");
-    std::fs::write(
-        &entry,
-        include_str!("../../../tests/fixtures/class_boolean_refused.py"),
-    )
-    .unwrap();
-    assert_refusal_before_llvm(
-        &entry,
-        &format!(
-            "{}:12:33: cannot compile this comprehension ahead of time (through 12:75)",
-            entry.display()
-        ),
-        &[CompileOptions::default()],
-    );
+    let entry = project.path().join("subject.py");
+    let class = include_str!("../../../tests/fixtures/class_boolean_refused.py");
+    let assertion = include_str!("../../../tests/fixtures/assertion_message_refused.py");
+    for (source, reached, dead, line, from, to) in [
+        (class, "enabled and", "False and", 12, 33, 75),
+        (assertion, "assert False,", "assert True,", 5, 22, 64),
+    ] {
+        std::fs::write(&entry, source).unwrap();
+        assert_refusal_before_llvm(
+            &entry,
+            &format!(
+                "{}:{line}:{from}: cannot compile this comprehension ahead of time (through {line}:{to})",
+                entry.display()
+            ),
+            &[CompileOptions::default()],
+        );
+        std::fs::write(&entry, source.replace(reached, dead)).unwrap();
+        check_file(&entry, None).unwrap();
+        compile_file(&entry, None, &CompileOptions::default()).unwrap();
+    }
 }
 
 #[test]

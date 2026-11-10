@@ -2868,6 +2868,7 @@ impl SourceScope<'_> {
         let message = stmt
             .msg
             .as_deref()
+            .filter(|_| ir::control::boolean_literal(&test) != Some(true))
             .map(|message| self.operand(message).ok_or(()))
             .transpose()?;
         let failure = operation(
@@ -3272,6 +3273,7 @@ impl SourceScope<'_> {
                 self.source,
                 None,
                 matches!(self.kind, RegisteredScope::Class),
+                ir::control::boolean_literal,
                 |_| true,
                 |child| {
                     match expr {
