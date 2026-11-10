@@ -481,7 +481,7 @@ impl<'a> PreparedBody<'a, '_> {
             generators: None,
             lambdas: None,
         };
-        let (strings, generators) = crate::frontend::prepare_expression_sites(&body, values);
+        let generators = RegisteredGenerator::collect(&body, values);
         let values = crate::frontend::RegisteredSource {
             generators: Some(&generators),
             ..values
@@ -506,7 +506,13 @@ impl<'a> PreparedBody<'a, '_> {
             |alias| aliases.push(alias),
             |expr| logicals.visit(expr, values),
         );
-        let lambdas = RegisteredLambda::collect(&body, values, std::mem::take(&mut scopes.lambdas));
+        let mut templates = HashMap::new();
+        let lambdas = RegisteredLambda::collect(
+            &body,
+            values,
+            std::mem::take(&mut scopes.lambdas),
+            &mut templates,
+        );
         let values = crate::frontend::RegisteredSource {
             lambdas: Some(&lambdas),
             ..values
@@ -620,7 +626,7 @@ impl<'a> PreparedBody<'a, '_> {
             has_templates,
             strings: crate::frontend::PreparedStrings {
                 fields: template_fields,
-                ..strings
+                templates,
             },
             replacements,
             method_imports,
@@ -1412,7 +1418,7 @@ mod tests {
             lambdas: Some(&missing),
             ..prepared.source.registered_source()
         };
-        let (strings, generators) = crate::frontend::prepare_expression_sites(body, source);
+        let generators = RegisteredGenerator::collect(body, source);
         let source = RegisteredSource {
             generators: Some(&generators),
             ..source
@@ -1440,10 +1446,6 @@ mod tests {
         prepared.source.class_bodies = class_bodies;
         prepared.source.statement_sites = sites;
         prepared.source.nested_bodies.extend(nested);
-        prepared.source.strings = crate::frontend::PreparedStrings {
-            fields: std::mem::take(&mut prepared.source.strings.fields),
-            ..strings
-        };
     }
 
     #[test]
@@ -1689,13 +1691,27 @@ mod tests {
         let def = module.syntax.as_ref().unwrap()[0]
             .as_function_def_stmt()
             .unwrap();
-        let plan = module
-            .source
-            .function_bodies
-            .get(&def.start())
-            .and_then(|entry| entry.suite())
-            .or_else(|| module.source.nested_bodies.get(&def.body[0].start()))
-            .unwrap();
+        let start = def.start();
+        let body_start = def.body[0].start();
+        // Withhold template spelling from the suite planner. The physical child can
+        // still read the real prepared template, even after its enclosing loop is erased.
+        let missing = HashMap::new();
+        let source = crate::frontend::RegisteredSource {
+            template_fields: Some(&missing),
+            ..module.source.registered_source()
+        };
+        let mut physical = crate::frontend::SuitePreparation::new(
+            &module.source.namespace_operations, source, &def.body, true,
+        );
+        physical.physical_body(
+            &def.body,
+            crate::frontend::RegisteredScope::Function { is_async: false },
+        );
+        let (sites, nested) = (physical.sites, physical.nested);
+        module.source.statement_sites = sites;
+        module.source.nested_bodies.extend(nested);
+        module.source.function_bodies.remove(&start);
+        let plan = &module.source.nested_bodies[&body_start];
         let [run] = plan.residual.as_slice() else {
             panic!("expected a mixed for")
         };
@@ -1987,7 +2003,6 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert!(!prepared.source.strings.literals.is_empty());
         let before = prepared.standalone().unwrap().unwrap();
         assert!(!prepared.source.replacements.is_empty());
         prepared.source.replacements.clear();
@@ -2717,15 +2732,21 @@ mod tests {
     }
 
     #[test]
-    fn residual_source_supplies_only_the_interpolation_value() {
+    fn a_mixed_suite_uses_the_entire_prepared_template() {
         let path = Path::new("field.py");
         let original = r#"q = t"left{(lambda v: v)(xs)!r:>4}right""#;
         let mut prepared =
             PreparedBody::module("field", path, original, 0, ModuleOrigin::Program(None)).unwrap();
         assert_eq!(prepared.source.strings.templates.len(), 1);
         inject_residual_child_module(&mut prepared);
-        assert!(prepared.source.strings.templates.is_empty());
-        assert_eq!(prepared.source.strings.residual_templates.len(), 1);
+        assert!(
+            !prepared
+                .source
+                .initializer
+                .as_ref()
+                .unwrap()
+                .fully_checked()
+        );
         let emit = |prepared: &PreparedBody<'_, '_>| {
             let mut output = Output::default();
             let file = output.data(b"field.py");
@@ -2734,8 +2755,8 @@ mod tests {
         };
         let expected = emit(&prepared);
 
-        // Keep the original operand and its range. All literal parts, conversions
-        // and format specs used by the frame must already come from preparation.
+        // Keep the site range while changing both its metadata and its operand.
+        // The mixed suite must emit only the prepared operation.
         let replace_body = |text| {
             ruff_python_parser::parse_module(text)
                 .unwrap()
@@ -2745,7 +2766,7 @@ mod tests {
         prepared.syntax = Some(Cow::Owned(replace_body(r#"q = t"xxxx{(lambda v: v)(xs)!s:^9}yyyyy""#)));
         assert_eq!(emit(&prepared), expected);
         prepared.syntax = Some(Cow::Owned(replace_body(r#"q = t"xxxx{(lambda v: v)(ys)!s:^9}yyyyy""#)));
-        assert_ne!(emit(&prepared), expected);
+        assert_eq!(emit(&prepared), expected);
     }
 
     #[test]
@@ -2848,8 +2869,6 @@ mod tests {
                 .fully_checked()
         );
         assert!(prepared.syntax.is_none());
-        assert!(prepared.source.strings.literals.is_empty());
-        assert!(prepared.source.strings.residual_templates.is_empty());
         prepared.source.strings.templates.clear();
 
         let mut output = Output::default();
@@ -2904,7 +2923,11 @@ mod tests {
         assert!(initializer.fully_checked());
         assert_eq!(prepared.source.generators.len(), 1);
         let (site, generator) = prepared.source.generators.iter().next().unwrap();
-        let template = prepared.source.strings.templates.values().next().unwrap();
+        let crate::frontend::PreparedTemplate::Checked(template) =
+            prepared.source.strings.templates.values().next().unwrap()
+        else {
+            panic!("expected a fully checked template");
+        };
         let mut references = Vec::new();
         let mut caller_names = Vec::new();
         crate::ir::walk_operand_expressions(&template.value, &mut |expr| match &expr.kind {
@@ -2990,14 +3013,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         .unwrap();
         assert_eq!(prepared.source.strings.templates.len(), 2);
         inject_residual_child_module(&mut prepared);
-        let checked: Vec<_> = prepared
-            .source
-            .strings
-            .templates
-            .keys()
-            .map(|&range| &prepared.source.text[range])
-            .collect();
-        assert_eq!(checked, ["t'{client.lookup(*args)}{v * 2}'"]);
+        assert_eq!(prepared.source.strings.templates.len(), 2);
         assert!(
             !prepared
                 .source

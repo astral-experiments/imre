@@ -9,7 +9,7 @@ pub(crate) use generators::RegisteredGenerator;
 mod lambdas;
 pub(crate) use lambdas::{LambdaBinding, LambdaDefault, RegisteredLambda};
 mod templates;
-pub(crate) use templates::{PreparedStrings, ResidualField, prepare_expression_sites, template_operands};
+pub(crate) use templates::{PreparedStrings, PreparedTemplate, TemplateField};
 pub(super) mod patterns;
 pub(super) mod values;
 
@@ -2497,11 +2497,16 @@ impl SourceScope<'_> {
         {
             self.suspend_operand(kind, value, expr.range())?
         } else if let ast::Expr::TString(template) = expr {
-            self.source.template(
-                template,
-                matches!(self.kind, RegisteredScope::Function { .. } | RegisteredScope::Lambda),
-                |child| self.ordinary_operand(child),
-            )?
+            self.with_suspending_operands(|scope| {
+                scope.source.template(
+                    template,
+                    matches!(
+                        scope.kind,
+                        RegisteredScope::Function { .. } | RegisteredScope::Lambda
+                    ),
+                    |child| scope.ordinary_operand(child),
+                )
+            })?
         } else if let ast::Expr::FString(formatted) = expr {
             self.with_suspending_operands(|scope| {
                 fstrings::registered_fstring(formatted, scope.source, |child| {

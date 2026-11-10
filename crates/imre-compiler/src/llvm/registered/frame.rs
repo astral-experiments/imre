@@ -1302,6 +1302,29 @@ impl<'a> ArgumentPack<'a> {
 pub(crate) trait FrameEmitter<'a, 'p>:
     std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>> + Sized
 {
+    /// Append each interpolation after its value and spec have been evaluated. An
+    /// unavailable field ends this path after the preceding Python operations.
+    fn template<T>(
+        &mut self,
+        segments: &[Vec<u8>],
+        fields: &[T],
+        mut field: impl FnMut(&mut Self, &T) -> std::ops::ControlFlow<String, String>,
+    ) -> String {
+        use std::ops::ControlFlow;
+
+        let strings = self.emit_string_tuple(segments.to_vec());
+        let parts = self.op("list", &[]);
+        for input in fields {
+            match field(self, input) {
+                ControlFlow::Continue(value) => {
+                    self.op("append", &[&parts, &value]);
+                }
+                ControlFlow::Break(exit) => return exit,
+            }
+        }
+        self.op("build_template", &[&strings, &parts])
+    }
+
     /// A bare raise transfers the active exception immediately. An explicit raise
     /// roots its evaluated exception until the caller has evaluated the cause.
     fn raise_operands<T>(
