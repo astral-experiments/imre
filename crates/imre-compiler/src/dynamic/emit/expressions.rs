@@ -3,15 +3,15 @@ use ruff_text_size::Ranged;
 
 use super::FrameEmitter;
 use super::Function;
-use crate::frontend::{SourceOperand, prepare_boolean};
+use crate::frontend::{BorrowedOperand, ExpressionSelection, LogicalOperand, SourceOperand};
 use crate::ir::control::Context as BooleanContext;
 use crate::llvm::operations::branches::{Logical, LogicalEmitter, LogicalInput};
 use crate::llvm::operations::{CheckedBody, CheckedValue, ComparisonChain, ValueJoin};
 
-impl LogicalEmitter<SourceOperand<'_>> for Function<'_, '_> {
+impl LogicalEmitter<LogicalOperand> for Function<'_, '_> {
     fn logical_input<'a>(
         &mut self,
-        leaf: &'a SourceOperand<'_>,
+        leaf: &'a LogicalOperand,
         context: BooleanContext,
     ) -> LogicalInput<'a> {
         match leaf {
@@ -42,7 +42,6 @@ impl Function<'_, '_> {
     }
 
     fn registered_region(&mut self, expr: &ast::Expr, condition: bool) -> Option<String> {
-        use crate::frontend::ExpressionSelection;
         let selected = self
             .source
             .statement_sites
@@ -131,10 +130,17 @@ impl Function<'_, '_> {
             self.suspend_value(*kind, expr.range(), |code| code.expr(child))
         } else if let Some(inputs) = physical {
             self.physical_value(expr, inputs)
-        } else if let Some((edges, inputs)) = self.source.statement_sites.expressions.value(expr) {
-            let value = Logical::value(&mut self.frame.body, edges, crate::ir::Type::PythonObject)
-                .emit(self, &inputs)
-                .expect("a selected operand reaches the join");
+        } else if let Some(ExpressionSelection::Mixed {
+            value: Some(plan), ..
+        }) = self.source.statement_sites.expressions.get(expr)
+        {
+            let value = Logical::value(
+                &mut self.frame.body,
+                plan.edges.clone(),
+                crate::ir::Type::PythonObject,
+            )
+            .emit(self, &plan.operands)
+            .expect("a selected operand reaches the join");
             self.frame
                 .with_checked_frame(&self.sites, None, |mut frame| frame.materialize(&value))
         } else if let Some([test, yes, no]) =
@@ -209,7 +215,7 @@ impl Function<'_, '_> {
         }
     }
 
-    fn source_operand(&mut self, operand: SourceOperand<'_>) -> String {
+    fn source_operand(&mut self, operand: BorrowedOperand<'_>) -> String {
         match operand {
             SourceOperand::Checked(value) => self.registered_value(value),
             SourceOperand::Residual(expr) => self.expr(expr),
@@ -219,20 +225,26 @@ impl Function<'_, '_> {
     /// The enclosing source operation supplies evaluated leaves. Its branch graph
     /// and ownership policy are the same ones used by a wholly checked suite.
     pub(super) fn branch_expr(&mut self, expr: &ast::Expr, yes: &str, no: &str) {
-        if let Some(crate::frontend::ExpressionSelection::Checked(condition)) =
-            self.source.statement_sites.expressions.get(expr)
-        {
-            self.prepare_checked_value(condition);
-            self.frame
-                .registered_branch(condition, &self.sites, yes, no);
-            return;
+        match self.source.statement_sites.expressions.get(expr) {
+            Some(ExpressionSelection::Checked(condition)) => {
+                self.prepare_checked_value(condition);
+                self.frame
+                    .registered_branch(condition, &self.sites, yes, no);
+            }
+            Some(ExpressionSelection::Mixed { branch, .. }) => {
+                Logical::branch(&mut self.frame.body, branch.edges.clone(), yes, no)
+                    .emit(self, &branch.operands);
+            }
+            Some(ExpressionSelection::Operand(operand)) => {
+                self.prepare_checked_value(&operand.value);
+                let bit = self.frame.prepared_operand(operand, &self.sites, true);
+                self.branch(&bit, yes, no);
+            }
+            _ => {
+                let bit = self.test_operand(expr);
+                self.branch(&bit, yes, no);
+            }
         }
-        let (edges, inputs) = prepare_boolean(
-            expr,
-            BooleanContext::Condition,
-            &self.source.statement_sites.expressions,
-        );
-        Logical::branch(&mut self.frame.body, edges, yes, no).emit(self, &inputs);
     }
 
     fn test_operand(&mut self, expr: &ast::Expr) -> String {
