@@ -197,35 +197,13 @@ impl CompiledAlias {
     }
 }
 
-pub(crate) struct CompiledParameterProvider {
-    pub(crate) parameter: usize,
-    pub(crate) field: imre_ast::TypeParameterField,
-    pub(crate) evaluator: CompiledDefinition,
-}
-
-impl CompiledParameterProvider {
-    pub(crate) fn install(
-        &self,
-        frame: &mut RegisteredFrame<'_, '_>,
-        scope: &str,
-        parameters: &[RegisteredTypeParameter],
-    ) {
-        let binding = frame.code_name(&parameters[self.parameter].binding);
-        let parameter = frame.op("lookup", &[scope, &binding]);
-        let field = frame.code_name(self.field.as_str());
-        let evaluator = self.evaluator.bind_defaults(frame, scope, &[]);
-        frame.op(
-            "type_parameter_evaluator",
-            &[&parameter, &field, &evaluator],
-        );
-    }
-}
+pub(crate) type CompiledTypeParameters =
+    Result<Vec<RegisteredTypeParameter<CompiledDefinition>>, String>;
 
 pub(crate) struct Declaration {
     pub(crate) definition: CompiledDefinition,
     pub(crate) decorator_lines: Vec<usize>,
-    pub(crate) type_params: Vec<RegisteredTypeParameter>,
-    pub(crate) parameter_providers: Result<Vec<CompiledParameterProvider>, String>,
+    pub(crate) type_params: Option<CompiledTypeParameters>,
 }
 
 /// The compiled-site tables read by checked operations in a registered frame.
@@ -357,7 +335,6 @@ impl CheckedSites {
             definition,
             decorator_lines,
             type_params,
-            parameter_providers,
         } = &self.definitions[&site];
         let (decorators, defaults) = header.split_at(decorator_lines.len());
         let scope = frame.scope.clone();
@@ -370,24 +347,16 @@ impl CheckedSites {
             frame.set_source_range(None);
             class
         } else {
-            let scope = if type_params.is_empty() {
+            let scope = if let Some(params) = type_params {
+                let Some(scope) = frame.bind_type_parameters(&scope, params, false) else {
+                    return "0".into();
+                };
                 scope
             } else {
-                let scope = frame.parameter_scope(&scope, type_params, false);
-                let providers = match parameter_providers {
-                    Ok(providers) => providers,
-                    Err(error) => {
-                        frame.output.diagnostic.get_or_insert_with(|| error.clone());
-                        return "0".into();
-                    }
-                };
-                for provider in providers {
-                    provider.install(frame, &scope, type_params);
-                }
                 scope
             };
             let function = definition.bind_defaults(frame, &scope, defaults);
-            if !type_params.is_empty() {
+            if type_params.is_some() {
                 frame.publish_type_parameters(&scope, &function);
             }
             function
@@ -416,17 +385,46 @@ impl RegisteredFrame<'_, '_> {
         params: &[RegisteredTypeParameter],
         class: bool,
     ) -> String {
-        if !self.native_suspension && params.iter().any(|p| p.has_bound_or_default) {
+        if !self.native_suspension && params.iter().any(|p| !p.fields.is_empty()) {
             let message = self.text("class type parameter bounds and defaults");
             self.op("unsupported", &[&message]);
         }
         self.parameter_scope(outer, params, class)
     }
 
-    fn parameter_scope(
+    pub(crate) fn bind_type_parameters(
         &mut self,
         outer: &str,
-        params: &[RegisteredTypeParameter],
+        parameters: &CompiledTypeParameters,
+        class: bool,
+    ) -> Option<String> {
+        let params = match parameters {
+            Ok(params) => params,
+            Err(error) => {
+                self.output.diagnostic.get_or_insert_with(|| error.clone());
+                return None;
+            }
+        };
+        let scope = self.parameter_scope(outer, params, class);
+        for param in params.iter().filter(|param| !param.fields.is_empty()) {
+            let binding = self.code_name(&param.binding);
+            let parameter = self.op("lookup", &[&scope, &binding]);
+            for (field, definition) in &param.fields {
+                let field = self.code_name(field.as_str());
+                let evaluator = definition.bind_defaults(self, &scope, &[]);
+                self.op(
+                    "type_parameter_evaluator",
+                    &[&parameter, &field, &evaluator],
+                );
+            }
+        }
+        Some(scope)
+    }
+
+    fn parameter_scope<F>(
+        &mut self,
+        outer: &str,
+        params: &[RegisteredTypeParameter<F>],
         class: bool,
     ) -> String {
         let names = self.op("dict", &[]);
