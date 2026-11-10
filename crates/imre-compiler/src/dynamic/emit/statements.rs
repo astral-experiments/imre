@@ -11,7 +11,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use serde_json::json;
 
-use super::{Body, Cleanup, ContextExit, DefinitionName, Entry, Function, LoopTarget};
+use super::{Body, Cleanup, DefinitionName, Entry, Function, LoopTarget};
 
 impl Function<'_, '_> {
     pub(super) fn declare_globals(&mut self, globals: &std::collections::BTreeSet<String>) {
@@ -144,7 +144,7 @@ impl Function<'_, '_> {
             if !self.start_statement() {
                 break;
             }
-            if let Some(statements) = self.source.assertions.get(&stmt.range()) {
+            if let Some(statements) = self.source.statement_sites.assertions.get(&stmt.range()) {
                 for statement in statements {
                     self.checked_statement(statement);
                 }
@@ -1370,94 +1370,36 @@ impl Function<'_, '_> {
         self.exits = active;
     }
 
-    fn exit_context(&mut self, context: &ContextExit, exception: Option<&str>) -> String {
-        if !context.is_async {
-            return self.frame.exit_sync(context, exception);
-        }
-        let args = [
-            context.callable.as_str(),
-            exception.unwrap_or("0"),
-            context.caught.as_str(),
-        ];
-
-        // A pending return, outer managers and the body exception survive this await.
-        // The exceptional exit also retains its callable through the truth test.
-        let outer_roots = self.live.len();
-        self.live.extend(exception.map(String::from));
-        self.live.push(context.callable.clone());
-        self.caught
-            .push(exception.unwrap_or(&context.caught).into());
-        self.checkpoint(&context.site.range);
-        self.caught.pop();
-        self.live.truncate(outer_roots);
-        self.call_position(context.site.range);
-        let awaitable = self.op("async_exit_context", &args);
-        let mark = if exception.is_some() {
-            outer_roots + 2
-        } else {
-            outer_roots
-        }
-        .to_string();
-        self.keep_operands(&mark, &awaitable, "0");
-        let result = self.await_at(&awaitable, "2", context.site.range, &mark);
-        if let Some(exc) = exception {
-            self.call_position(context.site.range);
-            let suppress = self.op("truth", &[&result]);
-            self.keep_operands(&outer_roots.to_string(), exc, &suppress);
-            self.op("restore_caught", &[&context.caught]);
-            suppress
-        } else {
-            self.discard_truth(&mark);
-            "0".into()
-        }
-    }
-
     fn with(&mut self, items: &[ast::WithItem], body: &[ast::Stmt], is_async: bool) {
         let Some((item, rest)) = items.split_first() else {
             self.statements(body);
             return;
         };
-        let site = crate::ir::ContextSite::new(&item.context_expr);
+        let site = self.source.statement_sites.contexts[&item.context_expr.range()];
         let (exit, value, above_exit) = if is_async {
-            let range = site.range;
             let mark = self.temporary_mark();
-            self.unwind_operands(&mark, |f| {
-                let manager = f.expr(&item.context_expr);
-                f.call_position(range);
-                let exit = f.op("lookup_exit", &[&manager, "2"]);
-                f.call_position(range);
-                let enter = f.op("lookup_enter", &[&manager, "2"]);
-                let above_exit = f.keep_operands(&mark, &exit, &enter);
-                f.call_position(range);
-                let value = f.invoke(&enter, &[]);
-                f.keep_operands(&above_exit, &value, "0");
-                let value = f.await_at(&value, "1", range, &above_exit);
-                (exit, value, Some(above_exit))
-            })
+            let unwind = self.open_operand_unwind();
+            let manager = self.expr(&item.context_expr);
+            let (exit, value, above_exit) = self.frame.enter_async(&manager, site, &mark);
+            self.close_unwind(unwind, |f| f.discard_truth(&mark));
+            (exit, value, Some(above_exit))
         } else {
             let manager = self.expr(&item.context_expr);
             let (exit, value) = self.frame.enter_sync(&manager, site);
             (exit, value, None)
         };
-        crate::llvm::registered::context::entered(
-            self,
-            site,
-            exit,
-            is_async,
-            |f, context, outer| {
-                f.exits
-                    .push((Cleanup::With(context.clone()), outer.to_owned()));
-                if let Some(target) = &item.optional_vars {
-                    f.assign(target, &value);
-                }
-                if let Some(mark) = above_exit {
-                    f.discard_truth(&mark);
-                }
-                f.with(rest, body, is_async);
-                f.exits.pop();
-            },
-            Self::exit_context,
-        );
+        let region = self.frame.begin_context(site, exit, is_async);
+        self.exits
+            .push((Cleanup::With(region.exit.clone()), region.outer.clone()));
+        if let Some(target) = &item.optional_vars {
+            self.assign(target, &value);
+        }
+        if let Some(mark) = above_exit {
+            self.discard_truth(&mark);
+        }
+        self.with(rest, body, is_async);
+        self.exits.pop();
+        self.frame.end_context(region);
     }
 }
 

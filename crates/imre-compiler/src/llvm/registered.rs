@@ -302,7 +302,11 @@ impl Frame<'_, '_, '_> {
             ) | ExprKind::Conditional(..)
         ) {
             let value = self.evaluate_handle(expr);
-            return self.code.truth(&value);
+            let range = match &expr.kind {
+                ExprKind::Builtin(Builtin::RegisteredLocation(range, _), _) => Some(*range),
+                _ => None,
+            };
+            return self.code.truth_at(&value, range);
         }
         self.test_structure(expr)
     }

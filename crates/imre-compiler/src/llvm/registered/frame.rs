@@ -446,7 +446,25 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
 
     /// Evaluate Python truthiness and produce the LLVM branch condition.
     pub(crate) fn truth(&mut self, value: &str) -> String {
-        let boolean = self.op("truth", &[value]);
+        self.truth_at(value, None)
+    }
+
+    pub(crate) fn truth_at(&mut self, value: &str, range: Option<TextRange>) -> String {
+        let span = range.and_then(|range| {
+            let (line, start) = self.positions.line_and_column(range.start());
+            let (end_line, end) = self.positions.line_and_column(range.end());
+            (line == end_line).then_some([line, start, start, end])
+        });
+        // The direct operation ABI carries one line. Preserve a continued expression
+        // on the active frame while Python's truth method runs.
+        let multiline = range.is_some() && span.is_none();
+        if multiline {
+            self.set_source_range(range);
+        }
+        let boolean = self.op_at("truth", &[value], span);
+        if multiline {
+            self.set_source_range(None);
+        }
         self.value(&format!("icmp eq i64 {boolean}, 2"))
     }
 

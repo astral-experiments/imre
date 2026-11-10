@@ -3065,26 +3065,11 @@ pub(crate) struct ExceptHandler {
     pub body: Vec<Statement>,
 }
 
-/// The physical context expression and the delimiter of a directly called or indexed manager.
+/// The context expression's full range and its single-line traceback anchor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ContextSite {
     pub range: ruff_text_size::TextRange,
-    pub delimiter: Option<(ruff_text_size::TextSize, u8)>,
-}
-
-impl ContextSite {
-    pub(crate) fn new(manager: &ruff_python_ast::Expr) -> Self {
-        use ruff_text_size::Ranged;
-        let delimiter = match manager {
-            ruff_python_ast::Expr::Call(call) => Some((call.func.end(), b'(')),
-            ruff_python_ast::Expr::Subscript(index) => Some((index.value.end(), b'[')),
-            _ => None,
-        };
-        Self {
-            range: manager.range(),
-            delimiter,
-        }
-    }
+    pub anchor: ruff_text_size::TextSize,
 }
 
 #[derive(Clone)]
