@@ -148,7 +148,7 @@ pub(crate) use registered::{
     RegisteredOperand, RegisteredRegion, TemplateField,
 };
 pub(crate) use registered::{
-    PhysicalBinding, PhysicalSuite, PreparedContext, PreparedFor, SourceGuard,
+    PhysicalBinding, PhysicalSuite, PreparedContext, PreparedFor, PreparedTry, SourceGuard,
 };
 mod sequences;
 mod shutil;

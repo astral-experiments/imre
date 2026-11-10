@@ -1356,13 +1356,6 @@ impl std::ops::DerefMut for Function<'_, '_> {
 
 use crate::llvm::registered::context::ContextRegion;
 
-/// The lexical cleanup selected at try entry, valid on every edge leaving the body.
-#[derive(Clone, Copy)]
-enum FinallySuite<'p> {
-    Checked(&'p crate::frontend::RegisteredFunction),
-    Residual(&'p [ast::Stmt]),
-}
-
 enum Cleanup<'p> {
     With(ContextRegion),
     ExceptionName(String),
@@ -1371,7 +1364,7 @@ enum Cleanup<'p> {
         enclosing_exception: Option<String>,
     },
     Finally {
-        body: FinallySuite<'p>,
+        body: &'p crate::frontend::PhysicalSuite,
         loop_depth: usize,
         caught_depth: usize,
     },
@@ -3856,6 +3849,100 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         .into();
         assert!(!prepared.linked_declarations().contains_key(&site));
         assert!(prepared.standalone().unwrap().unwrap() == original);
+    }
+
+    #[test]
+    fn mixed_try_retains_its_matcher_and_suites_after_erasing_the_statement() {
+        use crate::frontend::{
+            PhysicalOperand, RegisteredScope, RegisteredSource, SourceEffect, SuitePreparation,
+        };
+
+        let source = concat!(
+            "async def run(matcher, record, finish):\n",
+            "    try:\n",
+            "        await record((lambda: 1)())\n",
+            "    except (lambda: matcher)() as caught:\n",
+            "        record(caught)\n",
+            "    else:\n",
+            "        record('clear')\n",
+            "    finally:\n",
+            "        await finish((lambda: 2)())\n",
+        );
+        let mut module = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let parsed = ruff_python_parser::parse_module(source).unwrap();
+        module.syntax = Some(Cow::Owned(parsed.into_syntax().body));
+        let function = module.syntax.as_ref().unwrap()[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let function_start = function.start();
+        let try_start = function.body[0].start();
+        // Withhold the descriptors from suite preparation alone so these operands
+        // still use their real compiled lambda children during emission.
+        let missing = HashMap::new();
+        let values = RegisteredSource {
+            lambdas: Some(&missing),
+            ..module.source.registered_source()
+        };
+        let mut plan = SuitePreparation::new(
+            &module.source.namespace_operations,
+            values,
+            &function.body,
+            true,
+        );
+        plan.physical_body(
+            &function.body,
+            RegisteredScope::Function { is_async: true },
+            true,
+            &|_| false,
+        );
+        let (sites, nested) = (plan.sites, plan.nested);
+        module.source.statement_sites = sites;
+        module.source.nested_bodies.extend(nested);
+        module.source.function_bodies.remove(&function_start);
+
+        let [run] = module.source.nested_bodies[&try_start].residual.as_slice() else {
+            panic!("expected a single mixed try");
+        };
+        let Some(SourceEffect::Try(region)) = &run.effect else {
+            panic!("expected a prepared try")
+        };
+        assert!(matches!(
+            region.handlers[0].matcher,
+            Some((_, PhysicalOperand::Source(_)))
+        ));
+        assert!(!region.body.plan.fully_checked());
+        assert!(region.otherwise.plan.fully_checked());
+        assert!(!region.finalbody.as_ref().unwrap().plan.fully_checked());
+        let original = module.standalone().unwrap().unwrap();
+        let function = module.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let stmt = &mut function.body[0];
+        *stmt = ast::StmtPass {
+            range: stmt.range(),
+            node_index: Default::default(),
+        }
+        .into();
+        assert_eq!(module.standalone().unwrap().unwrap(), original);
+
+        let run = &mut module
+            .source
+            .nested_bodies
+            .get_mut(&try_start)
+            .unwrap()
+            .residual[0];
+        let Some(SourceEffect::Try(region)) = &mut run.effect else {
+            unreachable!()
+        };
+        region.handlers[0].name = None;
+        assert_ne!(module.standalone().unwrap().unwrap(), original);
     }
 
     #[test]
