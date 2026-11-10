@@ -252,9 +252,10 @@ pub(crate) fn emit_units(
     functions: &[usize],
     names: &[String],
     entry: usize,
-) -> Result<(Vec<CodegenUnit>, bool), super::Unsupported> {
+    program: NativeProgram,
+) -> Result<Vec<CodegenUnit>, super::Unsupported> {
     let mut output = Output::new(functions, names.len(), entry, true);
-    let prefer_objects = emit_program(module, ranges, sanitize, &mut output)?;
+    emit_program(module, ranges, sanitize, &mut output, program)?;
     let units = names
         .iter()
         .zip(output.finish())
@@ -263,7 +264,7 @@ pub(crate) fn emit_units(
             llvm_ir,
         })
         .collect();
-    Ok((units, prefer_objects))
+    Ok(units)
 }
 
 #[cfg(test)]

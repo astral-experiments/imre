@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use ruff_db::parsed::ParsedModuleRef;
 use ruff_python_ast as ast;
@@ -2787,9 +2787,29 @@ impl IntrinsicModule {
     }
 }
 
-pub(crate) struct TypeAlias {
-    pub(crate) value: ast::Expr,
-    pub(crate) constructor: bool,
+pub(crate) enum TypeAlias {
+    Expression(ast::Expr),
+    NewType(ast::Expr),
+    /// A PEP 695 declaration. The checked initializer creates the lazy alias object.
+    Declaration(usize),
+}
+
+impl TypeAlias {
+    pub(crate) fn annotation_value<'a>(
+        &'a self,
+        module: &'a SourceModule,
+    ) -> Option<&'a ast::Expr> {
+        match self {
+            Self::Expression(value) | Self::NewType(value) => Some(value),
+            Self::Declaration(statement) => {
+                let declaration = module.parsed.syntax().body[*statement].as_type_alias_stmt()?;
+                declaration
+                    .type_params
+                    .is_none()
+                    .then_some(&declaration.value)
+            }
+        }
+    }
 }
 
 pub(crate) struct SourceModule {
@@ -3113,9 +3133,23 @@ pub(crate) enum SetLayoutHint {
     Disabled,
 }
 
+/// Resolver facts which native lowering can extend or consume while trying a set layout.
+pub(crate) struct LoweringBaseline {
+    diagnostic_counts: Vec<usize>,
+    explicit_check: bool,
+    needs_object_runtime: bool,
+    deferred_object_error: Option<Diagnostic>,
+    reachable: Option<Arc<reachability::Reachable>>,
+    mutable_documents: bool,
+    traceback_objects: bool,
+}
+
 pub(crate) struct SourceGraph {
     /// Fixed at graph construction, in the checked resolver's search order.
     pub(crate) filesystem_roots: Box<[PathBuf]>,
+    /// The launcher has already selected a registered module initializer.
+    pub(crate) registered_startup: bool,
+    registered_functions: std::cell::RefCell<HashMap<ModuleId, crate::dynamic::CheckedFunctions>>,
     /// Declaration result for these exact selected files, prior to any object-path re-selection.
     pub(crate) source_contract: Option<Result<(), String>>,
     pub(crate) set_layout_hint: std::cell::Cell<SetLayoutHint>,
@@ -3142,7 +3176,7 @@ pub(crate) struct SourceGraph {
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     pub(crate) mutable_builtin_len: bool,
-    reachable: Option<reachability::Reachable>,
+    reachable: Option<Arc<reachability::Reachable>>,
     required_library: Option<(ModuleId, reachability::Reachable)>,
     pub(crate) inputs: crate::SourceInputs,
     zip_files: Vec<(PathBuf, PathBuf, String)>,
@@ -3160,7 +3194,106 @@ pub(crate) struct SourceGraph {
     pub(crate) doctest_imports: Vec<String>,
 }
 
+pub(crate) const MEMORY_SOURCE_PATH: &str = "/input.py";
+
 impl SourceGraph {
+    pub(crate) fn lowering_baseline(&self) -> LoweringBaseline {
+        LoweringBaseline {
+            diagnostic_counts: self
+                .checked_diagnostics
+                .borrow()
+                .iter()
+                .map(Vec::len)
+                .collect(),
+            explicit_check: self.session.explicit_check,
+            needs_object_runtime: self.needs_object_runtime.get(),
+            deferred_object_error: self.deferred_object_error.borrow().clone(),
+            reachable: self.reachable.clone(),
+            mutable_documents: self.mutable_documents,
+            traceback_objects: self.traceback_objects,
+        }
+    }
+
+    /// Start ordinary lowering with the original import decisions and proof scopes.
+    pub(crate) fn retry_without_set_layout(&mut self, baseline: &LoweringBaseline) {
+        self.source_contract = None;
+        self.session.resume_layout_queries();
+        self.session.explicit_check = baseline.explicit_check;
+        self.set_layout_hint.set(SetLayoutHint::Disabled);
+        self.float_components.set(FloatComponents::Native);
+        self.missing_repr.set(None);
+        *self.class_layout_error.get_mut() = None;
+        self.has_object_constructor_fallback.set(false);
+        self.check_fallback_calls.set(FallbackCalls::None);
+        self.check_method_factories.set(false);
+        self.needs_object_runtime.set(baseline.needs_object_runtime);
+        self.deferred_object_error
+            .get_mut()
+            .clone_from(&baseline.deferred_object_error);
+        self.reachable.clone_from(&baseline.reachable);
+        self.mutable_documents = baseline.mutable_documents;
+        self.traceback_objects = baseline.traceback_objects;
+        for (proofs, &count) in self
+            .checked_diagnostics
+            .get_mut()
+            .iter_mut()
+            .zip(&baseline.diagnostic_counts)
+        {
+            proofs.truncate(count);
+        }
+    }
+
+    /// A representation trial must neither discard a Python operation nor change the
+    /// admission or diagnostics of the enclosing registered program.
+    pub(crate) fn try_registered_body<T>(
+        &self,
+        module: ModuleId,
+        lower: impl FnOnce() -> Option<T>,
+    ) -> Option<T> {
+        let diagnostics = self.checked_diagnostic_count(module);
+        let deferred = self.deferred_object_error.take();
+        let needs_object = self.needs_object_runtime.replace(false);
+        let calls = self.check_fallback_calls.get();
+        let constructor = self.has_object_constructor_fallback.replace(false);
+        let floats = self.float_components.get();
+        let set = self.set_layout_hint.get();
+        let repr = self.missing_repr.get();
+        let result = lower();
+        let deferred_here = self.deferred_object_error.replace(deferred).is_some();
+        let needed_here = self.needs_object_runtime.replace(needs_object);
+        let used_constructor = self.has_object_constructor_fallback.replace(constructor);
+        let result = result.filter(|_| !deferred_here && !needed_here && !used_constructor);
+        self.check_fallback_calls.set(calls);
+        self.float_components.set(floats);
+        self.set_layout_hint.set(set);
+        self.missing_repr.set(repr);
+        self.checked_diagnostics.borrow_mut()[module].truncate(diagnostics);
+        result
+    }
+
+    pub(crate) fn clear_registered_functions(&self) {
+        self.registered_functions.borrow_mut().clear();
+    }
+
+    pub(crate) fn register_function(
+        &self,
+        module: ModuleId,
+        start: TextSize,
+        body: crate::frontend::RegisteredFunction,
+    ) {
+        self.registered_functions
+            .borrow_mut()
+            .entry(module)
+            .or_default()
+            .insert(start, body);
+    }
+
+    pub(crate) fn registered_functions(
+        &self,
+    ) -> std::cell::Ref<'_, HashMap<ModuleId, crate::dynamic::CheckedFunctions>> {
+        self.registered_functions.borrow()
+    }
+
     /// A concrete Python file registered by the checked resolver, before object lowering.
     pub(crate) fn python_file(&self, name: &str) -> Option<ModuleId> {
         let id = *self.by_name.get(name)?;
@@ -3297,9 +3430,15 @@ impl SourceGraph {
     ) -> (crate::SourceInputs, Vec<PathBuf>) {
         let mut inputs = std::mem::take(&mut self.inputs);
         let mut modules = self.modules.iter().enumerate();
-        inputs.files.retain(|_| {
+        inputs.files.retain(|(path, _, _)| {
             let (id, module) = modules.next().expect("one input per module");
-            !module.bundled && !module.is_namespace() && !(id == self.entry && self.virtual_command)
+            !module.bundled
+                && !module.is_namespace()
+                && !(id == self.entry && self.virtual_command)
+                && !self
+                    .zip_files
+                    .iter()
+                    .any(|(archive, _, _)| path.starts_with(archive))
         });
         inputs.files.append(&mut self.zip_files);
         let paths = inputs
@@ -3429,9 +3568,9 @@ impl SourceGraph {
     }
 
     pub(crate) fn include_key_reprs(&mut self, owners: &HashSet<DefinitionId>) {
-        self.reachable = Some(reachability::Reachable::collect_with_reprs(
+        self.reachable = Some(Arc::new(reachability::Reachable::collect_with_reprs(
             self, false, owners,
-        ));
+        )));
         self.refresh_reachable_state();
     }
 
@@ -3456,7 +3595,7 @@ impl SourceGraph {
         {
             return Some(roots);
         }
-        self.reachable.as_ref()
+        self.reachable.as_deref()
     }
 
     pub(crate) fn includes(&self, definition: DefinitionId) -> bool {
@@ -3499,6 +3638,36 @@ impl SourceGraph {
     /// their own diagnostics, including calls with the same method name.
     pub(crate) fn checked_overload(&self, module: ModuleId, call: TextRange) {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::Call(call));
+    }
+
+    /// The live namespace supplies the callable for this checked Python call. Its binder
+    /// checks the arguments against that object; nested expressions keep their own checks.
+    pub(crate) fn checked_live_call(&self, module: ModuleId, call: &ast::ExprCall) {
+        let checked = &mut self.checked_diagnostics.borrow_mut()[module];
+        checked.extend([
+            CheckedDiagnostic::NonCallable(call.range()),
+            CheckedDiagnostic::Call(call.range()),
+            CheckedDiagnostic::MissingArgument(call.range()),
+        ]);
+        for arg in &call.arguments.args {
+            checked.push(CheckedDiagnostic::ExcessArgument(arg.range()));
+            checked.push(CheckedDiagnostic::ArgumentType(arg.range()));
+        }
+        let mut names = HashSet::new();
+        for keyword in &call.arguments.keywords {
+            checked.extend([
+                CheckedDiagnostic::Keyword(keyword.range()),
+                CheckedDiagnostic::PositionalKeyword(keyword.range()),
+                CheckedDiagnostic::ArgumentType(keyword.range()),
+                CheckedDiagnostic::ArgumentType(keyword.value.range()),
+            ]);
+            // An explicitly repeated name is invalid regardless of the callable.
+            if let Some(name) = &keyword.arg
+                && names.insert(name.as_str())
+            {
+                checked.push(CheckedDiagnostic::RepeatedKeyword(keyword.range()));
+            }
+        }
     }
 
     /// Native evaluation of this exact call raises for a known noncallable object.
@@ -3735,6 +3904,7 @@ impl SourceGraph {
 
     /// An isolated source API supports sealed imports only; first-party imports
     /// require the path API and its filesystem search root.
+    #[cfg(test)]
     pub(crate) fn single(source: &str) -> Result<Self, String> {
         Self::single_with_mode(source, false)
     }
@@ -3743,7 +3913,7 @@ impl SourceGraph {
         let mut loader = Loader::new(PathBuf::from("/"), &[], &[], None, FileSystem::default())?;
         loader.allow_imports = false;
         loader.reachable_only = reachable_only;
-        let filename = PathBuf::from("/input.py");
+        let filename = PathBuf::from(MEMORY_SOURCE_PATH);
         let entry = loader.add(
             filename.clone(),
             filename.clone(),
@@ -3821,11 +3991,12 @@ impl SourceGraph {
         } else {
             cwd
         };
-        if options.path_entry && !fs.is_dir(&spelling) {
-            // A ZIP operand belongs to the ZIP finder, even under isolated startup.
-            return Ok(None);
-        }
-        let root = fs.canonicalize(&spelling).map_err(|e| e.to_string())?;
+        let archive_entry = options.path_entry && !fs.is_dir(&spelling);
+        let root = if archive_entry {
+            spelling.clone()
+        } else {
+            fs.canonicalize(&spelling).map_err(|e| e.to_string())?
+        };
         let mut loader = Loader::new(
             root.clone(),
             &options.extension_paths,
@@ -3838,7 +4009,18 @@ impl SourceGraph {
             !options.path_entry && startup.is_some_and(|(flags, _)| flags.safe_path);
         loader.frozen_modules = startup.is_none_or(|(flags, _)| flags.frozen_modules);
         loader.reachable_only = options.reachable_only || options.entry_profile.is_some();
-        if !loader.skip_current_root {
+        if archive_entry {
+            let Some(archive) = crate::zip_entry::ZipSources::discover(
+                &spelling,
+                &mut loader.inputs,
+                &mut loader.fs,
+            )?
+            else {
+                return Ok(None);
+            };
+            loader.zip_files.append(&mut loader.inputs.files);
+            loader.zip_sources.insert(root, archive);
+        } else if !loader.skip_current_root {
             loader.inputs.directories.push((spelling, root));
         }
         loader.module_operand = Some(name.to_owned());
@@ -4416,13 +4598,6 @@ pub(crate) struct SiteProbes {
 }
 
 impl SiteProbes {
-    pub(crate) fn next_layout(self) -> Self {
-        Self {
-            wheel_records: self.wheel_records,
-            ..Self::default()
-        }
-    }
-
     fn is_file(&mut self, fs: &mut FileSystem<'_>, path: PathBuf) -> bool {
         *self
             .file_checks
@@ -4751,6 +4926,8 @@ impl<'a> Loader<'a> {
                 self.needs_object_imports && self.runtime_initializer.is_none(),
             ),
             has_object_constructor_fallback: Default::default(),
+            registered_functions: Default::default(),
+            registered_startup: false,
             source_contract: None,
             set_layout_hint: std::cell::Cell::new(SetLayoutHint::Available),
             check_fallback_calls: Default::default(),
@@ -4782,7 +4959,7 @@ impl<'a> Loader<'a> {
             errno_names: self.errno_names,
         };
         if reachable_only {
-            graph.reachable = Some(reachability::Reachable::collect(&graph, false));
+            graph.reachable = Some(Arc::new(reachability::Reachable::collect(&graph, false)));
         } else if let Some(library) = graph
             .modules
             .iter()
@@ -4893,7 +5070,7 @@ impl<'a> Loader<'a> {
                     self.modules[id].type_guards.push(index);
                     for stmt in &guard.body {
                         if let (Some(name), Some(value)) = (value_name(stmt), module_value(stmt)) {
-                            let known = self.add_alias(id, value, false);
+                            let known = self.add_alias(id, TypeAlias::Expression(value.clone()));
                             self.modules[id]
                                 .type_bindings
                                 .insert(name.to_owned(), known);
@@ -4919,6 +5096,13 @@ impl<'a> Loader<'a> {
                 }
                 _ if self.alias_declaration(id, statement)? => {
                     self.modules[id].type_guards.push(index);
+                }
+                ast::Stmt::TypeAlias(alias) if let Some(name) = alias.name.as_name_expr() => {
+                    let binding = self.add_alias(id, TypeAlias::Declaration(index));
+                    self.bind(id, name.id.as_str(), binding, statement)?;
+                    // Its initializer binds the object in source order. The alias
+                    // body can first run when an ordinary operand reads __value__.
+                    self.modules[id].executable.push(index);
                 }
                 ast::Stmt::FunctionDef(function) => {
                     definition_prefix |= self.partial_source(id);
@@ -5579,6 +5763,16 @@ impl<'a> Loader<'a> {
                                     ready
                                 }
                                 Binding::Value(def) => package && self.initialized(def),
+                                Binding::TypeAlias(owner, index)
+                                    if let TypeAlias::Declaration(statement) =
+                                        self.modules[owner].aliases[index] =>
+                                {
+                                    package
+                                        && self.initialized(DefinitionId {
+                                            module: owner,
+                                            statement,
+                                        })
+                                }
                                 Binding::ConditionalValue | Binding::RuntimeClass => false,
                                 _ => package,
                             };
@@ -6198,6 +6392,7 @@ impl<'a> Loader<'a> {
         let mut resolved = None;
         let mut portions = Vec::new();
         let mut zip_import = false;
+        let mut member_source = None;
         for (root_index, root) in roots.enumerate() {
             if root_index == 0 && self.skip_current_root {
                 continue;
@@ -6205,7 +6400,23 @@ impl<'a> Loader<'a> {
             if parent_roots.is_some_and(|roots| !roots.contains(root_index)) {
                 continue;
             }
-            if let Some(archive) = self.zip_sources.get(root) {
+            if let Some(archive) = self.zip_sources.get_mut(root) {
+                // The path-entry finder supplies the physical member used as __main__
+                // and the source of imports from this same first-party archive.
+                if root_index == 0
+                    && self.module_operand.is_some()
+                    && let Some(member) = archive.module(name)
+                {
+                    member_source = Some(member.source);
+                    resolved = Some((
+                        member.path.clone(),
+                        member.path,
+                        member.package,
+                        root_index,
+                        None,
+                    ));
+                    break;
+                }
                 if archive.package(name).is_some() {
                     zip_import = true;
                     break;
@@ -6367,13 +6578,18 @@ impl<'a> Loader<'a> {
                 self.modules[previous].name
             ));
         }
-        let source = self
-            .fs
-            .read_source_string(&identity)
-            .map_err(|error| format!("{}: {error}", path.display()))?;
+        let (source, kind) = if let Some(source) = member_source {
+            (source, crate::SourceKind::DecodedFile)
+        } else {
+            let source = self
+                .fs
+                .read_source_string(&identity)
+                .map_err(|error| format!("{}: {error}", path.display()))?;
+            (source, crate::SourceKind::File)
+        };
         // ty resolves logical import paths; canonical identities enforce containment
         // and uniqueness without breaking a single internal symlink's import name.
-        let id = self.add(path, identity, name.to_owned(), is_package, &source)?;
+        let id = self.add_source(path, identity, name.to_owned(), is_package, &source, kind)?;
         self.modules[id].search_roots = SearchRoots::Single(root_index);
         self.modules[id].archive = archive;
         self.scan(id)?;

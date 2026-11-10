@@ -21,6 +21,15 @@ import reprlib as bundled
 print('shadow', project.marker(), bundled.Repr().repr([1, 2]), project is bundled)
 print('docs', project.marker.__doc__, bundled.recursive_repr.__doc__, bundled.__doc__ is None)
 
+print('before xml.parsers', 'xml.parsers' in sys.modules)
+import xml.parsers
+from xml import parsers
+print('xml', xml.__all__)
+print('parsers', parsers is sys.modules['xml.parsers'], parsers.__doc__ and parsers.__doc__.splitlines()[0])
+
+from importlib.resources._itertools import only
+print('only', only([17]), only([], 41), only.__defaults__)
+
 def dormant():
     import never_loaded
 print('deferred', 'never_loaded' in sys.modules)
@@ -88,8 +97,19 @@ def main():
         subprocess.run([compiler, 'build', entry, '--opt-level', args.opt_level,
                         '--no-cache', '-o', binary], cwd=root, env=env, check=True)
         archives = compiler.parent / 'imre-toolchain' / 'lib' / 'imre-stdlib'
-        assert provider_symbols(binary) & provider_symbols(archives / f'O{args.opt_level}/providers.a'), (
-            'no provider from the installed archive was linked')
+        ir = root / 'standalone-ir'
+        subprocess.run([compiler, '--emit-bundled-provider-ir', ir], cwd=root, env=env, check=True)
+        linked = provider_symbols(binary) & provider_symbols(archives / f'O{args.opt_level}/providers.a')
+        origins = (b'reprlib.py', b'xml/__init__.py', b'xml/parsers/__init__.py',
+                   b'importlib/resources/_itertools.py')
+        providers = {origin: [] for origin in origins}
+        for unit in ir.glob('*.ll'):
+            body = unit.read_bytes()
+            for origin in origins:
+                if b'c"<imre stdlib>/' + origin + b'\\00"' in body:
+                    providers[origin].append(unit.stem.encode())
+        for origin, symbols in providers.items():
+            assert len(symbols) == 1 and symbols[0] in linked, (origin, symbols)
 
         env['IMRE_ENCODED_FLAGS'] = '\x1f'.join(['--opt-level', args.opt_level, '--no-cache'])
         for flags, command in [([], [binary]), (['-OO'], [compiler, '-B', '-OO', entry])]:

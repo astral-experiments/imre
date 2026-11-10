@@ -347,7 +347,8 @@ pub(super) fn alias_builtin_parameters(
     function: &mut ast::StmtFunctionDef,
     graph: &SourceGraph,
     module: ModuleId,
-) {
+) -> bool {
+    let mut renamed = false;
     let params = &mut function.parameters;
     for parameter in params
         .posonlyargs
@@ -374,8 +375,10 @@ pub(super) fn alias_builtin_parameters(
             };
             *name = alias.local.clone();
             alias.visit_body(&mut function.body);
+            renamed = true;
         }
     }
+    renamed
 }
 
 struct BuiltinAlias {
@@ -443,15 +446,217 @@ impl Transformer for BuiltinAlias {
     }
 }
 
+/// Facts about the live Python namespace, local to one module initializer.
+#[derive(Clone, Default)]
+pub(super) struct ModuleNamespace {
+    aliases: HashSet<usize>,
+    keys: HashMap<usize, String>,
+    exposed: HashSet<String>,
+    unknown_key: bool,
+    last_python_call: Option<TextSize>,
+    released_owner: bool,
+}
+
+impl ModuleNamespace {
+    /// During signature discovery, only the initial module bindings have a
+    /// concrete owner independent of the eventual registered calling convention.
+    pub(super) fn is_unexposed(&self) -> bool {
+        self.last_python_call.is_none()
+            && !self.released_owner
+            && !self.unknown_key
+            && self.exposed.is_empty()
+    }
+
+    pub(super) fn join(&mut self, other: &Self) {
+        self.aliases.extend(&other.aliases);
+        self.keys
+            .retain(|slot, key| other.keys.get(slot) == Some(key));
+        self.exposed.extend(other.exposed.iter().cloned());
+        self.unknown_key |= other.unknown_key;
+        self.last_python_call = self.last_python_call.max(other.last_python_call);
+        self.released_owner |= other.released_owner;
+    }
+
+    fn key(&self, value: &Expr) -> Option<String> {
+        match &value.kind {
+            ExprKind::Str(name) => Some(name.clone()),
+            ExprKind::Builtin(
+                Builtin::RegisteredLocation(..) | Builtin::RegisteredIndexConstant(_),
+                args,
+            ) => self.key(args.first()?),
+            ExprKind::Local(slot) => self.keys.get(slot).cloned(),
+            _ => None,
+        }
+    }
+}
+
+impl Checker<'_> {
+    pub(super) fn live_module_binding(&self, expr: &ast::Expr) -> Option<Expr> {
+        let name = expr.as_name_expr()?.id.as_str();
+        (self.module_scope
+            && (self.module_namespace.exposed.contains(name)
+                || self.module_namespace.unknown_key && self.names.contains_key(name)))
+        .then(|| registered::values::name_binding(name))
+    }
+
+    pub(super) fn is_module_namespace(&self, value: &Expr) -> bool {
+        match &value.kind {
+            ExprKind::Builtin(Builtin::RegisteredCall(site), _) => {
+                self.namespace_calls.contains(&site.range)
+            }
+            ExprKind::Local(slot) => self.module_namespace.aliases.contains(slot),
+            _ => false,
+        }
+    }
+
+    pub(super) fn closed_passive_call(&self, call: &ast::ExprCall) -> bool {
+        if self.module_namespace.unknown_key
+            || self.module_namespace.released_owner
+            || self.live_module_binding(&call.func).is_some()
+            || !call.func.is_name_expr()
+            || !call.arguments.args.iter().all(ast::Expr::is_literal_expr)
+            || !call
+                .arguments
+                .keywords
+                .iter()
+                .all(|keyword| keyword.arg.is_some() && keyword.value.is_literal_expr())
+        {
+            return false;
+        }
+        let Some(Binding::Definition(id)) = self.resolve(&call.func) else {
+            return false;
+        };
+        let definition = &self.graph.modules[id.module].parsed.syntax().body[id.statement];
+        id.module == self.module
+            && self
+                .module_namespace
+                .last_python_call
+                .is_none_or(|end| end <= definition.start())
+            && definition
+                .as_function_def_stmt()
+                .is_some_and(crate::analysis::passive_function)
+    }
+
+    /// Calling Python can replace any module binding visible when control enters the
+    /// callee. A later first assignment still establishes its normal checked layout.
+    pub(super) fn invalidate_called_bindings(
+        &mut self,
+        call: &ast::Expr,
+        checked: &Result<Expr, String>,
+    ) {
+        if self.namespace_calls.contains(&call.range()) {
+            return;
+        }
+        let can_call_python = match checked {
+            Ok(value) => matches!(
+                &value.kind,
+                ExprKind::Call(..)
+                    | ExprKind::Invoke { .. }
+                    | ExprKind::Construct { .. }
+                    | ExprKind::Builtin(Builtin::RegisteredCall(..), _)
+            ),
+            Err(error) => error.is_object(),
+        };
+        if can_call_python {
+            self.module_namespace.last_python_call =
+                self.module_namespace.last_python_call.max(Some(call.end()));
+            if !self.globals.registered_initializers {
+                return;
+            }
+            self.module_namespace.exposed.extend(
+                self.names
+                    .iter()
+                    .filter(|(_, slot)| self.assigned.contains(slot))
+                    .map(|(name, _)| name.clone()),
+            );
+            self.module_namespace.keys.clear();
+        }
+    }
+
+    fn can_release_owner(&self, slot: usize) -> bool {
+        self.assigned.contains(&slot) && self.types.stores_python_object(self.locals[slot])
+    }
+
+    // A store installs its RHS before releasing the previous owner. A Python finalizer
+    // can change any binding already visible in this module before the next lookup.
+    fn release_module_owner(&mut self) {
+        // A finalizer can replace a function before the next direct call looks it up.
+        self.module_namespace.released_owner = true;
+        self.module_namespace
+            .exposed
+            .extend(self.names.keys().cloned());
+        self.module_namespace.keys.clear();
+    }
+
+    pub(super) fn namespace_item_store(&mut self, index: &Expr, value: &Expr) {
+        if let Some(name) = self.module_namespace.key(index) {
+            if self.module_namespace.unknown_key
+                || self.module_namespace.exposed.contains(&name)
+                || self
+                    .names
+                    .get(&name)
+                    .is_some_and(|&slot| self.can_release_owner(slot))
+            {
+                self.release_module_owner();
+            }
+            if self.types.stores_python_object(value.ty) {
+                self.module_namespace.exposed.insert(name);
+            }
+        } else if matches!(index.ty, Type::Str | Type::PythonObject) {
+            if !self.module_namespace.exposed.is_empty()
+                || self.module_namespace.unknown_key
+                || self
+                    .names
+                    .values()
+                    .any(|&slot| self.can_release_owner(slot))
+            {
+                self.release_module_owner();
+            }
+            self.module_namespace.unknown_key |= self.types.stores_python_object(value.ty);
+        }
+    }
+
+    pub(super) fn namespace_assignment(&mut self, slot: usize, value: &Expr) {
+        let alias = self.is_module_namespace(value);
+        let key = self.module_namespace.key(value);
+        let releases_owner = self.can_release_owner(slot)
+            || self.module_namespace.unknown_key
+            || !self.module_namespace.exposed.is_empty()
+                && self.names.iter().any(|(name, &local)| {
+                    local == slot && self.module_namespace.exposed.contains(name)
+                });
+        if releases_owner {
+            self.release_module_owner();
+        }
+        if alias {
+            self.module_namespace.aliases.insert(slot);
+        } else if !releases_owner {
+            self.module_namespace.aliases.remove(&slot);
+        }
+        if let Some(key) = key.filter(|_| !releases_owner) {
+            self.module_namespace.keys.insert(slot, key);
+        } else {
+            self.module_namespace.keys.remove(&slot);
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct LocalState {
     pub(super) assigned: Assigned,
     pub(super) narrowed: Narrowed,
+    module_namespace: ModuleNamespace,
 }
 
 impl LocalState {
-    pub(super) fn retain_common(&mut self, assigned: &Assigned, narrowed: &Narrowed) {
-        intersect(&mut self.assigned, &mut self.narrowed, assigned, narrowed);
+    pub(super) fn retain_common(&mut self, other: &Self) {
+        intersect(
+            &mut self.assigned,
+            &mut self.narrowed,
+            &other.assigned,
+            &other.narrowed,
+        );
+        self.module_namespace.join(&other.module_namespace);
     }
 }
 
@@ -470,13 +675,14 @@ impl Checker<'_> {
         LocalState {
             assigned: self.assigned.clone(),
             narrowed: self.narrowed.clone(),
+            module_namespace: self.module_namespace.clone(),
         }
     }
 
     /// Intersects one normally completed branch with the exits checked so far.
     pub(super) fn merge_exit(&self, joined: &mut Option<LocalState>) {
         if let Some(exit) = joined {
-            exit.retain_common(&self.assigned, &self.narrowed);
+            exit.retain_common(&self.local_state());
         } else {
             *joined = Some(self.local_state());
         }
@@ -486,6 +692,7 @@ impl Checker<'_> {
     pub(super) fn restore_state(&mut self, state: LocalState) {
         self.assigned = state.assigned;
         self.narrowed = state.narrowed;
+        self.module_namespace = state.module_namespace;
     }
 
     /// A binding yields the original RHS value; optional promotion belongs to

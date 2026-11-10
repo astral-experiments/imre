@@ -65,6 +65,133 @@ pub(crate) fn module(module: &Module) -> Result<(), String> {
     Ok(())
 }
 
+/// Registered frames resolve slots by their original Python names and can carry either a
+/// checked native scalar or a Python handle as a display operand. They have no native
+/// container layout table. Validate this handoff before the emitter indexes its operands.
+pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result<(), String> {
+    let private = frame.private_slots();
+    let local = |slot: usize| {
+        require(
+            slot < frame.locals.len()
+                && (frame.local_names.contains_key(&slot) || private.contains(&slot)),
+            "invalid registered frame slot or missing Python name",
+        )
+    };
+    for &slot in frame.params {
+        local(slot)?;
+    }
+    for &slot in frame.local_names.keys() {
+        local(slot)?;
+    }
+    let mut result = Ok(());
+    frame.walk(&mut |node, parent| {
+        if result.is_err() {
+            return;
+        }
+        result = match node {
+            ir::Node::Statement(Statement::Assign(slot, _)) => local(*slot),
+            ir::Node::Statement(Statement::With {
+                binding: Some(binding),
+                ..
+            }) => require(
+                frame.locals.get(binding.entered) == Some(&Type::PythonObject)
+                    && private.contains(&binding.entered),
+                "context binding needs a private entered-value slot",
+            ),
+            ir::Node::Statement(Statement::IterNext {
+                kind: ir::IterNextKind::Async(_),
+                iterator,
+                key,
+                ready,
+                value,
+            }) => require(
+                value.is_none()
+                    && iterator != key
+                    && key != ready
+                    && iterator != ready
+                    && [iterator, key, ready]
+                        .iter()
+                        .all(|slot| private.contains(*slot))
+                    && frame.locals.get(*iterator) == Some(&Type::PythonObject)
+                    && frame.locals.get(*key) == Some(&Type::PythonObject)
+                    && frame.locals.get(*ready) == Some(&Type::Bool),
+                "async pull needs distinct private cursor, item and readiness slots",
+            ),
+            ir::Node::Expression(value) => match &value.kind {
+                ExprKind::Local(slot) => local(*slot),
+                ExprKind::List(_) => require(
+                    matches!(value.ty, Type::PythonObject | Type::ListInt | Type::List(_)),
+                    "invalid checked list type",
+                ),
+                ExprKind::Tuple(_) => require(
+                    matches!(value.ty, Type::PythonObject | Type::Tuple(_)),
+                    "invalid checked tuple type",
+                ),
+                ExprKind::Set { element, values } => require(
+                    match value.ty {
+                        Type::PythonObject => *element == Type::PythonObject,
+                        Type::Set(_) => {
+                            *element != Type::PythonObject
+                                && values.iter().all(|item| {
+                                    matches!(
+                                        item.kind,
+                                        ExprKind::Builtin(Builtin::RegisteredSpread, _)
+                                    ) || item.ty == *element
+                                })
+                        }
+                        _ => false,
+                    },
+                    "inconsistent checked set element type",
+                ),
+                ExprKind::Builtin(Builtin::GlobalSet(slot), args) => local(*slot).and_then(|()| {
+                    require(
+                        args.len() == 1,
+                        "registered namespace write needs one operand",
+                    )
+                }),
+                ExprKind::Builtin(Builtin::RegisteredAssertionFailure { .. }, args) => require(
+                    value.ty == Type::None && args.len() <= 1,
+                    "registered assertion failure takes at most one message",
+                ),
+                ExprKind::Invoke { .. } => require(
+                    value.is_registered_invoke(),
+                    "registered invocation needs a Python callable, call position and positional arguments",
+                ),
+                ExprKind::Builtin(Builtin::RegisteredLocation(..), args) => match args.as_slice() {
+                    [inner] => same(value.ty, inner.ty),
+                    _ => Err("registered location needs one operand".into()),
+                },
+                ExprKind::Builtin(Builtin::RegisteredSpread, args) => {
+                    let collection = parent.is_some_and(|parent| match &parent.kind {
+                        ExprKind::List(_) | ExprKind::Tuple(_) | ExprKind::Set { .. } => true,
+                        ExprKind::Builtin(Builtin::Append | Builtin::SetAdd, args) => {
+                            matches!(args.as_slice(), [out, item] if out.ty == Type::PythonObject && std::ptr::eq(item, value))
+                        }
+                        _ => false,
+                    });
+                    require(
+                        collection && value.ty == Type::PythonObject && args.len() == 1,
+                        "registered spread needs one operand in a Python collection",
+                    )
+                }
+                ExprKind::Builtin(Builtin::RegisteredGenerator(_, scoped), args) => {
+                    ir::generator_operands(*scoped, args)
+                        .map(|_| ())
+                        .map_err(str::to_owned)
+                }
+                ExprKind::Builtin(op, args) => op
+                    .iteration_operands(args)
+                    .transpose()
+                    .map(|_| ())
+                    .map_err(str::to_owned),
+                _ => Ok(()),
+            },
+            _ => Ok(()),
+        };
+    });
+    result
+}
+
 fn require(condition: bool, message: &str) -> Result<(), String> {
     if condition {
         Ok(())
@@ -209,6 +336,13 @@ impl Verifier<'_> {
             Statement::Assign(slot, value) => same(value.ty, self.local(*slot)?),
             Statement::Move(target, source) => same(self.local(*source)?, self.local(*target)?),
             Statement::Clear(slot) => self.local(*slot).map(|_| ()),
+            Statement::With { binding, body, .. } => {
+                if let Some(binding) = binding {
+                    same(self.local(binding.entered)?, Type::PythonObject)?;
+                    self.block(&binding.body)?;
+                }
+                self.block(body)
+            }
             Statement::Scope { body, clear } => {
                 self.slots(clear)?;
                 self.block(body)
@@ -230,6 +364,19 @@ impl Verifier<'_> {
                     *field < self.module.class_fields[class].len(),
                     "invalid augmented field index",
                 )
+            }
+            Statement::Match(_, cases) => {
+                for case in cases {
+                    if case.captures.len() != case.pattern.names.len() {
+                        return Err("match capture names and slots have different lengths".into());
+                    }
+                    self.slots(&case.captures)?;
+                    if let Some(guard) = &case.guard {
+                        same(guard.ty, Type::Bool)?;
+                    }
+                    self.block(&case.body)?;
+                }
+                Ok(())
             }
             Statement::If(test, yes, no) | Statement::While(test, yes, no) => {
                 same(test.ty, Type::Bool)?;
@@ -272,6 +419,9 @@ impl Verifier<'_> {
                     crate::ir::IterNextKind::CodePoint | crate::ir::IterNextKind::Utf8Byte => {
                         Some(Type::Int)
                     }
+                    crate::ir::IterNextKind::Async(_) => {
+                        return Err("async cursor requires a registered frame".into());
+                    }
                     crate::ir::IterNextKind::Generic => None,
                 };
                 if let Some(ty) = item_type {
@@ -301,6 +451,14 @@ impl Verifier<'_> {
                 finalbody,
             } => {
                 self.block(body)?;
+                let subgroup = |h: &crate::ir::ExceptHandler| {
+                    matches!(h.matcher, crate::ir::ExceptionMatcher::Subgroup(..))
+                };
+                if let Some(first) = handlers.first()
+                    && handlers.iter().any(|h| subgroup(h) != subgroup(first))
+                {
+                    return Err("cannot mix whole-exception and subgroup handlers".into());
+                }
                 for handler in handlers {
                     if let Some(slot) = handler.name {
                         self.local(slot)?;
@@ -328,6 +486,9 @@ impl Verifier<'_> {
     fn expression_types(&self, value: &Expr) -> Result<(), String> {
         self.ty(value.ty)?;
         match &value.kind {
+            ExprKind::Builtin(Builtin::Unrepresented, _) => {
+                Err("unrepresented source operand in executable IR".into())
+            }
             ExprKind::Dict { key, value, .. } => {
                 self.ty(*key)?;
                 self.ty(*value)
@@ -526,6 +687,10 @@ impl Verifier<'_> {
                 same(native_result, callee.returns)
             }
             ExprKind::Invoke { callable, args } => {
+                require(
+                    args.python_site.is_none(),
+                    "fixed invocation cannot use a Python call site",
+                )?;
                 let (params, returns) = types
                     .signature(callable.ty)
                     .ok_or("indirect call needs a callable")?;
@@ -667,6 +832,86 @@ mod tests {
     }
 
     #[test]
+    fn registered_display_handoff_accepts_heterogeneous_operands_and_checks_frame_slots() {
+        use crate::{frontend, modules::SourceGraph};
+        let text = "out = [1, ('s', callback(arg)), *rest]\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let source = frontend::RegisteredSource {
+            template_fields: None,
+            generators: None,
+            lambdas: None,
+            text,
+            private_names: None,
+            replacements: &Default::default(),
+            has_templates: false,
+            method_imports: &Default::default(),
+        };
+        let operations = Default::default();
+        let body = &graph.modules[graph.entry].parsed.syntax().body;
+        let prepare = frontend::SuitePreparation::new(&operations, source, body, true);
+        for scope in [
+            frontend::RegisteredScope::Module,
+            frontend::RegisteredScope::Function { is_async: false },
+        ] {
+            let mut frame = prepare.complete(body, scope).unwrap().checked;
+            registered(frame.region()).unwrap();
+            frame.local_names.clear();
+            assert!(
+                registered(frame.region())
+                    .unwrap_err()
+                    .contains("frame slot")
+            );
+        }
+    }
+
+    #[test]
+    fn registered_namespace_checks_the_optional_parent_before_emission() {
+        let mut frame = crate::frontend::RegisteredFunction {
+            fixed_sites: Vec::new(),
+            function: empty().entry,
+            local_names: Default::default(),
+        };
+        for count in 0..=2 {
+            let parent = Expr::none();
+            frame.function.body = vec![Statement::Expr(Expr {
+                ty: Type::PythonObject,
+                kind: ExprKind::Builtin(
+                    Builtin::RegisteredNamespace(Vec::new()),
+                    vec![parent; count],
+                ),
+            })];
+            if count < 2 {
+                registered(frame.region()).unwrap();
+            } else {
+                assert_eq!(
+                    registered(frame.region()).unwrap_err(),
+                    "registered namespace takes at most one parent"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn registered_display_handoff_rejects_a_misplaced_or_malformed_spread() {
+        let mut frame = crate::frontend::RegisteredFunction {
+            fixed_sites: Vec::new(),
+            function: empty().entry,
+            local_names: Default::default(),
+        };
+        let spread = |args| Expr {
+            ty: Type::PythonObject,
+            kind: ExprKind::Builtin(Builtin::RegisteredSpread, args),
+        };
+        frame.function.body = vec![Statement::Expr(spread(vec![Expr::integer(42)]))];
+        assert!(registered(frame.region()).unwrap_err().contains("spread"));
+        frame.function.body = vec![Statement::Expr(Expr {
+            ty: Type::PythonObject,
+            kind: ExprKind::Tuple(vec![Expr::integer(42), spread(vec![])]),
+        })];
+        assert!(registered(frame.region()).unwrap_err().contains("spread"));
+    }
+
+    #[test]
     fn checks_type_identities_before_using_shape_accessors() {
         for ty in [Type::List(usize::MAX), Type::Class(0), Type::Callable(0)] {
             let mut module = empty();
@@ -695,6 +940,7 @@ mod tests {
             body: Vec::new(),
         });
         let mut args = CallArgs {
+            python_site: None,
             exhaustive_enum_match: false,
             values: vec![
                 Expr {
@@ -770,6 +1016,15 @@ mod tests {
         };
         module.entry.body = vec![invoke(CallArgs::positional(vec![Expr::integer(1)]))];
         super::module(&module).unwrap();
+        let mut frame_args = CallArgs::positional(vec![Expr::integer(1)]);
+        frame_args.python_site = Some(ir::InvokeSite {
+            range: ruff_text_size::TextRange::new(0.into(), 4.into()),
+            callee_end: 1.into(),
+            suspended_name: None,
+            scope: None,
+        });
+        module.entry.body = vec![invoke(frame_args)];
+        reject(&module, "fixed invocation cannot use a Python call site");
         module.entry.body = vec![invoke(CallArgs::positional(Vec::new()))];
         reject(&module, "argument count");
         module.functions[0].locals[0] = Type::Float;

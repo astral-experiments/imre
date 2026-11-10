@@ -3174,6 +3174,7 @@ impl Context {
             .and_then(|range| program.literals.get(&range).copied())
             .unwrap_or(NONE);
         self.alloc(Value::Code(value::CodeObject {
+            compilation_constants: Default::default(),
             parsed_parameters: Default::default(),
             varnames: NONE,
             cellvars: NONE,
@@ -3862,7 +3863,14 @@ impl Context {
             return Ok(replaced);
         };
         let key = self.heap.code_name(name);
-        self.put_item(target, key, value)?;
+        if matches!(
+            self.heap.get(target),
+            Value::Dict(_) | Value::DefaultDict { .. }
+        ) {
+            self.store_binding_item(target, key, value)?;
+        } else {
+            self.put_item(target, key, value)?;
+        }
         Ok(replaced)
     }
 

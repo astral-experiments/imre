@@ -572,8 +572,16 @@ impl Cache {
             crate::cli::Relro::Partial => 1,
             crate::cli::Relro::Off => 2,
         };
+        // An unreadable or incomplete index can select local provider bodies without
+        // placing the archive in the linker's dependency file. Its identity still
+        // determines whether this executable can be reused.
+        let provider_archive = match &options.bundled_provider_archive {
+            Some(path) => Some(Stamp::read(path)?),
+            None => None,
+        };
         let link_inputs = serde_json::to_vec(&(
-            5,
+            6,
+            provider_archive,
             module_objects,
             (
                 file,

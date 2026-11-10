@@ -26,6 +26,7 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         ctx.bind(scope, "__module__", module_name);
         let fields = string_tuple(ctx, spec.fields.iter().map(|(key, _)| *key));
         ctx.bind(scope, "_fields", fields);
+        ctx.bind(scope, "__match_args__", fields);
         ctx.bind(
             scope,
             "_attributes",

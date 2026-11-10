@@ -2,12 +2,8 @@
 //! Its heap frame contains the live machine values. Python handles remain rooted by
 //! the ordinary activation and its delegate, using the same statement checkpoints.
 
-use ruff_text_size::TextRange;
-
-use super::Function;
-
 /// The runtime owns the sized, aligned frame storage through the final destroy.
-pub(super) const ABI: &str = r#"
+pub(crate) const ABI: &str = r#"
 declare token @llvm.coro.id(i32, ptr, ptr, ptr)
 declare i64 @llvm.coro.size.i64()
 declare i32 @llvm.coro.align.i32()
@@ -35,7 +31,7 @@ release:
 }
 "#;
 
-pub(super) const PROLOGUE: &str = r#"  %coro_id = call token @llvm.coro.id(i32 0, ptr null, ptr null, ptr null)
+pub(crate) const PROLOGUE: &str = r#"  %coro_id = call token @llvm.coro.id(i32 0, ptr null, ptr null, ptr null)
   %frame_bytes = call i64 @llvm.coro.size.i64()
   %frame_align = call i32 @llvm.coro.align.i32()
   %storage = call ptr @imre_dyn_coro_alloc(ptr %context_slot, i64 %frame_bytes, i32 %frame_align)
@@ -48,10 +44,7 @@ start:
   call void @imre_dyn_coro_open(ptr %context_slot, ptr %handle, ptr @imre_boxed_drive)
 "#;
 
-pub(super) const EPILOGUE: &str = r#"failed:
-  call void @imre_dyn_suspend_return(ptr %context_slot, i64 0)
-  br label %complete
-complete:
+pub(crate) const EPILOGUE: &str = r#"complete:
   %final_save = call token @llvm.coro.save(ptr %handle)
   %final = call i8 @llvm.coro.suspend(token %final_save, i1 true)
   switch i8 %final, label %parked [ i8 0, label %invalid_resume
@@ -67,59 +60,9 @@ parked:
 
 /// Operation numbers in the boxed suspension ABI.
 #[repr(i32)]
-pub(super) enum Suspension {
+pub(crate) enum Suspension {
     Yield = 0,
     AsyncYield = 1,
     Await = 2,
     Delegate = 3,
-}
-
-impl Function<'_, '_> {
-    pub(super) fn suspension_position(&mut self, range: TextRange) {
-        let (line, col) = self.source.line_and_column(range.start());
-        let (end_line, end_col) = self.source.line_and_column(range.end());
-        let position = self.output.position([line, end_line, col, end_col]);
-        self.line(&format!(
-            "call void @imre_dyn_call_position(ptr %ctx, ptr {position})"
-        ));
-    }
-
-    /// Once __await__ returns, only its iterator owns the pending operation.
-    pub(super) fn await_at(
-        &mut self,
-        value: &str,
-        mode: &str,
-        range: TextRange,
-        mark: &str,
-    ) -> String {
-        self.suspension_position(range);
-        let iterator = self.op("await_iter", &[value, mode]);
-        let result = self.suspend_at(&iterator, Suspension::Await, range, mark);
-        self.keep_operands(mark, &result, "0");
-        result
-    }
-
-    pub(super) fn suspend_at(
-        &mut self,
-        value: &str,
-        kind: Suspension,
-        range: TextRange,
-        mark: &str,
-    ) -> String {
-        self.suspension_position(range);
-        self.line(&format!(
-            "call void @imre_dyn_suspend_operands(ptr %context_slot, i64 {value}, i64 {mark}, i32 {})",
-            kind as i32
-        ));
-        let saved = self.value("call token @llvm.coro.save(ptr %handle)");
-        let branch = self.value(&format!(
-            "call i8 @llvm.coro.suspend(token {saved}, i1 false)"
-        ));
-        let resume = self.name("b");
-        self.end(&format!(
-            "switch i8 {branch}, label %parked [ i8 0, label %{resume} i8 1, label %discard ]"
-        ));
-        self.label(&resume);
-        self.checked("call i64 @imre_dyn_resume_input(ptr %context_slot)")
-    }
 }

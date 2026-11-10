@@ -612,6 +612,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "ForwardRef",
             "FrozenSet",
             "Generator",
+            "Generic",
             "Hashable",
             "ItemsView",
             "KT",

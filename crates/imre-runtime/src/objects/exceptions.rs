@@ -8,8 +8,8 @@
 use crate::StrOwner;
 mod arguments;
 mod imports;
-pub(super) use imports::imre_exception_field_repr;
 pub(crate) use imports::keyword_suggestion;
+pub(super) use imports::{imre_exception_field_repr, type_name as word_type_name};
 mod tree;
 pub(super) use tree::append_tree_entries;
 
@@ -788,13 +788,7 @@ impl Error {
                 {
                     return error;
                 }
-                MEMORY_ERRORS.with(|errors| {
-                    let slot = errors[..MEMORY_ERROR_RESERVE]
-                        .iter()
-                        .find(|error| crate::ObjectOwner::strong_count(&error.borrow()) == 1)
-                        .unwrap_or(&errors[MEMORY_ERROR_RESERVE]);
-                    slot.borrow().clone()
-                })
+                MEMORY_ERRORS.with(|errors| memory_error_slot(errors).borrow().clone())
             }
             Some(payload) => exception_with_cause(self.kind, payload, self.cause),
             None => SEQUENCE_ALLOCATION_ERROR.with_borrow(crate::ObjectOwner::clone),
@@ -839,6 +833,7 @@ pub(crate) fn finish<T>(result: Result<T>, sentinel: T) -> T {
 // CPython reserves sixteen distinct errors and uses one last-resort instance
 // while all sixteen are still observable by callers.
 const MEMORY_ERROR_RESERVE: usize = 16;
+const SEQUENCE_ALLOCATION_MESSAGE: &str = "sequence allocation failed";
 
 thread_local! {
     static MEMORY_ERRORS: [RefCell<crate::ObjectOwner>; MEMORY_ERROR_RESERVE + 1] =
@@ -847,7 +842,7 @@ thread_local! {
         Kind::MemoryError, StrOwner::new(Str::new("record allocation failed")),
     ));
     static SEQUENCE_ALLOCATION_ERROR: RefCell<crate::ObjectOwner> = RefCell::new(new_exception(
-        Kind::MemoryError, StrOwner::new(Str::new("sequence allocation failed")),
+        Kind::MemoryError, StrOwner::new(Str::new(SEQUENCE_ALLOCATION_MESSAGE)),
     ));
     static PENDING: RefCell<Option<crate::ObjectOwner>> = const { RefCell::new(None) };
     static ACTIVE: RefCell<Option<crate::ObjectOwner>> = const { RefCell::new(None) };
@@ -1418,6 +1413,15 @@ pub(super) fn take_pending() -> Option<crate::ObjectOwner> {
     let pending = PENDING.with(RefCell::take);
     PENDING_PRESENT.set(false);
     pending
+}
+
+fn memory_error_slot(
+    errors: &[RefCell<crate::ObjectOwner>; MEMORY_ERROR_RESERVE + 1],
+) -> &RefCell<crate::ObjectOwner> {
+    errors[..MEMORY_ERROR_RESERVE]
+        .iter()
+        .find(|error| crate::ObjectOwner::strong_count(&error.borrow()) == 1)
+        .unwrap_or(&errors[MEMORY_ERROR_RESERVE])
 }
 
 /// A suspended task retains the exception dynamically active in its own handlers.

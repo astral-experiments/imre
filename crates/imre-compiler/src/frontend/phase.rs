@@ -4,7 +4,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use ruff_text_size::{Ranged, TextRange};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use crate::modules::{ModuleId, SourceGraph};
 
@@ -13,6 +13,9 @@ pub(crate) type Result<T, M = String> = std::result::Result<T, Failure<M>>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
     Ordinary,
+    UnsupportedRepresentation,
+    GeneratorSuspension,
+    UnresolvedParameter(ModuleId, ruff_text_size::TextSize),
     ExecutionOperand(ModuleId),
     RegisteredExecution,
     ExactType,
@@ -24,9 +27,19 @@ pub(crate) enum Kind {
     ScopedClassLayout,
 }
 
+/// The entry operand and physical source containing its checked diagnostic.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct EntryOperand {
+    pub(crate) module: ModuleId,
+    pub(crate) body: ModuleId,
+    pub(crate) statement: TextSize,
+    pub(crate) operand: TextRange,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Position {
     range: TextRange,
+    entry_statement: Option<Box<EntryOperand>>,
     line: usize,
     column: usize,
 }
@@ -69,6 +82,7 @@ impl<M> Diagnostic<M> {
         Self {
             position: Some(Position {
                 range,
+                entry_statement: None,
                 line,
                 column,
             }),
@@ -79,6 +93,32 @@ impl<M> Diagnostic<M> {
     pub(crate) fn classified(mut self, kind: Kind) -> Self {
         self.kind = kind;
         self
+    }
+
+    pub(crate) fn entry_operand(&self) -> Option<EntryOperand> {
+        let entry = *self.position.as_ref()?.entry_statement.as_deref()?;
+        (self.kind == Kind::ExactType).then_some(entry)
+    }
+
+    pub(super) fn exact_operand(&self) -> Option<TextRange> {
+        (self.kind == Kind::ExactType).then_some(self.position.as_ref()?.range)
+    }
+
+    pub(super) fn reached_in_entry(
+        &mut self,
+        module: ModuleId,
+        body: ModuleId,
+        statement: TextSize,
+        call: TextRange,
+    ) {
+        if let Some(position) = &mut self.position {
+            position.entry_statement = Some(Box::new(EntryOperand {
+                module,
+                body,
+                statement,
+                operand: call,
+            }));
+        }
     }
 
     pub(crate) fn with_path(mut self, path: &std::path::Path) -> Self {
@@ -151,6 +191,14 @@ impl From<&str> for Diagnostic {
 }
 
 impl Kind {
+    pub(super) fn is_representation(self) -> bool {
+        self == Self::UnsupportedRepresentation || self.is_object()
+    }
+
+    pub(super) fn is_object(self) -> bool {
+        matches!(self, Self::Object | Self::ScopedObject) || self.is_class_layout()
+    }
+
     pub(crate) fn checks_object_calls(self) -> bool {
         matches!(self, Self::ScopedObject | Self::ScopedClassLayout)
     }
@@ -196,14 +244,35 @@ impl Failure<&'static str> {
                 module,
                 range,
             },
-            Self::Diagnostic(report) => {
-                Diagnostic::at(source, site, report.message.to_owned()).into()
-            }
+            Self::Diagnostic(report) => Diagnostic::at(source, site, report.message.to_owned())
+                .classified(report.kind)
+                .into(),
         }
     }
 }
 
 impl Failure {
+    pub(super) fn in_entry_statement(
+        mut self,
+        entry: Option<ModuleId>,
+        statement: TextSize,
+    ) -> Self {
+        if let (Some(module), Self::Diagnostic(report)) = (entry, &mut self)
+            && report.kind == Kind::ExactType
+            && let Some(position) = &mut report.position
+        {
+            position.entry_statement.get_or_insert_with(|| {
+                Box::new(EntryOperand {
+                    module,
+                    body: module,
+                    statement,
+                    operand: position.range,
+                })
+            });
+        }
+        self
+    }
+
     pub(super) fn at_callable_argument(
         mut self,
         site: TextRange,
@@ -226,8 +295,12 @@ impl Failure {
         self
     }
 
+    pub(super) fn is_representation(&self) -> bool {
+        matches!(self, Self::Diagnostic(d) if d.kind.is_representation())
+    }
+
     pub(super) fn is_object(&self) -> bool {
-        matches!(self, Self::Diagnostic(d) if matches!(d.kind, Kind::Object | Kind::ScopedObject | Kind::ClassLayout | Kind::ScopedClassLayout))
+        matches!(self, Self::Diagnostic(d) if d.kind.is_object())
     }
 
     pub(super) fn map_message(mut self, f: impl FnOnce(String) -> String) -> Self {

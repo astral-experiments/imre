@@ -1,0 +1,295 @@
+use super::*;
+use crate::llvm::registered::{Output, RegisteredFrame, SourcePositions, sites::CheckedSites};
+
+#[test]
+fn template_children_use_their_eager_bindings_after_source_is_dropped() {
+    let spelling = r#" [f"<{client.read(v)!r}>" for v in v]"#;
+    let operand = {
+        let source = String::from(
+            r#"rows = [t"""{ [f"<{client.read(v)!r}>" for v in v] !a:>{f"W{client.width(v)!s}"}}""" for v in batches]"#,
+        );
+        let parsed = ruff_python_parser::parse_module(&source).unwrap();
+        let fields = imre_ast::strings::template_fields(&source, parsed.tokens(), parsed.syntax());
+        let assignment = parsed.syntax().body[0].as_assign_stmt().unwrap();
+        RegisteredOperand::prepare(
+            &assignment.value,
+            RegisteredSource {
+                text: &source,
+                private_names: None,
+                replacements: &Default::default(),
+                has_templates: true,
+                template_fields: Some(&fields),
+                lambdas: None,
+                generators: None,
+                method_imports: &Default::default(),
+            },
+            RegisteredScope::Module,
+        )
+        .unwrap()
+    };
+
+    let mut scopes = HashMap::new();
+    let mut captures = 0;
+    ir::walk_operand_expressions(&operand.value, &mut |node| match &node.kind {
+        ExprKind::Builtin(Builtin::RegisteredCall(call), args) => {
+            let ir::RegisteredCallTarget::Method { name, .. } = &call.target else {
+                panic!("expected a method call");
+            };
+            let [scope, _, arg] = args.as_slice() else {
+                panic!("expected a scope, receiver and single argument");
+            };
+            assert!(call.explicit_scope);
+            let ExprKind::Local(namespace) = scope.kind else {
+                panic!("expected a comprehension namespace");
+            };
+            let mut lookups = 0;
+            ir::walk_operand_expressions(arg, &mut |child| {
+                if let ExprKind::Builtin(Builtin::RegisteredName(id), owner) = &child.kind {
+                    assert_eq!(id, "v");
+                    assert!(
+                        matches!(owner.as_slice(), [Expr {kind: ExprKind::Local(slot), ..}] if *slot == namespace)
+                    );
+                    lookups += 1;
+                }
+            });
+            assert_eq!(lookups, 1);
+            assert!(scopes.insert(name.as_str(), namespace).is_none());
+        }
+        ExprKind::Builtin(
+            Builtin::RegisteredInterpolation {
+                expression,
+                conversion,
+            },
+            _,
+        ) => {
+            assert_eq!(expression, spelling);
+            assert_eq!(*conversion, Some('a'));
+            captures += 1;
+        }
+        _ => {}
+    });
+    assert_eq!(captures, 1);
+    assert_ne!(scopes["read"], scopes["width"]);
+    for namespace in scopes.values() {
+        assert!(
+            operand
+                .local_names
+                .values()
+                .any(|binding| { binding.name == "v" && binding.namespace == Some(*namespace) })
+        );
+    }
+
+    let mut output = Output::default();
+    let file = output.data(b"lexical.py");
+    let positions = SourcePositions::new("", &file);
+    let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
+    frame.prepared_operand(&operand, &CheckedSites::default(), false);
+    frame.finish(false);
+    let code = &output.functions;
+    assert_eq!(
+        code.matches("call i64 @imre_dyn_builtin_method_target(")
+            .count(),
+        2
+    );
+    assert_eq!(
+        code.matches("call void @imre_dyn_finish_format_join(")
+            .count(),
+        3
+    );
+    assert!(code.contains("call void @imre_dyn_unwind_operands("));
+    let symbol = output.strings[spelling.as_bytes()];
+    assert!(code.contains(&format!("ptr @str{symbol},")));
+}
+
+#[test]
+fn template_async_comprehension_uses_its_enclosing_activation() {
+    let text = "async def collect(rows):\n    return t'{[await load(v) async for v in rows]}'\n";
+    let parsed = ruff_python_parser::parse_module(text).unwrap();
+    let fields = imre_ast::strings::template_fields(text, parsed.tokens(), parsed.syntax());
+    let definition = parsed.syntax().body[0].as_function_def_stmt().unwrap();
+    let result = definition.body[0]
+        .as_return_stmt()
+        .unwrap()
+        .value
+        .as_deref()
+        .unwrap();
+    let source = RegisteredSource {
+        text,
+        private_names: None,
+        replacements: &Default::default(),
+        has_templates: true,
+        template_fields: Some(&fields),
+        lambdas: None,
+        generators: None,
+        method_imports: &Default::default(),
+    };
+    for owner in [
+        RegisteredScope::Module,
+        RegisteredScope::Class,
+        RegisteredScope::Function { is_async: false },
+    ] {
+        assert!(RegisteredOperand::prepare(result, source, owner).is_none());
+    }
+    let operand =
+        RegisteredOperand::prepare(result, source, RegisteredScope::Function { is_async: true })
+            .unwrap();
+    let mut awaits = 0;
+    let mut pulls = 0;
+    operand.region().walk(&mut |node, _| match node {
+        ir::Node::Expression(Expr {
+            kind: ExprKind::Builtin(Builtin::RegisteredSuspend(ir::SuspendValue::Await, _), _),
+            ..
+        }) => awaits += 1,
+        ir::Node::Statement(Statement::IterNext {
+            kind: ir::IterNextKind::Async(_),
+            ..
+        }) => pulls += 1,
+        _ => {}
+    });
+    assert_eq!((awaits, pulls), (1, 1));
+}
+
+#[test]
+fn template_default_and_body_suspend_in_their_defining_frames() {
+    let text = concat!(
+        "async def factory():\n",
+        "    def inner(p=t'{await fetch()}'):\n",
+        "        return t'pre{(yield p)!r:>{(yield from widths)}}post'\n",
+        "    return inner\n",
+    );
+    let templates = {
+        let parsed = ruff_python_parser::parse_module(text).unwrap();
+        let fields = imre_ast::strings::template_fields(text, parsed.tokens(), parsed.syntax());
+        let source = RegisteredSource {
+            text,
+            private_names: None,
+            replacements: &Default::default(),
+            has_templates: true,
+            template_fields: Some(&fields),
+            lambdas: None,
+            generators: None,
+            method_imports: &Default::default(),
+        };
+        let mut templates = HashMap::new();
+        let mut body = parsed.into_syntax().body;
+        let names = imre_ast::lower(&mut body);
+        let mut scopes =
+            crate::frontend::function_scope::ScopeFacts::prepare(&body, &names, |_| {}, |_| {});
+        RegisteredLambda::collect(&body, source, &mut scopes, &mut templates);
+        templates
+    };
+    let mut sites: Vec<_> = templates.iter().collect();
+    sites.sort_by_key(|(range, _)| range.start());
+    assert_eq!(sites.len(), 2);
+
+    let mut captures = Vec::new();
+    let mut suspensions = Vec::new();
+    let mut formats = 0;
+    for (_, operand) in sites {
+        let PreparedTemplate::Checked(operand) = operand else {
+            panic!("expected a complete template operand");
+        };
+        crate::verify::registered(operand.region()).unwrap();
+        ir::walk_operand_expressions(&operand.value, &mut |node| match &node.kind {
+            ExprKind::Builtin(
+                Builtin::RegisteredInterpolation {
+                    expression,
+                    conversion,
+                },
+                _,
+            ) => {
+                captures.push((expression.as_str(), *conversion));
+            }
+            ExprKind::Builtin(Builtin::RegisteredSuspend(kind, range), _) => {
+                let op = match kind {
+                    ir::SuspendValue::Await => "await",
+                    ir::SuspendValue::Yield => "yield",
+                    ir::SuspendValue::Delegate => "yield from",
+                };
+                suspensions.push((op, &text[*range]));
+            }
+            ExprKind::Builtin(Builtin::FormatField(_), _) => formats += 1,
+            _ => {}
+        });
+    }
+    assert_eq!(
+        captures,
+        [("await fetch()", None), ("(yield p)", Some('r'))]
+    );
+    assert_eq!(
+        suspensions,
+        [
+            ("await", "await fetch()"),
+            ("yield", "yield p"),
+            ("yield from", "yield from widths"),
+        ]
+    );
+    assert_eq!(formats, 1);
+}
+
+#[test]
+fn incomplete_field_preserves_the_checked_prefix_and_child_admission() {
+    let text = concat!(
+        "def report(rows, fetch):\n",
+        "    return t'{mark()}{([lambda v=await fetch(x): v for x in rows] for _ in rows)=}', ",
+        "t'{mark()}{([lambda v=await fetch(x): v for x in rows] for _ in rows)}'\n",
+    );
+    let parsed = ruff_python_parser::parse_module(text).unwrap();
+    let module = parsed.syntax();
+    let fields = imre_ast::strings::template_fields(text, parsed.tokens(), module);
+    let source = RegisteredSource {
+        text,
+        private_names: None,
+        replacements: &Default::default(),
+        has_templates: true,
+        template_fields: Some(&fields),
+        lambdas: None,
+        generators: None,
+        method_imports: &Default::default(),
+    };
+    // Withhold this child descriptor to exercise a partially prepared template.
+    let missing = HashMap::new();
+    let source = RegisteredSource {
+        generators: Some(&missing),
+        ..source
+    };
+    let function = module.body[0].as_function_def_stmt().unwrap();
+    let values = function.body[0]
+        .as_return_stmt()
+        .unwrap()
+        .value
+        .as_deref()
+        .unwrap();
+    let templates = &values.as_tuple_expr().unwrap().elts;
+    for (i, template) in templates.iter().enumerate() {
+        let Some(PreparedTemplate::Mixed { fields, .. }) = PreparedTemplate::prepare(
+            template,
+            source,
+            RegisteredScope::Function { is_async: false },
+        ) else {
+            panic!("the generator has no checked activation");
+        };
+        let [TemplateField::Checked(prefix), tail] = fields.as_slice() else {
+            panic!("expected the supported first field to run");
+        };
+        assert!(matches!(&prefix.value.kind,
+            ExprKind::Builtin(Builtin::RegisteredInterpolation { expression, .. }, _)
+                if expression == "mark()"));
+        match (i, tail) {
+            (0, TemplateField::Unsupported("debug t-string interpolation")) => {}
+            (
+                1,
+                TemplateField::External {
+                    value,
+                    interpolation,
+                },
+            ) => {
+                assert!(matches!(value.as_ref(), ast::Expr::Generator(_)));
+                assert!(matches!(&interpolation.kind,
+                    ExprKind::Builtin(Builtin::RegisteredInterpolation { .. }, inputs)
+                        if matches!(inputs[0].kind, ExprKind::Local(0))));
+            }
+            _ => panic!("unexpected incomplete field"),
+        }
+    }
+}

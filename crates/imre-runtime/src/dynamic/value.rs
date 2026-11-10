@@ -15,13 +15,22 @@ use std::sync::{Arc, Weak};
 use super::Context;
 
 pub(super) type Id = u64;
+
+#[derive(Eq, Hash, PartialEq)]
+pub(super) enum ConstantSlot {
+    Legacy(i64),
+    Linked(usize),
+}
+
 type MemberValues = hashbrown::HashMap<Id, Id, std::collections::hash_map::RandomState>;
 pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
 /// The entry reloads this slot before borrowing the interpreter on every activation.
 pub(super) type ResumeCode =
     unsafe extern "C" fn(*mut super::native_suspension::Activation, Id) -> *mut std::ffi::c_void;
 
-/// Immutable executable and argument layout shared by functions from one Python definition.
+/// Sibling code objects share physical literal slots for the lifetime of this compilation.
+pub(super) type CompilationConstants = std::rc::Rc<RefCell<HashMap<usize, Id>>>;
+
 #[derive(Clone)]
 pub(super) struct CodeObject {
     pub body: Body,
@@ -46,6 +55,7 @@ pub(super) struct CodeObject {
     pub flags_complete: bool,
     pub generator_lambda: bool,
     pub nested: Vec<(usize, Id)>,
+    pub compilation_constants: Option<CompilationConstants>,
     pub freevars: Vec<String>,
     pub closure_supported: bool,
 }
@@ -447,7 +457,11 @@ impl Context {
             .iter()
             .rev()
             .find(|frame| frame.object == Some(object))?;
-        frame.call_position
+        frame.call_position.or_else(|| {
+            let location = frame.location.as_ref()?;
+            let span = location.span?;
+            Some([location.line, span.end_line, span.start, span.end])
+        })
     }
 
     pub(super) fn active_frame(&mut self, depth: usize) -> Result<Option<(Location, Id)>> {
@@ -607,6 +621,15 @@ impl Context {
                     });
                 } else if let Some((_, span)) = position {
                     loc.span = Some(span);
+                } else if let Some(span) = &mut loc.span
+                    && span.anchor == TracebackAnchor::Hidden
+                    && let ExpressionPosition::Line(line) =
+                        self.heap.frames.last().unwrap().expression
+                    && line == loc.line
+                {
+                    // An eager expression shares the published range of a definition,
+                    // but its own failing instruction is highlighted in the traceback.
+                    span.anchor = TracebackAnchor::Uniform;
                 }
                 let active = self.heap.active_exception();
                 if error.context == NONE
@@ -1406,6 +1429,7 @@ pub(super) enum Value {
         ordered: bool,
     },
     DictIterator(DictIterator),
+    SetIterator(SetIterator),
     DefaultDict {
         factory: Id,
         entries: super::dictionary::Entries,
@@ -1617,7 +1641,6 @@ pub(super) enum Value {
         table: Id,
         marker: Id,
     },
-    Yielded(Id),
     AstWalk {
         queue: std::collections::VecDeque<Id>,
         running: bool,
@@ -1905,6 +1928,7 @@ impl Value {
             Self::Enumerate { .. } => "enumerate",
             Self::Iterator { kind, .. } => kind,
             Self::DictIterator(iter) => iter.class_name(),
+            Self::SetIterator(_) => "set_iterator",
             Self::Set { frozen: true, .. } => "frozenset",
             Self::Set { frozen: false, .. } => "set",
             Self::Dict(_) => "dict",
@@ -2038,8 +2062,7 @@ impl Value {
             | Self::LoopIterator { .. }
             | Self::PythonBufferLease { .. }
             | Self::ProcessPreparation(_)
-            | Self::ProcessHandle { .. }
-            | Self::Yielded(_) => false,
+            | Self::ProcessHandle { .. } => false,
             Self::Weak(reference) if reference.internal => false,
             Self::Tuple(items) => !items.is_empty(),
             _ => true,
@@ -2122,6 +2145,10 @@ impl Value {
 
     /// Changing a traced child of these values requires a mutable borrow of the heap slot.
     fn directly_stores_children(&self) -> bool {
+        // A sibling can publish another literal through the same compilation pool.
+        if matches!(self, Self::Code(code) if code.compilation_constants.is_some()) {
+            return false;
+        }
         matches!(
             self,
             Self::List(_)
@@ -2184,6 +2211,7 @@ impl Value {
                 }
             }
             Self::DictIterator(iter) => visit.extend(iter.dict),
+            Self::SetIterator(iter) => visit.extend(iter.set),
             Self::FormatIterator { input, .. } => visit.push(*input),
             Self::ThreadLocal(local) => visit.extend(local.live()),
             Self::Count { current, step, .. } => visit.extend([*current, *step]),
@@ -2246,7 +2274,6 @@ impl Value {
                 visit.extend([*context, *variable]);
                 visit.extend(old);
             }
-            Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
             Self::BytesIoStorage(state) => visit.extend(state.snapshot.get()),
             Self::BufferWrapper => {}
@@ -2391,6 +2418,10 @@ impl Value {
                 fields.children(visit);
             }
             Self::Code(code) => {
+                if let Some(keys) = &code.compilation_constants {
+                    visit.extend(keys.borrow().values().copied());
+                }
+
                 visit.push(code.name);
                 visit.push(code.qualname);
                 visit.push(code.doc);
@@ -2713,6 +2744,59 @@ pub(super) enum DictViewKind {
     Keys,
     Values,
     Items,
+}
+
+/// Set iteration checks size at each pull, even after yielding the last item.
+/// Detach the owner on observed exhaustion and latch an observed size mismatch.
+#[derive(Clone, Copy)]
+pub(super) struct SetIterator {
+    set: Option<Id>,
+    expected_len: Option<usize>,
+    position: usize,
+    remaining: i64,
+}
+
+impl SetIterator {
+    pub(super) fn new(set: Id, len: usize) -> Self {
+        Self {
+            set: Some(set),
+            expected_len: Some(len),
+            position: 0,
+            remaining: len as i64,
+        }
+    }
+
+    pub(super) fn length_hint(&self, ctx: &Context) -> i64 {
+        match self.set {
+            Some(set)
+                if self.expected_len == Some(ctx.stored_entries(ctx.scalar_value(set)).len()) =>
+            {
+                self.remaining
+            }
+            _ => 0,
+        }
+    }
+
+    pub(super) fn next(&mut self, ctx: &Context) -> Result<Option<Id>> {
+        let Some(set) = self.set else {
+            return Ok(None);
+        };
+        let entries = ctx.stored_entries(ctx.scalar_value(set));
+        if self.expected_len != Some(entries.len()) {
+            self.expected_len = None;
+            return Err(Error::new(
+                "RuntimeError",
+                "Set changed size during iteration",
+            ));
+        }
+        let Some((position, key, _)) = entries.at(self.position) else {
+            self.set = None;
+            return Ok(None);
+        };
+        self.position = position + 1;
+        self.remaining -= 1;
+        Ok(Some(key))
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -3567,7 +3651,7 @@ pub(super) struct Heap {
     slot_shapes: Vec<SlotShape>,
     generator_owners: GeneratorOwners,
     gc_order: GcOrder,
-    linked_string_constants: HashMap<i64, Id>,
+    linked_constants: HashMap<ConstantSlot, Id>,
     short_bytes: HashMap<Option<u8>, Id>,
     full_collection: Option<CycleSet>,
     prompt_cycles: CycleSet,
@@ -3830,7 +3914,7 @@ impl Heap {
             gc_order: GcOrder::EMPTY,
             full_collection: None,
             prompt_cycles: CycleSet::default(),
-            linked_string_constants: HashMap::new(),
+            linked_constants: HashMap::new(),
             short_bytes: HashMap::new(),
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
@@ -4150,17 +4234,60 @@ impl Heap {
         &mut self,
         slot: Id,
         build: impl FnOnce(&mut Self) -> Id,
-    ) -> Id {
+    ) -> Result<Id> {
         let Value::Int(key) = self.get(slot) else {
             unreachable!("compiler constant slot")
         };
-        let key = key.to_i64().expect("compiler constant slot fits in i64");
-        if let Some(&value) = self.linked_string_constants.get(&key) {
-            return value;
+        self.cached_constant(
+            ConstantSlot::Legacy(key.to_i64().expect("compiler slot fits in i64")),
+            |heap| Ok(build(heap)),
+        )
+    }
+
+    pub(super) fn constant_at(&self, key: &ConstantSlot) -> Option<Id> {
+        if let ConstantSlot::Linked(slot) = key
+            && let Some(frame) = self.frames.last()
+            && let Value::Code(code) = self.get(frame.code)
+        {
+            return code
+                .compilation_constants
+                .as_ref()?
+                .borrow()
+                .get(slot)
+                .copied();
         }
-        let value = build(self);
-        self.linked_string_constants.insert(key, value);
-        value
+        self.linked_constants.get(key).copied()
+    }
+
+    pub(super) fn cached_constant(
+        &mut self,
+        key: ConstantSlot,
+        build: impl FnOnce(&mut Self) -> Result<Id>,
+    ) -> Result<Id> {
+        if let Some(value) = self.constant_at(&key) {
+            return Ok(value);
+        }
+        if let ConstantSlot::Linked(slot) = key
+            && let Some(code) = self.frames.last().map(|frame| frame.code)
+            && let Value::Code(code) = self.get_mut(code)
+        {
+            let pool = code
+                .compilation_constants
+                .get_or_insert_with(Default::default)
+                .clone();
+            pool.borrow_mut()
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            let value = build(self)?;
+            pool.borrow_mut().insert(slot, value);
+            return Ok(value);
+        }
+        self.linked_constants
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        let value = build(self)?;
+        self.linked_constants.insert(key, value);
+        Ok(value)
     }
 
     /// Packing an array skips tracking when its elements all have non-GC types.
@@ -5348,7 +5475,7 @@ impl Heap {
     fn mark_roots(&self, globals: impl Iterator<Item = Id>, pending: &mut impl VisitReferences) {
         globals.for_each(pending.visitor());
         pending.extend(self.full_collection_members());
-        pending.extend(self.linked_string_constants.values().copied());
+        pending.extend(self.linked_constants.values().copied());
         pending.extend(self.short_bytes.values().copied());
         pending.extend(
             self.interned
@@ -6152,6 +6279,7 @@ impl Heap {
         let line = location.line;
         frame.location = Some(location);
         frame.expression = ExpressionPosition::Statement;
+        frame.call_position = None;
         frame.live.clear();
         frame.live.extend(live);
         self.set_statement_line(line);
@@ -6363,8 +6491,49 @@ impl Heap {
         if self.slots[child as usize].finalization != Finalization::Pending {
             return Ok(false);
         }
+        self.released_last_reference(child, roots, Some(child))
+    }
+
+    /// Replace a dead list or tuple operand with its owned elements. Popping those roots
+    /// releases elements from the end, including the contents of nested displays.
+    pub(super) fn expand_released_sequence(
+        &mut self,
+        index: usize,
+        roots: impl Iterator<Item = Id>,
+    ) -> bool {
+        let owner = *self.temporary_root(index);
+        if !matches!(self.get(owner), Value::List(items) | Value::Tuple(items) if !items.is_empty())
+        {
+            return false;
+        }
+        *self.temporary_root(index) = NONE;
+        if !self
+            .released_last_reference(owner, roots, None)
+            .unwrap_or(false)
+        {
+            *self.temporary_root(index) = owner;
+            return false;
+        }
+        let (Value::List(items) | Value::Tuple(items)) = self.get_mut(owner) else {
+            unreachable!()
+        };
+        let items = std::mem::take(items);
+        self.release_temporaries_since(index);
+        for item in items {
+            self.keep(item);
+        }
+        true
+    }
+
+    /// Check for references from live frames, finalizers and cycles before deallocation.
+    fn released_last_reference(
+        &self,
+        child: Id,
+        roots: impl Iterator<Item = Id>,
+        releasing: Option<Id>,
+    ) -> Result<bool> {
         let mut cycles = CycleSet::new(self.slots.len())?;
-        self.mark_reference_survivors(roots, &mut cycles, Some(child));
+        self.mark_reference_survivors(roots, &mut cycles, releasing);
         let last = self.traces[child as usize].get() == UNMARKED;
         self.clear_marks();
         Ok(last)

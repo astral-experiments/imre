@@ -6,6 +6,8 @@ use std::sync::Arc;
 
 use super::*;
 
+mod linked_literals;
+
 fn flag(v: bool) -> Id {
     if v { TRUE } else { FALSE }
 }
@@ -57,8 +59,11 @@ impl Context {
 
     /// Instantiate exception classes used by raise and its explicit cause.
     fn instantiate_exception_class(&mut self, value: Id) -> Result<Id> {
+        if matches!(self.heap.get(value), Value::Raised(_)) {
+            return Ok(value);
+        }
         let base = self.builtin("BaseException");
-        if !self.subclass(value, base) {
+        if !self.direct_subclass(value, base) {
             return Ok(value);
         }
         let result = self.call(value, Vec::new(), Vec::new())?;
@@ -74,6 +79,69 @@ impl Context {
             ));
         }
         Ok(result)
+    }
+
+    /// Normalize against the class selected by raise, even if constructing the cause
+    /// changed the original instance's class.
+    fn normalize_raised(&mut self, class: Id, exception: Id) -> Result<Id> {
+        let actual = self.exact_type(exception)?;
+        let metaclass = self.heap.get(class).instance_class();
+        let custom_type = metaclass.is_some_and(|meta| self.builtins.get("type") != Some(&meta));
+        let accepted = if custom_type {
+            self.python_subclass_check(actual, class)?
+        } else {
+            self.direct_subclass(actual, class)
+        };
+        if accepted {
+            return Ok(exception);
+        }
+
+        let result = self
+            .call(class, vec![exception], Vec::new())
+            .and_then(|value| {
+                if matches!(self.heap.get(value), Value::Raised(_)) {
+                    Ok(value)
+                } else {
+                    Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "calling {} should have returned an instance of BaseException, not {}",
+                            self.repr(class),
+                            self.type_name(value)
+                        ),
+                    ))
+                }
+            });
+        result.map_err(|error| {
+            let failure = self.raised_instance(error);
+            self.heap.keep(failure);
+            let args = builtins::call(self, "repr", &[exception], &[])
+                .unwrap_or_else(|_| self.text("<unknown>"));
+            let prefix = self.text(format!(
+                "Normalization failed: type={} args=",
+                self.class_name(class)
+            ));
+            if let Ok(note) = self.concat_strings(prefix, args) {
+                let _ = self.add_exception_note(failure, note);
+            }
+            self.error_from_instance(failure)
+        })
+    }
+
+    fn error_from_instance(&self, instance: Id) -> Error {
+        let Value::Raised(error) = self.heap.get(instance) else {
+            unreachable!("expected a normalized exception instance")
+        };
+        let mut error = error.clone();
+        error.tracing().instance = Some(instance);
+        error
+    }
+
+    /// Propagate an already normalized instance with the active exception as context.
+    pub(super) fn raise_normalized(&mut self, instance: Id) -> Result<Id> {
+        let mut error = self.error_from_instance(instance);
+        self.chain_raised_instance(&mut error);
+        Err(error)
     }
 
     /// Check the mapping and its length before evaluating the pattern's key expressions.
@@ -142,25 +210,100 @@ impl Context {
         self.python_instance_check(subject, class)
     }
 
-    /// Fetch keyword fields in source order before evaluating their nested patterns.
+    /// Resolve positional names only after isinstance succeeds, then fetch all
+    /// fields in source order before testing any nested patterns.
     fn match_class(&mut self, subject: Id, class: Id, names: Id) -> Result<Id> {
         if !self.class_pattern_matches(subject, class)? {
             return Ok(NONE);
         }
         let Value::List(names) = self.heap.get(names) else {
-            unreachable!("compiled class pattern keywords")
+            unreachable!("compiled class pattern arguments")
         };
-        let names = names.clone();
+        let mut names = names.clone();
+        let positional = names.iter().take_while(|&&name| name == NONE).count();
         let mut fields = Vec::with_capacity(names.len());
-        for name in names {
-            let name = self.str_value(name)?.to_owned();
-            match self.lookup_attr(subject, &name) {
+        let mut seen = Vec::new();
+        let mut first = 0;
+        let args_mark = self.heap.temporary_mark();
+        if positional > 0 {
+            let match_args = self.optional_attr(class, "__match_args__")?;
+            let match_self = match_args.is_none() && self.class_matches_self(class)?;
+            let elements = match match_args {
+                Some(tuple) => match self.heap.get(tuple) {
+                    Value::Tuple(items) => items.as_slice(),
+                    _ => {
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "{}.__match_args__ must be a tuple (got {})",
+                                self.class_name(class),
+                                self.type_name(tuple)
+                            ),
+                        ));
+                    }
+                },
+                None => &[],
+            };
+            let allowed = if match_self { 1 } else { elements.len() };
+            if positional > allowed {
+                let suffix = if allowed == 1 { "" } else { "s" };
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "{}() accepts {allowed} positional sub-pattern{suffix} ({positional} given)",
+                        self.class_name(class)
+                    ),
+                ));
+            }
+            if match_self {
+                self.heap.keep(subject);
+                fields.push(subject);
+                first = 1;
+            } else {
+                names[..positional].copy_from_slice(&elements[..positional]);
+            }
+        }
+        for (index, &name) in names.iter().enumerate().skip(first) {
+            if index < positional
+                && !matches!(self.heap.get(name), Value::Str(_) | Value::SurrogateStr(_))
+            {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "__match_args__ elements must be strings (got {})",
+                        self.type_name(name)
+                    ),
+                ));
+            }
+            if positional > 0 {
+                if seen.iter().any(|&other| self.equal(other, name)) {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "{}() got multiple sub-patterns for attribute {}",
+                            self.class_name(class),
+                            self.repr(name)
+                        ),
+                    ));
+                }
+                seen.push(name);
+            }
+            let attr = super::attribute_name::AttributeName::Python {
+                key: name,
+                text: None,
+            };
+            match self.lookup_attribute(subject, attr, false) {
                 Ok(field) => {
                     self.heap.keep(field);
                     fields.push(field);
                 }
                 Err(error) if self.is_attribute_error(&error) => return Ok(NONE),
                 Err(error) => return Err(error),
+            }
+            if index + 1 == positional {
+                // MATCH_CLASS drops the descriptor's tuple after its positional reads.
+                // Retain the extracted values and names across this observable boundary.
+                self.discard_temporaries(args_mark, fields.iter().chain(&seen).copied());
             }
         }
         Ok(self.alloc(Value::Tuple(fields)))
@@ -218,12 +361,12 @@ impl Context {
             }
             "linked_string_tuple" => {
                 let items = self.items(a)?;
-                Ok(self.linked_constant(|ctx| {
+                self.linked_constant(|ctx| {
                     ctx.heap
                         .linked_string_constant(b, |heap| heap.packed_tuple(items, true))
-                }))
+                })
             }
-            "linked_string" => Ok(self.heap.linked_string_constant(b, |_| a)),
+            "linked_string" => self.heap.linked_string_constant(b, |_| a),
             "match_class" => self.match_class(a, b, c),
             "match_mapping" => self.match_mapping(a, b),
             "match_mapping_keys" => self.match_mapping_keys(a, b),
@@ -432,6 +575,8 @@ impl Context {
                         list.extend_from_slice(chunk);
                         remaining = rest;
                     }
+                } else if matches!(self.heap.get(a), Value::Set { frozen: false, .. }) {
+                    builtins::update_set(self, a, b)?;
                 } else {
                     for item in self.items(b)? {
                         self.op("append", a, item, NONE)?;
@@ -528,7 +673,6 @@ impl Context {
             }
             "truth" => Ok(flag(self.truth(a)?)),
             "generator" => self.generator(a, b, c),
-            "yielded" => Ok(self.alloc(Value::Yielded(a))),
             "iter" => self.loop_iterator(a),
             "get_iter" => self.iterator(a),
             "loop_cursor" => Ok(self.loop_cursor(a)),
@@ -619,11 +763,12 @@ impl Context {
                 Ok(NONE)
             }
             "matches" => {
-                if let Value::Raised(error) = self.heap.get(a) {
-                    Ok(flag(self.raised_error_matches(error, b)))
-                } else {
-                    Ok(FALSE)
-                }
+                let base = self.builtin("BaseException");
+                let classes = self.tuple_elements(b).unwrap_or(std::slice::from_ref(&b));
+                self.check_exception_classes(classes, base)?;
+                let matched = matches!(self.heap.get(a), Value::Raised(error)
+                    if classes.iter().any(|&class| self.raised_error_matches(error, class)));
+                Ok(flag(matched))
             }
             "exit_context" | "async_exit_context" => {
                 let active = if b == NONE {
@@ -663,51 +808,34 @@ impl Context {
                     return Err(Error::new("RuntimeError", "No active exception to reraise"));
                 }
                 let exception = self.instantiate_exception_class(a)?;
-                let Value::Raised(e) = self.heap.get(exception) else {
+                if !matches!(self.heap.get(exception), Value::Raised(_)) {
                     return Err(Error::new(
                         "TypeError",
                         "exceptions must derive from BaseException",
                     ));
-                };
-                let mut error = e.clone();
-                let trace = error.tracing();
-                trace.instance = Some(exception);
-                if op == "raise" {
-                    if c == TRUE {
-                        let cause = self.instantiate_exception_class(b)?;
-                        if cause != NONE && !matches!(self.heap.get(cause), Value::Raised(_)) {
-                            return Err(Error::new(
-                                "TypeError",
-                                "exception causes must derive from BaseException",
-                            ));
-                        }
-                        trace.cause = Some(cause);
-                        trace.suppress_context = None;
-                    }
-                    if exception != a && !self.instance_of(exception, a) {
-                        // A class may allocate a different exception. CPython normalizes
-                        // the target by calling the requested class with that instance.
-                        let Value::Raised(original) = self.heap.get_mut(exception) else {
-                            unreachable!()
-                        };
-                        *original = error;
-                        let normalized = self.call(a, vec![exception], Vec::new())?;
-                        let Value::Raised(result) = self.heap.get(normalized) else {
-                            return Err(Error::new(
-                                "TypeError",
-                                format!(
-                                    "calling {} should have returned an instance of BaseException, not {}",
-                                    self.repr(a),
-                                    self.type_name(normalized)
-                                ),
-                            ));
-                        };
-                        error = result.clone();
-                        error.tracing().instance = Some(normalized);
-                    }
-                    self.chain_raised_instance(&mut error);
                 }
-                Err(error)
+                if op == "reraise" {
+                    return Err(self.error_from_instance(exception));
+                }
+                let class = if a == exception {
+                    self.exact_type(exception)?
+                } else {
+                    a
+                };
+                // The cause constructor can mutate __class__ and collect its old value.
+                self.heap.keep(class);
+                if c == TRUE {
+                    let cause = self.instantiate_exception_class(b)?;
+                    if cause != NONE && !matches!(self.heap.get(cause), Value::Raised(_)) {
+                        return Err(Error::new(
+                            "TypeError",
+                            "exception causes must derive from BaseException",
+                        ));
+                    }
+                    self.set_exception_cause(exception, cause)?;
+                }
+                let normalized = self.normalize_raised(class, exception)?;
+                self.raise_normalized(normalized)
             }
             "unsupported" => Err(Error::new("NotImplementedError", self.str_value(a)?)),
             _ => match op.strip_prefix("inplace:") {
@@ -1469,28 +1597,182 @@ pub(super) unsafe extern "C" fn imre_dyn_permanent_sequence(
     len: usize,
     tuple: bool,
 ) -> Id {
-    // SAFETY: generated code supplies a live context and the exact byte length.
-    let (ctx, bytes) = unsafe { (&mut *ctx, slice::from_raw_parts(data, len)) };
+    // SAFETY: the legacy entry supplies the same permanent handles as a byte count.
+    unsafe { imre_dyn_build_sequence(ctx, data.cast(), len / 2, true, tuple, std::ptr::null()) }
+}
+
+/// Build a display from evaluated handles or from linked immutable handle data.
+///
+/// # Safety
+/// The caller supplies a live context and `count` rooted native handles, or little-endian
+/// u16 permanent handles when `packed` is set. A nonnull slot identifies a constant tuple.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_build_sequence(
+    ctx: *mut Context,
+    data: *const Id,
+    count: usize,
+    packed: bool,
+    tuple: bool,
+    slot: *const u8,
+) -> Id {
+    // SAFETY: generated code supplies its active context.
+    let ctx = unsafe { &mut *ctx };
     if ctx.pending.is_some() {
         return NONE;
     }
-    let (handles, rest) = bytes.as_chunks::<2>();
-    debug_assert!(rest.is_empty());
-    let mut items = Vec::new();
-    if items.try_reserve_exact(handles.len()).is_err() {
-        return finish(ctx, Err(Error::new("MemoryError", "")));
-    }
-    items.extend(
-        handles
-            .iter()
-            .map(|&pair| Id::from(u16::from_le_bytes(pair))),
-    );
-    let id = if tuple {
-        ctx.linked_constant(|ctx| ctx.heap.packed_tuple(items, true))
-    } else {
-        ctx.alloc(Value::List(items))
+    let items = || -> Result<Vec<Id>> {
+        let mut items = Vec::new();
+        items
+            .try_reserve_exact(count)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        if packed {
+            // SAFETY: little-endian pairs in module data need not be aligned.
+            let pairs = unsafe { slice::from_raw_parts(data.cast::<[u8; 2]>(), count) };
+            items.extend(pairs.iter().map(|&pair| Id::from(u16::from_le_bytes(pair))));
+        } else {
+            // SAFETY: a zero-length display may pass null; the frame roots all other handles.
+            items.extend_from_slice(unsafe { live_handles(data, count) });
+        }
+        Ok(items)
     };
-    finish(ctx, Ok(id))
+    let result = if !slot.is_null() {
+        ctx.linked_constant(|ctx| {
+            ctx.heap
+                .cached_constant(super::value::ConstantSlot::Linked(slot.addr()), |heap| {
+                    Ok(heap.packed_tuple(items()?, true))
+                })
+        })
+    } else if tuple && packed {
+        ctx.linked_constant(|ctx| Ok(ctx.heap.packed_tuple(items()?, true)))
+    } else {
+        items().map(|items| {
+            if tuple {
+                ctx.heap.packed_tuple(items, false)
+            } else {
+                ctx.alloc(Value::List(items))
+            }
+        })
+    };
+    finish(ctx, result)
+}
+
+/// Transfer the evaluated keys to a fresh set in operand order, including the release of
+/// duplicates and, following an insertion error, the remaining keys before the partial set.
+///
+/// # Safety
+/// The compiler supplies a live context, rooted handles, and the mark before their evaluation.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_build_set(
+    ctx: *mut Context,
+    data: *const Id,
+    count: usize,
+    mark: usize,
+) -> Id {
+    // SAFETY: the caller keeps this frame and its handle array live across hash/equality callbacks.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    // SAFETY: the compiler roots each key and keeps its native operand array live for this call.
+    let keys = unsafe { live_handles(data, count) };
+    let result = (|| {
+        ctx.heap.reserve_temporaries(1 + count)?;
+        let set = ctx.op("set", NONE, NONE, NONE)?;
+        ctx.discard_temporaries(mark, std::iter::once(set).chain(keys.iter().rev().copied()));
+        let mut result = Ok(set);
+        for (index, &key) in keys.iter().enumerate() {
+            if result.is_ok() {
+                result = builtins::set_add(ctx, set, key).map(|()| set);
+            }
+            let key_mark = mark + count - index;
+            match &result {
+                Ok(_) => ctx.discard_truth(key_mark),
+                Err(error) => ctx.discard_temporaries(key_mark, error.roots()),
+            }
+        }
+        ctx.release_with_result(mark, result)
+    })();
+    finish(ctx, result)
+}
+
+/// Intern an already evaluated immutable value in its linked source unit.
+///
+/// # Safety
+/// The context and value must be live and the compiler slot must have a stable, unique address.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_linked_value(
+    ctx: *mut Context,
+    slot: *const u8,
+    value: Id,
+) -> Id {
+    // SAFETY: generated code keeps the value rooted in its live context.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let result = ctx
+        .heap
+        .cached_constant(super::value::ConstantSlot::Linked(slot.addr()), |_| {
+            Ok(value)
+        });
+    finish(ctx, result)
+}
+
+/// Insert one streamed display operand and transfer its roots to the receiving list or set.
+///
+/// # Safety
+/// The compiler passes its live context, a mutable list or set, its operand and their mark.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_display_item(
+    ctx: *mut Context,
+    list: Id,
+    item: Id,
+    mark: usize,
+    extend: bool,
+) -> Id {
+    let op = if extend { c"extend" } else { c"append" };
+    // SAFETY: this is the ordinary checked operation on the same rooted operands.
+    let result = unsafe { imre_dyn_op_at(ctx, op.as_ptr(), list, item, NONE, std::ptr::null()) };
+    if result != NONE {
+        // SAFETY: both operations return their target container on success.
+        unsafe { &mut *ctx }.discard_temporaries(mark, [result]);
+    }
+    result
+}
+
+/// Pop a failed display's operands in stack order while their Python exception stays active.
+///
+/// # Safety
+/// The context and mark must belong to the active registered frame.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_unwind_display(ctx: *mut Context, mark: usize) {
+    // SAFETY: the generated error edge is in the frame which established the mark.
+    unsafe { &mut *ctx }.unwind_operands(mark);
+}
+
+/// Borrow a tagged integer from an exact Python int. Zero indicates another type.
+///
+/// # Safety
+/// Generated code keeps the object rooted until its last use of the borrowed word.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_exact_int_word(ctx: *const Context, object: Id) -> usize {
+    // SAFETY: the caller supplies its active context and a live handle.
+    match unsafe { &*ctx }.heap.get(object) {
+        Value::Int(integer) => integer.0,
+        _ => 0,
+    }
+}
+
+/// Move one owned tagged integer into the active Python heap.
+///
+/// # Safety
+/// The caller transfers a live integer reference and owns the context for this call.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_take_int(ctx: *mut Context, word: usize) -> Id {
+    // SAFETY: the caller owns the context and transfers the reference to the heap.
+    let ctx = unsafe { &mut *ctx };
+    let object = ctx.alloc(Value::Int(crate::Int(word)));
+    finish(ctx, Ok(object))
 }
 
 #[unsafe(no_mangle)]
@@ -1617,7 +1899,7 @@ pub(super) unsafe extern "C" fn imre_dyn_lookup(
     let mut result = std::str::from_utf8(name)
         .map_err(|error| Error::new("UnicodeError", error.to_string()))
         .and_then(|name| ctx.lookup(scope, name));
-    finish_operand_position(ctx, &mut result);
+    finish_operand_position(ctx, &mut result, false);
     finish(ctx, result)
 }
 
@@ -1648,12 +1930,30 @@ pub(super) unsafe extern "C" fn imre_dyn_get_slice_at(
     stop: Id,
     span: *const [u32; 4],
 ) -> Id {
+    // SAFETY: all original handles are forwarded without a linked constant marker.
+    unsafe { imre_dyn_get_linked_slice_at(ctx, receiver, start, stop, std::ptr::null(), span) }
+}
+
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_get_linked_slice_at(
+    ctx: *mut Context,
+    receiver: Id,
+    start: Id,
+    stop: Id,
+    marker: *const u8,
+    span: *const [u32; 4],
+) -> Id {
     // SAFETY: generated native code owns its context and supplies a static span or null.
     let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
     if ctx.pending.is_some() {
         return NONE;
     }
-    let result = ctx.get_slice(receiver, start, stop);
+    let result = ctx.get_slice(
+        receiver,
+        start,
+        stop,
+        (!marker.is_null()).then_some(marker as usize),
+    );
     finish_at(ctx, result, span)
 }
 
@@ -1673,6 +1973,7 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
     }
     let reraise = op == "reraise" && (a != NONE || ctx.heap.active_exception() != NONE);
     let mut result = ctx.op(op, a, b, c);
+    let format_field = matches!(op, "format" | "format_conversion");
     if matches!(
         op,
         "attr"
@@ -1686,8 +1987,9 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
             | "async_exit_context"
             | "truth"
     ) || (b == TRUE && matches!(op, "lookup_enter" | "lookup_exit"))
+        || format_field
     {
-        finish_operand_position(ctx, &mut result);
+        finish_operand_position(ctx, &mut result, format_field);
     }
     if reraise && let Err(error) = result {
         ctx.pending = Some(error);
@@ -1750,8 +2052,9 @@ pub(super) unsafe extern "C" fn imre_dyn_string_method_target(
 ) -> Id {
     // SAFETY: generated code owns the context and passes a UTF-8 constant and one writable slot.
     let (ctx, name, bound_receiver) = unsafe { (&mut *ctx, cstr(name), &mut *bound_receiver) };
-    let target = ctx.string_method_target(receiver, name);
-    finish_method_target(ctx, target, bound_receiver)
+    method_target(ctx, bound_receiver, |ctx| {
+        ctx.string_method_target(receiver, name)
+    })
 }
 
 /// Prepare an ordinary positional method call before evaluating its arguments.
@@ -1767,8 +2070,9 @@ pub(super) unsafe extern "C" fn imre_dyn_builtin_method_target(
 ) -> Id {
     // SAFETY: generated code retains the context and passes static method names.
     let (ctx, name, bound_receiver) = unsafe { (&mut *ctx, cstr(name), &mut *bound_receiver) };
-    let target = ctx.builtin_method_target(receiver, name);
-    finish_method_target(ctx, target, bound_receiver)
+    method_target(ctx, bound_receiver, |ctx| {
+        ctx.builtin_method_target(receiver, name)
+    })
 }
 
 /// Resolve an immediate get call before evaluating arguments that may release its receiver.
@@ -1783,21 +2087,23 @@ pub(super) unsafe extern "C" fn imre_dyn_dict_get_target(
 ) -> Id {
     // SAFETY: generated code owns the context and passes one writable slot.
     let (ctx, bound_receiver) = unsafe { (&mut *ctx, &mut *bound_receiver) };
-    let target = ctx.dict_get_target(receiver);
-    finish_method_target(ctx, target, bound_receiver)
+    method_target(ctx, bound_receiver, |ctx| ctx.dict_get_target(receiver))
 }
 
-/// Publish the receiver only after method lookup succeeds.
-fn finish_method_target(
+/// Propagate a failing receiver expression before looking up its method.
+fn method_target(
     ctx: &mut Context,
-    target: Result<(Id, Id)>,
     bound_receiver: &mut Id,
+    lookup: impl FnOnce(&mut Context) -> Result<(Id, Id)>,
 ) -> Id {
-    let mut result = target.map(|(callable, receiver)| {
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let mut result = lookup(ctx).map(|(callable, receiver)| {
         *bound_receiver = receiver;
         callable
     });
-    finish_operand_position(ctx, &mut result);
+    finish_operand_position(ctx, &mut result, false);
     finish(ctx, result)
 }
 
@@ -1973,13 +2279,14 @@ pub(super) unsafe extern "C" fn imre_dyn_keyword_call_at(
 }
 
 /// A failing packed operand or call may span multiple lines in a native resumable frame.
-fn finish_operand_position(ctx: &mut Context, result: &mut Result<Id>) {
+fn finish_operand_position(ctx: &mut Context, result: &mut Result<Id>, include_ordinary: bool) {
     if let Some([line, end_line, start, end]) = ctx.heap.take_call_position()
         && let Err(error) = result
-        && matches!(
-            ctx.code_object(ctx.heap.current_code()).body,
-            value::Body::Suspended(_)
-        )
+        && (include_ordinary
+            || matches!(
+                ctx.code_object(ctx.heap.current_code()).body,
+                value::Body::Suspended(_)
+            ))
     {
         error.tracing().source_position = Some((
             line,
@@ -2004,7 +2311,7 @@ fn scoped_call(
         return NONE;
     }
     let mut result = invoke(ctx);
-    finish_operand_position(ctx, &mut result);
+    finish_operand_position(ctx, &mut result, false);
     finish_at(ctx, result, span)
 }
 
@@ -2106,6 +2413,14 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
             unreachable!()
         };
         parent.nested.push((key, code));
+        let constants = parent
+            .compilation_constants
+            .get_or_insert_with(Default::default)
+            .clone();
+        let Value::Code(child) = ctx.heap.get_mut(code) else {
+            unreachable!()
+        };
+        child.compilation_constants = Some(constants);
         code
     };
     let result = ctx.define_function(
@@ -2137,8 +2452,8 @@ impl Context {
         Some(freevars)
     }
 
-    /// A method captures __class__ from its class and other names from the enclosing function.
-    pub(super) fn method_freevars<'a>(
+    /// Include the explicit or implicit __class__ read once in the sorted closure layout.
+    fn freevars_with_class_cell<'a>(
         &self,
         enclosing: Option<Id>,
         reads: impl Iterator<Item = &'a str>,
@@ -2174,6 +2489,9 @@ impl Context {
                 if !frame.closure.declared_complete {
                     return None;
                 }
+                if name == "__class__" && frame.class_cell.is_some() {
+                    return Some(true);
+                }
             }
             scope = parent;
         }
@@ -2197,6 +2515,12 @@ impl Context {
                     unreachable!()
                 };
                 frame.closure.cells.insert(name.to_owned(), cell);
+                return cell;
+            }
+            if frame.class_body.is_none()
+                && name == "__class__"
+                && let Some(cell) = frame.class_cell
+            {
                 return cell;
             }
             cursor = frame.parent.expect("free variable has enclosing scope");
@@ -2236,7 +2560,13 @@ impl Context {
                     !annotation_class || *name != "__classdict__"
                 }
             });
-        let lexical = if annotation_class {
+        let lexical = if annotation_class
+            && !self
+                .scope_data(scope)
+                .closure
+                .cells
+                .contains_key("__classdict__")
+        {
             self.scope_data(scope).parent.unwrap_or(scope)
         } else {
             scope
@@ -2252,9 +2582,11 @@ impl Context {
             } else {
                 owner.parent
             };
-            self.method_freevars(enclosing, reads, captures_class)
+            self.freevars_with_class_cell(enclosing, reads, captures_class)
         } else if metadata.class_cell == true {
-            None
+            // A nested function can read __class__ through super(), or resolve it as a global.
+            self.is_enclosing_freevar(lexical, "__class__")
+                .and_then(|captures| self.freevars_with_class_cell(Some(lexical), reads, captures))
         } else {
             self.enclosing_freevars(lexical, reads)
         }
@@ -2275,6 +2607,7 @@ impl Context {
             .as_u64()
             .and_then(|v| u32::try_from(v).ok());
         self.alloc(Value::Code(value::CodeObject {
+            compilation_constants: Default::default(),
             parsed_parameters: Default::default(),
             varnames: NONE,
             cellvars: NONE,
@@ -2311,7 +2644,7 @@ impl Context {
         let owner = self.scope_data(scope);
         // A borrowed method only owns its defining class if its code captures __class__.
         let code_data = self.code_object(code);
-        let class_cell = owner.class_cell.filter(|_| {
+        let mut class_cell = owner.class_cell.filter(|_| {
             !code_data.closure_supported
                 || code_data.freevars.iter().any(|name| name == "__class__")
         });
@@ -2397,7 +2730,11 @@ impl Context {
                 cells.push(class_cell.expect("class scope"));
                 continue;
             }
-            cells.push(self.capture_free_cell(scope, name));
+            let cell = self.capture_free_cell(scope, name);
+            if name == "__class__" {
+                class_cell = Some(cell);
+            }
+            cells.push(cell);
         }
         let scope = if self.code_object(code).closure_supported {
             let mut globals = scope;
@@ -2460,6 +2797,37 @@ pub(super) unsafe extern "C" fn imre_dyn_discard_expression(ctx: *mut Context, v
 pub(super) unsafe extern "C" fn imre_dyn_discard_truth(ctx: *mut Context, mark: usize) {
     // SAFETY: the mark comes from the same active Python frame.
     unsafe { (&mut *ctx).discard_truth(mark) }
+}
+
+/// Unwind a partially evaluated operand stack from the top, keeping the exception live.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_unwind_operands(ctx: *mut Context, mark: usize) {
+    // SAFETY: the generated caller owns this context and marked the same activation.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.heap.observes_released_roots() {
+        for slot in (mark..ctx.heap.temporary_mark()).rev() {
+            ctx.discard_truth(slot);
+        }
+    } else {
+        ctx.discard_truth(mark);
+    }
+}
+
+/// Keep a completed joined string while popping its inputs in Python evaluation-stack order.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_finish_format_join(
+    ctx: *mut Context,
+    mark: usize,
+    result: Id,
+) {
+    // SAFETY: the result and operand boundary belong to the caller's active frame.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.heap.observes_released_roots() {
+        for slot in (mark + 1..ctx.heap.temporary_mark()).rev() {
+            ctx.discard_temporaries(slot, [result]);
+        }
+    }
+    ctx.discard_temporaries(mark, [result]);
 }
 
 /// Publish surviving operands before collecting, returning the boundary above the first one.
@@ -2779,6 +3147,43 @@ impl Context {
         }
         self.dispatch_finalizer(generator);
         true
+    }
+
+    /// Release a removed list binding while its remaining items still own their references.
+    pub(super) fn release_list_owner(&mut self, owner: Id) {
+        if !self.heap.observes_released_roots()
+            || !matches!(self.heap.get(owner), Value::List(items) if !items.is_empty())
+            || (!self.heap.has_weak_values && !self.heap.could_own_finalizer(owner, false))
+        {
+            return;
+        }
+        let mark = self.heap.temporary_mark();
+        if self.can_skip_finalizer_sweep(mark) {
+            return;
+        }
+        self.heap.keep(owner);
+        let (heap, roots) = self.heap_and_roots();
+        if heap.expand_released_sequence(mark, roots) {
+            self.unwind_operands(mark);
+        } else {
+            self.heap.release_temporaries_since(mark);
+        }
+    }
+
+    /// Release expression operands from the stack top. A dead sequence transfers its
+    /// elements to the stack, keeping earlier siblings alive across Python callbacks.
+    fn unwind_operands(&mut self, mark: usize) {
+        if !self.heap.observes_released_roots() || self.can_skip_finalizer_sweep(mark) {
+            self.discard_truth(mark);
+            return;
+        }
+        while self.heap.temporary_mark() > mark {
+            let index = self.heap.temporary_mark() - 1;
+            let (heap, roots) = self.heap_and_roots();
+            if !heap.expand_released_sequence(index, roots) {
+                self.discard_truth(index);
+            }
+        }
     }
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.

@@ -118,19 +118,92 @@ pub fn replacements(source: &str) -> impl Iterator<Item = u32> + '_ {
     })
 }
 
-/// CPython keeps the original expression spelling, including leading whitespace
-/// and enclosing parentheses. Commented expressions require a separate tokenizer
-/// transformation and are left unsupported.
-pub fn template_expressions<'a>(
+/// Debug fields default to repr when they have no explicit format spec.
+pub fn interpolation_conversion(field: &ast::InterpolatedElement) -> Option<char> {
+    field
+        .conversion
+        .to_char()
+        .or_else(|| (field.debug_text.is_some() && field.format_spec.is_none()).then_some('r'))
+}
+
+/// Text retained by a template literal independently of evaluating its fields.
+#[derive(Debug, Clone)]
+pub struct TemplateFieldText {
+    pub expression: String,
+    pub debug_prefix: Option<String>,
+}
+
+pub fn template_fields<'a>(
     source: &str,
     tokens: &Tokens,
     syntax: impl Into<ast::ModRef<'a>>,
-) -> HashMap<TextSize, String> {
+) -> HashMap<TextSize, TemplateFieldText> {
     use ast::visitor::{self, Visitor};
     struct Fields<'a> {
         source: &'a str,
         tokens: &'a Tokens,
-        expressions: HashMap<TextSize, String>,
+        fields: HashMap<TextSize, TemplateFieldText>,
+    }
+    impl Fields<'_> {
+        /// Remove comments in this field while keeping newlines, string contents
+        /// and comments inside nested string literals verbatim.
+        fn text(&self, range: TextRange) -> String {
+            let mut output = String::new();
+            let mut start = range.start();
+            let mut nested = 0;
+            for token in self.tokens.in_range(range) {
+                match token.kind() {
+                    TokenKind::TStringStart | TokenKind::FStringStart => nested += 1,
+                    TokenKind::TStringEnd | TokenKind::FStringEnd => nested -= 1,
+                    TokenKind::Comment if nested == 0 => {
+                        output.push_str(&self.source[TextRange::new(start, token.start())]);
+                        start = token.end();
+                    }
+                    _ => {}
+                }
+            }
+            output.push_str(&self.source[TextRange::new(start, range.end())]);
+            if output.contains('\r') {
+                output = output.replace("\r\n", "\n").replace('\r', "\n");
+            }
+            output
+        }
+
+        fn record(&mut self, field: &ast::InterpolatedElement) {
+            // Ruff omits outer grouping parentheses from the expression range.
+            // The delimiter also bounds whitespace and explicit line joins.
+            let mut suffix = self
+                .tokens
+                .after(field.expression.end())
+                .iter()
+                .filter(|t| !t.kind().is_trivia() && t.kind() != TokenKind::Rpar);
+            let Some(delimiter) = suffix.next() else {
+                return;
+            };
+            let start = field.start() + TextSize::new(1);
+            let debug_prefix = match delimiter.kind() {
+                TokenKind::Equal => suffix
+                    .next()
+                    .map(|end| self.text(TextRange::new(start, end.start()))),
+                TokenKind::Exclamation | TokenKind::Colon | TokenKind::Rbrace => None,
+                _ => return,
+            };
+            let mut expression = self.text(TextRange::new(start, delimiter.start()));
+            expression.truncate(expression.trim_end().len());
+            self.fields.insert(
+                field.start(),
+                TemplateFieldText {
+                    expression,
+                    debug_prefix,
+                },
+            );
+
+            if let Some(spec) = &field.format_spec {
+                for field in spec.elements.interpolations() {
+                    self.record(field);
+                }
+            }
+        }
     }
     impl<'a> Visitor<'a> for Fields<'_> {
         fn visit_expr(&mut self, expr: &'a ast::Expr) {
@@ -141,41 +214,7 @@ pub fn template_expressions<'a>(
 
         fn visit_t_string(&mut self, template: &'a ast::TString) {
             for field in template.elements.interpolations() {
-                // Ruff's expression range omits redundant outer parentheses. End
-                // at the field delimiter to retain both those and explicit line joins.
-                let Some(delimiter) = self
-                    .tokens
-                    .after(field.expression.end())
-                    .iter()
-                    .find(|t| !t.kind().is_trivia() && t.kind() != TokenKind::Rpar)
-                else {
-                    continue;
-                };
-                if !matches!(
-                    delimiter.kind(),
-                    TokenKind::Equal
-                        | TokenKind::Exclamation
-                        | TokenKind::Colon
-                        | TokenKind::Rbrace
-                ) {
-                    continue;
-                }
-                let range = TextRange::new(field.start() + TextSize::new(1), delimiter.start());
-                if self
-                    .tokens
-                    .in_range(range)
-                    .iter()
-                    .any(|t| t.kind() == TokenKind::Comment)
-                {
-                    continue;
-                }
-                let spelling = self.source[range].trim_end();
-                let expression = if spelling.contains('\r') {
-                    spelling.replace("\r\n", "\n").replace('\r', "\n")
-                } else {
-                    spelling.to_owned()
-                };
-                self.expressions.insert(field.start(), expression);
+                self.record(field);
             }
             visitor::walk_t_string(self, template);
         }
@@ -183,7 +222,7 @@ pub fn template_expressions<'a>(
     let mut fields = Fields {
         source,
         tokens,
-        expressions: HashMap::new(),
+        fields: HashMap::new(),
     };
     if tokens.iter().any(|t| t.kind() == TokenKind::TStringStart) {
         match syntax.into() {
@@ -191,7 +230,18 @@ pub fn template_expressions<'a>(
             ast::ModRef::Expression(expr) => fields.visit_expr(&expr.body),
         }
     }
-    fields.expressions
+    fields.fields
+}
+
+pub fn template_expressions<'a>(
+    source: &str,
+    tokens: &Tokens,
+    syntax: impl Into<ast::ModRef<'a>>,
+) -> HashMap<TextSize, String> {
+    template_fields(source, tokens, syntax)
+        .into_iter()
+        .map(|(start, field)| (start, field.expression))
+        .collect()
 }
 
 /// Limit the field metadata to forms supported by both native evaluators.

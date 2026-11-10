@@ -322,10 +322,7 @@ impl Emitter<'_, '_> {
         let tags = self.instruction(format!("and i64 {tags}, 1"));
         let small = self.instruction(format!("icmp eq i64 {tags}, 1"));
         let (fast, slow, end) = (self.label(), self.label(), self.label());
-        self.line(format!(
-            "br i1 {small}, label %{fast}, label %{slow}, !prof !1"
-        ));
-        self.terminated = true;
+        self.body.conditional(&small, &fast, &slow, Some(true));
 
         self.start(&fast);
         let values = self.integer_region_values(
@@ -346,7 +343,7 @@ impl Emitter<'_, '_> {
             "icmp {predicate} i64 {}, {right_value}",
             values[summary.result]
         ));
-        let fast_end = self.current.clone();
+        let fast_end = self.body.current.clone();
         self.jump(&end);
 
         self.start(&slow);
@@ -363,7 +360,7 @@ impl Emitter<'_, '_> {
         );
         let slow_value = self.compare(operation, &left, &right.value);
         self.release(&left);
-        let slow_end = self.current.clone();
+        let slow_end = self.body.current.clone();
         self.jump(&end);
 
         self.start(&end);

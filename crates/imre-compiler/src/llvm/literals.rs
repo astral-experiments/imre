@@ -158,13 +158,7 @@ impl Emitter<'_, '_> {
 
     /// Construct a new owner, even when all field values are literals.
     pub(super) fn record_from_fields(&mut self, ty: Type, values: &[Expr]) -> Value {
-        let object = self.record(ty);
-        for (field, value) in values.iter().enumerate() {
-            let value = self.operand(value);
-            self.set_field(&object, field, &value.value);
-            self.release_operand(&value);
-        }
-        object
+        self.native_sequence(ty, values, true)
     }
 
     /// Main releases the literal roots after locals/globals on either exit.

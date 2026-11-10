@@ -1,7 +1,7 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
 use super::{attribute_name::AttributeName, calls::ObjectAttribute};
-use imre_ast::providers::BUILTIN_FUNCTIONS;
+use imre_ast::providers::{BUILTIN_FUNCTIONS, BUILTIN_TYPES};
 
 use super::Context;
 use super::value::{
@@ -183,37 +183,9 @@ pub(super) fn exception_ancestors(
     .map(|base| base.name())
 }
 
-const TYPES: &[&str] = &[
-    "bool",
-    "bytearray",
-    "bytes",
-    "complex",
-    "dict",
-    "enumerate",
-    "filter",
-    "float",
-    "frozenset",
-    "int",
-    "list",
-    "map",
-    "memoryview",
-    "object",
-    "property",
-    "classmethod",
-    "staticmethod",
-    "range",
-    "set",
-    "slice",
-    "str",
-    "tuple",
-    "type",
-    "super",
-    "zip",
-];
-
 /// Types supplied by the interpreter before optional modules install their own types.
 pub(super) fn core_types() -> impl Iterator<Item = &'static str> {
-    TYPES
+    BUILTIN_TYPES
         .iter()
         .chain(imre_ast::exceptions::BOXED_BUILTINS)
         .chain(CORE_RUNTIME_TYPES)
@@ -225,7 +197,7 @@ pub(super) fn core_types() -> impl Iterator<Item = &'static str> {
 pub(super) fn names() -> impl Iterator<Item = &'static str> {
     BUILTIN_FUNCTIONS
         .iter()
-        .chain(TYPES)
+        .chain(BUILTIN_TYPES)
         .chain(imre_ast::exceptions::BOXED_BUILTINS)
         .copied()
 }
@@ -529,7 +501,7 @@ pub(super) fn native_method_owner(symbol: &str) -> Option<&str> {
 }
 
 pub(super) fn is_builtin_type(name: &str) -> bool {
-    TYPES.contains(&name)
+    BUILTIN_TYPES.contains(&name)
         || super::stdlib::fixed_structseq::fixed_type(name).is_some()
         || name == super::stdlib::flags::TYPE
         || is_exception(name)
@@ -538,7 +510,7 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
 
 /// The native classes exported directly by the builtins module.
 pub(super) fn is_exported_type(name: &str) -> bool {
-    TYPES.contains(&name) || imre_ast::exceptions::boxed_builtin_kind(name).is_some()
+    BUILTIN_TYPES.contains(&name) || imre_ast::exceptions::boxed_builtin_kind(name).is_some()
 }
 
 /// Static builtin types have a GC-capable metaclass, but are never themselves tracked.
@@ -611,6 +583,9 @@ pub(super) const STRUCT_METHODS: &[&str] = &[
     "iter_unpack",
 ];
 
+pub(super) const SET_ITERATOR_METHODS: &[&str] =
+    &["__iter__", "__next__", "__length_hint__", "__reduce__"];
+
 pub(super) const UNPACK_ITERATOR_METHODS: &[&str] = &["__iter__", "__next__", "__length_hint__"];
 
 /// Native iterator classes implement both iterator slots in the runtime.
@@ -639,6 +614,7 @@ const CORE_ITERATOR_TYPES: &[&str] = &[
     "async_generator_asend",
     "async_generator_athrow",
     "list_iterator",
+    "set_iterator",
     "list_reverseiterator",
     "str_ascii_iterator",
     "str_iterator",
@@ -957,6 +933,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
+        Value::SetIterator(_) if SET_ITERATOR_METHODS.contains(&attr) => "set_iterator",
         Value::DictIterator(iter) if DictIterator::methods(iter.class_name()).contains(&attr) => {
             iter.class_name()
         }
@@ -2639,8 +2616,21 @@ pub(super) fn call(
             "range" | "range_iterator" | "longrange_iterator" => {
                 super::range::method(ctx, owner, method, args, kwargs)
             }
-            "list_iterator" | "tuple_iterator" | "str_ascii_iterator" | "str_iterator" | "map"
-            | "zip" | "filter" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
+            "set_iterator" if matches!(method, "__length_hint__" | "__reduce__") => {
+                let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
+                let Value::SetIterator(state) = *ctx.heap.get(receiver) else {
+                    unreachable!("validated set iterator")
+                };
+                if method == "__length_hint__" {
+                    Ok(ctx.int(state.length_hint(ctx)))
+                } else {
+                    ctx.reduce_iterator_copy(Value::SetIterator(state))
+                }
+            }
+            "set_iterator" | "list_iterator" | "tuple_iterator" | "str_ascii_iterator"
+            | "str_iterator" | "map" | "zip" | "filter" | "enumerate" => {
+                ctx.iterator_method(owner, method, args, kwargs)
+            }
             "property" => super::property::method(ctx, method, args, kwargs),
             "function" | "cell" | "mappingproxy" if method == "__new__" => {
                 let Some((&class, args)) = args.split_first() else {

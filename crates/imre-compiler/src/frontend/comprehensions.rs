@@ -94,9 +94,9 @@ impl Helpers {
         self.functions.borrow_mut()[id - self.first] = Some(helper);
     }
 
-    pub fn into_functions(self) -> impl Iterator<Item = Helper> {
+    pub fn take_functions(&self) -> impl Iterator<Item = Helper> {
         self.functions
-            .into_inner()
+            .take()
             .into_iter()
             .map(|helper| helper.expect("checked comprehension filled its helper"))
     }
@@ -104,9 +104,153 @@ impl Helpers {
 
 /// A consumer can fuse integer addition into an eager list plan.
 #[derive(Clone, Copy)]
-enum Collector {
+pub(super) enum Collector {
     Display(Option<Type>),
     IntegerSum,
+}
+
+/// Translate the structured plan once, with each frontend supplying its operand
+/// and target types. The outer iterator is already acquired when the first target binds.
+pub(super) trait EagerDisplay: Sized {
+    type Input;
+    type Destination: Copy;
+    type Error;
+
+    fn before_pull(&mut self, _plan: &Plan<'_>, _depth: usize) {}
+    fn input(&mut self, clause: &ast::Comprehension) -> StdResult<Self::Input, Self::Error>;
+    fn with_target(
+        &mut self,
+        target: &ast::Expr,
+        input: Self::Input,
+        output: Output<'_>,
+        body: impl FnOnce(&mut Self) -> StdResult<Vec<Statement>, Self::Error>,
+    ) -> StdResult<Vec<Statement>, Self::Error>;
+    fn filter(&mut self, test: &ast::Expr) -> StdResult<Expr, Self::Error>;
+    fn invalid_edges(&self, plan: &Plan<'_>) -> Self::Error;
+    fn collect(
+        &mut self,
+        output: Output<'_>,
+        destination: Self::Destination,
+        result: usize,
+        conditions: &[Expr],
+    ) -> StdResult<Vec<Statement>, Self::Error>;
+
+    fn eager_filters(
+        &mut self,
+        plan: &Plan<'_>,
+        pull: usize,
+        parent: Option<usize>,
+    ) -> StdResult<(usize, Vec<Expr>), Self::Error> {
+        let filters = plan
+            .loop_filters(pull, parent)
+            .ok_or_else(|| self.invalid_edges(plan))?;
+        let accepted = filters.end;
+        let mut conditions = Vec::with_capacity(filters.len());
+        for step in &plan.steps[filters] {
+            let Step::Filter { test, .. } = step else {
+                unreachable!("validated filters")
+            };
+            conditions.push(self.filter(test)?);
+        }
+        Ok((accepted, conditions))
+    }
+
+    fn eager_loop(
+        &mut self,
+        plan: &Plan<'_>,
+        pc: usize,
+        parent: Option<usize>,
+        input: Self::Input,
+        destination: Self::Destination,
+        result: usize,
+    ) -> StdResult<Vec<Statement>, Self::Error> {
+        self.comprehension_loop(plan, pc, parent, input, &mut |lower, output, conditions| {
+            lower.collect(output, destination, result, conditions)
+        })
+    }
+
+    fn comprehension_loop<'p>(
+        &mut self,
+        plan: &Plan<'p>,
+        pc: usize,
+        parent: Option<usize>,
+        input: Self::Input,
+        emit: &mut impl FnMut(&mut Self, Output<'p>, &[Expr]) -> StdResult<Vec<Statement>, Self::Error>,
+    ) -> StdResult<Vec<Statement>, Self::Error> {
+        let Step::Next { depth, target, .. } = plan.steps[pc] else {
+            unreachable!("an iterator is followed by its pull")
+        };
+        self.before_pull(plan, depth);
+        self.with_target(target, input, plan.output, |lower| {
+            let (next, conditions) = lower.eager_filters(plan, pc, parent)?;
+            let mut body = match plan.steps[next] {
+                Step::Emit { output, .. } => emit(lower, output, &conditions)?,
+                Step::Open { depth, .. } => {
+                    let input = lower.input(&plan.clauses[depth])?;
+                    lower.comprehension_loop(plan, next + 1, Some(pc), input, emit)?
+                }
+                _ => unreachable!("an accepted input opens an iterator or emits"),
+            };
+            for condition in conditions.into_iter().rev() {
+                body = vec![Statement::If(condition, body, Vec::new())];
+            }
+            Ok(body)
+        })
+    }
+}
+
+impl EagerDisplay for Checker<'_> {
+    type Input = Iteration;
+    type Destination = Collector;
+    type Error = Failure;
+
+    fn before_pull(&mut self, plan: &Plan<'_>, depth: usize) {
+        self.forget_comprehension_writes(plan, depth)
+    }
+
+    fn input(&mut self, clause: &ast::Comprehension) -> Result<Iteration, String> {
+        self.iteration_input(&clause.iter, None)
+    }
+
+    fn with_target(
+        &mut self,
+        target: &ast::Expr,
+        input: Iteration,
+        _: Output<'_>,
+        body: impl FnOnce(&mut Self) -> Result<Vec<Statement>, String>,
+    ) -> Result<Vec<Statement>, String> {
+        self.lower_iteration(target, input, &[], body)
+            .map(|(body, _)| body)
+    }
+
+    fn filter(&mut self, test: &ast::Expr) -> Result<Expr, String> {
+        let condition = self.condition(test)?;
+        self.apply_facts(test, true);
+        Ok(condition)
+    }
+
+    fn invalid_edges(&self, plan: &Plan<'_>) -> Failure {
+        error(
+            self.source,
+            plan.outer,
+            "unsupported comprehension loop edges",
+        )
+    }
+
+    fn collect(
+        &mut self,
+        output: Output<'_>,
+        destination: Collector,
+        result: usize,
+        conditions: &[Expr],
+    ) -> Result<Vec<Statement>, String> {
+        self.comprehension_leaf(
+            output,
+            destination,
+            result,
+            conditions.last().and_then(present_field),
+        )
+    }
 }
 
 /// Writes on the backedge of this loop invalidate earlier narrowing facts.
@@ -325,17 +469,29 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let display = Plan::from_expr(expression)
             .ok_or_else(|| error(self.source, expression, "unsupported comprehension display"))?;
+        self.lower_display(expression, &display, expected)
+    }
+
+    pub(super) fn lower_display(
+        &mut self,
+        expression: &ast::Expr,
+        display: &Plan<'_>,
+        expected: Option<Type>,
+    ) -> Result<Expr, String> {
+        if self.registered.is_some() {
+            return self.comprehension_display(expression, display, Collector::Display(expected));
+        }
         let filtered = match display.output {
-            Output::Set(_) => self.character_set_filter(&display, expected)?,
+            Output::Set(_) => self.character_set_filter(display, expected)?,
             Output::List(_) => {
-                self.string_list_filter(&display, expected.and_then(|ty| self.types.element(ty)))?
+                self.string_list_filter(display, expected.and_then(|ty| self.types.element(ty)))?
             }
             _ => None,
         };
         if let Some(filtered) = filtered {
             return Ok(filtered);
         }
-        self.comprehension_display(expression, &display, Collector::Display(expected))
+        self.comprehension_display(expression, display, Collector::Display(expected))
     }
 
     /// A dict can consume an exact two-column zip in the same order as a
@@ -629,6 +785,7 @@ impl Checker<'_> {
         if matches!(collector, Collector::IntegerSum) && display.clauses.len() == 1 {
             slices::fuse(&mut body, &params, &mut args);
         }
+        helper.finish_region(Ok(()))?;
         self.helpers.finish(
             id,
             Helper {
@@ -739,11 +896,58 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let first_private = self.locals.len();
         let writes = narrowing::expression_assignments(expression);
-        let scope = self.enter_comprehension(display.target_names());
+        // Acquire the outer iterator before declaring the comprehension's shadowing names.
+        let mut input = input;
+        let mut prefix = Vec::new();
+        let enclosing = self.namespace;
+        let targets = display.target_names();
+        if self.registered.is_some() {
+            let Iteration::Prepared(cursor) = &mut input else {
+                unreachable!("Python iterables have an explicit acquisition")
+            };
+            prefix.append(&mut cursor.evaluate);
+            prefix.append(&mut cursor.acquire);
+            let slot = self.hidden(Type::PythonObject);
+            let mut declared: Vec<_> = targets.iter().cloned().collect();
+            declared.sort();
+            prefix.push(Statement::Assign(
+                slot,
+                Expr {
+                    ty: Type::PythonObject,
+                    kind: ExprKind::Builtin(
+                        Builtin::RegisteredNamespace(declared),
+                        enclosing
+                            .map(|parent| self.local(parent))
+                            .into_iter()
+                            .collect(),
+                    ),
+                },
+            ));
+            self.namespace = Some(slot);
+        }
+        let scope = self.enter_comprehension(targets.clone());
         let result = self.hidden(Type::None);
         let body = self.comprehension_body(display, input, collector, result);
+        if let Some(namespace) = self.namespace {
+            for name in &targets {
+                if let Some(&slot) = self.names.get(name) {
+                    self.namespace_bindings.insert(
+                        slot,
+                        registered::LocalBinding {
+                            name: name.clone(),
+                            namespace: Some(namespace),
+                        },
+                    );
+                }
+            }
+        }
+        self.namespace = enclosing;
         self.leave_comprehension(scope);
-        let (ty, body) = body?;
+        let (ty, mut body) = body?;
+        if !prefix.is_empty() {
+            prefix.append(&mut body);
+            body = prefix;
+        }
         for name in writes {
             if let Some(slot) = self.names.get(&name) {
                 self.narrowed.remove_mut(slot);
@@ -775,7 +979,7 @@ impl Checker<'_> {
         collector: Collector,
         result: usize,
     ) -> Result<(Type, Vec<Statement>), String> {
-        let loops = self.comprehension_step(display, 0, None, input, collector, result)?;
+        let loops = self.eager_loop(display, 0, None, input, collector, result)?;
         let ty = self.locals[result];
         let empty = match (collector, display.output) {
             (Collector::Display(_), Output::List(_)) => ExprKind::List(Vec::new()),
@@ -807,75 +1011,13 @@ impl Checker<'_> {
         }
     }
 
-    /// Check conditions in source order, carrying each true edge's narrowing
-    /// facts into the following filter and the accepted body.
     pub(super) fn comprehension_filters(
         &mut self,
         plan: &Plan<'_>,
         pull: usize,
         parent: Option<usize>,
     ) -> Result<(usize, Vec<Expr>), String> {
-        let filters = plan.loop_filters(pull, parent).ok_or_else(|| {
-            error(
-                self.source,
-                plan.outer,
-                "unsupported comprehension loop edges",
-            )
-        })?;
-        let accepted = filters.end;
-        let mut conditions = Vec::with_capacity(filters.len());
-        for step in &plan.steps[filters] {
-            let Step::Filter { test, .. } = step else {
-                unreachable!("validated filter range")
-            };
-            conditions.push(self.condition(test)?);
-            self.apply_facts(test, true);
-        }
-        Ok((accepted, conditions))
-    }
-
-    /// Translate a structured loop of the shared plan to typed iteration IR.
-    /// The target's type and the true edges of its guards are in scope when
-    /// checking either the nested iterator or the output expression.
-    fn comprehension_step(
-        &mut self,
-        plan: &Plan<'_>,
-        pc: usize,
-        parent: Option<usize>,
-        input: Iteration,
-        collector: Collector,
-        result: usize,
-    ) -> Result<Vec<Statement>, String> {
-        let Step::Next { depth, target, .. } = plan.steps[pc] else {
-            unreachable!("an iterator is followed by its pull");
-        };
-        self.forget_comprehension_writes(plan, depth);
-        self.lower_iteration(target, input, &[], |checker| {
-            let (next, conditions) = checker.comprehension_filters(plan, pc, parent)?;
-            let mut body = match plan.steps[next] {
-                Step::Emit { output, .. } => {
-                    let guarded = conditions.last().and_then(present_field);
-                    checker.comprehension_leaf(output, collector, result, guarded)?
-                }
-                Step::Open { iterable, .. } => {
-                    let input = checker.iteration_input(iterable, None)?;
-                    checker.comprehension_step(
-                        plan,
-                        next + 1,
-                        Some(pc),
-                        input,
-                        collector,
-                        result,
-                    )?
-                }
-                _ => unreachable!("a successful guard opens an iterator or emits"),
-            };
-            for condition in conditions.into_iter().rev() {
-                body = vec![Statement::If(condition, body, Vec::new())];
-            }
-            Ok(body)
-        })
-        .map(|(body, _)| body)
+        self.eager_filters(plan, pull, parent)
     }
 
     /// A dict display evaluates and roots its key before its value. Ordinary
@@ -913,7 +1055,7 @@ impl Checker<'_> {
                     }
                 });
                 let value = self.guarded_element(expression, element, guarded)?;
-                if is_set && !self.types.hashable_key(value.ty) {
+                if is_set && !self.comprehension_key(value.ty) {
                     return Err(error(
                         self.source,
                         expression,
@@ -940,7 +1082,7 @@ impl Checker<'_> {
             (Collector::Display(expected), Output::Dict(key, value)) => {
                 let expected = expected.and_then(|ty| self.types.mapping(ty));
                 let key_value = self.guarded_element(key, expected.map(|(ty, _)| ty), guarded)?;
-                if !self.types.hashable_key(key_value.ty) {
+                if !self.comprehension_key(key_value.ty) {
                     return Err(error(
                         self.source,
                         key,
@@ -961,6 +1103,10 @@ impl Checker<'_> {
             }
             _ => unreachable!("invalid eager comprehension collector"),
         }
+    }
+
+    fn comprehension_key(&self, ty: Type) -> bool {
+        self.types.hashable_key(ty) || self.registered.is_some() && ty == Type::PythonObject
     }
 
     fn guarded_element(

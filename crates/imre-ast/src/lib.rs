@@ -53,6 +53,8 @@ pub mod python_nodes;
 pub mod source_encoding;
 pub mod startup;
 pub mod strings;
+mod thread_entry;
+pub use thread_entry::{ThreadEntry, captured_thread_locks, thread_entry};
 mod type_aliases;
 pub mod zlib;
 pub use type_aliases::annotation_scope_error as type_alias_error;
@@ -92,12 +94,14 @@ pub fn wildcard_pattern(pattern: &ast::Pattern) -> bool {
 }
 
 /// The sequence protocol operations required by one validated sequence pattern.
+#[derive(Clone)]
 pub struct SequencePatternPlan {
     /// A sole star does not call len. Otherwise require exactly or at least this many items.
     pub length: Option<(ast::CmpOp, usize)>,
     pub items: SequencePatternItems,
 }
 
+#[derive(Clone)]
 pub enum SequencePatternItems {
     /// Every item is a wildcard. The subject need not be indexed or iterated.
     Ignore,
@@ -231,41 +235,6 @@ pub fn direct_method<'a>(
             spellings.and_then(|names| names.original.get(&name.start())).unwrap_or(&name.id).as_str()
         )))
     .then_some(field)
-}
-
-/// Certify a final lock acquire with at most one unconditional release before it.
-/// No cell can be read after a potentially blocking operation.
-pub fn captured_thread_locks<'a>(
-    stmts: &'a [ast::Stmt],
-    params: &ast::Parameters,
-) -> Option<Vec<&'a str>> {
-    fn receiver<'a>(stmt: &'a ast::Stmt, method: &str) -> Option<&'a str> {
-        let ast::Stmt::Expr(expr) = stmt else {
-            return None;
-        };
-        let ast::Expr::Call(call) = &*expr.value else {
-            return None;
-        };
-        let ast::Expr::Attribute(attr) = &*call.func else {
-            return None;
-        };
-        let ast::Expr::Name(name) = &*attr.value else {
-            return None;
-        };
-        (attr.attr.as_str() == method && call.arguments.is_empty()).then(|| name.id.as_str())
-    }
-    if params.iter().next().is_some() {
-        return None;
-    }
-    match stmts {
-        [last] => Some(vec![receiver(last, "acquire")?]),
-        [first, last] => {
-            let first = receiver(first, "release")?;
-            let last = receiver(last, "acquire")?;
-            (first != last).then(|| vec![first, last])
-        }
-        _ => None,
-    }
 }
 
 /// CPython omits the caret for the whole call in these assignment and return statements.

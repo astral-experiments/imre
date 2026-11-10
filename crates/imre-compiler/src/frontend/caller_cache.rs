@@ -276,22 +276,23 @@ pub(super) fn record_lowering(name: &str) {
 }
 
 #[cfg(test)]
+pub(super) fn observe_lowerings<T>(run: impl FnOnce() -> T) -> (T, Vec<String>) {
+    LOWERED.with_borrow_mut(|names| *names = Some(Vec::new()));
+    let result = run();
+    (
+        result,
+        LOWERED.with_borrow_mut(|names| names.take().unwrap()),
+    )
+}
+
+#[cfg(test)]
 mod tests {
     use std::fs;
     use std::path::Path;
     use tempfile::tempdir;
 
-    use super::LOWERED;
+    use super::observe_lowerings as observe;
     use crate::{CompileOptions, IncrementalCompiler, UnitCompilation, compile_file_units};
-
-    fn observe<T>(run: impl FnOnce() -> T) -> (T, Vec<String>) {
-        LOWERED.with_borrow_mut(|names| *names = Some(Vec::new()));
-        let result = run();
-        (
-            result,
-            LOWERED.with_borrow_mut(|names| names.take().unwrap()),
-        )
-    }
 
     fn llvm(compilation: UnitCompilation) -> Vec<(String, String)> {
         compilation

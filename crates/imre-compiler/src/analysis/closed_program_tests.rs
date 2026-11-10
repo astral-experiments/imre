@@ -4,6 +4,19 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
+fn an_imported_function_can_read_a_registered_type_alias_as_a_value() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    fs::write(
+        project.path().join("aliases.py"),
+        include_str!("../../../../tests/fixtures/boxed_type_alias_values.py"),
+    )
+    .unwrap();
+    fs::write(&entry, "from aliases import current\ncurrent()\n").unwrap();
+    crate::check_file(&entry, None).unwrap();
+}
+
+#[test]
 fn registered_body_checks_its_declared_result() {
     let project = tempdir().unwrap();
     let entry = project.path().join("main.py");
@@ -83,6 +96,7 @@ fn registered_parameter_changes_recheck_the_unchanged_caller() {
             sources.iter().map(|s| RegisteredSource::new(s, true, None)),
             None,
             Some(&graph),
+            None,
         )
     };
     fs::remove_file(entry).unwrap();
@@ -108,6 +122,7 @@ fn registered_parameter_changes_recheck_the_unchanged_caller() {
             .map(|(i, s)| RegisteredSource::new(s, i == 0, None)),
         None,
         Some(&graph),
+        None,
     )
     .unwrap_err();
     assert!(
@@ -138,6 +153,7 @@ fn new_registration_checks_dormant_bodies_against_registered_declarations() {
             .map(|(i, s)| RegisteredSource::new(s, i == 1, None)),
         None,
         None,
+        None,
     )
     .unwrap_err();
     assert!(
@@ -152,6 +168,7 @@ fn new_registration_checks_dormant_bodies_against_registered_declarations() {
             .iter()
             .enumerate()
             .map(|(i, s)| RegisteredSource::new(s, i == 1, None)),
+        None,
         None,
         None,
     )
@@ -183,6 +200,7 @@ fn registered_python_shadow_provides_the_call_signature() {
                 .iter()
                 .enumerate()
                 .map(|(i, s)| RegisteredSource::new(s, i == 1, None)),
+            None,
             None,
             None,
         )
@@ -378,7 +396,11 @@ fn retained_native_candidate_registers_its_original_source_owner() {
     fs::write(&external, replacement).unwrap();
     assert!(!graph.inputs.fresh());
     let compilation = crate::dynamic::compile(
-        (&entry, None, Default::default(), &mut Default::default()),
+        (
+            crate::ProgramEntry::File(&entry, None),
+            Default::default(),
+            &mut Default::default(),
+        ),
         &options,
         true,
         Some(crate::dynamic::ObjectOperation::CheckedEntry),
@@ -413,7 +435,11 @@ fn retained_native_candidate_registers_its_original_source_owner() {
     fs::create_dir(&package).unwrap();
     fs::write(package.join("__init__.py"), replacement).unwrap();
     let error = crate::dynamic::compile(
-        (&entry, None, Default::default(), &mut Default::default()),
+        (
+            crate::ProgramEntry::File(&entry, None),
+            Default::default(),
+            &mut Default::default(),
+        ),
         &options,
         true,
         Some(crate::dynamic::ObjectOperation::CheckedEntry),
@@ -527,6 +553,7 @@ fn a_script_named_runpy_does_not_own_the_imported_sdk_function() {
         sources.iter().map(|s| RegisteredSource::new(s, true, None)),
         Some(&|_| false),
         None,
+        None,
     )
     .unwrap_err();
     assert!(
@@ -587,6 +614,7 @@ fn dormant_lexical_checks_keep_known_parameters_of_partial_calls() {
             [RegisteredSource::new(&source, true, None)],
             None,
             None,
+            None,
         )
         .unwrap_err();
         assert!(
@@ -631,6 +659,16 @@ fn initializer_calls_use_original_bindings_and_all_arguments() {
             "{caller}"
         );
     }
+    let generator = "def rows():\n    yield eval(input())\n";
+    let caller = "from scores import rows\nfor value in rows(): pass\n";
+    let message = check(caller, generator).unwrap();
+    assert!(
+        message.contains("scores.py:2:16")
+            && message.contains("builtins.eval without a linked body"),
+        "{message}"
+    );
+    let replaced = "import scores\ninstall_hook()\nfor value in scores.rows(): pass\n";
+    assert!(check(replaced, generator).is_none());
     let docstring = "'application setup'\nimport scores\nif False:\n    scores.take('x')\n";
     assert!(
         check(docstring, number)
@@ -754,6 +792,7 @@ fn a_linked_signature_requires_a_reaching_initializer_call() {
             }),
             None,
             None,
+            None,
         )
     };
     let read = "from __main__ import take as use\nif False: use('x')\n";
@@ -797,6 +836,92 @@ fn a_linked_signature_requires_a_reaching_initializer_call() {
 }
 
 #[test]
+fn registered_generators_require_a_linked_source_body() {
+    let project = tempdir().unwrap();
+    let path = project.path().join("main.py");
+    let source = "def rows():\n    yield eval(input())\nfor row in rows(): print(row)\n";
+    fs::write(&path, source).unwrap();
+    let module = ("__main__".to_owned(), path, source.to_owned());
+    let error = super::check_registered_project(
+        project.path(),
+        &[],
+        std::iter::once(RegisteredSource::new(&module, true, None)),
+        None,
+        None,
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("main.py:2:16") && error.contains("builtins.eval without a linked body"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_builtin_namespace_lookup_only_requires_a_source_body_when_invoked() {
+    let project = tempdir().unwrap();
+    let path = project.path().join("main.py");
+    let check = |body: &str| {
+        fs::write(&path, format!("import builtins\n{body}\n")).unwrap();
+        crate::check_file(&path, None)
+    };
+    let error = check(
+        "def rows(f): yield f(input())\nfor row in rows(getattr(builtins, input())): print(row)",
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("main.py:2:22") && error.contains("explicit table"),
+        "{error}"
+    );
+    check("name=input()\nif name in ('len', 'str'): print(getattr(builtins,name)('abc'))").unwrap();
+    check("print(getattr(builtins,input()).__name__)").unwrap();
+    fs::write(
+        project.path().join("inspect_callback.py"),
+        "def name(callback):\n    if False: eval(input())\n    return callback.__name__\n",
+    )
+    .unwrap();
+    check("from inspect_callback import name\nprint(name(getattr(builtins,input())))").unwrap();
+}
+
+#[test]
+fn captured_generator_keeps_its_source_requirement_through_a_helper() {
+    let project = tempdir().unwrap();
+    let provider = (
+        "producer".to_owned(),
+        project.path().join("producer.py"),
+        "def rows():\n    yield eval(input())\n".to_owned(),
+    );
+    fs::write(&provider.1, &provider.2).unwrap();
+    let check = |tail: &str| {
+        let entry = (
+            "__main__".to_owned(),
+            project.path().join("main.py"),
+            format!(
+                "from producer import rows\ndef run():\n    for row in rows(): print(row)\n{tail}\nrun()\n"
+            ),
+        );
+        fs::write(&entry.1, &entry.2).unwrap();
+        let mut main = RegisteredSource::new(&entry, true, None);
+        main.initial = true;
+        main.main_body = true;
+        super::check_registered_project(
+            project.path(),
+            &[],
+            [main, RegisteredSource::new(&provider, true, None)],
+            None,
+            None,
+            None,
+        )
+    };
+    let error = check("if False: globals()").unwrap_err();
+    assert!(
+        error.contains("producer.py:2:16") && error.contains("builtins.eval without a linked body"),
+        "{error}"
+    );
+    check("def safe(): yield 7\nglobals()['rows'] = safe").unwrap();
+}
+
+#[test]
 fn earlier_unlinked_source_precedes_a_later_initializer_argument() {
     let project = tempdir().unwrap();
     let main = project.path().join("main.py");
@@ -825,5 +950,35 @@ fn earlier_unlinked_source_precedes_a_later_initializer_argument() {
     assert!(
         before.contains("main.py:2:6") && before.contains("expected int"),
         "{before}"
+    );
+}
+
+#[test]
+fn the_ordinary_entry_keeps_an_operand_in_the_default_flow_region() {
+    let directory = tempdir().unwrap();
+    let entry = directory.path().join("app.py");
+    fs::write(directory.path().join("observe.py"), "print('observed')\n").unwrap();
+    fs::write(
+        &entry,
+        "import observe\nvalues: list[int] = [3]\nvalues.append(True)\n",
+    )
+    .unwrap();
+    let mut graph = crate::modules::SourceGraph::load(&entry, Some(directory.path()), &[]).unwrap();
+    let crate::CheckedProgram::Runtime(report) =
+        crate::checked_lower_with(&mut graph, None, None).unwrap()
+    else {
+        panic!("expected the normal checker operand diagnostic")
+    };
+    let site = report.entry_operand().unwrap();
+    assert_eq!(site.body, site.module);
+    assert!(
+        graph
+            .session
+            .unconditional_module_operand(site.module, site.statement, site.operand)
+    );
+    assert!(
+        report
+            .to_string()
+            .contains("app.py:3:15: Imre: expected int, got bool")
     );
 }

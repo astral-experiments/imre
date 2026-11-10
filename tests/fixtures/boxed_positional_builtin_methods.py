@@ -28,6 +28,17 @@ def current():
     except AttributeError:
         assert events == ["lookup", "argument"]
 
+    def failed_receiver():
+        raise LookupError("receiver")
+
+    try:
+        failed_receiver().append(argument())
+    except LookupError as error:
+        assert error.args == ("receiver",)
+        assert events == ["lookup", "argument"]
+    else:
+        raise AssertionError("lost receiver error")
+
     class Element:
         def __del__(self):
             events.append("finalized")

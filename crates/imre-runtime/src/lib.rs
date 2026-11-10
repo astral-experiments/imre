@@ -2820,13 +2820,12 @@ pub unsafe extern "C" fn imre_list_all_i32(
 pub unsafe extern "C" fn imre_list_repeat(list: *const List, count: usize) -> *const List {
     // SAFETY: the caller roots the count; integer conversion cannot reenter.
     let count = unsafe { Int::borrow(count) };
-    let count = count
-        .as_small()
-        .map(|value| value as isize)
-        .or_else(|| count.big().to_isize());
-    let Some(count) = count else {
-        return Error::new(Kind::OverflowError, "list repeat count is too large")
-            .returning(std::ptr::null());
+    let Some(count) = signed_index(&count) else {
+        return Error::new(
+            Kind::OverflowError,
+            "cannot fit 'int' into an index-sized integer",
+        )
+        .returning(std::ptr::null());
     };
     if count <= 0 {
         return imre_list_new();
@@ -2840,7 +2839,7 @@ pub unsafe extern "C" fn imre_list_repeat(list: *const List, count: usize) -> *c
                 .len()
                 .checked_mul(count)
                 .filter(|&length| length <= isize::MAX as usize / size_of::<Int>())
-                .ok_or_else(|| Error::new(Kind::MemoryError, "list is too large"))?;
+                .ok_or_else(Error::memory_error)?;
             let mut result = Vec::new();
             result
                 .try_reserve_exact(length)
@@ -3505,6 +3504,45 @@ mod tests {
                 .map(|value| Int::small(value).unwrap())
                 .collect();
             drop(List::new(values));
+        }
+    }
+
+    #[test]
+    fn list_repeat_checks_the_multiplier_before_the_allocation() {
+        let empty = List::new(Vec::new());
+        let elements = List::new(vec![Int::from(3), Int::from(7)]);
+        let beyond_index = BigInt::from(1) << 160usize;
+        for count in [beyond_index.clone(), -beyond_index] {
+            let count = Int::new(count);
+            // SAFETY: both operands are live. Taking the error transfers its owner.
+            unsafe {
+                assert!(imre_list_repeat(&empty, count.0).is_null());
+                let error = imre_error_take();
+                assert!(!error.is_null());
+                assert_eq!(imre_exception_matches(error, Kind::OverflowError as u32), 1);
+                let message = StrOwner::from_raw(imre_exception_message(error));
+                assert_eq!(
+                    message.as_str(),
+                    "cannot fit 'int' into an index-sized integer"
+                );
+                objects::imre_object_release(error);
+            }
+        }
+        let count = Int::from(1i64 << 60);
+        // SAFETY: the empty list produces an owned empty result; the nonempty
+        // list would need more than isize::MAX bytes and never allocates it.
+        unsafe {
+            let result = imre_list_repeat(&empty, count.0);
+            assert!(!result.is_null());
+            assert_eq!(imre_list_len(result), Int::from(0).0);
+            imre_list_release(result);
+            assert!(imre_list_repeat(&elements, count.0).is_null());
+            let error = imre_error_take();
+            assert!(!error.is_null());
+            assert_eq!(imre_exception_matches(error, Kind::MemoryError as u32), 1);
+            let message = StrOwner::from_raw(imre_exception_message(error));
+            assert!(message.is_empty());
+            objects::imre_object_release(error);
         }
     }
 

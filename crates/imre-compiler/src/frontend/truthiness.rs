@@ -58,6 +58,10 @@ impl Checker<'_> {
     }
 
     pub(super) fn test_truth(&mut self, value: Expr, at: &impl Ranged) -> Result<Expr, String> {
+        if self.registered.is_some() {
+            // A recorded parameter type does not replace the object's live truth protocol.
+            return Ok(registered::truth(value));
+        }
         let value = Self::weak_target(value);
         if !self.needs_truth_dispatch(value.ty) {
             return Ok(self.truth_value(value));
@@ -179,7 +183,10 @@ impl Checker<'_> {
         let mut reachable = true;
         for first in prefix {
             let left = self.boolean_operand(first, expected)?;
-            let known = self.known_truth(left.ty);
+            let known = match left.kind {
+                ExprKind::Bool(value) => Some(value),
+                _ => self.known_truth(left.ty),
+            };
             // A present record with a false override can be the selected operand of "and".
             let selected = if and && self.needs_truth_dispatch(left.ty) {
                 left.ty
@@ -232,7 +239,7 @@ impl Checker<'_> {
             } else if known == Some(!and) {
                 selected
             } else {
-                self.types.join(selected, right.ty).ok_or_else(|| {
+                self.types.join_results(selected, right.ty).ok_or_else(|| {
                     error(
                         self.source,
                         first,

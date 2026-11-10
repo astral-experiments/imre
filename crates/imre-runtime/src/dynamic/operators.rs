@@ -3635,7 +3635,13 @@ impl Context {
         Ok(false)
     }
     /// Read an ordinary sequence slice directly when its bounds need no Python callbacks.
-    pub(super) fn get_slice(&mut self, receiver: Id, start: Id, stop: Id) -> Result<Id> {
+    pub(super) fn get_slice(
+        &mut self,
+        receiver: Id,
+        start: Id,
+        stop: Id,
+        slot: Option<usize>,
+    ) -> Result<Id> {
         let parts = [start, stop, NONE];
         if matches!(
             self.heap.get(receiver),
@@ -3652,7 +3658,14 @@ impl Context {
         }) {
             return self.slice(receiver, parts);
         }
-        let key = self.alloc(Value::Slice(parts));
+        let key = if let Some(slot) = slot {
+            self.heap
+                .cached_constant(super::value::ConstantSlot::Linked(slot), |heap| {
+                    Ok(heap.alloc(Value::Slice(parts)))
+                })?
+        } else {
+            self.alloc(Value::Slice(parts))
+        };
         self.get_item(receiver, key)
     }
 
@@ -3708,7 +3721,9 @@ impl Context {
         let positions = slice_positions(start, end, step);
         let full_forward = start == 0 && step == 1 && count == len;
         let result = match self.heap.get(obj) {
-            Value::Str(_) | Value::SurrogateStr(_) if receiver == obj && full_forward => {
+            Value::Str(_) | Value::SurrogateStr(_) | Value::Tuple(_)
+                if receiver == obj && full_forward =>
+            {
                 return Ok(obj);
             }
             Value::SurrogateStr(points) => {
@@ -5998,10 +6013,11 @@ impl Context {
     }
 
     pub(super) fn finalize_removed_dict_value(&mut self, removed: Id) {
-        if self.heap.tracks_finalizers()
+        let collect = self.heap.tracks_finalizers()
             && self.heap.could_own_finalizer(removed, true)
-            && self.heap.has_unbound_finalizer(NONE)
-        {
+            && self.heap.has_unbound_finalizer(NONE);
+        self.release_list_owner(removed);
+        if collect {
             self.collect_unreachable();
         }
     }

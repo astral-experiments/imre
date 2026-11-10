@@ -2,6 +2,13 @@
 
 use super::*;
 
+/// The fixed calling convention either names its function or reads an adapter and
+/// context from a callable captured before its arguments.
+pub(super) enum NativeCallTarget {
+    Function(usize),
+    Callable(Operand),
+}
+
 /// Definitions referenced while lowering callable construction, invocation and inspection.
 #[derive(Default)]
 pub(super) struct Uses {
@@ -323,53 +330,49 @@ impl Emitter<'_, '_> {
         result
     }
 
-    /// The callee is captured before arguments. Stable local owners permit a
-    /// borrow; temporaries and expression-rebound slots keep independent owners.
-    /// A singleton closed target exposes its body to LLVM without dynamic dispatch.
-    pub(super) fn invoke_callable(
+    /// Transfer resources only after every operand has been captured in source order.
+    pub(super) fn native_call(
         &mut self,
-        callable: &Expr,
+        target: NativeCallTarget,
         args: &CallArgs,
+        mut values: Vec<Operand>,
         returns: Type,
     ) -> Value {
-        let targets = self.callable_targets.get(callable.ty).to_vec();
-        let callable = self.operand(callable);
-        let mut values = self.call_operands(args);
         self.transfer_call_operands(&mut values);
-        let target = if let [target] = targets.as_slice() {
-            format!(
-                "@{}",
-                self.callable_adapter(target.function, target.bound, callable.value.ty)
-            )
-        } else {
-            self.instruction(format!("load ptr, ptr {}", callable.value.operand))
+        let inputs: Vec<_> = args
+            .order
+            .iter()
+            .map(|&index| &values[index].value)
+            .collect();
+        let result = match &target {
+            NativeCallTarget::Function(id) => {
+                self.user_call(*id, returns, &inputs, args.exhaustive_enum_match)
+            }
+            NativeCallTarget::Callable(callable) => {
+                let targets = self.callable_targets.get(callable.value.ty).to_vec();
+                let entry = if let [target] = targets.as_slice() {
+                    format!(
+                        "@{}",
+                        self.callable_adapter(target.function, target.bound, callable.value.ty)
+                    )
+                } else {
+                    self.instruction(format!("load ptr, ptr {}", callable.value.operand))
+                };
+                let context = self.callable_context_slot(&callable.value);
+                let context = self.instruction(format!("load ptr, ptr {context}"));
+                let may_raise = targets.is_empty()
+                    || targets
+                        .iter()
+                        .any(|target| self.effects.may_raise(target.function));
+                self.call_with_effect(&entry, Some(&context), returns, &inputs, may_raise, false)
+            }
         };
-        let context = self.callable_context_slot(&callable.value);
-        let context = self.instruction(format!("load ptr, ptr {context}"));
-        let mut inputs = vec![format!("ptr {context}")];
-        inputs.extend(args.order.iter().map(|&index| {
-            let value = &values[index].value;
-            format!("{} {}", value.ty.llvm(), value.operand)
-        }));
-        let instruction = format!("call {} {target}({})", returns.llvm(), inputs.join(", "));
-        let may_raise = targets.is_empty()
-            || targets
-                .iter()
-                .any(|target| self.effects.may_raise(target.function));
-        let operand = if may_raise {
-            self.checked_instruction(instruction)
-        } else {
-            self.instruction(instruction)
-        };
-        let result = self.owned(Value {
-            ty: returns,
-            operand,
-            small_integer: false,
-        });
         for value in &values {
             self.release_operand(value);
         }
-        self.release_operand(&callable);
+        if let NativeCallTarget::Callable(callable) = target {
+            self.release_operand(&callable);
+        }
         result
     }
 }

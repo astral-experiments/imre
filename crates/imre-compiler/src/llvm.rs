@@ -19,6 +19,7 @@ use crate::types::Types;
 
 mod affine;
 mod asyncio;
+pub(crate) mod body;
 mod byte_outputs;
 mod calendar;
 mod callables;
@@ -30,10 +31,13 @@ mod integer_regions;
 mod json;
 mod line_views;
 mod literals;
+mod module_registration;
+pub(crate) mod operations;
 mod paths;
 mod posixpath;
 mod processes;
 mod records;
+pub(crate) mod registered;
 mod runtime;
 mod socket;
 mod stdlib;
@@ -45,6 +49,7 @@ mod truthiness;
 mod unions;
 mod units;
 
+use operations::CheckedBody;
 use units::Output;
 pub(crate) use units::emit_units;
 
@@ -81,6 +86,9 @@ impl Type {
     /// Classifies the type once for LLVM values, retain/release calls, and field descriptors.
     fn word_kind(self) -> WordKind {
         match self {
+            Self::PythonObject => {
+                unreachable!("registered heap handle in fixed calling convention")
+            }
             Self::None => WordKind::None,
             Self::Bool => WordKind::Bool,
             Self::Int => WordKind::Int,
@@ -223,22 +231,33 @@ impl Type {
 }
 
 #[derive(Clone)]
-struct Value {
+pub(crate) struct Value {
     ty: Type,
     operand: String,
     small_integer: bool,
 }
 
 #[derive(Clone, Copy)]
-enum Ownership {
+pub(crate) enum Ownership {
     Owned,
     Borrowed,
 }
 
 /// A call or operator input may borrow a local root instead of acquiring a temporary.
-struct Operand {
+pub(crate) struct Operand {
     value: Value,
     ownership: Ownership,
+}
+
+impl Operand {
+    pub(crate) fn int_word(&self, protected: bool) -> (&str, bool) {
+        assert_eq!(self.value.ty, Type::Int, "expected the native integer ABI");
+        assert!(
+            protected || matches!(self.ownership, Ownership::Borrowed),
+            "a registered native owner must survive a failing conversion"
+        );
+        (&self.value.operand, self.value.small_integer)
+    }
 }
 
 #[derive(Clone)]
@@ -246,6 +265,14 @@ struct ForwardCursor {
     next: String,
     end: String,
     start: Option<String>,
+}
+
+/// Range and append-window facts that hold only in the true suite of a native guard.
+struct NativeIfFacts {
+    small_slots: Vec<usize>,
+    guarded_lists: usize,
+    previous_window: Option<(usize, String)>,
+    window: Option<(usize, ForwardCursor, String)>,
 }
 
 #[derive(Clone)]
@@ -305,22 +332,138 @@ enum Completion {
 #[derive(Debug)]
 pub(crate) struct Unsupported(pub(crate) &'static str);
 
+#[cfg(test)]
 pub(crate) fn emit(
     module: &Module,
     ranges: &RangeFacts<'_>,
     sanitize: bool,
 ) -> Result<String, Unsupported> {
-    emit_file(module, ranges, sanitize).map(|(llvm, _)| llvm)
+    let program = analyze_program(module, &mut Default::default())?;
+    emit_file(module, ranges, sanitize, program)
 }
 
 pub(crate) fn emit_file(
     module: &Module,
     ranges: &RangeFacts<'_>,
     sanitize: bool,
-) -> Result<(String, bool), Unsupported> {
+    program: NativeProgram,
+) -> Result<String, Unsupported> {
     let mut output = Output::new(&vec![0; module.functions.len()], 1, 0, false);
-    let prefer_objects = emit_program(module, ranges, sanitize, &mut output)?;
-    Ok((std::mem::take(output.entry_buffer()), prefer_objects))
+    emit_program(module, ranges, sanitize, &mut output, program)?;
+    Ok(std::mem::take(output.entry_buffer()))
+}
+
+const BRANCH_WEIGHTS: &str = "\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n!1 = !{!\"branch_weights\", i32 2000, i32 1}\n";
+
+/// Callable representation selected for the specialized checked module.
+pub(crate) struct NativeProgram {
+    pub(crate) prefer_objects: bool,
+    callable_targets: crate::callables::Targets,
+    function_link_types: HashSet<Type>,
+}
+
+pub(crate) fn analyze_program(
+    module: &Module,
+    sites: &mut crate::FixedFrameSources,
+) -> Result<NativeProgram, Unsupported> {
+    let mut function_link_types = HashSet::new();
+    let mut link_owners = BTreeMap::<usize, Vec<&Expr>>::new();
+    let mut declared_caches = HashSet::new();
+    let mut object_call = None;
+    let mut targets = crate::callables::TargetCollector::default();
+    for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
+        // The tags are needed only for this post-specialization inventory.
+        // A valid frame keeps the original position table through admission.
+        let operations = sites
+            .get_mut(&id)
+            .filter(|(_, source)| source.local_names.len() == function.locals.len())
+            .map(|(_, source)| std::mem::take(&mut source.operations));
+        let mut remaining = operations.as_deref();
+        ir::walk_nodes(&function.body, &mut |node, _| {
+            remaining = remaining.and_then(|operations| {
+                let (expected, rest) = operations.split_first()?;
+                let expected = (*expected)?;
+                (crate::frontend::FixedNode::checked(&node) == Some(expected)).then_some(rest)
+            });
+            let ir::Node::Expression(expr) = node else {
+                return;
+            };
+            targets.inspect(&module.types, expr);
+            let ExprKind::Builtin(builtin, args) = &expr.kind else {
+                return;
+            };
+            match builtin {
+                Builtin::ObjectCall(kind, ..)
+                    if object_call.is_none_or(|previous| *kind < previous) =>
+                {
+                    object_call = Some(*kind);
+                }
+                Builtin::FunctionWrappedSet | Builtin::FunctionWrappedGet => {
+                    let owner = &args[0];
+                    function_link_types.insert(owner.ty);
+                    link_owners.entry(id).or_default().push(owner);
+                }
+                Builtin::ModuleCache(id) => {
+                    declared_caches.insert(*id);
+                }
+                _ => {}
+            }
+        });
+        if !matches!(remaining, Some([])) {
+            sites.remove(&id);
+        }
+    }
+    let callable_targets = targets.finish();
+    if function_link_types.iter().any(|&ty| {
+        let targets = callable_targets.get(ty);
+        module.types.dispatcher(ty).is_some()
+            || targets.is_empty()
+            || targets.iter().any(|target| {
+                let function = &module.functions[target.function];
+                target.bound && !matches!(function.locals[function.params[0]], Type::Class(_))
+                    || declared_caches.contains(&target.function)
+                    || module.types.cache_adapter(target.function).is_some()
+            })
+    }) {
+        return Err(Unsupported(
+            "Imre: wrapper links require a callable signature with known native functions or source methods",
+        ));
+    }
+    if let Some(call) = object_call {
+        return Err(Unsupported(match call {
+            ir::ObjectCall::ExecText => "Imre: native execution requires linked code",
+            ir::ObjectCall::FormatField => {
+                "Imre: this f-string field requires registered Python formatting"
+            }
+            ir::ObjectCall::SocketSendfile => {
+                "Imre: socket.sendfile requires native Python object operations"
+            }
+        }));
+    }
+    let mut prefer_objects = false;
+    for (id, mut owners) in link_owners {
+        owners.retain(|owner| {
+            callable_targets
+                .get(owner.ty)
+                .iter()
+                .any(|target| target.bound)
+        });
+        if owners.is_empty() {
+            continue;
+        }
+        let function = module.functions.get(id).unwrap_or(&module.entry);
+        if !ir::plain_link_owners(function, &owners) {
+            return Err(Unsupported(
+                "Imre: native wrapper links require a plain function as their owner",
+            ));
+        }
+        prefer_objects = true;
+    }
+    Ok(NativeProgram {
+        prefer_objects,
+        callable_targets,
+        function_link_types,
+    })
 }
 
 fn emit_program(
@@ -328,75 +471,31 @@ fn emit_program(
     ranges: &RangeFacts<'_>,
     sanitize: bool,
     output: &mut Output,
-) -> Result<bool, Unsupported> {
-    let callable_targets = crate::callables::Targets::analyze(module);
-    let mut resource_types: HashSet<_> = module
-        .functions
-        .iter()
-        .chain([&module.entry])
-        .flat_map(|function| function.locals.iter().copied())
-        .collect();
-    resource_types.retain(|&ty| {
-        if matches!(ty, Type::Callable(_)) {
-            // A plain function has no captured receiver to finalize.
-            return callable_targets.get(ty).iter().any(|target| {
-                let f = &module.functions[target.function];
-                target.bound
-                    && module
-                        .types
-                        .may_own_file(f.locals[f.params[0]], &module.class_fields, true)
-            });
-        }
-        module.types.may_own_file(ty, &module.class_fields, true)
-    });
-    let borrows = borrows::analyze(module, &callable_targets);
-    let effects = effects::analyze(module, &callable_targets);
-    let inline_dispatch = string_enums::inline_dispatch(module, &effects);
+    program: NativeProgram,
+) -> Result<(), Unsupported> {
     let mut literal_globals = vec![None; module.globals.len()];
-    let mut extension_modules = std::collections::BTreeSet::new();
-    let mut function_link_types = HashSet::new();
-    let mut mixed_link_owners = Vec::new();
-    let mut declared_caches = HashSet::new();
+    let mut extension_modules = BTreeSet::new();
     let mut uses_regex_positions = false;
+    let mut uses_format_field = false;
     let mut uses_sys_argv = false;
     let mut uses_orig_argv = false;
     let mut uses_linecache = false;
     let mut uses_cache_paths = false;
     let mut uses_builtins_last = false;
     let mut changes_stdout = false;
-    let mut object_call = None;
     for function in module.functions.iter().chain([&module.entry]) {
-        let mut owners = Vec::new();
-        crate::ir::walk_expressions(&function.body, &mut |expr| {
+        ir::walk_expressions(&function.body, &mut |expr| {
             let ExprKind::Builtin(builtin, args) = &expr.kind else {
                 return;
             };
             match builtin {
-                Builtin::ObjectCall(kind, ..)
-                    if object_call.is_none() || matches!(kind, ir::ObjectCall::ExecText) =>
-                {
-                    object_call = Some(*kind);
-                }
                 Builtin::RegexCapture {
                     operation: RegexCapture::Start | RegexCapture::End,
                     ..
                 } => uses_regex_positions = true,
+                Builtin::FormatField(_) => uses_format_field = true,
                 Builtin::ExtensionImport(name) => {
                     extension_modules.insert(name.clone());
-                }
-                Builtin::FunctionWrappedSet | Builtin::FunctionWrappedGet => {
-                    let owner = &args[0];
-                    function_link_types.insert(owner.ty);
-                    if callable_targets
-                        .get(owner.ty)
-                        .iter()
-                        .any(|target| target.bound)
-                    {
-                        owners.push(owner);
-                    }
-                }
-                Builtin::ModuleCache(id) => {
-                    declared_caches.insert(*id);
                 }
                 Builtin::GlobalSet(slot) => {
                     // A checked module binding has only one initializer.
@@ -423,45 +522,33 @@ fn emit_program(
                 _ => {}
             }
         });
-        if !owners.is_empty() {
-            mixed_link_owners.push((function, owners));
-        }
     }
-    if function_link_types.iter().any(|&ty| {
-        let targets = callable_targets.get(ty);
-        module.types.dispatcher(ty).is_some()
-            || targets.is_empty()
-            || targets.iter().any(|target| {
-                let function = &module.functions[target.function];
-                target.bound && !matches!(function.locals[function.params[0]], Type::Class(_))
-                    || declared_caches.contains(&target.function)
-                    || module.types.cache_adapter(target.function).is_some()
-            })
-    }) {
-        return Err(Unsupported(
-            "Imre: wrapper links require a callable signature with known native functions or source methods",
-        ));
-    }
-    if let Some(call) = object_call {
-        return Err(Unsupported(match call {
-            ir::ObjectCall::ExecText => "Imre: native execution requires linked code",
-            ir::ObjectCall::SocketSendfile => {
-                "Imre: socket.sendfile requires native Python object operations"
-            }
-        }));
-    }
-    if mixed_link_owners
+    let mut resource_types: HashSet<_> = module
+        .functions
         .iter()
-        .any(|(function, owners)| !ir::plain_link_owners(function, owners))
-    {
-        return Err(Unsupported(
-            "Imre: native wrapper links require a plain function as their owner",
-        ));
-    }
+        .chain([&module.entry])
+        .flat_map(|function| function.locals.iter().copied())
+        .collect();
+    resource_types.retain(|&ty| {
+        if matches!(ty, Type::Callable(_)) {
+            // A plain function has no captured receiver to finalize.
+            return program.callable_targets.get(ty).iter().any(|target| {
+                let f = &module.functions[target.function];
+                target.bound
+                    && module
+                        .types
+                        .may_own_file(f.locals[f.params[0]], &module.class_fields, true)
+            });
+        }
+        module.types.may_own_file(ty, &module.class_fields, true)
+    });
+    let borrows = borrows::analyze(module, &program.callable_targets);
+    let effects = effects::analyze(module, &program.callable_targets);
+    let inline_dispatch = string_enums::inline_dispatch(module, &effects);
     let mut emitter = Emitter {
         module,
         output,
-        code: String::new(),
+        body: body::FunctionBody::new("entry", ""),
         entry_allocas: String::new(),
         mapping_words: 0,
         forward_cursors: BTreeMap::new(),
@@ -480,7 +567,7 @@ fn emit_program(
         callable_uses: callables::Uses::default(),
         async_frames: BTreeMap::new(),
         async_invoke_frames: BTreeMap::new(),
-        function_link_types,
+        function_link_types: program.function_link_types,
         json_schema_roots: Vec::new(),
         module_reads_regex_positions: uses_regex_positions,
         uses_regex_positions: false,
@@ -490,10 +577,6 @@ fn emit_program(
         enum_members: Vec::new(),
         http_members: Vec::new(),
         literal_globals,
-        next_value: 0,
-        next_label: 0,
-        current: "entry".to_owned(),
-        terminated: false,
         loops: Vec::new(),
         locals: Vec::new(),
         directory_slot_count: 0,
@@ -518,12 +601,11 @@ fn emit_program(
         cleanup_bytes: 0,
         cleanup_limit_hit: false,
         return_exit: String::new(),
-        error_exit: String::new(),
         sanitize,
         ranges,
         effects,
         inline_dispatch,
-        callable_targets,
+        callable_targets: program.callable_targets,
         integer_regions: integer_regions::analyze(module),
         uses_sys_argv: uses_sys_argv || uses_orig_argv,
         uses_orig_argv,
@@ -552,18 +634,17 @@ fn emit_program(
         };
         if emitter.output.split() {
             // SSA names and labels are scoped to one LLVM function.
-            emitter.next_value = 0;
-            emitter.next_label = 0;
+            emitter.body.reset_names();
         }
         let frame = function_source_frame(module, &repr_methods, id);
         let params = emitter.function(function, entry, frame, &borrows[id])?;
-        bodies.push((params, std::mem::take(&mut emitter.code)));
+        bodies.push((params, std::mem::take(&mut emitter.body.code)));
     }
     emitter
         .output
         .common()
         .push_str("; Generated by Imre. Runtime arguments borrow; results transfer ownership.\n");
-    write_declarations(emitter.output.common());
+    write_declarations(emitter.output.common(), uses_format_field);
     if emitter.uses_sequence_layout {
         emitter
             .output
@@ -704,15 +785,27 @@ fn emit_program(
     }
     emitter.enum_table();
     emitter.literal_pool();
+    write_function_bodies(emitter.output, module, bodies, sanitize);
+    // Layout hints never replace the representation, overflow, or error guards.
+    emitter.output.common().push_str(BRANCH_WEIGHTS);
+    Ok(())
+}
+
+fn write_function_bodies(
+    output: &mut Output,
+    module: &Module,
+    bodies: Vec<(String, String)>,
+    sanitize: bool,
+) {
     for (id, (params, body)) in bodies.into_iter().enumerate() {
         let (owner, name, returns) = if let Some(f) = module.functions.get(id) {
             (
-                emitter.output.function_owner(id),
-                emitter.output.function_name(id),
+                output.function_owner(id),
+                output.function_name(id),
                 f.returns.llvm(),
             )
         } else {
-            (emitter.output.entry, "main".to_owned(), "i32")
+            (output.entry, "main".to_owned(), "i32")
         };
         // Keep native function entries aligned to a cache line as the linked runtime changes.
         let attrs = if sanitize {
@@ -720,28 +813,17 @@ fn emit_program(
         } else {
             " align 64"
         };
-        emitter.output.common().push('\n');
-        emitter
-            .output
+        output.common().push('\n');
+        output
             .function(owner, &name, returns, &params, attrs)
             .push_str(&body);
     }
-    // Layout hints never replace the representation, overflow, or error guards.
-    emitter
-        .output
-        .common()
-        .push_str("\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n");
-    emitter
-        .output
-        .common()
-        .push_str("!1 = !{!\"branch_weights\", i32 2000, i32 1}\n");
-    Ok(!mixed_link_owners.is_empty())
 }
 
 struct Emitter<'a, 'module> {
     module: &'a Module,
     output: &'a mut Output,
-    code: String,
+    body: body::FunctionBody,
     entry_allocas: String,
     mapping_words: usize,
     forward_cursors: BTreeMap<usize, ForwardCursor>,
@@ -770,10 +852,6 @@ struct Emitter<'a, 'module> {
     enum_members: Vec<[usize; 3]>,
     http_members: Vec<Option<(u64, usize, usize)>>,
     literal_globals: Vec<Option<String>>,
-    next_value: usize,
-    next_label: usize,
-    current: String,
-    terminated: bool,
     loops: Vec<LoopTarget>,
     locals: Vec<Type>,
     directory_slot_count: usize,
@@ -798,7 +876,6 @@ struct Emitter<'a, 'module> {
     cleanup_bytes: usize,
     cleanup_limit_hit: bool,
     return_exit: String,
-    error_exit: String,
     sanitize: bool,
     ranges: &'a RangeFacts<'module>,
     effects: ExceptionEffects,
@@ -852,21 +929,17 @@ fn regex_positions_may_escape(module: &crate::ir::Module, function: &Function) -
 
 impl Emitter<'_, '_> {
     fn line(&mut self, line: impl AsRef<str>) {
-        writeln!(self.code, "  {}", line.as_ref()).unwrap();
+        self.body.line(line);
     }
 
     fn instruction(&mut self, instruction: impl AsRef<str>) -> String {
-        let result = format!("%v{}", self.next_value);
-        self.next_value += 1;
-        self.line(format!("{result} = {}", instruction.as_ref()));
-        result
+        self.body.instruction(instruction)
     }
 
     /// Gives each emitted operation independent scratch with function lifetime,
     /// including operations inside loops and duplicated finally cleanup paths.
     fn entry_alloca(&mut self, ty: impl AsRef<str>) -> String {
-        let result = format!("%scratch{}", self.next_value);
-        self.next_value += 1;
+        let result = self.body.name("%scratch");
         writeln!(self.entry_allocas, "  {result} = alloca {}", ty.as_ref()).unwrap();
         result
     }
@@ -905,29 +978,30 @@ impl Emitter<'_, '_> {
     }
 
     fn label(&mut self) -> String {
-        let result = format!("b{}", self.next_label);
-        self.next_label += 1;
-        result
+        self.body.label()
     }
 
     fn start(&mut self, label: &str) {
-        writeln!(self.code, "{label}:").unwrap();
-        self.current = label.to_owned();
-        self.terminated = false;
+        self.body.start(label);
     }
 
     fn jump(&mut self, label: &str) {
-        self.line(format!("br label %{label}"));
-        self.terminated = true;
+        self.body.jump(label);
     }
 
     fn branch(&mut self, condition: &str, yes: &str, no: &str) {
-        self.line(format!("br i1 {condition}, label %{yes}, label %{no}"));
-        self.terminated = true;
+        self.body.branch(condition, yes, no);
     }
 
     fn call(&mut self, name: &str, returns: Type, args: &[&Value]) -> Value {
-        self.call_with_effect(name, returns, args, runtime_call_may_raise(name), false)
+        self.call_with_effect(
+            &format!("@{name}"),
+            None,
+            returns,
+            args,
+            runtime_call_may_raise(name),
+            false,
+        )
     }
 
     /// Uses only the final IR's conservative callee summary. Argument evaluation
@@ -941,7 +1015,8 @@ impl Emitter<'_, '_> {
     ) -> Value {
         let name = self.output.function_ref(function);
         self.call_with_effect(
-            &name,
+            &format!("@{name}"),
+            None,
             returns,
             args,
             self.effects.may_raise(function),
@@ -952,7 +1027,7 @@ impl Emitter<'_, '_> {
     /// Captures in source order, preserving earlier owners across later argument
     /// effects and errors. Parameter reordering happens only after this step.
     fn call_operands(&mut self, args: &CallArgs) -> Vec<Operand> {
-        args.values.iter().map(|arg| self.operand(arg)).collect()
+        args.capture(|arg| self.operand(arg))
     }
 
     /// Once every argument is evaluated, the callee takes an owner of each
@@ -972,19 +1047,24 @@ impl Emitter<'_, '_> {
 
     fn call_with_effect(
         &mut self,
-        name: &str,
+        target: &str,
+        context: Option<&str>,
         returns: Type,
         args: &[&Value],
         may_raise: bool,
         inline: bool,
     ) -> Value {
-        let args = args
-            .iter()
-            .map(|value| format!("{} {}", value.ty.llvm(), value.operand))
+        let args = context
+            .into_iter()
+            .map(|context| format!("ptr {context}"))
+            .chain(
+                args.iter()
+                    .map(|value| format!("{} {}", value.ty.llvm(), value.operand)),
+            )
             .collect::<Vec<_>>()
             .join(", ");
         let attribute = if inline { " alwaysinline" } else { "" };
-        let instruction = format!("call {} @{name}({args}){attribute}", returns.llvm());
+        let instruction = format!("call {} {target}({args}){attribute}", returns.llvm());
         let operand = if may_raise {
             self.checked_instruction(instruction)
         } else {
@@ -1111,9 +1191,7 @@ impl Emitter<'_, '_> {
             self.instruction("load atomic i8, ptr @imre_signal_tripped monotonic, align 1");
         let pending = self.instruction(format!("icmp ne i8 {tripped}, 0"));
         let (slow, next) = (self.label(), self.label());
-        self.line(format!(
-            "br i1 {pending}, label %{slow}, label %{next}, !prof !0"
-        ));
+        self.body.conditional(&pending, &slow, &next, Some(false));
         self.start(&slow);
         let raised = self.instruction("call i1 @imre_typed_interrupt()");
         self.check_failed(&raised);
@@ -1127,10 +1205,7 @@ impl Emitter<'_, '_> {
     /// Branch weights guide layout/inlining without assuming errors impossible.
     fn check_failed(&mut self, failed: &str) {
         let (error, success) = (self.label(), self.label());
-        self.line(format!(
-            "br i1 {failed}, label %{error}, label %{success}, !prof !0"
-        ));
-        self.terminated = true;
+        self.body.conditional(failed, &error, &success, Some(false));
         let temporaries = self.temporaries.clone();
         self.start(&error);
         for value in temporaries.iter().rev() {
@@ -1456,7 +1531,7 @@ impl Emitter<'_, '_> {
             .runtime_call(&LIST_BORROW_INDEX, [receiver, &at])
             .value
             .operand;
-        let slow_exit = self.current.clone();
+        let slow_exit = self.body.current.clone();
         self.jump(&end);
         self.start(&end);
         Some(self.instruction(format!(
@@ -1501,7 +1576,7 @@ impl Emitter<'_, '_> {
             .into_value(self);
         // The join takes ownership of the value acquired on this edge.
         self.forget(&ordinary);
-        let slow_exit = self.current.clone();
+        let slow_exit = self.body.current.clone();
         self.jump(&end);
         self.start(&end);
         let result = self.instruction(format!(
@@ -1775,7 +1850,7 @@ impl Emitter<'_, '_> {
     fn cached_string_length(&mut self, slot: usize, text: &Value) -> Value {
         let cached = self.instruction(format!("load i64, ptr %str_count{slot}"));
         let hit = self.instruction(format!("icmp ne i64 {cached}, 0"));
-        let from = self.current.clone();
+        let from = self.body.current.clone();
         let (miss, done) = (self.label(), self.label());
         self.branch(&hit, &done, &miss);
         self.start(&miss);
@@ -1785,7 +1860,7 @@ impl Emitter<'_, '_> {
         let immediate = self.instruction(format!("trunc i64 {word} to i1"));
         let entry = self.instruction(format!("select i1 {immediate}, i64 {word}, i64 0"));
         self.line(format!("store i64 {entry}, ptr %str_count{slot}"));
-        let miss_exit = self.current.clone();
+        let miss_exit = self.body.current.clone();
         self.jump(&done);
         self.start(&done);
         let word = self.instruction(format!(
@@ -1808,11 +1883,11 @@ impl Emitter<'_, '_> {
             receiver.operand, snapshot.receiver.operand
         ));
         let (fallback, end) = (self.label(), self.label());
-        let before = self.current.clone();
+        let before = self.body.current.clone();
         self.branch(&same, &end, &fallback);
         self.start(&fallback);
         let ordinary = self.list_length(receiver);
-        let fallback_end = self.current.clone();
+        let fallback_end = self.body.current.clone();
         self.jump(&end);
         self.start(&end);
         Some(Value {
@@ -1964,7 +2039,7 @@ impl Emitter<'_, '_> {
                     const MAX_CLEANUP_BYTES: usize = 8 * 1024 * 1024;
                     if self.cleanup_limit_hit || self.cleanup_bytes >= MAX_CLEANUP_BYTES {
                         self.cleanup_limit_hit = true;
-                        self.terminated = true;
+                        self.body.terminated = true;
                         return;
                     }
                     let depth = self.cleanups.len();
@@ -1987,13 +2062,13 @@ impl Emitter<'_, '_> {
                         None
                     };
                     self.loops = loops;
-                    let before = self.code.len();
+                    let before = self.body.code.len();
                     let previous_bytes = self.cleanup_bytes;
                     self.block(&body);
                     // Nested copies are already included in this byte range.
-                    self.cleanup_bytes = previous_bytes + (self.code.len() - before);
+                    self.cleanup_bytes = previous_bytes + (self.body.code.len() - before);
                     self.cleanups.truncate(depth);
-                    if self.terminated {
+                    if self.body.terminated {
                         return;
                     }
                     if let Some((error, previous)) = error {
@@ -2016,7 +2091,7 @@ impl Emitter<'_, '_> {
                 self.jump(&self.return_exit.clone());
             }
             Completion::Jump { label, .. } => self.jump(&label),
-            Completion::Error => self.jump(&self.error_exit.clone()),
+            Completion::Error => self.jump(&self.body.error_target.clone()),
         }
     }
 
@@ -2086,9 +2161,9 @@ impl Emitter<'_, '_> {
         if catches_error {
             self.cleanups.pop();
         }
-        if !self.terminated {
+        if !self.body.terminated {
             self.block(orelse);
-            if !self.terminated {
+            if !self.body.terminated {
                 self.route(Completion::Jump {
                     label: end.clone(),
                     depth,
@@ -2100,11 +2175,14 @@ impl Emitter<'_, '_> {
             let exception = self.call("imre_error_take", Type::Exception, &[]);
             let pending_temporary = self.temporaries.clone();
             for handler in handlers {
-                let matched = if handler.kinds.is_empty() {
+                let crate::ir::ExceptionMatcher::Categories(kinds) = &handler.matcher else {
+                    unreachable!("a live Python matcher requires the registered frame")
+                };
+                let matched = if kinds.is_empty() {
                     "true".to_owned()
                 } else {
                     let mut matched = "false".to_owned();
-                    for kind in &handler.kinds {
+                    for kind in kinds {
                         let byte = self.instruction(format!(
                             "call i32 @imre_exception_matches(ptr {}, i32 {kind})",
                             exception.operand
@@ -2130,7 +2208,7 @@ impl Emitter<'_, '_> {
                     name: handler.name,
                 });
                 self.block(&handler.body);
-                if !self.terminated {
+                if !self.body.terminated {
                     self.route(Completion::Jump {
                         label: end.clone(),
                         depth,
@@ -2254,7 +2332,7 @@ impl Emitter<'_, '_> {
                 self.start(&failed);
                 let message = self.byte_array(b"cannot enable faulthandler\0".to_vec());
                 self.line(format!("call void @perror(ptr @{message})"));
-                self.line("ret i32 1");
+                self.body.end("ret i32 1");
                 self.start(&ready);
             }
             let filename = self.byte_array(file.as_bytes().to_vec());
@@ -2285,7 +2363,7 @@ impl Emitter<'_, '_> {
         self.directory_slot_count = directory_slots.len();
         let separate_exits = entry || !directory_slots.is_empty();
         self.return_exit = self.label();
-        self.error_exit = if separate_exits {
+        self.body.error_target = if separate_exits {
             self.label()
         } else {
             self.return_exit.clone()
@@ -2338,7 +2416,7 @@ impl Emitter<'_, '_> {
                 self.line(format!("store [4 x i64] zeroinitializer, ptr %line{slot}"));
             }
         }
-        let allocas_at = self.code.len();
+        let allocas_at = self.body.code.len();
         let mut pair_views = BTreeSet::new();
         ir::walk_expressions(&function.body, &mut |expr| {
             if let ExprKind::Builtin(Builtin::PairTable(ir::PairTableOp::Snapshot(slot)), _) =
@@ -2433,7 +2511,7 @@ impl Emitter<'_, '_> {
         }
         let command_flags = self.module.command_flags.as_ref();
         let ignore_env = command_flags.is_some_and(|flags| flags.ignore_environment);
-        let startup_at = self.code.len();
+        let startup_at = self.body.code.len();
         if entry {
             self.line(format!(
                 "call void @imre_process_config_init(i32 {}, i32 {}, i32 {})",
@@ -2488,8 +2566,8 @@ impl Emitter<'_, '_> {
             Some(ir::SourceFrame::Depth) => Some(self.enter_frame(None)),
             None => None,
         };
-        self.int_buffer_body(function);
-        if !self.terminated {
+        CheckedBody::native(self).emit_function(function);
+        if !self.body.terminated {
             self.jump(&self.return_exit.clone());
         }
         self.start(&self.return_exit.clone());
@@ -2497,10 +2575,10 @@ impl Emitter<'_, '_> {
             self.with_directory_frame(|out, frame| {
                 out.line(format!("call void @imre_object_release(ptr {frame})"));
             });
-            let returned = self.current.clone();
+            let returned = self.body.current.clone();
             let cleanup = self.label();
             self.jump(&cleanup);
-            self.start(&self.error_exit.clone());
+            self.start(&self.body.error_target.clone());
             self.with_directory_frame(|out, frame| {
                 for &slot in &directory_slots {
                     let value = out.borrow_slot(slot);
@@ -2513,7 +2591,7 @@ impl Emitter<'_, '_> {
                     "call void @imre_error_attach_directory_frame(ptr {frame})"
                 ));
             });
-            let raised = self.current.clone();
+            let raised = self.body.current.clone();
             self.jump(&cleanup);
             self.start(&cleanup);
             entry.then(|| {
@@ -2572,20 +2650,20 @@ impl Emitter<'_, '_> {
             self.branch(&failed, &error_return, &flush);
             self.start(&error_return);
             let status = self.instruction(format!("call i32 @imre_finish_unhandled(ptr {exit})"));
-            self.line(format!("ret i32 {status}"));
+            self.body.end(format!("ret i32 {status}"));
             self.start(&flush);
             let status = self.instruction("call i32 @imre_finish_stdio()");
-            self.line(format!("ret i32 {status}"));
+            self.body.end(format!("ret i32 {status}"));
         } else if function.returns == Type::None {
-            self.line("ret i8 0");
+            self.body.end("ret i8 0");
         } else {
             let value = self.instruction(format!(
                 "load {}, ptr %function_return",
                 function.returns.llvm()
             ));
-            self.line(format!("ret {returns} {value}"));
+            self.body.end(format!("ret {returns} {value}"));
         }
-        self.code.push_str("}\n");
+        self.body.code.push_str("}\n");
         // Mapping calls transfer their output words before another call can reuse them.
         for name in ["%mapping_key_word", "%mapping_value_word"]
             .into_iter()
@@ -2601,12 +2679,12 @@ impl Emitter<'_, '_> {
                 "null"
             };
             if self.has_extensions {
-                self.code.insert_str(
+                self.body.code.insert_str(
                     startup_at,
                     "  %extension_owner = call i1 @imre_extension_enter()\n",
                 );
             }
-            self.code.insert_str(
+            self.body.code.insert_str(
                 startup_at,
                 &format!(
                     "  call void @imre_typed_start(i32 {}, ptr {layout})\n",
@@ -2614,7 +2692,7 @@ impl Emitter<'_, '_> {
                 ),
             );
         }
-        self.code.insert_str(allocas_at, &self.entry_allocas);
+        self.body.code.insert_str(allocas_at, &self.entry_allocas);
         if self.cleanup_limit_hit {
             return Err(Unsupported(
                 "Imre: finally cleanup expansion exceeds the compiler limit",
@@ -2624,31 +2702,7 @@ impl Emitter<'_, '_> {
     }
 
     fn block(&mut self, statements: &[Statement]) {
-        let incoming = self.temporaries.clone();
-        let mut remaining = statements;
-        while let Some((statement, tail)) = remaining.split_first() {
-            if self.terminated {
-                break;
-            }
-            let grouped = self.integer_assignments(remaining);
-            if grouped > 0 {
-                remaining = &remaining[grouped..];
-            } else if let Some((next, after)) = tail.split_first()
-                && (self.move_cleared_local(statement, next) || self.append_pair(statement, next))
-            {
-                remaining = after;
-            } else {
-                self.statement(statement);
-                remaining = tail;
-            }
-            debug_assert!(
-                self.temporaries
-                    .iter()
-                    .map(|value| (&value.operand, value.ty))
-                    .eq(incoming.iter().map(|value| (&value.operand, value.ty))),
-                "statement changed its enclosing expression owners"
-            );
-        }
+        CheckedBody::native(self).emit_block(statements);
     }
 
     /// A copy immediately followed by clearing its private source transfers one owner.
@@ -2660,7 +2714,7 @@ impl Emitter<'_, '_> {
             && self.owns_slot(source)
             && self.owns_slot(*target)
         {
-            self.statement(&Statement::Move(*target, source));
+            CheckedBody::native(self).emit_statement(&Statement::Move(*target, source));
             return true;
         }
         false
@@ -2756,69 +2810,130 @@ impl Emitter<'_, '_> {
         }
     }
 
-    fn statement(&mut self, statement: &Statement) {
+    fn if_facts(&mut self, test: &Expr, yes: &[Statement]) -> NativeIfFacts {
+        let mut bounded = false;
+        if crate::list_specialization::is_window_range_guard(test)
+            && let [Statement::While(_, body, _)] = yes
+        {
+            crate::ir::walk_expressions(body, &mut |value| {
+                bounded |= matches!(
+                    value.kind,
+                    ExprKind::Builtin(Builtin::GetBoundedInAppendWindow { .. }, _)
+                );
+            });
+        }
+        let small_slots = if bounded {
+            self.ranges
+                .checked_small_slots(yes, &self.locals, &self.small_locals)
+        } else {
+            Vec::new()
+        };
+        let previous_window = self.reserved_append_window.clone();
+        let window = bounded
+            .then(|| crate::list_specialization::reserved_append_window(yes))
+            .flatten()
+            .and_then(|(slot, cursor)| Some((slot, self.forward_cursors.get(&cursor)?.clone())))
+            .map(|(slot, cursor)| {
+                let tail = self.entry_alloca("i64");
+                self.reserved_append_window = Some((slot, tail.clone()));
+                (slot, cursor, tail)
+            });
+        NativeIfFacts {
+            small_slots,
+            guarded_lists: self.guarded_integer_lists.len(),
+            previous_window,
+            window,
+        }
+    }
+
+    /// The fast loop needs tagged starting counters and room for the remaining appends.
+    fn if_edges(
+        &mut self,
+        statement: &Statement,
+        guard: &str,
+        facts: &NativeIfFacts,
+        yes: &str,
+        no: &str,
+    ) {
+        self.reserved_append_window
+            .clone_from(&facts.previous_window);
+        let mut guard = guard.to_owned();
+        let mut unknown = facts
+            .small_slots
+            .iter()
+            .copied()
+            .filter(|slot| !self.ranges.starts_small(statement, *slot))
+            .collect::<Vec<_>>()
+            .into_iter();
+        if let Some(first) = unknown.next() {
+            let mut words = self.borrow_slot(first).operand;
+            for slot in unknown {
+                let word = self.borrow_slot(slot).operand;
+                words = self.instruction(format!("and i64 {words}, {word}"));
+            }
+            let tagged = self.instruction(format!("trunc i64 {words} to i1"));
+            guard = self.instruction(format!("and i1 {guard}, {tagged}"));
+        }
+        if let Some((slot, cursor, _)) = &facts.window {
+            let check = self.label();
+            self.branch(&guard, &check, no);
+            self.start(&check);
+            let bytes = self.remaining_cursor_bytes(cursor);
+            let list = self.borrow_slot(*slot).operand;
+            let window = self.append_window(*slot);
+            let success = self.instruction(format!(
+                "call i32 @imre_list_try_open_append_window(ptr {list}, i64 {bytes}, ptr {window})"
+            ));
+            guard = self.instruction(format!("icmp ne i32 {success}, 0"));
+        }
+        self.branch(&guard, yes, no);
+    }
+
+    fn enter_if_body(&mut self, test: &Expr, facts: &NativeIfFacts) {
+        if let Some((slot, _, tail)) = &facts.window {
+            self.reserved_append_window = Some((*slot, tail.clone()));
+            // Opening the reserved window proves the list has an immediate tail.
+            let window = self.append_window(*slot);
+            let cursor = self.instruction(format!(
+                "getelementptr [3 x ptr], ptr {window}, i32 0, i32 1"
+            ));
+            let next = self.instruction(format!("load ptr, ptr {cursor}"));
+            let last = self.instruction(format!("getelementptr i64, ptr {next}, i64 -1"));
+            let word = self.instruction(format!("load i64, ptr {last}"));
+            self.line(format!("store i64 {word}, ptr {tail}"));
+        }
+        self.borrow_guarded_integer_lists(test);
+        for &slot in &facts.small_slots {
+            self.small_locals[slot] = true;
+        }
+    }
+
+    fn leave_if_body(&mut self, facts: &NativeIfFacts) {
+        self.reserved_append_window
+            .clone_from(&facts.previous_window);
+        for &slot in &facts.small_slots {
+            self.small_locals[slot] = false;
+        }
+        self.guarded_integer_lists.truncate(facts.guarded_lists);
+    }
+
+    fn other_statement(&mut self, statement: &Statement) {
         match statement {
-            Statement::Assign(slot, expression) => {
-                if let Some(cursor) = self.forward_cursors.get(slot).cloned() {
-                    self.assign_forward_cursor(*slot, expression, cursor);
-                    return;
-                }
-                if self.line_slots[*slot] {
-                    self.assign_line(*slot, expression);
-                    return;
-                }
-                if let ExprKind::Builtin(Builtin::SplitIntSource(mask), args) = &expression.kind {
-                    let value = self.expr(&args[0]);
-                    self.line(format!("call void @imre_str_prepare_int_fields(ptr {}, ptr %split_fields{slot}, i32 {mask})", value.operand));
-                    self.store(*slot, &value);
-                    return;
-                }
-                if let ExprKind::Builtin(Builtin::SplitTextSource(fields), args) = &expression.kind
-                {
-                    let value = self.expr(&args[0]);
-                    self.line(format!("call void @imre_str_field_spans(ptr {}, ptr %text_fields{slot}, i32 {fields})", value.operand));
-                    self.store(*slot, &value);
-                    return;
-                }
-                if self.locals[*slot] == Type::ByteOutput
-                    && matches!(&expression.kind, ExprKind::List(values) if values.is_empty())
-                {
-                    let value = self.call("imre_byte_output_new", Type::ByteOutput, &[]);
-                    if self.byte_output_owners.get(*slot) == Some(&Some(*slot)) {
-                        self.line(format!(
-                            "store {{ ptr, i64, i64 }} zeroinitializer, ptr %byte_window{slot}"
-                        ));
-                    }
-                    self.store(*slot, &value);
-                    return;
-                }
-                if self.struct_locals[*slot] {
-                    let value = self
-                        .struct_snapshot(expression)
-                        .expect("checked scalar struct source");
-                    self.store_borrowed(*slot, &value);
-                    return;
-                }
-                if self.borrowed_locals[*slot] {
-                    let value = self.borrow_projection(expression);
-                    self.store_borrowed(*slot, &value);
-                    return;
-                }
-                if self.concat_assign(*slot, expression) {
-                    return;
-                }
-                if !self.loops.is_empty()
-                    && let Some(fields) = records::replacement_fields(self.module, expression)
-                {
-                    self.assign_loop_record(*slot, fields);
-                    return;
-                }
-                let previous_small = self.assignment_replaces_small(*slot, expression);
-                let value = self.expr(expression);
-                self.store_with_previous_small(*slot, &value, previous_small);
-                if self.fixed_int_lists[*slot] {
-                    self.remember_int_buffer(*slot, &value);
-                }
+            Statement::Assign(..)
+            | Statement::Expr(_)
+            | Statement::Return(_)
+            | Statement::Scope { .. }
+            | Statement::With { .. }
+            | Statement::Clear(_)
+            | Statement::SetItem(..)
+            | Statement::Match(..)
+            | Statement::If(..)
+            | Statement::While(..)
+            | Statement::IterNext { .. }
+            | Statement::Break
+            | Statement::Continue
+            | Statement::Exhaust => {
+                unreachable!("shared IR statement")
             }
             Statement::Move(target, source) => {
                 debug_assert_eq!(self.locals[*target], self.locals[*source]);
@@ -2841,15 +2956,6 @@ impl Emitter<'_, '_> {
                 let value = self.take_slot(*source);
                 self.store(*target, &value);
             }
-            Statement::Clear(slot) => self.clear_slots(&[*slot]),
-            Statement::Scope { body, clear } => {
-                self.cleanups.push(Cleanup::Slots(clear.clone()));
-                self.block(body);
-                self.cleanups.pop();
-                if !self.terminated {
-                    self.clear_slots(clear);
-                }
-            }
             Statement::Try {
                 body,
                 handlers,
@@ -2866,59 +2972,12 @@ impl Emitter<'_, '_> {
                 }
                 // Both runtime helpers always set an error; their success edge
                 // is unreachable, but uses the same immediate-check protocol.
-                self.line("unreachable");
-                self.terminated = true;
+                self.body.end("unreachable");
             }
-            Statement::IterNext {
-                iterator,
-                key,
-                value,
-                ready,
-                kind,
-            } => {
-                self.iter_next(*iterator, *key, *value, *ready, *kind);
+            Statement::AugmentItem(_, _, ir::ItemUpdate::Protocol(_), _) => {
+                unreachable!("Python item update in fixed calling convention")
             }
-            Statement::SetItem(list, index, expression) => {
-                if self.copy_item(list, index, expression) {
-                    return;
-                }
-                // Python evaluates an assignment's RHS before its target expressions.
-                let nonnegative = self.nonnegative_index(index);
-                let fixed_slot = match list.kind {
-                    ExprKind::Local(slot)
-                        if self.fixed_int_lists[slot] && self.int_buffers.contains_key(&slot) =>
-                    {
-                        Some(slot)
-                    }
-                    _ => None,
-                };
-                let value = self.operand(expression);
-                let list = self.operand(list);
-                let index = self.operand(index);
-                if let Some(slot) = fixed_slot {
-                    self.fixed_int_set(slot, &index.value, &value.value);
-                } else {
-                    self.set_item(&list.value, &index.value, &value.value, nonnegative);
-                }
-                if self.module.types.mapping(list.value.ty).is_some()
-                    && self.module.types.may_own_file(
-                        value.value.ty,
-                        &self.module.class_fields,
-                        true,
-                    )
-                {
-                    // The assignment's stack keeps the RHS alive while the
-                    // temporary dictionary releases its remaining entries.
-                    self.release_operand(&list);
-                    self.release_operand(&index);
-                    self.release_operand(&value);
-                } else {
-                    self.release_operand(&value);
-                    self.release_operand(&index);
-                    self.release_operand(&list);
-                }
-            }
-            Statement::AugmentItem(list, index, op, expression) => {
+            Statement::AugmentItem(list, index, ir::ItemUpdate::Fixed(op), expression) => {
                 // Augmented assignment instead roots the target and old item first.
                 let nonnegative = self.nonnegative_index(index);
                 let list = self.operand(list);
@@ -3007,180 +3066,6 @@ impl Emitter<'_, '_> {
                 self.release_operand(&old);
                 self.release_operand(&receiver);
             }
-            // Discarded scalar literals have no effects. In particular, a
-            // function docstring must not allocate on every call. Literal
-            // allocation exhaustion is already fatal rather than catchable.
-            Statement::Expr(expression)
-                if matches!(
-                    expression.kind,
-                    ExprKind::Int(_)
-                        | ExprKind::Float(_)
-                        | ExprKind::Bool(_)
-                        | ExprKind::Str(_)
-                        | ExprKind::Bytes(_)
-                        | ExprKind::None
-                ) => {}
-            Statement::Expr(expression) => {
-                if let ExprKind::Builtin(Builtin::TextWrite, args) = &expression.kind {
-                    self.write_discard(args);
-                } else {
-                    let value = self.expr(expression);
-                    self.release(&value);
-                }
-            }
-            Statement::Return(expression) => {
-                let value = self.expr(expression);
-                self.forget(&value);
-                self.route(Completion::Return(value));
-            }
-            Statement::If(test, yes, no) => {
-                let mut bounded = false;
-                if crate::list_specialization::is_window_range_guard(test)
-                    && let [Statement::While(_, body, _)] = yes.as_slice()
-                {
-                    crate::ir::walk_expressions(body, &mut |value| {
-                        bounded |= matches!(
-                            value.kind,
-                            ExprKind::Builtin(Builtin::GetBoundedInAppendWindow { .. }, _)
-                        );
-                    });
-                }
-                let slots = if bounded {
-                    self.ranges
-                        .checked_small_slots(yes, &self.locals, &self.small_locals)
-                } else {
-                    Vec::new()
-                };
-                let reserve = bounded
-                    .then(|| crate::list_specialization::reserved_append_window(yes))
-                    .flatten();
-                let reserve = reserve.and_then(|(slot, cursor)| {
-                    self.forward_cursors
-                        .get(&cursor)
-                        .cloned()
-                        .map(|c| (slot, c))
-                });
-                let previous = self.reserved_append_window.clone();
-                let carried = reserve
-                    .as_ref()
-                    .map(|(slot, _)| (*slot, self.entry_alloca("i64")));
-                if carried.is_some() {
-                    self.reserved_append_window.clone_from(&carried);
-                }
-                let condition = self.expr(test);
-                self.reserved_append_window.clone_from(&previous);
-                let (yes_label, no_label, end) = (self.label(), self.label(), self.label());
-                let mut guard = condition.operand;
-                let unknown = slots
-                    .iter()
-                    .copied()
-                    .filter(|slot| !self.ranges.starts_small(statement, *slot))
-                    .collect::<Vec<_>>();
-                if let Some((first, rest)) = unknown.split_first() {
-                    let mut words = self.borrow_slot(*first).operand;
-                    for slot in rest {
-                        let word = self.borrow_slot(*slot).operand;
-                        words = self.instruction(format!("and i64 {words}, {word}"));
-                    }
-                    let tagged = self.instruction(format!("trunc i64 {words} to i1"));
-                    guard = self.instruction(format!("and i1 {guard}, {tagged}"));
-                }
-                if let Some((slot, cursor)) = reserve {
-                    let check = self.label();
-                    self.branch(&guard, &check, &no_label);
-                    self.start(&check);
-                    let bytes = self.remaining_cursor_bytes(&cursor);
-                    let list = self.borrow_slot(slot).operand;
-                    let window = self.append_window(slot);
-                    let success = self.instruction(format!(
-                        "call i32 @imre_list_try_open_append_window(ptr {list}, i64 {bytes}, ptr {window})"
-                    ));
-                    let opened = self.instruction(format!("icmp ne i32 {success}, 0"));
-                    self.branch(&opened, &yes_label, &no_label);
-                    self.reserved_append_window.clone_from(&carried);
-                } else {
-                    self.branch(&guard, &yes_label, &no_label);
-                }
-                self.start(&yes_label);
-                if let Some((slot, tail)) = carried {
-                    // Opening the reserved window proves the list has an immediate tail.
-                    let window = self.append_window(slot);
-                    let cursor = self.instruction(format!(
-                        "getelementptr [3 x ptr], ptr {window}, i32 0, i32 1"
-                    ));
-                    let next = self.instruction(format!("load ptr, ptr {cursor}"));
-                    let last = self.instruction(format!("getelementptr i64, ptr {next}, i64 -1"));
-                    let word = self.instruction(format!("load i64, ptr {last}"));
-                    self.line(format!("store i64 {word}, ptr {tail}"));
-                }
-                let prior = self.guarded_integer_lists.len();
-                self.borrow_guarded_integer_lists(test);
-                for slot in &slots {
-                    self.small_locals[*slot] = true;
-                }
-                self.block(yes);
-                self.reserved_append_window = previous;
-                for slot in slots {
-                    self.small_locals[slot] = false;
-                }
-                self.guarded_integer_lists.truncate(prior);
-                let yes_ends = self.terminated;
-                if !yes_ends {
-                    self.jump(&end);
-                }
-                self.start(&no_label);
-                self.block(no);
-                let no_ends = self.terminated;
-                if !no_ends {
-                    self.jump(&end);
-                }
-                self.start(&end);
-                if yes_ends && no_ends {
-                    self.line("unreachable");
-                    self.terminated = true;
-                }
-            }
-            Statement::While(test, body, orelse) => {
-                let previous_lengths = self.snapshot_loop_lengths(statement);
-                let previous_buffers = self.int_buffer_loop(statement);
-                let raw_subtotal = self.raw_subtotal(body);
-                let (condition, body_label, end) = (self.label(), self.label(), self.label());
-                let exhausted = if orelse.is_empty() {
-                    end.clone()
-                } else {
-                    self.label()
-                };
-                if !self.struct_run_loop(test, body, &condition, &exhausted) {
-                    self.jump(&condition);
-                }
-                self.start(&condition);
-                self.check_interrupt();
-                let test = self.while_condition(test, raw_subtotal.is_some());
-                self.branch(&test, &body_label, &exhausted);
-                self.start(&body_label);
-                self.loops.push(LoopTarget {
-                    end: end.clone(),
-                    exhausted: exhausted.clone(),
-                    next: condition.clone(),
-                    cleanup_depth: self.cleanups.len(),
-                    raw_subtotal,
-                });
-                self.block(body);
-                self.loops.pop();
-                if !self.terminated {
-                    self.jump(&condition);
-                }
-                if !orelse.is_empty() {
-                    self.start(&exhausted);
-                    self.block(orelse);
-                    if !self.terminated {
-                        self.jump(&end);
-                    }
-                }
-                self.start(&end);
-                self.length_snapshots = previous_lengths;
-                self.int_buffers = previous_buffers;
-            }
             Statement::For {
                 target,
                 cursor,
@@ -3228,7 +3113,7 @@ impl Emitter<'_, '_> {
                 self.branch(&zero.operand, &fail, &condition);
                 self.start(&fail);
                 self.checked_line("call void @imre_range_step_zero()");
-                self.line("unreachable");
+                self.body.end("unreachable");
                 self.start(&condition);
                 self.check_interrupt();
                 let mut current = self.borrow_slot(*cursor);
@@ -3260,7 +3145,7 @@ impl Emitter<'_, '_> {
                 });
                 self.block(body);
                 self.loops.pop();
-                if !self.terminated {
+                if !self.body.terminated {
                     if unit_step {
                         self.batch_modular_writes(body, *target, *cursor, *stop);
                     }
@@ -3281,22 +3166,11 @@ impl Emitter<'_, '_> {
                 if !orelse.is_empty() {
                     self.start(&exhausted);
                     self.block(orelse);
-                    if !self.terminated {
+                    if !self.body.terminated {
                         self.jump(&end);
                     }
                 }
                 self.start(&end);
-            }
-            Statement::Break | Statement::Continue | Statement::Exhaust => {
-                let target = self.loops.last().unwrap();
-                self.route(Completion::Jump {
-                    label: match statement {
-                        Statement::Break => target.end.clone(),
-                        Statement::Exhaust => target.exhausted.clone(),
-                        _ => target.next.clone(),
-                    },
-                    depth: target.cleanup_depth,
-                });
             }
             Statement::Assert(test) => {
                 let test = self.expr(test);
@@ -3304,7 +3178,7 @@ impl Emitter<'_, '_> {
                 self.branch(&test.operand, &success, &fail);
                 self.start(&fail);
                 self.checked_line("call void @imre_assert_fail()");
-                self.line("unreachable");
+                self.body.end("unreachable");
                 self.start(&success);
             }
         }
@@ -3324,136 +3198,36 @@ impl Emitter<'_, '_> {
             self.retain(&value);
             value
         } else {
-            self.expression(expression)
+            CheckedBody::native(self)
+                .emit_value(expression)
+                .into_native()
+                .value
         };
         value.small_integer |= self.ranges.integer(expression).is_some();
         self.owned(value)
     }
 
-    fn expression(&mut self, expression: &Expr) -> Value {
+    fn other_expression(&mut self, expression: &Expr) -> Value {
         match &expression.kind {
-            ExprKind::Int(value) => {
-                if let Ok(value) = value.parse::<i64>()
-                    && (-(1_i64 << 62)..(1_i64 << 62)).contains(&value)
-                {
-                    small(value)
-                } else {
-                    self.pooled_literal(value.as_bytes(), Type::Int)
-                }
-            }
-            ExprKind::Float(value) => Value {
-                ty: Type::Float,
-                operand: format!("0x{:016X}", value.to_bits()),
-                small_integer: false,
-            },
-            ExprKind::Bool(value) => Value {
-                ty: Type::Bool,
-                operand: u8::from(*value).to_string(),
-                small_integer: false,
-            },
-            ExprKind::Str(value) => Value {
-                ty: expression.ty,
-                ..self.pooled_literal(value.as_bytes(), Type::Str)
-            },
-            ExprKind::Bytes(value) => self.pooled_literal(value, Type::Bytes),
-            ExprKind::None => none(),
-            ExprKind::Local(slot) => {
-                let mut value = self.borrow_slot(*slot);
-                value.small_integer |= self.ranges.integer(expression).is_some();
-                self.retain(&value);
-                value
-            }
-            ExprKind::Bind(slot, expression) => {
-                let value = self.expr(expression);
-                self.retain(&value);
-                let storage = self.locals[*slot];
-                let stored = if storage == value.ty {
-                    value.clone()
-                } else if value.ty == Type::None {
-                    Value {
-                        ty: storage,
-                        operand: "0".into(),
-                        small_integer: false,
-                    }
-                } else if matches!(
-                    self.module.types.payload(storage).unwrap_or(storage),
-                    Type::Union(_)
-                ) && matches!(
-                    self.module.types.payload(value.ty).unwrap_or(value.ty),
-                    Type::Str
-                        | Type::Bytes
-                        | Type::List(_)
-                        | Type::Class(_)
-                        | Type::Exception
-                        | Type::NamedException(_)
-                ) {
-                    self.union_inject(value.clone(), storage)
-                } else {
-                    self.present(value.clone(), storage)
-                };
-                self.store(*slot, &stored);
-                value
-            }
-            ExprKind::Scope { body, value, clear } => {
-                self.cleanups.push(Cleanup::Slots(clear.clone()));
-                self.block(body);
-                // Unpacking returns a captured item and clears its slot before
-                // evaluating the next target. Hand its owner to the result.
-                if let ExprKind::Local(slot) = value.kind
-                    && clear.as_slice() == [slot]
-                    && self.owns_slot(slot)
-                {
-                    self.cleanups.pop();
-                    return self.take_slot(slot);
-                }
-                let value = self.expr(value);
-                self.cleanups.pop();
-                self.clear_slots(clear);
-                value
-            }
-            ExprKind::List(values) => {
-                let list = if expression.ty == Type::ListInt {
-                    self.call("imre_list_new", expression.ty, &[])
-                } else {
-                    let element = self.module.types.element(expression.ty).unwrap();
-                    let op = if self.module.types.is_value_struct(element) {
-                        let layout = self.output.record_layout(element);
-                        format!("call ptr @imre_struct_list_new(ptr @{layout})")
-                    } else {
-                        format!(
-                            "call ptr @imre_seq_new(i32 {})",
-                            representation_kind(element, &self.module.types)
-                        )
-                    };
-                    let value = Value {
-                        ty: expression.ty,
-                        operand: self.instruction(op),
-                        small_integer: false,
-                    };
-                    self.owned(value)
-                };
-                let mut remaining = values.as_slice();
-                if list.ty == Type::ListInt {
-                    while let [first, second, rest @ ..] = remaining {
-                        let first = self.operand(first);
-                        let second = self.operand(second);
-                        self.runtime_call(&LIST_APPEND_PAIR, [&list, &first.value, &second.value]);
-                        self.release_operand(&second);
-                        self.release_operand(&first);
-                        remaining = rest;
-                    }
-                }
-                for value in remaining {
-                    if self.append_struct_constructor(&list, value) {
-                        continue;
-                    }
-                    let value = self.operand(value);
-                    if !self.try_append_owned(&list, &value) {
-                        self.append(&list, &value.value);
-                        self.release_operand(&value);
-                    }
-                }
-                list
+            ExprKind::Negate(_)
+            | ExprKind::Not(_)
+            | ExprKind::Scope { .. }
+            | ExprKind::Int(_)
+            | ExprKind::Float(_)
+            | ExprKind::Str(_)
+            | ExprKind::Bytes(_)
+            | ExprKind::Bool(_)
+            | ExprKind::None
+            | ExprKind::Local(_)
+            | ExprKind::Bind(..)
+            | ExprKind::Invoke { .. }
+            | ExprKind::Binary(..)
+            | ExprKind::Boolean(..)
+            | ExprKind::BooleanValue(..)
+            | ExprKind::Conditional(..)
+            | ExprKind::Builtin(..) => unreachable!("shared IR expression"),
+            ExprKind::List(_) | ExprKind::Tuple(_) | ExprKind::Set { .. } => {
+                unreachable!("shared checked display")
             }
             ExprKind::Dict {
                 key,
@@ -3479,24 +3253,6 @@ impl Emitter<'_, '_> {
                 }
                 dict
             }
-            ExprKind::Set { element, values } => {
-                let set = Value {
-                    ty: expression.ty,
-                    operand: self.instruction(format!(
-                        "call ptr @imre_set_new(i32 {})",
-                        representation_kind(*element, &self.module.types)
-                    )),
-                    small_integer: false,
-                };
-                let set = self.owned(set);
-                for value in values {
-                    let value = self.operand(value);
-                    self.set_member(&set, &value.value, true);
-                    self.release_operand(&value);
-                }
-                set
-            }
-            ExprKind::Tuple(values) => self.tuple(expression.ty, values, None),
             ExprKind::Present(expression_value) => {
                 let value = self.operand(expression_value);
                 let value = self.own_operand(value);
@@ -3527,73 +3283,7 @@ impl Emitter<'_, '_> {
                 };
                 self.decode_word(word, expression.ty)
             }
-            ExprKind::Binary(Binary::Concat, ..) if expression.ty == Type::Str => {
-                self.concat(expression)
-            }
-            ExprKind::Binary(op, left, right) => {
-                if matches!(op, Binary::Add)
-                    && matches!(&left.kind, ExprKind::Builtin(Builtin::IntBounded { .. }, _))
-                    && let Some(slot) = self.active_subtotal().map(str::to_owned)
-                {
-                    let subtotal = self.instruction(format!("load i64, ptr {slot}"));
-                    let term = self.operand(right);
-                    let decoded = self.instruction(format!("ashr i64 {}, 1", term.value.operand));
-                    let updated = self.instruction(format!("add nsw i64 {subtotal}, {decoded}"));
-                    self.release_operand(&term);
-                    self.line(format!("store i64 {updated}, ptr {slot}"));
-                    return self.tag_small(&updated);
-                }
-                let direct = self.small_binary_proof(expression, left, right, *op);
-                let left_value = self.operand(left);
-                let right_value = self.operand(right);
-                let result = if let Some(adjust_floor) = direct {
-                    let bounds = self.ranges.integer(left).zip(self.ranges.integer(right));
-                    self.small_binary(
-                        *op,
-                        &left_value.value,
-                        &right_value.value,
-                        adjust_floor,
-                        bounds,
-                    )
-                } else {
-                    self.binary(*op, &left_value.value, &right_value.value)
-                };
-                self.release_operand(&left_value);
-                self.release_operand(&right_value);
-                result
-            }
-            ExprKind::Negate(value) => {
-                let direct = self.ranges.integer(expression).is_some()
-                    && self.ranges.integer(value).is_some();
-                let value = self.operand(value);
-                let result = if value.value.ty == Type::Float {
-                    Value {
-                        ty: Type::Float,
-                        operand: self.instruction(format!("fneg double {}", value.value.operand)),
-                        small_integer: false,
-                    }
-                } else if direct {
-                    self.small_binary(Binary::Subtract, &small(0), &value.value, false, None)
-                } else {
-                    self.binary(Binary::Subtract, &small(0), &value.value)
-                };
-                self.release_operand(&value);
-                result
-            }
-            ExprKind::Not(value) => {
-                let value = self.expr(value);
-                Value {
-                    ty: Type::Bool,
-                    operand: self.instruction(format!("xor i1 {}, true", value.operand)),
-                    small_integer: false,
-                }
-            }
-            ExprKind::Boolean(and, values) => self.boolean(*and, values),
-            ExprKind::BooleanValue(and, left, right) => {
-                self.boolean_value(*and, left, right, expression.ty)
-            }
-            ExprKind::Conditional(test, yes, no) => self.conditional(test, yes, no),
-            ExprKind::Compare(values, ops) => self.comparisons(values, ops),
+            ExprKind::Compare(..) => unreachable!("checked comparison"),
             ExprKind::Call(id, args) => {
                 if let [arg] = args.values.as_slice()
                     && self.module.types.is_value_struct(arg.ty)
@@ -3607,28 +3297,16 @@ impl Emitter<'_, '_> {
                         args.exhaustive_enum_match,
                     );
                 }
-                let mut values = self.call_operands(args);
-                self.transfer_call_operands(&mut values);
-                let result = self.user_call(
-                    *id,
+                let values = self.call_operands(args);
+                self.native_call(
+                    callables::NativeCallTarget::Function(*id),
+                    args,
+                    values,
                     expression.ty,
-                    &args
-                        .order
-                        .iter()
-                        .map(|&index| &values[index].value)
-                        .collect::<Vec<_>>(),
-                    args.exhaustive_enum_match,
-                );
-                for arg in &values {
-                    self.release_operand(arg);
-                }
-                result
+                )
             }
             ExprKind::Callable { function, receiver } => {
                 self.callable_value(expression.ty, *function, receiver.as_deref())
-            }
-            ExprKind::Invoke { callable, args } => {
-                self.invoke_callable(callable, args, expression.ty)
             }
             ExprKind::Construct { initializer, args } => {
                 // A type call keeps its own arguments while __init__ runs.
@@ -3685,7 +3363,6 @@ impl Emitter<'_, '_> {
                 self.release_operand(&receiver);
                 value
             }
-            ExprKind::Builtin(builtin, args) => self.builtin(builtin, args, expression.ty),
         }
     }
 
@@ -3697,7 +3374,7 @@ impl Emitter<'_, '_> {
     fn concat_assign(&mut self, slot: usize, expression: &Expr) -> bool {
         if self.locals[slot] != Type::Str
             || self.expression_rebound[slot]
-            || !matches!(expression.kind, ExprKind::Binary(Binary::Concat, ..))
+            || !expression.is_string_concat()
         {
             return false;
         }
@@ -3948,7 +3625,7 @@ impl Emitter<'_, '_> {
     /// receiver and fragment roots survive until the status has been checked.
     fn write_discard(&mut self, args: &[Expr]) {
         let receiver = self.operand(&args[0]);
-        let (status, owners) = if matches!(args[1].kind, ExprKind::Binary(Binary::Concat, ..)) {
+        let (status, owners) = if args[1].is_string_concat() {
             let (scratch, count, owners) = self.concat_parts(concat_leaves(self, &args[1]));
             let status = self.instruction(format!(
                 "call i32 @imre_text_write_parts(ptr {}, ptr {scratch}, i64 {count})",
@@ -4008,7 +3685,9 @@ impl Emitter<'_, '_> {
                         left.operand, right.operand
                     ))
                 }
-                Binary::Repeat
+                Binary::Power
+                | Binary::MatrixMultiply
+                | Binary::Repeat
                 | Binary::Concat
                 | Binary::BitAnd
                 | Binary::BitOr
@@ -4025,6 +3704,7 @@ impl Emitter<'_, '_> {
             };
         }
         match op {
+            Binary::Power | Binary::MatrixMultiply => unreachable!("fixed operator was checked"),
             Binary::Repeat => {
                 let (list, count) = if matches!(
                     left.ty,
@@ -4054,9 +3734,12 @@ impl Emitter<'_, '_> {
                 left.ty,
                 &[left, right],
             ),
-            Binary::Add => self.call("int_add", Type::Int, &[left, right]),
-            Binary::Subtract => self.call("int_sub", Type::Int, &[left, right]),
-            Binary::Multiply => self.call("int_mul", Type::Int, &[left, right]),
+            Binary::Add | Binary::Subtract | Binary::Multiply => {
+                let result = self
+                    .body
+                    .integer_arithmetic(op, &left.operand, &right.operand);
+                self.owned(result)
+            }
             Binary::Divide => self.call("imre_int_true_divide", Type::Float, &[left, right]),
             Binary::FloorDivide => self.call("int_floordiv", Type::Int, &[left, right]),
             Binary::Modulo => self.call("int_mod", Type::Int, &[left, right]),
@@ -4099,7 +3782,11 @@ impl Emitter<'_, '_> {
                     (left.min >= 0 && right.min > 0) || (left.max <= 0 && right.max < 0);
                 Some(!same_sign)
             }
-            Binary::Divide | Binary::Repeat | Binary::Concat => None,
+            Binary::Power
+            | Binary::MatrixMultiply
+            | Binary::Divide
+            | Binary::Repeat
+            | Binary::Concat => None,
         }
     }
 
@@ -4217,7 +3904,11 @@ impl Emitter<'_, '_> {
                 };
                 self.instruction(format!("{instruction} i64 {left}, {right}"))
             }
-            Binary::Divide | Binary::Repeat | Binary::Concat => {
+            Binary::Power
+            | Binary::MatrixMultiply
+            | Binary::Divide
+            | Binary::Repeat
+            | Binary::Concat => {
                 unreachable!("only proved integer arithmetic")
             }
         };
@@ -4252,7 +3943,7 @@ impl Emitter<'_, '_> {
         };
         let generic = self.call(symbol, Type::Int, &[value]);
         self.forget(&generic);
-        let wide_exit = self.current.clone();
+        let wide_exit = self.body.current.clone();
         self.jump(&done);
         self.start(&done);
         let operand = self.instruction(format!(
@@ -4376,11 +4067,11 @@ impl Emitter<'_, '_> {
         self.branch(&immediate, &fast, &slow);
         self.start(&fast);
         let small = self.select_integer_extremum(order, args, true);
-        let fast_end = self.current.clone();
+        let fast_end = self.body.current.clone();
         self.jump(&done);
         self.start(&slow);
         let generic = self.select_integer_extremum(order, args, false);
-        let slow_end = self.current.clone();
+        let slow_end = self.body.current.clone();
         self.jump(&done);
         self.start(&done);
         Value {
@@ -4473,6 +4164,9 @@ impl Emitter<'_, '_> {
             self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
         } else {
             match left.ty {
+                Type::PythonObject => {
+                    unreachable!("registered comparison in fixed calling convention")
+                }
                 Type::CmpKey(..) => unreachable!("comparator keys use their callback"),
                 Type::ForwardRef(_) | Type::AnnotationValue(_) => {
                     let symbol = if matches!(left.ty, Type::ForwardRef(_)) {
@@ -4910,36 +4604,10 @@ impl Emitter<'_, '_> {
         } else {
             Self::operand
         };
-        let end = self.label();
-        let mut incoming = Vec::new();
-        let mut left = operand(self, &values[0]);
-        for (i, &op) in ops.iter().enumerate() {
-            let right = operand(self, &values[i + 1]);
-            let test = self.compare(op, &left.value, &right.value);
-            self.release_operand(&left);
-            if i + 1 == ops.len() {
-                self.release_operand(&right);
-                incoming.push(format!("[ {}, %{} ]", test.operand, self.current));
-                self.jump(&end);
-            } else {
-                let (next, fail) = (self.label(), self.label());
-                self.branch(&test.operand, &next, &fail);
-                let temporaries = self.temporaries.clone();
-                self.start(&fail);
-                self.release_operand(&right);
-                incoming.push(format!("[ false, %{} ]", self.current));
-                self.jump(&end);
-                self.start(&next);
-                self.temporaries = temporaries;
-            }
-            left = right;
-        }
-        self.start(&end);
-        Value {
-            ty: Type::Bool,
-            operand: self.instruction(format!("phi i1 {}", incoming.join(", "))),
-            small_integer: false,
-        }
+        operations::CheckedBody::native(self)
+            .native_comparisons(values, ops, operand)
+            .into_native()
+            .value
     }
 
     /// Borrows a direct integer-list read under its local root. Callers prove the
@@ -4974,72 +4642,19 @@ impl Emitter<'_, '_> {
         self.operand(expression)
     }
 
-    /// Each predecessor transfers one result owner into the phi. Removing that
-    /// branch's temporary before emitting the other branch keeps its error
-    /// cleanup from referring to an SSA value that does not dominate it.
-    fn conditional(&mut self, test: &Expr, yes: &Expr, no: &Expr) -> Value {
-        if let Some(value) = conditionals::absolute_operand(test, yes, no) {
-            let value = self.operand(value);
-            let result = self.call("int_abs", Type::Int, &[&value.value]);
-            self.release_operand(&value);
-            return result;
-        }
-        let test = self.expr(test);
-        let (yes_label, no_label, end) = (self.label(), self.label(), self.label());
-        self.branch(&test.operand, &yes_label, &no_label);
-        self.start(&yes_label);
-        let yes = self.expr(yes);
-        self.forget(&yes);
-        let yes_end = self.current.clone();
-        self.jump(&end);
-        self.start(&no_label);
-        let no = self.expr(no);
-        self.forget(&no);
-        let no_end = self.current.clone();
-        self.jump(&end);
-        self.start(&end);
-        Value {
-            ty: yes.ty,
-            operand: self.instruction(format!(
-                "phi {} [ {}, %{yes_end} ], [ {}, %{no_end} ]",
-                yes.ty.llvm(),
-                yes.operand,
-                no.operand
-            )),
-            small_integer: yes.small_integer && no.small_integer,
-        }
+    fn absolute_choice(&mut self, test: &Expr, yes: &Expr, no: &Expr) -> Option<Value> {
+        let value = self.operand(conditionals::absolute_operand(test, yes, no)?);
+        let result = self.call("int_abs", Type::Int, &[&value.value]);
+        self.release_operand(&value);
+        Some(result)
     }
 
-    fn boolean(&mut self, and: bool, values: &[Expr]) -> Value {
-        if let Some(result) = self.indexed_ascii_membership(and, values) {
-            return result;
-        }
-        if !and && let Some(value) = self.ascii_affix_alternatives(values) {
-            return value;
-        }
-        let end = self.label();
-        let mut incoming = Vec::new();
-        for (i, expression) in values.iter().enumerate() {
-            let value = self.expr(expression);
-            incoming.push(format!("[ {}, %{} ]", value.operand, self.current));
-            if i + 1 == values.len() {
-                self.jump(&end);
-            } else {
-                let next = self.label();
-                if and {
-                    self.branch(&value.operand, &next, &end);
-                } else {
-                    self.branch(&value.operand, &end, &next);
-                }
-                self.start(&next);
-            }
-        }
-        self.start(&end);
-        Value {
-            ty: Type::Bool,
-            operand: self.instruction(format!("phi i1 {}", incoming.join(", "))),
-            small_integer: false,
-        }
+    fn boolean_specialization(&mut self, and: bool, values: &[Expr]) -> Option<Value> {
+        self.indexed_ascii_membership(and, values).or_else(|| {
+            (!and)
+                .then(|| self.ascii_affix_alternatives(values))
+                .flatten()
+        })
     }
 
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
@@ -5086,10 +4701,13 @@ impl Emitter<'_, '_> {
                 ty: Type::Tuple(*layout),
                 kind: ExprKind::Builtin(Builtin::RecordView, expressions.to_vec()),
             };
-            return self.expression(&Expr {
-                ty: returns,
-                kind: ExprKind::Field(Box::new(frame), 0),
-            });
+            return CheckedBody::native(self)
+                .emit_value(&Expr {
+                    ty: returns,
+                    kind: ExprKind::Field(Box::new(frame), 0),
+                })
+                .into_native()
+                .value;
         }
         if let Builtin::BoxAnnotation(layout) = builtin {
             return Value {
@@ -5108,10 +4726,13 @@ impl Emitter<'_, '_> {
                 ty: Type::Tuple(id),
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![reference.clone()]),
             };
-            return self.expression(&Expr {
-                ty: returns,
-                kind: ExprKind::Field(Box::new(frame), *index),
-            });
+            return CheckedBody::native(self)
+                .emit_value(&Expr {
+                    ty: returns,
+                    kind: ExprKind::Field(Box::new(frame), *index),
+                })
+                .into_native()
+                .value;
         }
         if matches!(builtin, Builtin::NewForwardRef) {
             let Type::ForwardRef(id) = returns else {
@@ -5151,8 +4772,7 @@ impl Emitter<'_, '_> {
             ] = expressions
             && self.locals[*slot] == rhs.ty
         {
-            let value = self.expr(rhs);
-            self.store(*slot, &value);
+            let value = self.bind_value(*slot, rhs, Ownership::Borrowed);
             return self.truth(&value);
         }
         let probe_index = builtin.tuple_probe_index();
@@ -5205,6 +4825,49 @@ impl Emitter<'_, '_> {
             })
             .collect::<Vec<_>>();
         let result = match builtin {
+            Builtin::RegisteredImport(_)
+            | Builtin::RegisteredSuspend(..)
+            | Builtin::RegisteredAssertionFailure { .. }
+            | Builtin::RegisteredNamespaceAnnotation(_)
+            | Builtin::RegisteredAnnotationStart
+            | Builtin::RegisteredAnnotationFormat
+            | Builtin::RegisteredAnnotationInsert(_)
+            | Builtin::BindAnnotationExpression(_)
+            | Builtin::RegisteredAnnotationResult
+            | Builtin::RegisteredDeleteName(..)
+            | Builtin::RegisteredDefinition(_)
+            | Builtin::RegisteredLambda(..)
+            | Builtin::RegisteredGenerator(..)
+            | Builtin::RegisteredTypeAlias(_)
+            | Builtin::RegisteredStatement(..)
+            | Builtin::RegisteredDiscard
+            | Builtin::RegisteredNamespace(_)
+            | Builtin::RegisteredUnpack { .. }
+            | Builtin::RegisteredIter(_)
+            | Builtin::RegisteredCall(..)
+            | Builtin::RegisteredName(_)
+            | Builtin::RegisteredUnary(_)
+            | Builtin::Unrepresented
+            | Builtin::RegisteredCompare(_)
+            | Builtin::RegisteredContainsLiteral(_)
+            | Builtin::RegisteredInPlace(_)
+            | Builtin::RegisteredSubscript(..)
+            | Builtin::RegisteredSpread
+            | Builtin::RegisteredIndexConstant(_)
+            | Builtin::RegisteredSlice
+            | Builtin::RegisteredDeleteItem
+            | Builtin::RegisteredDict(_)
+            | Builtin::RegisteredEllipsis
+            | Builtin::RegisteredComplex(..)
+            | Builtin::FormatConversion(_)
+            | Builtin::RegisteredString(_)
+            | Builtin::RegisteredTemplate(_)
+            | Builtin::RegisteredInterpolation { .. }
+            | Builtin::RegisteredAttribute { .. }
+            | Builtin::RegisteredLocation(..) => {
+                unreachable!("registered operation in fixed calling convention")
+            }
+            Builtin::FormatJoin => unreachable!("the checked body emits string joins"),
             Builtin::PairTable(ir::PairTableOp::ViewLen(slot)) => {
                 let count = self.instruction(format!(
                     "getelementptr inbounds {{ ptr, i64 }}, ptr %pair_view{slot}, i32 0, i32 1"
@@ -5235,7 +4898,7 @@ impl Emitter<'_, '_> {
                     "call i64 @imre_pair_table_field(ptr {}, i64 {}, i64 {}, i32 {field})",
                     args[0].value.operand, args[1].value.operand, args[2].value.operand
                 ));
-                let other = self.current.clone();
+                let other = self.body.current.clone();
                 self.jump(&done);
                 self.start(&done);
                 let value = self.instruction(format!(
@@ -6366,6 +6029,7 @@ impl Emitter<'_, '_> {
             | Builtin::SortRestore
             | Builtin::StringJoin
             | Builtin::StringFormat
+            | Builtin::FormatField(_)
             | Builtin::StringReplace
             | Builtin::FloatFormat { .. }
             | Builtin::HexFormat { .. }
@@ -6670,7 +6334,8 @@ impl Emitter<'_, '_> {
                 self.output
                     .local_helper("imre_tagged_modpow", include_str!("llvm/tagged_modpow.ll"));
                 self.call_with_effect(
-                    "imre_tagged_modpow",
+                    "@imre_tagged_modpow",
+                    None,
                     Type::Int,
                     &[&args[0].value, &args[1].value, &args[2].value],
                     true,
@@ -8078,7 +7743,8 @@ impl Emitter<'_, '_> {
                     include_str!("llvm/tagged_sumprod.ll"),
                 );
                 self.call_with_effect(
-                    "imre_tagged_sumprod",
+                    "@imre_tagged_sumprod",
+                    None,
                     Type::Int,
                     &[&args[0].value, &args[1].value],
                     true,
@@ -9548,7 +9214,7 @@ impl Emitter<'_, '_> {
                 ));
                 let word = self.instruction(format!("load i64, ptr {ptr}"));
                 let ready = self.instruction(format!("icmp ne i64 {word}, 0"));
-                let (before, slow, end) = (self.current.clone(), self.label(), self.label());
+                let (before, slow, end) = (self.body.current.clone(), self.label(), self.label());
                 self.branch(&ready, &end, &slow);
                 self.start(&slow);
                 let fallback = if self.line_slots[slot] {
@@ -9562,7 +9228,7 @@ impl Emitter<'_, '_> {
                         args[0].value.operand
                     ))
                 };
-                let after = self.current.clone();
+                let after = self.body.current.clone();
                 self.jump(&end);
                 self.start(&end);
                 Value {
@@ -9635,13 +9301,13 @@ impl Emitter<'_, '_> {
                     ));
                     let unbound = self.instruction(format!("icmp eq ptr {keys}, null"));
                     let collect = self.instruction(format!("or i1 {hit}, {unbound}"));
-                    let empty = self.current.clone();
+                    let empty = self.body.current.clone();
                     let select = self.label();
                     let done = self.label();
                     self.branch(&collect, &select, &done);
                     self.start(&select);
                     let result = self.checked_instruction(call);
-                    let selected = self.current.clone();
+                    let selected = self.body.current.clone();
                     self.jump(&done);
                     self.start(&done);
                     self.instruction(format!("phi ptr [null, %{empty}], [{result}, %{selected}]"))
@@ -9872,7 +9538,7 @@ impl Emitter<'_, '_> {
             self.present(value, returns)
         };
         self.forget(&value);
-        let present_end = self.current.clone();
+        let present_end = self.body.current.clone();
         self.jump(&end);
         self.start(&absent);
         let default = if let Some(default) = args.get(2) {
@@ -9931,6 +9597,7 @@ impl Emitter<'_, '_> {
         }
         let iterator = self.borrow_slot(iterator);
         let (available, direct_key) = match kind {
+            ir::IterNextKind::Async(_) => unreachable!("async pull requires a suspended frame"),
             ir::IterNextKind::SplitField => {
                 let field = self.instruction(format!(
                     "call i64 @imre_split_field_next(ptr {})",
@@ -9988,20 +9655,17 @@ impl Emitter<'_, '_> {
             small_integer: false,
         };
         self.store(ready, &ready_value);
-        let (success, end) = (self.label(), self.label());
-        self.branch(&ready_value.operand, &success, &end);
-        self.start(&success);
-        let word =
-            direct_key.unwrap_or_else(|| self.instruction("load i64, ptr %mapping_key_word"));
-        let key_value = self.unpack_word(word, self.locals[key]);
-        self.store(key, &key_value);
-        if let Some(value) = value {
-            let word = self.instruction("load i64, ptr %mapping_value_word");
-            let value_result = self.unpack_word(word, self.locals[value]);
-            self.store(value, &value_result);
-        }
-        self.jump(&end);
-        self.start(&end);
+        self.when(&ready_value.operand, |emitter| {
+            let word = direct_key
+                .unwrap_or_else(|| emitter.instruction("load i64, ptr %mapping_key_word"));
+            let key_value = emitter.unpack_word(word, emitter.locals[key]);
+            emitter.store(key, &key_value);
+            if let Some(value) = value {
+                let word = emitter.instruction("load i64, ptr %mapping_value_word");
+                let value_result = emitter.unpack_word(word, emitter.locals[value]);
+                emitter.store(value, &value_result);
+            }
+        });
     }
 
     /// Converts a typed value to the runtime's word representation without
@@ -10184,14 +9848,14 @@ impl Emitter<'_, '_> {
         self.start(&allocate);
         let layout = self.output.record_layout(previous.ty);
         let fresh = self.allocate_record(previous.ty, &layout);
-        let allocated = self.current.clone();
+        let allocated = self.body.current.clone();
         self.jump(&write);
         self.start(&cached);
         let replacement = self.checked_pointer(format!(
             "call ptr @imre_record_try_cached_result(ptr {})",
             previous.operand
         ));
-        let reused = self.current.clone();
+        let reused = self.body.current.clone();
         self.jump(&write);
         self.start(&write);
         let record = Value {
@@ -10601,7 +10265,9 @@ const INLINE_CONCAT_LITERAL: usize = 3 * size_of::<usize>();
 /// leaf order without evaluating through calls or other expression boundaries.
 fn concat_leaves<'e>(emitter: &Emitter<'_, '_>, expression: &'e Expr) -> Vec<&'e Expr> {
     fn visit<'a>(emitter: &Emitter<'_, '_>, expression: &'a Expr, output: &mut Vec<&'a Expr>) {
-        if let ExprKind::Binary(Binary::Concat, left, right) = &expression.kind {
+        if let ExprKind::Builtin(Builtin::FormatJoin, parts) = &expression.kind {
+            output.extend(parts);
+        } else if let ExprKind::Binary(Binary::Concat, left, right) = &expression.kind {
             // A completed left addition can raise before the right operand runs.
             // An in-bounds ASCII lookup with an already evaluated index is
             // also an immutable read. The range proof alone does not establish
@@ -10818,7 +10484,11 @@ fn none() -> Value {
 
 // Use i32 for runtime flags and status codes. Narrow C integers require different
 // extension attributes on Apple ARM64 and Linux ARM64, even for the same Rust type.
-fn write_declarations(output: &mut String) {
+fn write_declarations(output: &mut String, uses_format_field: bool) {
+    if uses_format_field {
+        output.push_str("declare ptr @imre_format_scalar(i32, i64, ptr)\n");
+        output.push_str("declare ptr @imre_format_object(i32, i64, ptr)\n");
+    }
     output.push_str(
         r#"
 declare ptr @imre_run_config(ptr, i32, i64, i64, i32, i32, i1, ptr)
@@ -12126,36 +11796,8 @@ done:
             .unwrap();
         }
     }
-    for (op, intrinsic, number) in [("add", "sadd", 0), ("sub", "ssub", 1), ("mul", "smul", 2)] {
-        let (left, decode) = if op == "mul" {
-            ("%x", "  %x = ashr i64 %a, 1\n")
-        } else {
-            ("%a", "")
-        };
-        writeln!(
-            output,
-            r#"
-define internal i64 @int_{op}(i64 %a, i64 %b) alwaysinline {{
-entry:
-  %both = and i64 %a, %b
-  %tag = and i64 %both, 1
-  %small = icmp eq i64 %tag, 1
-  br i1 %small, label %fast, label %big, !prof !1
-fast:
-{decode}  %right = sub i64 %b, 1
-  %pair = call {{ i64, i1 }} @llvm.{intrinsic}.with.overflow.i64(i64 {left}, i64 %right)
-  %result = extractvalue {{ i64, i1 }} %pair, 0
-  %overflow = extractvalue {{ i64, i1 }} %pair, 1
-  br i1 %overflow, label %big, label %done, !prof !0
-done:
-  %encoded = or i64 %result, 1
-  ret i64 %encoded
-big:
-  %slow = call i64 @imre_int_binary(i64 %a, i64 %b, i32 {number}) cold
-  ret i64 %slow
-}}"#
-        )
-        .unwrap();
+    for op in [Binary::Add, Binary::Subtract, Binary::Multiply] {
+        output.push_str(&integer_arithmetic_helper(op));
     }
     output.push_str(conditionals::INTEGER_ABSOLUTE_HELPER);
     output.push_str(&division_helpers());
@@ -12181,6 +11823,44 @@ big:
 "#,
     );
     output
+}
+
+/// Tagged add, subtract and multiply used by checked integer operations in either call ABI.
+pub(crate) fn integer_arithmetic_helper(op: Binary) -> String {
+    let (op, intrinsic, number) = match op {
+        Binary::Add => ("add", "sadd", 0),
+        Binary::Subtract => ("sub", "ssub", 1),
+        Binary::Multiply => ("mul", "smul", 2),
+        _ => unreachable!("expected integer addition, subtraction or multiplication"),
+    };
+    let (left, decode) = if op == "mul" {
+        ("%x", "  %x = ashr i64 %a, 1\n")
+    } else {
+        ("%a", "")
+    };
+    format!(
+        r#"
+define internal i64 @int_{op}(i64 %a, i64 %b) alwaysinline {{
+entry:
+  %both = and i64 %a, %b
+  %tag = and i64 %both, 1
+  %small = icmp eq i64 %tag, 1
+  br i1 %small, label %fast, label %big, !prof !1
+fast:
+{decode}  %right = sub i64 %b, 1
+  %pair = call {{ i64, i1 }} @llvm.{intrinsic}.with.overflow.i64(i64 {left}, i64 %right)
+  %result = extractvalue {{ i64, i1 }} %pair, 0
+  %overflow = extractvalue {{ i64, i1 }} %pair, 1
+  br i1 %overflow, label %big, label %done, !prof !0
+done:
+  %encoded = or i64 %result, 1
+  ret i64 %encoded
+big:
+  %slow = call i64 @imre_int_binary(i64 %a, i64 %b, i32 {number}) cold
+  ret i64 %slow
+}}
+"#
+    )
 }
 
 /// Decoded small integers cannot overflow i64 division. Guard zero before any

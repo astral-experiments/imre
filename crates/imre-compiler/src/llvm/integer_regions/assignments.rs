@@ -1,6 +1,7 @@
 //! Lower a run of pure integer assignments under one range and ownership guard.
 
 use super::*;
+use crate::llvm::operations::CheckedBody;
 
 struct Input {
     slot: usize,
@@ -158,7 +159,7 @@ impl Emitter<'_, '_> {
         self.line(format!(
             "br i1 {valid}, label %{fast}, label %{slow}, !prof !1"
         ));
-        self.terminated = true;
+        self.body.terminated = true;
 
         self.start(&fast);
         let values =
@@ -183,7 +184,7 @@ impl Emitter<'_, '_> {
 
         self.start(&slow);
         for stmt in &statements[..group.writes.len()] {
-            self.statement(stmt);
+            CheckedBody::native(self).emit_statement(stmt);
         }
         self.jump(&end);
         self.start(&end);

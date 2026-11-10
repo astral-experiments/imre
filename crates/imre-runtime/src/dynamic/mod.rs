@@ -506,6 +506,7 @@ impl Context {
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
             | ("filter", Value::Filter { .. })
+            | ("set_iterator", Value::SetIterator(_))
             | ("map", Value::Map { .. })
             | ("zip", Value::Zip { .. })
             | ("mappingproxy", Value::MappingProxy(_))
@@ -1161,6 +1162,7 @@ impl Context {
                 | Value::DequeIterator { .. }
                 | Value::Scandir(_)
                 | Value::DictIterator(_)
+                | Value::SetIterator(_)
                 | Value::AstWalk { .. }
                 | Value::Map { .. }
                 | Value::Filter { .. }
@@ -1214,6 +1216,7 @@ impl Context {
             }
             Value::Context(_) => return Ok(self.context_iterator(id, "Context.keys")),
             Value::MappingProxy(_) => return self.iterator(self.mapping_proxy_target(id)),
+            Value::Set { .. } => return Ok(self.set_iterator(id)),
             Value::Deque(ref ring) => {
                 let cursor = deque::iterator(id, ring, false, 0);
                 return Ok(self.alloc(cursor));
@@ -1305,6 +1308,11 @@ impl Context {
         })
     }
 
+    fn set_iterator(&mut self, owner: Id) -> Id {
+        let len = self.stored_entries(self.scalar_value(owner)).len();
+        self.alloc(Value::SetIterator(value::SetIterator::new(owner, len)))
+    }
+
     /// Start a cursor at the first entry without copying keys or values.
     fn dict_iterator(&mut self, dict: Id, kind: DictViewKind, ordered: bool, reverse: bool) -> Id {
         let storage = self.dict_storage(dict).expect("dictionary iterator source");
@@ -1345,6 +1353,7 @@ impl Context {
                 | Value::DequeIterator { .. }
                 | Value::Scandir(_)
                 | Value::DictIterator(_)
+                | Value::SetIterator(_)
                 | Value::CallableIterator(_)
                 | Value::Map { .. }
                 | Value::Filter { .. }
@@ -1752,6 +1761,12 @@ impl Context {
             Value::AstWalk { .. } => return stdlib::ast::advance(self, id),
             Value::TemplateIter { .. } => return self.next_template_item(id),
             Value::DictIterator(iter) => return (*iter).next(self, id),
+            Value::SetIterator(cursor) => {
+                let mut cursor = *cursor;
+                let item = cursor.next(self);
+                *self.heap.get_mut(id) = Value::SetIterator(cursor);
+                return item;
+            }
             Value::FormatIterator { .. } => return self.next_format_row(id),
             Value::Enumerate { input, .. } => {
                 let input = *input;
@@ -1776,19 +1791,10 @@ impl Context {
                     self.next_zip_or_map(id)
                 });
             }
-            Value::Generator { code, .. } => {
-                let code = *code;
+            Value::Generator { .. } => {
                 // Delegated generators resume their children on the native stack.
                 return stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
-                    match self.code_object(code).body {
-                        value::Body::Native(..) => self.next_generator_item(id),
-                        value::Body::Suspended(_) => self.resume_native(
-                            id,
-                            id,
-                            generator_protocol::GeneratorInput::Send(NONE),
-                        ),
-                        value::Body::Parsed { .. } => self.missing_compiled_body(code),
-                    }
+                    self.resume_native(id, id, generator_protocol::GeneratorInput::Send(NONE))
                 });
             }
             Value::LoopIterator { peeked, .. } => return Ok(peeked.take()),
@@ -1985,13 +1991,15 @@ impl Context {
     }
 
     /// Read positional tuple storage without calling a subclass's sequence slots.
-    fn tuple_items(&self, id: Id) -> Result<Option<Vec<Id>>> {
-        if let Value::Tuple(items) | Value::NamedTuple { values: items, .. } =
-            self.heap.get(self.scalar_value(id))
-        {
-            return copy_ids(items).map(Some);
+    fn tuple_elements(&self, id: Id) -> Option<&[Id]> {
+        match self.heap.get(self.scalar_value(id)) {
+            Value::Tuple(items) | Value::NamedTuple { values: items, .. } => Some(items),
+            _ => None,
         }
-        Ok(None)
+    }
+
+    fn tuple_items(&self, id: Id) -> Result<Option<Vec<Id>>> {
+        self.tuple_elements(id).map(copy_ids).transpose()
     }
 
     /// Release the previous iteration's operands before collecting and advancing the iterator.
@@ -2153,6 +2161,7 @@ impl Context {
                 | Value::DequeIterator { .. }
                 | Value::Scandir(_)
                 | Value::DictIterator(_)
+                | Value::SetIterator(_)
                 | Value::DictView { .. }
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
@@ -2577,6 +2586,12 @@ impl Context {
 
     /// Share the class namespace cell across source-loaded and precompiled method providers.
     pub(super) fn class_annotation_dict_cell(&mut self, scope: Id) -> Id {
+        let owner = self.scope_data(scope);
+        if owner.class_body.is_none()
+            && let Some(&cell) = owner.closure.cells.get("__classdict__")
+        {
+            return cell;
+        }
         if let Some(cell) = self
             .scope_data(scope)
             .class_namespace
@@ -2666,7 +2681,11 @@ impl Context {
 
     fn remove_binding(&mut self, scope: Id, name: &str, key: Id) -> Result<bool> {
         if let Some(&cell) = self.scope_data(scope).closure.cells.get(name) {
-            return Ok(self.heap.replace_cell(cell, None).is_some());
+            if let Some(previous) = self.heap.replace_cell(cell, None) {
+                self.release_list_owner(previous);
+                return Ok(true);
+            }
+            return Ok(false);
         }
         let frame = self.scope_data(scope);
         if let Some(locals) = frame.exec_locals.or(frame.class_body_mapping()) {
@@ -2694,12 +2713,15 @@ impl Context {
             .class_namespace
             .as_ref()
             .and_then(|class| class.dictionary);
-        // Deleting the class dictionary entry can collect the removed value.
+        // Mirror mutations can run Python. Their own removal releases the stored
+        // value, so never consult the old name slot after touching the dictionary.
         self.heap.weak_edge_removed(previous);
         if name != "__qualname__"
             && let Some(dictionary) = dictionary
         {
             self.delete_item(dictionary, key)?;
+        } else {
+            self.release_list_owner(previous);
         }
         Ok(true)
     }
@@ -2734,13 +2756,17 @@ impl Context {
 
     fn bind_local(&mut self, scope: Id, name: &str, value: Id) {
         if let Some(&cell) = self.scope_data(scope).closure.cells.get(name) {
-            self.heap.replace_cell(cell, Some(value));
+            if let Some(previous) = self.heap.replace_cell(cell, Some(value))
+                && previous != value
+            {
+                self.release_list_owner(previous);
+            }
             return;
         }
         if let Some(namespace) = self.scope_data(scope).binding_namespace(name) {
             let key = self.heap.code_name(name);
             let storage = self.dict_storage(namespace).expect("namespace dictionary");
-            self.put_item(storage, key, value)
+            self.store_binding_item(storage, key, value)
                 .expect("string key in namespace dictionary");
             return;
         }
@@ -2760,17 +2786,17 @@ impl Context {
             .class_namespace
             .as_ref()
             .and_then(|class| class.dictionary);
-        if let Some(dictionary) = dictionary
-            && (s.class_body.is_some() || name != "__qualname__")
-        {
-            let key = self.text(name);
-            self.put_item(dictionary, key, value)
-                .expect("class dictionary has string keys");
+        let mirror = dictionary.filter(|_| s.class_body.is_some() || name != "__qualname__");
+        let displaced = previous.filter(|&old| old != value);
+        if let Some(old) = displaced {
+            self.heap.weak_edge_removed(old);
         }
-        if let Some(previous) = previous
-            && previous != value
-        {
-            self.heap.weak_edge_removed(previous);
+        if let Some(dictionary) = mirror {
+            let key = self.text(name);
+            self.store_binding_item(dictionary, key, value)
+                .expect("class dictionary has string keys");
+        } else if let Some(old) = displaced {
+            self.release_list_owner(old);
         }
     }
     /// Describe a missing binding in the scope that owns it.
@@ -3292,6 +3318,7 @@ impl Context {
                 "index",
             ],
             "set" | "frozenset" => builtins::set_methods(name),
+            "set_iterator" => builtins::SET_ITERATOR_METHODS,
             "bytearray" => {
                 additional = &["fromhex"];
                 builtins::BYTEARRAY_METHODS

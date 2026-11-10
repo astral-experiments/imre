@@ -197,6 +197,8 @@ impl Types {
     pub(crate) fn verify_type(&self, ty: Type, classes: usize) -> Result<(), String> {
         let storage = self.0.borrow();
         let valid = match ty {
+            // Registered object handles cannot enter a fixed-layout module.
+            Type::PythonObject => false,
             Type::StrLiteral(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::StringLiterals(_)))
             }
@@ -648,6 +650,15 @@ impl Types {
                 .into_iter()
                 .all(|field| field == Type::None || self.ordered_key(field)),
             _ => false,
+        }
+    }
+
+    /// A selected Python result can hold either operand when one already uses an object handle.
+    pub(crate) fn join_results(&self, left: Type, right: Type) -> Option<Type> {
+        if left == Type::PythonObject || right == Type::PythonObject {
+            Some(Type::PythonObject)
+        } else {
+            self.join(left, right)
         }
     }
 
@@ -1218,6 +1229,10 @@ impl Types {
         )
     }
 
+    pub(crate) fn is_plain_tuple(&self, ty: Type) -> bool {
+        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::Tuple(_)))
+    }
+
     /// Tuple layouts whose directories are provided by the native tuple namespace.
     pub(crate) fn is_plain_or_declared_tuple(&self, ty: Type) -> bool {
         match ty {
@@ -1369,6 +1384,15 @@ impl Types {
     /// properties of direct source definitions rather than part of this ABI.
     pub(crate) fn callable(&self, params: Vec<Type>, returns: Type) -> Type {
         Type::Callable(self.intern(Shape::Callable(params, returns)))
+    }
+
+    pub(crate) fn plain_callable_signature(&self, ty: Type) -> Option<(Vec<Type>, Type)> {
+        let Type::Callable(id) = ty else { return None };
+        let shapes = self.0.borrow();
+        let Shape::Callable(params, returns) = &shapes.shapes[id] else {
+            return None;
+        };
+        Some((params.clone(), *returns))
     }
 
     /// A subscription method accepts booleans in its first positional integer slot.
@@ -1637,7 +1661,39 @@ impl Types {
         Some(element)
     }
 
-    /// Mutable sequences with integer positions; their storage layouts remain distinct.
+    /// Preserve the common element type when an iterator traverses a fixed tuple.
+    pub(crate) fn tuple_iteration_element(&self, fields: &[Type]) -> Option<Type> {
+        let first = *fields.first()?;
+        if fields.iter().all(|ty| *ty == first) {
+            return Some(first);
+        }
+        let non_none = *fields.iter().find(|&&ty| ty != Type::None)?;
+        let payload = self.payload(non_none).unwrap_or(non_none);
+        fields
+            .iter()
+            .all(|&ty| ty == Type::None || self.payload(ty).unwrap_or(ty) == payload)
+            .then(|| self.optional(payload))
+    }
+
+    /// The element contract for an ordinary container or mapping view.
+    pub(crate) fn iteration_element(&self, ty: Type, items: bool) -> Option<Type> {
+        self.indexed_element(ty)
+            .or_else(|| self.var_tuple_element(ty))
+            .or_else(|| self.readable_set_element(ty))
+            .or((ty == Type::Str).then_some(Type::Str))
+            .or((ty == Type::Bytes).then_some(Type::Int))
+            .or_else(|| {
+                self.mapping(ty).map(|(key, value)| {
+                    if items {
+                        self.tuple(vec![key, value])
+                    } else {
+                        key
+                    }
+                })
+            })
+    }
+
+    /// Mutable sequences with integer positions and distinct storage layouts.
     pub(crate) fn indexed_element(&self, ty: Type) -> Option<Type> {
         self.element(ty).or_else(|| self.deque_element(ty))
     }
@@ -1820,6 +1876,21 @@ impl Types {
                     pending.extend(self.concrete_subclasses(class).iter().copied());
                 }
                 _ => pending.extend(self.children(ty)),
+            }
+        }
+        false
+    }
+
+    /// Whether any stored part of this operand requires a live Python handle.
+    pub(crate) fn stores_python_object(&self, ty: Type) -> bool {
+        let mut pending = vec![ty];
+        let mut visited = std::collections::HashSet::new();
+        while let Some(ty) = pending.pop() {
+            if ty == Type::PythonObject {
+                return true;
+            }
+            if visited.insert(ty) {
+                pending.extend(self.children(ty));
             }
         }
         false

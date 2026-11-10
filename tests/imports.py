@@ -2086,11 +2086,13 @@ def main() -> None:
                 (project / f"{name}.py").write_bytes((temporary / name / "main.py").read_bytes())
             (project / "helper.py").write_bytes((temporary / "codeop_named_helper" / "helper.py").read_bytes())
             interactive = "boxed_interactive_interpreter"
-            (project / f"{interactive}.py").write_bytes((FIXTURES.parent / f"{interactive}.py").read_bytes())
+            type_aliases = "boxed_type_alias_values"
+            for fixture in (interactive, type_aliases):
+                shutil.copyfile(FIXTURES.parent / f"{fixture}.py", project / f"{fixture}.py")
             entry = project / "main.py"
             # Select a known provider at execution time. All Python sources exist before the build.
             providers = ("opcode", "_opcode_metadata", "code", "codeop", "codeop_module",
-                         "codeop_named_helper", interactive, "gzip")
+                         "codeop_named_helper", interactive, type_aliases, "gzip")
             entry.write_text(
                 "import importlib, sys\n"
                 "def run():\n"
@@ -2166,7 +2168,7 @@ def main() -> None:
             if args.sanitize:
                 command.append("--sanitize")
             require_success(run(command, temporary, timeout=build_timeout))
-            # The saved image must initialize the three application modules from its registrations.
+            # The saved image must initialize the application modules from its registrations.
             for source in project.glob("*.py"):
                 source.unlink()
             for module, operation, expected in [
@@ -2175,6 +2177,7 @@ def main() -> None:
                 ("codeop_module", "import", ""),
                 ("codeop_named_helper", "import", "16896\n"),
                 (interactive, "current", ""),
+                (type_aliases, "current", "checked lazy aliases\n"),
                 ("gzip", "write", "7\n"),
                 ("gzip", "read", "b'first' b's' 6 b'econd'\nTrue\nb'' b'fir' b'stsecond' b''\n"),
             ]:

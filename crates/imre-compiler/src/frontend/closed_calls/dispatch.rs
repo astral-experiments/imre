@@ -138,7 +138,7 @@ pub(super) fn specialize(
     function: &mut ast::StmtFunctionDef,
     graph: &SourceGraph,
     module: ModuleId,
-) {
+) -> bool {
     let mut prior = Mentions::default();
     prior
         .0
@@ -166,8 +166,9 @@ pub(super) fn specialize(
                     plan.visit_body(&mut case.body);
                 }
             }
-            break;
+            return true;
         }
         prior.visit_stmt(stmt);
     }
+    false
 }

@@ -1,0 +1,142 @@
+//! Lexical reads for lazy function and class annotation providers.
+
+use std::collections::{BTreeSet, HashMap};
+
+use ruff_python_ast as ast;
+use ruff_python_ast::visitor::Visitor;
+use ruff_text_size::{Ranged, TextSize};
+
+use super::{ClassBindings, ClosureNames, class_metadata};
+use crate::ir::AnnotationOccurrence;
+
+#[derive(Default)]
+pub(crate) struct AnnotationScopes {
+    parameters: HashMap<TextSize, ParameterReads>,
+    assignments: HashMap<TextSize, AssignmentReads>,
+}
+
+#[derive(Clone)]
+pub(super) struct ParameterReads {
+    pub(super) direct: BTreeSet<String>,
+    pub(super) nested: BTreeSet<String>,
+}
+
+impl ParameterReads {
+    pub(super) fn resolve(mut self, class: Option<&ClassBindings>) -> BTreeSet<String> {
+        if let Some(class) = class {
+            if self.direct.contains("super") || self.nested.contains("super") {
+                self.nested.insert("__class__".into());
+            }
+            self.direct
+                .retain(|name| !class.locals.contains(name) && !class.globals.contains(name));
+        }
+        self.direct.append(&mut self.nested);
+        self.direct
+    }
+}
+
+struct AssignmentReads {
+    reads: BTreeSet<String>,
+    incomplete: bool,
+}
+
+impl AnnotationScopes {
+    pub(super) fn function(&mut self, def: &ast::StmtFunctionDef, string_annotations: bool) {
+        let entries =
+            crate::frontend::parameter_annotations(&def.parameters, def.returns.as_deref());
+        if !entries.is_empty() {
+            let reads = class_metadata::parameter_reads(&entries, string_annotations);
+            self.parameters.insert(def.parameters.start(), reads);
+        }
+    }
+
+    pub(super) fn assignment(&mut self, assign: &ast::StmtAnnAssign) {
+        if assign.simple {
+            let mut names = ClosureNames::default();
+            names.visit_expr(&assign.annotation);
+            self.assignments.insert(
+                assign.start(),
+                AssignmentReads {
+                    reads: names.reads,
+                    incomplete: names.incomplete,
+                },
+            );
+        }
+    }
+
+    pub(crate) fn parameter_reads(
+        &self,
+        parameters: TextSize,
+        class: Option<&ClassBindings>,
+    ) -> BTreeSet<String> {
+        self.parameters[&parameters].clone().resolve(class)
+    }
+
+    pub(crate) fn class_reads<'a>(
+        &self,
+        sites: impl Iterator<Item = &'a TextSize>,
+        class: &ClassBindings,
+    ) -> (BTreeSet<String>, bool) {
+        let mut reads = BTreeSet::new();
+        let mut complete = true;
+        for site in sites {
+            let assignment = &self.assignments[site];
+            reads.extend(
+                assignment
+                    .reads
+                    .iter()
+                    .filter(|name| !class.locals.contains(*name) && !class.globals.contains(*name))
+                    .cloned(),
+            );
+            complete &= !assignment.incomplete;
+        }
+        (reads, complete)
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct ClassAnnotations {
+    pub(crate) sites: Vec<AnnotationOccurrence>,
+    pub(crate) reads: BTreeSet<String>,
+    pub(crate) incomplete: bool,
+}
+
+impl ClassAnnotations {
+    pub(super) fn observe(&mut self, assign: &ast::StmtAnnAssign) {
+        if assign.simple && assign.target.is_name_expr() {
+            self.sites.push(AnnotationOccurrence {
+                site: assign.start(),
+                index: None,
+            });
+        }
+    }
+
+    pub(super) fn finish(
+        &mut self,
+        class: &ast::StmtClassDef,
+        scopes: &AnnotationScopes,
+        bindings: &ClassBindings,
+    ) {
+        if self.sites.is_empty() {
+            return;
+        }
+        let (reads, complete) =
+            scopes.class_reads(self.sites.iter().map(|entry| &entry.site), bindings);
+        self.reads = reads;
+        self.incomplete = !complete;
+        self.reads.insert("__classdict__".into());
+        self.sites.sort_unstable_by_key(|entry| entry.site);
+        let mut conditional = 0;
+        for entry in &mut self.sites {
+            if class
+                .body
+                .binary_search_by_key(&entry.site, Ranged::start)
+                .is_err()
+            {
+                self.reads.insert("__conditional_annotations__".into());
+                entry.index = Some(conditional);
+                conditional += 1;
+            }
+        }
+    }
+}
