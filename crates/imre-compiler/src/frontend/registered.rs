@@ -2996,7 +2996,9 @@ impl SourceScope<'_> {
                 self.refusal = Some((expr.range(), COMPREHENSION_REFUSAL));
             }
             value?
-        } else if (self.comprehension.is_some() || self.generator_expression)
+        } else if (self.comprehension.is_some()
+            || self.generator_expression
+            || self.loop_scope == LoopScope::WithCursor)
             && matches!(self.kind, RegisteredScope::Function { is_async: true })
             && let ast::Expr::Await(awaited) = expr
         {
@@ -5120,6 +5122,24 @@ mod tests {
             "        left, right = (await result)[await key()]\n",
         );
         assert_cursor_suspensions(source, &["await result", "await key()"]);
+    }
+
+    #[test]
+    fn nested_awaits_use_the_current_loop_cursor() {
+        let source = concat!(
+            "async def visit(rows, key, call):\n",
+            "    async for row in rows:\n",
+            "        args = row if key is None else await key(row)\n",
+            "        await (await call(*args))\n",
+        );
+        assert_cursor_suspensions(
+            source,
+            &[
+                "await key(row)",
+                "await (await call(*args))",
+                "await call(*args)",
+            ],
+        );
     }
 
     fn assert_cursor_suspensions(source: &str, expected: &[&str]) {
