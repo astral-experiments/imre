@@ -719,6 +719,7 @@ impl Builtin {
             | Self::RegisteredNamespace(_)
             | Self::RegisteredUnpack { .. }
             | Self::RegisteredIter(_)
+            | Self::RegisteredPairNeedsRow
             | Self::RegisteredCall(..)
             | Self::SortByComparator => Contract::new(true, Unknown),
             Self::ListReserveRange | Self::StructCyclePrefix => Contract::new(false, PreservesOwners),

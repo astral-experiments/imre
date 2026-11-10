@@ -1176,6 +1176,29 @@ impl RegisteredFrame<'_, '_> {
         ))
     }
 
+    pub(crate) fn plain_items_cursor(&mut self, cursor: &str) -> String {
+        self.value(&format!(
+            "call i1 @imre_dyn_plain_items_cursor(ptr %ctx, i64 {cursor})"
+        ))
+    }
+
+    /// Branch after pulling both projections into the caller's rooted temporary slots.
+    pub(crate) fn next_item_pair(
+        &mut self,
+        cursor: &str,
+        header: ruff_text_size::TextSize,
+        has_else: bool,
+        available: &str,
+        exhausted: &str,
+    ) {
+        self.retained_loop_header(header);
+        self.max_live = self.max_live.max(2);
+        let more = self.checked(&format!(
+            "call i64 @imre_dyn_next_pair(ptr %ctx, i64 {cursor}, ptr %live, i1 {has_else})"
+        ));
+        self.branch_on_item(&more, available, exhausted);
+    }
+
     /// A plain dictionary-items cursor fills the two target slots directly.
     /// Every other cursor supplies its ordinary Python row to the same binding.
     pub(crate) fn pull_item_pair(
@@ -1193,12 +1216,7 @@ impl RegisteredFrame<'_, '_> {
         self.branch(plain_items, &pair, &ordinary);
 
         self.label(&pair);
-        self.retained_loop_header(header);
-        self.max_live = self.max_live.max(2);
-        let more = self.checked(&format!(
-            "call i64 @imre_dyn_next_pair(ptr %ctx, i64 {cursor}, ptr %live, i1 {has_else})"
-        ));
-        self.branch_on_item(&more, &direct, exhausted);
+        self.next_item_pair(cursor, header, has_else, &direct, exhausted);
         self.label(&direct);
         self.jump(&joined);
 

@@ -108,6 +108,36 @@ impl Prepared {
         }
     }
 
+    /// A plain dictionary-items cursor can supply both target values without creating a row.
+    pub(super) fn project_items(&mut self, pair: unpacking::PairBinding) {
+        let ordinary = self.next.pop().expect("a prepared cursor ends in its pull");
+        let Statement::IterNext { iterator, .. } = ordinary else {
+            unreachable!("registered for loops prepare a cursor pull")
+        };
+        self.evaluate.push(Statement::Assign(
+            pair.ordinary,
+            Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(
+                    Builtin::RegisteredPairNeedsRow,
+                    vec![Expr::local(iterator, Type::PythonObject)],
+                ),
+            },
+        ));
+        self.clear.push(pair.ordinary);
+        self.next.push(Statement::If(
+            Expr::local(pair.ordinary, Type::Bool),
+            vec![ordinary],
+            vec![Statement::IterNext {
+                kind: ir::IterNextKind::Generic,
+                iterator,
+                key: pair.items[0],
+                value: Some(pair.items[1]),
+                ready: self.ready,
+            }],
+        ));
+    }
+
     /// An enclosing adapter has its own iteration semantics even if it reuses this state.
     pub(super) fn eager_list_at(&self, source: &impl Ranged) -> Option<EagerList> {
         self.eager_list

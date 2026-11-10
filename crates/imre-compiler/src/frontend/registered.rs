@@ -2323,11 +2323,20 @@ impl statements::StatementLowering for SourceScope<'_> {
     }
 
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> StdResult<statements::Block, ()> {
-        let input = self
+        let mut input = self
             .creating_iterable(|scope| scope.iteration_input(&loop_.iter, for_pull(loop_)))
             .ok_or(())?;
-        let (binding, body) =
-            self.iteration_body(&loop_.target, &input, |scope| scope.suite(&loop_.body))?;
+        let (binding, pair) = unpacking::bind_input(
+            self,
+            &loop_.target,
+            Expr::local(input.value, Type::PythonObject),
+            None,
+            !loop_.is_async,
+        )?;
+        if let Some(pair) = pair {
+            input.project_items(pair);
+        }
+        let body = self.in_loop(LoopScope::WithCursor, |scope| scope.suite(&loop_.body))?;
         let otherwise = self.suite(&loop_.orelse)?;
         Ok((input.for_suite(binding, body, otherwise, Vec::new()), true))
     }
@@ -2910,12 +2919,13 @@ impl SourceScope<'_> {
         let (body, pair) = self.with_binding_operands(|scope| {
             unpacking::bind_input(scope, target, value, None, pair_pull)
         })?;
+        let mut clear = vec![slot];
+        if let Some(pair) = &pair {
+            clear.push(pair.ordinary);
+        }
         let binding = ir::ContextBinding {
             entered: slot,
-            body: vec![Statement::Scope {
-                body,
-                clear: vec![slot],
-            }],
+            body: vec![Statement::Scope { body, clear }],
         };
         Ok((binding, pair))
     }
@@ -5358,11 +5368,11 @@ mod tests {
             values::ModuleSource::new(module).context(&module.source),
         )
         .expect("complete suspended body");
-        let mut cursors = Vec::new();
+        let mut cursors = std::collections::BTreeSet::new();
         let mut suspensions = Vec::new();
         ir::walk_statements(&checked.function.body, &mut |stmt| {
             if let Statement::IterNext { iterator, .. } = stmt {
-                cursors.push(*iterator);
+                cursors.insert(*iterator);
             }
         });
         ir::walk_expressions(&checked.function.body, &mut |expr| {
@@ -5372,7 +5382,7 @@ mod tests {
             }
         });
         assert_eq!(cursors.len(), 1);
-        assert!(checked.region().private_slots().contains(&cursors[0]));
+        assert!(checked.region().private_slots().contains(cursors.first().unwrap()));
         assert_eq!(suspensions, expected);
     }
 

@@ -99,14 +99,20 @@ pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result
                 "context binding needs a private entered-value slot",
             ),
             ir::Node::Statement(Statement::IterNext {
-                kind: ir::IterNextKind::Generic | ir::IterNextKind::Async(_),
+                kind: kind @ (ir::IterNextKind::Generic | ir::IterNextKind::Async(_)),
                 iterator,
                 key,
                 ready,
                 value,
             }) => require(
-                value.is_none()
-                    && iterator != key
+                value.is_none_or(|slot| {
+                    *kind == ir::IterNextKind::Generic
+                        && slot != *iterator
+                        && slot != *key
+                        && slot != *ready
+                        && private.contains(&slot)
+                        && frame.locals.get(slot) == Some(&Type::PythonObject)
+                }) && iterator != key
                     && key != ready
                     && iterator != ready
                     && [iterator, key, ready]

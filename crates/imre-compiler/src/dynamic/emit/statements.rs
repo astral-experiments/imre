@@ -481,9 +481,7 @@ impl<'p> Function<'_, 'p> {
                 binding,
                 pair: Some(pair),
             } => {
-                let plain = self.value(&format!(
-                    "call i1 @imre_dyn_plain_items_cursor(ptr %ctx, i64 {cursor})"
-                ));
+                let plain = self.plain_items_cursor(&cursor);
                 Some((binding, *entered, pair, plain))
             }
             _ => None,

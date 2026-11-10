@@ -250,8 +250,7 @@ impl CheckedBody<'_, '_, '_, '_> {
             e.iter_next(iterator, key, value, ready, kind);
             return;
         }
-        debug_assert!(value.is_none());
-        self.python().pull(iterator, key, ready, kind);
+        self.python().pull(iterator, key, value, ready, kind);
     }
 
     pub(super) fn loop_transfer(&mut self, statement: &Statement) {
