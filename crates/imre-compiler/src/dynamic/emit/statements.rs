@@ -365,7 +365,7 @@ impl<'p> Function<'_, 'p> {
                 code.physical_operand(&header.operands[index])
             })
         });
-        self.prepare_definition(site);
+        self.callable_sites().place_definition(site);
         let value = self
             .sites
             .definition(&mut self.frame, site, &decorators, arguments);

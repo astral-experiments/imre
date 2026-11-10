@@ -64,36 +64,11 @@ impl SourceMap<'_> {
                         callables.place_alias(site, outer_diagnostic);
                     }
                 }
-                RequiredSite::Definition(site) if self.is_checked_ordinary_function(site) => {
-                    callables.place_named_function(site);
-                }
-                RequiredSite::Definition(site) => {
-                    let Some(class) = self
-                        .class_bodies
-                        .get(&site)
-                        .filter(|c| c.header.parameters.is_none())
-                    else {
-                        return &required[index..];
-                    };
-                    callables.place_class(site, class);
-                }
+                RequiredSite::Definition(site) => callables.place_definition(site),
                 _ => return &required[index..],
             }
         }
         &[]
-    }
-
-    fn is_checked_ordinary_function(&self, site: TextSize) -> bool {
-        self.scopes.functions.get(&site).is_some_and(|scope| {
-            scope.metadata.suspension_flags() == 0
-                && !scope.generic
-                && !self.parameter_annotations.contains_key(&scope.parameters)
-                && !self.thread_entries.contains_key(&site)
-                && self
-                    .function_bodies
-                    .get(&site)
-                    .is_some_and(|body| body.fully_checked())
-        })
     }
 
     pub(in crate::dynamic::emit) fn place_annotation_string(
@@ -268,6 +243,14 @@ impl CallableSites<'_, '_> {
             provider,
             default_names: metadata.defaults.clone(),
             ..CompiledDefinition::new(code, signature, name, qualname, false)
+        }
+    }
+
+    pub(super) fn place_definition(&mut self, start: TextSize) {
+        if let Some(class) = self.source.class_bodies.get(&start) {
+            self.place_class(start, class);
+        } else {
+            self.place_named_function(start);
         }
     }
 
@@ -518,16 +501,9 @@ impl Function<'_, '_> {
             }
             RequiredSite::Definition(start) => start,
         };
-        self.prepare_definition(start);
+        self.callable_sites().place_definition(start);
     }
 
-    pub(super) fn prepare_definition(&mut self, start: TextSize) {
-        if let Some(class) = self.source.class_bodies.get(&start) {
-            self.callable_sites().place_class(start, class);
-        } else {
-            self.callable_sites().place_named_function(start);
-        }
-    }
 }
 
 #[cfg(test)]
@@ -541,7 +517,7 @@ mod tests {
         use crate::dynamic::emit::SourcePositions;
 
         let text = concat!(
-            "def read(value, offset=1):\n    return value + offset\n",
+            "def read[T](value, offset=1):\n    return value + offset\n",
             "first = lambda: read(3)\n",
             "class C: pass\n",
             "last = lambda: 2\n",
@@ -574,7 +550,6 @@ mod tests {
         else {
             panic!("expected the function, lambda, class and final lambda");
         };
-        assert!(location.is_checked_ordinary_function(*read));
         let rest = location.place_module_callables(&mut output, &mut sites, required);
         assert!(rest.is_empty());
         assert_eq!(sites.definitions.len(), 2);
