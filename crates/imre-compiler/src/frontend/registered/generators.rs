@@ -80,12 +80,29 @@ impl RegisteredGenerator {
         let mut body = scope
             .comprehension_loop(&plan, 0, None, input, &mut |scope, output, _| {
                 let item = output.value();
-                let value = scope.ordinary_operand(item).ok_or(())?;
-                Ok(vec![Statement::Expr(operation(
-                    Builtin::RegisteredSuspend(ir::SuspendValue::Yield, item.range()),
-                    Type::PythonObject,
-                    vec![value],
-                ))])
+                let yield_item = |value| {
+                    Statement::Expr(operation(
+                        Builtin::RegisteredSuspend(ir::SuspendValue::Yield, item.range()),
+                        Type::PythonObject,
+                        vec![value],
+                    ))
+                };
+                if let ast::Expr::Starred(star) = item {
+                    let input = scope.iteration_input(&star.value, None).ok_or(())?;
+                    return Ok(loop_clause(
+                        input,
+                        item.range(),
+                        true,
+                        |mut input, boundary| {
+                            let projection = input.pull_expression(Type::PythonObject);
+                            input
+                                .next
+                                .extend([boundary.clone(), yield_item(projection)]);
+                            input.loop_suite(Vec::new(), Vec::new())
+                        },
+                    ));
+                }
+                Ok(vec![yield_item(scope.ordinary_operand(item).ok_or(())?)])
             })
             .ok()?;
         body.push(Statement::Return(Expr::none()));
@@ -98,30 +115,41 @@ impl RegisteredGenerator {
 
 /// Emit one lazy clause using the checked iterator scope and the registered unwind edges.
 pub(super) fn clause(
-    mut input: pipelines::Prepared,
+    input: pipelines::Prepared,
     binding: Vec<Statement>,
     mut body: Vec<Statement>,
     site: TextRange,
     nested: bool,
 ) -> Vec<Statement> {
-    // Publish the acquired cursor before each pull. Release unpack temporaries
-    // once targets are bound, before evaluating filters or opening another loop.
+    loop_clause(input, site, nested, |mut input, boundary| {
+        // Publish the cursor before each pull, then publish its successful bindings.
+        input.next.insert(0, boundary.clone());
+        body.insert(0, boundary.clone());
+        input.for_suite(binding, body, Vec::new(), Vec::new())
+    })
+}
+
+fn loop_clause(
+    input: pipelines::Prepared,
+    site: TextRange,
+    nested: bool,
+    emit: impl FnOnce(pipelines::Prepared, &Statement) -> Vec<Statement>,
+) -> Vec<Statement> {
     let boundary = Statement::Expr(operation(
         Builtin::RegisteredStatement(site, None),
         Type::None,
         vec![],
     ));
-    input.next.insert(0, boundary.clone());
-    body.insert(0, boundary.clone());
     if !nested {
-        return input.for_suite(binding, body, Vec::new(), Vec::new());
+        return emit(input, &boundary);
     }
     // Close and throw reach this final suite while the enclosing cursors are
     // still live. An inner cursor's last reference must go first.
     let mut finalbody: Vec<_> = input.clear.iter().copied().map(Statement::Clear).collect();
+    let body = emit(input, &boundary);
     finalbody.push(boundary);
     vec![Statement::Try {
-        body: input.for_suite(binding, body, Vec::new(), Vec::new()),
+        body,
         handlers: Vec::new(),
         orelse: Vec::new(),
         finalbody,

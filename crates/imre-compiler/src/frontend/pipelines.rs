@@ -129,7 +129,7 @@ impl Prepared {
         mut self,
         binding: Vec<Statement>,
         body: Vec<Statement>,
-        mut otherwise: Vec<Statement>,
+        otherwise: Vec<Statement>,
         before_iteration: Vec<Statement>,
     ) -> Vec<Statement> {
         Self::bind_next(
@@ -139,6 +139,28 @@ impl Prepared {
             binding,
         );
         self.next.extend(body);
+        self.loop_suite(otherwise, before_iteration)
+    }
+
+    /// The suspension owns this pull, including the exhaustion edge and the yielded item.
+    pub(super) fn pull_expression(&mut self, ty: Type) -> Expr {
+        self.next
+            .push(Self::exhaust_if_empty(Expr::local(self.ready, Type::Bool)));
+        Expr {
+            ty,
+            kind: ExprKind::Scope {
+                body: std::mem::take(&mut self.next),
+                value: Box::new(Expr::local(self.value, ty)),
+                clear: vec![self.value],
+            },
+        }
+    }
+
+    pub(super) fn loop_suite(
+        mut self,
+        mut otherwise: Vec<Statement>,
+        before_iteration: Vec<Statement>,
+    ) -> Vec<Statement> {
         if !otherwise.is_empty() {
             otherwise = self
                 .clear
@@ -160,13 +182,13 @@ impl Prepared {
 
     /// Pulls and binds one owned item, or exits the source loop on exhaustion.
     fn bind_next(next: &mut Vec<Statement>, ready: Expr, value: usize, bindings: Vec<Statement>) {
-        next.push(Statement::If(
-            not(ready),
-            vec![Statement::Exhaust],
-            Vec::new(),
-        ));
+        next.push(Self::exhaust_if_empty(ready));
         next.extend(bindings);
         next.push(Statement::Clear(value));
+    }
+
+    fn exhaust_if_empty(ready: Expr) -> Statement {
+        Statement::If(not(ready), vec![Statement::Exhaust], Vec::new())
     }
 }
 
