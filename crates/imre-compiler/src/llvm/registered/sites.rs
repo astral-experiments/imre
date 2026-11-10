@@ -4,8 +4,7 @@ use std::collections::HashMap;
 
 use super::RegisteredFrame;
 use crate::ir::{
-    self, Builtin, DefinitionSite, Expr, ExprKind, RegisteredTypeParameter, Statement,
-    TypeParameterKind,
+    self, Builtin, Expr, ExprKind, RegisteredTypeParameter, Statement, TypeParameterKind,
 };
 
 /// The body's identity is compiled once. Defaults, decorators and the defining scope
