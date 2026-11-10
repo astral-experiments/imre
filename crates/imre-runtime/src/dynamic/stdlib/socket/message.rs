@@ -239,20 +239,30 @@ fn send(ctx: &mut Context, socket: &Object, receiver: Id, args: &[Id], flags: i3
             let n = retry(ctx, socket, |ctx, until| {
                 let owner = super::active_sendfile_owner(ctx, receiver)?;
                 let mut scratch = IoVectors::new(streams.spans.len())?;
-                let iov = scratch.resolve(ctx, &streams.spans, false)?;
-                Ok(native::with_send_fd(socket, owner.as_ref(), |raw| {
-                    // SAFETY: the exports pin all ranges. The pointers expire before dispatch.
-                    unsafe {
-                        native::message::send(
-                            raw,
-                            iov,
-                            &mut control,
-                            flags,
-                            destination.as_ref(),
-                            until,
-                        )
-                    }
-                })?)
+                // Preserve buffer errors before a fallible descriptor check or readiness wait.
+                if owner.is_some() || until.is_some() {
+                    drop(scratch.readable(ctx, &streams.spans)?);
+                }
+                native::with_send_fd(socket, owner.as_ref(), |raw| {
+                    Ok(native::message::when_ready(
+                        raw,
+                        libc::POLLOUT,
+                        until,
+                        || {
+                            let mut buffers = scratch.readable(ctx, &streams.spans)?;
+                            // SAFETY: sendmsg reads only from this validated live borrow.
+                            Ok(unsafe {
+                                native::message::send_once(
+                                    raw,
+                                    buffers.as_raw(),
+                                    &mut control,
+                                    flags,
+                                    destination.as_ref(),
+                                )
+                            }?)
+                        },
+                    ))
+                })?
             })?;
             Ok(ctx.int(n as i64))
         })();
@@ -273,20 +283,39 @@ fn receive(
         .map_err(|_| Error::new("ValueError", "invalid ancillary data buffer length"))?;
     let mut control = native::message::ReceivedControl::new(size)?;
     let (n, flags, peer) = retry(ctx, socket, |ctx, until| {
-        let mut single;
-        let mut scratch;
-        let iov = if let Some(bytes) = &mut data {
-            single = [libc::iovec {
-                iov_base: bytes.as_mut_ptr().cast(),
-                iov_len: bytes.len(),
-            }];
-            &mut single[..]
+        // Preserve acquisition errors before the readiness wait. No pointer
+        // survives prevalidation, polling, EAGAIN, or Python signal dispatch.
+        let mut scratch = if data.is_none() {
+            let mut scratch = IoVectors::new(spans.len())?;
+            if until.is_some() {
+                drop(scratch.writable(ctx, spans)?);
+            }
+            Some(scratch)
         } else {
-            scratch = IoVectors::new(spans.len())?;
-            scratch.resolve(ctx, spans, true)?
+            None
         };
-        // SAFETY: the private buffer or pinned writable exports outlive this attempt.
-        Ok(unsafe { native::message::recv(socket, iov, &mut control, flags, until) }?)
+        let raw = native::fd(socket);
+        native::message::when_ready(raw, libc::POLLIN, until, || {
+            let mut single;
+            let mut buffers;
+            let iov = if let Some(bytes) = &mut data {
+                single = [libc::iovec {
+                    iov_base: bytes.as_mut_ptr().cast(),
+                    iov_len: bytes.len(),
+                }];
+                &mut single[..]
+            } else {
+                buffers = scratch
+                    .as_mut()
+                    .expect("exported ranges")
+                    .writable(ctx, spans)?;
+                // SAFETY: recvmsg below uses the writable ranges only within this borrow.
+                unsafe { buffers.as_raw() }
+            };
+            // SAFETY: either the private buffer or exported writable ranges
+            // live throughout this single recvmsg, with no Python reentry.
+            Ok(unsafe { native::message::recv_once(raw, iov, &mut control, flags) }?)
+        })
     })?;
     if control.malformed() {
         ctx.emit_builtin_warning(

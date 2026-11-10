@@ -87,19 +87,25 @@ fn transfer_exported(
 ) -> Result<Id> {
     let mut scratch = crate::dynamic::raw_read_window::IoVectors::new(spans.len())?;
     loop {
-        let vectors = scratch.resolve(ctx, spans, !write)?;
-        let iov = vectors.as_ptr();
-        let count = vectors.len() as libc::c_int;
-        // SAFETY: each iovec addresses live exported storage until the syscall returns.
-        // No Rust slice into those buffers or Python callback is live during the call.
-        let n = unsafe {
-            match transfer {
-                Transfer::Read => libc::readv(fd, iov, count),
-                // Gather writes only read iov_base, including for immutable bytes.
-                Transfer::Write => libc::writev(fd, iov, count),
-                Transfer::Positioned(call, offset) => call(fd, iov, count, offset),
-                Transfer::PositionedWithFlags(call, offset, flags) => {
-                    call(fd, iov, count, offset, flags)
+        let n = {
+            let mut loan = if write {
+                scratch.readable(ctx, spans)?
+            } else {
+                scratch.writable(ctx, spans)?
+            };
+            // SAFETY: the synchronous syscall consumes the vectors before the context
+            // loan ends. Only the scatter-read variants write to the backing storage.
+            unsafe {
+                let vectors = loan.as_raw();
+                let iov = vectors.as_ptr();
+                let count = vectors.len() as libc::c_int;
+                match transfer {
+                    Transfer::Read => libc::readv(fd, iov, count),
+                    Transfer::Write => libc::writev(fd, iov, count),
+                    Transfer::Positioned(call, offset) => call(fd, iov, count, offset),
+                    Transfer::PositionedWithFlags(call, offset, flags) => {
+                        call(fd, iov, count, offset, flags)
+                    }
                 }
             }
         };
