@@ -49,6 +49,7 @@ mod truthiness;
 mod unions;
 mod units;
 
+pub(crate) use module_registration::ModuleLauncher;
 use operations::CheckedBody;
 use units::Output;
 pub(crate) use units::emit_units;
