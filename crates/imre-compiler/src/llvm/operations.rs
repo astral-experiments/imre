@@ -514,6 +514,26 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     Entry::Registered(frame) => frame.return_result(value),
                 }
             }
+            Statement::Raise(exception) => match &mut self.0 {
+                Entry::Native(emitter) => emitter.other_statement(stmt),
+                Entry::Registered(frame) => frame.raise_exception(exception.as_ref()),
+            },
+            Statement::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            } if matches!(self.0, Entry::Registered(_)) => {
+                self.python().try_region(body, handlers, orelse, finalbody);
+            }
+            Statement::With {
+                manager,
+                site,
+                entered,
+                body,
+            } => {
+                self.python().with_manager(manager, *site, *entered, body);
+            }
             Statement::Clear(slot) => self.clear_iteration_slots(&[*slot]),
             Statement::Scope { body, clear } => self.scoped_suite(body, clear),
             Statement::While(test, body, otherwise) => {

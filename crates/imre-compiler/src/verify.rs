@@ -295,6 +295,12 @@ impl Verifier<'_> {
             Statement::Assign(slot, value) => same(value.ty, self.local(*slot)?),
             Statement::Move(target, source) => same(self.local(*source)?, self.local(*target)?),
             Statement::Clear(slot) => self.local(*slot).map(|_| ()),
+            Statement::With { entered, body, .. } => {
+                if let Some(slot) = entered {
+                    same(self.local(*slot)?, Type::PythonObject)?;
+                }
+                self.block(body)
+            }
             Statement::Scope { body, clear } => {
                 self.slots(clear)?;
                 self.block(body)
@@ -387,6 +393,14 @@ impl Verifier<'_> {
                 finalbody,
             } => {
                 self.block(body)?;
+                let subgroup = |h: &crate::ir::ExceptHandler| {
+                    matches!(h.matcher, crate::ir::ExceptionMatcher::Subgroup(..))
+                };
+                if let Some(first) = handlers.first()
+                    && handlers.iter().any(|h| subgroup(h) != subgroup(first))
+                {
+                    return Err("cannot mix whole-exception and subgroup handlers".into());
+                }
                 for handler in handlers {
                     if let Some(slot) = handler.name {
                         self.local(slot)?;

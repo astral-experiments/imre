@@ -1,7 +1,9 @@
 //! Checked operations inside a Python function with a registered frame and object arguments.
 
 mod abi;
+pub(crate) mod context;
 mod frame;
+pub(crate) mod handlers;
 mod sequences;
 pub(crate) mod sites;
 pub(crate) mod suspension;
@@ -15,6 +17,7 @@ pub(crate) use frame::{FrameEmitter, Place, RegisteredFrame, SourcePositions};
 use sites::CheckedSites;
 
 use crate::llvm::operations::{CheckedBody, CheckedValue, LoopEdges};
+use context::Region;
 use std::collections::BTreeSet;
 
 /// Only take a body when all its operations have a lowering for the registered calling convention.
@@ -24,39 +27,81 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
     let private = checked.private_slots();
     let has_slot = |slot: &usize| private.contains(slot) || checked.local_names.contains_key(slot);
     let mut supported = true;
-    ir::walk_statements(body, &mut |stmt| {
-        supported &= match stmt {
-            Statement::Assign(slot, _) => has_slot(slot),
-            Statement::Return(_)
-            | Statement::Expr(_)
-            | Statement::While(..)
-            | Statement::Break
-            | Statement::Continue
-            | Statement::Exhaust => true,
-            Statement::Scope { body, .. } => !suspends(body),
-            Statement::SetItem(receiver, _, _)
-            | Statement::AugmentItem(receiver, _, ir::ItemUpdate::Protocol(_), _) => {
-                uses_python_protocol |= receiver.ty == Type::PythonObject;
-                matches!(receiver.ty, Type::Dict(_) | Type::PythonObject)
+    let mut cause_wrapper = None;
+    ir::walk_nodes(body, &mut |node, _| {
+        let expr = match node {
+            ir::Node::Statement(stmt) => {
+                supported &= match stmt {
+                    Statement::Assign(slot, _) => has_slot(slot),
+                    Statement::Raise(value) => {
+                        uses_python_protocol = true;
+                        cause_wrapper = value
+                            .as_ref()
+                            .filter(|value| value.explicit_cause().is_some());
+                        true
+                    }
+                    Statement::Return(_)
+                    | Statement::Expr(_)
+                    | Statement::While(..)
+                    | Statement::Break
+                    | Statement::Continue
+                    | Statement::Exhaust => true,
+                    Statement::Try {
+                        handlers,
+                        finalbody,
+                        ..
+                    } => {
+                        uses_python_protocol |= handlers
+                            .iter()
+                            .any(|h| !matches!(h.matcher, ir::ExceptionMatcher::Categories(_)));
+                        handlers::supported(handlers, finalbody)
+                            && handlers.iter().all(|h| {
+                                h.name.is_none_or(|slot| {
+                                    checked
+                                        .local_names
+                                        .get(&slot)
+                                        .is_some_and(|binding| binding.namespace.is_none())
+                                })
+                            })
+                    }
+                    Statement::With { body, entered, .. } => {
+                        uses_python_protocol = true;
+                        entered.as_ref().is_none_or(|slot| private.contains(slot))
+                            && !suspends(body)
+                    }
+                    Statement::Scope { body, .. } => !suspends(body),
+                    Statement::SetItem(receiver, _, _)
+                    | Statement::AugmentItem(receiver, _, ir::ItemUpdate::Protocol(_), _) => {
+                        uses_python_protocol |= receiver.ty == Type::PythonObject;
+                        matches!(receiver.ty, Type::Dict(_) | Type::PythonObject)
+                    }
+                    Statement::Clear(slot) => private.contains(slot),
+                    Statement::If(_, _, no) => no.is_empty(),
+                    Statement::IterNext {
+                        kind: ir::IterNextKind::Generic,
+                        iterator,
+                        key,
+                        value: None,
+                        ready,
+                    } => {
+                        checked.function.locals[*iterator] == Type::PythonObject
+                            && [iterator, key, ready]
+                                .into_iter()
+                                .all(|slot| private.contains(slot))
+                    }
+                    _ => false,
+                };
+                return;
             }
-            Statement::Clear(slot) => private.contains(slot),
-            Statement::If(_, _, no) => no.is_empty(),
-            Statement::IterNext {
-                kind: ir::IterNextKind::Generic,
-                iterator,
-                key,
-                value: None,
-                ready,
-            } => {
-                checked.function.locals[*iterator] == Type::PythonObject
-                    && [iterator, key, ready]
-                        .into_iter()
-                        .all(|slot| private.contains(slot))
-            }
-            _ => false,
+            ir::Node::Expression(expr) => expr,
         };
-    });
-    ir::walk_expressions(body, &mut |expr| {
+        // Only a raise consumes the cause wrapper directly. Its children still need normal lowering.
+        if cause_wrapper
+            .take()
+            .is_some_and(|value| std::ptr::eq(value, expr))
+        {
+            return;
+        }
         supported &= match &expr.kind {
             ExprKind::Local(slot) => has_slot(slot),
             ExprKind::Bind(slot, _) => {
@@ -178,7 +223,7 @@ pub(super) struct IterationState {
     private_slots: Vec<usize>,
     first_slot: usize,
     cursors: BTreeSet<usize>,
-    scopes: Vec<Vec<usize>>,
+    scopes: Vec<Region>,
     loops: Vec<(LoopEdges, usize)>,
     in_expression: bool,
 }
@@ -204,6 +249,14 @@ impl std::ops::DerefMut for Frame<'_, '_, '_> {
 }
 
 impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
+    pub(crate) fn raise_exception(&mut self, value: Option<&Expr>) {
+        let (exception, cause) = match value.and_then(Expr::explicit_cause) {
+            Some((exception, cause)) => (Some(exception), Some(cause)),
+            None => (value, None),
+        };
+        self.raise_operands(exception, cause, Self::evaluate_handle);
+    }
+
     pub(super) fn for_expression(
         code: &'f mut RegisteredFrame<'a, 'p>,
         sites: &'f CheckedSites,
@@ -448,7 +501,10 @@ impl Frame<'_, '_, '_> {
             .line(&format!("store i64 {value}, ptr %ir_slot{slot}"));
     }
     pub(crate) fn enter_scope(&mut self, clear: &[usize]) {
-        self.code.iteration.scopes.push(clear.to_vec());
+        self.code
+            .iteration
+            .scopes
+            .push(Region::Slots(clear.to_vec()));
     }
     pub(crate) fn leave_scope(&mut self) {
         self.code.iteration.scopes.pop();
@@ -485,9 +541,7 @@ impl Frame<'_, '_, '_> {
             _ => &edges.exhausted,
         }
         .clone();
-        for slots in self.code.iteration.scopes[*depth..].to_vec().iter().rev() {
-            self.clear_slots(slots);
-        }
+        self.exit_regions(*depth, None);
         self.code.jump(&dest);
     }
     pub(crate) fn begin_step(&mut self, mark: &str) {
@@ -616,6 +670,12 @@ impl Frame<'_, '_, '_> {
 
     pub(crate) fn return_result(&mut self, value: CheckedValue) {
         let value = self.materialize(&value);
+        self.code.live.push(value.clone());
+        self.exit_regions(0, Some(&value));
+        self.code.live.pop();
+        if self.code.body.terminated {
+            return;
+        }
         if self.code.cleanup_returns.is_some() {
             let label = self.code.name("return_cleanup");
             self.code.jump(&label);

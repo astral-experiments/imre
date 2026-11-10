@@ -99,6 +99,7 @@ fn block(body: &[Statement], functions: &[bool], targets: Context<'_>) -> bool {
         }
         // Every native loop can propagate KeyboardInterrupt at its signal checkpoint.
         Statement::While(..) | Statement::For { .. } => true,
+        Statement::With { .. } => true,
         Statement::IterNext { .. } | Statement::Assert(_) | Statement::Raise(_) => true,
         Statement::Try {
             body,
@@ -510,7 +511,7 @@ def integers(values: list[int]) -> int:
                     Vec::new()
                 },
                 handlers: vec![ExceptHandler {
-                    kinds: Vec::new(),
+                    matcher: crate::ir::ExceptionMatcher::Categories(Vec::new()),
                     name: None,
                     body: if part == 1 {
                         raises.clone()

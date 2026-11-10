@@ -196,15 +196,7 @@ pub(super) fn split_star(ctx: &mut Context, exception: Id, condition: Id) -> Res
     let types = ctx.tuple_items(condition)?;
     let types = types.as_deref().unwrap_or(std::slice::from_ref(&condition));
     let base = ctx.builtin("BaseException");
-    if !types
-        .iter()
-        .all(|&ty| ctx.is_type_object(ty) && ctx.direct_subclass(ty, base))
-    {
-        return Err(Error::new(
-            "TypeError",
-            "catching classes that do not inherit from BaseException is not allowed",
-        ));
-    }
+    ctx.check_exception_classes(types, base)?;
     let group = ctx.builtin("BaseExceptionGroup");
     if types.iter().any(|&ty| ctx.direct_subclass(ty, group)) {
         return Err(Error::new(

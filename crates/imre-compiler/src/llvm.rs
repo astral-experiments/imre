@@ -2180,11 +2180,14 @@ impl Emitter<'_, '_> {
             let exception = self.call("imre_error_take", Type::Exception, &[]);
             let pending_temporary = self.temporaries.clone();
             for handler in handlers {
-                let matched = if handler.kinds.is_empty() {
+                let crate::ir::ExceptionMatcher::Categories(kinds) = &handler.matcher else {
+                    unreachable!("a live Python matcher requires the registered frame")
+                };
+                let matched = if kinds.is_empty() {
                     "true".to_owned()
                 } else {
                     let mut matched = "false".to_owned();
-                    for kind in &handler.kinds {
+                    for kind in kinds {
                         let byte = self.instruction(format!(
                             "call i32 @imre_exception_matches(ptr {}, i32 {kind})",
                             exception.operand
@@ -2826,6 +2829,7 @@ impl Emitter<'_, '_> {
             | Statement::Expr(_)
             | Statement::Return(_)
             | Statement::Scope { .. }
+            | Statement::With { .. }
             | Statement::Clear(_)
             | Statement::SetItem(..)
             | Statement::If(..)

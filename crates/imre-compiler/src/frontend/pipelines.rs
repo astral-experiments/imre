@@ -351,7 +351,9 @@ fn catch_stop_iteration(
     vec![Statement::Try {
         body,
         handlers: vec![ir::ExceptHandler {
-            kinds: vec![exception_kind("StopIteration").unwrap()],
+            matcher: crate::ir::ExceptionMatcher::Categories(vec![
+                exception_kind("StopIteration").unwrap(),
+            ]),
             name: None,
             body: on_stop,
         }],
@@ -1029,7 +1031,9 @@ impl Checker<'_> {
         let pull = Statement::Try {
             body: vec![Statement::Assign(value, item)],
             handlers: vec![ir::ExceptHandler {
-                kinds: vec![exception_kind("StopIteration").unwrap()],
+                matcher: crate::ir::ExceptionMatcher::Categories(vec![
+                    exception_kind("StopIteration").unwrap(),
+                ]),
                 name: None,
                 body: exhaust.clone(),
             }],

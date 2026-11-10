@@ -91,8 +91,11 @@ impl Context {
 
     /// Instantiate exception classes used by raise and its explicit cause.
     fn instantiate_exception_class(&mut self, value: Id) -> Result<Id> {
+        if matches!(self.heap.get(value), Value::Raised(_)) {
+            return Ok(value);
+        }
         let base = self.builtin("BaseException");
-        if !self.subclass(value, base) {
+        if !self.direct_subclass(value, base) {
             return Ok(value);
         }
         let result = self.call(value, Vec::new(), Vec::new())?;
@@ -108,6 +111,71 @@ impl Context {
             ));
         }
         Ok(result)
+    }
+
+    /// Normalize an explicit raise after the cause is visible on its original instance.
+    fn normalize_raised(&mut self, requested: Id, exception: Id) -> Result<Id> {
+        let Value::Raised(error) = self.heap.get(exception) else {
+            unreachable!("raise requires an exception instance")
+        };
+        let class = if requested == exception {
+            let Some(class) = error.class() else {
+                return Ok(exception);
+            };
+            class
+        } else {
+            requested
+        };
+        let metaclass = self.heap.get(class).instance_class();
+        let custom_type = metaclass.is_some_and(|meta| self.builtins.get("type") != Some(&meta));
+        if !custom_type && (requested == exception || error.class() == Some(class)) {
+            return Ok(exception);
+        }
+        let actual = self.exact_type(exception)?;
+        let accepted = if custom_type {
+            self.python_subclass_check(actual, class)?
+        } else {
+            self.direct_subclass(actual, class)
+        };
+        if accepted {
+            return Ok(exception);
+        }
+
+        let result = self
+            .call(class, vec![exception], Vec::new())
+            .and_then(|value| {
+                if matches!(self.heap.get(value), Value::Raised(_)) {
+                    Ok(value)
+                } else {
+                    Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "calling {} should have returned an instance of BaseException, not {}",
+                            self.repr(class),
+                            self.type_name(value)
+                        ),
+                    ))
+                }
+            });
+        result.map_err(|error| {
+            let failure = self.raised_instance(error);
+            self.heap.keep(failure);
+            let args = builtins::call(self, "repr", &[exception], &[])
+                .unwrap_or_else(|_| self.text("<unknown>"));
+            let prefix = self.text(format!(
+                "Normalization failed: type={} args=",
+                self.class_name(class)
+            ));
+            if let Ok(note) = self.concat_strings(prefix, args) {
+                let _ = self.add_exception_note(failure, note);
+            }
+            let Value::Raised(error) = self.heap.get(failure) else {
+                unreachable!("normalization failure")
+            };
+            let mut error = error.clone();
+            error.tracing().instance = Some(failure);
+            error
+        })
     }
 
     /// Check the mapping and its length before evaluating the pattern's key expressions.
@@ -655,11 +723,12 @@ impl Context {
                 Ok(NONE)
             }
             "matches" => {
-                if let Value::Raised(error) = self.heap.get(a) {
-                    Ok(flag(self.raised_error_matches(error, b)))
-                } else {
-                    Ok(FALSE)
-                }
+                let base = self.builtin("BaseException");
+                let classes = self.tuple_elements(b).unwrap_or(std::slice::from_ref(&b));
+                self.check_exception_classes(classes, base)?;
+                let matched = matches!(self.heap.get(a), Value::Raised(error)
+                    if classes.iter().any(|&class| self.raised_error_matches(error, class)));
+                Ok(flag(matched))
             }
             "exit_context" | "async_exit_context" => {
                 let active = if b == NONE {
@@ -698,16 +767,13 @@ impl Context {
                 if op == "reraise" && a == NONE {
                     return Err(Error::new("RuntimeError", "No active exception to reraise"));
                 }
-                let exception = self.instantiate_exception_class(a)?;
-                let Value::Raised(e) = self.heap.get(exception) else {
+                let mut exception = self.instantiate_exception_class(a)?;
+                if !matches!(self.heap.get(exception), Value::Raised(_)) {
                     return Err(Error::new(
                         "TypeError",
                         "exceptions must derive from BaseException",
                     ));
-                };
-                let mut error = e.clone();
-                let trace = error.tracing();
-                trace.instance = Some(exception);
+                }
                 if op == "raise" {
                     if c == TRUE {
                         let cause = self.instantiate_exception_class(b)?;
@@ -717,30 +783,16 @@ impl Context {
                                 "exception causes must derive from BaseException",
                             ));
                         }
-                        trace.cause = Some(cause);
-                        trace.suppress_context = None;
+                        self.set_exception_cause(exception, cause)?;
                     }
-                    if exception != a && !self.instance_of(exception, a) {
-                        // A class may allocate a different exception. CPython normalizes
-                        // the target by calling the requested class with that instance.
-                        let Value::Raised(original) = self.heap.get_mut(exception) else {
-                            unreachable!()
-                        };
-                        *original = error;
-                        let normalized = self.call(a, vec![exception], Vec::new())?;
-                        let Value::Raised(result) = self.heap.get(normalized) else {
-                            return Err(Error::new(
-                                "TypeError",
-                                format!(
-                                    "calling {} should have returned an instance of BaseException, not {}",
-                                    self.repr(a),
-                                    self.type_name(normalized)
-                                ),
-                            ));
-                        };
-                        error = result.clone();
-                        error.tracing().instance = Some(normalized);
-                    }
+                    exception = self.normalize_raised(a, exception)?;
+                }
+                let Value::Raised(error) = self.heap.get(exception) else {
+                    unreachable!("normalized exception instance")
+                };
+                let mut error = error.clone();
+                error.tracing().instance = Some(exception);
+                if op == "raise" {
                     self.chain_raised_instance(&mut error);
                 }
                 Err(error)

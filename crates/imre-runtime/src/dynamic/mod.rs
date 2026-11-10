@@ -1986,13 +1986,15 @@ impl Context {
     }
 
     /// Read positional tuple storage without calling a subclass's sequence slots.
-    fn tuple_items(&self, id: Id) -> Result<Option<Vec<Id>>> {
-        if let Value::Tuple(items) | Value::NamedTuple { values: items, .. } =
-            self.heap.get(self.scalar_value(id))
-        {
-            return copy_ids(items).map(Some);
+    fn tuple_elements(&self, id: Id) -> Option<&[Id]> {
+        match self.heap.get(self.scalar_value(id)) {
+            Value::Tuple(items) | Value::NamedTuple { values: items, .. } => Some(items),
+            _ => None,
         }
-        Ok(None)
+    }
+
+    fn tuple_items(&self, id: Id) -> Result<Option<Vec<Id>>> {
+        self.tuple_elements(id).map(copy_ids).transpose()
     }
 
     /// Release the previous iteration's operands before collecting and advancing the iterator.

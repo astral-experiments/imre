@@ -1164,13 +1164,7 @@ impl std::ops::DerefMut for Function<'_, '_> {
     }
 }
 
-#[derive(Clone)]
-struct ContextExit {
-    range: ruff_text_size::TextRange,
-    is_async: bool,
-    callable: String,
-    caught: String,
-}
+use crate::llvm::registered::context::ContextExit;
 
 #[derive(Clone)]
 enum Cleanup {
@@ -1718,9 +1712,9 @@ second = t'{client.lookup(*args)}{v * 2}'",
     }
 
     #[test]
-    fn declare_exit_line_only_for_compiled_with() {
+    fn declare_context_position_only_for_compiled_with() {
         let path = Path::new("<imre stdlib>/example.py");
-        let declare = "declare void @imre_dyn_set_statement_line";
+        let declare = "declare void @imre_dyn_definition_position";
         for (source, expected) in [("value = 1", 0), ("with a, b:\n    pass", 1)] {
             let (_, ir) = PreparedBody::module("example", path, source, 0, ModuleOrigin::Bundled)
                 .unwrap()

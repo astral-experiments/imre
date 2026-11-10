@@ -351,6 +351,7 @@ impl Plan<'_> {
                 | Statement::While(..)
                 | Statement::For { .. }
                 | Statement::IterNext { .. }
+                | Statement::With { .. }
                 | Statement::Try { .. } => return false,
             }
         }
