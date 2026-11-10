@@ -3256,6 +3256,36 @@ mod tests {
     }
 
     #[test]
+    fn list_and_set_comprehensions_unpack_into_their_result() {
+        let text = "result = ([*row for row in rows], {*row for row in rows})\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let source = values::ModuleSource::new(module);
+        let suite = registered_suite(
+            &module.parsed.syntax().body,
+            RegisteredScope::Module,
+            source.context(text),
+        )
+        .unwrap();
+        crate::verify::registered(suite.region()).unwrap();
+        let mut collectors = Vec::new();
+        ir::walk_expressions(&suite.function.body, &mut |expr| {
+            if let ExprKind::Builtin(op @ (Builtin::Append | Builtin::SetAdd), args) = &expr.kind {
+                let [out, item] = args.as_slice() else {
+                    panic!("expected accumulator and projection");
+                };
+                assert!(matches!(out.kind, ExprKind::Local(_)));
+                assert!(matches!(
+                    &item.kind,
+                    ExprKind::Builtin(Builtin::RegisteredSpread, inner) if inner.len() == 1
+                ));
+                collectors.push(matches!(op, Builtin::SetAdd));
+            }
+        });
+        assert_eq!(collectors, [false, true]);
+    }
+
+    #[test]
     fn standalone_dictionary_uses_the_current_async_scope() {
         let text = concat!(
             "async def gather(stream, first, second, nested, mapping):\n",

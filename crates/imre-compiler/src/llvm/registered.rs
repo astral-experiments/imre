@@ -800,8 +800,12 @@ impl Frame<'_, '_, '_> {
                     }
                     Insert([out, item]) => {
                         let out = self.evaluate_handle(out);
+                        let (op, item) = match sequences::spread(item) {
+                            Some(iterable) => ("extend", iterable),
+                            None => ("append", item),
+                        };
                         let item = self.evaluate_handle(item);
-                        self.code.op("append", &[&out, &item])
+                        self.code.op(op, &[&out, &item])
                     }
                     Unpack(value, count, star) => {
                         let value = self.evaluate_handle(value);

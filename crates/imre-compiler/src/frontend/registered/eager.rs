@@ -156,10 +156,12 @@ impl EagerDisplay for SourceScope<'_> {
                 } else {
                     Builtin::Append
                 };
+                let item =
+                    values::collection_item(item, |value| self.ordinary_operand(value).ok_or(()))?;
                 vec![Statement::Expr(operation(
                     op,
                     Type::None,
-                    vec![collection, self.ordinary_operand(item).ok_or(())?],
+                    vec![collection, item],
                 ))]
             }
             Output::Dict(key, value) => {

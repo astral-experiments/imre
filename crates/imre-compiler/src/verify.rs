@@ -164,15 +164,16 @@ pub(crate) fn registered(
                     _ => Err("registered location needs one operand".into()),
                 },
                 ExprKind::Builtin(Builtin::RegisteredSpread, args) => {
-                    let display = parent.is_some_and(|parent| {
-                        matches!(
-                            parent.kind,
-                            ExprKind::List(_) | ExprKind::Tuple(_) | ExprKind::Set { .. }
-                        )
+                    let collection = parent.is_some_and(|parent| match &parent.kind {
+                        ExprKind::List(_) | ExprKind::Tuple(_) | ExprKind::Set { .. } => true,
+                        ExprKind::Builtin(Builtin::Append | Builtin::SetAdd, args) => {
+                            matches!(args.as_slice(), [out, item] if out.ty == Type::PythonObject && std::ptr::eq(item, value))
+                        }
+                        _ => false,
                     });
                     require(
-                        display && value.ty == Type::PythonObject && args.len() == 1,
-                        "registered spread needs one operand inside a Python display",
+                        collection && value.ty == Type::PythonObject && args.len() == 1,
+                        "registered spread needs one operand in a Python collection",
                     )
                 }
                 ExprKind::Builtin(Builtin::RegisteredGenerator(_, scoped), args) => {

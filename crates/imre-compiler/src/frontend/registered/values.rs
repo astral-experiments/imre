@@ -511,18 +511,7 @@ pub(in crate::frontend) fn index_key<E>(
             let values = tuple
                 .elts
                 .iter()
-                .map(|item| {
-                    if let Some(starred) = item.as_starred_expr() {
-                        let value = index_key(&starred.value, operand)?;
-                        Ok(super::operation(
-                            Builtin::RegisteredSpread,
-                            Type::PythonObject,
-                            vec![value],
-                        ))
-                    } else {
-                        index_key(item, operand)
-                    }
-                })
+                .map(|item| collection_item(item, |value| index_key(value, operand)))
                 .collect::<StdResult<Vec<_>, E>>()?;
             let value = Expr {
                 ty: Type::PythonObject,
@@ -670,6 +659,20 @@ pub(super) fn index_operands<'a>(
     Some(IndexOperands { value, inputs, split_slice })
 }
 
+pub(super) fn collection_item<E>(
+    item: &ast::Expr,
+    child: impl FnOnce(&ast::Expr) -> StdResult<Expr, E>,
+) -> StdResult<Expr, E> {
+    match item {
+        ast::Expr::Starred(star) => Ok(super::operation(
+            Builtin::RegisteredSpread,
+            Type::PythonObject,
+            vec![child(&star.value)?],
+        )),
+        item => child(item),
+    }
+}
+
 fn display_operands<E>(
     items: &[ast::Expr],
     source: RegisteredSource<'_>,
@@ -678,12 +681,7 @@ fn display_operands<E>(
     items
         .iter()
         .map(|item| {
-            if let ast::Expr::Starred(star) = item {
-                Ok(Expr {
-                    ty: Type::PythonObject,
-                    kind: ExprKind::Builtin(Builtin::RegisteredSpread, vec![child(&star.value)?]),
-                })
-            } else if let ast::Expr::UnaryOp(op) = item
+            if let ast::Expr::UnaryOp(op) = item
                 && matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
                 && let ast::Expr::NumberLiteral(n) = &*op.operand
             {
@@ -700,7 +698,7 @@ fn display_operands<E>(
                     },
                 ))
             } else {
-                child(item)
+                collection_item(item, &mut *child)
             }
         })
         .collect()
