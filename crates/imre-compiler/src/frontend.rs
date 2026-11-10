@@ -13488,8 +13488,9 @@ mod tests {
         let Err(error) = super::lower_with_caller_cache(&mut graph, None) else {
             panic!("expected to reject the later annotation");
         };
+        let parsed_source = &graph.modules[graph.entry].source;
         assert_eq!(
-            error.exact_operand().map(|range| &source[range]),
+            error.exact_operand().map(|range| &parsed_source[range]),
             Some("'wrong'"),
             "{error}"
         );
