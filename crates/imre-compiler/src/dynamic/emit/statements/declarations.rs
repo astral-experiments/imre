@@ -78,11 +78,15 @@ impl Function<'_, '_> {
         let qualname = format!("{}<lambda>", self.prefix);
         let existing = self.source.lambda_code.borrow().get(&site).cloned();
         let code = existing.unwrap_or_else(|| {
-            let entry = if metadata.generator { Entry::Suspended } else { Entry::Compiled };
+            let entry = if metadata.generator {
+                Entry::Suspended(imre_ast::code_flags::GENERATOR)
+            } else {
+                Entry::Compiled
+            };
             let code = self.source.definition(
                 self.frame.output,
                 format!("{qualname}.<locals>."),
-                Body::CheckedExpression(body),
+                Body::Checked(body),
                 site,
                 true,
                 entry,
@@ -146,11 +150,11 @@ impl Function<'_, '_> {
         let body = &self.source.generators[&site];
         let definition = self.compile_definition(
             site.start(),
-            DefinitionName::Plain("<genexpr>"),
+            DefinitionName::Generator(site),
             None,
             None,
             None,
-            Body::CheckedGenerator(site, body),
+            Body::Checked(&body.body),
         );
         let targets = self.source.scopes.comprehension_targets[&site].clone();
         self.sites.generators.insert(

@@ -829,6 +829,7 @@ enum Input<'a> {
 enum DefinitionName<'a> {
     Binding(&'a ast::Identifier),
     Plain(&'a str),
+    Generator(TextRange),
 }
 
 enum Body<'a> {
@@ -845,34 +846,17 @@ enum Body<'a> {
         Vec<(&'a str, &'a ast::Expr)>,
         Option<crate::frontend::function_scope::ClassBindings>,
     ),
-    CheckedExpression(&'a crate::frontend::RegisteredFunction),
+    Checked(&'a crate::frontend::RegisteredFunction),
     AnnotationOperand(
         ruff_text_size::TextRange,
         &'a crate::frontend::RegisteredOperand,
     ),
     AliasEvaluator(AliasValue<'a>),
-    CheckedGenerator(TextRange, &'a crate::frontend::RegisteredGenerator),
-}
-
-impl Body<'_> {
-    fn is_genexpr(&self) -> bool {
-        matches!(self, Self::CheckedGenerator(..))
-    }
-
-    fn generator_flags(&self) -> u32 {
-        use imre_ast::code_flags::{ASYNC_GENERATOR, GENERATOR};
-        match self {
-            Self::Function(_, flags) => *flags,
-            Self::CheckedGenerator(_, child) if child.is_async => ASYNC_GENERATOR,
-            Self::CheckedGenerator(..) => GENERATOR,
-            _ => 0,
-        }
-    }
 }
 
 enum Entry {
     Compiled,
-    Suspended,
+    Suspended(u32),
 }
 
 #[derive(Clone, Copy)]
@@ -1050,7 +1034,7 @@ impl SourceMap<'_> {
         entry: Entry,
     ) -> String {
         let site = format!("@code_site{}", output.count);
-        let suspended = matches!(entry, Entry::Suspended);
+        let suspended = matches!(entry, Entry::Suspended(_));
         let tag = if suspended {
             if !output.declarations.declared_suspension {
                 output.functions.push_str(suspension::ABI);
@@ -1079,7 +1063,10 @@ impl SourceMap<'_> {
         in_function: bool,
         definition: Option<(ruff_text_size::TextSize, Entry)>,
     ) -> String {
-        let native_suspension = matches!(definition, Some((_, Entry::Suspended)));
+        let suspension = match definition {
+            Some((_, Entry::Suspended(flags))) => flags,
+            _ => 0,
+        };
         let start = definition.map(|(start, _)| start);
         let checked = start
             .filter(|_| matches!(body, Body::Function(..)))
@@ -1087,11 +1074,11 @@ impl SourceMap<'_> {
         let mut frame = RegisteredFrame::new(
             output,
             self.positions,
-            native_suspension,
+            suspension != 0,
             self.unit,
             self.module_start,
         );
-        frame.async_generator = body.generator_flags() == imre_ast::code_flags::ASYNC_GENERATOR;
+        frame.async_generator = suspension == imre_ast::code_flags::ASYNC_GENERATOR;
         if let Body::Namespace(_) = body {
             frame.class_locals = Some(
                 self.scopes.classes[&start.expect("class definition")]
@@ -1111,13 +1098,10 @@ impl SourceMap<'_> {
             _ => None,
         };
         let mut f = self.function(frame, prefix, in_function, false);
-        f.is_async = match body {
-            Body::Function(_, flags) => matches!(
-                flags,
-                imre_ast::code_flags::COROUTINE | imre_ast::code_flags::ASYNC_GENERATOR
-            ),
-            _ => false,
-        };
+        f.is_async = matches!(
+            suspension,
+            imre_ast::code_flags::COROUTINE | imre_ast::code_flags::ASYNC_GENERATOR
+        );
         match &body {
             Body::Annotations(entries, _) => {
                 for (_, expression) in entries {
@@ -1140,8 +1124,7 @@ impl SourceMap<'_> {
             {
                 f.frame.declare_global(name);
             }
-            f.prepare_checked_sites(&checked.function.body);
-            RegisteredFrame::checked_body(&mut f.frame, checked, &f.sites);
+            f.checked_function(checked);
             return f.frame.finish(false);
         }
         match body {
@@ -1188,11 +1171,8 @@ impl SourceMap<'_> {
                 let value = f.frame.prepared_operand(operand, &f.sites, false);
                 f.return_value(&value);
             }
-            Body::CheckedExpression(checked)
-            | Body::CheckedGenerator(_, crate::frontend::RegisteredGenerator { body: checked, .. })
-            | Body::AliasEvaluator(AliasValue::Checked(checked)) => {
-                f.prepare_checked_sites(&checked.function.body);
-                RegisteredFrame::checked_body(&mut f.frame, checked, &f.sites);
+            Body::Checked(checked) | Body::AliasEvaluator(AliasValue::Checked(checked)) => {
+                f.checked_function(checked);
             }
             Body::AliasEvaluator(AliasValue::Residual(expr)) => {
                 f.checkpoint(expr);
@@ -1262,6 +1242,11 @@ struct LoopTarget {
 }
 
 impl Function<'_, '_> {
+    fn checked_function(&mut self, function: &crate::frontend::RegisteredFunction) {
+        self.prepare_checked_sites(&function.function.body);
+        RegisteredFrame::checked_body(&mut self.frame, function, &self.sites);
+    }
+
     fn checkpoint(&mut self, node: &impl Ranged) {
         self.current_range = node.range();
         self.frame.checkpoint(node.range());
