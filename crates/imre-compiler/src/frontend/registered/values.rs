@@ -370,18 +370,10 @@ pub(in crate::frontend) fn fixed_positional_arguments(call: &ast::ExprCall) -> b
     )
 }
 
-/// The checked target already identifies the distinction between a frame name lookup,
-/// a direct method receiver, and an independently evaluated callable value.
+/// Invoke a checked callable value with its positional operands. Method resolution
+/// and argument packing carry additional binding data in the registered call.
 fn bound_call(call: ir::RegisteredCall, target: Expr, mut arguments: Vec<Expr>) -> Expr {
-    let mut binding = &target;
-    while let ExprKind::Builtin(Builtin::RegisteredLocation(..), inputs) = &binding.kind {
-        binding = &inputs[0];
-    }
     if target.ty == Type::PythonObject
-        && !matches!(
-            binding.kind,
-            ExprKind::Builtin(Builtin::RegisteredName(_), _)
-        )
         && matches!(call.arguments, ir::RegisteredArguments::Positional)
         && let ir::RegisteredCallTarget::Callable { end, suspended_name } = call.target
     {
@@ -422,14 +414,16 @@ impl Checker<'_> {
     }
 }
 
+/// The fixed checker selected this builtin and recorded its registered frame requirement.
 pub(in crate::frontend) fn name_call(
     call: &ast::ExprCall,
     name: &str,
-    arguments: Vec<Expr>,
+    mut arguments: Vec<Expr>,
 ) -> Expr {
-    bound_call(
-        call_site(call, callable_target(call)),
-        name_binding(name),
+    arguments.insert(0, name_binding(name));
+    super::operation(
+        Builtin::RegisteredCall(call_site(call, callable_target(call))),
+        Type::PythonObject,
         arguments,
     )
 }
@@ -1318,6 +1312,29 @@ mod tests {
             })
             .collect();
         assert_eq!(names, ["f", "items", "a", "mapping", "b"]);
+    }
+
+    #[test]
+    fn live_name_call_invokes_the_evaluated_lookup() {
+        let text = "callback(argument)";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let source = ModuleSource::new(module);
+        let call = &module.parsed.syntax().body[0].as_expr_stmt().unwrap().value;
+        let value = registered_value(call, source.context(text)).unwrap();
+        let (ExprKind::Invoke { callable, args }, _) = value_and_position(&value) else {
+            panic!("expected a positional invocation of the looked-up value");
+        };
+        assert!(
+            matches!(operation_and_position(callable).0, Builtin::RegisteredName(name) if name == "callback")
+        );
+        let [argument] = args.values.as_slice() else {
+            panic!("expected the checked positional argument");
+        };
+        assert!(
+            matches!(operation_and_position(argument).0, Builtin::RegisteredName(name) if name == "argument")
+        );
+        assert_eq!(args.order, [0]);
     }
 
     #[test]
