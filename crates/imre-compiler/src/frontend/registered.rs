@@ -98,7 +98,7 @@ impl RegisteredOperand {
         let operations = HashMap::new();
         let sites = StatementSites::default();
         let mut scope = SourceScope::new(kind, source, &operations, &sites);
-        let value = scope.ordinary_operand(expr)?;
+        let value = scope.operand(expr)?;
         let (_locals, local_names) = scope.bindings();
         Some(Self {
             value,
@@ -1494,7 +1494,8 @@ pub(crate) fn inline_operand(
 ) -> Option<RegisteredOperand> {
     if !matches!(
         expr,
-        ast::Expr::Dict(_)
+        ast::Expr::Named(_)
+            | ast::Expr::Dict(_)
             | ast::Expr::ListComp(_)
             | ast::Expr::SetComp(_)
             | ast::Expr::DictComp(_)
@@ -1847,8 +1848,28 @@ impl SourceScope<'_> {
         ))
     }
 
+    fn operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
+        self.lower_operand(expr, true)
+    }
+
     fn ordinary_operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
-        let mut value = if let ast::Expr::TString(template) = expr {
+        self.lower_operand(expr, false)
+    }
+
+    fn lower_operand(&mut self, expr: &ast::Expr, whole: bool) -> Option<Expr> {
+        let mut value = if whole
+            && let RegisteredScope::Function { is_async } = self.kind
+            && let Some((kind, value)) = ir::SuspendValue::operand(expr)
+            // A plain generator keeps its live iterator in a private frame slot.
+            && (self.loop_scope != LoopScope::WithCursor
+                || matches!((kind, is_async), (ir::SuspendValue::Yield, false)))
+            && !matches!(
+                (kind, is_async),
+                (ir::SuspendValue::Await, false) | (ir::SuspendValue::Delegate, true)
+            )
+        {
+            self.suspend_operand(kind, value, expr.range())?
+        } else if let ast::Expr::TString(template) = expr {
             self.source.template(
                 template,
                 matches!(self.kind, RegisteredScope::Function { .. }),
@@ -1902,7 +1923,8 @@ impl SourceScope<'_> {
             binding
         } else if let ast::Expr::Named(named) = expr {
             let target = named.target.as_name_expr()?;
-            let value = self.ordinary_operand(&named.value)?;
+            // Binding has no preceding operand to keep live across a suspension.
+            let value = self.lower_operand(&named.value, whole)?;
             Expr {
                 ty: value.ty,
                 kind: ExprKind::Bind(self.slot(&target.id), Box::new(value)),
@@ -1939,25 +1961,6 @@ impl SourceScope<'_> {
             Type::PythonObject,
             vec![value],
         ))
-    }
-
-    fn operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
-        if let RegisteredScope::Function { is_async } = self.kind
-            && let Some((kind, value)) = ir::SuspendValue::operand(expr)
-            // A plain generator keeps its live iterator in a private frame slot.
-            && (self.loop_scope != LoopScope::WithCursor
-                || matches!((kind, is_async), (ir::SuspendValue::Yield, false)))
-            && !matches!(
-                (kind, is_async),
-                (ir::SuspendValue::Await, false) | (ir::SuspendValue::Delegate, true)
-            )
-        {
-            // Admit a suspension only at this whole-expression boundary. All previous
-            // statements have committed their owners to the observable frame.
-            let suspended = self.suspend_operand(kind, value, expr.range())?;
-            return Some(self.source.located(expr, suspended));
-        }
-        self.ordinary_operand(expr)
     }
 }
 
@@ -2553,6 +2556,24 @@ mod tests {
             }
         });
         assert_eq!(headers, 1);
+    }
+
+    #[test]
+    fn inline_bind_inherits_the_whole_operand_suspension_boundary() {
+        let prepare = |rhs: &str, is_async| {
+            let text = format!("async def run(value):\n    return (saved := {rhs})\n");
+            let graph = SourceGraph::single(&text).unwrap();
+            let module = &graph.modules[graph.entry];
+            let def = module.parsed.syntax().body[0].as_function_def_stmt().unwrap();
+            let expr = def.body[0].as_return_stmt().unwrap().value.as_deref().unwrap();
+            let literals = values::ModuleSource::new(module);
+            inline_operand(expr, literals.context(&text), RegisteredScope::Function { is_async })
+        };
+        let operand = prepare("(inner := await value)", true).unwrap();
+        crate::verify::registered(operand.region()).unwrap();
+        assert_eq!(operand.local_names.len(), 2);
+        assert!(prepare("await value", false).is_none());
+        assert!(prepare("[value, (inner := await value)]", true).is_none());
     }
 
     #[test]
