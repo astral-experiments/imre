@@ -3785,7 +3785,19 @@ mod tests {
                 operations.push("name")
             }
             ExprKind::Builtin(Builtin::RegisteredSubscript(..), _) => operations.push("get"),
-            ExprKind::Builtin(Builtin::RegisteredCall(..), _) => operations.push("call"),
+            ExprKind::Invoke { callable, args } => {
+                let ExprKind::Builtin(Builtin::RegisteredLocation(_, _), operands) = &callable.kind
+                else {
+                    panic!("expected the located callback");
+                };
+                assert!(matches!(
+                    operands.as_slice(),
+                    [Expr { kind: ExprKind::Builtin(Builtin::RegisteredSubscript(..), _), .. }]
+                ));
+                assert_eq!(args.values.len(), 1);
+                assert_eq!(args.order, [0]);
+                operations.push("call");
+            }
             ExprKind::Binary(Binary::Add, left, right) => {
                 assert_eq!(
                     (left.ty, right.ty, value.ty),
