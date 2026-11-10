@@ -12,8 +12,25 @@ def make():
     return LocalMap(x=1), LocalWindow([1, 2], maxlen=2)
 
 
+def custom_mapping():
+    print("receiver")
+
+    class LocalMap(Table):
+        def items(self, *, key):
+            print("items")
+            return [(key, 3)]
+
+    return LocalMap()
+
+
+def item_key():
+    print("argument")
+    return "override"
+
+
 mapping, series = make()
 mapping["y"] = 2
 mapping.move_to_end("x")
 series.append(3)
 print(list(mapping.items()), list(series))
+print(list(custom_mapping().items(key=item_key())))

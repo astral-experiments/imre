@@ -811,6 +811,10 @@ impl Checker<'_> {
                     let iterable = self.iteration_method_call(call, attribute, class, iterable)?;
                     return self.iteration_value(iterable, false, call);
                 }
+                if iterable.ty == Type::PythonObject {
+                    let iterable = self.call_on(call, Some(iterable))?;
+                    return self.iteration_value(iterable, false, call);
+                }
                 let iterable = if matches!(iterable.ty, Type::Document(_)) {
                     self.document_map(iterable)
                 } else {
