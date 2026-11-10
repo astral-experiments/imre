@@ -831,6 +831,8 @@ pub(crate) struct SourceRun {
 }
 
 pub(crate) enum ValueStatement {
+    /// Retain the RHS once for the checked assignment targets that follow.
+    Store(usize),
     Return,
     Expression,
     Raise,
@@ -839,20 +841,30 @@ pub(crate) enum ValueStatement {
 pub(crate) enum SourceEffect {
     /// Transfer control or discard a value using operands prepared in this frame.
     Value(ValueStatement, Vec<PhysicalOperand>),
-    /// Evaluate the RHS once for the following checked assignment targets.
-    AssignmentInput(usize),
     /// Evaluate and release each operand of an annotation without an assigned value.
     Discard(Vec<PhysicalOperand>),
     /// The enclosing suite owns any source inputs on their test or failure edge.
     Assertion(Box<AssertionSite>),
+    /// A target operand that failed to prepare retains its original diagnostic site.
+    RefusedTargetOperand(TextRange, &'static str),
     /// Evaluate the operands at their place in the operation, in the current frame.
     ObjectOperation(Box<Builtin>, Vec<PhysicalOperand>),
+    /// The enclosing loop supplies the destination and cleanup depth.
+    LoopTransfer(TextRange, &'static Statement),
     /// A mixed loop needs its source suites. A literal false test runs only the else suite.
     While(SourceGuard<Box<RegisteredOperand>>),
     /// The manager, binding and protected child are prepared together.
     Context(Box<PreparedContext>),
     /// A loop whose checked lowering left one or more physical inputs or suites.
     For(Box<PreparedFor>),
+}
+
+fn loop_transfer(stmt: &ast::Stmt) -> Option<&'static Statement> {
+    match stmt {
+        ast::Stmt::Break(_) => Some(&Statement::Break),
+        ast::Stmt::Continue(_) => Some(&Statement::Continue),
+        _ => None,
+    }
 }
 
 pub(crate) struct PreparedFor {
@@ -889,9 +901,11 @@ impl PhysicalSuite {
                 Some(
                     SourceEffect::For(_)
                         | SourceEffect::Context(_)
+                        | SourceEffect::LoopTransfer(..)
                         | SourceEffect::ObjectOperation(..)
                         | SourceEffect::Discard(_)
                         | SourceEffect::Value(..)
+                        | SourceEffect::RefusedTargetOperand(..)
                 )
             ) {
                 sources.extend_from_slice(&stmts[run.statements.clone()]);
@@ -1168,9 +1182,9 @@ fn statement_sites(
 }
 
 #[derive(Clone, Copy)]
-enum SuiteSelection {
+enum SuiteSelection<'a> {
     All,
-    Physical,
+    Physical(&'a dyn Fn(TextSize) -> bool),
 }
 
 /// Prepare ordered suites while the source tree and its namespace operands are available.
@@ -1277,9 +1291,10 @@ impl<'a> SuitePreparation<'a> {
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
         suspends: bool,
+        has_ordinary_header: &dyn Fn(TextSize) -> bool,
     ) -> RegisteredSuite {
         let children = if suspends {
-            SuiteSelection::Physical
+            SuiteSelection::Physical(has_ordinary_header)
         } else {
             SuiteSelection::All
         };
@@ -1293,15 +1308,21 @@ impl<'a> SuitePreparation<'a> {
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
         suspended: bool,
+        has_ordinary_header: &dyn Fn(TextSize) -> bool,
     ) {
-        self.nested_suite(stmts, kind, SuiteSelection::Physical, suspended);
+        self.nested_suite(
+            stmts,
+            kind,
+            SuiteSelection::Physical(has_ordinary_header),
+            suspended,
+        );
     }
 
     fn nested_suite(
         &mut self,
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
-        select: SuiteSelection,
+        select: SuiteSelection<'_>,
         suspended: bool,
     ) {
         if let Some(first) = stmts.first() {
@@ -1319,8 +1340,8 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
-        select: SuiteSelection,
-        child_selection: SuiteSelection,
+        select: SuiteSelection<'_>,
+        child_selection: SuiteSelection<'_>,
         suspended: bool,
     ) -> RegisteredSuite {
         use ast::statement_visitor::{StatementVisitor, walk_stmt};
@@ -1328,7 +1349,7 @@ impl<'a> SuitePreparation<'a> {
         struct Children<'p, 's> {
             prepare: &'p mut SuitePreparation<'s>,
             kind: RegisteredScope,
-            select: SuiteSelection,
+            select: SuiteSelection<'p>,
             suspended: bool,
         }
         impl<'a> StatementVisitor<'a> for Children<'_, '_> {
@@ -1348,11 +1369,6 @@ impl<'a> SuitePreparation<'a> {
             let sites = &mut children.prepare.sites.expressions;
             for stmt in &stmts[run.statements.clone()] {
                 match &run.effect {
-                    Some(SourceEffect::AssignmentInput(_)) => {
-                        if let ast::Stmt::Assign(assign) = stmt {
-                            sites.prepare_input(&assign.value, source, kind, suspended);
-                        }
-                    }
                     Some(
                         SourceEffect::ObjectOperation(_, inputs)
                         | SourceEffect::Discard(inputs)
@@ -1487,12 +1503,14 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         expr: &ast::Expr,
         kind: RegisteredScope,
-        selection: SuiteSelection,
+        selection: SuiteSelection<'_>,
         suspended: bool,
     ) -> PhysicalOperand {
         let operand =
             RegisteredOperand::prepare_with(self.source, kind, |scope| match (kind, selection) {
-                (RegisteredScope::Function { .. }, SuiteSelection::Physical) => scope.operand(expr),
+                (RegisteredScope::Function { .. }, SuiteSelection::Physical(_)) => {
+                    scope.operand(expr)
+                }
                 _ => scope.ordinary_operand(expr),
             });
         match operand {
@@ -1527,7 +1545,7 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
-        selection: SuiteSelection,
+        selection: SuiteSelection<'_>,
         suspended: bool,
     ) -> PhysicalSuite {
         PhysicalSuite::new(
@@ -1540,7 +1558,7 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         stmt: &ast::StmtWith,
         kind: RegisteredScope,
-        selection: SuiteSelection,
+        selection: SuiteSelection<'_>,
         suspended: bool,
     ) -> PreparedContext {
         let inputs = stmt
@@ -1570,7 +1588,7 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         loop_: &ast::StmtFor,
         kind: RegisteredScope,
-        selection: SuiteSelection,
+        selection: SuiteSelection<'_>,
         suspended: bool,
     ) -> PreparedFor {
         let iterable = self.physical_operand(&loop_.iter, kind, selection, suspended);
@@ -1593,13 +1611,34 @@ impl<'a> SuitePreparation<'a> {
         &self,
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
-        select: SuiteSelection,
+        select: SuiteSelection<'_>,
         suspended: bool,
     ) -> RegisteredSuite {
         let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
         let mut body = Vec::new();
         let mut residual: Vec<SourceRun> = Vec::new();
+        let frame_value = |expr: &ast::Expr| {
+            let checked = RegisteredOperand::prepare_with(self.source, kind, |scope| {
+                if suspended {
+                    scope.frame_value(expr)
+                } else {
+                    scope.ordinary_operand(expr)
+                }
+            });
+            match checked {
+                Some(value) => PhysicalOperand::Checked(Box::new(value)),
+                None => PhysicalOperand::Source(Box::new(expr.clone())),
+            }
+        };
         for (i, stmt) in stmts.iter().enumerate() {
+            if let Some(transfer) = loop_transfer(stmt) {
+                residual.push(SourceRun {
+                    at: body.len(),
+                    statements: i..i + 1,
+                    effect: Some(SourceEffect::LoopTransfer(stmt.range(), transfer)),
+                });
+                continue;
+            }
             if let ast::Stmt::Assert(assertion) = stmt {
                 if !self.sites.omit_assertions {
                     let site = scope.assertion(assertion);
@@ -1616,9 +1655,12 @@ impl<'a> SuitePreparation<'a> {
                 continue;
             }
             let slots_before = scope.locals.len();
+            scope.refusal = None;
             let lowered = match select {
                 SuiteSelection::All => scope.statement(stmt, &mut body),
-                SuiteSelection::Physical => scope.physical_statement(stmt, &mut body),
+                SuiteSelection::Physical(has_ordinary_header) => {
+                    scope.physical_statement(stmt, &mut body, has_ordinary_header)
+                }
             };
             if lowered.is_ok() {
                 continue;
@@ -1639,23 +1681,7 @@ impl<'a> SuitePreparation<'a> {
                 _ => None,
             };
             if let Some((output, inputs)) = output {
-                let inputs = inputs
-                    .into_iter()
-                    .flatten()
-                    .map(|expr| {
-                        let checked = RegisteredOperand::prepare_with(self.source, kind, |scope| {
-                            if suspended {
-                                scope.frame_value(expr)
-                            } else {
-                                scope.ordinary_operand(expr)
-                            }
-                        });
-                        match checked {
-                            Some(value) => PhysicalOperand::Checked(Box::new(value)),
-                            None => PhysicalOperand::Source(Box::new(expr.clone())),
-                        }
-                    })
-                    .collect();
+                let inputs = inputs.into_iter().flatten().map(frame_value).collect();
                 body.push(checkpoint(stmt));
                 residual.push(SourceRun {
                     at: body.len(),
@@ -1692,17 +1718,38 @@ impl<'a> SuitePreparation<'a> {
                     Expr::local(input, Type::PythonObject),
                     input,
                 );
-                if let Ok(targets) = scope.assignment_targets(&assign.targets, value) {
-                    body.push(checkpoint(stmt));
-                    residual.push(SourceRun {
-                        at: body.len(),
-                        statements: i..i + 1,
-                        effect: Some(SourceEffect::AssignmentInput(input)),
-                    });
-                    body.extend(targets);
-                    continue;
-                }
-                scope.truncate_locals(slots_before);
+                let first_refusal = scope.refusal.take();
+                scope.diagnostic_suspension = Some(suspended);
+                let targets = scope.assignment_targets(&assign.targets, value);
+                scope.diagnostic_suspension = None;
+                let (effect, targets) = match targets {
+                    Ok(targets) => (
+                        SourceEffect::Value(
+                            ValueStatement::Store(input),
+                            vec![frame_value(&assign.value)],
+                        ),
+                        targets,
+                    ),
+                    Err(()) => {
+                        scope.truncate_locals(slots_before);
+                        let (range, reason) = scope.refusal.or(first_refusal).unwrap_or((
+                            assign.range(),
+                            "cannot compile this assignment target ahead of time",
+                        ));
+                        (
+                            SourceEffect::RefusedTargetOperand(range, reason),
+                            Vec::new(),
+                        )
+                    }
+                };
+                body.push(checkpoint(stmt));
+                residual.push(SourceRun {
+                    at: body.len(),
+                    statements: i..i + 1,
+                    effect: Some(effect),
+                });
+                body.extend(targets);
+                continue;
             } else if let ast::Stmt::Delete(delete) = stmt {
                 // A missing operand keeps its place between the other targets' checked effects.
                 body.push(checkpoint(stmt));
@@ -2027,6 +2074,11 @@ impl statements::StatementLowering for SourceScope<'_> {
     }
 
     fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<statements::Block, ()> {
+        if let Some(transfer) = loop_transfer(stmt) {
+            return (self.loop_scope != LoopScope::Outside)
+                .then(|| (vec![transfer.clone()], false))
+                .ok_or(());
+        }
         match stmt {
             ast::Stmt::AugAssign(assign) => {
                 if let Some(name) = assign.target.as_name_expr() {
@@ -2142,12 +2194,6 @@ impl statements::StatementLowering for SourceScope<'_> {
                 };
                 let otherwise = self.suite(&loop_.orelse)?;
                 Ok((vec![Statement::While(condition, body, otherwise)], true))
-            }
-            ast::Stmt::Break(_) if self.loop_scope != LoopScope::Outside => {
-                Ok((vec![Statement::Break], false))
-            }
-            ast::Stmt::Continue(_) if self.loop_scope != LoopScope::Outside => {
-                Ok((vec![Statement::Continue], false))
             }
             ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => Ok((Vec::new(), true)),
             ast::Stmt::AnnAssign(ann) => {
@@ -2272,9 +2318,9 @@ struct SourceScope<'a> {
     loop_scope: LoopScope,
     suspending_operands: bool,
     refusal: Option<(TextRange, &'static str)>,
-    // A dictionary reports its first unprepared comprehension. A Named operand
-    // also preserves terminal errors from its RHS, in the enclosing frame.
-    named_suspension: Option<bool>,
+    // A dictionary reports its first unprepared comprehension. Named expressions and assignment
+    // targets preserve terminal operand errors in their enclosing frame.
+    diagnostic_suspension: Option<bool>,
 }
 
 /// Prepare an inline expression that can require private slots in the enclosing activation.
@@ -2292,7 +2338,7 @@ pub(crate) fn inline_operand(
                 if is_dict {
                     scope.suspending_operands = native_suspension;
                 } else {
-                    scope.named_suspension = Some(native_suspension);
+                    scope.diagnostic_suspension = Some(native_suspension);
                 }
                 let value = scope.operand(expr);
                 refusal = scope.refusal;
@@ -2375,7 +2421,7 @@ impl<'a> SourceScope<'a> {
             loop_scope: LoopScope::Outside,
             suspending_operands: false,
             refusal: None,
-            named_suspension: None,
+            diagnostic_suspension: None,
         }
     }
 
@@ -2487,6 +2533,7 @@ impl SourceScope<'_> {
         &mut self,
         stmt: &ast::Stmt,
         body: &mut Vec<Statement>,
+        has_ordinary_header: &dyn Fn(TextSize) -> bool,
     ) -> StdResult<bool, ()> {
         if let ast::Stmt::Assign(assign) = stmt {
             // The physical frame owns an assignment that yields or awaits its value.
@@ -2503,6 +2550,7 @@ impl SourceScope<'_> {
                 .is_some_and(|ann| ann.value.is_none() && !ann.target.is_name_expr())
             || stmt.is_aug_assign_stmt()
             || stmt.is_raise_stmt()
+            || stmt.is_function_def_stmt() && has_ordinary_header(stmt.start())
             || attribute_write(stmt).is_some()
         {
             return self.statement(stmt, body);
@@ -2772,11 +2820,11 @@ impl SourceScope<'_> {
 
     fn lower_operand(&mut self, expr: &ast::Expr, whole: bool) -> Option<Expr> {
         if expr.is_dict_expr()
-            && let Some(suspended) = self.named_suspension.take()
+            && let Some(suspended) = self.diagnostic_suspension.take()
         {
             // A dictionary owns its own diagnostic, including inside a Named RHS.
             let value = self.checked_operand(expr, whole);
-            self.named_suspension = Some(suspended);
+            self.diagnostic_suspension = Some(suspended);
             if value.is_none() {
                 self.refusal.get_or_insert((
                     expr.range(),
@@ -2787,7 +2835,7 @@ impl SourceScope<'_> {
         }
 
         let value = self.checked_operand(expr, whole);
-        if value.is_none() && self.named_suspension.is_some() {
+        if value.is_none() && self.diagnostic_suspension.is_some() {
             let reason = match expr {
                 ast::Expr::FString(_) => "cannot compile this formatted string ahead of time",
                 ast::Expr::Generator(_) => "cannot compile this generator expression ahead of time",
@@ -2828,7 +2876,7 @@ impl SourceScope<'_> {
             }) {
                 Ok(value) => value,
                 Err(reason) => {
-                    if self.named_suspension == Some(true)
+                    if self.diagnostic_suspension == Some(true)
                         && let Some(reason) = reason
                     {
                         self.refusal = Some((expr.range(), reason));
@@ -2862,7 +2910,7 @@ impl SourceScope<'_> {
             self.suspend_operand(ir::SuspendValue::Await, Some(&awaited.value), expr.range())?
         } else if let ast::Expr::Lambda(lambda) = expr {
             if !values::has_checked_lambda_body(lambda, self.source) {
-                if self.named_suspension.is_some() {
+                if self.diagnostic_suspension.is_some() {
                     self.refusal = Some((
                         expr.range(),
                         "cannot compile this lambda body ahead of time",
