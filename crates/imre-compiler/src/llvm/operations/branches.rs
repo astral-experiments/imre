@@ -1,7 +1,7 @@
 //! Branch plans and ownership transfers shared by fixed-layout values and Python frame entries.
 use super::{CheckedBody, CheckedValue, Entry, Value, ValueJoin};
-use crate::ir::control::{Context, Depth, Edges, Target, edges};
-use crate::ir::{Builtin, Expr, ExprKind, Type};
+use crate::ir::control::{Context, Depth, Edges, Input, Target, edges};
+use crate::ir::{Builtin, Expr, ExprKind, TruthPredicate, Type};
 
 /// A logical plan owns the short-circuit edges and the selected value join.
 pub(crate) struct Logical {
@@ -21,7 +21,7 @@ enum ResultEdges {
 
 /// A checked leaf, or the result of emitting an irreducible input in its source frame.
 pub(crate) enum LogicalInput<'a> {
-    Checked(&'a Expr),
+    Checked(&'a Expr, Option<&'a TruthPredicate>),
     Handle(String),
     Predicate(String),
 }
@@ -31,9 +31,9 @@ pub(crate) trait LogicalEmitter<I> {
     fn with_logical_body<R>(&mut self, emit: impl FnOnce(&mut CheckedBody) -> R) -> R;
 }
 
-impl LogicalEmitter<&Expr> for CheckedBody<'_, '_, '_, '_> {
-    fn logical_input<'a>(&mut self, input: &'a &Expr, _: Context) -> LogicalInput<'a> {
-        LogicalInput::Checked(input)
+impl LogicalEmitter<Input<'_, Expr>> for CheckedBody<'_, '_, '_, '_> {
+    fn logical_input<'a>(&mut self, input: &'a Input<'_, Expr>, _: Context) -> LogicalInput<'a> {
+        LogicalInput::Checked(input.value, input.predicate)
     }
 
     fn with_logical_body<R>(&mut self, emit: impl FnOnce(&mut CheckedBody) -> R) -> R {
@@ -132,7 +132,12 @@ impl Logical {
         let (done, join, result_type) = match &mut self.result {
             ResultEdges::Branch(yes, no) => {
                 let bit = match input {
-                    LogicalInput::Checked(expr) => code.test_operand(expr),
+                    LogicalInput::Checked(expr, None) => code.test_operand(expr),
+                    LogicalInput::Checked(expr, Some(predicate)) => {
+                        let (value, bit) = code.logical_operand(expr, Some(predicate));
+                        code.release_input(value);
+                        bit
+                    }
                     LogicalInput::Predicate(bit) => bit,
                     LogicalInput::Handle(_) => unreachable!("expected a predicate"),
                 };
@@ -150,7 +155,7 @@ impl Logical {
         let no = label(f, done, done);
         if yes == done && no == done {
             let value = match input {
-                LogicalInput::Checked(expr) => code.evaluate(expr),
+                LogicalInput::Checked(expr, _) => code.evaluate(expr),
                 LogicalInput::Handle(id) => CheckedValue::handle(id),
                 LogicalInput::Predicate(_) => unreachable!("expected a value"),
             };
@@ -159,11 +164,7 @@ impl Logical {
             return;
         }
         let (value, truth) = match input {
-            LogicalInput::Checked(expr) => {
-                let value = code.operand(expr);
-                let truth = code.operand_truth(expr, &value, None);
-                (value, truth)
-            }
+            LogicalInput::Checked(expr, predicate) => code.logical_operand(expr, predicate),
             LogicalInput::Handle(id) => {
                 let truth = code.python().truth(&id);
                 (CheckedValue::handle(id), truth)
@@ -403,8 +404,31 @@ impl CheckedBody<'_, '_, '_, '_> {
         }
     }
 
+    fn logical_operand(
+        &mut self,
+        expr: &Expr,
+        predicate: Option<&TruthPredicate>,
+    ) -> (CheckedValue, String) {
+        let value = self.operand(expr);
+        let Some(predicate) = predicate else {
+            let truth = self.operand_truth(expr, &value, None);
+            return (value, truth);
+        };
+        let emitter = self.fixed();
+        let slot = predicate.receiver;
+        let receiver = emitter.own_operand(value.into_native());
+        debug_assert_eq!(receiver.ty, emitter.locals[slot]);
+        emitter
+            .cleanups
+            .push(crate::llvm::Cleanup::Slots(vec![slot]));
+        emitter.store(slot, &receiver);
+        let truth = emitter.expr(&predicate.condition);
+        emitter.cleanups.pop();
+        (CheckedValue::owned(emitter.take_slot(slot)), truth.operand)
+    }
+
     fn logical_value(&mut self, expr: &Expr) -> CheckedValue {
-        let depth = if matches!(&self.0, Entry::Native(_)) {
+        let depth = if expr.ty == Type::Bool && matches!(&expr.kind, ExprKind::Boolean(..)) {
             Depth::Root
         } else {
             Depth::All
@@ -429,7 +453,7 @@ impl CheckedBody<'_, '_, '_, '_> {
     }
 
     pub(super) fn boolean_expression(&mut self, expr: &Expr) -> CheckedValue {
-        if let (Entry::Native(emitter), ExprKind::BooleanValue(and, left, right)) =
+        if let (Entry::Native(emitter), ExprKind::BooleanValue(and, left, right, None)) =
             (&mut self.0, &expr.kind)
             && let Some(truth) = emitter.module.types.truthiness(left.ty)
         {

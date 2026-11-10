@@ -396,8 +396,13 @@ impl Analysis<'_> {
                 join_states(state, &other);
                 join(yes, no)
             }
-            ExprKind::BooleanValue(_, left, right) => {
+            ExprKind::BooleanValue(_, left, right, predicate) => {
                 let left = self.expression(left, state);
+                if let Some(predicate) = predicate {
+                    state[predicate.receiver] = left;
+                    self.expression(&mut predicate.condition, state);
+                    state[predicate.receiver] = None;
+                }
                 let skipped = state.clone();
                 let right = self.expression(right, state);
                 join_states(state, &skipped);
@@ -474,9 +479,12 @@ fn readonly(expression: &Expr) -> bool {
         | ExprKind::Not(value)
         | ExprKind::Negate(value)
         | ExprKind::Field(value, _) => readonly(value),
-        ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
-            readonly(left) && readonly(right)
+        ExprKind::BooleanValue(_, left, right, predicate) => {
+            readonly(left)
+                && predicate.as_ref().is_none_or(|p| readonly(&p.condition))
+                && readonly(right)
         }
+        ExprKind::Binary(_, left, right) => readonly(left) && readonly(right),
         ExprKind::Conditional(test, yes, no) => readonly(test) && readonly(yes) && readonly(no),
         ExprKind::Exception { message, .. } => message.as_deref().is_none_or(readonly),
         _ => true,

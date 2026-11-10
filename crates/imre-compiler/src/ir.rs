@@ -620,6 +620,13 @@ impl Function {
     }
 }
 
+/// The checked truth of a fixed-layout operand may call Python code.
+#[derive(Clone)]
+pub(crate) struct TruthPredicate {
+    pub(crate) receiver: usize,
+    pub(crate) condition: Box<Expr>,
+}
+
 #[derive(Clone)]
 pub(crate) struct Expr {
     pub ty: Type,
@@ -975,7 +982,7 @@ pub(crate) enum ExprKind {
     Boolean(bool, Vec<Expr>),
     /// Returns the short-circuit operand, narrowed by its selected truth value,
     /// or the RHS. The operands are evaluated once and retain their identities.
-    BooleanValue(bool, Box<Expr>, Box<Expr>),
+    BooleanValue(bool, Box<Expr>, Box<Expr>, Option<TruthPredicate>),
     /// Only the selected arm runs; both arms have the expression's storage type.
     Conditional(Box<Expr>, Box<Expr>, Box<Expr>),
     Not(Box<Expr>),
@@ -3846,6 +3853,10 @@ fn node_writes(node: Node<'_>, visit: &mut impl FnMut(usize, Option<&Expr>)) {
                     }
                 }
                 ExprKind::Bind(slot, _) => visit(*slot, None),
+                ExprKind::BooleanValue(_, left, _, Some(predicate)) => {
+                    visit(predicate.receiver, Some(left));
+                    visit(predicate.receiver, None);
+                }
                 _ => {}
             }
             return;
@@ -3962,7 +3973,14 @@ macro_rules! expression_children {
             | ExprKind::Not(value)
             | ExprKind::Negate(value)
             | ExprKind::Field(value, _) => $visit(value),
-            ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
+            ExprKind::BooleanValue(_, left, right, predicate) => {
+                $visit(left);
+                if let Some(TruthPredicate { condition, .. }) = predicate {
+                    $visit(condition);
+                }
+                $visit(right);
+            }
+            ExprKind::Binary(_, left, right) => {
                 $visit(left);
                 $visit(right);
             }

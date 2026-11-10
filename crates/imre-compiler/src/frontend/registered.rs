@@ -329,7 +329,7 @@ pub(super) fn selected_operands(and: bool, mut operands: Vec<Expr>) -> Expr {
     for left in operands.into_iter().rev() {
         result = Expr {
             ty: selected_type(left.ty, result.ty),
-            kind: ExprKind::BooleanValue(and, Box::new(left), Box::new(result)),
+            kind: ExprKind::BooleanValue(and, Box::new(left), Box::new(result), None),
         };
     }
     result

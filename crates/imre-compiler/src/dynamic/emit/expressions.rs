@@ -18,7 +18,7 @@ impl LogicalEmitter<LogicalOperand> for Function<'_, '_> {
         match leaf.operand() {
             SourceOperand::Checked(value) => {
                 self.prepare_checked_value(value);
-                LogicalInput::Checked(value)
+                LogicalInput::Checked(value, None)
             }
             SourceOperand::Residual(expr) if context == BooleanContext::Condition => {
                 LogicalInput::Predicate(self.test_operand(expr))
