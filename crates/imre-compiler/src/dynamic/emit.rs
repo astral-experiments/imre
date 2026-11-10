@@ -1473,7 +1473,9 @@ mod tests {
         )
         .unwrap();
         let original = prepared.standalone().unwrap().unwrap();
-        let function = prepared.body[0].as_function_def_stmt_mut().unwrap();
+        let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
         let context = function.body[0].as_with_stmt_mut().unwrap();
         let context_range = context.range();
         let manager = &mut context.items[0].context_expr;
