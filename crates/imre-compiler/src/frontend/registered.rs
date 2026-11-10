@@ -2036,13 +2036,15 @@ impl SourceScope<'_> {
                 kind: ExprKind::Bind(self.slot(&target.id), Box::new(value)),
             }
         } else {
+            // The display keeps earlier operands live while a direct await suspends.
+            let display = matches!(expr, ast::Expr::Set(_) | ast::Expr::Dict(_));
             values::operation(
                 expr,
                 self.source,
                 None,
                 matches!(self.kind, RegisteredScope::Class),
                 |_| true,
-                |child| self.ordinary_operand(child).ok_or(()),
+                |child| self.lower_operand(child, display && child.is_await_expr()).ok_or(()),
             )
             .ok()??
         };
@@ -2687,7 +2689,11 @@ mod tests {
 
     #[test]
     fn standalone_dictionary_uses_the_current_async_scope() {
-        let text = "async def gather(stream, mapping):\n    return {0: (saved := [item async for item in stream]), **mapping}\n";
+        let text = concat!(
+            "async def gather(stream, first, second, mapping):\n",
+            "    return {0: (saved := [item async for item in stream]),\n",
+            "            1: {await first, await second}, **await mapping}\n",
+        );
         let graph = SourceGraph::single(text).unwrap();
         let module = &graph.modules[graph.entry];
         let def = module.parsed.syntax().body[0]
@@ -2706,6 +2712,15 @@ mod tests {
         let operand = prepare(true).unwrap();
         crate::verify::registered(operand.region()).unwrap();
         assert!(operand.local_names.values().any(|binding| binding.name == "saved"));
+        let mut awaits = Vec::new();
+        ir::walk_operand_expressions(&operand.value, &mut |value| {
+            if let ExprKind::Builtin(Builtin::RegisteredSuspend(ir::SuspendValue::Await, range), _) =
+                &value.kind
+            {
+                awaits.push(&text[*range]);
+            }
+        });
+        assert_eq!(awaits, ["await first", "await second", "await mapping"]);
     }
 
     #[test]
