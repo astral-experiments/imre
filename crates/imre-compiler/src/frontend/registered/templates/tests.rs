@@ -186,7 +186,7 @@ fn template_default_and_body_suspend_in_their_defining_frames() {
     let mut suspensions = Vec::new();
     let mut formats = 0;
     for (_, operand) in sites {
-        let PreparedTemplate::Checked(operand) = operand else {
+        let Ok(operand) = operand else {
             panic!("expected a complete template operand");
         };
         crate::verify::registered(operand.region()).unwrap();
@@ -228,7 +228,7 @@ fn template_default_and_body_suspend_in_their_defining_frames() {
 }
 
 #[test]
-fn incomplete_field_preserves_the_checked_prefix_and_child_admission() {
+fn unavailable_template_child_is_reported_at_its_own_range() {
     let text = concat!(
         "def report(rows, fetch):\n",
         "    return t'{mark()}{([lambda v=await fetch(x): v for x in rows] for _ in rows)=}', ",
@@ -247,49 +247,67 @@ fn incomplete_field_preserves_the_checked_prefix_and_child_admission() {
         generators: None,
         method_imports: &Default::default(),
     };
-    // Withhold this child descriptor to exercise a partially prepared template.
-    let missing = HashMap::new();
-    let source = RegisteredSource {
-        generators: Some(&missing),
-        ..source
-    };
     let function = module.body[0].as_function_def_stmt().unwrap();
-    let values = function.body[0]
+    let templates = function.body[0]
         .as_return_stmt()
         .unwrap()
         .value
         .as_deref()
+        .unwrap()
+        .as_tuple_expr()
         .unwrap();
-    let templates = &values.as_tuple_expr().unwrap().elts;
-    for (i, template) in templates.iter().enumerate() {
-        let Some(PreparedTemplate::Mixed { fields, .. }) = PreparedTemplate::prepare(
-            template,
-            source,
-            RegisteredScope::Function { is_async: false },
-        ) else {
-            panic!("the generator has no checked activation");
-        };
-        let [TemplateField::Checked(prefix), tail] = fields.as_slice() else {
-            panic!("expected the supported first field to run");
-        };
-        assert!(matches!(&prefix.value.kind,
-            ExprKind::Builtin(Builtin::RegisteredInterpolation { expression, .. }, _)
-                if expression == "mark()"));
-        match (i, tail) {
-            (0, TemplateField::Unsupported("debug t-string interpolation")) => {}
-            (
-                1,
-                TemplateField::External {
-                    value,
-                    interpolation,
-                },
-            ) => {
-                assert!(matches!(value.as_ref(), ast::Expr::Generator(_)));
-                assert!(matches!(&interpolation.kind,
-                    ExprKind::Builtin(Builtin::RegisteredInterpolation { .. }, inputs)
-                        if matches!(inputs[0].kind, ExprKind::Local(0))));
+    let children = RegisteredGenerator::collect(&module.body, source);
+    let missing = HashMap::new();
+    for (generators, complete) in [(&missing, false), (&children, true)] {
+        let mut scopes = crate::frontend::function_scope::ScopeFacts::prepare(
+            &module.body,
+            &Default::default(),
+            |_| {},
+            |_| {},
+        );
+        let mut sites = HashMap::new();
+        RegisteredLambda::collect(
+            &module.body,
+            RegisteredSource {
+                generators: Some(generators),
+                ..source
+            },
+            &mut scopes,
+            &mut sites,
+        );
+        for template in &templates.elts {
+            let result = sites.get(&template.range()).unwrap();
+            let tail = template
+                .as_t_string_expr()
+                .unwrap()
+                .value
+                .iter()
+                .flat_map(|part| part.elements.interpolations())
+                .nth(1)
+                .unwrap();
+            if complete {
+                let operand = result.as_ref().unwrap();
+                crate::verify::registered(operand.region()).unwrap();
+                let mut captures = Vec::new();
+                ir::walk_operand_expressions(&operand.value, &mut |expr| {
+                    if let ExprKind::Builtin(
+                        Builtin::RegisteredInterpolation { expression, .. },
+                        _,
+                    ) = &expr.kind
+                    {
+                        captures.push(expression.clone());
+                    }
+                });
+                assert_eq!(captures, ["mark()", &text[tail.expression.range()]]);
+            } else {
+                assert_eq!(
+                    result.as_ref().err(),
+                    Some(&(
+                        tail.expression.range(),
+                        "cannot compile this generator expression ahead of time"
+                    ))
+                );
             }
-            _ => panic!("unexpected incomplete field"),
         }
     }
 }

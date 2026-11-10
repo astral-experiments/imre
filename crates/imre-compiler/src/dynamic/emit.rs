@@ -3597,9 +3597,7 @@ mod tests {
         assert!(initializer.fully_checked());
         assert_eq!(prepared.source.generators.len(), 1);
         let (site, generator) = prepared.source.generators.iter().next().unwrap();
-        let crate::frontend::PreparedTemplate::Checked(template) =
-            prepared.source.strings.templates.values().next().unwrap()
-        else {
+        let Ok(template) = prepared.source.strings.templates.values().next().unwrap() else {
             panic!("expected a fully checked template");
         };
         let mut references = Vec::new();

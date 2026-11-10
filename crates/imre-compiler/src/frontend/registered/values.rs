@@ -998,9 +998,9 @@ impl Region {
             return index_key(node, &mut |child| self.operand(child, source).ok_or(())).ok();
         }
         let value = match node {
-            ast::Expr::TString(template) => source
-                .template(template, false, |child| self.operand(child, source))
-                .ok()?,
+            ast::Expr::TString(template) => {
+                source.template(template, false, |child| self.operand(child, source))?
+            }
             ast::Expr::FString(value) if matches!(self, Self::Suite | Self::Lambda) => {
                 fstrings::registered_fstring(value, source, |child| {
                     self.operand(child, source).ok_or(())

@@ -3,7 +3,7 @@ use ruff_text_size::Ranged;
 
 use super::FrameEmitter;
 use super::Function;
-use crate::frontend::{PreparedTemplate, SourceOperand, TemplateField, prepare_boolean};
+use crate::frontend::{SourceOperand, prepare_boolean};
 use crate::ir::control::Context as BooleanContext;
 use crate::llvm::operations::branches::{Logical, LogicalEmitter, LogicalInput};
 use crate::llvm::operations::{CheckedBody, CheckedValue, ComparisonChain, ValueJoin};
@@ -65,7 +65,12 @@ impl Function<'_, '_> {
         let operand = match selected {
             Some(ExpressionSelection::Operand(operand)) => operand.as_ref(),
             _ => match self.source.strings.templates.get(&expr.range()) {
-                Some(PreparedTemplate::Checked(operand)) => operand,
+                Some(Ok(operand)) => operand,
+                Some(Err((range, reason))) => {
+                    return Some(
+                        self.with_expression_range(*range, |code| code.build_diagnostic(reason)),
+                    );
+                }
                 _ => return None,
             },
         };
@@ -193,33 +198,10 @@ impl Function<'_, '_> {
     }
 
     fn expr_inner(&mut self, expr: &ast::Expr) -> String {
-        if let Some(PreparedTemplate::Mixed { segments, fields }) =
-            self.source.strings.templates.get(&expr.range())
-        {
-            return self.template(segments, fields, |code, field| {
-                use std::ops::ControlFlow;
-                let value = match field {
-                    TemplateField::Checked(operand) => {
-                        code.prepare_checked_value(&operand.value);
-                        code.frame.prepared_operand(operand, &code.sites, false)
-                    }
-                    TemplateField::External {
-                        value,
-                        interpolation,
-                    } => {
-                        let input = code.expr(value);
-                        code.frame
-                            .registered_with_inputs(interpolation, &[input], &code.sites)
-                    }
-                    TemplateField::Unsupported(reason) => {
-                        return ControlFlow::Break(code.unsupported(reason));
-                    }
-                };
-                ControlFlow::Continue(value)
-            });
-        }
         match expr {
-            ast::Expr::TString(_) => self.unsupported("t-string expression spelling"),
+            ast::Expr::TString(_) => {
+                self.build_diagnostic("cannot compile this template ahead of time")
+            }
             ast::Expr::DictComp(display) if display.key.is_none() => {
                 self.unsupported("dict unpacking comprehension")
             }

@@ -899,9 +899,13 @@ impl Frame<'_, '_, '_> {
                 .lit(4, &[real.to_le_bytes(), imag.to_le_bytes()].concat()),
             (Builtin::RegisteredString(points), []) => self.code.linked_string(points.clone()),
             (Builtin::RegisteredTemplate(segments), fields) => {
-                self.template(segments, fields, |frame, field| {
-                    std::ops::ControlFlow::Continue(frame.evaluate_handle(field))
-                })
+                let strings = self.code.emit_string_tuple(segments.to_vec());
+                let parts = self.code.op("list", &[]);
+                for field in fields {
+                    let value = self.evaluate_handle(field);
+                    self.code.op("append", &[&parts, &value]);
+                }
+                self.code.op("build_template", &[&strings, &parts])
             }
             (
                 Builtin::RegisteredInterpolation {
