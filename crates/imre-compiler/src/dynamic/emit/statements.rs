@@ -327,7 +327,7 @@ impl<'p> Function<'_, 'p> {
     fn branch_physical_operand(&mut self, test: &PhysicalOperand, yes: &str, no: &str) {
         match test {
             PhysicalOperand::Checked(operand) => self.branch_operand(operand, yes, no),
-            PhysicalOperand::Source(expr) => self.branch_expr(expr, yes, no),
+            PhysicalOperand::Residual(input) => self.branch_input(input.as_input(), yes, no),
         }
     }
 
@@ -349,7 +349,7 @@ impl<'p> Function<'_, 'p> {
                 self.prepare_checked_value(&value.value);
                 self.frame.prepared_operand(value, &self.sites, false)
             }
-            PhysicalOperand::Source(expr) => self.expr(expr),
+            PhysicalOperand::Residual(input) => self.input_value(input.as_input()),
         }
     }
 
@@ -373,7 +373,9 @@ impl<'p> Function<'_, 'p> {
                         self.frame
                             .prepared_branch(operand, &self.sites, matched, failed);
                     }
-                    PhysicalOperand::Source(expr) => self.branch_expr(expr, matched, failed),
+                    PhysicalOperand::Residual(input) => {
+                        self.branch_input(input.as_input(), matched, failed)
+                    }
                 },
                 MatchRegion::Body(case) => self.physical_suite(&site.cases[case].body),
             }

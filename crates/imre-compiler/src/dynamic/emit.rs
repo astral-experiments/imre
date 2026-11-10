@@ -400,12 +400,10 @@ impl<'a> PreparedBody<'a> {
         };
         let mut aliases = Vec::new();
         let mut logicals = crate::frontend::ExpressionSites::default();
-        let mut scopes = crate::frontend::function_scope::ScopeFacts::prepare(
-            &body,
-            &private_names,
-            |alias| aliases.push(alias),
-            |expr| logicals.visit(expr, values),
-        );
+        let mut scopes =
+            crate::frontend::function_scope::ScopeFacts::prepare(&body, &private_names, |alias| {
+                aliases.push(alias)
+            });
         let lambdas = RegisteredLambda::collect(&body, values, &mut scopes, &mut logicals);
         let values = crate::frontend::RegisteredSource {
             lambdas: Some(&lambdas),
@@ -535,6 +533,7 @@ impl<'a> PreparedBody<'a> {
             namespace_annotations,
             scopes,
             thread_entries,
+            #[cfg(test)]
             statement_sites: prepare.sites,
             python_optimization,
             lambdas,
@@ -817,6 +816,7 @@ struct SourceInfo<'a> {
     generators: HashMap<TextRange, RegisteredGenerator>,
     type_aliases: HashMap<ruff_text_size::TextSize, TypeAliasDefinition>,
     python_optimization: i32,
+    #[cfg(test)]
     statement_sites: crate::frontend::StatementSites,
     #[cfg(test)]
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
@@ -1154,7 +1154,7 @@ mod tests {
     fn inject_residual_child_module(prepared: &mut PreparedBody) {
         use crate::frontend::{RegisteredScope, RegisteredSource, SuitePreparation};
 
-        let mut logicals = prepared.source.statement_sites.expressions.take_lexical();
+        let logicals = prepared.source.statement_sites.expressions.take_lexical();
         if prepared.syntax.is_none() {
             let parsed = ruff_python_parser::parse_module(&prepared.source.text).unwrap();
             prepared.syntax = Some(Cow::Owned(parsed.into_syntax().body));
@@ -1170,12 +1170,6 @@ mod tests {
             generators: Some(&generators),
             ..source
         };
-        crate::frontend::function_scope::ScopeFacts::prepare(
-            body,
-            &prepared.source.private_names,
-            |_| {},
-            |expr| logicals.visit(expr, source),
-        );
         let classes = crate::frontend::registered_sites(
             body,
             &prepared.source.private_names,
@@ -1219,26 +1213,30 @@ mod tests {
         }
     }
 
-    fn residual_value_mut(suite: &mut crate::frontend::RegisteredSuite) -> &mut ast::Expr {
+    fn residual_occurrence(
+        suite: &mut crate::frontend::RegisteredSuite,
+    ) -> &mut crate::frontend::OwnedExpression {
         let [run] = suite.residual.as_mut_slice() else {
             panic!("expected one mixed statement");
         };
         let crate::frontend::SourceEffect::Value(_, inputs) = &mut run.effect else {
             panic!("expected a value operand");
         };
-        let [crate::frontend::PhysicalOperand::Source(value)] = &mut inputs[..] else {
-            panic!("expected one residual expression");
+        let [crate::frontend::PhysicalOperand::Residual(value)] = inputs.as_mut_slice() else {
+            panic!("expected one owned expression");
         };
         value
     }
 
+    fn residual_selection(
+        suite: &mut crate::frontend::RegisteredSuite,
+    ) -> &mut crate::frontend::ExpressionSelection {
+        std::rc::Rc::get_mut(&mut residual_occurrence(suite).selected).unwrap()
+    }
+
     fn replace_residual_input(prepared: &mut PreparedBody<'_>, index: usize) {
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
-        prepared
-            .source
-            .statement_sites
-            .expressions
-            .replace_residual_input(value, index, crate::ir::Expr::none());
+        residual_selection(prepared.source.initializer.as_mut().unwrap())
+            .replace_residual_input(index, crate::ir::Expr::none());
     }
 
     #[test]
@@ -1714,15 +1712,10 @@ mod tests {
         inject_residual_child_module(&mut module);
         let initializer = module.source.initializer.as_mut().unwrap();
         assert!(!initializer.fully_checked());
-        let call = residual_value_mut(initializer).clone();
         let before = module.standalone().unwrap();
         module.syntax = None;
         assert_eq!(module.standalone().unwrap(), before);
-        module
-            .source
-            .statement_sites
-            .expressions
-            .replace_residual_input(&call, 1, crate::ir::Expr::none());
+        replace_residual_input(&mut module, 1);
         assert_ne!(module.standalone().unwrap(), before);
     }
 
@@ -2802,7 +2795,10 @@ mod tests {
 
     #[test]
     fn a_physical_subscript_retains_its_receiver_and_individual_slice_bounds() {
-        use crate::frontend::SourceOperand::{Checked, Residual};
+        use crate::frontend::{
+            ExpressionInput,
+            SourceOperand::{Checked, Residual},
+        };
 
         let path = Path::new("store.py");
         let text = concat!(
@@ -2811,89 +2807,36 @@ mod tests {
         );
         let mut prepared =
             PreparedBody::module("store", path, text, 0, ModuleOrigin::Program(None)).unwrap();
-        let parsed = ParsedModule::parse(path, text.into()).unwrap();
-        prepared.syntax = Some(Cow::Owned(module_source::into_body(parsed.parsed)));
         inject_residual_child_module(&mut prepared);
 
-        fn erase(node: &mut ast::Expr) {
-            *node = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
-                range: node.range(),
-                node_index: Default::default(),
-            });
-        }
-
         let original = prepared.standalone().unwrap();
-        let adjacent = &prepared.syntax.as_deref().unwrap()[0]
-            .as_assign_stmt()
-            .unwrap()
-            .value;
-        assert!(
-            prepared
-                .source
-                .statement_sites
-                .expressions
-                .get(adjacent)
-                .is_none()
-        );
-        let sites = &prepared.source.statement_sites.expressions;
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        assert!(prepared.initializer().residual[0].at > 0);
+        let root = residual_selection(prepared.source.initializer.as_mut().unwrap());
+        let outer_inputs = root.physical().unwrap().operands().collect::<Vec<_>>();
+        let [
+            Checked(_),
+            Checked(_),
+            Residual(ExpressionInput {
+                range,
+                selected: inner,
+                ..
+            }),
+            Checked(_),
+        ] = outer_inputs.as_slice()
+        else {
+            panic!("expected the outer slice to own its upper-bound operation");
+        };
+        assert_eq!(&text[*range], "receiver()[begin():(lambda v: v)(hi())]");
         assert!(matches!(
-            sites
-                .physical(value)
+            inner
+                .physical()
                 .unwrap()
-                .operands(false)
-                .collect::<Vec<_>>()
-                .as_slice(),
-            [Checked(_), Checked(_), Residual(_), Checked(_)]
-        ));
-        let outer = value.as_subscript_expr_mut().unwrap();
-        erase(&mut outer.value);
-        let key = outer.slice.as_slice_expr_mut().unwrap();
-        erase(key.lower.as_deref_mut().unwrap());
-        erase(key.step.as_deref_mut().unwrap());
-        let read = key.upper.as_deref_mut().unwrap();
-        assert!(matches!(
-            sites
-                .physical(read)
-                .unwrap()
-                .operands(false)
+                .operands()
                 .collect::<Vec<_>>()
                 .as_slice(),
             [Checked(_), Checked(_), Residual(_)]
         ));
-        let read = read.as_subscript_expr_mut().unwrap();
-        erase(&mut read.value);
-        erase(
-            read.slice
-                .as_slice_expr_mut()
-                .unwrap()
-                .lower
-                .as_deref_mut()
-                .unwrap(),
-        );
-        assert_eq!(prepared.standalone().unwrap(), original);
-
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
-        let key = value
-            .as_subscript_expr_mut()
-            .unwrap()
-            .slice
-            .as_slice_expr_mut()
-            .unwrap();
-        let read = key
-            .upper
-            .as_deref_mut()
-            .unwrap()
-            .as_subscript_expr_mut()
-            .unwrap();
-        let residual = read
-            .slice
-            .as_slice_expr_mut()
-            .unwrap()
-            .upper
-            .as_mut()
-            .unwrap();
-        erase(&mut residual.as_call_expr_mut().unwrap().func);
+        prepared.syntax = None;
         assert_eq!(prepared.standalone().unwrap(), original);
         replace_residual_input(&mut prepared, 2);
         assert_ne!(prepared.standalone().unwrap(), original);
@@ -2901,7 +2844,8 @@ mod tests {
 
     #[test]
     fn a_mixed_comparison_keeps_its_operators_and_only_the_residual_child() {
-        use crate::frontend::ExpressionSelection::Comparison;
+        use crate::frontend::ExpressionInput;
+        use crate::frontend::ExpressionSelection::{Comparison, Inputs};
         use crate::frontend::SourceOperand::{Checked, Residual};
 
         let text = concat!(
@@ -2918,44 +2862,39 @@ mod tests {
         .unwrap();
         inject_residual_child_module(&mut prepared);
         let original = prepared.standalone().unwrap();
-        let complete = &prepared.syntax.as_deref().unwrap()[0]
-            .as_assign_stmt()
-            .unwrap()
-            .value;
-        let sites = &prepared.source.statement_sites.expressions;
-        assert!(!matches!(sites.get(complete), Some(Comparison { .. })));
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
-        let Some(Comparison {
-            range,
-            ops,
-            operands,
-        }) = sites.get(value)
-        else {
+        assert!(prepared.initializer().residual[0].at > 0);
+        let root = residual_occurrence(prepared.source.initializer.as_mut().unwrap());
+        assert_eq!(
+            &text[root.range],
+            "first() < (lambda v: v)(middle()) <= last()"
+        );
+        let Comparison { ops, operands } = root.selected.as_ref() else {
             panic!("expected a mixed comparison");
         };
-        assert_eq!(*range, value.range());
         assert_eq!(ops.as_ref(), [ast::CmpOp::Lt, ast::CmpOp::LtE]);
-        let [Checked(_), Residual(child), Checked(_)] = operands.as_ref() else {
-            panic!("only the middle operand requires source");
+        let [first, middle, last] = operands.as_ref() else {
+            panic!("expected all three comparison operands");
         };
-        assert_eq!(&text[child.range()], "(lambda v: v)(middle())");
+        assert!(matches!(first.operand(), Checked(_)));
+        assert!(matches!(last.operand(), Checked(_)));
+        let Residual(ExpressionInput {
+            range,
+            selected: Inputs(_),
+            ..
+        }) = middle.operand()
+        else {
+            panic!("expected the comparison to own its middle call");
+        };
+        assert_eq!(&text[range], "(lambda v: v)(middle())");
 
-        // Keep the lookup range and withdraw every child, including its source positions.
-        let cmp = value.as_compare_expr_mut().unwrap();
-        cmp.ops = Box::new([ast::CmpOp::Is]);
-        cmp.operands = Box::default();
+        prepared.syntax = None;
         assert_eq!(prepared.standalone().unwrap(), original);
-
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
-        let sites = &mut prepared.source.statement_sites.expressions;
-        let Some(Comparison { operands, .. }) = sites.get_mut(value) else {
+        let Comparison { operands, .. } =
+            residual_selection(prepared.source.initializer.as_mut().unwrap())
+        else {
             unreachable!()
         };
-        let Residual(child) = &mut operands[1] else {
-            unreachable!()
-        };
-        // Yield the original lambda object instead of invoking it on middle().
-        *child = child.as_call_expr().unwrap().func.clone();
+        operands[1] = std::rc::Rc::new(Checked(crate::ir::Expr::none()));
         assert_ne!(prepared.standalone().unwrap(), original);
     }
 
@@ -2967,49 +2906,18 @@ mod tests {
         let text = "good = before() + after()\nresult = (lambda v: v)(hi()) + more()\n";
         let mut prepared =
             PreparedBody::module("store", path, text, 0, ModuleOrigin::Program(None)).unwrap();
-        let parsed = ParsedModule::parse(path, text.into()).unwrap();
-        prepared.syntax = Some(Cow::Owned(module_source::into_body(parsed.parsed)));
         inject_residual_child_module(&mut prepared);
 
-        fn erase(node: &mut ast::Expr) {
-            *node = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
-                range: node.range(),
-                node_index: Default::default(),
-            });
-        }
-
         let original = prepared.standalone().unwrap();
-        let checked = &prepared.syntax.as_deref().unwrap()[0]
-            .as_assign_stmt()
-            .unwrap()
-            .value;
-        assert!(
-            prepared
-                .source
-                .statement_sites
-                .expressions
-                .get(checked)
-                .is_none()
-        );
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
-        let inputs = prepared
-            .source
-            .statement_sites
-            .expressions
-            .physical(value)
+        assert!(prepared.initializer().residual[0].at > 0);
+        let inputs = residual_selection(prepared.source.initializer.as_mut().unwrap())
+            .physical()
             .unwrap();
         assert!(matches!(
-            inputs.operands(false).collect::<Vec<_>>().as_slice(),
+            inputs.operands().collect::<Vec<_>>().as_slice(),
             [Residual(_), Checked(_)]
         ));
-        let binary = value.as_bin_op_expr_mut().unwrap();
-        binary.op = ast::Operator::Sub;
-        erase(&mut binary.right);
-        assert_eq!(prepared.standalone().unwrap(), original);
-
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
-        let binary = value.as_bin_op_expr_mut().unwrap();
-        erase(&mut binary.left.as_call_expr_mut().unwrap().func);
+        prepared.syntax = None;
         assert_eq!(prepared.standalone().unwrap(), original);
         replace_residual_input(&mut prepared, 0);
         assert_ne!(prepared.standalone().unwrap(), original);
@@ -3029,39 +2937,24 @@ mod tests {
         .unwrap();
         inject_residual_child_module(&mut prepared);
         let original = prepared.standalone().unwrap();
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
-        let inputs = prepared
-            .source
-            .statement_sites
-            .expressions
-            .physical(value)
+        let expected = prepared.syntax.as_ref().unwrap()[0]
+            .as_assign_stmt()
+            .unwrap()
+            .value
+            .as_call_expr()
+            .unwrap()
+            .arguments
+            .keywords[0]
+            .value
+            .range();
+        let inputs = residual_selection(prepared.source.initializer.as_mut().unwrap())
+            .physical()
             .unwrap();
-        let operands = inputs.operands(false).collect::<Vec<_>>();
+        let operands = inputs.operands().collect::<Vec<_>>();
         assert!(
-            matches!(operands.as_slice(), [Checked(_), Checked(_), Residual(arg), Checked(_)]
-            if arg.range() == value.as_call_expr().unwrap().arguments.keywords[0].value.range())
+            matches!(operands.as_slice(), [Checked(_), Checked(_), Residual(arg), Checked(_)] if arg.range() == expected)
         );
-
-        fn erase(expr: &mut ast::Expr) {
-            *expr = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
-                range: expr.range(),
-                node_index: Default::default(),
-            });
-        }
-
-        let call = value.as_call_expr_mut().unwrap();
-        let receiver = call.func.as_attribute_expr_mut().unwrap();
-        receiver.attr.id = "other".into();
-        erase(&mut receiver.value);
-        erase(&mut call.arguments.args[0]);
-        call.arguments.keywords[0].arg.as_mut().unwrap().id = "other".into();
-        erase(&mut call.arguments.keywords[1].value);
-        assert_eq!(prepared.standalone().unwrap(), original);
-
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
-        let call = value.as_call_expr_mut().unwrap();
-        let residual = &mut call.arguments.keywords[0].value;
-        erase(&mut residual.as_call_expr_mut().unwrap().func);
+        prepared.syntax = None;
         assert_eq!(prepared.standalone().unwrap(), original);
         replace_residual_input(&mut prepared, 2);
         assert_ne!(prepared.standalone().unwrap(), original);
@@ -3137,18 +3030,12 @@ mod tests {
         else {
             panic!("expected a prepared expression statement");
         };
-        let [crate::frontend::PhysicalOperand::Source(call)] = inputs.as_mut_slice() else {
+        let [crate::frontend::PhysicalOperand::Residual(call)] = inputs.as_mut_slice() else {
             panic!("expected the residual call");
         };
-        let site = call.clone();
-        let arg = &mut call.as_call_expr_mut().unwrap().arguments.args[0];
-        *arg = (*arg.as_call_expr().unwrap().func).clone();
-        assert_eq!(prepared.standalone().unwrap(), original);
-        prepared
-            .source
-            .statement_sites
-            .expressions
-            .replace_residual_input(&site, 1, crate::ir::Expr::none());
+        std::rc::Rc::get_mut(&mut call.selected)
+            .expect("the expression statement owns the selected call")
+            .replace_residual_input(1, crate::ir::Expr::none());
         assert_ne!(prepared.standalone().unwrap(), original);
     }
 
@@ -3179,14 +3066,21 @@ mod tests {
         let ast::Expr::Named(named) = assign.value.as_mut() else {
             panic!("expected assignment expression")
         };
-        assert!(matches!(
-            prepared
+        let mut owns_choice = false;
+        crate::ir::walk_expressions(
+            &prepared
                 .source
-                .statement_sites
-                .expressions
-                .get(&named.value),
-            Some(crate::frontend::ExpressionSelection::Checked(_))
-        ));
+                .initializer
+                .as_ref()
+                .unwrap()
+                .checked
+                .function
+                .body,
+            &mut |value| {
+                owns_choice |= matches!(value.kind, crate::ir::ExprKind::Conditional(..));
+            },
+        );
+        assert!(owns_choice);
         let ast::Expr::If(choice) = named.value.as_mut() else {
             panic!("expected choice")
         };
@@ -3202,7 +3096,7 @@ mod tests {
     #[test]
     fn a_mixed_conditional_reads_only_its_residual_child() {
         use crate::frontend::{
-            ExpressionSelection,
+            ExpressionInput, ExpressionSelection,
             SourceOperand::{Checked, Residual},
         };
 
@@ -3213,40 +3107,28 @@ mod tests {
         inject_residual_child_module(&mut prepared);
 
         let original = prepared.standalone().unwrap();
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
-        let Some(ExpressionSelection::Mixed {
+        let ExpressionSelection::Mixed {
             parts: Some(parts), ..
-        }) = prepared.source.statement_sites.expressions.get(value)
+        } = residual_selection(prepared.source.initializer.as_mut().unwrap())
         else {
             panic!("expected a mixed conditional");
         };
-        let [Checked(_), Checked(_), Residual(call)] =
-            parts.each_ref().map(|child| child.operand(false))
+        let [
+            Checked(_),
+            Checked(_),
+            Residual(ExpressionInput {
+                range,
+                selected: ExpressionSelection::Inputs(_),
+                ..
+            }),
+        ] = parts.each_ref().map(|child| child.operand())
         else {
             panic!("expected a checked test and true arm, and a residual false arm");
         };
-        let site = call.clone();
-
-        let none = || {
-            Box::new(ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
-                range: Default::default(),
-                node_index: Default::default(),
-            }))
-        };
-        *value = ast::Expr::If(ast::ExprIf {
-            range: value.range(),
-            node_index: Default::default(),
-            test: none(),
-            body: none(),
-            orelse: none(),
-        });
+        assert_eq!(&text[range], "(lambda v: v)(make())");
+        prepared.syntax = None;
         assert_eq!(prepared.standalone().unwrap(), original);
-
-        prepared
-            .source
-            .statement_sites
-            .expressions
-            .replace_residual_input(&site, 0, crate::ir::Expr::none());
+        replace_residual_input(&mut prepared, 2);
         assert_ne!(prepared.standalone().unwrap(), original);
     }
 
@@ -3262,20 +3144,21 @@ mod tests {
         .unwrap();
         inject_residual_child_module(&mut prepared);
         let original = prepared.standalone().unwrap();
-        let choice = residual_value_mut(prepared.source.initializer.as_mut().unwrap())
-            .as_if_expr_mut()
-            .unwrap();
+        use crate::frontend::{ExpressionInput, ExpressionSelection, SourceOperand};
+        let ExpressionSelection::Mixed {
+            parts: Some(parts), ..
+        } = residual_selection(prepared.source.initializer.as_mut().unwrap())
+        else {
+            panic!("expected a mixed choice");
+        };
         assert!(matches!(
-            prepared
-                .source
-                .statement_sites
-                .expressions
-                .get(&choice.test),
-            Some(crate::frontend::ExpressionSelection::Mixed { .. })
+            parts[0].operand(),
+            SourceOperand::Residual(ExpressionInput {
+                selected: ExpressionSelection::Mixed { .. },
+                ..
+            })
         ));
-        let guard = choice.test.as_bool_op_expr_mut().unwrap();
-        guard.op = ast::BoolOp::Or;
-        guard.values = Default::default();
+        prepared.syntax = None;
         assert_eq!(prepared.standalone().unwrap(), original);
     }
 
@@ -3363,7 +3246,7 @@ mod tests {
         };
         let [
             (Some(PhysicalOperand::Checked(_)), first),
-            (Some(PhysicalOperand::Source(_)), middle),
+            (Some(PhysicalOperand::Residual(_)), middle),
             (None, last),
         ] = arms.as_slice()
         else {
@@ -3401,7 +3284,7 @@ mod tests {
         let SourceEffect::Value(_, inputs) = &mut run.effect else {
             panic!("expected an expression statement");
         };
-        let [operand @ PhysicalOperand::Source(_)] = inputs.as_mut_slice() else {
+        let [operand @ PhysicalOperand::Residual(_)] = inputs.as_mut_slice() else {
             panic!("expected only the call to need its source operand");
         };
         *operand = child;
@@ -4307,7 +4190,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         };
         assert!(matches!(
             region.handlers[0].matcher,
-            Some((_, PhysicalOperand::Source(_)))
+            Some((_, PhysicalOperand::Residual(_)))
         ));
         assert!(!region.body.fully_checked());
         assert!(region.otherwise.fully_checked());
@@ -4542,17 +4425,6 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 SuitePreparation::new(&module.source.namespace_operations, source, &def.body, true);
             physical.sites.expressions = lexical;
             let body = physical.named_body(&def.body, kind, true, false);
-            assert!(matches!(
-                physical.sites.expressions.get(input),
-                Some(crate::frontend::ExpressionSelection::Suspension(
-                    crate::ir::SuspendValue::Yield,
-                    _
-                ))
-            ));
-            physical
-                .sites
-                .expressions
-                .prepare_input(&replacement, source, kind, true);
             module.source.statement_sites = physical.sites;
             install_test_function_body(&mut module.source, def, body);
             let suite = test_function_suite(&mut module.source, function);
@@ -4570,7 +4442,10 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             } else {
                 (message, &site.test)
             };
-            assert!(matches!(owned, PhysicalOperand::Source(_)));
+            assert!(
+                matches!(owned, PhysicalOperand::Residual(input) if matches!(input.selected.as_ref(),
+                crate::frontend::ExpressionSelection::Suspension(crate::ir::SuspendValue::Yield, _)))
+            );
             let PhysicalOperand::Checked(checked) = checked else {
                 panic!("expected a checked walrus")
             };
@@ -4598,32 +4473,21 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .into();
             assert_eq!(module.standalone().unwrap(), original);
 
-            fn residual<'a>(
-                module: &'a mut PreparedBody<'_>,
-                function: TextSize,
-                external_test: bool,
-            ) -> &'a mut ast::Expr {
-                let run = &mut test_function_suite(&mut module.source, function).residual[0];
-                let SourceEffect::Assertion(site) = &mut run.effect else {
-                    unreachable!()
-                };
-                let input = if external_test {
-                    &mut site.test
-                } else {
-                    site.message.as_mut().unwrap()
-                };
-                let PhysicalOperand::Source(input) = input else {
-                    unreachable!()
-                };
-                input
-            }
-            // The physical suspension owns its yielded value even inside the residual leaf.
-            residual(&mut module, function, external_test)
-                .as_yield_expr_mut()
-                .unwrap()
-                .value = None;
-            assert_eq!(module.standalone().unwrap(), original);
-            *residual(&mut module, function, external_test) = replacement;
+            let SourceEffect::Assertion(site) =
+                &mut test_function_suite(&mut module.source, function).residual[0].effect
+            else {
+                unreachable!()
+            };
+            let PhysicalOperand::Residual(input) = (if external_test {
+                &mut site.test
+            } else {
+                site.message.as_mut().unwrap()
+            }) else {
+                unreachable!()
+            };
+            input.selected = std::rc::Rc::new(crate::frontend::ExpressionSelection::Checked(
+                crate::ir::Expr::none(),
+            ));
             assert_ne!(module.standalone().unwrap(), original);
         }
     }
@@ -4677,8 +4541,10 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 WhileGuard::Operand(PhysicalOperand::Checked(operand)) if checked => {
                     operand.value = crate::ir::Expr::integer(0);
                 }
-                WhileGuard::Operand(PhysicalOperand::Source(test)) if !checked => {
-                    *test = test.as_call_expr().unwrap().func.clone();
+                WhileGuard::Operand(PhysicalOperand::Residual(test)) if !checked => {
+                    test.selected = std::rc::Rc::new(
+                        crate::frontend::ExpressionSelection::Checked(crate::ir::Expr::integer(0)),
+                    );
                 }
                 _ => panic!("unexpected guard for {guard}"),
             }
@@ -4714,7 +4580,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             panic!("expected the prepared while");
         };
         assert!(
-            matches!(&region.condition, WhileGuard::Operand(PhysicalOperand::Source(test)) if test.is_list_comp_expr())
+            matches!(&region.condition, WhileGuard::Operand(PhysicalOperand::Residual(test)) if test.kind == ast::NodeKind::ExprListComp)
         );
         region.condition = WhileGuard::Literal(false);
         assert!(module.standalone().is_ok());
@@ -5147,7 +5013,10 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
 
     #[test]
     fn a_residual_statement_uses_its_prepared_call_and_inline_operand() {
-        use crate::frontend::SourceOperand::{Checked, Residual};
+        use crate::frontend::{
+            ExpressionInput, ExpressionSelection,
+            SourceOperand::{Checked, Residual},
+        };
 
         let mut prepared = PreparedBody::module(
             "store",
@@ -5159,47 +5028,43 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         .unwrap();
         inject_residual_child_module(&mut prepared);
         let original = prepared.standalone().unwrap();
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
-        let sites = &prepared.source.statement_sites.expressions;
-        let inputs = sites.physical(value).unwrap();
-        let parts = inputs.operands(false).collect::<Vec<_>>();
-        let call = value.as_call_expr().unwrap();
+        let call = prepared.syntax.as_ref().unwrap()[0]
+            .as_expr_stmt()
+            .unwrap()
+            .value
+            .as_call_expr()
+            .unwrap();
+        let inputs = residual_selection(prepared.source.initializer.as_mut().unwrap())
+            .physical()
+            .unwrap();
+        let parts = inputs.operands().collect::<Vec<_>>();
         let [
             Checked(_),
-            Residual(first),
+            Residual(ExpressionInput {
+                range: first,
+                selected: ExpressionSelection::Inputs(_),
+                ..
+            }),
             Checked(_),
-            Residual(dictionary),
+            Residual(ExpressionInput {
+                range: dictionary,
+                selected: ExpressionSelection::Operand(operand),
+                ..
+            }),
         ] = parts.as_slice()
         else {
             panic!("expected the nested call and dictionary to use their own operand plans");
         };
-        assert_eq!(first.range(), call.arguments.args[0].range());
-        assert!(matches!(
-            sites.get(dictionary),
-            Some(crate::frontend::ExpressionSelection::Operand(_))
-        ));
-        let call = value.as_call_expr_mut().unwrap();
-        let [_, receiver, value] = &mut call.arguments.args[..] else {
-            panic!("expected the residual call, receiver and dictionary");
-        };
-        let callee = &mut receiver.as_call_expr_mut().unwrap().func;
-        **callee = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
-            range: callee.range(),
-            node_index: Default::default(),
-        });
-        value.as_dict_expr_mut().unwrap().items.clear();
+        assert_eq!(*first, call.arguments.args[0].range());
+        assert_eq!(*dictionary, call.arguments.args[2].range());
+        assert!(!operand.region().private_slots().is_empty());
+        prepared.syntax = None;
         assert_eq!(prepared.standalone().unwrap(), original);
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
-        let call = value.as_call_expr_mut().unwrap().arguments.args[0]
-            .as_call_expr_mut()
-            .unwrap();
-        *call.func = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
-            range: call.func.range(),
-            node_index: Default::default(),
-        });
-        assert_eq!(prepared.standalone().unwrap(), original);
+        replace_residual_input(&mut prepared, 3);
+        let changed = prepared.standalone().unwrap();
+        assert_ne!(changed, original);
         replace_residual_input(&mut prepared, 1);
-        assert_ne!(prepared.standalone().unwrap(), original);
+        assert_ne!(prepared.standalone().unwrap(), changed);
     }
 
     #[test]
@@ -5216,6 +5081,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
+        let start = def.start();
         let value = def.body[0]
             .as_return_stmt_mut()
             .unwrap()
@@ -5223,8 +5089,8 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .as_deref_mut()
             .unwrap();
         assert!(matches!(
-            prepared.source.statement_sites.expressions.get(value),
-            Some(crate::frontend::ExpressionSelection::Refused(range, _)) if *range == value.range()
+            residual_occurrence(test_function_suite(&mut prepared.source, start)).selected.as_ref(),
+            crate::frontend::ExpressionSelection::Refused(range, _) if *range == value.range()
         ));
         let display = value.as_list_comp_expr_mut().unwrap();
         *display.elt = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
@@ -5254,14 +5120,17 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
+        let start = def.start();
         let value = def.body[0]
             .as_return_stmt_mut()
             .unwrap()
             .value
             .as_deref_mut()
             .unwrap();
-        let Some(crate::frontend::ExpressionSelection::Refused(range, _)) =
-            prepared.source.statement_sites.expressions.get(value)
+        let crate::frontend::ExpressionSelection::Refused(range, _) =
+            residual_occurrence(test_function_suite(&mut prepared.source, start))
+                .selected
+                .as_ref()
         else {
             panic!("expected the checked child diagnostic");
         };
@@ -5296,22 +5165,18 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
+        let start = function.start();
         let expr = function.body[0]
             .as_return_stmt_mut()
             .unwrap()
             .value
             .as_deref_mut()
             .unwrap();
-        let sites = &prepared.source.statement_sites.expressions;
-        let lambdas = &prepared.source.lambdas;
-        let binding = sites.selection(expr, lambdas).unwrap();
-        assert!(std::ptr::eq(binding, &lambdas[&expr.start()].binding));
-        let replacement = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
-            range: expr.range(),
-            node_index: Default::default(),
-        });
-        assert!(sites.selection(&replacement, lambdas).is_none());
-        let ExpressionSelection::Refused(range, reason) = binding else {
+        let binding = prepared.source.lambdas[&expr.start()].binding.clone();
+        let held = residual_occurrence(test_function_suite(&mut prepared.source, start));
+        assert_eq!(held.range, expr.range());
+        assert!(std::rc::Rc::ptr_eq(&held.selected, &binding));
+        let ExpressionSelection::Refused(range, reason) = binding.as_ref() else {
             panic!("the prepared lambda owns the rejected display's range");
         };
         assert_eq!(&source[*range], "[lambda v=await get(x): v for x in rows]");
@@ -5521,10 +5386,12 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         else {
             panic!("expected the retained assignment value");
         };
-        let [crate::frontend::PhysicalOperand::Source(value)] = &mut inputs[..] else {
+        let [crate::frontend::PhysicalOperand::Residual(value)] = &mut inputs[..] else {
             panic!("expected the residual lambda call");
         };
-        *value = value.as_call_expr().unwrap().func.clone();
+        value.selected = std::rc::Rc::new(crate::frontend::ExpressionSelection::Checked(
+            crate::ir::Expr::none(),
+        ));
         assert_ne!(emit(&prepared), before);
     }
 
@@ -5611,12 +5478,12 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         ));
         let [
             crate::frontend::PhysicalOperand::Checked(_),
-            crate::frontend::PhysicalOperand::Source(key),
+            crate::frontend::PhysicalOperand::Residual(key),
         ] = operands.as_slice()
         else {
             panic!("expected a checked base and an opaque key");
         };
-        assert_eq!(key.range(), key_range);
+        assert_eq!(key.range, key_range);
         assert_eq!(&source[key_range], "(lambda: key)()");
 
         let emit = |prepared: &PreparedBody<'_>| {
@@ -5678,21 +5545,16 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .as_call_expr_mut()
             .unwrap();
         let tuple = &mut call.arguments.args[0];
-        assert!(
-            prepared
-                .source
-                .statement_sites
-                .expressions
-                .get(tuple)
-                .is_none()
-        );
         tuple.as_tuple_expr_mut().unwrap().elts.clear();
         assert_eq!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
     fn a_residual_assignment_uses_the_prepared_tuple_after_its_elements_are_erased() {
-        use crate::frontend::{ExpressionSelection, SourceOperand};
+        use crate::frontend::{
+            ExpressionInput, ExpressionSelection,
+            SourceOperand::{Checked, Residual},
+        };
 
         let mut prepared = PreparedBody::module(
             "worker",
@@ -5705,33 +5567,30 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         inject_residual_child_module(&mut prepared);
         let original = prepared.standalone().unwrap();
 
-        let sites = &prepared.source.statement_sites.expressions;
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
-        let inputs = sites.physical(value).unwrap();
-        assert!(matches!(
-            inputs.operands(false).collect::<Vec<_>>().as_slice(),
-            [
-                SourceOperand::Checked(_),
-                SourceOperand::Residual(_),
-                SourceOperand::Residual(_)
-            ]
-        ));
-        let call = value.as_call_expr_mut().unwrap();
-        let tuple = &mut call.arguments.args[0];
-        assert!(matches!(
-            sites.get(tuple),
-            Some(ExpressionSelection::Operand(_))
-        ));
-        tuple.as_tuple_expr_mut().unwrap().elts.clear();
-        assert_eq!(prepared.standalone().unwrap(), original);
-
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
-        let residual = &mut value.as_call_expr_mut().unwrap().arguments.args[1];
-        let callee = &mut residual.as_call_expr_mut().unwrap().func;
-        **callee = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
-            range: callee.range(),
-            node_index: Default::default(),
-        });
+        let call = prepared.syntax.as_ref().unwrap()[0]
+            .as_assign_stmt()
+            .unwrap()
+            .value
+            .as_call_expr()
+            .unwrap();
+        let inputs = residual_selection(prepared.source.initializer.as_mut().unwrap())
+            .physical()
+            .unwrap();
+        let parts = inputs.operands().collect::<Vec<_>>();
+        let [
+            Checked(_),
+            Residual(ExpressionInput {
+                range,
+                selected: ExpressionSelection::Operand(_),
+                ..
+            }),
+            Residual(_),
+        ] = parts.as_slice()
+        else {
+            panic!("expected the prepared tuple argument");
+        };
+        assert_eq!(*range, call.arguments.args[0].range());
+        prepared.syntax = None;
         assert_eq!(prepared.standalone().unwrap(), original);
         replace_residual_input(&mut prepared, 2);
         assert_ne!(prepared.standalone().unwrap(), original);

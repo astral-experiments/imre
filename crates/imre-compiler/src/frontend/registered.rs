@@ -1004,10 +1004,8 @@ pub(crate) enum PhysicalBinding {
     Refused(TextRange, &'static str),
 }
 
-pub(crate) enum PhysicalOperand {
-    Checked(Box<RegisteredOperand>),
-    Source(Box<ast::Expr>),
-}
+pub(crate) type PhysicalOperand =
+    booleans::SourceOperand<Box<RegisteredOperand>, booleans::OwnedExpression>;
 
 pub(crate) struct RegisteredSuite {
     pub(crate) checked: RegisteredFunction,
@@ -1171,7 +1169,7 @@ impl<'a> SuitePreparation<'a> {
                     .decorator_list
                     .iter()
                     .map(|decorator| {
-                        self.class_operand(&decorator.expression, site.enclosing, suspended)
+                        self.registered_operand(&decorator.expression, site.enclosing, suspended)
                     })
                     .collect();
                 let generic = site.parameters.is_some();
@@ -1204,7 +1202,9 @@ impl<'a> SuitePreparation<'a> {
                     Vec::new()
                 } else {
                     values()
-                        .map(|expr| self.class_operand(expr, bases_scope, suspended && !generic))
+                        .map(|expr| {
+                            self.registered_operand(expr, bases_scope, suspended && !generic)
+                        })
                         .collect()
                 };
                 let header = ClassHeader {
@@ -1278,29 +1278,6 @@ impl<'a> SuitePreparation<'a> {
         suspended: bool,
     ) -> RegisteredSuite {
         let (checked, pending) = self.lower(stmts, kind, select, suspended);
-        let source = self.source;
-        let sites = &mut self.sites.expressions;
-        for run in &pending {
-            let mut prepare_operand = |input: &PhysicalOperand| {
-                if let PhysicalOperand::Source(expr) = input {
-                    sites.prepare_input(expr, source, kind, suspended);
-                }
-            };
-            match &run.effect {
-                Some(
-                    SourceEffect::ObjectOperation(_, inputs)
-                    | SourceEffect::Discard(inputs)
-                    | SourceEffect::Value(_, inputs),
-                ) => inputs.iter().for_each(prepare_operand),
-                Some(SourceEffect::Assertion(site)) => {
-                    prepare_operand(&site.test);
-                    if let Some(message) = &site.message {
-                        prepare_operand(message);
-                    }
-                }
-                _ => {}
-            }
-        }
         let mut residual = Vec::with_capacity(pending.len());
         for run in pending {
             let effect =
@@ -1364,8 +1341,8 @@ impl<'a> SuitePreparation<'a> {
         self.retain_operand(expr, kind, suspended, operand)
     }
 
-    fn class_operand(
-        &mut self,
+    fn registered_operand(
+        &self,
         expr: &ast::Expr,
         kind: RegisteredScope,
         suspended: bool,
@@ -1375,20 +1352,20 @@ impl<'a> SuitePreparation<'a> {
     }
 
     fn retain_operand(
-        &mut self,
+        &self,
         expr: &ast::Expr,
         kind: RegisteredScope,
         suspended: bool,
         operand: Option<RegisteredOperand>,
     ) -> PhysicalOperand {
         match operand {
-            Some(operand) => PhysicalOperand::Checked(Box::new(operand)),
-            None => {
-                self.sites
-                    .expressions
-                    .prepare_input(expr, self.source, kind, suspended);
-                PhysicalOperand::Source(Box::new(expr.clone()))
-            }
+            Some(value) => PhysicalOperand::Checked(Box::new(value)),
+            None => PhysicalOperand::Residual(self.sites.expressions.owned_input(
+                expr,
+                self.source,
+                kind,
+                suspended,
+            )),
         }
     }
 
@@ -1596,10 +1573,13 @@ impl<'a> SuitePreparation<'a> {
                     scope.ordinary_operand(expr)
                 }
             });
-            match checked {
-                Some(value) => PhysicalOperand::Checked(Box::new(value)),
-                None => PhysicalOperand::Source(Box::new(expr.clone())),
-            }
+            self.retain_operand(expr, kind, suspended, checked)
+        };
+        let target_input = |input: TargetInput<'_>| {
+            let checked =
+                RegisteredOperand::prepare_with(self.source, kind, |scope| input.lower(scope));
+            let (TargetInput::Receiver(expr) | TargetInput::Index(expr)) = input;
+            self.retain_operand(expr, kind, suspended, checked)
         };
         for stmt in stmts {
             if let Some(transfer) = loop_transfer(stmt) {
@@ -1702,12 +1682,7 @@ impl<'a> SuitePreparation<'a> {
                         effect: Some(SourceEffect::Discard(
                             inputs
                                 .into_iter()
-                                .map(|expr| {
-                                    match RegisteredOperand::prepare(expr, self.source, kind) {
-                                        Some(value) => PhysicalOperand::Checked(Box::new(value)),
-                                        None => PhysicalOperand::Source(Box::new(expr.clone())),
-                                    }
-                                })
+                                .map(|expr| self.registered_operand(expr, kind, suspended))
                                 .collect(),
                         )),
                     });
@@ -1739,7 +1714,7 @@ impl<'a> SuitePreparation<'a> {
                         ValueStatement::AugmentItem(op),
                         vec![
                             frame_value(&target.value),
-                            TargetInput::Index(&target.slice).physical(self.source, kind),
+                            target_input(TargetInput::Index(&target.slice)),
                             frame_value(&assign.value),
                         ],
                     ),
@@ -1821,9 +1796,7 @@ impl<'a> SuitePreparation<'a> {
                             source: stmt,
                             effect: Some(SourceEffect::ObjectOperation(
                                 Box::new(op),
-                                inputs
-                                    .map(|input| input.physical(self.source, kind))
-                                    .collect(),
+                                inputs.map(target_input).collect(),
                             )),
                         });
                     }
@@ -2280,21 +2253,6 @@ impl TargetInput<'_> {
             Self::Index(key) => {
                 values::index_key(key, &mut |expr| scope.ordinary_operand(expr).ok_or(())).ok()
             }
-        }
-    }
-
-    fn physical(
-        self,
-        source: values::RegisteredSource<'_>,
-        kind: RegisteredScope,
-    ) -> PhysicalOperand {
-        if let Some(value) =
-            RegisteredOperand::prepare_with(source, kind, |scope| self.lower(scope))
-        {
-            PhysicalOperand::Checked(Box::new(value))
-        } else {
-            let (Self::Receiver(expr) | Self::Index(expr)) = self;
-            PhysicalOperand::Source(Box::new(expr.clone()))
         }
     }
 }
@@ -3248,7 +3206,7 @@ mod tests {
         };
         assert_eq!(test.local_names.len(), 1);
         assert_eq!(test.local_names[&0].name, "early");
-        assert!(matches!(site.message, Some(PhysicalOperand::Source(_))));
+        assert!(matches!(site.message, Some(PhysicalOperand::Residual(_))));
         let [_, Statement::If(test, succeeds, fails)] = plan.checked.function.body.as_slice()
         else {
             panic!("expected only the checked assertion checkpoint and branch");

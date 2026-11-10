@@ -174,7 +174,7 @@ fn template_default_and_body_suspend_in_their_defining_frames() {
         let mut body = parsed.into_syntax().body;
         let names = imre_ast::lower(&mut body);
         let mut scopes =
-            crate::frontend::function_scope::ScopeFacts::prepare(&body, &names, |_| {}, |_| {});
+            crate::frontend::function_scope::ScopeFacts::prepare(&body, &names, |_| {});
         RegisteredLambda::collect(&body, source, &mut scopes, &mut templates);
         templates
     };
@@ -263,7 +263,6 @@ fn unavailable_template_child_is_reported_at_its_own_range() {
             &module.body,
             &Default::default(),
             |_| {},
-            |_| {},
         );
         let mut sites = ExpressionSites::default();
         RegisteredLambda::collect(
@@ -276,7 +275,10 @@ fn unavailable_template_child_is_reported_at_its_own_range() {
             &mut sites,
         );
         for template in &templates.elts {
-            let result = sites.get(template).unwrap();
+            let (_, result) = sites
+                .templates()
+                .find(|(range, _)| *range == template.range())
+                .unwrap();
             let tail = template
                 .as_t_string_expr()
                 .unwrap()

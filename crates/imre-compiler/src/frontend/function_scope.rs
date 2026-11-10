@@ -369,7 +369,6 @@ impl ScopeFacts {
         body: &'a [ast::Stmt],
         names: &imre_ast::Names,
         alias_site: impl FnMut(&'a ast::StmtTypeAlias),
-        expression_site: impl FnMut(&ast::Expr),
     ) -> Self {
         let mut scopes = Self::default();
         Collector {
@@ -377,7 +376,6 @@ impl ScopeFacts {
             names,
             scope: Scope::Module,
             alias_site,
-            expression_site,
         }
         .visit_body(body);
         scopes
@@ -391,17 +389,14 @@ enum Scope {
     Function,
 }
 
-struct Collector<'a, A, E> {
+struct Collector<'a, A> {
     scopes: &'a mut ScopeFacts,
     names: &'a imre_ast::Names,
     scope: Scope,
     alias_site: A,
-    expression_site: E,
 }
 
-impl<'a, A: FnMut(&'a ast::StmtTypeAlias), E: FnMut(&ast::Expr)> Visitor<'a>
-    for Collector<'_, A, E>
-{
+impl<'a, A: FnMut(&'a ast::StmtTypeAlias)> Visitor<'a> for Collector<'_, A> {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         let strings = self.names.string_annotations;
         let parent = self.scope;
@@ -483,7 +478,6 @@ impl<'a, A: FnMut(&'a ast::StmtTypeAlias), E: FnMut(&ast::Expr)> Visitor<'a>
     }
 
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
-        (self.expression_site)(expr);
         let strings = self.names.string_annotations;
         if let ast::Expr::Lambda(lambda) = expr {
             self.scopes

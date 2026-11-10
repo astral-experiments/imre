@@ -7,7 +7,7 @@ use imre_ast::code_flags;
 pub(crate) struct RegisteredLambda {
     pub(crate) metadata: CallableMetadata,
     pub(crate) body: Option<RegisteredFunction>,
-    pub(crate) binding: ExpressionSelection,
+    pub(crate) binding: std::rc::Rc<ExpressionSelection>,
 }
 
 impl RegisteredLambda {
@@ -87,8 +87,9 @@ impl RegisteredLambda {
                             &self.scopes[&lambda.start()],
                             self.owner,
                         );
+                        self.expressions
+                            .register_lexical(expr, std::rc::Rc::clone(&plan.binding));
                         self.sites.insert(lambda.start(), plan);
-                        self.expressions.register_lambda(expr);
                     }
                     ast::Expr::TString(_) => {
                         self.expressions.prepare_template(expr, source, self.owner)
@@ -154,7 +155,7 @@ impl RegisteredLambda {
                 scope,
                 code_flags::yields_in_expression(&lambda.body),
             ),
-            binding,
+            binding: std::rc::Rc::new(binding),
             body,
         }
     }
@@ -178,7 +179,7 @@ async def factory(seed, rows, mark):
             .body;
         let names = imre_ast::lower(&mut body);
         let mut scopes =
-            crate::frontend::function_scope::ScopeFacts::prepare(&body, &names, |_| {}, |_| {});
+            crate::frontend::function_scope::ScopeFacts::prepare(&body, &names, |_| {});
         let source = values::RegisteredSource {
             text,
             method_imports: &Default::default(),
@@ -207,7 +208,7 @@ async def factory(seed, rows, mark):
         };
 
         let checked = &sites[&lambda(0).start()];
-        let ExpressionSelection::Operand(display) = &checked.binding else {
+        let ExpressionSelection::Operand(display) = checked.binding.as_ref() else {
             panic!("the complete binding should own the comprehension's private slots");
         };
         let row = display
@@ -241,7 +242,7 @@ async def factory(seed, rows, mark):
         };
         assert!(RegisteredOperand::prepare(binding(1), complete, owner).is_some());
 
-        let ExpressionSelection::Operand(plan) = &sites[&residual.start()].binding else {
+        let ExpressionSelection::Operand(plan) = sites[&residual.start()].binding.as_ref() else {
             panic!("expected an owning binding");
         };
         let ExprKind::Builtin(Builtin::RegisteredLambda(site, false), defaults) = &plan.value.kind
@@ -279,7 +280,7 @@ async def factory(seed, rows, mark):
             owner,
         );
         assert!(
-            matches!(mixed.binding, ExpressionSelection::Refused(range, "cannot compile this lambda body ahead of time") if range == thunk.range())
+            matches!(mixed.binding.as_ref(), ExpressionSelection::Refused(range, "cannot compile this lambda body ahead of time") if *range == thunk.range())
         );
         sites.insert(residual.start(), mixed);
 
@@ -315,7 +316,7 @@ async def factory(seed, rows, mark):
             RegisteredScope::Function { is_async: true },
         );
 
-        let ExpressionSelection::Operand(binding) = &plan.binding else {
+        let ExpressionSelection::Operand(binding) = plan.binding.as_ref() else {
             panic!("the awaited default should be part of the prepared binding");
         };
         let iteration = binding
@@ -491,7 +492,7 @@ async def factory(seed, rows, mark):
         let child_checked = values::Region::Lambda
             .operand(&nested.body, source)
             .is_some();
-        match &plan.binding {
+        match plan.binding.as_ref() {
             ExpressionSelection::Checked(binding) => {
                 let ExprKind::Builtin(Builtin::RegisteredLambda(_, false), defaults) =
                     &binding.kind
