@@ -1,39 +1,130 @@
-//! Prepare t-string constants and their interpolation operands before code generation.
+//! Prepare interpolated string literals and checked template operands before code generation.
 use super::*;
 use ast::visitor::{self, Visitor};
 use imre_ast::strings::{TemplateFieldText, interpolation_conversion};
 
-struct Templates<'a> {
+#[derive(Default)]
+pub(crate) struct PreparedStrings {
+    pub(crate) templates: HashMap<TextRange, Expr>,
+    pub(crate) literals: HashMap<TextRange, Expr>,
+    pub(crate) residual_templates: HashMap<TextRange, ResidualTemplate>,
+}
+
+pub(crate) struct ResidualTemplate {
+    pub(crate) segments: Vec<Vec<u8>>,
+    pub(crate) specs: Vec<StdResult<Expr, &'static str>>,
+}
+
+struct StringPreparation<'a> {
     source: RegisteredSource<'a>,
     fields: &'a HashMap<TextSize, TemplateFieldText>,
-    prepared: HashMap<TextRange, Expr>,
+    prepared: PreparedStrings,
+    // Template text is owned by its segments. Nested expressions can switch string kinds.
+    in_f_string: bool,
 }
 
 /// A template with a residual operand stays at its original whole-expression boundary.
-pub(crate) fn prepare_templates(
+pub(crate) fn prepare_strings(
     body: &[ast::Stmt],
     source: RegisteredSource<'_>,
     fields: &HashMap<TextSize, TemplateFieldText>,
-) -> HashMap<TextRange, Expr> {
-    let mut templates = Templates {
+) -> PreparedStrings {
+    let mut preparation = StringPreparation {
         source,
         fields,
-        prepared: HashMap::new(),
+        prepared: PreparedStrings::default(),
+        in_f_string: false,
     };
-    templates.visit_body(body);
-    templates.prepared
+    preparation.visit_body(body);
+    preparation.prepared
 }
 
-impl<'a> Visitor<'a> for Templates<'_> {
+impl<'a> Visitor<'a> for StringPreparation<'_> {
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
         // Prepare nested t-strings before lowering their enclosing operands.
+        let enclosing =
+            std::mem::replace(&mut self.in_f_string, matches!(expr, ast::Expr::FString(_)));
         stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
             visitor::walk_expr(self, expr)
         });
-        if let ast::Expr::TString(template) = expr
-            && let Some(value) = self.template(template)
-        {
-            self.prepared.insert(expr.range(), value);
+        self.in_f_string = enclosing;
+        match expr {
+            ast::Expr::TString(template) => {
+                if let Some(segments) = template_segments(template, self.source, self.fields) {
+                    if let Some(fields) = self.checked_fields(template) {
+                        self.prepared.templates.insert(
+                            expr.range(),
+                            object(Builtin::RegisteredTemplate(segments), fields),
+                        );
+                    } else {
+                        let specs = template
+                            .value
+                            .iter()
+                            .flat_map(|part| part.elements.interpolations())
+                            .map(|field| {
+                                imre_ast::strings::template_format_spec(field).map(|literal| {
+                                    match literal {
+                                        Some(literal) => self.source.formatted_literal(literal),
+                                        None => text(""),
+                                    }
+                                })
+                            })
+                            .collect();
+                        self.prepared
+                            .residual_templates
+                            .insert(expr.range(), ResidualTemplate { segments, specs });
+                    }
+                }
+            }
+            ast::Expr::FString(formatted) => {
+                for part in formatted.value.iter() {
+                    if let ast::FStringPartRef::Literal(literal) = part
+                        && !literal.value.is_empty()
+                    {
+                        let value = values::registered_string(
+                            &literal.value,
+                            std::iter::once(literal),
+                            self.source.replacements,
+                            self.source.has_templates,
+                        );
+                        self.prepared.literals.insert(literal.range(), value);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn visit_interpolated_string_element(&mut self, element: &'a ast::InterpolatedStringElement) {
+        if self.in_f_string {
+            match element {
+                ast::InterpolatedStringElement::Literal(literal) if !literal.value.is_empty() => {
+                    self.prepared
+                        .literals
+                        .insert(literal.range(), self.source.formatted_literal(literal));
+                }
+                ast::InterpolatedStringElement::Interpolation(field) => {
+                    if let Some(debug) = &field.debug_text {
+                        self.prepared
+                            .literals
+                            .insert(field.range(), text(debug.as_str()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        visitor::walk_interpolated_string_element(self, element);
+    }
+}
+
+impl RegisteredSource<'_> {
+    pub(crate) fn formatted_literal(self, literal: &ast::InterpolatedStringLiteralElement) -> Expr {
+        if let Some(replacements) = self.format_replacements(literal) {
+            let mut bytes = Vec::new();
+            values::push_codepoints(&mut bytes, &literal.value, Some(&replacements));
+            object(Builtin::RegisteredString(bytes), vec![])
+        } else {
+            text(literal.value.to_string())
         }
     }
 }
@@ -58,7 +149,7 @@ fn literal_points(
     values::push_codepoints(buffer, &literal.value, replacements.as_deref());
 }
 
-pub(crate) fn template_segments(
+fn template_segments(
     template: &ast::ExprTString,
     source: RegisteredSource<'_>,
     fields: &HashMap<TextSize, TemplateFieldText>,
@@ -82,9 +173,8 @@ pub(crate) fn template_segments(
     Some(strings)
 }
 
-impl Templates<'_> {
-    fn template(&self, template: &ast::ExprTString) -> Option<Expr> {
-        let strings = template_segments(template, self.source, self.fields)?;
+impl StringPreparation<'_> {
+    fn checked_fields(&self, template: &ast::ExprTString) -> Option<Vec<Expr>> {
         let mut parts = Vec::new();
         for field in template
             .value
@@ -100,7 +190,7 @@ impl Templates<'_> {
                 vec![self.operand(&field.expression)?, self.format_spec(field)?],
             ));
         }
-        Some(object(Builtin::RegisteredTemplate(strings), parts))
+        Some(parts)
     }
 
     fn format_spec(&self, field: &ast::InterpolatedElement) -> Option<Expr> {
@@ -114,9 +204,7 @@ impl Templates<'_> {
                     continue;
                 }
                 ast::InterpolatedStringElement::Literal(literal) => {
-                    let mut points = Vec::new();
-                    literal_points(self.source, literal, &mut points);
-                    object(Builtin::RegisteredString(points), vec![])
+                    self.source.formatted_literal(literal)
                 }
                 ast::InterpolatedStringElement::Interpolation(nested) => {
                     if let Some(prefix) = &self.fields.get(&nested.start())?.debug_prefix {
@@ -145,7 +233,7 @@ impl Templates<'_> {
         values::registered_value(
             expr,
             RegisteredSource {
-                templates: Some(&self.prepared),
+                templates: Some(&self.prepared.templates),
                 ..self.source
             },
         )

@@ -121,15 +121,15 @@ mod registered;
 pub(crate) use registered::type_alias::type_alias_body;
 pub(crate) use registered::values::{
     RegisteredSource, ValueStatement, binary_operands, display_elements, lambda_defaults, literal_membership,
-    literal_replacements, packed_arguments, push_codepoints, registered_arguments,
-    registered_constant_key, registered_index_key, registered_string, registered_value,
+    literal_replacements, module_literal_replacements, packed_arguments, push_codepoints, registered_arguments,
+    registered_constant_key, registered_index_key, registered_value,
     suspended_operand, value_statement,
 };
 pub(crate) use registered::{
-    AnnotationValue, DeferredModuleAnnotation, RegisteredFunction, RegisteredLambda,
+    AnnotationValue, DeferredModuleAnnotation, PreparedStrings, RegisteredFunction, RegisteredLambda,
     RegisteredScope, RegisteredSuite, SuitePreparation, annotation_expression, attribute_effects,
-    delete_targets, module_annotations, prepare_templates, registered_index_target,
-    registered_sites, registered_type_alias, registered_type_parameters, template_segments,
+    delete_targets, module_annotations, prepare_strings, registered_index_target,
+    registered_sites, registered_type_alias, registered_type_parameters,
 };
 mod sequences;
 mod shutil;

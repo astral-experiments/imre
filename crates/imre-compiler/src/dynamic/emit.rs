@@ -20,7 +20,6 @@ mod comprehensions;
 mod expressions;
 mod patterns;
 mod statements;
-mod strings;
 
 type ModuleSource = (String, PathBuf, String);
 
@@ -305,12 +304,8 @@ pub(super) fn check_parsed_source(
     keep_docstrings: bool,
 ) -> Result<HashMap<ruff_text_size::TextRange, Vec<u32>>, String> {
     module_source::validate_syntax(path, source, parsed)?;
-    let replacements = strings::literal_replacements(source, parsed.tokens());
-    if keep_docstrings && !replacements.is_empty() {
-        strings::check_docs(source, &parsed.syntax().body, &replacements)
-            .map_err(|error| format!("{}:{error}", path.display()))?;
-    }
-    Ok(replacements)
+    crate::frontend::module_literal_replacements(source, parsed, keep_docstrings)
+        .map_err(|error| format!("{}:{error}", path.display()))
 }
 
 /// Validate the executable bodies. Discovery already recorded the malformed modules.
@@ -402,6 +397,10 @@ impl<'a> PreparedBody<'a> {
         let has_templates = tokens
             .iter()
             .any(|t| t.kind() == ast::token::TokenKind::TStringStart);
+        let has_interpolation = has_templates
+            || tokens
+                .iter()
+                .any(|token| token.kind() == ast::token::TokenKind::FStringStart);
         let template_fields = imre_ast::strings::template_fields(source, tokens, syntax);
         // CPython starts the module provider at the first statement, excluding its decorators.
         let module_start = syntax
@@ -444,13 +443,13 @@ impl<'a> PreparedBody<'a> {
             method_imports: &method_imports,
             templates: None,
         };
-        let templates = if has_templates {
-            crate::frontend::prepare_templates(&body, values, &template_fields)
+        let strings = if has_interpolation {
+            crate::frontend::prepare_strings(&body, values, &template_fields)
         } else {
-            HashMap::new()
+            Default::default()
         };
         let values = crate::frontend::RegisteredSource {
-            templates: Some(&templates),
+            templates: Some(&strings.templates),
             ..values
         };
         let sites = crate::frontend::registered_sites(&body, &private_names);
@@ -594,7 +593,7 @@ impl<'a> PreparedBody<'a> {
             class_keywords,
             docs,
             has_templates,
-            templates,
+            strings,
             template_fields,
             replacements,
             method_imports,
@@ -843,7 +842,7 @@ struct SourceInfo<'a> {
     class_keywords: Vec<ruff_text_size::TextSize>,
     docs: Option<crate::modules::doctest::SealedDocs>,
     has_templates: bool,
-    templates: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
+    strings: crate::frontend::PreparedStrings,
     template_fields: HashMap<ruff_text_size::TextSize, imre_ast::strings::TemplateFieldText>,
     replacements: HashMap<ruff_text_size::TextRange, Vec<u32>>,
     private_names: imre_ast::Names,
@@ -859,7 +858,7 @@ impl SourceInfo<'_> {
             text: &self.text,
             replacements: &self.replacements,
             has_templates: self.has_templates,
-            templates: Some(&self.templates),
+            templates: Some(&self.strings.templates),
             method_imports: &self.method_imports,
             private_names: Some(&self.private_names),
         }
@@ -1193,6 +1192,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn prepared_format_literals_emit_without_lexical_replacements() {
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            r#"out = f"\ud800{{{value = :{width}\ud801}}}" "\ud802""#,
+            0,
+            ModuleOrigin::Program(ProgramBodies::default()),
+        )
+        .unwrap();
+        assert!(!prepared.source.strings.literals.is_empty());
+        let before = prepared.standalone().unwrap().unwrap();
+        assert!(!prepared.source.replacements.is_empty());
+        prepared.source.replacements.clear();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+    }
+
+    #[test]
     fn prepared_template_emits_after_source_body_is_dropped() {
         let mut prepared = PreparedBody::module(
             "query",
@@ -1211,7 +1227,9 @@ mod tests {
                 .fully_checked()
         );
         prepared.body.clear();
-        prepared.source.templates.clear();
+        assert!(prepared.source.strings.literals.is_empty());
+        assert!(prepared.source.strings.residual_templates.is_empty());
+        prepared.source.strings.templates.clear();
         prepared.source.template_fields.clear();
 
         let mut output = Output::default();
@@ -1263,6 +1281,7 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
         .unwrap();
         let checked: Vec<_> = prepared
             .source
+            .strings
             .templates
             .keys()
             .map(|&range| &prepared.source.text[range])
