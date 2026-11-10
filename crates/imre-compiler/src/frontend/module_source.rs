@@ -1,9 +1,11 @@
 //! Parsed physical module text and the source checks used before preparing registered code.
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::path::Path;
 
 use ruff_python_ast as ast;
 use ruff_python_parser::Parsed;
+use ruff_text_size::TextRange;
 
 /// Text and syntax in the same coordinate system. Discovery normalizes physical newlines.
 pub(crate) struct ParsedModule<'a> {
@@ -43,6 +45,23 @@ impl<'a> ParsedModule<'a> {
             })
     }
 
+    /// Check the original file offsets. A discovered CRLF file can have normalized offsets.
+    pub(crate) fn check_file(
+        path: &Path,
+        source: &'a str,
+        discovered: Option<Self>,
+        keep_docstrings: bool,
+    ) -> Result<(), String> {
+        let module = match discovered.filter(|entry| entry.text == source) {
+            Some(entry) => entry,
+            None => Self::parse(path, source.into())?,
+        };
+        validate(path, &module.text, &module.parsed, keep_docstrings)?;
+        let mut body = into_body(module.parsed);
+        lower(path, &module.text, &mut body)?;
+        Ok(())
+    }
+
     pub(crate) fn parse(path: &Path, text: Cow<'a, str>) -> Result<Self, String> {
         let parsed = imre_ast::indentation::prepare(&text)
             .parse_module()
@@ -54,11 +73,13 @@ impl<'a> ParsedModule<'a> {
     }
 }
 
-pub(crate) fn validate_syntax(
+/// Check syntax and prepare the literal escapes that this module can emit.
+pub(crate) fn validate(
     path: &Path,
     source: &str,
     parsed: &Parsed<ast::ModModule>,
-) -> Result<(), String> {
+    keep_docstrings: bool,
+) -> Result<HashMap<TextRange, Vec<u32>>, String> {
     if let Some((range, reason)) = imre_ast::comprehension::dict_unpacking_error(parsed) {
         let error = super::diagnostic_message(source, &range, &format!("SyntaxError: {reason}"));
         return Err(format!("{}:{error}", path.display()));
@@ -71,7 +92,8 @@ pub(crate) fn validate_syntax(
         let error = super::diagnostic_message(source, keyword, &reason);
         return Err(format!("{}:{error}", path.display()));
     }
-    Ok(())
+    super::module_literal_replacements(source, parsed, keep_docstrings)
+        .map_err(|error| format!("{}:{error}", path.display()))
 }
 
 pub(crate) fn lower(

@@ -589,7 +589,7 @@ fn scan_imports(
         }
     };
     if let Some((path, keep_docstrings)) = file_alternative {
-        emit::check_parsed_source(path, &module.text, &module.parsed, keep_docstrings)?;
+        module_source::validate(path, &module.text, &module.parsed, keep_docstrings)?;
     }
     imports_from_body(
         &module.text,
@@ -2067,9 +2067,14 @@ pub(crate) fn compile(
             ));
         }
     }
-    let modules = (sources.as_slice(), builtins.as_slice(), entry_source);
     let (units, used_archive) = if checking {
-        emit::check(modules, keep_docstrings, &module_errors)?;
+        let mut entry = entry_source;
+        for (_, path, source) in sources.iter().chain(&builtins) {
+            let parsed = entry.take();
+            if !module_errors.contains_key(path) {
+                ParsedModule::check_file(path, source, parsed, keep_docstrings)?;
+            }
+        }
         (Vec::new(), false)
     } else {
         // Admission may have given a fixed definition to its registered frame.
@@ -2089,7 +2094,7 @@ pub(crate) fn compile(
             .unwrap_or_default();
         let config = config.to_string();
         emit::emit(
-            modules,
+            (sources.as_slice(), builtins.as_slice(), entry_source),
             &config,
             python_optimization,
             Path::new(bundled_root),
