@@ -284,46 +284,6 @@ pub(crate) trait RegionEmitter<'a, 'p>: FrameEmitter<'a, 'p> {
         self.regions.extend(left.into_iter().rev());
         self.body.error_target = target;
     }
-
-    fn with_contexts(
-        &mut self,
-        sites: impl ExactSizeIterator<Item = ContextSite>,
-        mut manager: impl FnMut(&mut Self, usize) -> String,
-        mut bind: impl FnMut(&mut Self, usize, &str),
-        body: impl FnOnce(&mut Self),
-    ) {
-        let count = sites.len();
-        for (index, site) in sites.enumerate() {
-            let (exit, value, above_exit) = if site.is_async {
-                let mark = self.temporary_mark();
-                let (exit, value, above_exit) = self.unwind_operands(&mark, |code| {
-                    let manager = manager(code, index);
-                    code.enter_async(&manager, site, &mark)
-                });
-                (exit, value, Some(above_exit))
-            } else {
-                let manager = manager(self, index);
-                let (exit, value) = self.enter_sync(&manager, site);
-                (exit, value, None)
-            };
-            let (region, outer) = self.begin_context(site, exit);
-            self.regions.push(Region::Context {
-                exit: region,
-                outer,
-            });
-            bind(self, index, &value);
-            if let Some(mark) = above_exit {
-                self.discard_truth(&mark);
-            }
-        }
-        body(self);
-        for _ in 0..count {
-            let Some(Region::Context { exit, outer }) = self.regions.pop() else {
-                unreachable!("active context region")
-            };
-            self.end_context(exit, outer);
-        }
-    }
 }
 
 pub(crate) enum Finally<'p> {
@@ -363,17 +323,32 @@ impl Frame<'_, '_, '_> {
         binding: Option<&ContextBinding>,
         body: &[Statement],
     ) {
-        self.with_contexts(
-            std::iter::once(site),
-            |frame, _| frame.evaluate_handle(manager),
-            |frame, _, value| {
-                if let Some(binding) = binding {
-                    frame.store_private(binding.entered, value);
-                    frame.emit_suite(&binding.body);
-                }
-            },
-            |frame| frame.emit_suite(body),
-        );
+        let (exit, value, above_exit) = if site.is_async {
+            let mark = self.temporary_mark();
+            let (exit, value, above_exit) = self.unwind_operands(&mark, |frame| {
+                let manager = frame.evaluate_handle(manager);
+                frame.enter_async(&manager, site, &mark)
+            });
+            (exit, value, Some(above_exit))
+        } else {
+            let manager = self.evaluate_handle(manager);
+            let (exit, value) = self.enter_sync(&manager, site);
+            (exit, value, None)
+        };
+        let (exit, outer) = self.begin_context(site, exit);
+        self.regions.push(Region::Context { exit, outer });
+        if let Some(binding) = binding {
+            self.store_private(binding.entered, &value);
+            self.emit_suite(&binding.body);
+        }
+        if let Some(mark) = above_exit {
+            self.discard_truth(&mark);
+        }
+        self.emit_suite(body);
+        let Some(Region::Context { exit, outer }) = self.regions.pop() else {
+            unreachable!("active context region")
+        };
+        self.end_context(exit, outer);
     }
 }
 

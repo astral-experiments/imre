@@ -3116,13 +3116,31 @@ mod tests {
         let [run] = suite.residual.as_slice() else {
             panic!("expected a mixed context")
         };
-        let Ok(crate::frontend::SourceEffect::Context(context)) = &run.effect else {
+        let Ok(crate::frontend::SourceEffect::Region(region)) = &run.effect else {
             panic!("expected a prepared context")
         };
-        assert!(
-            matches!(context.inputs.as_slice(), [input] if matches!(input.manager, crate::frontend::PhysicalOperand::Checked(_))
-            && matches!(input.target, Some(crate::frontend::PhysicalBinding::Checked { .. })))
-        );
+        assert!(matches!(
+            region.operands.as_slice(),
+            [crate::frontend::PhysicalOperand::Checked(_)]
+        ));
+        let [
+            _,
+            crate::ir::Statement::With {
+                binding: Some(_),
+                body,
+                ..
+            },
+        ] = &region.checked.function.body[..]
+        else {
+            panic!("expected the checked context and binding")
+        };
+        let [crate::ir::Statement::Expr(input)] = body.as_slice() else {
+            panic!("expected a prepared suite input")
+        };
+        assert!(matches!(
+            input.kind,
+            crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredSuite(0), _)
+        ));
         let original = prepared.standalone().unwrap();
 
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
@@ -3137,12 +3155,12 @@ mod tests {
 
         // The expression statement owns the one call that still needs its lambda child.
         let suite = test_function_suite(&mut prepared.source, position);
-        let Ok(crate::frontend::SourceEffect::Context(context)) = &mut suite.residual[0].effect
+        let Ok(crate::frontend::SourceEffect::Region(region)) = &mut suite.residual[0].effect
         else {
             panic!("expected the mixed context");
         };
         let Ok(crate::frontend::SourceEffect::Value(statement, inputs)) =
-            &mut context.body.residual[0].effect
+            &mut region.suites[0].residual[0].effect
         else {
             panic!("expected a prepared expression statement");
         };
