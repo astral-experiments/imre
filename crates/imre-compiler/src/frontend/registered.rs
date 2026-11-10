@@ -1792,7 +1792,7 @@ impl SourceScope<'_> {
         {
             self.suspend_operand(ir::SuspendValue::Await, Some(&awaited.value), expr.range())?
         } else if let ast::Expr::Lambda(lambda) = expr {
-            if !values::can_bind(lambda, self.source) {
+            if !values::has_checked_lambda_body(lambda, self.source) {
                 return None;
             }
             let defaults = values::lambda_defaults(lambda)
