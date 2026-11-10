@@ -2151,7 +2151,9 @@ impl SourceScope<'_> {
                         }
                         // The dictionary retains earlier operands while a key, value or spread suspends.
                         ast::Expr::Dict(_) => self.operand(child),
-                        ast::Expr::Set(_) if child.is_await_expr() => self.operand(child),
+                        ast::Expr::Set(_) | ast::Expr::Subscript(_) if child.is_await_expr() => {
+                            self.operand(child)
+                        }
                         _ => self.ordinary_operand(child),
                     }
                     .ok_or(())
@@ -3901,6 +3903,16 @@ mod tests {
         let source =
             "async def visit(rows, call):\n    for row in rows:\n        await call(row)\n";
         assert_cursor_suspensions(source, &["await call(row)"]);
+    }
+
+    #[test]
+    fn awaited_subscription_binds_its_result_in_the_checked_loop() {
+        let source = concat!(
+            "async def visit(rows, key):\n",
+            "    for result in rows:\n",
+            "        left, right = (await result)[await key()]\n",
+        );
+        assert_cursor_suspensions(source, &["await result", "await key()"]);
     }
 
     fn assert_cursor_suspensions(source: &str, expected: &[&str]) {
