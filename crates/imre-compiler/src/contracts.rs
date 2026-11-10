@@ -692,6 +692,7 @@ impl Builtin {
             | Self::RegisteredLambda(..)
             | Self::RegisteredGenerator(..)
             | Self::RegisteredTypeAlias(_)
+            | Self::RegisteredSuite(_)
             | Self::RegisteredStatement(..)
             | Self::RegisteredDiscard
             | Self::RegisteredName(_)

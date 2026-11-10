@@ -373,6 +373,28 @@ pub(crate) fn emit_prepared_suite<'a, 'p>(
     frame.restore_checked_slots(enclosing);
 }
 
+pub(crate) fn prepared_condition<'a, 'p>(
+    owner: &mut dyn PreparedSuiteEmitter<'a, 'p>,
+    test: &crate::frontend::PhysicalOperand,
+) -> String {
+    match test {
+        crate::frontend::PhysicalOperand::Checked(operand) => {
+            let (frame, sites) = owner.frame_and_sites(Some(&operand.value));
+            frame.prepared_test(operand, sites)
+        }
+        crate::frontend::PhysicalOperand::Residual(input) => {
+            let mark = owner.temporary_mark();
+            let bit = emit_operand(
+                owner,
+                crate::frontend::SourceOperand::Residual(input.as_input()),
+                true,
+            );
+            owner.discard_truth(&mark);
+            bit
+        }
+    }
+}
+
 /// A checked run borrows its enclosing suite when a return can reach a prepared finally.
 enum FrameOwner<'f, 'a, 'p> {
     Registered(&'f mut RegisteredFrame<'a, 'p>, &'f CheckedSites),
@@ -427,17 +449,18 @@ impl std::ops::DerefMut for FrameOwner<'_, '_, '_> {
 }
 
 #[derive(Clone, Copy)]
-enum FrameInputs<'f> {
+enum FrameInputs<'f, 'p> {
     Handles(&'f [String]),
     Prepared(&'f crate::frontend::PhysicalInputs),
     Statement(&'f [crate::frontend::PhysicalOperand]),
+    Region(&'p crate::frontend::PreparedRegion),
 }
 
 /// The registered binder owns the scope, argument identities and frame.
 pub(crate) struct Frame<'f, 'a, 'p> {
     code: FrameOwner<'f, 'a, 'p>,
     names: Option<&'f HashMap<usize, LocalBinding>>,
-    inputs: FrameInputs<'f>,
+    inputs: FrameInputs<'f, 'p>,
     fixed_sites: Option<(&'f RegisteredFunction, &'f Cell<usize>)>,
 }
 
@@ -491,6 +514,19 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
         statement_frame.names = None;
         statement_frame.inputs = FrameInputs::Statement(inputs);
         CheckedBody::registered(statement_frame).emit_statement(statement);
+    }
+
+    pub(crate) fn emit_region(
+        owner: &'f mut dyn PreparedSuiteEmitter<'a, 'p>,
+        region: &'p crate::frontend::PreparedRegion,
+    ) {
+        let mut frame = Self {
+            code: FrameOwner::Prepared(owner),
+            names: None,
+            fixed_sites: None,
+            inputs: FrameInputs::Region(region),
+        };
+        frame.emit_suite(&region.body);
     }
 
     /// Bind the owned occurrence slots used by the checked operation.
@@ -651,8 +687,20 @@ impl Frame<'_, '_, '_> {
         }))
     }
 
+    pub(super) fn has_region_inputs(&self) -> bool {
+        matches!(self.inputs, FrameInputs::Region(_))
+    }
+
+    pub(super) fn bound_condition(&mut self, expr: &Expr) -> Option<String> {
+        let (FrameInputs::Region(region), ExprKind::Local(slot)) = (self.inputs, &expr.kind) else {
+            return None;
+        };
+        Some(prepared_condition(self.code.prepared_owner(), &region.guards[*slot]))
+    }
+
     pub(crate) fn lookup_local(&mut self, slot: usize) -> String {
         match self.inputs {
+            FrameInputs::Region(_) => unreachable!("control region slots are tested as conditions"),
             FrameInputs::Handles([]) => {}
             FrameInputs::Handles(inputs) => return inputs[slot].clone(),
             FrameInputs::Prepared(inputs) => {
@@ -936,6 +984,12 @@ impl Frame<'_, '_, '_> {
             let message = operands.first().map(|expr| self.evaluate_handle(expr));
             self.code
                 .assertion_failure(*statement, *test, message.as_deref());
+            true
+        } else if let ExprKind::Builtin(Builtin::RegisteredSuite(index), _) = &expr.kind {
+            let FrameInputs::Region(region) = self.inputs else {
+                unreachable!("ordered child suite outside its control region")
+            };
+            emit_prepared_suite(self.code.prepared_owner(), &region.suites[*index]);
             true
         } else if let ExprKind::Builtin(Builtin::RegisteredStatement(range, simple), _) = &expr.kind
         {

@@ -2013,10 +2013,11 @@ mod tests {
         let [run] = plan.residual.as_mut_slice() else {
             panic!("expected one mixed while in the function");
         };
-        let SourceEffect::While(region) = &mut run.effect else {
+        let SourceEffect::Region(region) = &mut run.effect else {
             panic!("expected the prepared while");
         };
-        let suite = &mut region.body;
+        assert!(matches!(region.body.as_slice(), [crate::ir::Statement::While(..)]));
+        let suite = &mut region.suites[0];
         fn transfer(
             suite: &mut crate::frontend::RegisteredSuite,
             range: TextRange,
@@ -2035,14 +2036,17 @@ mod tests {
             transfer(suite, stop_range),
             crate::ir::Statement::Break
         ));
-        let SourceEffect::If { range, arms } = &mut suite.residual[0].effect else {
+        let SourceEffect::Region(branch) = &mut suite.residual[0].effect else {
             panic!("expected the if at the start of the while body");
         };
-        assert_eq!(*range, branch_range);
-        let [(Some(_), arm)] = arms.as_mut_slice() else {
-            panic!("expected one guarded arm");
+        use crate::ir::{Builtin, ExprKind, Statement};
+        let [Statement::Expr(mark), Statement::If(..)] = branch.body.as_slice() else {
+            panic!("expected the checkpoint and checked conditional");
         };
-        let op = transfer(arm, skip_range);
+        assert!(matches!(&mark.kind,
+            ExprKind::Builtin(Builtin::RegisteredStatement(site, None), _) if *site == branch_range
+        ));
+        let op = transfer(&mut branch.suites[0], skip_range);
         assert!(matches!(op, crate::ir::Statement::Continue));
         *op = crate::ir::Statement::Break;
         assert_ne!(module.standalone().unwrap(), original);
@@ -3391,16 +3395,15 @@ mod tests {
 
     #[test]
     fn mixed_if_owns_its_guards_and_residual_arm_after_source_erasure() {
-        use crate::frontend::{PhysicalOperand, RegisteredSuite, SourceEffect};
+        use crate::frontend::{PhysicalOperand, PreparedRegion, SourceEffect};
+        use crate::ir::Statement;
 
-        fn middle_arm<'a>(
-            prepared: &'a mut PreparedBody<'_>,
-        ) -> &'a mut (Option<PhysicalOperand>, RegisteredSuite) {
+        fn region<'a>(prepared: &'a mut PreparedBody<'_>) -> &'a mut PreparedRegion {
             let initializer = prepared.source.initializer.as_mut().unwrap();
-            let SourceEffect::If { arms, .. } = &mut initializer.residual[0].effect else {
+            let SourceEffect::Region(region) = &mut initializer.residual[0].effect else {
                 unreachable!()
             };
-            &mut arms[1]
+            region
         }
 
         let source = concat!(
@@ -3424,16 +3427,18 @@ mod tests {
         let [run] = prepared.initializer().residual.as_slice() else {
             panic!("expected only the mixed if");
         };
-        let SourceEffect::If { arms, .. } = &run.effect else {
-            panic!("expected a prepared if");
+        let SourceEffect::Region(branch) = &run.effect else {
+            panic!("expected a prepared conditional");
         };
-        let [
-            (Some(PhysicalOperand::Checked(_)), first),
-            (Some(PhysicalOperand::Residual(_)), middle),
-            (None, last),
-        ] = arms.as_slice()
-        else {
-            panic!("expected a checked guard, a residual guard, and an else");
+        assert!(matches!(branch.body.as_slice(),
+            [_, Statement::If(_, _, no)] if matches!(no.as_slice(), [Statement::If(..)])
+        ));
+        assert!(matches!(
+            branch.guards.as_slice(),
+            [PhysicalOperand::Checked(_), PhysicalOperand::Residual(_)]
+        ));
+        let [first, middle, last] = branch.suites.as_slice() else {
+            panic!("expected three ordered suites");
         };
         assert!(first.fully_checked() && last.fully_checked());
         assert!(!middle.fully_checked());
@@ -3456,12 +3461,12 @@ mod tests {
             PhysicalOperand::Checked(Box::new(value))
         };
         let (guard, child) = (checked_none(), checked_none());
-        let saved = middle_arm(&mut prepared).0.replace(guard);
+        let saved = std::mem::replace(&mut region(&mut prepared).guards[1], guard);
         assert_ne!(prepared.standalone().unwrap(), original);
-        middle_arm(&mut prepared).0 = saved;
+        region(&mut prepared).guards[1] = saved;
         assert_eq!(prepared.standalone().unwrap(), original);
 
-        let [run] = middle_arm(&mut prepared).1.residual.as_mut_slice() else {
+        let [run] = region(&mut prepared).suites[1].residual.as_mut_slice() else {
             panic!("expected the middle arm to retain only the call");
         };
         let SourceEffect::Value(_, inputs) = &mut run.effect else {
@@ -3471,7 +3476,12 @@ mod tests {
             panic!("expected only the call to need its source operand");
         };
         *operand = child;
-        assert_ne!(prepared.standalone().unwrap(), original);
+        let changed_child = prepared.standalone().unwrap();
+        assert_ne!(changed_child, original);
+
+        // Removing the checked If disconnects all three still-bound child suites.
+        region(&mut prepared).body.pop();
+        assert_ne!(prepared.standalone().unwrap(), changed_child);
     }
 
     #[test]
@@ -4833,9 +4843,10 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
 
     #[test]
     fn mixed_while_owns_its_guard_body_and_else_after_source_erasure() {
-        use crate::frontend::{PhysicalOperand, PreparedWhile, SourceEffect, WhileGuard};
+        use crate::frontend::{PhysicalOperand, PreparedRegion, SourceEffect};
+        use crate::ir::Statement;
 
-        fn region<'a>(module: &'a mut PreparedBody) -> &'a mut PreparedWhile {
+        fn region<'a>(module: &'a mut PreparedBody) -> &'a mut PreparedRegion {
             let [run] = module
                 .source
                 .initializer
@@ -4846,7 +4857,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             else {
                 panic!("expected one residual statement");
             };
-            let SourceEffect::While(region) = &mut run.effect else {
+            let SourceEffect::Region(region) = &mut run.effect else {
                 panic!("expected the prepared while");
             };
             region
@@ -4869,18 +4880,24 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             module.syntax.as_mut().unwrap().to_mut().clear();
             assert!(module.standalone().unwrap() == original);
 
-            let otherwise = region(&mut module).otherwise.take().unwrap();
+            fn else_block(region: &mut PreparedRegion) -> &mut Vec<Statement> {
+                let [Statement::While(_, _, otherwise)] = region.body.as_mut_slice() else {
+                    panic!("expected checked While with its ordered suites");
+                };
+                otherwise
+            }
+            let otherwise = std::mem::take(else_block(region(&mut module)));
             assert!(module.standalone().unwrap() != original);
-            region(&mut module).otherwise = Some(otherwise);
-            let residual = std::mem::take(&mut region(&mut module).body.residual);
+            *else_block(region(&mut module)) = otherwise;
+            let residual = std::mem::take(&mut region(&mut module).suites[0].residual);
             assert!(!residual.is_empty());
             assert!(module.standalone().unwrap() != original);
-            region(&mut module).body.residual = residual;
-            match &mut region(&mut module).condition {
-                WhileGuard::Operand(PhysicalOperand::Checked(operand)) if checked => {
+            region(&mut module).suites[0].residual = residual;
+            match &mut region(&mut module).guards[0] {
+                PhysicalOperand::Checked(operand) if checked => {
                     operand.value = crate::ir::Expr::integer(0);
                 }
-                WhileGuard::Operand(PhysicalOperand::Residual(test)) if !checked => {
+                PhysicalOperand::Residual(test) if !checked => {
                     test.selected = std::rc::Rc::new(
                         crate::frontend::ExpressionSelection::Checked(crate::ir::Expr::integer(0)),
                     );
@@ -4893,7 +4910,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
 
     #[test]
     fn mixed_while_preserves_its_residual_guard_diagnostic_after_erasure() {
-        use crate::frontend::{PhysicalOperand, SourceEffect, WhileGuard};
+        use crate::frontend::{PhysicalOperand, SourceEffect};
 
         let source = "async def probe():\n    while [lambda v=await get(x): v for x in [0]]:\n        yield 'body'\n        break\n";
         let mut module = PreparedBody::module_with_syntax(
@@ -4916,13 +4933,16 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert_eq!(module.standalone().unwrap_err(), expected);
 
         let plan = test_function_suite(&mut module.source, start);
-        let SourceEffect::While(region) = &mut plan.residual[0].effect else {
+        let SourceEffect::Region(region) = &mut plan.residual[0].effect else {
             panic!("expected the prepared while");
         };
         assert!(
-            matches!(&region.condition, WhileGuard::Operand(PhysicalOperand::Residual(test)) if test.range == guard_range)
+            matches!(region.guards.as_slice(), [PhysicalOperand::Residual(test)] if test.range == guard_range)
         );
-        region.condition = WhileGuard::Literal(false);
+        let [crate::ir::Statement::While(condition, _, _)] = region.body.as_mut_slice() else {
+            panic!("expected the checked loop");
+        };
+        *condition = crate::ir::Expr::boolean(false);
         assert!(module.standalone().is_ok());
     }
 

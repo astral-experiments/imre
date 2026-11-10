@@ -360,6 +360,7 @@ impl CheckedBody<'_, '_, '_, '_> {
             Entry::Native(emitter) => Some(emitter.if_facts(test, yes)),
             Entry::Registered(_) => None,
         };
+        let resumable = matches!(&self.0, Entry::Registered(frame) if frame.has_region_inputs());
         super::join::choose(
             self,
             Self::body,
@@ -381,7 +382,7 @@ impl CheckedBody<'_, '_, '_, '_> {
                     code.fixed().leave_if_body(facts);
                 }
             },
-            false,
+            resumable,
         );
     }
 }

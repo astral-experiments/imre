@@ -1007,13 +1007,8 @@ pub(crate) enum SourceEffect {
     Assertion(Box<AssertionSite>),
     /// A refused operation retains its diagnostic and original source range.
     Refused(TextRange, &'static str),
-    /// Re-evaluate the guard in the enclosing frame on each trip through the loop.
-    While(Box<PreparedWhile>),
-    /// Each test and its child suite are prepared in their enclosing frame.
-    If {
-        range: TextRange,
-        arms: Vec<(Option<PhysicalOperand>, RegisteredSuite)>,
-    },
+    /// Checked control flow with guards and child suites bound in their lexical frame.
+    Region(Box<PreparedRegion>),
     /// Patterns, guards and case suites belong to the same evaluation of the subject.
     Match(TextRange, Box<patterns::SourceMatch>),
     /// Exception matchers and all control-flow children belong to this protected region.
@@ -1032,15 +1027,31 @@ fn loop_transfer(stmt: &ast::Stmt) -> Option<Statement> {
     }
 }
 
-pub(crate) struct PreparedWhile {
-    pub(crate) condition: WhileGuard,
-    pub(crate) body: RegisteredSuite,
-    pub(crate) otherwise: Option<RegisteredSuite>,
+#[derive(Default)]
+pub(crate) struct PreparedRegion {
+    /// A disabled loop can only leave through its else suite.
+    terminates: bool,
+    pub(crate) body: Vec<Statement>,
+    pub(crate) guards: Vec<PhysicalOperand>,
+    pub(crate) suites: Vec<RegisteredSuite>,
 }
 
-pub(crate) enum WhileGuard {
-    Literal(bool),
-    Operand(PhysicalOperand),
+impl PreparedRegion {
+    fn guard(&mut self, operand: PhysicalOperand) -> Expr {
+        let index = self.guards.len();
+        self.guards.push(operand);
+        Expr::local(index, Type::Bool)
+    }
+
+    fn child(&mut self, suite: RegisteredSuite) -> Vec<Statement> {
+        let index = self.suites.len();
+        self.suites.push(suite);
+        vec![Statement::Expr(operation(
+            Builtin::RegisteredSuite(index),
+            Type::None,
+            vec![],
+        ))]
+    }
 }
 
 pub(crate) struct PreparedFor {
@@ -1373,9 +1384,9 @@ impl<'a> SuitePreparation<'a> {
                     (None, ast::Stmt::If(branch)) => {
                         self.prepare_if(branch, kind, child_selection, suspended)
                     }
-                    (None, ast::Stmt::While(loop_)) => SourceEffect::While(Box::new(
-                        self.prepare_while(loop_, kind, child_selection, suspended),
-                    )),
+                    (None, ast::Stmt::While(loop_)) => {
+                        self.prepare_while(loop_, kind, child_selection, suspended)
+                    }
                     (None, ast::Stmt::For(loop_)) => SourceEffect::For(Box::new(self.prepare_for(
                         loop_,
                         kind,
@@ -1427,14 +1438,7 @@ impl<'a> SuitePreparation<'a> {
                         .as_ref()
                         .is_none_or(|suite| suite.falls_through),
                 ),
-                SourceEffect::While(region)
-                    if matches!(region.condition, WhileGuard::Literal(false)) =>
-                {
-                    region
-                        .otherwise
-                        .as_ref()
-                        .is_none_or(|suite| suite.falls_through)
-                }
+                SourceEffect::Region(region) => !region.terminates,
                 _ => true,
             };
             residual.push(SuiteOperation { at: run.at, effect });
@@ -1570,7 +1574,9 @@ impl<'a> SuitePreparation<'a> {
         selection: SuiteSelection,
         suspended: bool,
     ) -> SourceEffect {
+        let mut region = PreparedRegion::default();
         let mut arms = Vec::new();
+        let mut otherwise = Vec::new();
         for (test, suite) in if_clauses(branch) {
             // A dead literal arm in a suspended frame has no resume entry.
             let test = match test {
@@ -1587,16 +1593,21 @@ impl<'a> SuitePreparation<'a> {
                 }
                 test => test.map(|expr| self.physical_operand(expr, kind, selection, suspended)),
             };
-            let unconditional = test.is_none();
-            arms.push((test, self.physical_suite(suite, kind, selection, suspended)));
-            if unconditional {
+            let child = region.child(self.physical_suite(suite, kind, selection, suspended));
+            if let Some(test) = test {
+                arms.push((region.guard(test), child));
+            } else {
+                otherwise = child;
                 break;
             }
         }
-        SourceEffect::If {
-            range: branch.range(),
-            arms,
-        }
+        region.body.push(Statement::Expr(operation(
+            Builtin::RegisteredStatement(branch.range(), None),
+            Type::None,
+            vec![],
+        )));
+        region.body.extend(statements::if_arms(arms, otherwise));
+        SourceEffect::Region(Box::new(region))
     }
 
     fn prepare_try(
@@ -1683,25 +1694,30 @@ impl<'a> SuitePreparation<'a> {
         kind: RegisteredScope,
         selection: SuiteSelection,
         suspended: bool,
-    ) -> PreparedWhile {
-        let condition = match loop_.test.as_ref() {
-            ast::Expr::BooleanLiteral(literal) => WhileGuard::Literal(literal.value),
-            test => WhileGuard::Operand(
-                self.owned_operand(test, kind, suspended, |scope| scope.condition_operand(test)),
-            ),
+    ) -> SourceEffect {
+        let mut region = PreparedRegion::default();
+        let test = match loop_.test.as_ref() {
+            ast::Expr::BooleanLiteral(literal) => Expr::boolean(literal.value),
+            expr => region.guard(self.owned_operand(expr, kind, suspended, |scope| {
+                scope.condition_operand(expr)
+            })),
         };
-        // A disabled loop has no body entry, including in a suspended frame.
-        let body = if matches!(condition, WhileGuard::Literal(false)) {
-            &[][..]
+        // A dead body has no resume entry, even when its syntax declares a generator.
+        let disabled = matches!(test.kind, ExprKind::Bool(false));
+        let body = if disabled {
+            Vec::new()
         } else {
-            &loop_.body
+            region.child(self.physical_suite(&loop_.body, kind, selection, suspended))
         };
-        PreparedWhile {
-            condition,
-            body: self.physical_suite(body, kind, selection, suspended),
-            otherwise: (!loop_.orelse.is_empty())
-                .then(|| self.physical_suite(&loop_.orelse, kind, selection, suspended)),
-        }
+        let otherwise = if loop_.orelse.is_empty() {
+            Vec::new()
+        } else {
+            let suite = self.physical_suite(&loop_.orelse, kind, selection, suspended);
+            region.terminates = disabled && !suite.falls_through;
+            region.child(suite)
+        };
+        region.body.push(Statement::While(test, body, otherwise));
+        SourceEffect::Region(Box::new(region))
     }
 
     fn prepare_for(
@@ -3684,13 +3700,15 @@ mod tests {
             panic!("expected only the second conditional to need a physical guard")
         };
 
-        let SourceEffect::If { range, arms } = &run.effect else {
-            panic!("expected a prepared mixed conditional")
+        let SourceEffect::Region(region) = &run.effect else {
+            panic!("expected the conditional to bind its child suite")
         };
-        assert_eq!(*range, stmts[1].range());
+        assert!(matches!(region.body.as_slice(),
+            [Statement::Expr(mark), Statement::If(..)] if matches!(mark.kind, ExprKind::Builtin(Builtin::RegisteredStatement(range, None), _) if range == stmts[1].range())
+        ));
         assert!(matches!(
-            arms.as_slice(),
-            [(Some(PhysicalOperand::Checked(_)), _)]
+            region.guards.as_slice(),
+            [PhysicalOperand::Checked(_)]
         ));
     }
 
