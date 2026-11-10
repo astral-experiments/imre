@@ -8080,6 +8080,21 @@ impl<'a> Checker<'a> {
                         (Type::Str, Builtin::StringTupleContains)
                     } else if self.types.element(receiver.ty) == Some(Type::Str) {
                         (Type::Str, Builtin::StringListContains)
+                    } else if matches!(
+                        self.types.element(receiver.ty),
+                        Some(Type::Float | Type::PythonObject)
+                    ) && (self.registered.is_some()
+                        || self.graph.modules[self.module].is_program_source())
+                    {
+                        // The boxed list comparison preserves identity before testing equality.
+                        self.require_registered_operation(compare);
+                        return Ok(Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Builtin(
+                                Builtin::RegisteredCompare(compare.ops.to_vec()),
+                                vec![key, receiver],
+                            ),
+                        });
                     } else {
                         return Err(error(
                             self.source,
@@ -13062,6 +13077,20 @@ impl<'a> Checker<'a> {
                     Type::Int,
                 )
             }
+            "id" if let [value] = args.as_slice()
+                && matches!(value.ty, Type::Float | Type::PythonObject)
+                && self.unshadowed_builtin(&call.func, "id")
+                && (self.registered.is_some()
+                    || self.graph.modules[self.module].is_program_source()) =>
+            {
+                self.require_registered_operation(call);
+                let mut operands = args;
+                operands.insert(0, registered::values::name_binding("id"));
+                return Ok(Expr {
+                    ty: Type::Int,
+                    ..registered::values::object_call(call, operands)
+                });
+            }
             "int"
                 if args.len() == 1
                     && matches!(args[0].ty, Type::Union(_))
@@ -13511,6 +13540,73 @@ mod tests {
             assert_eq!(error.kind, super::Kind::ExactType);
             assert!(error.to_string().contains(&format!(":{line}:")));
             assert!(error.to_string().contains("expected int, got bool"));
+        }
+    }
+
+    #[test]
+    fn boxed_float_operations_keep_checked_types_and_later_errors() {
+        let fixture = include_str!("../../../tests/fixtures/floats/component_identity.py");
+        for (annotation, operand, actual) in [
+            ("str", "id(value)", "int"),
+            ("str", "value in [real]", "bool"),
+            ("int", "'wrong'", "str"),
+        ] {
+            let source = format!("{fixture}\nlater: {annotation} = {operand}\n");
+            let mut graph = crate::modules::SourceGraph::single(&source).unwrap();
+            let Err(error) = super::lower_with_caller_cache(&mut graph, None) else {
+                panic!("expected to reject {operand} as {annotation}");
+            };
+            let parsed_source = &graph.modules[graph.entry].source;
+            let start = parsed_source.rfind(operand).unwrap();
+            assert_eq!(
+                error
+                    .exact_operand()
+                    .map(|range| (usize::from(range.start()), &parsed_source[range])),
+                Some((start, operand)),
+                "{error}"
+            );
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("expected {annotation}, got {actual}")),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn boxed_float_operations_require_project_ownership_for_fallback() {
+        use std::fs;
+
+        let workspace = tempfile::tempdir().unwrap();
+        let project = workspace.path().join("project");
+        let dependency = workspace.path().join("dependency");
+        fs::create_dir(&project).unwrap();
+        fs::create_dir(&dependency).unwrap();
+        let entry = project.join("main.py");
+        fs::write(
+            &entry,
+            "from helper import verify\nprint(verify(float('nan')))\n",
+        )
+        .unwrap();
+        let check =
+            || crate::check_file_with_extensions(&entry, None, std::slice::from_ref(&dependency));
+
+        for (expression, diagnostic) in [
+            ("id(value) == id(value)", "unsupported builtin arguments"),
+            (
+                "value in [value]",
+                "membership requires a concrete dictionary or set",
+            ),
+        ] {
+            let helper = format!("def verify(value: float) -> bool:\n    return {expression}\n");
+            fs::write(dependency.join("helper.py"), &helper).unwrap();
+            let error = check().unwrap_err();
+            assert!(error.contains(diagnostic), "{error}");
+
+            fs::write(project.join("helper.py"), helper).unwrap();
+            check().unwrap();
+            fs::remove_file(project.join("helper.py")).unwrap();
         }
     }
 
