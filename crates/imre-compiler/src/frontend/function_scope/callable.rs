@@ -50,8 +50,8 @@ pub(crate) struct NamedFunction {
     /// Source position shared with the prepared parameter annotation provider.
     pub(crate) parameters: TextSize,
     pub(crate) generic: bool,
-    pub(crate) type_params: Vec<crate::ir::RegisteredTypeParameter>,
-    pub(crate) parameter_providers: Vec<crate::frontend::FunctionParameterProvider>,
+    pub(crate) type_params:
+        Vec<crate::ir::RegisteredTypeParameter<crate::frontend::ParameterEvaluator>>,
     pub(crate) integer_sign_parameters: Vec<String>,
 }
 
@@ -76,7 +76,6 @@ impl NamedFunction {
             parameters: def.parameters.start(),
             generic: def.type_params.is_some(),
             type_params: Vec::new(),
-            parameter_providers: Vec::new(),
             integer_sign_parameters: Vec::new(),
         }
     }

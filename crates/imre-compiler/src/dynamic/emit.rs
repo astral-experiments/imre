@@ -440,7 +440,7 @@ impl<'a> PreparedBody<'a> {
                     body: crate::frontend::type_alias_body(&alias.value, values)
                         .ok_or(alias.value.range()),
                     parameters: alias.type_params.as_deref().map(|params| {
-                        crate::frontend::registered_type_parameters(params, &private_names)
+                        crate::frontend::registered_type_parameters(params, &private_names, |_| ())
                     }),
                 },
             );
@@ -487,7 +487,6 @@ impl<'a> PreparedBody<'a> {
             }
             let header = scopes.functions.get_mut(&start).expect("named function");
             header.type_params = site.parameters.unwrap_or_default();
-            header.parameter_providers = site.parameter_providers;
             if let Some(annotations) = sites.parameter_annotations.get(&header.parameters) {
                 header.integer_sign_parameters = header
                     .metadata
@@ -1828,6 +1827,42 @@ mod tests {
         let parameters = &module.source.scopes.functions[&scoped.start()].type_params;
         assert_eq!(parameters.len(), 1);
         assert_eq!(parameters[0].name, "T");
+    }
+
+    #[test]
+    fn function_parameter_owns_its_checked_fields() {
+        use imre_ast::TypeParameterField::{Constraints, Default};
+        let text = concat!(
+            "def factory(select, manager):\n",
+            "    def choose[U, T: (U, int) = select(), V = str]():\n",
+            "        with manager:\n",
+            "            return T\n",
+            "    return choose\n",
+        );
+        let mut module = PreparedBody::module(
+            "fields",
+            Path::new("fields.py"),
+            text,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let site = TextSize::try_from(text.find("def choose").unwrap()).unwrap();
+        assert!(module.syntax.is_none() && module.source.function_bodies[&site].fully_checked());
+        let before = module.standalone().unwrap();
+        let header = module.source.scopes.functions.get_mut(&site).unwrap();
+        let [u, t, v] = header.type_params.as_mut_slice() else {
+            panic!("expected three parameters");
+        };
+        assert!(u.fields.is_empty() && matches!(v.fields.as_slice(), [(Default, _)]));
+        assert_eq!(t.binding, "T");
+        let [(Constraints, _), (Default, default)] = t.fields.as_mut_slice() else {
+            panic!("expected constraints followed by a default");
+        };
+        let code = default.body.as_mut().unwrap();
+        assert_eq!(&text[code.range], "select()");
+        code.operand.value = crate::ir::Expr::none();
+        assert_ne!(module.standalone().unwrap(), before);
     }
 
     #[test]

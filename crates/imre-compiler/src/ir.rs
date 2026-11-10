@@ -1269,13 +1269,13 @@ pub(crate) enum DictEntryKind {
     Unpack,
 }
 
-/// Binding name and public name of a type parameter in a registered Python scope.
+/// A type parameter owns its binding and its lazy fields in declaration order.
 #[derive(Clone, Debug)]
-pub(crate) struct RegisteredTypeParameter {
+pub(crate) struct RegisteredTypeParameter<F = ()> {
     pub(crate) binding: String,
     pub(crate) name: String,
     pub(crate) kind: TypeParameterKind,
-    pub(crate) has_bound_or_default: bool,
+    pub(crate) fields: Vec<(imre_ast::TypeParameterField, F)>,
 }
 
 #[derive(Clone, Copy, Debug)]

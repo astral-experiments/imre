@@ -1,13 +1,13 @@
 //! Resolve declaration and annotation code sites before emitting the checked block.
 use super::super::sites::{
-    CheckedSites, CompiledAlias, CompiledDefinition, CompiledGenerator, CompiledParameterProvider,
+    CheckedSites, CompiledAlias, CompiledDefinition, CompiledGenerator, CompiledTypeParameters,
     Declaration, RequiredSite,
 };
 use super::super::{
     AnnotationScope, Body, DefinitionName, Entry, Function, RegisteredFrame, SourceInfo, SourceMap,
 };
 use super::CallableSites;
-use crate::frontend::FunctionParameterProvider;
+use crate::frontend::ParameterEvaluator;
 use crate::frontend::function_scope::{ClassBindings, NamedFunction};
 use crate::ir::{Expr, RegisteredTypeParameter, Statement};
 use ruff_text_size::{TextRange, TextSize};
@@ -295,8 +295,7 @@ impl CallableSites<'_, '_> {
                 .iter()
                 .map(|&offset| self.source.positions.line(offset))
                 .collect(),
-            type_params: Vec::new(),
-            parameter_providers: Ok(Vec::new()),
+            type_params: None,
         };
         self.sites.definitions.insert(start, declaration);
     }
@@ -314,49 +313,48 @@ impl CallableSites<'_, '_> {
             .iter()
             .map(|&offset| source.positions.line(offset))
             .collect();
-        let parameter_providers = self.compile_parameter_providers(
-            &header.type_params,
-            &header.parameter_providers,
-            self.class_locals,
-        );
+        let type_params = (!header.type_params.is_empty())
+            .then(|| self.compile_type_parameters(&header.type_params, self.class_locals));
         self.sites.definitions.insert(
             site,
             Declaration {
                 definition,
                 decorator_lines,
-                type_params: header.type_params.clone(),
-                parameter_providers,
+                type_params,
             },
         );
     }
 
-    pub(in crate::dynamic::emit) fn compile_parameter_providers(
+    fn compile_type_parameters(
         &mut self,
-        parameters: &[RegisteredTypeParameter],
-        providers: &[FunctionParameterProvider],
+        parameters: &[RegisteredTypeParameter<ParameterEvaluator>],
         class: Option<&ClassBindings>,
-    ) -> Result<Vec<CompiledParameterProvider>, String> {
-        let mut compiled = Vec::new();
-        for provider in providers {
-            let body = provider.body.as_ref().ok_or_else(|| {
-                self.source.diagnostic_at(
-                    provider.range,
-                    "type parameter evaluator has no checked expression operand",
-                )
-            })?;
-            let parameter = &parameters[provider.parameter];
-            let evaluator = self.compile_evaluator(
-                body.range.start(),
-                &parameter.name,
-                &provider.scope,
-                true,
-                body,
-                class.cloned(),
-            );
-            compiled.push(CompiledParameterProvider {
-                parameter: provider.parameter,
-                field: provider.field,
-                evaluator,
+    ) -> CompiledTypeParameters {
+        let mut compiled = Vec::with_capacity(parameters.len());
+        for parameter in parameters {
+            let mut fields = Vec::with_capacity(parameter.fields.len());
+            for (field, provider) in &parameter.fields {
+                let body = provider.body.as_ref().ok_or_else(|| {
+                    self.source.diagnostic_at(
+                        provider.range,
+                        "type parameter evaluator has no checked expression operand",
+                    )
+                })?;
+                let evaluator = self.compile_evaluator(
+                    body.range.start(),
+                    &parameter.name,
+                    &provider.scope,
+                    true,
+                    body,
+                    class.cloned(),
+                );
+                fields.push((*field, evaluator));
+            }
+            compiled.push(RegisteredTypeParameter {
+                binding: parameter.binding.clone(),
+                name: parameter.name.clone(),
+                kind: parameter.kind,
+                fields,
             });
         }
         Ok(compiled)
@@ -486,7 +484,7 @@ impl CallableSites<'_, '_> {
                 .parameters
                 .iter()
                 .flatten()
-                .any(|param| param.has_bound_or_default)
+                .any(|param| !param.fields.is_empty())
         {
             self.output.diagnostic = Some(self.source.diagnostic_at(
                 alias.range, "unsupported class type parameter bounds and defaults in a compiled suspended function",

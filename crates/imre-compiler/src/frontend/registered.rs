@@ -15,10 +15,11 @@ pub(crate) use placement::place_fixed_function;
 pub(super) mod values;
 
 /// Prepare the bindings installed by the existing type-parameter frame constructor.
-pub(crate) fn registered_type_parameters(
+pub(crate) fn registered_type_parameters<F>(
     params: &ast::TypeParams,
     private_names: &imre_ast::Names,
-) -> Vec<ir::RegisteredTypeParameter> {
+    mut prepare: impl FnMut(&ast::Expr) -> F,
+) -> Vec<ir::RegisteredTypeParameter<F>> {
     params
         .iter()
         .map(|param| {
@@ -32,8 +33,9 @@ pub(crate) fn registered_type_parameters(
                 binding: binding.to_string(),
                 name: private_names.definition(binding).to_owned(),
                 kind,
-                has_bound_or_default: param.default().is_some()
-                    || matches!(param, ast::TypeParam::TypeVar(v) if v.bound.is_some()),
+                fields: imre_ast::TypeParameterField::expressions(param)
+                    .map(|(field, rhs)| (field, prepare(rhs)))
+                    .collect(),
             }
         })
         .collect()
@@ -471,9 +473,7 @@ pub(crate) fn type_alias_body(
     Some(code)
 }
 
-pub(crate) struct FunctionParameterProvider {
-    pub(crate) parameter: usize,
-    pub(crate) field: imre_ast::TypeParameterField,
+pub(crate) struct ParameterEvaluator {
     pub(crate) range: TextRange,
     pub(crate) scope: super::function_scope::FunctionScope,
     pub(crate) body: Option<AnnotationCode>,
@@ -494,25 +494,17 @@ pub(crate) fn parameter_evaluator_body(
     }
 }
 
-impl FunctionParameterProvider {
-    fn prepare(
-        params: &ast::TypeParams,
+impl ParameterEvaluator {
+    pub(crate) fn prepare(
+        rhs: &ast::Expr,
         source: values::RegisteredSource<'_>,
         class: Option<&super::function_scope::ClassBindings>,
-    ) -> Vec<Self> {
-        let mut providers = Vec::new();
-        for (parameter, param) in params.iter().enumerate() {
-            for (field, rhs) in imre_ast::TypeParameterField::expressions(param) {
-                providers.push(Self {
-                    parameter,
-                    field,
-                    range: rhs.range(),
-                    scope: super::function_scope::FunctionScope::parameter(rhs, class),
-                    body: parameter_evaluator_body(rhs, source),
-                });
-            }
+    ) -> Self {
+        Self {
+            range: rhs.range(),
+            scope: super::function_scope::FunctionScope::parameter(rhs, class),
+            body: parameter_evaluator_body(rhs, source),
         }
-        providers
     }
 }
 
@@ -735,8 +727,7 @@ impl DeferredAnnotation {
 /// Physical source operands shared by namespace initialization and lazy annotation providers.
 pub(crate) struct FunctionSite<'a> {
     pub(crate) def: &'a ast::StmtFunctionDef,
-    pub(crate) parameters: Option<Vec<ir::RegisteredTypeParameter>>,
-    pub(crate) parameter_providers: Vec<FunctionParameterProvider>,
+    pub(crate) parameters: Option<Vec<ir::RegisteredTypeParameter<ParameterEvaluator>>>,
     pub(crate) prepare_entry: bool,
     pub(crate) thread_entry: Option<imre_ast::ThreadEntry>,
 }
@@ -819,7 +810,7 @@ pub(crate) fn registered_sites<'a>(
                         parameters: class
                             .type_params
                             .as_deref()
-                            .map(|params| registered_type_parameters(params, self.names)),
+                            .map(|params| registered_type_parameters(params, self.names, |_| ())),
                     });
                     let outer = std::mem::replace(&mut self.scope, RegisteredScope::Class);
                     let child = SourceScope::new(
@@ -864,10 +855,10 @@ pub(crate) fn registered_sites<'a>(
                     let worker = thread_entry.is_some();
                     self.output.functions.push(FunctionSite {
                         def,
-                        parameters: parameters
-                            .map(|params| registered_type_parameters(params, self.names)),
-                        parameter_providers: parameters.map_or_else(Vec::new, |params| {
-                            FunctionParameterProvider::prepare(params, self.source, None)
+                        parameters: parameters.map(|params| {
+                            registered_type_parameters(params, self.names, |rhs| {
+                                ParameterEvaluator::prepare(rhs, self.source, None)
+                            })
                         }),
                         prepare_entry: !unprepared || worker,
                         thread_entry,
