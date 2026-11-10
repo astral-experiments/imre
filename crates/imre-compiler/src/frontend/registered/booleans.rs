@@ -4,7 +4,7 @@ use crate::ir;
 use ast::visitor::{self, Visitor};
 use ir::control::{BranchShape, Context, Depth, Edges, Split, edges};
 use ruff_python_ast as ast;
-use ruff_text_size::{Ranged, TextRange};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 use std::collections::HashMap;
 
 impl BranchShape for ast::Expr {
@@ -47,12 +47,14 @@ pub(crate) enum Selection {
         parts: Option<Box<[Option<ir::Expr>; 3]>>,
         branch: PreparedSteps,
         value: Option<PreparedSteps>,
+        physical: Option<Box<PhysicalInputs>>,
     },
 }
 
 /// A physical owner supplies any remaining inputs before the checked operation runs.
 pub(crate) struct PhysicalInputs {
     pub(crate) operation: ir::Expr,
+    pub(crate) position: TextSize,
     children: Box<[Option<CheckedChild>]>,
     /// A subscript with an incomplete slice key evaluates its receiver and then
     /// the individual bounds. Other expressions consume their immediate children.
@@ -92,6 +94,24 @@ impl PhysicalInputs {
         self.children.iter().enumerate().map(move |(i, child)| {
             if let Some(value) = child.as_ref().and_then(|child| child.value(suspended)) {
                 SourceOperand::Checked(value)
+            } else if let ir::ExprKind::Builtin(ir::Builtin::RegisteredCall(call), _) =
+                &self.operation.kind
+            {
+                // A method consumes its receiver. The frame performs descriptor lookup
+                // before it starts unpacking arguments.
+                let original = node.as_call_expr().expect("prepared call");
+                let input = if i != 0 {
+                    values::registered_argument_at(&original.arguments, i - 1)
+                } else if matches!(call.target, ir::RegisteredCallTarget::Method { .. }) {
+                    &original
+                        .func
+                        .as_attribute_expr()
+                        .expect("prepared method")
+                        .value
+                } else {
+                    &original.func
+                };
+                SourceOperand::Residual(input)
             } else {
                 SourceOperand::Residual(
                     physical.get_or_insert_with(|| physical_children(node, self.split_slice))[i],
@@ -225,7 +245,11 @@ impl ExpressionSites {
 
     pub(crate) fn physical(&self, node: &ast::Expr) -> Option<&PhysicalInputs> {
         match self.selected.get(&site(node)) {
-            Some(Selection::Inputs(inputs)) => Some(inputs),
+            Some(Selection::Inputs(inputs))
+            | Some(Selection::Mixed {
+                physical: Some(inputs),
+                ..
+            }) => Some(inputs),
             _ => None,
         }
     }
@@ -286,6 +310,7 @@ impl ExpressionSites {
         }
         let mixed = |parts| Selection::Mixed {
             parts,
+            physical: None,
             branch: PreparedSteps::new(node, Context::Condition, source),
             value: node
                 .is_bool_op_expr()
@@ -355,8 +380,11 @@ impl<'a> Visitor<'a> for PhysicalPreparation<'_, '_> {
                 visitor::walk_expr(self, node);
                 return;
             }
+            Some(Selection::Mixed {
+                physical: Some(_), ..
+            }) => return,
             Some(Selection::Mixed { .. }) if !self.suspended => {
-                visitor::walk_expr(self, node);
+                self.residual(node);
                 return;
             }
             Some(Selection::Mixed { .. }) | None => {}
@@ -390,65 +418,99 @@ impl<'a> Visitor<'a> for PhysicalPreparation<'_, '_> {
             }
             Ok(None) => {}
         }
-        if let ast::Expr::Lambda(lambda) = node {
-            // The lambda body has its own compiled activation. Defaults run here.
-            for default in values::lambda_defaults(lambda) {
-                self.visit_expr(default);
-            }
+        // The lambda site owns the complete binding or its build diagnostic.
+        if node.is_lambda_expr() {
             return;
         }
-        let Some((op, physical)) = values::binary_operands(node) else {
-            if let Some(selected) = self.index(node) {
-                self.sites.selected.insert(site(node), selected);
-            } else {
-                visitor::walk_expr(self, node);
-            }
-            return;
-        };
-        let children = physical.map(|child| CheckedChild::prepare(child, self.source));
-        for (child, checked) in physical.into_iter().zip(&children) {
-            if checked
-                .as_ref()
-                .is_none_or(|value| value.requires_suspension)
-            {
-                self.visit_expr(child);
-            }
-        }
-        let selected = Selection::Inputs(Box::new(PhysicalInputs {
-            operation: values::binary(
-                op,
-                ir::Expr::local(0, ir::Type::PythonObject),
-                ir::Expr::local(1, ir::Type::PythonObject),
-            ),
-            children: Box::new(children),
-            split_slice: false,
-        }));
-        self.sites.selected.insert(site(node), selected);
+        self.residual(node);
     }
 }
 
 impl PhysicalPreparation<'_, '_> {
-    fn index(&mut self, node: &ast::Expr) -> Option<Selection> {
-        let index = values::index_operands(node, self.source)?;
-        let mut children = Vec::with_capacity(index.inputs.len());
-        for (child, ordinary) in index.inputs {
-            let checked = CheckedChild::from_ordinary(child, self.source, ordinary);
-            if checked
-                .as_ref()
-                .is_none_or(|value| value.requires_suspension)
-            {
-                self.visit_expr(child);
+    fn residual(&mut self, node: &ast::Expr) {
+        let source = self.source;
+        let selected = if let Some((op, operands)) = values::binary_operands(node) {
+            let operation = values::binary(
+                op,
+                ir::Expr::local(0, ir::Type::PythonObject),
+                ir::Expr::local(1, ir::Type::PythonObject),
+            );
+            self.inputs(
+                node,
+                operation,
+                operands
+                    .into_iter()
+                    .map(|child| (child, values::registered_value(child, source))),
+                false,
+            )
+        } else if let Some(index) = values::index_operands(node, source) {
+            self.inputs(node, index.value, index.inputs, index.split_slice)
+        } else if let Some(object) = source.object_operation(node) {
+            let children = std::iter::once(object.target)
+                .chain(object.arguments())
+                .collect::<Vec<_>>();
+            let slots = (0..children.len())
+                .map(|i| ir::Expr::local(i, ir::Type::PythonObject))
+                .collect();
+            let operation = super::operation(object.opcode, ir::Type::PythonObject, slots);
+            self.inputs(
+                node,
+                operation,
+                children
+                    .into_iter()
+                    .map(|child| (child, values::registered_value(child, source))),
+                false,
+            )
+        } else {
+            visitor::walk_expr(self, node);
+            return;
+        };
+        match (self.sites.selected.get_mut(&site(node)), selected) {
+            // The value of a mixed `not` consumes an object operand. Its condition
+            // still owns the original short-circuit graph.
+            (Some(Selection::Mixed { physical, .. }), Selection::Inputs(inputs)) => {
+                *physical = Some(inputs)
             }
-            children.push(checked);
+            (_, selected) => {
+                self.sites.selected.insert(site(node), selected);
+            }
         }
-        Some(Selection::Inputs(Box::new(PhysicalInputs {
-            operation: index.value,
-            children: children.into_boxed_slice(),
-            split_slice: index.split_slice,
-        })))
+    }
+
+    fn inputs<'a>(
+        &mut self,
+        node: &ast::Expr,
+        operation: ir::Expr,
+        inputs: impl IntoIterator<Item = (&'a ast::Expr, Option<ir::Expr>)>,
+        split_slice: bool,
+    ) -> Selection {
+        let children = inputs
+            .into_iter()
+            .map(|(child, ordinary)| {
+                let checked = CheckedChild::from_ordinary(child, self.source, ordinary);
+                if checked
+                    .as_ref()
+                    .is_none_or(|value| value.requires_suspension)
+                {
+                    self.visit_expr(child);
+                }
+                checked
+            })
+            .collect();
+        Selection::Inputs(Box::new(PhysicalInputs {
+            operation,
+            position: imre_ast::expression_position(
+                node,
+                self.source.method_imports,
+                self.source.private_names,
+            ),
+            children,
+            split_slice,
+        }))
     }
 }
 
+#[derive(Clone, Copy)]
 pub(crate) enum SourceOperand<'a> {
     Checked(&'a ir::Expr),
     Residual(&'a ast::Expr),

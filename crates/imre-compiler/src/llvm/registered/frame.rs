@@ -1399,10 +1399,12 @@ pub(crate) trait FrameEmitter<'a, 'p>:
             self.raise(&active, None, true);
             return;
         };
+        let statement = self.current_range;
         let exception = operand(self, exception);
         self.live.push(exception);
         let cause = cause.map(|value| operand(self, value));
         let exception = self.live.pop().expect("pending explicit raise");
+        self.replace_position(SourcePosition::Expression(statement));
         self.raise(&exception, cause.as_deref(), false);
     }
 

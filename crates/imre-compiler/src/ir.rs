@@ -1302,7 +1302,12 @@ pub(crate) enum IterationOperands<'a> {
     Truth(&'a Expr),
     Get(&'a [Expr; 2]),
     Insert(&'a [Expr; 2]),
-    Unpack(&'a Expr, usize, Option<usize>),
+    Unpack(
+        &'a Expr,
+        usize,
+        Option<usize>,
+        Option<ruff_text_size::TextRange>,
+    ),
     Namespace(&'a [String], Option<&'a Expr>),
 }
 
@@ -1325,9 +1330,11 @@ impl Builtin {
             Self::Bool => one().map(Truth),
             Self::ListGet => two().map(Get),
             Self::Append | Self::SetAdd => two().map(Insert),
-            Self::RegisteredUnpack { count, star } => {
-                one().map(|value| Unpack(value, *count, *star))
-            }
+            Self::RegisteredUnpack {
+                count,
+                star,
+                target,
+            } => one().map(|value| Unpack(value, *count, *star, *target)),
             Self::RegisteredNamespace(names) => match args {
                 [] | [_] => Ok(Namespace(names, args.first())),
                 _ => Err("registered namespace takes at most one parent"),
@@ -2105,6 +2112,7 @@ pub(crate) enum Builtin {
     RegisteredUnpack {
         count: usize,
         star: Option<usize>,
+        target: Option<ruff_text_size::TextRange>,
     },
     /// Allocate a child of the supplied Python namespace, declaring its private target names.
     RegisteredNamespace(Vec<String>),
