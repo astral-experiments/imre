@@ -498,16 +498,9 @@ impl DeferredAnnotation {
         expression: &ast::Expr,
         operands: &HashMap<TextSize, super::PreparedAnnotation<R>>,
     ) -> Self {
-        let value = match operands.get(&expression.start()) {
-            Some(PreparedAnnotation::String {
-                body: Some(body), ..
-            }) if matches!(body.code, AnnotationCode::Residual(_)) => None,
-            Some(operand) => Some(operand.operand(expression.start())),
-            None => None,
-        }
-        .map_or_else(
+        let value = operands.get(&expression.start()).map_or_else(
             || AnnotationValue::Source(expression.clone()),
-            AnnotationValue::Checked,
+            |operand| AnnotationValue::Checked(operand.operand(expression.start())),
         );
         Self {
             name,

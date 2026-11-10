@@ -167,36 +167,6 @@ impl Output {
         }
     }
 
-    /// Roll back private code sites when an optional annotation expression cannot be compiled.
-    pub(crate) fn try_native_body(
-        &mut self,
-        emit: impl FnOnce(&mut Self) -> String,
-    ) -> Option<String> {
-        let code = self.count;
-        let functions = self.functions.len();
-        let constants = self.constants.len();
-        let strings = self.strings.len() as u32;
-        let positions = self.positions.len();
-        let slots = self.constant_slots.len();
-        let declarations = self.declarations;
-        let names = std::mem::take(&mut self.interned_identifiers);
-        let outer_diagnostic = self.diagnostic.take();
-        let site = emit(self);
-        let added_names = std::mem::replace(&mut self.interned_identifiers, names);
-        if std::mem::replace(&mut self.diagnostic, outer_diagnostic).is_none() {
-            self.interned_identifiers.extend(added_names);
-            return Some(site);
-        }
-        self.count = code;
-        self.functions.truncate(functions);
-        self.constants.truncate(constants);
-        self.strings.retain(|_, id| *id < strings);
-        self.positions.retain(|_, id| *id < positions);
-        self.constant_slots.retain(|_, id| *id < slots);
-        self.declarations = declarations;
-        None
-    }
-
     pub(crate) fn data(&mut self, bytes: &[u8]) -> String {
         let count = self.strings.len() as u32;
         let index = *self.strings.entry(bytes.to_vec()).or_insert(count);

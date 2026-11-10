@@ -496,7 +496,7 @@ impl<'a> PreparedBody<'a, '_> {
             private_names.string_annotations,
             values,
             bundled,
-            |text, parsed| Self::prepare_annotation(text, parsed, python_optimization).ok(),
+            |text, parsed| Self::prepare_annotation(text, parsed, python_optimization),
             &mut namespace_annotations,
         );
         let sites = crate::frontend::registered_sites(&body, &private_names, &annotation_operands);
@@ -652,7 +652,7 @@ impl<'a> PreparedBody<'a, '_> {
         text: &str,
         parsed: &ruff_python_parser::Parsed<ast::ModExpression>,
         python_optimization: i32,
-    ) -> Result<crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>, String> {
+    ) -> Option<crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>> {
         let expression = parsed.syntax();
         let stmt = ast::Stmt::Expr(ast::StmtExpr {
             node_index: Default::default(),
@@ -672,27 +672,27 @@ impl<'a> PreparedBody<'a, '_> {
             python_optimization,
             ModuleOrigin::Program(None),
             Input::Expression(syntax, parsed.tokens(), &fields),
-            |mut prepared| {
-                let Some(ast::Stmt::Expr(statement)) = prepared
-                    .syntax
-                    .as_mut()
-                    .and_then(|body| body.to_mut().pop())
+            |prepared| {
+                let Some(ast::Stmt::Expr(statement)) =
+                    prepared.syntax.as_deref().and_then(|body| body.first())
                 else {
                     unreachable!("single decoded expression")
                 };
                 let code = crate::frontend::AnnotationCode::prepare(
-                    statement.value,
+                    &statement.value,
                     crate::frontend::RegisteredSource {
                         template_fields: Some(&fields),
                         ..prepared.source.registered_source()
                     },
                 );
-                Ok(crate::frontend::AnnotationBody {
+                Ok(code.map(|code| crate::frontend::AnnotationBody {
                     code,
                     scope: Box::new(prepared.source),
-                })
+                }))
             },
         )
+        .ok()
+        .flatten()
     }
 
     fn linked_declarations(&self) -> Cow<'_, Definitions<'_>> {
@@ -853,6 +853,10 @@ enum Body<'a> {
         Option<crate::frontend::function_scope::ClassBindings>,
     ),
     CheckedExpression(&'a crate::frontend::RegisteredFunction),
+    AnnotationOperand(
+        ruff_text_size::TextRange,
+        &'a crate::frontend::RegisteredOperand,
+    ),
     Expression(&'a ast::Expr),
     AliasEvaluator(AliasValue<'a>),
     CheckedGenerator(TextRange, &'a crate::frontend::RegisteredGenerator),
@@ -1189,6 +1193,12 @@ impl SourceMap<'_> {
                         code.unprepared_annotation(entries[index]);
                     }
                 });
+            }
+            Body::AnnotationOperand(range, operand) => {
+                f.checkpoint(&range);
+                f.prepare_checked_value(&operand.value);
+                let value = f.frame.prepared_operand(operand, &f.sites, false);
+                f.return_value(&value);
             }
             Body::CheckedExpression(checked)
             | Body::CheckedGenerator(_, crate::frontend::RegisteredGenerator { body: checked, .. })
@@ -1832,7 +1842,7 @@ mod tests {
         let Some(PreparedAnnotation::String {
             body:
                 Some(AnnotationBody {
-                    code: AnnotationCode::Checked(child),
+                    code: AnnotationCode { operand: child, .. },
                     ..
                 }),
             ..
@@ -1842,7 +1852,7 @@ mod tests {
         };
         assert!(sites.next().is_none());
         let mut captures = Vec::new();
-        crate::ir::walk_expressions(&child.function.body, &mut |value| {
+        crate::ir::walk_operand_expressions(&child.value, &mut |value| {
             if let ExprKind::Builtin(
                 Builtin::RegisteredInterpolation {
                     expression,

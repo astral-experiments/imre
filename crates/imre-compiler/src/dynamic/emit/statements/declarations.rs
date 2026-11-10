@@ -4,7 +4,7 @@ use super::super::sites::{
     RequiredSite,
 };
 use super::super::{AliasValue, Body, DefinitionName, DefinitionSite, Entry, Function, SourceInfo};
-use crate::frontend::{AnnotationCode, PreparedAnnotation};
+use crate::frontend::PreparedAnnotation;
 use crate::ir::{Expr, Statement};
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
@@ -33,7 +33,7 @@ impl Function<'_, '_> {
         if self.sites.annotation_strings.contains_key(&site) {
             return;
         }
-        let code = body.as_ref().and_then(|body| {
+        let code = body.as_ref().map(|body| {
             let unit = self.source.unit;
             let file = self.frame.output.data(b"<string>");
             let location = super::super::SourceMap {
@@ -43,18 +43,13 @@ impl Function<'_, '_> {
                 unit,
                 positions: &super::super::SourcePositions::new(text, &file),
             };
-            match &body.code {
-                AnnotationCode::Checked(function) => Some(location.code(
-                    self.frame.output,
-                    String::new(),
-                    Body::CheckedExpression(function),
-                    false,
-                    None,
-                )),
-                AnnotationCode::Residual(expr) => self.frame.output.try_native_body(|output| {
-                    location.code(output, String::new(), Body::Expression(expr), false, None)
-                }),
-            }
+            location.code(
+                self.frame.output,
+                String::new(),
+                Body::AnnotationOperand(body.code.range, &body.code.operand),
+                false,
+                None,
+            )
         });
         self.sites.annotation_strings.insert(
             site,
@@ -265,8 +260,23 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn forward_annotations_bind_the_compiled_child_and_preserve_residual_expressions() {
-        let source = "checked: 'select(Child)'\nclosure: '(lambda: Child)()'\ngenerator: '(x for x in Child)'\nresidual: 'resolve([Child for _ in (0,)])'\ninvalid: 'Child['\n";
+    fn forward_annotations_bind_prepared_children() {
+        let source = r#"checked: 'select(Child)'
+eager: '[x for x in Child]'
+projected: "Child.partition(',')[1]"
+width: "f'{Child!r:>{Width}}'"
+closure: '(lambda: Child)()'
+lazy: '(x for x in Child)'
+wrapped: 'list(x for x in Child)'
+nested: 'lambda: (x for x in Child)'
+collected: 'lambda: [box.make(x).value for x in Child]'
+bound: 'lambda: (v := box.make(9)).value'
+default: 'lambda vals=[box.make(x).value for x in Child]: vals'
+template: "t'{client.lookup(*args)}{[v for v in values]}'"
+template_generator: "t'{client.lookup(*args)}{(v for v in values)}'"
+argument: 'resolve([Child for _ in (0,)])'
+invalid: 'Child['
+"#;
         let body = PreparedBody::module(
             "example",
             Path::new("example.py"),
@@ -285,22 +295,45 @@ mod tests {
             };
             child
         };
-        let closure = child("'(lambda");
-        assert!(matches!(
-            closure.code,
-            crate::frontend::AnnotationCode::Checked(_)
-        ));
-        assert!(closure.scope.lambdas[&1.into()].body.is_some());
-        let generator = child("'(x for");
-        assert!(matches!(
-            generator.code,
-            crate::frontend::AnnotationCode::Checked(_)
-        ));
-        assert_eq!(generator.scope.generators.len(), 1);
-        assert!(matches!(
-            child("'resolve(").code,
-            crate::frontend::AnnotationCode::Residual(_)
-        ));
+        assert!(
+            !child("'[x for")
+                .code
+                .operand
+                .region()
+                .private_slots()
+                .is_empty()
+        );
+        assert!(child("'(lambda").scope.lambdas[&1.into()].body.is_some());
+        for quoted in ["'(x for", "'list(x for", "'lambda:"] {
+            assert_eq!(child(quoted).scope.generators.len(), 1, "{quoted}");
+        }
+        assert!(child("'lambda:").scope.lambdas[&0.into()].body.is_some());
+        for quoted in ["'lambda: [box", "'lambda: (v", "'lambda vals="] {
+            assert!(
+                child(quoted).scope.lambdas[&0.into()].body.is_some(),
+                "{quoted}"
+            );
+        }
+        assert!(
+            !child("\"t'")
+                .code
+                .operand
+                .region()
+                .private_slots()
+                .is_empty()
+        );
+        assert!(
+            !child("'resolve(")
+                .code
+                .operand
+                .region()
+                .private_slots()
+                .is_empty()
+        );
+        assert_eq!(
+            child("\"t'{client.lookup(*args)}{(").scope.generators.len(),
+            1
+        );
         let mut output = Output::default();
         let filename = output.data(b"example.py");
         body.emit(&mut output, 0, &filename).unwrap();
@@ -310,7 +343,7 @@ mod tests {
             .filter(|line| line.contains("call void @imre_dyn_bind_expression("))
             .map(|line| line.rsplit_once("ptr ").unwrap().1.trim_end_matches(')'))
             .collect();
-        assert_eq!(children.len(), 4);
+        assert_eq!(children.len(), 14);
         assert_ne!(children[0], children[1]);
         for child in children {
             assert_eq!(
