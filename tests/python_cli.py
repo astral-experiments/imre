@@ -3073,8 +3073,7 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
             "print(textwrap.wrap('one two three', width=5), textwrap.shorten('one two three', 9))",
         )
 
-        compare(
-            "-IB", "-c",
+        copy_source = (
             "from copy import copy, deepcopy\n"
             "from functools import lru_cache\n"
             "class C:\n"
@@ -3085,9 +3084,15 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
             "assert wrapped.__reduce__() == 'C.f'\n"
             "for owner in (type(wrapped), wrapped):\n"
             "    assert owner.__reduce__.__text_signature__ == '($self, /)'\n"
-            "    assert owner.__copy__.__text_signature__ is owner.__deepcopy__.__text_signature__ is None\n",
-            native_timeout=300,
+            "    assert owner.__copy__.__text_signature__ is owner.__deepcopy__.__text_signature__ is None\n"
         )
+        copy_fixtures = Path(__file__).with_name("fixtures") / "classes"
+        copy_source = "\n".join((
+            copy_source,
+            (copy_fixtures / "inherited_copy_reduction.py").read_text(),
+            (copy_fixtures / "copy_custom_getstate.py").read_text(),
+        ))
+        compare("-IB", "-c", copy_source, native_timeout=300)
         getters = Path(__file__).with_name("fixtures") / "typed_attrgetter"
         compare("-IB", getters / "fields.py")
         compare("-B", getters / "main.py")
