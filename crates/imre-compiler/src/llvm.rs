@@ -781,7 +781,12 @@ fn emit_program(
     Ok(())
 }
 
-fn write_function_bodies(output: &mut Output, module: &Module, mut bodies: Vec<String>, attrs: &str) {
+fn write_function_bodies(
+    output: &mut Output,
+    module: &Module,
+    mut bodies: Vec<String>,
+    attrs: &str,
+) {
     let main = bodies.pop().expect("program has an entry");
     for (id, (f, body)) in module.functions.iter().zip(bodies).enumerate() {
         let params = f

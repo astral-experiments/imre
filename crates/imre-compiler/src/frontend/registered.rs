@@ -1658,11 +1658,7 @@ impl<'a> SuitePreparation<'a> {
     ) -> PreparedFor {
         let iterable = self.physical_operand(&loop_.iter, kind, selection, suspended);
         let (acquire, pull) = iteration_protocol(loop_.iter.range(), for_pull(loop_));
-        let target = self.physical_binding(
-            &loop_.target,
-            kind,
-            pull == ir::IterNextKind::Generic,
-        );
+        let target = self.physical_binding(&loop_.target, kind, pull == ir::IterNextKind::Generic);
         PreparedFor {
             range: loop_.range(),
             iterable_range: loop_.iter.range(),
