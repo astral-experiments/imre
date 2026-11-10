@@ -121,7 +121,7 @@ impl Function<'_, '_> {
             provider: None,
             default_names: metadata.defaults.clone(),
             type_alias: false,
-            header: false,
+            class_header: None,
         };
         self.sites.lambdas.insert(site, definition);
     }
@@ -205,6 +205,10 @@ impl Function<'_, '_> {
             }
             RequiredSite::Definition(start) => start,
         };
+        self.prepare_definition(start);
+    }
+
+    pub(super) fn prepare_definition(&mut self, start: TextSize) {
         if !self.sites.definitions.contains_key(&start) {
             let syntax = self.source.definitions.as_ref().expect("registered scope")[&start];
             let (definition, decorators, type_params) = match syntax {
@@ -222,20 +226,22 @@ impl Function<'_, '_> {
                     );
                     (definition, &def.decorator_list, params)
                 }
-                DefinitionSite::Class(def) => (
-                    self.compile_definition(
-                        def.decorator_list
-                            .first()
-                            .map_or(def.start(), Ranged::start),
-                        DefinitionName::Binding(&def.name),
-                        None,
-                        None,
-                        None,
-                        Body::Namespace(&def.body),
-                    ),
-                    &def.decorator_list,
-                    None,
-                ),
+                DefinitionSite::Class(def) => {
+                    let definition = if self.source.class(def).header.parameters.is_some() {
+                        let name = format!("<generic parameters of {}>", def.name);
+                        self.compile_definition(
+                            def.start(),
+                            DefinitionName::Plain(&name),
+                            None,
+                            None,
+                            None,
+                            Body::ClassParameters(def),
+                        )
+                    } else {
+                        self.compile_class_namespace(def)
+                    };
+                    (definition, &def.decorator_list, None)
+                }
             };
             let decorator_lines = decorators
                 .iter()

@@ -970,12 +970,18 @@ impl Frame<'_, '_, '_> {
             }
             (Builtin::RegisteredDefinition(site), header) => {
                 let (prefix, arguments) = match site {
-                    ir::DefinitionSite::Class { arguments, .. } => {
+                    ir::DefinitionSite::Class {
+                        arguments: Some(arguments),
+                        ..
+                    } => {
                         let count = arguments.starred.len() + arguments.keywords.len();
                         let (decorators, operands) = header.split_at(header.len() - count);
                         (decorators, Some((arguments, operands)))
                     }
-                    ir::DefinitionSite::Function(_) => (header, None),
+                    ir::DefinitionSite::Class {
+                        arguments: None, ..
+                    }
+                    | ir::DefinitionSite::Function(_) => (header, None),
                 };
                 let header = prefix
                     .iter()
@@ -991,7 +997,7 @@ impl Frame<'_, '_, '_> {
                     pack.finish(self.code)
                 });
                 self.sites
-                    .definition(self.code, site, &header, class_arguments)
+                    .definition(self.code, site.start(), &header, class_arguments)
             }
             (Builtin::RegisteredTypeAlias(site), []) => {
                 self.sites.aliases[site].instantiate(self.code)

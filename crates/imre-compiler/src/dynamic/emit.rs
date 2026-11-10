@@ -556,7 +556,7 @@ impl<'a> PreparedBody<'a, '_> {
             });
         }
         let mut function_bodies = HashMap::new();
-        let class_bodies = prepare.class_suites(&sites.classes);
+        let class_bodies = prepare.class_suites(sites.classes);
         let mut thread_entries = HashMap::new();
         for site in sites.functions {
             let def = site.def;
@@ -899,7 +899,7 @@ fn source_declarations<'a>(sites: &crate::frontend::RegisteredSites<'a>) -> Defi
             sites
                 .classes
                 .iter()
-                .map(|class| (class.start(), DefinitionSite::Class(class))),
+                .map(|site| (site.def.start(), DefinitionSite::Class(site.def))),
         )
         .collect()
 }
@@ -951,7 +951,7 @@ struct SourceInfo<'a> {
     annotations: HashMap<ruff_text_size::TextSize, crate::frontend::DeferredAnnotation>,
     nested_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
     function_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
-    class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
+    class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredClass>,
     initializer: Option<crate::frontend::RegisteredSuite>,
     // Module admission and each output layout use the same ordered site references.
     initializer_sites: Vec<sites::RequiredSite>,
@@ -981,6 +981,14 @@ impl SourceInfo<'_> {
                 .object_docstring(qualname)
                 .map(str::to_owned)
         })
+    }
+
+    fn class(&self, class: &ast::StmtClassDef) -> &crate::frontend::RegisteredClass {
+        let start = class
+            .decorator_list
+            .first()
+            .map_or(class.start(), Ranged::start);
+        &self.class_bodies[&start]
     }
 
     fn registered_source(&self) -> crate::frontend::RegisteredSource<'_> {
@@ -1105,7 +1113,7 @@ impl SourceMap<'_> {
             ));
         }
         let prepared = match body {
-            Body::Namespace(_) => Some(&self.class_bodies[&start.expect("class definition")]),
+            Body::Namespace(_) => Some(&self.class_bodies[&start.expect("class definition")].body),
             Body::Statements(_) | Body::GeneratorFunction(..) => {
                 start.and_then(|key| self.function_bodies.get(&key))
             }
@@ -1363,7 +1371,7 @@ mod tests {
         let class = source.find("class _IdentityCallable(Protocol):").unwrap();
         let method = class + source[class..].find("def __call__[T]").unwrap();
         let start = |offset: usize| ruff_text_size::TextSize::try_from(offset).unwrap();
-        let body = &module.source.class_bodies[&start(class)];
+        let body = &module.source.class_bodies[&start(class)].body;
         assert!(body.fully_checked());
         let mut bindings = Vec::new();
         crate::ir::walk_expressions(&body.checked.function.body, &mut |value| {
@@ -1375,6 +1383,72 @@ mod tests {
         });
         assert_eq!(bindings, [start(method)]);
         assert!(module.source.function_bodies.contains_key(&start(method)));
+    }
+
+    #[test]
+    fn generic_class_sites_own_type_parameters_decorators_and_bases() {
+        use crate::ir::{Builtin, DefinitionSite, ExprKind};
+
+        let source = include_str!("../../stdlib/typing.py");
+        let syntax = ruff_python_parser::parse_module(source).unwrap().into_syntax();
+        let typing = PreparedBody::module(
+            "typing",
+            Path::new("<imre stdlib>/typing.py"),
+            source,
+            0,
+            ModuleOrigin::Bundled,
+        )
+        .unwrap();
+        let body = &typing
+            .source
+            .initializer
+            .as_ref()
+            .unwrap()
+            .checked
+            .function
+            .body;
+        for name in ["SupportsAbs", "SupportsRound"] {
+            let class = syntax
+                .body
+                .iter()
+                .filter_map(ast::Stmt::as_class_def_stmt)
+                .find(|class| class.name.as_str() == name)
+                .unwrap();
+            let owner = &typing.source.class_bodies[&class.decorator_list[0].start()];
+            let parameters = owner.header.parameters.as_ref().unwrap();
+            assert_eq!(parameters[0].name, "T");
+            assert!(matches!(owner.header.operands.as_slice(), [Some(_)]));
+            let mut decorations = Vec::new();
+            crate::ir::walk_expressions(body, &mut |expr| {
+                if let ExprKind::Builtin(
+                    Builtin::RegisteredDefinition(DefinitionSite::Class {
+                        start,
+                        arguments: None,
+                    }),
+                    operands,
+                ) = &expr.kind
+                    && *start == class.start()
+                {
+                    decorations.push(operands.len());
+                }
+            });
+            assert_eq!(decorations, [1], "{name}");
+        }
+
+        let program = PreparedBody::module(
+            "mixed",
+            Path::new("mixed.py"),
+            "@outer\n@next(d for d in decorators)\nclass Packet[T](base(T), *(c for c in bases), metaclass=meta(T)):\n    pass\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let header = &program.source.class_bodies[&ruff_text_size::TextSize::new(0)].header;
+        assert!(matches!(header.decorators.as_slice(), [Some(_), Some(_)]));
+        assert!(matches!(
+            header.operands.as_slice(),
+            [Some(_), Some(_), Some(_)]
+        ));
     }
 
     #[test]
@@ -2638,7 +2712,7 @@ second = t'{client.lookup(*args)}{((lambda: (value := v))() async for v in value
             .unwrap();
         let class = outer.body[0].as_class_def_stmt().unwrap();
         assert!(!prepared.source.function_bodies.contains_key(&outer.start()));
-        let suite = &prepared.source.class_bodies[&class.start()];
+        let suite = &prepared.source.class_bodies[&class.start()].body;
         assert!(
             !prepared
                 .source

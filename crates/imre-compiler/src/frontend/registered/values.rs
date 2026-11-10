@@ -257,17 +257,16 @@ pub(crate) fn packed_arguments(args: &ast::Arguments) -> ir::PackedArguments {
     }
 }
 
-fn positional_elements(args: &[ast::Expr]) -> impl Iterator<Item = (bool, &ast::Expr)> {
-    args.iter().map(|arg| match arg {
-        ast::Expr::Starred(star) => (true, star.value.as_ref()),
-        value => (false, value),
-    })
+pub(crate) fn registered_argument_at(args: &ast::Arguments, index: usize) -> &ast::Expr {
+    match args.args.get(index) {
+        Some(ast::Expr::Starred(star)) => &star.value,
+        Some(value) => value,
+        None => &args.keywords[index - args.args.len()].value,
+    }
 }
 
 pub(crate) fn registered_arguments(args: &ast::Arguments) -> impl Iterator<Item = &ast::Expr> {
-    positional_elements(&args.args)
-        .map(|(_, value)| value)
-        .chain(args.keywords.iter().map(|key| &key.value))
+    (0..args.len()).map(move |index| registered_argument_at(args, index))
 }
 
 impl From<ast::UnaryOp> for ir::ObjectUnary {

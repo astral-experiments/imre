@@ -568,11 +568,31 @@ pub(crate) struct FunctionSite<'a> {
     pub(crate) thread_entry: Option<imre_ast::ThreadEntry>,
 }
 
+pub(crate) struct ClassSite<'a> {
+    pub(crate) def: &'a ast::StmtClassDef,
+    enclosing: RegisteredScope,
+    parameters: Option<Vec<ir::RegisteredTypeParameter>>,
+}
+
+pub(crate) struct RegisteredClass {
+    pub(crate) body: RegisteredSuite,
+    pub(crate) header: ClassHeader,
+}
+
+/// Decorators use the enclosing activation. Generic bases and keywords use the
+/// type-parameter activation. A missing operand keeps its individual source callback.
+pub(crate) struct ClassHeader {
+    pub(crate) parameters: Option<Vec<ir::RegisteredTypeParameter>>,
+    pub(crate) layout: ir::PackedArguments,
+    pub(crate) operands: Vec<Option<RegisteredOperand>>,
+    pub(crate) decorators: Vec<Option<RegisteredOperand>>,
+}
+
 #[derive(Default)]
 pub(crate) struct RegisteredSites<'a> {
     pub(crate) operations: HashMap<TextRange, Expr>,
     pub(crate) functions: Vec<FunctionSite<'a>>,
-    pub(crate) classes: Vec<&'a ast::StmtClassDef>,
+    pub(crate) classes: Vec<ClassSite<'a>>,
     pub(crate) annotations: HashMap<TextSize, DeferredAnnotation>,
 }
 
@@ -596,7 +616,14 @@ pub(crate) fn registered_sites<'a, R>(
             }
             match stmt {
                 ast::Stmt::ClassDef(class) => {
-                    self.output.classes.push(class);
+                    self.output.classes.push(ClassSite {
+                        def: class,
+                        enclosing: self.scope,
+                        parameters: class
+                            .type_params
+                            .as_deref()
+                            .map(|params| registered_type_parameters(params, self.names)),
+                    });
                     let outer = std::mem::replace(&mut self.scope, RegisteredScope::Class);
                     walk_stmt(self, stmt);
                     self.scope = outer;
@@ -893,16 +920,52 @@ impl<'a> SuitePreparation<'a> {
 
     pub(crate) fn class_suites(
         &mut self,
-        classes: &[&ast::StmtClassDef],
-    ) -> HashMap<TextSize, RegisteredSuite> {
+        classes: Vec<ClassSite<'_>>,
+    ) -> HashMap<TextSize, RegisteredClass> {
         classes
-            .iter()
-            .map(|class| {
+            .into_iter()
+            .map(|site| {
+                let class = site.def;
                 let start = class
                     .decorator_list
                     .first()
                     .map_or(class.start(), Ranged::start);
-                (start, self.suite(&class.body, RegisteredScope::Class))
+                let decorators = class
+                    .decorator_list
+                    .iter()
+                    .map(|decorator| {
+                        RegisteredOperand::prepare(
+                            &decorator.expression,
+                            self.source,
+                            site.enclosing,
+                        )
+                    })
+                    .collect();
+                let bases_scope = if site.parameters.is_some() {
+                    RegisteredScope::Function { is_async: false }
+                } else {
+                    site.enclosing
+                };
+                let (layout, operands) =
+                    class
+                        .arguments
+                        .as_deref()
+                        .map_or_else(Default::default, |args| {
+                            let operands = registered_arguments(args)
+                                .map(|expr| {
+                                    RegisteredOperand::prepare(expr, self.source, bases_scope)
+                                })
+                                .collect();
+                            (packed_arguments(args), operands)
+                        });
+                let header = ClassHeader {
+                    parameters: site.parameters,
+                    layout,
+                    operands,
+                    decorators,
+                };
+                let body = self.suite(&class.body, RegisteredScope::Class);
+                (start, RegisteredClass { body, header })
             })
             .collect()
     }
@@ -1360,23 +1423,28 @@ impl statements::StatementLowering for SourceScope<'_> {
                 false,
             )),
             ast::Stmt::Match(branch) => self.match_statement(branch),
-            ast::Stmt::ClassDef(class) if class.type_params.is_none() => {
+            ast::Stmt::ClassDef(class) => {
                 let mut operands = class
                     .decorator_list
                     .iter()
                     .map(|d| self.ordinary_operand(&d.expression))
                     .collect::<Option<Vec<_>>>()
                     .ok_or(())?;
-                let mut layout = ir::PackedArguments::default();
-                if let Some(arguments) = &class.arguments {
-                    layout = super::packed_arguments(arguments);
-                    for operand in super::registered_arguments(arguments) {
-                        operands.push(self.ordinary_operand(operand).ok_or(())?);
+                let arguments = if class.type_params.is_some() {
+                    None
+                } else {
+                    let mut layout = ir::PackedArguments::default();
+                    if let Some(arguments) = &class.arguments {
+                        layout = super::packed_arguments(arguments);
+                        for operand in super::registered_arguments(arguments) {
+                            operands.push(self.ordinary_operand(operand).ok_or(())?);
+                        }
                     }
-                }
+                    Some(layout)
+                };
                 let site = ir::DefinitionSite::Class {
                     start: class.start(),
-                    arguments: layout,
+                    arguments,
                 };
                 let value = operation(
                     Builtin::RegisteredDefinition(site),
@@ -2583,7 +2651,10 @@ mod tests {
         let mut headers = 0;
         ir::walk_expressions(&suite.function.body, &mut |expr| {
             if let ExprKind::Builtin(
-                Builtin::RegisteredDefinition(ir::DefinitionSite::Class { arguments, .. }),
+                Builtin::RegisteredDefinition(ir::DefinitionSite::Class {
+                    arguments: Some(arguments),
+                    ..
+                }),
                 operands,
             ) = &expr.kind
             {

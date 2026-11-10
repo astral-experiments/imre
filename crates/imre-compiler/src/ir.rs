@@ -1347,7 +1347,8 @@ pub(crate) enum DefinitionSite {
     Function(ruff_text_size::TextSize),
     Class {
         start: ruff_text_size::TextSize,
-        arguments: PackedArguments,
+        /// The generic parameter frame owns its own base operands.
+        arguments: Option<PackedArguments>,
     },
 }
 

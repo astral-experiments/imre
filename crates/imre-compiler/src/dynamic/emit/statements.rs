@@ -240,6 +240,15 @@ impl<'p> Function<'_, 'p> {
                 }
                 continue;
             }
+            if let Some(super::DefinitionSite::Class(class)) = self
+                .source
+                .definitions
+                .as_ref()
+                .and_then(|sites| sites.get(&stmt.start()))
+            {
+                self.mixed_class_definition(class);
+                continue;
+            }
             if let Some(output) = crate::frontend::value_statement(
                 stmt,
                 self.source.registered_source(),
@@ -384,32 +393,6 @@ impl<'p> Function<'_, 'p> {
                     let function = self.apply_decorators(&decorators, &v.decorator_list, function);
                     self.bind(v.name.as_str(), &function);
                 }
-                ast::Stmt::ClassDef(v) => {
-                    let decorators = v
-                        .decorator_list
-                        .iter()
-                        .map(|d| self.expr(&d.expression))
-                        .collect::<Vec<_>>();
-                    let class = if v.type_params.is_some() {
-                        let name = format!("<generic parameters of {}>", v.name);
-                        let header = self.define(
-                            v.start(),
-                            DefinitionName::Plain(&name),
-                            None,
-                            None,
-                            None,
-                            Body::ClassParameters(v),
-                        );
-                        self.class_position(Some(v));
-                        let class = self.invoke(&header, &[]);
-                        self.class_position(None);
-                        class
-                    } else {
-                        self.create_class(v, None)
-                    };
-                    let class = self.apply_decorators(&decorators, &v.decorator_list, class);
-                    self.bind(v.name.as_str(), &class);
-                }
                 ast::Stmt::If(v) => self.conditional_fragments(v),
                 ast::Stmt::For(v) => {
                     let iter = self.iteration_cursor(&v.iter, v.is_async);
@@ -471,50 +454,66 @@ impl<'p> Function<'_, 'p> {
         }
     }
 
-    fn class_position(&mut self, class: Option<&ast::StmtClassDef>) {
-        let range = class.map(|class| {
-            let index = self
-                .source
-                .class_keywords
-                .partition_point(|&p| p < class.name.start());
-            ruff_text_size::TextRange::new(self.source.class_keywords[index - 1], class.end())
-        });
-        self.frame.set_source_range(range);
+    fn class_range(&self, class: &ast::StmtClassDef) -> TextRange {
+        let index = self
+            .source
+            .class_keywords
+            .partition_point(|&p| p < class.name.start());
+        TextRange::new(self.source.class_keywords[index - 1], class.end())
     }
 
-    pub(super) fn parameterized_class(&mut self, class: &ast::StmtClassDef) {
-        self.checkpoint(&class.name);
-        self.class_position(Some(class));
-        let frame = self.scope.clone();
-        let outer = self.op("annotation_scope", &[&frame]);
-        let params = class.type_params.as_deref().expect("generic class");
-        let scope = self.parameter_scope(&frame, params, true);
-        self.scope = self.op("class_base_scope", &[&scope, &outer]);
-        self.class_position(None);
-        let class = self.create_class(class, Some(scope));
-        self.end(&format!("ret i64 {class}"));
+    fn mixed_class_definition(&mut self, class: &ast::StmtClassDef) {
+        let header = &self.source.class(class).header;
+        let decorators = header
+            .decorators
+            .iter()
+            .enumerate()
+            .map(|(index, operand)| {
+                self.class_operand(operand.as_ref(), || &class.decorator_list[index].expression)
+            })
+            .collect::<Vec<_>>();
+        let arguments = header
+            .parameters
+            .is_none()
+            .then(|| self.class_arguments(class));
+        self.prepare_definition(class.start());
+        let value = self
+            .sites
+            .definition(&mut self.frame, class.start(), &decorators, arguments);
+        self.bind(class.name.as_str(), &value);
     }
 
-    fn create_class(&mut self, class: &ast::StmtClassDef, parameters: Option<String>) -> String {
-        let (bases, kwargs) = if let Some(args) = class.arguments.as_deref() {
-            let layout = crate::frontend::packed_arguments(args);
-            let mut pack = crate::llvm::registered::ArgumentPack::new(self, &layout, None);
-            for (index, operand) in crate::frontend::registered_arguments(args).enumerate() {
-                let slot = pack.prepare(self, index);
-                let value = self.expr(operand);
-                pack.insert(self, slot, &value);
-            }
-            pack.finish(self)
+    fn class_operand<'a>(
+        &mut self,
+        prepared: Option<&crate::frontend::RegisteredOperand>,
+        residual: impl FnOnce() -> &'a ast::Expr,
+    ) -> String {
+        if let Some(operand) = prepared {
+            self.prepare_checked_value(&operand.value);
+            self.frame.prepared_operand(operand, &self.sites, false)
         } else {
-            (self.op("list", &[]), "0".into())
-        };
-        let generic = parameters.is_some();
-        if let Some(scope) = parameters {
-            self.scope = scope;
-            let base = self.lookup(".generic_base");
-            self.op("append", &[&bases, &base]);
+            self.expr(residual())
         }
-        let init = self.define(
+    }
+
+    fn class_arguments(&mut self, class: &ast::StmtClassDef) -> (String, String) {
+        let header = &self.source.class(class).header;
+        let mut pack = crate::llvm::registered::ArgumentPack::new(self, &header.layout, None);
+        for (index, operand) in header.operands.iter().enumerate() {
+            let slot = pack.prepare(self, index);
+            let value = self.class_operand(operand.as_ref(), || {
+                crate::frontend::registered_argument_at(
+                    class.arguments.as_deref().expect("class argument"),
+                    index,
+                )
+            });
+            pack.insert(self, slot, &value);
+        }
+        pack.finish(self)
+    }
+
+    fn compile_class_namespace(&mut self, class: &ast::StmtClassDef) -> CompiledDefinition {
+        self.compile_definition(
             class
                 .decorator_list
                 .first()
@@ -524,21 +523,35 @@ impl<'p> Function<'_, 'p> {
             None,
             None,
             Body::Namespace(&class.body),
-        );
-        let operation = if generic {
-            self.class_position(Some(class));
-            "parameterized_class"
-        } else {
-            "class"
-        };
-        self.op(operation, &[&kwargs, &bases, &init])
+        )
     }
 
-    fn parameter_scope(&mut self, outer: &str, params: &ast::TypeParams, class: bool) -> String {
+    pub(super) fn parameterized_class(&mut self, class: &ast::StmtClassDef) {
+        let header = &self.source.class(class).header;
+        let parameters = header
+            .parameters
+            .as_deref()
+            .expect("generic class declaration");
+        let range = self.class_range(class);
+        self.checkpoint(&class.name);
+        self.frame.set_source_range(Some(range));
+        let frame = self.scope.clone();
+        let outer = self.op("annotation_scope", &[&frame]);
+        let scope = self.frame.checked_parameter_scope(&frame, parameters, true);
+        self.scope = self.op("class_base_scope", &[&scope, &outer]);
+        self.frame.set_source_range(None);
+        let args = self.class_arguments(class);
+        self.scope = scope;
+        let definition = self.compile_class_namespace(class);
+        let result = definition.instantiate_class(&mut self.frame, args, Some(range));
+        self.end(&format!("ret i64 {result}"));
+    }
+
+    fn function_parameter_scope(&mut self, outer: &str, params: &ast::TypeParams) -> String {
         let params =
             crate::frontend::registered_type_parameters(params, &self.source.private_names);
         self.check_suspended_parameters(&params, self.current_range);
-        self.frame.checked_parameter_scope(outer, &params, class)
+        self.frame.checked_parameter_scope(outer, &params, false)
     }
 
     fn check_suspended_parameters(
@@ -601,7 +614,7 @@ impl<'p> Function<'_, 'p> {
         let doc = compiled.doc(&mut self.frame);
         let outer = self.scope.clone();
         let scope = type_params
-            .map(|params| self.parameter_scope(&outer, params, false))
+            .map(|params| self.function_parameter_scope(&outer, params))
             .unwrap_or(outer);
         let operands = compiled.operands(&mut self.frame, &scope, doc);
         if let Some(params) = params {
@@ -649,7 +662,10 @@ impl<'p> Function<'_, 'p> {
         // even when lowering does not materialize a separate parameter frame.
         let generic = function.is_some_and(|f| f.type_params.is_some());
         let nested = self.in_function || generic;
-        let header = matches!(body, Body::ClassParameters(_));
+        let class_header = match &body {
+            Body::ClassParameters(class) => Some(self.class_range(class)),
+            _ => None,
+        };
         let prefix = if let Body::ClassParameters(class) = &body {
             if self.declared_globals.contains(class.name.as_str()) {
                 String::new()
@@ -677,7 +693,7 @@ impl<'p> Function<'_, 'p> {
                     nested,
                     self.class_locals.is_some()
                         && self.annotation_values.is_none()
-                        && !header
+                        && class_header.is_none()
                         && !generic,
                 );
                 if doc.is_some() {
@@ -875,7 +891,7 @@ impl<'p> Function<'_, 'p> {
             doc,
             provider,
             default_names,
-            header,
+            class_header,
             type_alias,
         }
     }
