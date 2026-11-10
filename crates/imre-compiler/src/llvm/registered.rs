@@ -1108,9 +1108,9 @@ impl Frame<'_, '_, '_> {
                 self.code.store_annotation(target, &value);
                 "0".to_owned()
             }
-            (Builtin::BindAnnotationExpression(site), []) => {
+            (Builtin::BindAnnotationExpression { site, spelling }, []) => {
                 let (code, sites) = self.code.parts();
-                sites.annotation_string(code, *site)
+                sites.annotation_string(code, *site, spelling)
             }
             (Builtin::RegisteredAnnotationResult, []) => self.code.take_annotation_result(),
             (

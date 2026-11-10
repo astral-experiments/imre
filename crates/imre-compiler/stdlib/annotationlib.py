@@ -170,7 +170,7 @@ def annotations_to_string(annotations):
 def _make_forward_ref(arg, module=None, owner=None, *, is_argument=True, is_class=False):
     from _typing import _validate_forward_ref
     # typing._make_forward_ref eagerly checks the syntax, without resolving names.
-    source = f"({arg},)[0]" if arg.lstrip().startswith("*") else arg
+    source = _rewrite_star_unpack(arg)
     try:
         _validate_forward_ref(source)
     except SyntaxError:
@@ -298,7 +298,7 @@ class ForwardRef:
 
         from _typing import _eval_type_expression, _validate_forward_ref
         arg = self.__forward_arg__
-        source = f"({arg},)[0]" if arg.lstrip().startswith("*") else arg
+        source = _rewrite_star_unpack(arg)
         try:
             return _eval_type_expression(source, globals, locals)
         except SyntaxError:
@@ -432,7 +432,8 @@ def _rewrite_star_unpack(arg):
        rewrite it to a valid expression.
        """
     if arg.lstrip().startswith("*"):
-        return f"({arg},)[0]"  # E.g. (*Ts,)[0] or (*tuple[int, int],)[0]
+        from _typing import _starred_forward_ref
+        return _starred_forward_ref(arg, f"{arg}")
     else:
         return arg
 

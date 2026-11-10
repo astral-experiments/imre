@@ -5,6 +5,11 @@ pub enum Error {
     Scope,
 }
 
+/// Turn an unpacked annotation such as `*Ts` into an expression suitable for `eval`.
+pub fn starred_expression(spelling: &str) -> String {
+    format!("({spelling},)[0]")
+}
+
 /// Parse annotation text without evaluating it or constructing Python AST objects.
 pub fn parse(
     source: &str,

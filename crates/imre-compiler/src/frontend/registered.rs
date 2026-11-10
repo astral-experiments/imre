@@ -3366,7 +3366,7 @@ mod tests {
         assert!(matches!(
             fields[0].1,
             [Expr {
-                kind: ExprKind::Builtin(Builtin::BindAnnotationExpression(site), _), ..
+                kind: ExprKind::Builtin(Builtin::BindAnnotationExpression { site, .. }, _), ..
             }] if *site == fields[0].0.range.start()
         ));
         assert_eq!(provider.references["a"], "mod.T");
@@ -3438,7 +3438,7 @@ mod tests {
         let bundled_sites = prepared(true).module_annotations.fields;
         let quoted_site = stmts[3].start();
         assert!(
-            matches!(&sites[&quoted_site].value, Ok(Expr { kind: ExprKind::Builtin(Builtin::BindAnnotationExpression(site), _), .. }) if *site == stmts[3].as_ann_assign_stmt().unwrap().annotation.start())
+            matches!(&sites[&quoted_site].value, Ok(Expr { kind: ExprKind::Builtin(Builtin::BindAnnotationExpression { site, .. }, _), .. }) if *site == stmts[3].as_ann_assign_stmt().unwrap().annotation.start())
         );
         assert!(
             matches!(&bundled_sites[&quoted_site].value, Ok(Expr {kind: ExprKind::Str(text), ..}) if text == "list[int]")
@@ -3448,7 +3448,7 @@ mod tests {
             Statement::Expr(Expr { kind: ExprKind::Builtin(
                 Builtin::RegisteredAnnotationInsert(ir::AnnotationField { index: Some(0), .. }), values), .. })
                 if matches!(values.as_slice(), [Expr { kind: ExprKind::Builtin(
-                    Builtin::BindAnnotationExpression(site), _), .. }] if *site == stmts[3].as_ann_assign_stmt().unwrap().annotation.start())));
+                    Builtin::BindAnnotationExpression { site, .. }, _), .. }] if *site == stmts[3].as_ann_assign_stmt().unwrap().annotation.start())));
         for slot in [2, 4, 6] {
             assert!(sites[&stmts[slot].start()].value.is_ok());
         }

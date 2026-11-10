@@ -228,11 +228,6 @@ pub(crate) struct Declaration {
     pub(crate) parameter_providers: Result<Vec<CompiledParameterProvider>, String>,
 }
 
-pub(crate) struct AnnotationString {
-    pub(crate) text: String,
-    pub(crate) code: String,
-}
-
 /// The compiled-site tables read by checked operations in a registered frame.
 #[derive(Clone, Copy)]
 pub(crate) enum RequiredSite {
@@ -254,14 +249,14 @@ fn visit_expression_site(expr: &Expr, visit: &mut impl FnMut(RequiredSite)) {
         Builtin::RegisteredLambda(site, scoped) => RequiredSite::Lambda(*site, *scoped),
         Builtin::RegisteredGenerator(site, _) => RequiredSite::Generator(*site),
         Builtin::RegisteredTypeAlias(site) => RequiredSite::Alias(*site),
-        Builtin::BindAnnotationExpression(site) => RequiredSite::AnnotationString(*site),
+        Builtin::BindAnnotationExpression { site, .. } => RequiredSite::AnnotationString(*site),
         _ => return,
     });
 }
 
 #[derive(Default)]
 pub(crate) struct CheckedSites {
-    pub(crate) annotation_strings: HashMap<TextSize, AnnotationString>,
+    pub(crate) annotation_strings: HashMap<TextSize, String>,
     pub(crate) definitions: HashMap<TextSize, Declaration>,
     pub(crate) class_namespaces:
         HashMap<TextSize, (CompiledDefinition, Vec<RegisteredTypeParameter>, TextRange)>,
@@ -321,10 +316,10 @@ impl CheckedSites {
         &self,
         frame: &mut RegisteredFrame<'_, '_>,
         site: TextSize,
+        spelling: &str,
     ) -> String {
-        let value = &self.annotation_strings[&site];
-        let text = frame.text(&value.text);
-        frame.bind_annotation_expression(&text, &value.code);
+        let text = frame.text(spelling);
+        frame.bind_annotation_expression(&text, &self.annotation_strings[&site]);
         text
     }
 

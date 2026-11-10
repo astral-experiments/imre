@@ -2581,6 +2581,29 @@ pub(super) fn call(
                 .map_err(|message| Error::new("SyntaxError", message))?;
             Ok(NONE)
         }
+        ("_starred_forward_ref", [original, rendered]) => {
+            let source = ctx.str_value(*rendered)?;
+            let entry = match ctx.heap.linked_sources.get(original) {
+                Some(&super::LinkedSource::Expression(entry))
+                    if ctx.str_value(*original)? == source
+                        && source
+                            .trim_start_matches(imre_ast::strings::python_whitespace)
+                            .starts_with('*') =>
+                {
+                    Some(entry)
+                }
+                _ => None,
+            };
+            let spelling = imre_ast::forward_refs::starred_expression(source);
+            let expression = ctx.text(spelling);
+            // Only the spelling produced from this particular checked string inherits its body.
+            if let Some(entry) = entry {
+                ctx.heap
+                    .linked_sources
+                    .insert(expression, super::LinkedSource::Expression(entry));
+            }
+            Ok(expression)
+        }
         ("_validate_forward_ref", [text]) => {
             if matches!(
                 ctx.heap.linked_sources.get(text),

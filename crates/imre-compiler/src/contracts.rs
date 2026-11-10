@@ -684,7 +684,7 @@ impl Builtin {
             | Self::RegisteredAnnotationStart
             | Self::RegisteredAnnotationFormat
             | Self::RegisteredAnnotationInsert(_)
-            | Self::BindAnnotationExpression(_)
+            | Self::BindAnnotationExpression { .. }
             | Self::RegisteredAnnotationResult
             | Self::RegisteredDeleteName(..)
             | Self::RegisteredDefinition(_)

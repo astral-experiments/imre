@@ -124,13 +124,30 @@ pub(crate) fn annotation_operands<R>(
             let body = if self.bundled {
                 None
             } else {
-                annotation_expression(&text).and_then(|parsed| (self.prepare_child)(&text, &parsed))
+                let expanded;
+                let expression = if text
+                    .trim_start_matches(imre_ast::strings::python_whitespace)
+                    .starts_with('*')
+                {
+                    expanded = imre_ast::forward_refs::starred_expression(&text);
+                    expanded.as_str()
+                } else {
+                    &text
+                };
+                annotation_expression(expression)
+                    .and_then(|parsed| (self.prepare_child)(expression, &parsed))
             };
             let site = expr.start();
             let kind = match body {
                 Some(body) => {
                     self.operands.children.insert(site, body);
-                    ExprKind::Builtin(Builtin::BindAnnotationExpression(site), Vec::new())
+                    ExprKind::Builtin(
+                        Builtin::BindAnnotationExpression {
+                            site,
+                            spelling: text,
+                        },
+                        Vec::new(),
+                    )
                 }
                 None => ExprKind::Str(text),
             };
@@ -303,7 +320,7 @@ mod tests {
 @decorator
 class C:
     field: C[D]
-    def f(self, arg: E[F]):
+    def f(self, arg: E[F], *rest: *Items):
         local: G[H]
         class Nested:
             field: I[J]
@@ -329,16 +346,16 @@ after: K[L]
                 bundled,
                 test_annotation_body,
             );
-            assert_eq!(sites.values.len(), 5);
-            assert_eq!(sites.children.len(), if bundled { 0 } else { 5 });
-            for spelling in ["A[B]", "C[D]", "E[F]", "I[J]", "K[L]"] {
+            assert_eq!(sites.values.len(), 6);
+            assert_eq!(sites.children.len(), if bundled { 0 } else { 6 });
+            for spelling in ["A[B]", "C[D]", "E[F]", "*Items", "I[J]", "K[L]"] {
                 let location = site(spelling);
                 let value = &sites.values[&location].kind;
                 if bundled {
                     assert!(matches!(value, ExprKind::Str(text) if text == spelling));
                 } else {
                     assert!(
-                        matches!(value, ExprKind::Builtin(Builtin::BindAnnotationExpression(child), _) if *child == location)
+                        matches!(value, ExprKind::Builtin(Builtin::BindAnnotationExpression { site, spelling: original }, _) if *site == location && original == spelling)
                     );
                 }
             }
