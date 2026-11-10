@@ -1649,6 +1649,7 @@ impl SourceScope<'_> {
             return self.statement(stmt, body);
         }
         if stmt.is_delete_stmt()
+            || stmt.is_raise_stmt()
             || self.sites.assertions.contains_key(&stmt.range())
             || attribute_effects(stmt).is_some()
         {

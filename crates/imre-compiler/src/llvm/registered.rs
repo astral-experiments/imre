@@ -326,11 +326,7 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
             Some((exception, cause)) => (Some(exception), Some(cause)),
             None => (value, None),
         };
-        let exception = exception.map(|value| self.evaluate_handle(value));
-        if self.begin_raise(exception) {
-            let cause = cause.map(|value| self.evaluate_handle(value));
-            self.finish_raise(cause.as_deref());
-        }
+        self.raise_operands(exception, cause, Self::evaluate_handle);
     }
 
     pub(super) fn for_expression(

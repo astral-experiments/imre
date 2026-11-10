@@ -215,6 +215,9 @@ impl<'p> Function<'_, 'p> {
                     self.discard_handle(&handle);
                 }
             }
+            ValueStatement::RaiseOperands(exception, cause) => {
+                self.raise_operands(exception, cause, Self::expr);
+            }
             ValueStatement::Ignore => {}
         }
     }
@@ -450,13 +453,6 @@ impl<'p> Function<'_, 'p> {
                 ast::Stmt::Try(v) => self.protected_statement(v),
                 ast::Stmt::With(v) if !v.is_async || self.native_suspension => {
                     self.emit_with_inputs(v);
-                }
-                ast::Stmt::Raise(v) => {
-                    let exception = v.exc.as_deref().map(|value| self.expr(value));
-                    if self.begin_raise(exception) {
-                        let cause = v.cause.as_deref().map(|value| self.expr(value));
-                        self.finish_raise(cause.as_deref());
-                    }
                 }
                 ast::Stmt::Assert(v) => {
                     let pass = self.name("b");

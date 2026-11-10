@@ -916,6 +916,7 @@ impl Region {
 /// An output statement encountered in a source suite. Only a residual operand needs syntax.
 pub(crate) enum ValueStatement<'a> {
     Checked(Statement),
+    RaiseOperands(Option<&'a ast::Expr>, Option<&'a ast::Expr>),
     ReturnOperand(&'a ast::Expr),
     DiscardOperand(&'a ast::Expr),
     Ignore,
@@ -932,6 +933,9 @@ pub(crate) fn value_statement<'a>(
         None => registered_value(value, source),
     };
     Some(match stmt {
+        ast::Stmt::Raise(raise) => {
+            ValueStatement::RaiseOperands(raise.exc.as_deref(), raise.cause.as_deref())
+        }
         ast::Stmt::Return(ret) => match ret.value.as_deref() {
             None => ValueStatement::Checked(Statement::Return(Expr::none())),
             Some(value) => operand(value).map_or(ValueStatement::ReturnOperand(value), |value| {

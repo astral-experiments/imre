@@ -1254,6 +1254,26 @@ impl<'a> ArgumentPack<'a> {
 pub(crate) trait FrameEmitter<'a, 'p>:
     std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>> + Sized
 {
+    /// A bare raise transfers the active exception immediately. An explicit raise
+    /// roots its evaluated exception until the caller has evaluated the cause.
+    fn raise_operands<T>(
+        &mut self,
+        exception: Option<T>,
+        cause: Option<T>,
+        operand: impl Fn(&mut Self, T) -> String,
+    ) {
+        let Some(exception) = exception else {
+            let active = self.caught.last().cloned().unwrap_or_else(|| "0".into());
+            self.raise(&active, None, true);
+            return;
+        };
+        let exception = operand(self, exception);
+        self.live.push(exception);
+        let cause = cause.map(|value| operand(self, value));
+        let exception = self.live.pop().expect("pending explicit raise");
+        self.raise(&exception, cause.as_deref(), false);
+    }
+
     fn with_operand_source<T>(&mut self, expr: &ir::Expr, emit: impl FnOnce(&mut Self) -> T) -> T {
         if let ir::ExprKind::Builtin(ir::Builtin::RegisteredLocation(range, _), _) = &expr.kind {
             self.with_source_range(*range, emit)
@@ -1898,24 +1918,6 @@ impl RegisteredFrame<'_, '_> {
             self.set_statement_line(test_line);
         }
         self.raise(&error, None, false);
-    }
-
-    /// A bare raise transfers the active exception immediately. An explicit raise
-    /// roots its evaluated exception until the caller has evaluated the cause.
-    pub(crate) fn begin_raise(&mut self, exception: Option<String>) -> bool {
-        if let Some(exception) = exception {
-            self.live.push(exception);
-            true
-        } else {
-            let active = self.caught.last().cloned().unwrap_or_else(|| "0".into());
-            self.raise(&active, None, true);
-            false
-        }
-    }
-
-    pub(crate) fn finish_raise(&mut self, cause: Option<&str>) {
-        let exception = self.live.pop().expect("pending explicit raise");
-        self.raise(&exception, cause, false);
     }
 
     pub(crate) fn raise(&mut self, exc: &str, cause: Option<&str>, reraise: bool) {
