@@ -1287,6 +1287,24 @@ pub(crate) struct RegisteredTypeParameter<F> {
     pub(crate) fields: Vec<(imre_ast::TypeParameterField, F)>,
 }
 
+impl<F> RegisteredTypeParameter<F> {
+    pub(crate) fn try_map_fields<T, E>(
+        &self,
+        mut map: impl FnMut(&F) -> Result<T, E>,
+    ) -> Result<RegisteredTypeParameter<T>, E> {
+        let mut fields = Vec::with_capacity(self.fields.len());
+        for (field, value) in &self.fields {
+            fields.push((*field, map(value)?));
+        }
+        Ok(RegisteredTypeParameter {
+            binding: self.binding.clone(),
+            name: self.name.clone(),
+            kind: self.kind,
+            fields,
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum TypeParameterKind {
     TypeVar,

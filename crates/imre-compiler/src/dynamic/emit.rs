@@ -10,12 +10,19 @@ use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use super::prepare::PreparedUnit;
 use crate::CodegenUnit;
+use crate::frontend::function_scope::{CallableMetadata, ClassBindings, NamedFunction};
 use crate::frontend::module_source::{self, ParsedModule};
-use crate::frontend::{RegisteredGenerator, RegisteredLambda};
+use crate::frontend::{ParameterEvaluator, RegisteredGenerator, RegisteredLambda};
+use crate::ir::RegisteredTypeParameter;
 use crate::llvm::ModuleLauncher;
+use crate::llvm::registered::sites::{
+    CheckedSites, CompiledAlias, CompiledDefinition, CompiledGenerator, CompiledTypeParameters,
+    Declaration,
+};
 use crate::llvm::registered::{
     ABI, AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourcePositions, sites,
 };
+use serde_json::json;
 
 mod statements;
 
@@ -444,7 +451,9 @@ impl<'a> PreparedBody<'a> {
         use crate::frontend::DeclarationSite;
         let mut function_bodies = HashMap::new();
         let mut class_bodies = HashMap::new();
-        let mut thread_entries = HashMap::new();
+        // These CPython providers implement their own call semantics in Python.
+        let python_annotations =
+            provider || bundled && matches!(name, "_py_warnings" | "tomllib._parser" | "typing");
         for declaration in sites.declarations.into_iter().rev() {
             let site = match declaration {
                 DeclarationSite::Function(site) => site,
@@ -457,25 +466,10 @@ impl<'a> PreparedBody<'a> {
             };
             let def = site.def;
             let start = def.start();
-            if let Some(entry) = site.thread_entry {
-                thread_entries.insert(start, entry);
-            }
             let header = scopes.functions.get_mut(&start).expect("named function");
             header.type_params = site.parameters.unwrap_or_default();
-            if let Some(annotations) = sites.parameter_annotations.get(&header.parameters) {
-                header.integer_sign_parameters = header
-                    .metadata
-                    .non_variadic_parameter_names()
-                    .filter(|name| {
-                        annotations
-                            .references
-                            .get(*name)
-                            .is_some_and(|ty| ty == "float")
-                    })
-                    .filter(|name| crate::frontend::only_compares_zero(&def.body, name))
-                    .map(str::to_owned)
-                    .collect();
-            }
+            header.annotations = site.annotations;
+            header.prepare_signature(def, site.thread_entry, python_annotations);
             let suspended = header.metadata.suspension_flags() != 0;
             let body = if let Some(checked) = program_bodies.and_then(|bodies| bodies.get(&start)) {
                 FunctionBody::Program(checked)
@@ -520,7 +514,6 @@ impl<'a> PreparedBody<'a> {
         let source = SourceInfo {
             annotation_children,
             scopes,
-            thread_entries,
             #[cfg(test)]
             statement_sites: prepare.sites,
             python_optimization,
@@ -530,15 +523,12 @@ impl<'a> PreparedBody<'a> {
             namespace_operations: operations,
             type_aliases,
             module_annotations: sites.module_annotations,
-            parameter_annotations: sites.parameter_annotations,
             function_bodies,
             class_bodies,
             initializer,
             bundled,
             path,
-            // These CPython providers implement their own call semantics in Python.
-            python_annotations: provider
-                || bundled && matches!(name, "_py_warnings" | "tomllib._parser" | "typing"),
+            python_annotations,
             module_start,
             #[cfg(test)]
             class_keywords,
@@ -698,11 +688,14 @@ enum DefinitionName<'a> {
         scope: &'a crate::frontend::function_scope::FunctionScope,
         type_parameter_scope: bool,
     },
-    ClassHeader(&'a str),
+    ClassHeader(&'a str, &'a crate::frontend::RegisteredClass),
 }
 
 enum Body<'a> {
-    Namespace,
+    Namespace(
+        &'a crate::frontend::RegisteredClass,
+        &'a crate::frontend::function_scope::classes::ClassScope,
+    ),
     Suite(&'a crate::frontend::RegisteredSuite),
     CheckedProvider(&'a crate::frontend::CheckedProvider, AnnotationScope),
     /// Named bodies carry their lexical global declarations into the checked frame.
@@ -770,7 +763,6 @@ struct SourceInfo<'a> {
     annotation_children:
         HashMap<TextSize, crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>>,
     scopes: crate::frontend::function_scope::ScopeFacts,
-    thread_entries: HashMap<ruff_text_size::TextSize, imre_ast::ThreadEntry>,
     lambdas: HashMap<ruff_text_size::TextSize, RegisteredLambda>,
     generators: HashMap<TextRange, RegisteredGenerator>,
     type_aliases: HashMap<ruff_text_size::TextSize, TypeAliasDefinition>,
@@ -780,7 +772,6 @@ struct SourceInfo<'a> {
     #[cfg(test)]
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
     module_annotations: crate::frontend::ModuleAnnotations,
-    parameter_annotations: HashMap<ruff_text_size::TextSize, crate::frontend::ParameterAnnotations>,
     function_bodies: HashMap<ruff_text_size::TextSize, FunctionBody<'a>>,
     class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredClass>,
     initializer: Option<crate::frontend::RegisteredSuite>,
@@ -802,6 +793,16 @@ struct SourceInfo<'a> {
 }
 
 impl SourceInfo<'_> {
+    fn function_body(&self, site: TextSize) -> Body<'_> {
+        let plan = &self.function_bodies[&site];
+        if let Some(suite) = plan.suite().filter(|suite| !suite.fully_checked()) {
+            Body::Suite(suite)
+        } else {
+            let globals = &self.scopes.functions[&site].globals;
+            Body::Checked(plan.checked(), Some(globals))
+        }
+    }
+
     /// Keep documentation attached to the bundled definition, even when callers rebind its name.
     fn bundled_docstring(&self, qualname: &str) -> Option<String> {
         self.docs
@@ -873,8 +874,10 @@ impl SourceMap<'_> {
         for name in globals {
             frame.declare_global(name);
         }
-        self.frame_callables(&mut frame, &mut sites, prefix, globals, in_function)
-            .place_statements(&checked.function.body);
+        sites.place_statements(
+            &checked.function.body,
+            &mut self.definitions(&mut frame, prefix, globals, in_function),
+        );
         frame.checked_body(checked, &sites);
         frame
     }
@@ -909,10 +912,7 @@ impl SourceMap<'_> {
                 &prefix,
                 in_function,
             ),
-            Body::Namespace => {
-                let site = start.expect("class definition");
-                let class = &self.scopes.classes[&site];
-                let prepared = &self.class_bodies[&site];
+            Body::Namespace(prepared, class) => {
                 frame.class_locals = Some(class.bindings.clone());
                 if frame.output.keep_docstrings
                     && let Some(doc) = prepared.doc.as_deref().or_else(|| {
@@ -980,14 +980,571 @@ impl SourceMap<'_> {
                     frame.use_class_annotation_names(class);
                 }
                 let globals = BTreeSet::new();
-                self.frame_callables(&mut frame, &mut sites, &prefix, &globals, in_function)
-                    .place_operand(&operand.value);
+                sites.place_operand(
+                    &operand.value,
+                    &mut self.definitions(&mut frame, &prefix, &globals, in_function),
+                );
                 let value = frame.prepared_operand(operand, &sites, false);
                 frame.return_value(&value);
                 frame
             }
         };
         frame.finish_callable(start)
+    }
+}
+
+/// Lexical inputs for compiling the children of one registered frame.
+struct LexicalDefinitions<'a, 'p> {
+    source: &'a SourceMap<'p>,
+    output: &'a mut Output,
+    prefix: &'a str,
+    declared_globals: &'a std::collections::BTreeSet<String>,
+    in_function: bool,
+    method_scope: bool,
+    class_locals: Option<&'a crate::frontend::function_scope::ClassBindings>,
+}
+
+enum Callable<'a> {
+    Lambda {
+        metadata: &'a CallableMetadata,
+        comprehension: bool,
+    },
+    Named(&'a NamedFunction),
+    Generator(&'a RegisteredGenerator),
+}
+
+impl<'p> SourceMap<'p> {
+    fn definitions<'a>(
+        &'a self,
+        frame: &'a mut RegisteredFrame<'_, '_>,
+        prefix: &'a str,
+        declared_globals: &'a std::collections::BTreeSet<String>,
+        in_function: bool,
+    ) -> LexicalDefinitions<'a, 'p> {
+        LexicalDefinitions {
+            source: self,
+            output: frame.output,
+            prefix,
+            declared_globals,
+            in_function,
+            class_locals: frame.class_locals.as_ref(),
+            method_scope: frame.class_locals.is_some() && frame.annotation_values.is_none(),
+        }
+    }
+}
+
+impl Function<'_, '_> {
+    fn definitions(&mut self) -> (&mut CheckedSites, LexicalDefinitions<'_, '_>) {
+        let definitions = self.source.definitions(
+            &mut self.frame,
+            &self.prefix,
+            &self.declared_globals,
+            self.in_function,
+        );
+        (&mut self.sites, definitions)
+    }
+}
+
+impl sites::SiteDefinitions for LexicalDefinitions<'_, '_> {
+    fn lambda(&mut self, site: TextSize, comprehension: bool) -> CompiledDefinition {
+        let lambda = &self.source.lambdas[&site];
+        let body = lambda.body.as_ref().expect("checked lambda body");
+        self.compile_callable(
+            site,
+            Callable::Lambda {
+                metadata: &lambda.metadata,
+                comprehension,
+            },
+            Body::Checked(body, None),
+        )
+    }
+
+    fn declaration(&mut self, site: TextSize) -> Declaration {
+        let source = self.source;
+        let (definition, decorator_offsets, type_params) = if let Some(class) =
+            source.class_bodies.get(&site)
+        {
+            let definition = if let Some(header) = &class.header {
+                let name = format!("<generic parameters of {}>", class.name);
+                let body = Body::CheckedProvider(&header.body, AnnotationScope::Plain);
+                self.compile_definition(site, DefinitionName::ClassHeader(&name, class), body)
+            } else {
+                self.compile_class_namespace(site, class)
+            };
+            (definition, &class.decorator_offsets, None)
+        } else {
+            let header = &source.scopes.functions[&site];
+            let definition =
+                self.compile_callable(site, Callable::Named(header), source.function_body(site));
+            let parameters = (!header.type_params.is_empty())
+                .then(|| self.compile_type_parameters(&header.type_params, self.class_locals));
+            (definition, &header.decorator_offsets, parameters)
+        };
+        Declaration {
+            definition,
+            decorator_offsets: decorator_offsets.clone(),
+            type_params,
+        }
+    }
+
+    fn class_namespace(
+        &mut self,
+        site: TextSize,
+    ) -> (CompiledDefinition, CompiledTypeParameters, TextRange) {
+        let class = &self.source.class_bodies[&site];
+        let namespace = self.compile_class_namespace(site, class);
+        let header = class.header.as_ref().expect("generic class");
+        let parameters = self.compile_scoped_type_parameters(&header.parameters);
+        (namespace, parameters, class.range)
+    }
+
+    fn generator(&mut self, site: TextRange) -> CompiledGenerator {
+        let body = &self.source.generators[&site];
+        let definition = self.compile_callable(
+            site.start(),
+            Callable::Generator(body),
+            Body::Checked(&body.body, None),
+        );
+        let targets = self.source.scopes.comprehension_targets[&site].clone();
+        CompiledGenerator {
+            definition,
+            targets,
+        }
+    }
+
+    fn type_alias(&mut self, site: TextSize) -> Result<CompiledAlias, String> {
+        let alias = &self.source.type_aliases[&site];
+        // Placement can visit children of a suite that exits before the alias binds.
+        let outer_diagnostic = self.output.diagnostic.take();
+        let compiled = match &alias.body {
+            Ok(code) => Some(CompiledAlias {
+                definition: self.compile_evaluator(
+                    site,
+                    &alias.name,
+                    &self.source.scopes.aliases[&site],
+                    alias.parameters.is_some(),
+                    code,
+                    self.class_locals.cloned(),
+                ),
+                parameters: alias
+                    .parameters
+                    .as_ref()
+                    .map(|parameters| self.compile_scoped_type_parameters(parameters)),
+            }),
+            Err(range) => {
+                self.output.diagnostic.get_or_insert_with(|| {
+                    self.source
+                        .positions
+                        .diagnostic_at(*range, "type alias value has no checked expression operand")
+                });
+                None
+            }
+        };
+        match std::mem::replace(&mut self.output.diagnostic, outer_diagnostic) {
+            Some(error) => Err(error),
+            None => Ok(compiled.expect("prepared alias evaluator")),
+        }
+    }
+
+    fn annotation_string(&mut self, site: TextSize) -> String {
+        let body = &self.source.annotation_children[&site];
+        let text = body.scope.text.as_ref();
+        let file = self.output.data(b"<string>");
+        let location = SourceMap {
+            info: &body.scope,
+            callable_code: Default::default(),
+            unit: self.source.unit,
+            positions: &SourcePositions::new(body.scope.path, text, &file),
+        };
+        location.code(
+            self.output,
+            String::new(),
+            Body::Operand(body.code.range, &body.code.operand, None),
+            false,
+            None,
+        )
+    }
+}
+
+impl LexicalDefinitions<'_, '_> {
+    fn compile_callable(
+        &mut self,
+        site: TextSize,
+        callable: Callable<'_>,
+        body: Body<'_>,
+    ) -> CompiledDefinition {
+        let source = self.source;
+        let (name, qualname, doc, metadata, comprehension) = match callable {
+            Callable::Lambda {
+                metadata,
+                comprehension,
+            } => (
+                "<lambda>",
+                format!("{}<lambda>", self.prefix),
+                None,
+                metadata,
+                comprehension,
+            ),
+            Callable::Generator(generator) => (
+                "<genexpr>",
+                format!("{}<genexpr>", self.prefix),
+                None,
+                &generator.metadata,
+                false,
+            ),
+            Callable::Named(header) => {
+                let qualname = if self.declared_globals.contains(&header.binding) {
+                    header.name.clone()
+                } else {
+                    format!("{}{}", self.prefix, header.name)
+                };
+                let doc = if self.output.keep_docstrings {
+                    header
+                        .doc
+                        .clone()
+                        .or_else(|| source.bundled_docstring(&qualname))
+                } else {
+                    None
+                };
+                (header.name.as_str(), qualname, doc, &header.metadata, false)
+            }
+        };
+        let (generic, class_cell, provider) = match callable {
+            Callable::Named(header) => (
+                header.generic,
+                !header.generic || header.type_params.is_empty(),
+                self.parameter_provider(header, &qualname),
+            ),
+            Callable::Lambda { .. } | Callable::Generator(_) => (false, true, None),
+        };
+        let suspension = metadata.suspension_flags();
+        // Several expression regions can place the same lexical lambda.
+        let cache = match callable {
+            Callable::Lambda { .. } => Some(&source.callable_code),
+            Callable::Named(_) | Callable::Generator(_) => None,
+        };
+        let existing = cache.and_then(|cache| cache.borrow().get(&site).cloned());
+        let code = existing.unwrap_or_else(|| {
+            let code = source.code(
+                self.output,
+                if matches!(callable, Callable::Generator(_)) {
+                    format!("{qualname}.")
+                } else {
+                    format!("{qualname}.<locals>.")
+                },
+                body,
+                true,
+                Some((site, suspension)),
+            );
+            if let Some(cache) = cache {
+                cache.borrow_mut().insert(site, code.clone());
+            }
+            code
+        });
+        // A lambda inside a display captures the iteration namespace even in a class body.
+        let method = !comprehension && self.method_scope;
+        let mut flags = source.function_flags(
+            self.in_function || comprehension || generic,
+            method && !generic,
+        );
+        if doc.is_some() {
+            flags |= imre_ast::code_flags::HAS_DOCSTRING;
+        }
+        let signature = metadata.signature(flags, method && class_cell);
+        if !matches!(callable, Callable::Generator(_)) {
+            self.output
+                .interned_identifiers
+                .extend(metadata.parameter_names().map(str::to_owned));
+        }
+        CompiledDefinition {
+            doc,
+            provider,
+            default_names: metadata.defaults.clone(),
+            ..CompiledDefinition::new(code, signature, name, qualname, false)
+        }
+    }
+
+    fn compile_class_namespace(
+        &mut self,
+        site: TextSize,
+        class: &crate::frontend::RegisteredClass,
+    ) -> CompiledDefinition {
+        self.compile_definition(
+            site,
+            DefinitionName::Binding(&class.name),
+            Body::Namespace(class, &self.source.scopes.classes[&site]),
+        )
+    }
+
+    fn compile_definition(
+        &mut self,
+        start: TextSize,
+        name: DefinitionName<'_>,
+        body: Body<'_>,
+    ) -> CompiledDefinition {
+        let (evaluator_scope, type_parameter_scope) = match name {
+            DefinitionName::Evaluator {
+                scope,
+                type_parameter_scope,
+                ..
+            } => (Some(scope), type_parameter_scope),
+            _ => (None, false),
+        };
+        let class = match name {
+            DefinitionName::ClassHeader(_, class) => Some(class),
+            _ => None,
+        };
+        let (name, global) = match name {
+            DefinitionName::Binding(identifier) => (
+                self.source.private_names.definition(identifier),
+                self.declared_globals.contains(identifier.as_str()),
+            ),
+            DefinitionName::ClassHeader(name, _) | DefinitionName::Evaluator { name, .. } => {
+                (name, false)
+            }
+        };
+        let qualname = if global {
+            name.to_owned()
+        } else {
+            format!("{}{name}", self.prefix)
+        };
+        let class_header = class.map(|class| class.range);
+        let prefix = if let Some(class) = class {
+            if self.declared_globals.contains(class.name.as_str()) {
+                String::new()
+            } else {
+                self.prefix.to_owned()
+            }
+        } else if matches!(body, Body::Namespace(..)) {
+            format!("{qualname}.")
+        } else {
+            format!("{qualname}.<locals>.")
+        };
+        let mut signature = json!({});
+        if !matches!(body, Body::Namespace(..)) {
+            signature["code_flags"] = json!(
+                self.source
+                    .function_flags(self.in_function || type_parameter_scope, false)
+            );
+        }
+        if let Body::Namespace(_, scope) = &body {
+            scope.write_signature(&mut signature);
+        } else if let Some(facts) = evaluator_scope {
+            facts.write_signature(&mut signature);
+        } else {
+            signature["scope_cellvars"] = serde_json::Value::Null;
+            signature["scope_complete"] = json!(false);
+            signature["scope_locals_complete"] = json!(true);
+        }
+        if evaluator_scope.is_some() {
+            signature["posonly"] = json!([".format"]);
+            if matches!(body, Body::Operand(_, _, Some(_))) {
+                signature["annotation_class"] = json!(true);
+            }
+        }
+        let in_function = self.in_function || !matches!(body, Body::Namespace(..));
+        let code = self
+            .source
+            .code(self.output, prefix, body, in_function, Some((start, 0)));
+        CompiledDefinition {
+            class_header,
+            format_evaluator: evaluator_scope.is_some(),
+            ..CompiledDefinition::new(
+                code,
+                signature,
+                name,
+                qualname,
+                class_header.is_some() || evaluator_scope.is_some(),
+            )
+        }
+    }
+
+    fn compile_evaluator(
+        &mut self,
+        site: TextSize,
+        name: &str,
+        scope: &crate::frontend::function_scope::FunctionScope,
+        type_parameter_scope: bool,
+        code: &crate::frontend::AnnotationCode,
+        class: Option<crate::frontend::function_scope::ClassBindings>,
+    ) -> CompiledDefinition {
+        self.compile_definition(
+            site,
+            DefinitionName::Evaluator {
+                name,
+                scope,
+                type_parameter_scope,
+            },
+            Body::Operand(code.range, &code.operand, class),
+        )
+    }
+
+    fn compile_scoped_type_parameters(
+        &mut self,
+        parameters: &crate::frontend::TypeParameterValues,
+    ) -> CompiledTypeParameters {
+        let class = parameters
+            .enclosing_class
+            .map(|site| &self.source.scopes.classes[&site].bindings);
+        self.compile_type_parameters(&parameters.declarations, class)
+    }
+
+    fn compile_type_parameters(
+        &mut self,
+        parameters: &[RegisteredTypeParameter<ParameterEvaluator>],
+        class: Option<&ClassBindings>,
+    ) -> CompiledTypeParameters {
+        parameters
+            .iter()
+            .map(|parameter| {
+                parameter.try_map_fields(|provider| {
+                    let body = provider.body.as_ref().ok_or_else(|| {
+                        self.source.positions.diagnostic_at(
+                            provider.range,
+                            "type parameter evaluator has no checked expression operand",
+                        )
+                    })?;
+                    Ok(self.compile_evaluator(
+                        body.range.start(),
+                        &parameter.name,
+                        &provider.scope,
+                        true,
+                        body,
+                        class.cloned(),
+                    ))
+                })
+            })
+            .collect()
+    }
+
+    fn parameter_provider(
+        &mut self,
+        header: &NamedFunction,
+        qualname: &str,
+    ) -> Option<Box<CompiledDefinition>> {
+        let source = self.source;
+        let annotations = header.annotations.as_ref()?;
+        let start = annotations.start;
+        let class = self.class_locals.filter(|_| !source.string_annotations);
+        let reads = annotations.reads(class);
+        let mut metadata = json!({
+            "posonly": ["format"],
+            "code_flags": source.function_flags(self.in_function || header.generic, false),
+            "scope_reads": reads,
+            "scope_complete": true,
+            "scope_locals_complete": true,
+            "annotation_class": class.is_some(),
+        });
+        if !source.python_annotations && header.type_params.is_empty() {
+            for (slot, reference) in &annotations.references {
+                let root = reference.split('.').next().unwrap();
+                if !class.is_some_and(|class| class.globals.contains(root)) {
+                    metadata["annotation_references"][slot] = json!(reference);
+                }
+            }
+        }
+        let scope = class
+            .cloned()
+            .map_or(AnnotationScope::Plain, AnnotationScope::Method);
+        Some(Box::new(source.annotation_provider(
+            self.output,
+            &annotations.body,
+            scope,
+            start,
+            metadata,
+            format!("{qualname}.__annotate__"),
+        )))
+    }
+}
+
+impl SourceMap<'_> {
+    fn finish_class_annotations(
+        &self,
+        frame: &mut RegisteredFrame<'_, '_>,
+        prefix: &str,
+        in_function: bool,
+        plan: &crate::frontend::ClassAnnotations,
+        globals: &std::collections::BTreeSet<String>,
+    ) {
+        let Some(body) = &plan.body else {
+            return;
+        };
+        if frame.body.terminated {
+            return;
+        }
+        let conditional = plan.sites.iter().any(|site| site.index.is_some());
+        let offsets = if conditional {
+            let offsets = frame.op("list", &[]);
+            for site in plan.sites.iter().filter(|site| site.index.is_some()) {
+                let offset = frame.integer(site.site.to_u32());
+                frame.op("append", &[&offsets, &offset]);
+            }
+            offsets
+        } else {
+            "0".into()
+        };
+        let signature = json!({
+            "posonly": ["format"], "scope_complete": !plan.incomplete, "scope_reads": plan.reads,
+            "code_flags": self.function_flags(in_function, false),
+        });
+        let scope = AnnotationScope::Class {
+            globals: globals.clone(),
+            conditional,
+        };
+        let compiled = self.annotation_provider(
+            frame.output,
+            body,
+            scope,
+            plan.sites[0].site,
+            signature,
+            format!("{prefix}__annotate__"),
+        );
+        let environment = frame.op(
+            "class_annotation_environment",
+            &[&frame.scope.clone(), &offsets],
+        );
+        let function = compiled.bind_defaults(frame, &environment, &[]);
+        frame.bind("__annotate_func__", &function);
+    }
+
+    fn annotation_provider(
+        &self,
+        output: &mut Output,
+        body: &crate::frontend::AnnotationProvider,
+        scope: AnnotationScope,
+        start: TextSize,
+        signature: serde_json::Value,
+        qualname: String,
+    ) -> CompiledDefinition {
+        // Class annotations already have an explicit class environment. A method's provider
+        // instead captures the class namespace of the function it annotates.
+        let annotation_scope = !matches!(&scope, AnnotationScope::Class { .. });
+        let code = self.code(
+            output,
+            String::new(),
+            Body::CheckedProvider(body, scope),
+            false,
+            Some((start, 0)),
+        );
+        CompiledDefinition::new(code, signature, "__annotate__", qualname, annotation_scope)
+    }
+
+    fn define_module_annotations(&self, frame: &mut RegisteredFrame<'_, '_>, sites: &[TextSize]) {
+        let body = self.module_annotations.module_body(sites);
+        let compiled = self.annotation_provider(
+            frame.output,
+            &body,
+            AnnotationScope::Plain,
+            self.module_start,
+            json!({
+                "posonly": ["format"], "scope_complete": true, "scope_locals_complete": true,
+                "code_flags": self.function_flags(false, false),
+            }),
+            "__annotate__".into(),
+        );
+        let scope = frame.scope.clone();
+        let provider = compiled.bind_defaults(frame, &scope, &[]);
+        frame.bind("__annotate__", &provider);
     }
 }
 
@@ -1023,6 +1580,7 @@ impl Function<'_, '_> {
 
 #[cfg(test)]
 mod tests {
+    mod declaration_sites;
     use super::super::prepare::ModuleSource;
     use super::*;
     use crate::frontend::RequiredSite;
@@ -1182,12 +1740,8 @@ mod tests {
         prepared.syntax.as_mut().unwrap().to_mut().clear();
         assert_eq!(prepared.standalone().unwrap(), before);
 
-        let provider = prepared
-            .source
-            .parameter_annotations
-            .values_mut()
-            .next()
-            .unwrap();
+        let header = prepared.source.scopes.functions.get_mut(&0.into()).unwrap();
+        let provider = header.annotations.as_mut().unwrap();
         let checked = provider.body.as_mut().unwrap();
         assert!(!checked.region().private_slots().is_empty());
         crate::verify::registered(checked.region()).unwrap();
@@ -1389,11 +1943,7 @@ mod tests {
         for (start, plan) in &prepared.source.function_bodies {
             let header = &prepared.source.scopes.functions[start];
             let name = header.name.as_str();
-            if prepared
-                .source
-                .parameter_annotations
-                .contains_key(&header.parameters)
-            {
+            if header.annotations.is_some() {
                 annotated.push(name);
             } else {
                 ordinary.push(name);
@@ -3807,12 +4357,13 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let provider = prepared
-            .source
-            .parameter_annotations
-            .values()
-            .next()
+        let class = prepared.syntax.as_ref().unwrap()[0]
+            .as_class_def_stmt()
             .unwrap();
+        let method = class.body[0].as_function_def_stmt().unwrap();
+        let header = prepared.source.scopes.function(method);
+        let provider = header.annotations.as_ref().unwrap();
+        assert_eq!(provider.start, method.parameters.start());
         let body = provider.body.as_ref().unwrap();
         assert_eq!(body.function.body.len(), 4); // start, two fields, return
         assert!(!body.local_names.is_empty());
@@ -3940,7 +4491,10 @@ mod tests {
                 assert!(required.is_empty());
                 let header = &module.source.scopes.functions[&def.start()];
                 assert_eq!(header.doc.as_deref(), Some("Record the sign."));
-                assert_eq!(header.integer_sign_parameters, ["value"]);
+                assert_eq!(
+                    header.metadata.signature(0, false)["integer_sign_parameters"],
+                    serde_json::json!({"value": true})
+                );
             } else {
                 assert!(matches!(required.as_slice(), [RequiredSite::Lambda(..)]));
             }
@@ -4179,27 +4733,30 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     #[test]
     fn physical_worker_targets_use_checked_registered_calls() {
         use crate::ir::{self, Builtin, ExprKind, RegisteredCallTarget};
-        use imre_ast::ThreadEntry;
+        use serde_json::json;
 
-        for (source, target, entry, calls, excluded) in [
+        for (source, target, key, expected, calls, excluded) in [
             (
                 include_str!("../../../../tests/fixtures/boxed_thread_bound_lock.py"),
                 "def task(",
-                ThreadEntry::Bound("gate".into()),
+                "thread_bound_lock_field",
+                json!("gate"),
                 1,
                 "def replacement(",
             ),
             (
                 include_str!("../../../../tests/fixtures/boxed_thread_method_closure.py"),
                 "@staticmethod",
-                ThreadEntry::Captured(vec!["gate".into()]),
+                "thread_captured_locks",
+                json!(["gate"]),
                 1,
                 "def make_wait(",
             ),
             (
                 include_str!("../../../../tests/fixtures/boxed_threading_tcp_server.py"),
                 "def acquire_on_worker(",
-                ThreadEntry::Parameters { lock_only: true },
+                "thread_lock_only",
+                json!(true),
                 2,
                 "def handle(",
             ),
@@ -4215,9 +4772,21 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             let start = |declaration| {
                 ruff_text_size::TextSize::try_from(source.find(declaration).unwrap()).unwrap()
             };
-            let entries = &prepared.source.thread_entries;
-            assert_eq!(entries.get(&start(target)), Some(&entry));
-            assert!(!entries.contains_key(&start(excluded)));
+            let functions = &prepared.source.scopes.functions;
+            assert_eq!(
+                functions[&start(target)].metadata.signature(0, false)[key],
+                expected
+            );
+            let excluded = functions[&start(excluded)].metadata.signature(0, false);
+            assert!(
+                [
+                    "thread_bound_lock_field",
+                    "thread_captured_locks",
+                    "thread_lock_only"
+                ]
+                .iter()
+                .all(|key| excluded.get(key).is_none())
+            );
             let suite = prepared.source.function_bodies[&start(target)]
                 .suite()
                 .unwrap();

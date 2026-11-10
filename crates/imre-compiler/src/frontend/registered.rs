@@ -629,20 +629,31 @@ pub(crate) type CheckedProvider = StdResult<RegisteredFunction, (TextRange, &'st
 pub(crate) type AnnotationProvider = CheckedProvider;
 
 pub(crate) struct ParameterAnnotations {
+    pub(crate) start: TextSize,
+    reads: super::function_scope::ParameterReads,
     pub(crate) body: AnnotationProvider,
     pub(crate) references: HashMap<String, String>,
 }
 
 impl ParameterAnnotations {
+    pub(crate) fn reads(
+        &self,
+        class: Option<&super::function_scope::ClassBindings>,
+    ) -> std::collections::BTreeSet<String> {
+        self.reads.clone().resolve(class)
+    }
+
     fn prepare(
         def: &ast::StmtFunctionDef,
         source: values::RegisteredSource<'_>,
         operands: &mut HashMap<TextSize, Expr>,
-    ) -> Option<Self> {
+        string_annotations: bool,
+    ) -> Option<Box<Self>> {
         let annotations = parameter_annotations(&def.parameters, def.returns.as_deref());
         if annotations.is_empty() {
             return None;
         }
+        let reads = super::function_scope::parameter_reads(&annotations, string_annotations);
         let mut entries = Vec::with_capacity(annotations.len());
         let mut references = HashMap::new();
         let operations = HashMap::new();
@@ -666,7 +677,12 @@ impl ParameterAnnotations {
             ));
         }
         let body = DeferredAnnotation::prepare_body(entries, scope.bindings());
-        Some(Self { body, references })
+        Some(Box::new(Self {
+            start: def.parameters.start(),
+            reads,
+            body,
+            references,
+        }))
     }
 }
 
@@ -760,6 +776,7 @@ impl DeferredAnnotation {
 /// Physical source operands shared by namespace initialization and lazy annotation providers.
 pub(crate) struct FunctionSite<'a> {
     pub(crate) def: &'a ast::StmtFunctionDef,
+    pub(crate) annotations: Option<Box<ParameterAnnotations>>,
     pub(crate) parameters: Option<Vec<ir::RegisteredTypeParameter<ParameterEvaluator>>>,
     pub(crate) prepare_entry: bool,
     pub(crate) thread_entry: Option<imre_ast::ThreadEntry>,
@@ -835,7 +852,6 @@ pub(crate) struct RegisteredSites<'a> {
     pub(crate) module_annotations: ModuleAnnotations,
     pub(crate) class_annotations: HashMap<TextSize, DeferredAnnotation>,
     pub(crate) class_annotation_bindings: HashMap<TextSize, RegisteredBindings>,
-    pub(crate) parameter_annotations: HashMap<TextSize, ParameterAnnotations>,
 }
 
 pub(crate) fn registered_sites<'a>(
@@ -880,13 +896,12 @@ pub(crate) fn registered_sites<'a>(
                     }
                 }
                 ast::Stmt::FunctionDef(def) => {
-                    if let Some(provider) =
-                        ParameterAnnotations::prepare(def, self.source, &mut self.operands)
-                    {
-                        self.output
-                            .parameter_annotations
-                            .insert(def.parameters.start(), provider);
-                    }
+                    let annotations = ParameterAnnotations::prepare(
+                        def,
+                        self.source,
+                        &mut self.operands,
+                        self.names.string_annotations,
+                    );
                     let parameters = def.type_params.as_deref().filter(|_| {
                         !matches!(self.scope, RegisteredScope::Class)
                             || super::function_scope::type_parameter_scope(
@@ -907,6 +922,7 @@ pub(crate) fn registered_sites<'a>(
                         .declarations
                         .push(DeclarationSite::Function(FunctionSite {
                             def,
+                            annotations,
                             parameters: parameters.map(|params| {
                                 registered_type_parameters(params, self.names, |rhs| {
                                     ParameterEvaluator::prepare(rhs, self.source, None)
@@ -3696,7 +3712,17 @@ mod tests {
         let def = stmts[0].as_function_def_stmt().unwrap();
         assert!(sites.module_annotations.fields.is_empty());
         assert!(sites.class_annotations.is_empty());
-        let provider = &sites.parameter_annotations[&def.parameters.start()];
+        let [DeclarationSite::Function(site)] = sites.declarations.as_slice() else {
+            panic!("expected a function declaration");
+        };
+        let provider = site.annotations.as_ref().unwrap();
+        assert_eq!(provider.start, def.parameters.start());
+        let class = crate::frontend::function_scope::ClassBindings {
+            locals: ["mod".to_owned()].into_iter().collect(),
+            globals: Default::default(),
+        };
+        assert!(!provider.reads(Some(&class)).contains("mod"));
+        assert!(provider.reads(None).contains("mod"));
         let body = &provider.body.as_ref().unwrap().function.body;
         let fields: Vec<_> = body
             .iter()

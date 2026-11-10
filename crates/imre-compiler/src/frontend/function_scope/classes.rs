@@ -2,6 +2,7 @@
 use std::collections::BTreeSet;
 
 use ruff_python_ast::{self as ast, visitor::Visitor};
+use serde_json::{Value, json};
 
 use super::{ClassBindings, ClosureNames, FunctionScope, class_metadata};
 
@@ -32,6 +33,18 @@ pub(crate) struct ClassScope {
 }
 
 impl ClassScope {
+    pub(crate) fn write_signature(&self, signature: &mut Value) {
+        signature["postponed_annotations"] = json!(self.postponed_annotations);
+        signature["needs_class_cell"] = json!(self.needs_class_cell);
+        signature["needs_dict_cell"] = json!(self.needs_dict_cell);
+        signature["static_attributes"] = json!(self.static_attributes);
+        signature["class_frame_reads"] = json!(self.frame_reads);
+        if !self.bindings.globals.is_empty() {
+            signature["class_globals"] = json!(self.bindings.globals);
+        }
+        self.namespace.write_signature(signature);
+    }
+
     pub(crate) fn prepare(
         class: &ast::StmtClassDef,
         names: &imre_ast::Names,

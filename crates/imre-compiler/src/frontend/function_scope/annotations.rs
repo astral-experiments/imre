@@ -6,22 +6,24 @@ use ruff_python_ast as ast;
 use ruff_python_ast::visitor::Visitor;
 use ruff_text_size::{Ranged, TextSize};
 
-use super::{ClassBindings, ClosureNames, class_metadata};
+use super::{ClassBindings, ClosureNames};
 
 #[derive(Default)]
 pub(crate) struct AnnotationScopes {
-    parameters: HashMap<TextSize, ParameterReads>,
     assignments: HashMap<TextSize, AssignmentReads>,
 }
 
 #[derive(Clone)]
-pub(super) struct ParameterReads {
+pub(in crate::frontend) struct ParameterReads {
     pub(super) direct: BTreeSet<String>,
     pub(super) nested: BTreeSet<String>,
 }
 
 impl ParameterReads {
-    pub(super) fn resolve(mut self, class: Option<&ClassBindings>) -> BTreeSet<String> {
+    pub(in crate::frontend) fn resolve(
+        mut self,
+        class: Option<&ClassBindings>,
+    ) -> BTreeSet<String> {
         if let Some(class) = class {
             if self.direct.contains("super") || self.nested.contains("super") {
                 self.nested.insert("__class__".into());
@@ -40,15 +42,6 @@ struct AssignmentReads {
 }
 
 impl AnnotationScopes {
-    pub(super) fn function(&mut self, def: &ast::StmtFunctionDef, string_annotations: bool) {
-        let entries =
-            crate::frontend::parameter_annotations(&def.parameters, def.returns.as_deref());
-        if !entries.is_empty() {
-            let reads = class_metadata::parameter_reads(&entries, string_annotations);
-            self.parameters.insert(def.parameters.start(), reads);
-        }
-    }
-
     pub(super) fn assignment(&mut self, assign: &ast::StmtAnnAssign) {
         if assign.simple {
             let mut names = ClosureNames::default();
@@ -61,14 +54,6 @@ impl AnnotationScopes {
                 },
             );
         }
-    }
-
-    pub(crate) fn parameter_reads(
-        &self,
-        parameters: TextSize,
-        class: Option<&ClassBindings>,
-    ) -> BTreeSet<String> {
-        self.parameters[&parameters].clone().resolve(class)
     }
 
     pub(crate) fn class_reads<'a>(
