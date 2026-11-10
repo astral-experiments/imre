@@ -2113,19 +2113,21 @@ impl statements::StatementLowering for SourceScope<'_> {
                 return Ok(Some(self.store(def.name.as_str(), binding.clone())));
             }
         }
-        let decorators = def.decorator_list.iter().map(|d| &d.expression);
-        let defaults = def
-            .parameters
-            .posonlyargs
-            .iter()
-            .chain(&def.parameters.args)
-            .chain(&def.parameters.kwonlyargs)
-            .filter_map(|p| p.default.as_deref());
-        let header = decorators
-            .chain(defaults)
-            .map(|e| self.ordinary_operand(e))
-            .collect::<Option<_>>()
-            .ok_or(())?;
+        let prepare_header = |scope: &mut Self| {
+            def.decorator_list
+                .iter()
+                .map(|decorator| &decorator.expression)
+                .chain(values::parameter_defaults(&def.parameters))
+                .map(|expr| scope.ordinary_operand(expr))
+                .collect::<Option<Vec<_>>>()
+        };
+        // Ordinary decorators and defaults can suspend in the enclosing frame.
+        let header = if def.type_params.is_none() {
+            self.with_binding_operands(prepare_header)
+        } else {
+            prepare_header(self)
+        }
+        .ok_or(())?;
         let function = operation(
             Builtin::RegisteredDefinition(ir::DefinitionSite::Function(def.start())),
             Type::PythonObject,
@@ -2621,10 +2623,10 @@ impl SourceScope<'_> {
         targets: &[ast::Expr],
         value: Expr,
     ) -> StdResult<Vec<Statement>, ()> {
-        self.with_assignment_operands(|scope| unpacking::bind_assignment(scope, targets, value))
+        self.with_binding_operands(|scope| unpacking::bind_assignment(scope, targets, value))
     }
 
-    fn with_assignment_operands<T>(&mut self, lower: impl FnOnce(&mut Self) -> T) -> T {
+    fn with_binding_operands<T>(&mut self, lower: impl FnOnce(&mut Self) -> T) -> T {
         if self.loop_scope == LoopScope::WithCursor
             && matches!(self.kind, RegisteredScope::Function { is_async: true })
         {
@@ -2892,7 +2894,7 @@ impl SourceScope<'_> {
     /// Its temporary roots keep earlier arguments live across a later suspension.
     fn frame_value(&mut self, expr: &ast::Expr) -> Option<Expr> {
         if matches!(self.kind, RegisteredScope::Function { .. }) {
-            self.with_assignment_operands(|scope| scope.operand(expr))
+            self.with_binding_operands(|scope| scope.operand(expr))
         } else {
             self.operand(expr)
         }
@@ -3042,7 +3044,7 @@ impl SourceScope<'_> {
         } else if let ast::Expr::Named(named) = expr {
             let target = named.target.as_name_expr()?;
             let value =
-                self.with_assignment_operands(|scope| scope.lower_operand(&named.value, whole))?;
+                self.with_binding_operands(|scope| scope.lower_operand(&named.value, whole))?;
             Expr {
                 ty: value.ty,
                 kind: ExprKind::Bind(self.slot(&target.id), Box::new(value)),

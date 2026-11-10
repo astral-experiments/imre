@@ -4282,7 +4282,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
 
     #[test]
     fn suspended_definitions_use_native_entries_in_each_module_origin() {
-        let source = "def items(xs):\n    yield 1\n    yield from xs\npark = lambda: (yield 2)\nresume = lambda: 1 + (yield 3)\nasync def more(xs):\n    async for x in xs:\n        yield x\nasync def consume(f):\n    return await f()\ndef defaults():\n    yield 0\n    def nested(first=1, second=(yield 4)):\n        return second\n    return nested\n";
+        let source = "def items(xs):\n    yield 1\n    yield from xs\npark = lambda: (yield 2)\nresume = lambda: 1 + (yield 3)\nasync def more(xs):\n    async for x in xs:\n        yield x\nasync def consume(f):\n    return await f()\ndef defaults():\n    yield 0\n    @(yield 'decorator')\n    def nested(first=1, second=(yield 4)):\n        return second\n    return nested\n";
         for bundled in [false, true] {
             let mut prepared = PreparedBody::module(
                 "example",
@@ -4296,11 +4296,12 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 },
             )
             .unwrap();
-            let syntax = prepared.syntax.as_ref().unwrap();
-            for name in ["items", "more", "consume"] {
+            let original = prepared.standalone().unwrap().unwrap();
+            let syntax = prepared.syntax.as_mut().unwrap().to_mut();
+            for name in ["items", "more", "consume", "defaults"] {
                 let def = syntax
-                    .iter()
-                    .filter_map(ast::Stmt::as_function_def_stmt)
+                    .iter_mut()
+                    .filter_map(ast::Stmt::as_function_def_stmt_mut)
                     .find(|def| def.name.as_str() == name)
                     .unwrap();
                 let suite = prepared.source.function_bodies[&def.start()]
@@ -4308,14 +4309,14 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                     .unwrap();
                 assert!(suite.fully_checked(), "{name}");
                 crate::verify::registered(suite.checked.region()).unwrap();
+                if name == "defaults" {
+                    let site = def.body[1].start();
+                    assert!(prepared.source.ordinary_function(site).is_some());
+                }
+                def.body.clear();
             }
-            // The prepared generator entry retains its flags and instructions across emission.
-            prepared.syntax.as_mut().unwrap().to_mut()[0]
-                .as_function_def_stmt_mut()
-                .unwrap()
-                .body
-                .clear();
             let (_, ir) = prepared.standalone().unwrap().unwrap();
+            assert_eq!(ir, original.1);
             let tag = format!(", i32 {} }}", permanent::NATIVE_SUSPENDED_BODY);
             assert_eq!(ir.lines().filter(|line| line.ends_with(&tag)).count(), 6);
             let operations: Vec<_> = ir
@@ -4325,7 +4326,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 .collect();
             assert_eq!(
                 operations,
-                ["0)", "3)", "0)", "0)", "2)", "1)", "2)", "0)", "0)"]
+                ["0)", "3)", "0)", "0)", "2)", "1)", "2)", "0)", "0)", "0)"]
             );
         }
     }

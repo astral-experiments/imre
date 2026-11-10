@@ -925,11 +925,17 @@ pub(crate) fn registered_index_key(key: &ast::Expr, source: RegisteredSource<'_>
 }
 
 pub(crate) fn lambda_defaults(lambda: &ast::ExprLambda) -> impl Iterator<Item = &ast::Expr> {
-    lambda.parameters.iter().flat_map(|parameters| {
-        parameters
-            .iter_non_variadic_params()
-            .filter_map(|p| p.default.as_deref())
-    })
+    lambda
+        .parameters
+        .as_deref()
+        .into_iter()
+        .flat_map(parameter_defaults)
+}
+
+pub(super) fn parameter_defaults(parameters: &ast::Parameters) -> impl Iterator<Item = &ast::Expr> {
+    parameters
+        .iter_non_variadic_params()
+        .filter_map(|p| p.default.as_deref())
 }
 
 pub(super) fn lambda_binding(lambda: &ast::ExprLambda, defaults: Vec<Expr>) -> Expr {
