@@ -188,16 +188,15 @@ pub(super) fn emit(
 }
 
 /// Normalized source and lowered names shared by archive, split, and inline placement.
-pub(super) struct PreparedBody<'a, 'tree> {
+pub(super) struct PreparedBody<'a> {
     name: &'a str,
     #[cfg(test)]
-    syntax: Option<Cow<'tree, ast::Suite>>,
-    declarations: Definitions<'tree>,
+    syntax: Option<Cow<'static, ast::Suite>>,
     docstring: Option<String>,
     source: SourceInfo<'a>,
 }
 
-impl<'a> PreparedBody<'a, '_> {
+impl<'a> PreparedBody<'a> {
     fn registration(
         &self,
         original_source: &'a str,
@@ -243,17 +242,31 @@ impl<'a> PreparedBody<'a, '_> {
         source: &'a str,
         python_optimization: i32,
         origin: ModuleOrigin<'a>,
-    ) -> Result<PreparedBody<'a, 'static>, String> {
-        // Erasure tests edit the retained syntax before resolving the declaration sites.
-        Self::with_module(name, path, source, python_optimization, origin, |module| {
-            Ok(PreparedBody {
-                name: module.name,
-                source: module.source,
-                docstring: module.docstring,
-                syntax: module.syntax.map(|body| Cow::Owned(body.into_owned())),
-                declarations: HashMap::new(),
-            })
-        })
+    ) -> Result<PreparedBody<'a>, String> {
+        Self::with_module(name, path, source, python_optimization, origin, Ok)
+    }
+
+    #[cfg(test)]
+    fn module_with_syntax(
+        name: &'a str,
+        path: &'a Path,
+        text: &'a str,
+        python_optimization: i32,
+        origin: ModuleOrigin<'a>,
+    ) -> Result<PreparedBody<'a>, String> {
+        let mut module = Self::module(name, path, text, python_optimization, origin)?;
+        // These fixtures edit the original suite or force a physical operand after checking.
+        module.syntax = Some(Cow::Owned(module.original_fixture_suite()?));
+        Ok(module)
+    }
+
+    #[cfg(test)]
+    fn original_fixture_suite(&self) -> Result<ast::Suite, String> {
+        let path = self.source.path;
+        let text = self.source.text.as_ref();
+        let mut body = module_source::into_body(ParsedModule::parse(path, text.into())?.parsed);
+        module_source::lower(path, text, &mut body)?;
+        Ok(body)
     }
 
     pub(super) fn with_module<R>(
@@ -262,7 +275,7 @@ impl<'a> PreparedBody<'a, '_> {
         source: &'a str,
         python_optimization: i32,
         origin: ModuleOrigin<'a>,
-        use_module: impl FnOnce(PreparedBody<'a, '_>) -> Result<R, String>,
+        use_module: impl FnOnce(PreparedBody<'a>) -> Result<R, String>,
     ) -> Result<R, String> {
         Self::prepare(
             name,
@@ -283,7 +296,7 @@ impl<'a> PreparedBody<'a, '_> {
         origin: ModuleOrigin<'a>,
         input: Input<'_>,
         use_module: impl FnOnce(
-            PreparedBody<'a, '_>,
+            PreparedBody<'a>,
             Option<crate::frontend::AnnotationCode>,
         ) -> Result<R, String>,
     ) -> Result<R, String> {
@@ -390,7 +403,6 @@ impl<'a> PreparedBody<'a, '_> {
         );
         let mut sites =
             crate::frontend::registered_sites(&body, &private_names, values, &annotation_operands);
-        let declarations = source_declarations(&sites);
         let mut operations = sites.operations;
         let mut type_aliases = HashMap::new();
         for alias in aliases {
@@ -450,8 +462,6 @@ impl<'a> PreparedBody<'a, '_> {
                 );
         }
         let mut thread_entries = HashMap::new();
-        // The collector visits a definition before its children. Prepare the children first
-        // so a physical enclosing suite can bind their already checked declarations.
         for site in sites.functions.into_iter().rev() {
             let def = site.def;
             let start = def.start();
@@ -462,6 +472,22 @@ impl<'a> PreparedBody<'a, '_> {
                 .functions
                 .get_mut(&start)
                 .expect("named function scope");
+            scope.header.type_params = site.parameters.unwrap_or_default();
+            if let Some(annotations) = sites.parameter_annotations.get(&scope.header.parameters) {
+                scope.header.integer_sign_parameters = scope
+                    .header
+                    .metadata
+                    .non_variadic_parameter_names()
+                    .filter(|name| {
+                        annotations
+                            .references
+                            .get(*name)
+                            .is_some_and(|ty| ty == "float")
+                    })
+                    .filter(|name| crate::frontend::only_compares_zero(&def.body, name))
+                    .map(str::to_owned)
+                    .collect();
+            }
             let suspended = scope.suspension_flags != 0;
             let body = if let Some(checked) = program_bodies.and_then(|bodies| bodies.get(&start)) {
                 FunctionBody::Program(checked)
@@ -469,41 +495,26 @@ impl<'a> PreparedBody<'a, '_> {
                 let kind = crate::frontend::RegisteredScope::Function {
                     is_async: def.is_async,
                 };
-                let has_ordinary_header = |site| {
-                    function_bodies
-                        .get(&site)
-                        .is_some_and(PreparedFunction::has_ordinary_header)
-                };
                 FunctionBody::Suite(prepare.named_body(
                     &def.body,
                     kind,
                     suspended,
                     site.prepare_entry,
-                    &has_ordinary_header,
                 ))
             };
-            let complete = match &body {
+            let checked_entry = match &body {
                 FunctionBody::Program(_) => true,
                 FunctionBody::Suite(suite) => site.prepare_entry && suite.plan.fully_checked(),
             };
-            let (header, declaration) = CheckedHeader::prepare(
-                def,
-                &mut scope.ordinary,
-                sites.parameter_annotations.get(&def.parameters.start()),
-                thread_entries.contains_key(&start),
-                keep_docstrings,
-                complete,
-            );
             function_bodies.insert(
                 start,
                 PreparedFunction {
                     body,
-                    header,
-                    declaration,
+                    checked_entry,
                 },
             );
         }
-        let mut source = SourceInfo {
+        let source = SourceInfo {
             annotation_operands,
             namespace_annotations,
             scopes,
@@ -512,6 +523,7 @@ impl<'a> PreparedBody<'a, '_> {
             python_optimization,
             lambdas,
             generators,
+            #[cfg(test)]
             namespace_operations: operations,
             type_aliases,
             annotations: sites.annotations,
@@ -542,22 +554,6 @@ impl<'a> PreparedBody<'a, '_> {
         let docstring = (!expression && keep_docstrings)
             .then(|| crate::frontend::docstring(&body).or_else(|| source.bundled_docstring("")))
             .flatten();
-        let retain_declarations = source.initializer.as_ref().is_some_and(|suite| {
-            !suite.plan.fully_checked()
-                || !source.initializer_sites.is_empty()
-                    && (declarations.is_empty()
-                        || declarations.keys().any(|site| {
-                            if source.ordinary_function(*site).is_some() {
-                                return false;
-                            }
-                            source
-                                .function_bodies
-                                .get(site)
-                                .and_then(PreparedFunction::graph_header)
-                                .is_none()
-                                || body.binary_search_by_key(site, Ranged::start).is_err()
-                        }))
-        });
         let annotation = if expression {
             let [ast::Stmt::Expr(statement)] = body.as_slice() else {
                 unreachable!("single decoded expression");
@@ -566,48 +562,17 @@ impl<'a> PreparedBody<'a, '_> {
         } else {
             None
         };
-        if retain_declarations {
-            use_module(
-                PreparedBody {
-                    name,
-                    #[cfg(test)]
-                    syntax: Some(Cow::Borrowed(&body)),
-                    declarations,
-                    docstring,
-                    source,
-                },
-                annotation,
-            )
-        } else {
-            drop(declarations);
-            if !source.initializer_sites.is_empty() {
-                // A direct graph definition retains its signature and its checked executable body.
-                for stmt in body {
-                    if let ast::Stmt::FunctionDef(mut def) = stmt
-                        && let Some(CheckedHeader::Declaration { syntax, .. }) = source
-                            .function_bodies
-                            .get_mut(&def.start())
-                            .and_then(PreparedFunction::graph_header_mut)
-                    {
-                        def.body = Default::default();
-                        *syntax = Some(Box::new(def));
-                    }
-                }
-            } else {
-                drop(body);
-            }
-            use_module(
-                PreparedBody {
-                    name,
-                    #[cfg(test)]
-                    syntax: None,
-                    declarations: HashMap::new(),
-                    docstring,
-                    source,
-                },
-                annotation,
-            )
-        }
+        drop(body);
+        use_module(
+            PreparedBody {
+                name,
+                #[cfg(test)]
+                syntax: None,
+                docstring,
+                source,
+            },
+            annotation,
+        )
     }
 
     /// Prepare the decoded expression and its lexical definitions in their own source unit.
@@ -652,20 +617,6 @@ impl<'a> PreparedBody<'a, '_> {
             .expect("module initializer")
     }
 
-    fn linked_declarations(&self) -> Cow<'_, Definitions<'_>> {
-        #[cfg(test)]
-        if let Some(Cow::Owned(stmts)) = &self.syntax {
-            // Structural tests can edit their copy after preparation.
-            return Cow::Owned(source_declarations(&crate::frontend::registered_sites(
-                stmts,
-                &self.source.private_names,
-                self.source.registered_source(),
-                &self.source.annotation_operands,
-            )));
-        }
-        Cow::Borrowed(&self.declarations)
-    }
-
     fn emit(&self, output: &mut Output, unit: usize, file: &str) -> Result<String, String> {
         // Frozen code exposes its origin independently of the module's registered source path.
         let code_file = match (self.source.bundled, self.name) {
@@ -680,11 +631,9 @@ impl<'a> PreparedBody<'a, '_> {
             RegisteredFrame::new(output, &positions, false, unit, self.source.module_start);
         let initializer = self.initializer();
         let suite = &initializer.plan;
-        let declarations = self.linked_declarations();
         let location = SourceMap {
             info: &self.source,
             callable_code: Default::default(),
-            definitions: Some(&declarations),
             unit,
             positions: &positions,
         };
@@ -701,7 +650,7 @@ impl<'a> PreparedBody<'a, '_> {
             &self.source.scopes.module_globals,
         );
         let module_function = |frame, sites| {
-            let mut function = location.function(frame, sites, String::new(), false, true);
+            let mut function = location.function(frame, sites, String::new(), false);
             function
                 .declared_globals
                 .clone_from(&self.source.scopes.module_globals);
@@ -800,21 +749,10 @@ enum Entry {
     Suspended(u32),
 }
 
-type Definitions<'a> = HashMap<TextSize, &'a ast::StmtFunctionDef>;
-
-fn source_declarations<'a>(sites: &crate::frontend::RegisteredSites<'a>) -> Definitions<'a> {
-    sites
-        .functions
-        .iter()
-        .map(|site| (site.def.start(), site.def))
-        .collect()
-}
-
 struct SourceMap<'a> {
     info: &'a SourceInfo<'a>,
     /// A duplicated cleanup path still evaluates the same lexical definition.
     callable_code: std::cell::RefCell<HashMap<ruff_text_size::TextSize, String>>,
-    definitions: Option<&'a Definitions<'a>>,
     unit: usize,
     positions: &'a SourcePositions<'a>,
 }
@@ -842,27 +780,13 @@ enum FunctionBody<'a> {
 
 struct PreparedFunction<'a> {
     body: FunctionBody<'a>,
-    header: Option<CheckedHeader>,
-    declaration: DeclarationMetadata,
+    /// A physical-only suite retains its original frame even if every selected operation checked.
+    checked_entry: bool,
 }
 
 impl PreparedFunction<'_> {
-    fn has_ordinary_header(&self) -> bool {
-        matches!(self.header, Some(CheckedHeader::Ordinary))
-    }
-
-    fn graph_header(&self) -> Option<&CheckedHeader> {
-        match self.body {
-            FunctionBody::Program(_) => self.header.as_ref(),
-            FunctionBody::Suite(_) => None,
-        }
-    }
-
-    fn graph_header_mut(&mut self) -> Option<&mut CheckedHeader> {
-        match self.body {
-            FunctionBody::Program(_) => self.header.as_mut(),
-            FunctionBody::Suite(_) => None,
-        }
+    fn fully_checked(&self) -> bool {
+        self.checked_entry
     }
 
     #[cfg(test)]
@@ -881,64 +805,6 @@ impl PreparedFunction<'_> {
     }
 }
 
-enum CheckedHeader {
-    /// The lexical scope owns OrdinaryFunction's complete declaration metadata.
-    Ordinary,
-    /// Other declarations use the source header. A released unit moves it here without its body.
-    Declaration {
-        syntax: Option<Box<ast::StmtFunctionDef>>,
-    },
-}
-
-#[derive(Default)]
-struct DeclarationMetadata {
-    docstring: Option<String>,
-    integer_sign_parameters: Vec<String>,
-}
-
-impl CheckedHeader {
-    fn prepare(
-        def: &ast::StmtFunctionDef,
-        ordinary: &mut Option<crate::frontend::function_scope::OrdinaryFunction>,
-        annotations: Option<&crate::frontend::ParameterAnnotations>,
-        worker: bool,
-        keep_docstrings: bool,
-        complete: bool,
-    ) -> (Option<Self>, DeclarationMetadata) {
-        if complete && ordinary.is_some() && !worker {
-            return (Some(Self::Ordinary), DeclarationMetadata::default());
-        }
-        let lexical = complete.then(|| ordinary.take()).flatten();
-        let docstring = keep_docstrings
-            .then(|| {
-                lexical.map_or_else(
-                    || crate::frontend::docstring(&def.body),
-                    |header| header.doc,
-                )
-            })
-            .flatten();
-        let integer_sign_parameters = def
-            .parameters
-            .iter_non_variadic_params()
-            .map(|arg| arg.parameter.name.as_str())
-            .filter(|name| {
-                annotations
-                    .and_then(|provider| provider.references.get(*name))
-                    .is_some_and(|reference| reference == "float")
-            })
-            .filter(|name| crate::frontend::only_compares_zero(&def.body, name))
-            .map(str::to_owned)
-            .collect();
-        (
-            complete.then_some(Self::Declaration { syntax: None }),
-            DeclarationMetadata {
-                docstring,
-                integer_sign_parameters,
-            },
-        )
-    }
-}
-
 struct SourceInfo<'a> {
     annotation_operands: HashMap<
         ruff_text_size::TextSize,
@@ -952,6 +818,7 @@ struct SourceInfo<'a> {
     type_aliases: HashMap<ruff_text_size::TextSize, TypeAliasDefinition>,
     python_optimization: i32,
     statement_sites: crate::frontend::StatementSites,
+    #[cfg(test)]
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
     annotations: HashMap<ruff_text_size::TextSize, crate::frontend::DeferredAnnotation>,
     module_annotation_bindings: crate::frontend::RegisteredBindings,
@@ -979,32 +846,6 @@ struct SourceInfo<'a> {
 }
 
 impl SourceInfo<'_> {
-    fn ordinary_function(
-        &self,
-        site: ruff_text_size::TextSize,
-    ) -> Option<(&crate::frontend::function_scope::OrdinaryFunction, Body<'_>)> {
-        let plan = self.function_bodies.get(&site)?;
-        if !plan.has_ordinary_header() {
-            return None;
-        }
-        let scope = &self.scopes.functions[&site];
-        Some((
-            scope.ordinary.as_ref().expect("ordinary function header"),
-            Body::Checked(plan.checked(), Some(scope.lexical.globals())),
-        ))
-    }
-
-    fn checked_function_header(&self, site: ruff_text_size::TextSize) -> Option<&CheckedHeader> {
-        self.function_bodies.get(&site)?.header.as_ref()
-    }
-
-    fn function_header(&self, site: ruff_text_size::TextSize) -> Option<&ast::StmtFunctionDef> {
-        match self.checked_function_header(site)? {
-            CheckedHeader::Ordinary => None,
-            CheckedHeader::Declaration { syntax, .. } => syntax.as_deref(),
-        }
-    }
-
     /// Keep documentation attached to the bundled definition, even when callers rebind its name.
     fn bundled_docstring(&self, qualname: &str) -> Option<String> {
         self.docs
@@ -1053,7 +894,6 @@ impl SourceMap<'_> {
         sites: sites::CheckedSites,
         prefix: String,
         in_function: bool,
-        module: bool,
     ) -> Function<'a, 'p> {
         Function {
             sites,
@@ -1061,7 +901,6 @@ impl SourceMap<'_> {
             source: self,
             in_function,
             is_async: false,
-            module,
             declared_globals: Default::default(),
             prefix,
             exits: Vec::new(),
@@ -1128,13 +967,7 @@ impl SourceMap<'_> {
                     .clone(),
             );
         }
-        let mut f = self.function(
-            frame,
-            sites::CheckedSites::default(),
-            prefix,
-            in_function,
-            false,
-        );
+        let mut f = self.function(frame, sites::CheckedSites::default(), prefix, in_function);
         f.is_async = matches!(
             suspension,
             imre_ast::code_flags::COROUTINE | imre_ast::code_flags::ASYNC_GENERATOR
@@ -1225,7 +1058,6 @@ struct Function<'a, 'p> {
     declared_globals: std::collections::BTreeSet<String>,
     in_function: bool,
     is_async: bool,
-    module: bool,
     exits: Vec<(Cleanup<'p>, String)>,
 }
 
@@ -1359,7 +1191,7 @@ mod tests {
     ) {
         let function = source.function_bodies.get_mut(&def.start()).unwrap();
         function.body = FunctionBody::Suite(body);
-        function.header = None;
+        function.checked_entry = false;
     }
 
     fn test_function_suite<'s>(
@@ -1385,7 +1217,7 @@ mod tests {
         value
     }
 
-    fn replace_residual_input(prepared: &mut PreparedBody<'_, '_>, index: usize) {
+    fn replace_residual_input(prepared: &mut PreparedBody<'_>, index: usize) {
         let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
         prepared
             .source
@@ -1508,6 +1340,39 @@ mod tests {
     }
 
     #[test]
+    fn mixed_function_header_keeps_its_binding_after_erasing_the_declaration() {
+        use crate::frontend::{PhysicalOperand, SourceEffect, ValueStatement};
+        let text = "@decorate\ndef choose[T](first=checked(), *, last=(lambda: item)()):\n    return T, first, last\n";
+        let mut module = PreparedBody::module_with_syntax(
+            "case",
+            Path::new("case.py"),
+            text,
+            0,
+            ModuleOrigin::Provider,
+        )
+        .unwrap();
+        inject_residual_child_module(&mut module);
+
+        assert!(module.initializer().sources.is_empty());
+        let plan = &module.initializer().plan;
+        let inputs: Vec<_> = plan
+            .residual
+            .iter()
+            .map(|run| {
+                let Some(SourceEffect::Value(ValueStatement::Store(_), input)) = &run.effect else {
+                    panic!("expected a mixed header operand");
+                };
+                matches!(input.as_slice(), [PhysicalOperand::Checked(_)])
+            })
+            .collect();
+        // The decorator and positional default are checked. Only the keyword default needs source.
+        assert_eq!(inputs, [true, true, false]);
+        let original = module.standalone().unwrap();
+        module.syntax = None;
+        assert_eq!(module.standalone().unwrap(), original);
+    }
+
+    #[test]
     fn nested_function_emits_without_parsed_declarations() {
         let source = concat!(
             "def factory(local):\n",
@@ -1551,10 +1416,9 @@ mod tests {
                     expected.1.matches(" = private constant %code_site").count(),
                     2
                 );
-                let retained = (module.syntax.take().is_some(), module.declarations.len());
-                module.declarations.clear();
+                let retained = module.syntax.take().is_some();
                 assert!(module.standalone()? == expected);
-                assert_eq!(retained, (false, 0));
+                assert!(!retained);
                 Ok(())
             },
         )
@@ -1580,7 +1444,6 @@ mod tests {
         )
         .unwrap();
         assert!(prepared.syntax.is_none());
-        assert!(prepared.declarations.is_empty());
         assert_eq!(prepared.source.initializer_sites.len(), 4);
         assert_eq!(prepared.source.function_bodies.len(), 4);
 
@@ -1588,16 +1451,17 @@ mod tests {
         let mut ordinary = Vec::new();
         let mut annotated = Vec::new();
         for (start, plan) in &prepared.source.function_bodies {
-            let name = if let Some((header, _)) = prepared.source.ordinary_function(*start) {
-                assert!(prepared.source.function_header(*start).is_none());
-                ordinary.push(header.name.as_str());
-                header.name.as_str()
+            let header = &prepared.source.scopes.functions[start].header;
+            let name = header.name.as_str();
+            if prepared
+                .source
+                .parameter_annotations
+                .contains_key(&header.parameters)
+            {
+                annotated.push(name);
             } else {
-                let def = prepared.source.function_header(*start).unwrap();
-                assert!(def.body.is_empty());
-                annotated.push(def.name.as_str());
-                def.name.as_str()
-            };
+                ordinary.push(name);
+            }
             assert!(std::ptr::eq(plan.checked(), &functions[start]));
             let def_line = source[..usize::from(*start)].lines().count() + 1;
             let first_statement = format!(", i32 {}, i64 0)", def_line + 1);
@@ -1646,8 +1510,6 @@ mod tests {
 
     #[test]
     fn detached_header_default_can_reuse_the_prepared_template_spelling() {
-        use crate::frontend::{RegisteredScope, inline_operand};
-
         let source =
             "def read(rows=[t'{ (v) = !r}' for v in (1, 2)]) -> object:\n    return rows\n";
         let path = Path::new("header.py");
@@ -1668,26 +1530,28 @@ mod tests {
         )
         .unwrap();
         assert!(module.syntax.is_none());
-        assert!(module.initializer().plan.fully_checked());
-        let header = module.source.function_header(site).unwrap();
-        assert!(header.body.is_empty());
-
-        let default = header.parameters.args[0].default.as_deref().unwrap();
+        let initializer = &module.initializer().plan;
+        assert!(initializer.fully_checked());
+        assert_eq!(
+            module.source.scopes.functions[&site]
+                .header
+                .metadata
+                .defaults,
+            ["rows"]
+        );
         let context = module.source.registered_source();
         let spelling = context.template_fields.unwrap().values().next().unwrap();
         assert_eq!(spelling.expression, " (v)");
         assert_eq!(spelling.debug_prefix.as_deref(), Some(" (v) = "));
-        let operand = inline_operand(default, context, RegisteredScope::Module, false)
-            .unwrap()
-            .unwrap();
         assert!(
-            operand
+            initializer
+                .checked
                 .local_names
                 .values()
-                .any(|binding| { binding.name == "v" && binding.namespace.is_some() })
+                .any(|binding| binding.name == "v" && binding.namespace.is_some())
         );
         let mut captures = Vec::new();
-        crate::ir::walk_operand_expressions(&operand.value, &mut |expr| {
+        crate::ir::walk_expressions(&initializer.checked.function.body, &mut |expr| {
             if let crate::ir::ExprKind::Builtin(
                 crate::ir::Builtin::RegisteredInterpolation {
                     expression,
@@ -1735,8 +1599,10 @@ mod tests {
             .as_function_def_stmt_mut()
             .unwrap();
         let plan = &prepared.source.function_bodies[&def.start()];
-        let header = prepared.source.function_header(def.start()).unwrap();
-        assert!(header.body.is_empty());
+        assert_eq!(
+            prepared.source.scopes.functions[&def.start()].header.name,
+            "publish"
+        );
         assert!(std::ptr::eq(
             plan.checked(),
             &bodies[&graph.entry][&def.start()]
@@ -1849,7 +1715,7 @@ mod tests {
 
     #[test]
     fn mixed_named_entry_uses_its_stored_suite_after_erasing_the_declaration_body() {
-        let mut module = PreparedBody::module(
+        let mut module = PreparedBody::module_with_syntax(
             "example",
             Path::new("example.py"),
             "def make():
@@ -1857,6 +1723,10 @@ mod tests {
         @retain
         def twice[U](value):
             return 2 * value
+    try:
+        raise (yield 'send-error')
+    except ValueError:
+        pass
     return define
 ",
             0,
@@ -1868,6 +1738,7 @@ mod tests {
             .as_function_def_stmt_mut()
             .unwrap();
         let start = def.start();
+        assert!(!module.source.function_bodies[&start].fully_checked());
         def.body.clear();
         assert_eq!(module.standalone().unwrap(), before);
 
@@ -1891,7 +1762,7 @@ mod tests {
             "    else:\n",
             "        return 42\n",
         );
-        let mut module = PreparedBody::module(
+        let mut module = PreparedBody::module_with_syntax(
             "example",
             Path::new("example.py"),
             source,
@@ -1923,7 +1794,6 @@ mod tests {
             crate::frontend::RegisteredScope::Function { is_async: false },
             false,
             false,
-            &|_| false,
         );
         module.source.statement_sites = physical.sites;
         install_test_function_body(&mut module.source, def, body);
@@ -1980,12 +1850,12 @@ mod tests {
         let parsed = ruff_python_parser::parse_module(text).unwrap();
         let outer = parsed.syntax().body[0].as_function_def_stmt().unwrap();
         let scoped = outer.body[0].as_function_def_stmt().unwrap();
-        assert!(
-            module.source.function_bodies[&scoped.start()]
-                .suite()
-                .unwrap()
-                .fully_checked()
-        );
+        assert!(module.source.function_bodies[&scoped.start()].fully_checked());
+        let parameters = &module.source.scopes.functions[&scoped.start()]
+            .header
+            .type_params;
+        assert_eq!(parameters.len(), 1);
+        assert_eq!(parameters[0].name, "T");
     }
 
     #[test]
@@ -2035,7 +1905,6 @@ mod tests {
             RegisteredScope::Function { is_async: false },
             false,
             false,
-            &|_| false,
         );
         module.source.statement_sites = plan.sites;
         install_test_function_body(&mut module.source, function, body);
@@ -2093,7 +1962,7 @@ mod tests {
 
     #[test]
     fn mixed_coroutine_emits_sync_for_without_its_source() {
-        let mut module = PreparedBody::module(
+        let mut module = PreparedBody::module_with_syntax(
             "async_groups",
             Path::new("async_groups.py"),
             include_str!("../../../../tests/fixtures/processes/async_groups.py"),
@@ -2266,9 +2135,9 @@ mod tests {
             source,
             0,
             ModuleOrigin::Bundled,
-            |mut typing| {
+            |typing| {
                 let expected = typing.standalone()?;
-                let mut body = typing.syntax.as_deref().unwrap().clone();
+                let mut body = typing.original_fixture_suite()?;
                 let mut protocols = Vec::new();
                 for stmt in &mut body {
                     let Some(class) = stmt.as_class_def_stmt() else {
@@ -2278,7 +2147,6 @@ mod tests {
                         let start = class.start();
                         protocols.push((class.name.to_string(), start));
                         assert!(typing.source.class_bodies[&start].body.plan.fully_checked());
-                        typing.declarations.remove(&start);
                         *stmt = ast::StmtPass {
                             node_index: Default::default(),
                             range: class.range(),
@@ -2310,7 +2178,7 @@ mod tests {
                 });
                 assert_eq!(bindings, [protocols[0].1, protocols[1].1]);
                 let withheld = PreparedBody {
-                    syntax: Some(Cow::Borrowed(&body)),
+                    syntax: Some(Cow::Owned(body)),
                     ..typing
                 };
                 assert!(withheld.standalone()? == expected);
@@ -2505,7 +2373,7 @@ mod tests {
             "        if flag:\n",
             "            async for child in stream: consume(child)\n",
         );
-        let prepared = PreparedBody::module(
+        let prepared = PreparedBody::module_with_syntax(
             "example",
             Path::new("example.py"),
             source,
@@ -2555,7 +2423,7 @@ mod tests {
     #[test]
     fn residual_with_emits_its_region_after_dropping_the_prepared_items() {
         let text = "def entries(path, stream):\n    with guard(), scandir(path) as stream:\n        with (yield stream):\n            pass\n";
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "scan",
             Path::new("scan.py"),
             text,
@@ -2585,7 +2453,7 @@ mod tests {
             "    with cm as (sink.head, *middle, sink[(yield 'key')]):\n",
             "        return sink\n",
         );
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "program",
             Path::new("program.py"),
             source,
@@ -2610,7 +2478,7 @@ mod tests {
 
     #[test]
     fn async_with_owns_its_checked_binding_and_return() {
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "program",
             Path::new("program.py"),
             "async def use(manager):\n    async with manager as value:\n        return value\n",
@@ -2638,7 +2506,7 @@ mod tests {
 
     #[test]
     fn async_with_prepares_its_awaited_manager_and_target() {
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "program",
             Path::new("program.py"),
             "async def use(provider, sink):\n    async with await provider() as sink.item:\n        return sink.item\n",
@@ -2691,7 +2559,7 @@ mod tests {
             "    return sink(await pause(), second=items[(lambda: item)()])\n",
             "state: int\n",
         );
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "worker",
             Path::new("worker.py"),
             source,
@@ -2744,7 +2612,7 @@ mod tests {
     fn assert_prepared_binary_output(source: &str) {
         use crate::ir::{Builtin, ExprKind, Statement, SuspendValue};
 
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "worker",
             Path::new("worker.py"),
             source,
@@ -2887,7 +2755,7 @@ mod tests {
     fn physical_raise_retains_its_two_suspending_operands() {
         use crate::frontend::{PhysicalOperand, SourceEffect, ValueStatement};
 
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "example",
             Path::new("example.py"),
             "async def throw_after(error, cause):\n    raise await error() from await cause()\nstate: int\n",
@@ -3218,7 +3086,6 @@ mod tests {
             crate::frontend::RegisteredScope::Function { is_async: false },
             false,
             false,
-            &|_| false,
         );
         prepared.source.statement_sites = physical.sites;
         let position = function.start();
@@ -3277,7 +3144,7 @@ mod tests {
 
     #[test]
     fn residual_named_assignment_consumes_its_completed_choice_after_erasing_the_arm_syntax() {
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "program", Path::new("program.py"),
             "def yes(): return 1\ntry:\n    result = (seen := yes() if first() and second() else no())\nfinally:\n    cleanup()\n",
             0, ModuleOrigin::Program(None),
@@ -3412,7 +3279,7 @@ mod tests {
             "    elif not await predicate(2):\n        return 2\n",
             "state: int\n",
         );
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "example",
             Path::new("example.py"),
             source,
@@ -3451,7 +3318,7 @@ mod tests {
         use crate::frontend::{PhysicalOperand, PhysicalSuite, SourceEffect};
 
         fn middle_arm<'a>(
-            prepared: &'a mut PreparedBody<'_, '_>,
+            prepared: &'a mut PreparedBody<'_>,
         ) -> &'a mut (Option<PhysicalOperand>, PhysicalSuite) {
             let initializer = &mut prepared.source.initializer.as_mut().unwrap().plan;
             let Some(SourceEffect::If { arms, .. }) = &mut initializer.residual[0].effect else {
@@ -3538,7 +3405,7 @@ mod tests {
             let source = format!(
                 "async def evaluate(seed):\n    match sink(await gate(), second=left() + table()[(lambda: seed)()]):\n        case item: {body}\nstate: int\n"
             );
-            let mut prepared = PreparedBody::module(
+            let mut prepared = PreparedBody::module_with_syntax(
                 "example",
                 Path::new("example.py"),
                 &source,
@@ -3648,7 +3515,7 @@ mod tests {
 
     #[test]
     fn annotation_comprehensions_emit_after_their_clauses_are_erased() {
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "example",
             Path::new("example.py"),
             "class C:\n    def f(self, x: [outer for _ in (1,)], y: [item for item in [outer]]): pass\n",
@@ -3736,7 +3603,7 @@ mod tests {
         );
         inject_residual_child_module(&mut prepared);
         assert!(!prepared.initializer().plan.fully_checked());
-        let emit = |prepared: &PreparedBody<'_, '_>| {
+        let emit = |prepared: &PreparedBody<'_>| {
             let mut output = Output::default();
             let file = output.data(b"field.py");
             prepared.emit(&mut output, 0, &file).unwrap();
@@ -3764,7 +3631,7 @@ mod tests {
 
     #[test]
     fn checked_named_entries_keep_their_registration_after_their_bodies_are_dropped() {
-        let mut module = PreparedBody::module(
+        let mut module = PreparedBody::module_with_syntax(
             "entries",
             Path::new("entries.py"),
             concat!(
@@ -3784,19 +3651,16 @@ mod tests {
         let defs = module.syntax.as_mut().unwrap().to_mut();
         for (i, stmt) in defs.iter_mut().enumerate() {
             let def = stmt.as_function_def_stmt_mut().unwrap();
-            let Body::Checked(body, Some(_)) = module.source.function_body(def) else {
-                panic!("named activation still needs source");
-            };
+            let plan = &module.source.function_bodies[&def.start()];
+            assert!(plan.fully_checked());
+            let body = plan.checked();
             let mut required = Vec::new();
             sites::CheckedSites::visit(&body.function.body, &mut |site| required.push(site));
             if i == 0 {
                 assert!(required.is_empty());
-                let DeclarationMetadata {
-                    docstring,
-                    integer_sign_parameters,
-                } = &module.source.function_bodies[&def.start()].declaration;
-                assert_eq!(docstring.as_deref(), Some("Record the sign."));
-                assert_eq!(integer_sign_parameters.as_slice(), ["value"]);
+                let header = &module.source.scopes.functions[&def.start()].header;
+                assert_eq!(header.doc.as_deref(), Some("Record the sign."));
+                assert_eq!(header.integer_sign_parameters, ["value"]);
             } else {
                 assert!(matches!(
                     required.as_slice(),
@@ -3928,7 +3792,7 @@ mod tests {
             pulls += usize::from(matches!(stmt, crate::ir::Statement::IterNext { .. }));
         });
         assert_eq!(pulls, 2);
-        prepared.syntax.as_mut().unwrap().to_mut().clear();
+        assert!(prepared.syntax.is_none());
         prepared.source.statement_sites.expressions = Default::default();
 
         let mut output = Output::default();
@@ -3952,7 +3816,7 @@ mod tests {
 
     #[test]
     fn generator_creation_emits_the_prepared_child_after_its_clauses_are_erased() {
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "scan",
             Path::new("scan.py"),
             concat!(
@@ -4030,7 +3894,6 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 assert_eq!(methods.len(), 1);
                 assert!(methods.values().all(|plan| plan.suite().unwrap().fully_checked()));
                 assert!(prepared.syntax.is_none());
-                assert!(prepared.declarations.is_empty());
                 prepared.standalone()
             },
         ).unwrap();
@@ -4111,8 +3974,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         )
         .unwrap();
         for alias in prepared
-            .syntax
-            .as_ref()
+            .original_fixture_suite()
             .unwrap()
             .iter()
             .filter_map(ast::Stmt::as_type_alias_stmt)
@@ -4193,7 +4055,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
 
     #[test]
     fn checked_alias_site_emits_after_dropping_the_ruff_suite() {
-        let mut prepared = PreparedBody::module(
+        let prepared = PreparedBody::module(
             "model",
             Path::new("model.py"),
             "type PublicRow[T] = payload[T]\n",
@@ -4202,7 +4064,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         )
         .unwrap();
         assert!(prepared.initializer().plan.fully_checked());
-        prepared.syntax.as_mut().unwrap().to_mut().clear();
+        assert!(prepared.syntax.is_none());
 
         let mut output = Output::default();
         let file = output.data(b"model.py");
@@ -4256,7 +4118,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let alias = &prepared.source.type_aliases[&prepared.syntax.as_ref().unwrap()[0].start()];
+        let alias = prepared.source.type_aliases.values().next().unwrap();
         let body = &alias
             .body
             .as_ref()
@@ -4343,7 +4205,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             "            return first, last, seed\n",
             "        yield cleanup\n",
         );
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "closing",
             Path::new("closing.py"),
             source,
@@ -4368,7 +4230,10 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             node_index: Default::default(),
         }
         .into();
-        assert!(!prepared.linked_declarations().contains_key(&site));
+        assert_eq!(
+            prepared.source.scopes.functions[&site].header.name,
+            "cleanup"
+        );
         assert!(prepared.standalone().unwrap() == original);
     }
 
@@ -4423,7 +4288,6 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             RegisteredScope::Function { is_async: true },
             true,
             false,
-            &|_| false,
         );
         module.source.statement_sites = plan.sites;
         install_test_function_body(&mut module.source, function, body);
@@ -4521,7 +4385,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
 
     #[test]
     fn suspended_index_update_keeps_its_operands_after_source_erasure() {
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "example",
             Path::new("example.py"),
             "def update():\n    (yield 'receiver')[(yield 'key')] += (yield 'rhs')\n",
@@ -4676,7 +4540,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             let mut physical =
                 SuitePreparation::new(&module.source.namespace_operations, source, &def.body, true);
             physical.sites.expressions = lexical;
-            let body = physical.named_body(&def.body, kind, true, false, &|_| false);
+            let body = physical.named_body(&def.body, kind, true, false);
             assert!(matches!(
                 physical.sites.expressions.get(input),
                 Some(crate::frontend::ExpressionSelection::Suspension(
@@ -4735,11 +4599,13 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             assert_eq!(module.standalone().unwrap(), original);
 
             fn residual<'a>(
-                module: &'a mut PreparedBody<'_, '_>,
+                module: &'a mut PreparedBody<'_>,
                 function: TextSize,
                 external_test: bool,
             ) -> &'a mut ast::Expr {
-                let run = &mut test_function_suite(&mut module.source, function).plan.residual[0];
+                let run = &mut test_function_suite(&mut module.source, function)
+                    .plan
+                    .residual[0];
                 let Some(SourceEffect::Assertion(site)) = &mut run.effect else {
                     unreachable!()
                 };
@@ -4828,7 +4694,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         use crate::frontend::{PhysicalOperand, SourceEffect, WhileGuard};
 
         let source = "async def probe():\n    while [lambda v=await get(x): v for x in [0]]:\n        yield 'body'\n        break\n";
-        let mut module = PreparedBody::module(
+        let mut module = PreparedBody::module_with_syntax(
             "guard",
             Path::new("guard.py"),
             source,
@@ -4881,7 +4747,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     #[test]
     fn suspended_while_keeps_its_condition_and_suites_after_erasure() {
         let source = "def pump():\n    while (yield 'test'):\n        yield 'body'\n    else:\n        yield 'else'\n";
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "example",
             Path::new("example.py"),
             source,
@@ -4913,7 +4779,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     fn suspended_definitions_use_native_entries_in_each_module_origin() {
         let source = "def items(xs):\n    yield 1\n    yield from xs\npark = lambda: (yield 2)\nresume = lambda: 1 + (yield 3)\nasync def more(xs):\n    async for x in xs:\n        yield x\nasync def consume(f):\n    return await f()\ndef defaults():\n    yield 0\n    @(yield 'decorator')\n    def nested(first=1, second=(yield 4)):\n        return second\n    return nested\n";
         for bundled in [false, true] {
-            let mut prepared = PreparedBody::module(
+            let mut prepared = PreparedBody::module_with_syntax(
                 "example",
                 Path::new("example.py"),
                 source,
@@ -4940,7 +4806,11 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 crate::verify::registered(suite.checked.region()).unwrap();
                 if name == "defaults" {
                     let site = def.body[1].start();
-                    assert!(prepared.source.ordinary_function(site).is_some());
+                    assert!(prepared.source.function_bodies[&site].fully_checked());
+                    assert_eq!(
+                        prepared.source.scopes.functions[&site].header.name,
+                        "nested"
+                    );
                 }
                 def.body.clear();
             }
@@ -5341,7 +5211,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     #[test]
     fn physical_comprehension_keeps_its_prepared_diagnostic() {
         let source = "async def make():\n    return [lambda v=await get(x): v for x in [1, 2]]\n";
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "example",
             Path::new("example.py"),
             source,
@@ -5379,7 +5249,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             "async def make():\n",
             "    return {\"items\": [lambda v=await get(x): v for x in [1, 2]]}\n",
         );
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "example",
             Path::new("example.py"),
             source,
@@ -5421,7 +5291,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             "    return lambda a=take(await first(), [x for x in rows]), ",
             "b={'items': [lambda v=await get(x): v for x in rows]}: a\n",
         );
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "example",
             Path::new("example.py"),
             source,
@@ -5483,7 +5353,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
 
     #[test]
     fn suspended_dictionary_emits_after_its_entries_are_erased() {
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "example",
             Path::new("example.py"),
             concat!(
@@ -5512,7 +5382,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
 
     #[test]
     fn suspended_assignment_emits_after_its_targets_are_erased() {
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "example",
             Path::new("example.py"),
             concat!(
@@ -5612,7 +5482,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let class = outer.body[0].as_class_def_stmt().unwrap();
         let outer_body = &prepared.source.function_bodies[&outer.start()];
         assert!(matches!(outer_body.body, FunctionBody::Suite(_)));
-        assert!(outer_body.header.is_none());
+        assert!(!outer_body.fully_checked());
         let class_start = class.start();
         let suite = &prepared.source.class_bodies[&class_start].body.plan;
         crate::verify::registered(suite.checked.region()).unwrap();
@@ -5642,7 +5512,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             }) && inputs.len() == 2
         ));
 
-        let emit = |prepared: &PreparedBody<'_, '_>| {
+        let emit = |prepared: &PreparedBody<'_>| {
             let mut output = Output::default();
             let file = output.data(b"example.py");
             prepared.emit(&mut output, 0, &file).unwrap();
@@ -5771,7 +5641,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert_eq!(key.range(), key_range);
         assert_eq!(&source[key_range], "(lambda: key)()");
 
-        let emit = |prepared: &PreparedBody<'_, '_>| {
+        let emit = |prepared: &PreparedBody<'_>| {
             let mut output = Output::default();
             let file = output.data(b"remove.py");
             prepared.emit(&mut output, 0, &file).unwrap();
@@ -5802,7 +5672,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             "    return evaluate\n",
             "state: int\n",
         );
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "worker",
             Path::new("worker.py"),
             source,

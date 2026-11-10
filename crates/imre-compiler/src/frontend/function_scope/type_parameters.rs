@@ -123,17 +123,13 @@ pub(crate) fn boxed_function_type_params<'a>(
     })
 }
 
-/// Class layout and registered definition binding share the lexical scope decision.
-/// Ordinary named functions may inherit a method's finite type-parameter scope.
-pub(crate) fn type_parameter_scope(
-    function: &ast::StmtFunctionDef,
+/// Parameters whose names and kinds can be installed by the registered function frame.
+pub(crate) fn function_parameter_header<'a>(
+    function: &'a ast::StmtFunctionDef,
     string_annotations: bool,
     nested: bool,
     private_names: Option<&imre_ast::Names>,
-) -> Option<TypeParameterScope> {
-    use ast::AnyNodeRef::*;
-    use ast::visitor::source_order::{SourceOrderVisitor, TraversalSignal};
-
+) -> Option<&'a ast::TypeParams> {
     let params = function.type_params.as_deref()?;
     let mut names = std::collections::HashSet::new();
     if function.is_async
@@ -153,6 +149,22 @@ pub(crate) fn type_parameter_scope(
     {
         return None;
     }
+
+    Some(params)
+}
+
+/// Class layout and registered definition binding share the lexical scope decision.
+/// Ordinary named functions may inherit a method's finite type-parameter scope.
+pub(crate) fn type_parameter_scope(
+    function: &ast::StmtFunctionDef,
+    string_annotations: bool,
+    nested: bool,
+    private_names: Option<&imre_ast::Names>,
+) -> Option<TypeParameterScope> {
+    use ast::AnyNodeRef::*;
+    use ast::visitor::source_order::{SourceOrderVisitor, TraversalSignal};
+
+    function_parameter_header(function, string_annotations, nested, private_names)?;
 
     struct BodyScope {
         nested: bool,

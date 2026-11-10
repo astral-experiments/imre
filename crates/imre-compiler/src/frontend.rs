@@ -127,8 +127,6 @@ pub(crate) use registered::booleans::{
     BorrowedOperand, ExpressionSites, LogicalOperand, PhysicalInputs,
     Selection as ExpressionSelection, SourceOperand,
 };
-#[cfg(test)]
-pub(crate) use registered::inline_operand;
 pub(crate) use registered::patterns::SourceMatch;
 pub(crate) use registered::type_alias_body;
 #[cfg(test)]
@@ -139,10 +137,10 @@ pub(crate) use registered::values::{
 };
 pub(crate) use registered::{
     AnnotationProvider, AssertionSite, DeferredAnnotation, ParameterAnnotations, PhysicalOperand,
-    RegisteredBindings, RegisteredFunction, RegisteredGenerator, RegisteredLambda,
-    RegisteredScope, RegisteredSites, RegisteredSuite, SourceEffect, SourceRun, StatementSites,
-    SuitePreparation, ValueStatement, annotation_expression, place_fixed_function,
-    registered_sites, registered_type_alias, registered_type_parameters,
+    RegisteredBindings, RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope,
+    RegisteredSuite, SourceEffect, SourceRun, StatementSites, SuitePreparation, ValueStatement,
+    annotation_expression, place_fixed_function, registered_sites, registered_type_alias,
+    registered_type_parameters,
 };
 pub(crate) use registered::{LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion};
 pub(crate) use registered::{

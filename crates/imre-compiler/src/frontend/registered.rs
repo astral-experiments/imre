@@ -684,6 +684,7 @@ impl DeferredAnnotation {
 /// Physical source operands shared by namespace initialization and lazy annotation providers.
 pub(crate) struct FunctionSite<'a> {
     pub(crate) def: &'a ast::StmtFunctionDef,
+    pub(crate) parameters: Option<Vec<ir::RegisteredTypeParameter>>,
     pub(crate) prepare_entry: bool,
     pub(crate) thread_entry: Option<imre_ast::ThreadEntry>,
 }
@@ -791,34 +792,34 @@ pub(crate) fn registered_sites<'a, R>(
                             .parameter_annotations
                             .insert(def.parameters.start(), provider);
                     }
-                    let generic_binding = !matches!(self.scope, RegisteredScope::Function { .. })
-                        && super::function_scope::type_parameter_scope(
+                    let parameters = if matches!(self.scope, RegisteredScope::Function { .. }) {
+                        super::function_scope::function_parameter_header(
                             def,
                             self.names.string_annotations,
-                            matches!(self.scope, RegisteredScope::Class),
+                            true,
                             Some(self.names),
                         )
-                        .is_some();
-                    if generic_binding {
-                        self.output.operations.insert(
-                            def.name.range(),
-                            operation(
-                                Builtin::RegisteredDefinition(ir::DefinitionSite::Function(
-                                    def.start(),
-                                )),
-                                Type::PythonObject,
-                                Vec::new(),
-                            ),
-                        );
-                    }
+                    } else {
+                        def.type_params.as_deref().filter(|_| {
+                            super::function_scope::type_parameter_scope(
+                                def,
+                                self.names.string_annotations,
+                                matches!(self.scope, RegisteredScope::Class),
+                                Some(self.names),
+                            )
+                            .is_some()
+                        })
+                    };
                     // Nested ordinary functions of an admitted definition take the
                     // same preparation path as any other lexical function.
-                    let unprepared = !generic_binding
+                    let unprepared = parameters.is_none()
                         && (self.in_unprepared_generic || def.type_params.is_some());
                     let thread_entry = imre_ast::thread_entry(def);
                     let worker = thread_entry.is_some();
                     self.output.functions.push(FunctionSite {
                         def,
+                        parameters: parameters
+                            .map(|params| registered_type_parameters(params, self.names)),
                         prepare_entry: !unprepared || worker,
                         thread_entry,
                     });
@@ -1177,9 +1178,9 @@ fn statement_sites(
 }
 
 #[derive(Clone, Copy)]
-enum SuiteSelection<'a> {
+enum SuiteSelection {
     All,
-    Physical(&'a dyn Fn(TextSize) -> bool),
+    Physical,
 }
 
 /// Prepare ordered suites while the source tree and its namespace operands are available.
@@ -1293,10 +1294,9 @@ impl<'a> SuitePreparation<'a> {
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
         suspends: bool,
-        has_ordinary_header: &dyn Fn(TextSize) -> bool,
     ) -> RegisteredSuite {
         let children = if suspends {
-            SuiteSelection::Physical(has_ordinary_header)
+            SuiteSelection::Physical
         } else {
             SuiteSelection::All
         };
@@ -1309,12 +1309,11 @@ impl<'a> SuitePreparation<'a> {
         kind: RegisteredScope,
         suspended: bool,
         prepare_entry: bool,
-        has_ordinary_header: &dyn Fn(TextSize) -> bool,
     ) -> PhysicalSuite {
         let plan = if prepare_entry {
-            self.function_suite(stmts, kind, suspended, has_ordinary_header)
+            self.function_suite(stmts, kind, suspended)
         } else {
-            let physical = SuiteSelection::Physical(has_ordinary_header);
+            let physical = SuiteSelection::Physical;
             self.selected_suite(stmts, kind, physical, physical, suspended)
         };
         PhysicalSuite::new(plan, stmts)
@@ -1324,8 +1323,8 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
-        select: SuiteSelection<'_>,
-        child_selection: SuiteSelection<'_>,
+        select: SuiteSelection,
+        child_selection: SuiteSelection,
         suspended: bool,
     ) -> RegisteredSuite {
         let mut plan = self.lower(stmts, kind, select, suspended);
@@ -1437,11 +1436,11 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         expr: &ast::Expr,
         kind: RegisteredScope,
-        selection: SuiteSelection<'_>,
+        selection: SuiteSelection,
         suspended: bool,
     ) -> PhysicalOperand {
         self.owned_operand(expr, kind, suspended, |scope| match (kind, selection) {
-            (RegisteredScope::Function { .. }, SuiteSelection::Physical(_)) => scope.operand(expr),
+            (RegisteredScope::Function { .. }, SuiteSelection::Physical) => scope.operand(expr),
             _ => scope.ordinary_operand(expr),
         })
     }
@@ -1513,7 +1512,7 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
-        selection: SuiteSelection<'_>,
+        selection: SuiteSelection,
         suspended: bool,
     ) -> PhysicalSuite {
         PhysicalSuite::new(
@@ -1526,7 +1525,7 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         branch: &ast::StmtIf,
         kind: RegisteredScope,
-        selection: SuiteSelection<'_>,
+        selection: SuiteSelection,
         suspended: bool,
     ) -> SourceEffect {
         let mut arms = Vec::new();
@@ -1563,7 +1562,7 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         stmt: &ast::StmtTry,
         kind: RegisteredScope,
-        selection: SuiteSelection<'_>,
+        selection: SuiteSelection,
         suspended: bool,
     ) -> PreparedTry {
         let body = self.physical_suite(&stmt.body, kind, selection, suspended);
@@ -1604,7 +1603,7 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         stmt: &ast::StmtWith,
         kind: RegisteredScope,
-        selection: SuiteSelection<'_>,
+        selection: SuiteSelection,
         suspended: bool,
     ) -> PreparedContext {
         let inputs = stmt
@@ -1634,7 +1633,7 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         loop_: &ast::StmtWhile,
         kind: RegisteredScope,
-        selection: SuiteSelection<'_>,
+        selection: SuiteSelection,
         suspended: bool,
     ) -> PreparedWhile {
         let condition = match loop_.test.as_ref() {
@@ -1655,7 +1654,7 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         loop_: &ast::StmtFor,
         kind: RegisteredScope,
-        selection: SuiteSelection<'_>,
+        selection: SuiteSelection,
         suspended: bool,
     ) -> PreparedFor {
         let iterable = self.physical_operand(&loop_.iter, kind, selection, suspended);
@@ -1678,7 +1677,7 @@ impl<'a> SuitePreparation<'a> {
         &self,
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
-        select: SuiteSelection<'_>,
+        select: SuiteSelection,
         suspended: bool,
     ) -> RegisteredSuite {
         let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
@@ -1710,9 +1709,7 @@ impl<'a> SuitePreparation<'a> {
             scope.refusal = None;
             let lowered = match select {
                 SuiteSelection::All => scope.statement(stmt, &mut body),
-                SuiteSelection::Physical(has_ordinary_header) => {
-                    scope.physical_statement(stmt, &mut body, has_ordinary_header)
-                }
+                SuiteSelection::Physical => scope.physical_statement(stmt, &mut body),
             };
             if lowered.is_ok() {
                 continue;
@@ -1739,6 +1736,30 @@ impl<'a> SuitePreparation<'a> {
                     statements: i..i + 1,
                     effect: Some(SourceEffect::Assertion(Box::new(site))),
                 });
+                continue;
+            }
+            if let ast::Stmt::FunctionDef(def) = stmt {
+                // The binding stays checked even if one header operand needs its physical frame.
+                // Store them in order so an exception or suspension precedes all later operands.
+                body.push(checkpoint(stmt));
+                let header = function_header_inputs(def)
+                    .map(|expr| {
+                        let slot = scope.hidden(Type::PythonObject);
+                        residual.push(SourceRun {
+                            at: body.len(),
+                            statements: i..i + 1,
+                            effect: Some(SourceEffect::Value(
+                                ValueStatement::Store(slot),
+                                vec![frame_value(expr)],
+                            )),
+                        });
+                        unpacking::take_pattern_temporary(
+                            Expr::local(slot, Type::PythonObject),
+                            slot,
+                        )
+                    })
+                    .collect();
+                body.push(scope.bind_function(def, header));
                 continue;
             }
             let output = match stmt {
@@ -2122,25 +2143,8 @@ impl statements::StatementLowering for SourceScope<'_> {
     }
 
     fn definition(&mut self, def: &ast::StmtFunctionDef) -> StdResult<Option<Statement>, ()> {
-        if def.type_params.is_some() {
-            let binding = self.operations.get(&def.name.range()).ok_or(())?;
-            if matches!(self.kind, RegisteredScope::Class) {
-                if !def.decorator_list.is_empty()
-                    || def
-                        .parameters
-                        .iter_non_variadic_params()
-                        .any(|p| p.default.is_some())
-                {
-                    return Err(());
-                }
-                return Ok(Some(self.store(def.name.as_str(), binding.clone())));
-            }
-        }
         let prepare_header = |scope: &mut Self| {
-            def.decorator_list
-                .iter()
-                .map(|decorator| &decorator.expression)
-                .chain(values::parameter_defaults(&def.parameters))
+            function_header_inputs(def)
                 .map(|expr| scope.ordinary_operand(expr))
                 .collect::<Option<Vec<_>>>()
         };
@@ -2151,12 +2155,7 @@ impl statements::StatementLowering for SourceScope<'_> {
             prepare_header(self)
         }
         .ok_or(())?;
-        let function = operation(
-            Builtin::RegisteredDefinition(ir::DefinitionSite::Function(def.start())),
-            Type::PythonObject,
-            header,
-        );
-        Ok(Some(self.store(def.name.as_str(), function)))
+        Ok(Some(self.bind_function(def, header)))
     }
 
     fn effect(&mut self, value: &ast::Expr) -> StdResult<(Option<Statement>, bool), ()> {
@@ -2632,7 +2631,23 @@ impl PhysicalRegion {
     }
 }
 
+fn function_header_inputs(def: &ast::StmtFunctionDef) -> impl Iterator<Item = &ast::Expr> {
+    def.decorator_list
+        .iter()
+        .map(|decorator| &decorator.expression)
+        .chain(values::parameter_defaults(&def.parameters))
+}
+
 impl SourceScope<'_> {
+    fn bind_function(&mut self, def: &ast::StmtFunctionDef, header: Vec<Expr>) -> Statement {
+        let function = operation(
+            Builtin::RegisteredDefinition(ir::DefinitionSite::Function(def.start())),
+            Type::PythonObject,
+            header,
+        );
+        self.store(def.name.as_str(), function)
+    }
+
     fn assignment_targets(
         &mut self,
         targets: &[ast::Expr],
@@ -2654,7 +2669,6 @@ impl SourceScope<'_> {
         &mut self,
         stmt: &ast::Stmt,
         body: &mut Vec<Statement>,
-        has_ordinary_header: &dyn Fn(TextSize) -> bool,
     ) -> StdResult<bool, ()> {
         if let ast::Stmt::Assign(assign) = stmt {
             // The physical frame owns an assignment that yields or awaits its value.
@@ -2676,7 +2690,7 @@ impl SourceScope<'_> {
             || stmt.is_ann_assign_stmt()
             || stmt.is_aug_assign_stmt()
             || stmt.is_raise_stmt()
-            || stmt.is_function_def_stmt() && has_ordinary_header(stmt.start())
+            || stmt.is_function_def_stmt()
         {
             return self.statement(stmt, body);
         }
@@ -3186,21 +3200,30 @@ mod tests {
 
     #[test]
     fn entirely_mixed_suite_keeps_its_prepared_entry() {
-        let text = "def bind[T]():\n    pass\n";
+        let text = "def outer():\n    @(yield 'decorator')\n    def bind[T]():\n        pass\n";
         let graph = SourceGraph::single(text).unwrap();
         let module = &graph.modules[graph.entry];
-        let body = &module.parsed.syntax().body;
+        let body = &module.parsed.syntax().body[0]
+            .as_function_def_stmt()
+            .unwrap()
+            .body;
         let literals = values::ModuleSource::new(module);
         let operations = HashMap::new();
         let mut prepare = SuitePreparation::new(&operations, literals.context(text), body, true);
         let suite = prepare.named_body(
             body,
             RegisteredScope::Function { is_async: false },
+            true,
             false,
-            false,
-            &|_| false,
         );
-        assert_eq!(suite.plan.residual.len(), 1);
+        assert!(matches!(
+            suite.plan.residual.as_slice(),
+            [SourceRun {
+                effect: Some(SourceEffect::Value(ValueStatement::Store(_), _)),
+                ..
+            }]
+        ));
+        assert!(suite.sources.is_empty());
         crate::verify::registered(suite.plan.checked.region()).unwrap();
     }
 
@@ -3218,7 +3241,10 @@ mod tests {
             panic!("expected the method and its lexical function");
         };
         assert!(method.prepare_entry && closure.prepare_entry);
-        assert!(sites.operations.contains_key(&method.def.name.range()));
+        let [parameter] = method.parameters.as_deref().unwrap() else {
+            panic!("expected the method's type parameter");
+        };
+        assert_eq!(parameter.binding, "T");
         assert_eq!(closure.def.name.as_str(), "get");
     }
 
