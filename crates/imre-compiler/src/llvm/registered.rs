@@ -114,7 +114,7 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
             }
             ExprKind::Builtin(Builtin::RegisteredIndexConstant(_), args) => args.len() == 1,
             ExprKind::Builtin(Builtin::RegisteredSlice, args) => matches!(args.len(), 2 | 3),
-            ExprKind::Builtin(Builtin::RegisteredDeleteItem, args) => {
+            ExprKind::Builtin(Builtin::RegisteredDeleteItem | Builtin::RegisteredInPlace(_), args) => {
                 uses_python_protocol = true;
                 args.len() == 2
             }
@@ -804,6 +804,11 @@ impl Frame<'_, '_, '_> {
                 [bounds.first(), bounds.get(1), bounds.get(2)],
                 Self::evaluate_handle,
             ),
+            (Builtin::RegisteredInPlace(op), [left, right]) => {
+                let left = self.evaluate_handle(left);
+                let right = self.evaluate_handle(right);
+                self.code.inplace(op, &left, &right)
+            }
             (Builtin::RegisteredDeleteItem, [base, key]) => {
                 let base = self.evaluate_handle(base);
                 let key = self.evaluate_handle(key);

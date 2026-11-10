@@ -4803,6 +4803,7 @@ impl Emitter<'_, '_> {
             | Builtin::Unrepresented
             | Builtin::RegisteredCompare(_)
             | Builtin::RegisteredContainsLiteral(_)
+            | Builtin::RegisteredInPlace(_)
             | Builtin::RegisteredSubscript(..)
             | Builtin::RegisteredSpread
             | Builtin::RegisteredIndexConstant(_)
