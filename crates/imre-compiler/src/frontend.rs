@@ -13544,6 +13544,18 @@ mod tests {
     }
 
     #[test]
+    fn fractions_use_python_numeric_equality() {
+        use crate::modules::SourceGraph;
+        let source = "from fractions import Fraction\nprint(Fraction(3, 6) == Fraction(1, 2))\n";
+        let graph = SourceGraph::single_with_mode(source, true).unwrap();
+        let error = super::lower(&graph)
+            .err()
+            .expect("numeric comparison requires the Python method");
+        assert!(error.contains("Fraction numeric comparison"), "{error}");
+        assert!(graph.needs_object_runtime.get());
+    }
+
+    #[test]
     fn boxed_float_operations_keep_checked_types_and_later_errors() {
         let fixture = include_str!("../../../tests/fixtures/floats/component_identity.py");
         for (annotation, operand, actual) in [
@@ -13608,18 +13620,6 @@ mod tests {
             check().unwrap();
             fs::remove_file(project.join("helper.py")).unwrap();
         }
-    }
-
-    #[test]
-    fn fractions_use_python_numeric_equality() {
-        use crate::modules::SourceGraph;
-        let source = "from fractions import Fraction\nprint(Fraction(3, 6) == Fraction(1, 2))\n";
-        let graph = SourceGraph::single_with_mode(source, true).unwrap();
-        let error = super::lower(&graph)
-            .err()
-            .expect("numeric comparison requires the Python method");
-        assert!(error.contains("Fraction numeric comparison"), "{error}");
-        assert!(graph.needs_object_runtime.get());
     }
 
     #[test]
