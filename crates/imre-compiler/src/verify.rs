@@ -143,6 +143,11 @@ pub(crate) fn registered(frame: &crate::frontend::RegisteredFunction) -> Result<
                         "registered spread needs one operand inside a Python display",
                     )
                 }
+                ExprKind::Builtin(op, args) => op
+                    .iteration_operands(args)
+                    .transpose()
+                    .map(|_| ())
+                    .map_err(str::to_owned),
                 _ => Ok(()),
             },
             _ => Ok(()),
@@ -793,6 +798,32 @@ mod tests {
             registered(&frame).unwrap();
             frame.local_names.clear();
             assert!(registered(&frame).unwrap_err().contains("frame slot"));
+        }
+    }
+
+    #[test]
+    fn registered_namespace_checks_the_optional_parent_before_emission() {
+        let mut frame = crate::frontend::RegisteredFunction {
+            function: empty().entry,
+            local_names: Default::default(),
+        };
+        for count in 0..=2 {
+            let parent = Expr::none();
+            frame.function.body = vec![Statement::Expr(Expr {
+                ty: Type::PythonObject,
+                kind: ExprKind::Builtin(
+                    Builtin::RegisteredNamespace(Vec::new()),
+                    vec![parent; count],
+                ),
+            })];
+            if count < 2 {
+                registered(&frame).unwrap();
+            } else {
+                assert_eq!(
+                    registered(&frame).unwrap_err(),
+                    "registered namespace takes at most one parent"
+                );
+            }
         }
     }
 
