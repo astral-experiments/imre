@@ -208,6 +208,15 @@ impl<'p> Function<'_, 'p> {
                 self.emit_assertion_inputs(site, source);
             }
             SourceEffect::Class(site) => self.mixed_class_definition(*site),
+            SourceEffect::Match(range, site) => {
+                self.checkpoint(range);
+                self.simple_call = None;
+                if let Some(site) = site {
+                    self.prepared_match(site);
+                } else {
+                    self.unsupported("unsupported value in match pattern");
+                }
+            }
             SourceEffect::Context(context) => self.prepared_context(context),
             SourceEffect::Try(region) => {
                 self.checkpoint(&region.range);
@@ -365,48 +374,29 @@ impl<'p> Function<'_, 'p> {
         }
     }
 
-    /// Supply only the source operands requested by the registered matcher.
-    fn emit_match_inputs(
-        &mut self,
-        site: &'p crate::frontend::SourceMatch,
-        source: &'p ast::StmtMatch,
-    ) {
+    fn prepared_match(&mut self, site: &'p crate::frontend::SourceMatch) {
         use crate::llvm::registered::patterns::MatchRegion;
 
         let mark = self.temporary_mark();
-        let subject = match &site.subject {
-            Some(operand) => {
-                self.prepare_checked_value(&operand.value);
-                self.frame.prepared_operand(operand, &self.sites, false)
-            }
-            None => self.expr(&source.subject),
-        };
+        let subject = self.physical_operand(&site.subject);
         let mut regions = self
             .frame
             .registered_match(&subject, &mark, site, &self.sites);
-        loop {
-            if let Some(test) = regions.pending_checked_guard() {
-                self.prepare_checked_value(test);
-            }
-            let Some(region) = self.frame.next_match_region(&mut regions, &self.sites) else {
-                break;
-            };
+        while let Some(region) = regions.next(&mut self.frame) {
             match region {
-                MatchRegion::ResidualGuard {
+                MatchRegion::Guard {
                     case,
                     matched,
                     failed,
-                } => self.branch_expr(
-                    source.cases[case].guard.as_deref().unwrap(),
-                    matched,
-                    failed,
-                ),
-                MatchRegion::Body(case) => match &site.cases[case].body {
-                    Some(suite) => self.checked_runs(suite, |code, run| {
-                        code.source_run(&source.cases[case].body, run);
-                    }),
-                    None => self.source_statements(&source.cases[case].body),
+                } => match site.cases[case].guard.as_ref().expect("match guard") {
+                    PhysicalOperand::Checked(operand) => {
+                        self.prepare_checked_value(&operand.value);
+                        self.frame
+                            .prepared_branch(operand, &self.sites, matched, failed);
+                    }
+                    PhysicalOperand::Source(expr) => self.branch_expr(expr, matched, failed),
                 },
+                MatchRegion::Body(case) => self.physical_suite(&site.cases[case].body),
             }
         }
     }
@@ -418,14 +408,6 @@ impl<'p> Function<'_, 'p> {
             }
             self.checkpoint(&stmt.range());
             self.simple_call = imre_ast::unhighlighted_call(stmt);
-            if let Some(site) = self.source.statement_sites.matches.get(&stmt.range()) {
-                if let Some(site) = site {
-                    self.emit_match_inputs(site, stmt.as_match_stmt().unwrap());
-                } else {
-                    self.unsupported("unsupported value in match pattern");
-                }
-                continue;
-            }
             match stmt {
                 ast::Stmt::FunctionDef(v) => {
                     let function = self.function_definition(v);

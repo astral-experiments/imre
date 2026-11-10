@@ -3450,22 +3450,10 @@ mod tests {
             let function = prepared.syntax.as_ref().unwrap()[0]
                 .as_function_def_stmt()
                 .unwrap();
-            let site = function.body[0].range();
-            let suite = prepared.source.function_bodies[&function.start()]
-                .suite()
-                .unwrap();
+            let start = function.start();
+            let suite = prepared.source.function_bodies[&start].suite().unwrap();
             assert_eq!(suite.fully_checked(), !physical);
-            let subject = prepared.source.statement_sites.matches[&site]
-                .as_ref()
-                .unwrap()
-                .subject
-                .as_ref();
-            if physical {
-                crate::verify::registered(subject.unwrap().region()).unwrap();
-            } else {
-                assert!(subject.is_none());
-                crate::verify::registered(suite.checked.region()).unwrap();
-            }
+            crate::verify::registered(suite.checked.region()).unwrap();
             let original = prepared.standalone().unwrap();
             let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
                 .as_function_def_stmt_mut()
@@ -3477,17 +3465,24 @@ mod tests {
             });
             assert_eq!(prepared.standalone().unwrap(), original);
             if physical {
-                let subject = prepared
+                let FunctionBody::Suite(suite) = &mut prepared
                     .source
-                    .statement_sites
-                    .matches
-                    .get_mut(&site)
+                    .function_bodies
+                    .get_mut(&start)
                     .unwrap()
-                    .as_mut()
-                    .unwrap()
-                    .subject
-                    .as_mut()
-                    .unwrap();
+                    .body
+                else {
+                    panic!("expected a prepared function suite")
+                };
+                let Some(crate::frontend::SourceEffect::Match(_, Some(site))) =
+                    &mut suite.plan.residual[0].effect
+                else {
+                    panic!("expected a mixed match")
+                };
+                let crate::frontend::PhysicalOperand::Checked(subject) = &mut site.subject else {
+                    panic!("expected a checked subject")
+                };
+                crate::verify::registered(subject.region()).unwrap();
                 subject.value = crate::ir::Expr::none();
                 crate::verify::registered(subject.region()).unwrap();
                 assert_ne!(prepared.standalone().unwrap(), original);
@@ -3529,18 +3524,26 @@ mod tests {
         let ast::Stmt::Match(branch) = &mut prepared.syntax.as_mut().unwrap().to_mut()[0] else {
             panic!("expected match")
         };
-        let site = prepared.source.statement_sites.matches[&branch.range()]
-            .as_ref()
-            .unwrap();
-        assert!(site.subject.is_some());
+        let suite = prepared.source.initializer.as_ref().unwrap();
+        let Some(crate::frontend::SourceEffect::Match(_, Some(site))) = &suite.residual[0].effect
+        else {
+            panic!("expected a mixed match")
+        };
+        assert!(matches!(
+            site.subject,
+            crate::frontend::PhysicalOperand::Checked(_)
+        ));
         assert_eq!(site.cases[0].pattern.names, ["item"]);
         assert!(matches!(
             site.cases[0].guard,
-            Some(crate::frontend::MatchGuard::Checked(_))
+            Some(crate::frontend::PhysicalOperand::Checked(_))
         ));
-        assert!(site.cases[0].body.as_ref().unwrap().fully_checked());
-        let mixed = site.cases[1].body.as_ref().unwrap();
-        assert_eq!(mixed.residual[0].statements, 1..2);
+        assert!(site.cases[0].body.plan.fully_checked());
+        let mixed = &site.cases[1].body.plan;
+        assert_eq!(mixed.residual.len(), 1);
+        assert!(
+            mixed.residual[0].at > 0 && mixed.residual[0].at < mixed.checked.function.body.len()
+        );
         *branch.subject = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
             range: branch.subject.range(),
             node_index: Default::default(),
@@ -5459,10 +5462,17 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .as_try_stmt_mut()
             .unwrap();
         let branch = protected.finalbody[0].as_match_stmt_mut().unwrap();
-        let site = prepared.source.statement_sites.matches[&branch.range()]
-            .as_ref()
-            .unwrap();
-        let suite = site.cases[0].body.as_ref().unwrap();
+        let suite = prepared.source.initializer.as_ref().unwrap();
+        let Some(crate::frontend::SourceEffect::Try(region)) = &suite.residual[0].effect else {
+            panic!("expected a mixed try")
+        };
+        let finalbody = &region.finalbody.as_ref().unwrap().plan;
+        let Some(crate::frontend::SourceEffect::Match(_, Some(site))) =
+            &finalbody.residual[0].effect
+        else {
+            panic!("expected a mixed match in finally")
+        };
+        let suite = &site.cases[0].body.plan;
         let [run] = suite.residual.as_slice() else {
             panic!("expected one external deletion operand");
         };

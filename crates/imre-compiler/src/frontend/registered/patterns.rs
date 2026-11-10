@@ -3,55 +3,45 @@ use super::*;
 use ir::MatchTest;
 
 pub(crate) struct SourceMatch {
-    pub(crate) subject: Option<RegisteredOperand>,
-    pub(crate) cases: Vec<SourceCase>,
+    pub(crate) subject: PhysicalOperand,
+    pub(crate) cases: Vec<ir::MatchCase<PhysicalOperand, PhysicalSuite, ()>>,
 }
 
-pub(crate) enum MatchGuard<T = Expr> {
-    Checked(T),
-    Residual,
-}
-
-impl<T> MatchGuard<T> {
-    pub(crate) fn as_ref(&self) -> MatchGuard<&T> {
-        match self {
-            Self::Checked(value) => MatchGuard::Checked(value),
-            Self::Residual => MatchGuard::Residual,
-        }
-    }
-}
-
-/// Source-owned frames bind captures by Python name. A suspended frame without a
-/// prepared suite keeps its body at the ordinary source boundary.
-pub(crate) type SourceCase = ir::MatchCase<MatchGuard, Option<RegisteredSuite>, ()>;
-
-impl SourceMatch {
-    pub(super) fn prepare(
-        node: &ast::StmtMatch,
-        source: values::RegisteredSource<'_>,
-    ) -> Option<Self> {
-        let cases = node
-            .cases
-            .iter()
-            .map(|case| {
-                Some(SourceCase {
-                    pattern: prepare_pattern(&case.pattern, source)?,
-                    captures: (),
-                    body: None,
-                    guard: case.guard.as_deref().map(|expr| {
-                        match values::registered_value(expr, source) {
-                            Some(value) => MatchGuard::Checked(value),
-                            None => MatchGuard::Residual,
-                        }
-                    }),
-                })
+impl SuitePreparation<'_> {
+    pub(super) fn prepare_match(
+        &mut self,
+        branch: &ast::StmtMatch,
+        kind: RegisteredScope,
+        suspended: bool,
+    ) -> Option<SourceMatch> {
+        let patterns = prepare_patterns(branch, self.source)?;
+        let operand = |prepare: &mut Self, expr: &ast::Expr| {
+            prepare.owned_operand(expr, kind, suspended, |scope| scope.frame_value(expr))
+        };
+        let subject = operand(self, &branch.subject);
+        let cases = patterns
+            .into_iter()
+            .zip(&branch.cases)
+            .map(|(pattern, case)| ir::MatchCase {
+                pattern,
+                captures: (),
+                guard: case.guard.as_deref().map(|guard| operand(self, guard)),
+                body: self.physical_suite(&case.body, kind, SuiteSelection::All, suspended),
             })
-            .collect::<Option<_>>()?;
-        Some(Self {
-            subject: None,
-            cases,
-        })
+            .collect();
+        Some(SourceMatch { subject, cases })
     }
+}
+
+pub(super) fn prepare_patterns(
+    branch: &ast::StmtMatch,
+    source: values::RegisteredSource<'_>,
+) -> Option<Vec<ir::MatchPattern>> {
+    branch
+        .cases
+        .iter()
+        .map(|case| prepare_pattern(&case.pattern, source))
+        .collect()
 }
 
 fn prepare_pattern(
