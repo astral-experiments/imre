@@ -2852,7 +2852,7 @@ mod tests {
     #[test]
     fn a_mixed_comparison_keeps_its_operators_and_only_the_residual_child() {
         use crate::frontend::ExpressionInput;
-        use crate::frontend::ExpressionSelection::{Comparison, Inputs};
+        use crate::frontend::ExpressionSelection::Inputs;
         use crate::frontend::SourceOperand::{Checked, Residual};
 
         let text = concat!(
@@ -2875,20 +2875,26 @@ mod tests {
             &text[root.range],
             "first() < (lambda v: v)(middle()) <= last()"
         );
-        let Comparison { ops, operands } = root.selected.as_ref() else {
-            panic!("expected a mixed comparison");
+        let inputs = root.selected.physical().unwrap();
+        let crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredCompare(ops), slots) =
+            &inputs.operation.kind
+        else {
+            panic!("expected a registered comparison");
         };
-        assert_eq!(ops.as_ref(), [ast::CmpOp::Lt, ast::CmpOp::LtE]);
-        let [first, middle, last] = operands.as_ref() else {
-            panic!("expected all three comparison operands");
-        };
-        assert!(matches!(first.operand(), Checked(_)));
-        assert!(matches!(last.operand(), Checked(_)));
+        assert_eq!(ops.as_slice(), [ast::CmpOp::Lt, ast::CmpOp::LtE]);
+        assert_eq!(slots.len(), 3);
+        assert!(
+            slots.iter().enumerate().all(
+                |(i, value)| matches!(value.kind, crate::ir::ExprKind::Local(slot) if slot == i)
+            )
+        );
+        assert!(matches!(inputs.operand(0), Checked(_)));
+        assert!(matches!(inputs.operand(2), Checked(_)));
         let Residual(ExpressionInput {
             range,
             selected: Inputs(_),
             ..
-        }) = middle.operand()
+        }) = inputs.operand(1)
         else {
             panic!("expected the comparison to own its middle call");
         };
@@ -2896,12 +2902,7 @@ mod tests {
 
         prepared.syntax = None;
         assert_eq!(prepared.standalone().unwrap(), original);
-        let Comparison { operands, .. } =
-            residual_selection(prepared.source.initializer.as_mut().unwrap())
-        else {
-            unreachable!()
-        };
-        operands[1] = std::rc::Rc::new(Checked(crate::ir::Expr::none()));
+        replace_residual_input(&mut prepared, 1);
         assert_ne!(prepared.standalone().unwrap(), original);
     }
 

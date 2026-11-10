@@ -1,7 +1,6 @@
 //! Emit checked operations using the storage and ownership of each operand.
 
 mod comparisons;
-pub(crate) use comparisons::ComparisonChain;
 mod iteration;
 pub(crate) use iteration::{LoopEdges, loop_region};
 pub(crate) mod branches;

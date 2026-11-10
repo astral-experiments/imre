@@ -372,6 +372,7 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
     pub(crate) fn prepared_operation(
         owner: &'f mut dyn PreparedSuiteEmitter<'a, 'p>,
         inputs: &'f crate::frontend::PhysicalInputs,
+        condition: bool,
     ) -> String {
         if let Some(operands) = inputs.eager_operands() {
             let handles: Vec<_> = operands.map(|child| owner.source_operand(child)).collect();
@@ -379,7 +380,7 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
             return code.with_checked_frame(sites, None, |mut enclosing| {
                 let mut frame = enclosing.reborrow();
                 frame.inputs = FrameInputs::Handles(&handles);
-                frame.evaluate_handle(&inputs.operation)
+                frame.evaluate_operand(&inputs.operation, condition)
             });
         }
         Self {
@@ -388,9 +389,10 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
             fixed_sites: None,
             inputs: FrameInputs::Prepared(inputs),
         }
-        .evaluate_handle(&inputs.operation)
+        .evaluate_operand(&inputs.operation, condition)
     }
 
+    #[cfg(test)]
     pub(super) fn for_expression(
         code: &'f mut RegisteredFrame<'a, 'p>,
         sites: &'f CheckedSites,

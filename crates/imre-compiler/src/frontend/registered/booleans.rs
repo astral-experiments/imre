@@ -34,10 +34,6 @@ pub(crate) enum Selection {
     Inputs(Box<PhysicalInputs>),
     /// Only the child remains physical. It runs under the suspension's operand mark.
     Suspension(ir::SuspendValue, OwnedExpression),
-    Comparison {
-        ops: Box<[ast::CmpOp]>,
-        operands: Box<[LogicalOperand]>,
-    },
     Mixed {
         parts: Option<Box<[LogicalOperand; 3]>>,
         branch: PreparedSteps,
@@ -325,13 +321,11 @@ impl PhysicalPreparation<'_, '_> {
                 )
             });
             let physical = node.as_unary_op_expr().map(|unary| {
-                let operation = super::operation(
+                self.slotted_operation(
+                    node,
                     ir::Builtin::RegisteredUnary(unary.op.into()),
-                    ir::Type::PythonObject,
-                    vec![ir::Expr::local(0, ir::Type::PythonObject)],
-                );
-                let children = vec![self.shared_input(&unary.operand)].into_boxed_slice();
-                self.inputs(node, operation, children, InputEvaluation::AtUse)
+                    std::iter::once(unary.operand.as_ref()),
+                )
             });
             return Some(Selection::Mixed {
                 parts,
@@ -341,16 +335,13 @@ impl PhysicalPreparation<'_, '_> {
             });
         }
         if let ast::Expr::Compare(cmp) = node {
-            return Some(Selection::Comparison {
-                ops: cmp.ops.clone(),
-                operands: cmp
-                    .operands
-                    .iter()
-                    .map(|child| self.shared_input(child))
-                    .collect(),
-            });
+            return Some(Selection::Inputs(self.slotted_operation(
+                node,
+                ir::Builtin::RegisteredCompare(cmp.ops.to_vec()),
+                cmp.operands.iter(),
+            )));
         }
-        let (op, children, timing) = if let Some((op, operands)) = values::binary_operands(node) {
+        let (op, children) = if let Some((op, operands)) = values::binary_operands(node) {
             let operation = values::binary(
                 op,
                 ir::Expr::local(0, ir::Type::PythonObject),
@@ -362,7 +353,6 @@ impl PhysicalPreparation<'_, '_> {
                     .into_iter()
                     .map(|child| self.shared_input(child))
                     .collect(),
-                InputEvaluation::BeforeOperation,
             )
         } else if let Some(index) = values::index_operands(node, source) {
             (
@@ -372,25 +362,37 @@ impl PhysicalPreparation<'_, '_> {
                     .into_iter()
                     .map(|(child, ordinary)| self.share(child, || ordinary))
                     .collect(),
-                InputEvaluation::BeforeOperation,
             )
         } else if let Some(object) = source.object_operation(node) {
-            let children: Box<[_]> = std::iter::once(object.target)
-                .chain(object.arguments())
-                .map(|child| self.shared_input(child))
-                .collect();
-            let slots = (0..children.len())
-                .map(|i| ir::Expr::local(i, ir::Type::PythonObject))
-                .collect();
-            (
-                super::operation(object.opcode, ir::Type::PythonObject, slots),
-                children,
-                InputEvaluation::AtUse,
-            )
+            let operands = std::iter::once(object.target).chain(object.arguments());
+            return Some(Selection::Inputs(self.slotted_operation(
+                node,
+                object.opcode,
+                operands,
+            )));
         } else {
             return None;
         };
-        Some(Selection::Inputs(self.inputs(node, op, children, timing)))
+        Some(Selection::Inputs(self.inputs(
+            node,
+            op,
+            children,
+            InputEvaluation::BeforeOperation,
+        )))
+    }
+
+    fn slotted_operation<'n>(
+        &mut self,
+        node: &ast::Expr,
+        opcode: ir::Builtin,
+        operands: impl Iterator<Item = &'n ast::Expr>,
+    ) -> Box<PhysicalInputs> {
+        let children: Box<[_]> = operands.map(|child| self.shared_input(child)).collect();
+        let slots = (0..children.len())
+            .map(|slot| ir::Expr::local(slot, ir::Type::PythonObject))
+            .collect();
+        let operation = super::operation(opcode, ir::Type::PythonObject, slots);
+        self.inputs(node, operation, children, InputEvaluation::AtUse)
     }
 
     fn inputs(
@@ -584,11 +586,14 @@ mod tests {
                 panic!("expected a selected comparison");
             };
             assert_eq!(input.range, range);
-            let Selection::Comparison { ops, operands, .. } = input.selected else {
-                panic!("expected a comparison");
+            let inputs = input.selected.physical().unwrap();
+            let ir::ExprKind::Builtin(ir::Builtin::RegisteredCompare(ops), _) =
+                &inputs.operation.kind
+            else {
+                panic!("expected a checked comparison");
             };
-            assert_eq!(ops.as_ref(), [op]);
-            let SourceOperand::Checked(name) = operands[1].operand() else {
+            assert_eq!(ops.as_slice(), [op]);
+            let SourceOperand::Checked(name) = inputs.operand(1) else {
                 panic!("expected the checked name operand");
             };
             let mut names = Vec::new();
