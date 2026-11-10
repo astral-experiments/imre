@@ -1597,6 +1597,7 @@ pub(crate) fn inline_operand(
             | ast::Expr::ListComp(_)
             | ast::Expr::SetComp(_)
             | ast::Expr::DictComp(_)
+            | ast::Expr::Generator(_)
             | ast::Expr::FString(_)
     ) {
         return None;
@@ -2059,7 +2060,14 @@ impl SourceScope<'_> {
                 None,
                 matches!(self.kind, RegisteredScope::Class),
                 |_| true,
-                |child| self.lower_operand(child, display && child.is_await_expr()).ok_or(()),
+                |child| {
+                    if matches!(expr, ast::Expr::Generator(_)) {
+                        self.creating_iterable(|scope| scope.ordinary_operand(child))
+                    } else {
+                        self.lower_operand(child, display && child.is_await_expr())
+                    }
+                    .ok_or(())
+                },
             )
             .ok()??
         };

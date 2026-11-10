@@ -15,7 +15,6 @@ use crate::llvm::registered::{
     ABI, FrameEmitter, Output, RegisteredFrame, SourcePositions, permanent, sites, suspension,
 };
 
-mod comprehensions;
 mod expressions;
 mod statements;
 
@@ -857,21 +856,19 @@ enum Body<'a> {
     Expression(&'a ast::Expr),
     AliasEvaluator(AliasValue<'a>),
     CheckedGenerator(TextRange, &'a crate::frontend::RegisteredGenerator),
-    Generator(TextRange, &'a imre_ast::comprehension::Plan<'a>),
 }
 
 impl Body<'_> {
     fn is_genexpr(&self) -> bool {
-        matches!(self, Self::CheckedGenerator(..) | Self::Generator(..))
+        matches!(self, Self::CheckedGenerator(..))
     }
 
     fn generator_flags(&self) -> u32 {
         use imre_ast::code_flags::{ASYNC_GENERATOR, GENERATOR};
         match self {
             Self::GeneratorFunction(_, flags) => *flags,
-            Self::Generator(_, plan) if plan.body_suspends() => ASYNC_GENERATOR,
             Self::CheckedGenerator(_, child) if child.is_async => ASYNC_GENERATOR,
-            Self::Generator(..) | Self::CheckedGenerator(..) => GENERATOR,
+            Self::CheckedGenerator(..) => GENERATOR,
             _ => 0,
         }
     }
@@ -1125,8 +1122,6 @@ impl SourceMap<'_> {
                 flags,
                 imre_ast::code_flags::COROUTINE | imre_ast::code_flags::ASYNC_GENERATOR
             ),
-            // A residual synchronous generator uses an ordinary compiled step.
-            Body::Generator(..) => native_suspension,
             _ => false,
         };
         match &body {
@@ -1201,7 +1196,6 @@ impl SourceMap<'_> {
                 f.prepare_checked_sites(&checked.function.body);
                 RegisteredFrame::checked_body(&mut f.frame, checked, &f.sites);
             }
-            Body::Generator(_, plan) => f.generator_step(plan),
             Body::AliasEvaluator(AliasValue::Residual(expr)) => {
                 f.checkpoint(expr);
                 let format = f.lookup(".format");
@@ -2036,7 +2030,7 @@ mod tests {
     }
 
     #[test]
-    fn residual_outer_iterable_uses_the_checked_child_after_its_clauses_are_erased() {
+    fn generator_creation_emits_the_prepared_child_after_its_clauses_are_erased() {
         let mut prepared = PreparedBody::module(
             "scan",
             Path::new("scan.py"),
