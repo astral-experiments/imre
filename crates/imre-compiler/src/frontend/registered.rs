@@ -936,6 +936,16 @@ impl statements::StatementLowering for SourceScope<'_> {
     fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<statements::Block, ()> {
         match stmt {
             ast::Stmt::AugAssign(assign) => {
+                if let Some(name) = assign.target.as_name_expr() {
+                    let left = self.ordinary_operand(&assign.target).ok_or(())?;
+                    let right = self.ordinary_operand(&assign.value).ok_or(())?;
+                    let value = operation(
+                        Builtin::RegisteredInPlace(assign.op.as_str()),
+                        Type::PythonObject,
+                        vec![left, right],
+                    );
+                    return Ok((vec![self.store(name.id.as_str(), value)], true));
+                }
                 let (receiver, key) =
                     registered_index_target(&assign.target, self.source).ok_or(())?;
                 let rhs = self.ordinary_operand(&assign.value).ok_or(())?;
@@ -1482,6 +1492,27 @@ mod tests {
         assert_eq!(run.at, 5);
         assert_eq!(plan.checked.function.body.len(), 7);
         assert!(prepare.nested.values().all(RegisteredSuite::fully_checked));
+    }
+
+    #[test]
+    fn name_updates_compile_to_a_load_and_an_inplace_operation() {
+        let graph = SourceGraph::single("result += operand()\n").unwrap();
+        let entry = &graph.modules[graph.entry];
+        for scope in [RegisteredScope::Module, RegisteredScope::Function { is_async: false }] {
+            let plan = registered_suite(
+                &entry.parsed.syntax().body,
+                scope,
+                values::ModuleSource::new(entry).context(&entry.source),
+            )
+            .expect("the whole update has a checked representation");
+            let mut operations = Vec::new();
+            ir::walk_expressions(&plan.function.body, &mut |expr| {
+                if let ExprKind::Builtin(Builtin::RegisteredInPlace(operator), operands) = &expr.kind {
+                    operations.push((*operator, operands.len()));
+                }
+            });
+            assert_eq!(operations, [("+", 2)]);
+        }
     }
 
     #[test]

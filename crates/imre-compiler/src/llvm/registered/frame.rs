@@ -903,10 +903,14 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         };
     }
 
+    fn inplace(&mut self, op: &str, left: &str, right: &str) -> String {
+        self.op(&format!("inplace:{op}"), &[left, right])
+    }
+
     fn update_place(&mut self, place: &Place, op: &str, rhs: impl FnOnce(&mut Self) -> String) {
         let left = self.read(place);
         let right = rhs(self);
-        let value = self.op(&format!("inplace:{op}"), &[&left, &right]);
+        let value = self.inplace(op, &left, &right);
         self.write(place, &value);
     }
 
@@ -1257,7 +1261,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
                     let value = code.unwind_operands(&right_mark, |code| {
                         let left = code.attribute_value(&receiver, name, range);
                         let right = evaluate(code, operands.next().expect("in-place RHS"));
-                        let value = code.op(&format!("inplace:{op}"), &[&left, &right]);
+                        let value = code.inplace(op, &left, &right);
                         // The binary operation consumed both operands before STORE_ATTR.
                         code.keep_operands(&right_mark, &value, "0");
                         value

@@ -1822,6 +1822,8 @@ pub(crate) enum Builtin {
     RegisteredCompare(Vec<ruff_python_ast::CmpOp>),
     /// The needle and a short constant tuple's elements, with optional negation.
     RegisteredContainsLiteral(bool),
+    /// Apply Python's in-place protocol to the previously loaded target and the RHS.
+    RegisteredInPlace(&'static str),
     /// Store evaluates the RHS before the receiver; in-place retains the receiver across the RHS.
     RegisteredAttribute {
         action: AttributeAction,

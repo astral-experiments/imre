@@ -694,6 +694,7 @@ impl Builtin {
             | Self::RegisteredCompare(_)
             | Self::RegisteredContainsLiteral(_)
             | Self::RegisteredUnary(_)
+            | Self::RegisteredInPlace(_)
             | Self::RegisteredAttribute { .. }
             | Self::RegisteredSpread
             | Self::RegisteredDict(_)
