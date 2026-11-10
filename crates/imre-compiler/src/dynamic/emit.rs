@@ -667,7 +667,6 @@ impl<'a> PreparedBody<'a, '_> {
             .flatten();
         let retain_syntax = source.initializer.as_ref().is_some_and(|suite| {
             !suite.fully_checked()
-                || source.scopes.module_annotations
                 || !source.initializer_sites.is_empty()
                     && (declarations.is_empty()
                         || declarations.keys().any(|site| {
@@ -805,63 +804,46 @@ impl<'a> PreparedBody<'a, '_> {
             unit,
             positions: &positions,
         };
-        let code = if self.syntax.is_some() || !self.source.initializer_sites.is_empty() {
-            let mut function = location.function(frame, String::new(), false, true);
-            if let Some(entries) = self.source.namespace_annotations.get(&None) {
-                for site in entries {
-                    function.place_annotation_string(*site);
-                }
+        let mut sites = sites::CheckedSites::default();
+        if let Some(entries) = self.source.namespace_annotations.get(&None) {
+            for &site in entries {
+                location.place_annotation_string(frame.output, &mut sites, site);
             }
-            self.begin_module(&mut function.frame);
+        }
+        frame.begin_module(
+            self.source.scopes.module_annotations,
+            self.source.string_annotations,
+            self.docstring.as_deref(),
+            &self.source.scopes.module_globals,
+        );
+        let module_function = |frame, sites| {
+            let mut function = location.function(frame, String::new(), false, true);
+            function.sites = sites;
             function
                 .declared_globals
                 .clone_from(&self.source.scopes.module_globals);
-            if suite.fully_checked() {
+            function
+        };
+        if suite.fully_checked() {
+            if !self.source.initializer_sites.is_empty() {
+                let mut function = module_function(frame, sites);
                 for &site in &self.source.initializer_sites {
                     function.prepare_site(site);
                 }
-                function.frame.checked_body(&suite.checked, &function.sites);
-            } else {
-                let stmts = self.syntax.as_deref().expect("physical module statements");
-                function.checked_runs(suite, |code, run| code.source_run(stmts, run));
+                (frame, sites) = (function.frame, function.sites);
             }
-            if let Some(sites) = function.module_annotation_sites.take() {
-                function.end("ret i64 0");
-                function.label("annotations_init");
-                function.setup_deferred_module_annotations(&sites);
-                function.jump("module_body");
-            }
-            function.frame.finish(true)
+            frame.checked_body(&suite.checked, &sites);
         } else {
-            self.begin_module(&mut frame);
-            frame.checked_body(&suite.checked, &sites::CheckedSites::default());
-            frame.finish(true)
-        };
+            let stmts = self.syntax.as_deref().expect("physical module statements");
+            let mut function = module_function(frame, sites);
+            function.checked_runs(suite, |code, run| code.source_run(stmts, run));
+            frame = function.frame;
+        }
+        let code =
+            frame.finish_module(|frame, sites| location.define_module_annotations(frame, sites));
         match output.diagnostic.take() {
             Some(diagnostic) => Err(diagnostic),
             None => Ok(code),
-        }
-    }
-
-    fn begin_module(&self, frame: &mut RegisteredFrame<'_, '_>) {
-        if self.source.scopes.module_annotations {
-            if self.source.string_annotations {
-                frame.op("setup_module_string_annotations", &[&frame.scope.clone()]);
-            } else {
-                // Lower the provider after collecting the body, but run its setup first.
-                frame.module_annotation_sites = Some(Vec::new());
-                frame.jump("annotations_init");
-                frame.label("module_body");
-            }
-        }
-        if frame.output.keep_docstrings
-            && let Some(doc) = &self.docstring
-        {
-            let value = frame.text(doc);
-            frame.bind("__doc__", &value);
-        }
-        for name in &self.source.scopes.module_globals {
-            frame.declare_global(name);
         }
     }
 
@@ -1285,7 +1267,7 @@ impl SourceMap<'_> {
             && let Some(entries) = self.namespace_annotations.get(&start)
         {
             for site in entries {
-                f.place_annotation_string(*site);
+                self.place_annotation_string(f.frame.output, &mut f.sites, *site);
             }
         }
         match body {
@@ -1702,11 +1684,16 @@ mod tests {
         assert!(entry.1.contains("call i64 @int_add("));
         assert!(entry.1.contains("call i64 @imre_dyn_positional_call_at("));
         assert!(entry.1.contains("Send the sum."));
+        assert!(prepared.syntax.is_none());
+        prepared.syntax = Some(Cow::Owned(
+            graph.modules[graph.entry].parsed.syntax().body.clone(),
+        ));
         let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
         let plan = &prepared.source.function_bodies[&def.start()];
-        assert!(prepared.source.function_header(def.start()).is_none());
+        let header = prepared.source.function_header(def.start()).unwrap();
+        assert!(header.body.is_empty());
         assert!(std::ptr::eq(
             plan.checked(),
             &bodies[&graph.entry][&def.start()]
@@ -1938,7 +1925,6 @@ mod tests {
             "    transform = lambda x: x + 1\n",
             "    for item in (1, 2): yield transform(choose(item))\n",
             "for item in values(): print(item)\n",
-            // Keep this module mixed so the test can erase the original suite.
             "state: int\n",
         );
         let graph = crate::modules::SourceGraph::single(source).unwrap();
@@ -1963,6 +1949,10 @@ mod tests {
         )
         .unwrap();
         let before = module.standalone().unwrap().unwrap();
+        assert!(module.syntax.is_none());
+        module.syntax = Some(Cow::Owned(
+            graph.modules[graph.entry].parsed.syntax().body.clone(),
+        ));
         let def = module.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
@@ -2458,14 +2448,10 @@ mod tests {
     fn bare_annotation_targets_emit_after_erasing_their_syntax() {
         use crate::ir::{self, Builtin, ExprKind, Node};
 
-        let mut module = PreparedBody::module(
-            "targets",
-            Path::new("targets.py"),
-            "owner.field: Unused\nvalues[(left, right):stop:step, (one, two)]: Unused\n",
-            0,
-            ModuleOrigin::Program(None),
-        )
-        .unwrap();
+        let path = Path::new("targets.py");
+        let source = "owner.field: Unused\nvalues[(left, right):stop:step, (one, two)]: Unused\n";
+        let mut module =
+            PreparedBody::module("targets", path, source, 0, ModuleOrigin::Program(None)).unwrap();
         let suite = module.source.initializer.as_ref().unwrap();
         assert!(suite.fully_checked());
         let mut reads = Vec::new();
@@ -2494,9 +2480,34 @@ mod tests {
         // The tuple used as a slice bound is evaluated as one operand.
         assert_eq!(tuples, 1);
         assert_eq!(discarded, 7);
-        let before = module.standalone().unwrap().unwrap();
+        assert!(module.source.initializer_sites.is_empty());
+        assert!(module.syntax.is_none());
+        let withdrawn = module.standalone().unwrap().unwrap();
+        assert!(withdrawn.1.contains("setup_module_annotations"));
+        let parsed = ParsedModule::parse(path, source.into()).unwrap();
+        module.syntax = Some(Cow::Owned(module_source::into_body(parsed.parsed)));
+        assert_eq!(module.standalone().unwrap().unwrap(), withdrawn);
         module.syntax.as_mut().unwrap().to_mut().clear();
-        assert_eq!(module.standalone().unwrap().unwrap(), before);
+        assert_eq!(module.standalone().unwrap().unwrap(), withdrawn);
+    }
+
+    #[test]
+    fn a_deferred_module_annotation_publishes_its_provider_without_syntax() {
+        let module = PreparedBody::module(
+            "annotations",
+            Path::new("annotations.py"),
+            "value: Later\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        assert!(module.syntax.is_none());
+        assert!(module.source.initializer_sites.is_empty());
+        let (_, llvm) = module.standalone().unwrap().unwrap();
+        assert!(llvm.contains("mark_module_annotation"));
+        assert!(llvm.contains("setup_module_annotations"));
+        assert!(llvm.contains("__annotate__"));
+        assert_eq!(llvm.matches(" = private constant %code_site").count(), 1);
     }
 
     #[test]
@@ -2729,16 +2740,12 @@ mod tests {
 
     #[test]
     fn residual_with_reads_its_prepared_manager_after_erasing_the_call() {
-        // The module annotation retains the physical suite for this residual-input test.
-        let text = "def read(open_stream, path, record):\n    with open_stream(path) as stream:\n        record((lambda: stream)())\nstate: int\n";
-        let mut prepared = PreparedBody::module(
-            "scan",
-            Path::new("scan.py"),
-            text,
-            0,
-            ModuleOrigin::Program(None),
-        )
-        .unwrap();
+        let text = "def read(open_stream, path, record):\n    with open_stream(path) as stream:\n        record((lambda: stream)())\n";
+        let path = Path::new("scan.py");
+        let mut prepared =
+            PreparedBody::module("scan", path, text, 0, ModuleOrigin::Program(None)).unwrap();
+        let parsed = ParsedModule::parse(path, text.into()).unwrap();
+        prepared.syntax = Some(Cow::Owned(module_source::into_body(parsed.parsed)));
         let function = prepared.syntax.as_ref().unwrap()[0]
             .as_function_def_stmt()
             .unwrap();
