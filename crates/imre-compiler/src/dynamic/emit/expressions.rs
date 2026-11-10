@@ -156,7 +156,7 @@ impl Function<'_, '_> {
                     slice.upper.as_deref(),
                     slice.step.as_deref(),
                 ]
-                .map(|bound| bound.map_or_else(|| "0".into(), |bound| self.expr(bound)));
+                .map(|bound| bound.map_or_else(|| "0".into(), |bound| self.index_operand(bound)));
                 self.slice_object(bounds)
             }
             ast::Expr::Dict(v) => self.dict_display(
