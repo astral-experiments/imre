@@ -7,7 +7,7 @@ pub(crate) mod sites;
 pub(crate) mod suspension;
 use crate::frontend::RegisteredFunction;
 use crate::ir::DisplayKind;
-use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Statement, Type};
+use crate::ir::{self, Builtin, Expr, ExprKind, Statement, Type};
 use crate::llvm::body::FunctionBody;
 pub(crate) use abi::{ABI, CallArguments, Output, permanent};
 use abi::{GUARDED_LIT, GUARDED_NAMED_OP, NAMED_OP};
@@ -87,10 +87,7 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
             ExprKind::Builtin(Builtin::RegisteredUnpack { .. }, args) => args.len() == 1,
             ExprKind::Builtin(Builtin::ListGet, args) => args.len() == 2,
             ExprKind::Builtin(Builtin::RegisteredNamespace(_), args) => args.len() <= 1,
-            ExprKind::Binary(Binary::Add, left, right) => {
-                expr.ty == Type::PythonObject
-                    || left.ty == Type::Int && right.ty == Type::Int && expr.ty == Type::Int
-            }
+            ExprKind::Binary(..) => true,
             ExprKind::List(_) | ExprKind::Tuple(_) | ExprKind::Set { .. } => {
                 uses_python_protocol = true;
                 true

@@ -878,8 +878,51 @@ pub(crate) enum Binary {
     BitXor,
     LeftShift,
     RightShift,
+    Power,
+    MatrixMultiply,
     Repeat,
     Concat,
+}
+
+impl From<ruff_python_ast::Operator> for Binary {
+    fn from(op: ruff_python_ast::Operator) -> Self {
+        use ruff_python_ast::Operator;
+        match op {
+            Operator::Add => Self::Add,
+            Operator::Sub => Self::Subtract,
+            Operator::Mult => Self::Multiply,
+            Operator::Div => Self::Divide,
+            Operator::FloorDiv => Self::FloorDivide,
+            Operator::Mod => Self::Modulo,
+            Operator::BitAnd => Self::BitAnd,
+            Operator::BitOr => Self::BitOr,
+            Operator::BitXor => Self::BitXor,
+            Operator::LShift => Self::LeftShift,
+            Operator::RShift => Self::RightShift,
+            Operator::Pow => Self::Power,
+            Operator::MatMult => Self::MatrixMultiply,
+        }
+    }
+}
+
+impl Binary {
+    pub(crate) fn protocol(self) -> &'static str {
+        match self {
+            Self::Add | Self::Concat => "+",
+            Self::Subtract => "-",
+            Self::Multiply | Self::Repeat => "*",
+            Self::Divide => "/",
+            Self::FloorDivide => "//",
+            Self::Modulo => "%",
+            Self::BitAnd => "&",
+            Self::BitOr => "|",
+            Self::BitXor => "^",
+            Self::LeftShift => "<<",
+            Self::RightShift => ">>",
+            Self::Power => "**",
+            Self::MatrixMultiply => "@",
+        }
+    }
 }
 
 #[derive(Clone, Copy)]

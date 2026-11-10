@@ -71,6 +71,10 @@ impl Function<'_, '_> {
         // The display itself is covered even if an operand still needs the syntax adapter.
         let value = if let Some((items, display)) = crate::frontend::display_elements(expr) {
             self.sequence_display(items, display, None, ast_spread, Self::expr)
+        } else if let Some((op, [left, right])) = crate::frontend::binary_operands(expr) {
+            let left = self.expr(left);
+            let right = self.expr(right);
+            self.binary_handles(op, &left, &right)
         } else if let Some(operation) = self.source.registered_source().object_operation(expr) {
             if let crate::ir::Builtin::RegisteredUnary(op) = operation.opcode {
                 let scope = self.begin_operand_scope();
@@ -146,11 +150,6 @@ impl Function<'_, '_> {
                 v.items.iter().map(|item| (item.key.as_ref(), &item.value)),
                 Self::expr,
             ),
-            ast::Expr::BinOp(v) => {
-                let left = self.expr(&v.left);
-                let right = self.expr(&v.right);
-                self.op(v.op.as_str(), &[&left, &right])
-            }
             ast::Expr::BoolOp(_) => self.boolean_value(expr),
             ast::Expr::Compare(v) => self.source_comparison(v, false),
             ast::Expr::If(v) => ValueJoin::select(

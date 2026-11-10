@@ -3599,7 +3599,9 @@ impl Emitter<'_, '_> {
                         left.operand, right.operand
                     ))
                 }
-                Binary::Repeat
+                Binary::Power
+                | Binary::MatrixMultiply
+                | Binary::Repeat
                 | Binary::Concat
                 | Binary::BitAnd
                 | Binary::BitOr
@@ -3616,6 +3618,7 @@ impl Emitter<'_, '_> {
             };
         }
         match op {
+            Binary::Power | Binary::MatrixMultiply => unreachable!("fixed operator was checked"),
             Binary::Repeat => {
                 let (list, count) = if matches!(
                     left.ty,
@@ -3693,7 +3696,11 @@ impl Emitter<'_, '_> {
                     (left.min >= 0 && right.min > 0) || (left.max <= 0 && right.max < 0);
                 Some(!same_sign)
             }
-            Binary::Divide | Binary::Repeat | Binary::Concat => None,
+            Binary::Power
+            | Binary::MatrixMultiply
+            | Binary::Divide
+            | Binary::Repeat
+            | Binary::Concat => None,
         }
     }
 
@@ -3811,7 +3818,11 @@ impl Emitter<'_, '_> {
                 };
                 self.instruction(format!("{instruction} i64 {left}, {right}"))
             }
-            Binary::Divide | Binary::Repeat | Binary::Concat => {
+            Binary::Power
+            | Binary::MatrixMultiply
+            | Binary::Divide
+            | Binary::Repeat
+            | Binary::Concat => {
                 unreachable!("only proved integer arithmetic")
             }
         };

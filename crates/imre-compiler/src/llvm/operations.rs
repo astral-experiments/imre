@@ -210,11 +210,16 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         }
     }
 
-    fn python_add(&mut self, left: &CheckedValue, right: &CheckedValue) -> CheckedValue {
+    fn python_binary(
+        &mut self,
+        op: Binary,
+        left: &CheckedValue,
+        right: &CheckedValue,
+    ) -> CheckedValue {
         let frame = self.python();
         let lhs = frame.materialize(left);
         let rhs = frame.materialize(right);
-        CheckedValue::handle(frame.op("+", &[&lhs, &rhs]))
+        CheckedValue::handle(frame.binary_handles(op, &lhs, &rhs))
     }
 
     fn add_integers(&mut self, left: &CheckedValue, right: &CheckedValue) -> CheckedValue {
@@ -244,7 +249,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             Self::body,
             |code, yes, no| code.body().branch(&guard, yes, no),
             exact,
-            |code| code.python_add(left, right),
+            |code| code.python_binary(Binary::Add, left, right),
         )
         .expect("guarded addition has a normal result")
     }
@@ -326,13 +331,12 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             if a.use_integer_add(left.ty, &b, right.ty) {
                 self.add_integers(&a, &b)
             } else {
-                self.python_add(&a, &b)
+                self.python_binary(op, &a, &b)
             }
-        } else {
-            let (CheckedValue::Native(x, _), CheckedValue::Native(y, _)) = (&a, &b) else {
-                unreachable!("unsupported checked operator")
-            };
+        } else if let (CheckedValue::Native(x, None), CheckedValue::Native(y, None)) = (&a, &b) {
             CheckedValue::owned(self.fixed().binary(op, &x.value, &y.value))
+        } else {
+            self.python_binary(op, &a, &b)
         };
         self.release_input(a);
         self.release_input(b);

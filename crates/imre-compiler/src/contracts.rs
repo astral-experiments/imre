@@ -1182,7 +1182,9 @@ impl Binary {
     /// Conservative operation effect before operand-specific conversion checks.
     pub(crate) fn may_raise(self) -> bool {
         match self {
-            Self::Divide
+            Self::Power
+            | Self::MatrixMultiply
+            | Self::Divide
             | Self::FloorDivide
             | Self::Modulo
             | Self::Repeat
@@ -1201,6 +1203,8 @@ impl Binary {
     /// Includes checked byte concatenation and conversion of mixed integer/float operands.
     pub(crate) fn may_raise_with_operands(self, left: Type, right: Type) -> bool {
         self.may_raise()
+            || left == Type::PythonObject
+            || right == Type::PythonObject
             || (matches!(self, Self::Concat) && matches!(left, Type::Str | Type::Bytes))
             || matches!(
                 (left, right),
