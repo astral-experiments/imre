@@ -1016,7 +1016,7 @@ fn the_ordinary_entry_keeps_an_operand_in_the_default_flow_region() {
 }
 
 #[test]
-fn quoted_return_uses_a_linked_class_reexported_for_type_checking() {
+fn quoted_annotations_use_a_linked_class_reexported_for_type_checking() {
     let project = tempdir().unwrap();
     let root = project.path();
     fs::write(
@@ -1027,7 +1027,7 @@ fn quoted_return_uses_a_linked_class_reexported_for_type_checking() {
     let main = root.join("main.py");
     fs::write(
         &main,
-        "import labels\nfrom model import Packet\nfrom typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from labels import Alias\ndef get() -> 'Alias':\n    return Packet()\nget()\n",
+        "import labels\nfrom model import Packet\nfrom typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from labels import Alias\ndef get() -> 'Alias':\n    return Packet()\ndef keep(value: 'Alias') -> 'Alias':\n    return value\nkeep(get())\n",
     )
     .unwrap();
     for model in ["class Packet: pass\n", "class Packet(ValueError): pass\n"] {
@@ -1038,4 +1038,48 @@ fn quoted_return_uses_a_linked_class_reexported_for_type_checking() {
             crate::CheckedProgram::Native(_)
         ));
     }
+}
+
+#[test]
+fn quoted_method_result_keeps_the_class_scope_binding() {
+    use ruff_text_size::Ranged;
+
+    let project = tempdir().unwrap();
+    let main = project.path().join("main.py");
+    fs::write(
+        project.path().join("model.py"),
+        "class Packet: pass\nclass Other: pass\n",
+    )
+    .unwrap();
+    let source = r#"from model import Packet, Other
+from model import Other as Alias
+class Factory:
+    Alias = Packet
+    def get(self) -> "Alias":
+        return Packet()
+print(Factory().get() is None)
+"#;
+    fs::write(&main, source).unwrap();
+    let mut graph = crate::modules::SourceGraph::load(&main, Some(project.path()), &[]).unwrap();
+    let class = graph.modules[graph.entry].parsed.syntax().body[2]
+        .as_class_def_stmt()
+        .unwrap();
+    let get = class.body[1].as_function_def_stmt().unwrap();
+    let result = get.returns.as_deref().unwrap();
+    assert!(graph.session.quoted_class(graph.entry, result).is_some());
+
+    // Even the same literal at the same offsets inside decoded text has no lexical scope.
+    let padding = " ".repeat(usize::from(result.start()) - "list[".len());
+    let decoded = format!("list[{padding}\"Alias\"]");
+    let parsed = ruff_python_parser::parse_expression(&decoded).unwrap();
+    let detached = &parsed.expr().as_subscript_expr().unwrap().slice;
+    assert_eq!(detached.range(), result.range());
+    assert!(graph.session.quoted_class(graph.entry, detached).is_none());
+    crate::checked_lower(&mut graph).unwrap();
+    fs::write(&main, source.replace("return Packet()", "return Other()")).unwrap();
+    let error = crate::check_file(&main, None).unwrap_err();
+    assert!(
+        error.contains("main.py:6:16: Imre: expected model.Packet, got model.Other"),
+        "{error}"
+    );
 }

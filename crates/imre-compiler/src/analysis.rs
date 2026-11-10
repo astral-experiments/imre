@@ -1298,16 +1298,18 @@ impl Session {
         )
     }
 
-    /// Locate the physical class of a postponed result name in the definition's scope.
-    pub(crate) fn quoted_class_result(
+    /// Locate the physical class of a quoted annotation in its declaration scope.
+    pub(crate) fn quoted_class(
         &self,
         module: usize,
         annotation: &Expr,
     ) -> Option<(usize, TextRange)> {
         use ty_python_semantic::types::{Type, TypeDefinition};
 
-        let name = annotation.as_string_literal_expr()?.value.to_str();
-        if !ruff_python_stdlib::identifiers::is_identifier(name) {
+        let literal = annotation.as_string_literal_expr()?;
+        // Recursively parsed string contents have no node in the indexed module.
+        literal.node_index.load().as_u32()?;
+        if !ruff_python_stdlib::identifiers::is_identifier(literal.value.to_str()) {
             return None;
         }
         self.hint_reads.set(self.hint_reads.get() + 1);
