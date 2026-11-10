@@ -10,6 +10,8 @@ type ClassLiteral = (Option<ModuleId>, Rc<[String]>);
 
 #[derive(Default)]
 pub(super) struct ModuleValues {
+    /// A reached initializer may still be waiting for a callee during this inference round.
+    waiting: RefCell<HashMap<DefinitionId, Failure>>,
     pub(super) registered_initializers: bool,
     /// A concrete source read supplies the registered function's ordinary Python binding.
     pub(super) missing_bindings: RefCell<std::collections::BTreeMap<usize, Diagnostic>>,
@@ -122,6 +124,13 @@ impl ModuleValues {
     }
 
     /// Resolves storage only after the defining initializer has been checked.
+    pub(super) fn read(&self, definition: DefinitionId) -> Result<Option<(usize, Type)>, String> {
+        if let Some(wait) = self.waiting.borrow().get(&definition) {
+            return Err(wait.clone());
+        }
+        Ok(self.get(definition))
+    }
+
     pub fn get(&self, definition: DefinitionId) -> Option<(usize, Type)> {
         self.definitions.borrow().get(&definition).copied()
     }
@@ -411,7 +420,8 @@ impl Checker<'_> {
                 self.source,
                 statement,
                 "imported module values cannot contain callable values",
-            ));
+            )
+            .classify(Kind::UnsupportedRepresentation));
         }
         let value = if rebound.is_some() {
             if !class_data_type(value.ty, self.types) {
@@ -419,7 +429,8 @@ impl Checker<'_> {
                     self.source,
                     statement,
                     "a rebindable module value requires plain scalar or container storage",
-                ));
+                )
+                .classify(Kind::UnsupportedRepresentation));
             }
             Expr {
                 ty: self.types.list(value.ty),
@@ -507,6 +518,7 @@ impl Initialization {
         let module = &checker.graph.modules[checker.module];
         let mut body = Vec::new();
         let mut checkpoints = Vec::new();
+        let mut pending = None;
         let complete = range.end == module.parsed.syntax().body.len();
         for index in range {
             let statement = &module.parsed.syntax().body[index];
@@ -640,8 +652,21 @@ impl Initialization {
             {
                 match checker.initialize_global(statement, definition) {
                     Ok(value) => body.push(value),
-                    // Each module binding has one initializer. Leave its layout unknown
-                    // and continue discovering calls that do not read this binding.
+                    Err(wait @ Failure::PendingSignature { .. }) => {
+                        checker
+                            .globals
+                            .waiting
+                            .borrow_mut()
+                            .insert(definition, wait.clone());
+                        pending.get_or_insert(wait);
+                    }
+                    // The binding exists even when its initializer needs Python storage.
+                    // Preserve a real use-before-initialization error for unreached stores.
+                    Err(error) if checker.missing_operation(&error) => {
+                        if checker.globals.get(definition).is_none() {
+                            checker.globals.insert(definition, Type::PythonObject);
+                        }
+                    }
                     Err(error) if checker.defer_object_error(&error) => continue,
                     Err(error) => {
                         return Err(
@@ -650,7 +675,7 @@ impl Initialization {
                     }
                 }
             } else {
-                let (checked, _) = checker.statement(statement, &[])?;
+                let (checked, _) = checker.statement(statement)?;
                 // An imported module's __main__ block must type-check, but it
                 // cannot read definitions that are still being initialized.
                 if checker.module != checker.graph.entry
@@ -679,6 +704,7 @@ impl Initialization {
                 statement: module.parsed.syntax().body.len(),
             });
         }
+        checker.finish_region(pending.map_or(Ok(()), Err))?;
         Ok(Self {
             module: checker.module,
             function: ir::Function {

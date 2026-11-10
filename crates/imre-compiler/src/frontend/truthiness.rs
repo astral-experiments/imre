@@ -242,7 +242,7 @@ impl Checker<'_> {
             } else if known == Some(!and) {
                 selected
             } else {
-                self.types.join(selected, right.ty).ok_or_else(|| {
+                self.types.join_results(selected, right.ty).ok_or_else(|| {
                     error(
                         self.source,
                         first,

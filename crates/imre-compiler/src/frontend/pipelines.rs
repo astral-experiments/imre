@@ -1291,6 +1291,36 @@ impl Checker<'_> {
         )))
     }
 
+    pub(super) fn prepare_object_iteration(
+        &mut self,
+        iterable: Expr,
+        node: &impl Ranged,
+    ) -> Prepared {
+        self.require_registered_operation(node);
+        let value = self.hidden(Type::PythonObject);
+        let ready = self.hidden(Type::Bool);
+        Prepared {
+            evaluate: vec![Statement::Expr(iterable)],
+            acquire: Vec::new(),
+            next: vec![
+                Statement::Assign(
+                    ready,
+                    Expr {
+                        ty: Type::Bool,
+                        ..Expr::unrepresented()
+                    },
+                ),
+                Statement::Assign(value, Expr::unrepresented()),
+            ],
+            value,
+            ready,
+            elementless: false,
+            eager_list: None,
+            writes: HashSet::new(),
+            clear: vec![value, ready],
+        }
+    }
+
     pub(super) fn prepare_cursor(&mut self, cursor: Expr, element: Type) -> Prepared {
         Prepared::cursor(cursor, element, |ty| self.hidden(ty))
     }
@@ -2998,5 +3028,47 @@ impl Checker<'_> {
                 clear,
             },
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn python_pulls_and_unpacking_preserve_the_following_contracts() {
+        use crate::frontend::{Kind, lower_with_caller_cache};
+        use crate::modules::SourceGraph;
+
+        for (body, location) in [
+            (
+                "    for x in manager:\n        values: list[int] = [3]\n        values.append(True)",
+                "4:23",
+            ),
+            (
+                "    x: int = 2\n    for x in manager:\n        pass\n    values: list[int] = [3]\n    values.append(True)",
+                "6:19",
+            ),
+            (
+                "    x: int = 2\n    for _, x in zip([1], manager):\n        pass\n    values: list[int] = [3]\n    values.append(True)",
+                "6:19",
+            ),
+            (
+                "    for x in map(int, manager):\n        values: list[int] = [3]\n        values.append(True)",
+                "4:23",
+            ),
+            (
+                "    a, (b, *tail) = manager\n    values: list[int] = [3]\n    values.append(True)",
+                "4:19",
+            ),
+        ] {
+            let source = format!(
+                "def check(manager):\n{body}\ndef get_context():\n    return set()\ncheck(get_context())\n"
+            );
+            let mut graph = SourceGraph::single(&source).unwrap();
+            let Err(error) = lower_with_caller_cache(&mut graph, None) else {
+                panic!("expected a checked list operand");
+            };
+            assert_eq!(error.kind, Kind::ExactType);
+            assert!(error.to_string().contains(location), "{error}");
+        }
     }
 }

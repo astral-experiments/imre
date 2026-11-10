@@ -653,6 +653,15 @@ impl Types {
         }
     }
 
+    /// A selected Python result can hold either operand when one already uses an object handle.
+    pub(crate) fn join_results(&self, left: Type, right: Type) -> Option<Type> {
+        if left == Type::PythonObject || right == Type::PythonObject {
+            Some(Type::PythonObject)
+        } else {
+            self.join(left, right)
+        }
+    }
+
     /// Joins values only when one existing concrete or nullable layout can hold both.
     pub(crate) fn join(&self, left: Type, right: Type) -> Option<Type> {
         if let (Some(left), Some(right)) = (self.directory_value(left), self.directory_value(right))

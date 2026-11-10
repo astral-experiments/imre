@@ -641,6 +641,7 @@ impl Checker<'_> {
         if matches!(collector, Collector::IntegerSum) && display.clauses.len() == 1 {
             slices::fuse(&mut body, &params, &mut args);
         }
+        helper.finish_region(Ok(()))?;
         self.helpers.finish(
             id,
             Helper {

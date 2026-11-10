@@ -13,6 +13,7 @@ pub(crate) type Result<T, M = String> = std::result::Result<T, Failure<M>>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
     Ordinary,
+    UnsupportedRepresentation,
     UnresolvedParameter(ModuleId, ruff_text_size::TextSize),
     ExecutionOperand(ModuleId),
     RegisteredExecution,
@@ -174,6 +175,10 @@ impl From<&str> for Diagnostic {
 }
 
 impl Kind {
+    pub(super) fn is_representation(self) -> bool {
+        self == Self::UnsupportedRepresentation || self.is_object()
+    }
+
     pub(super) fn is_object(self) -> bool {
         matches!(self, Self::Object | Self::ScopedObject) || self.is_class_layout()
     }
@@ -223,9 +228,9 @@ impl Failure<&'static str> {
                 module,
                 range,
             },
-            Self::Diagnostic(report) => {
-                Diagnostic::at(source, site, report.message.to_owned()).into()
-            }
+            Self::Diagnostic(report) => Diagnostic::at(source, site, report.message.to_owned())
+                .classified(report.kind)
+                .into(),
         }
     }
 }
@@ -267,6 +272,10 @@ impl Failure {
             d.kind = kind;
         }
         self
+    }
+
+    pub(super) fn is_representation(&self) -> bool {
+        matches!(self, Self::Diagnostic(d) if d.kind.is_representation())
     }
 
     pub(super) fn is_object(&self) -> bool {

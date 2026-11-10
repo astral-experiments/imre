@@ -63,6 +63,35 @@ pub const BUILTIN_FUNCTIONS: &[&str] = &[
     "anext",
 ];
 
+/// Class objects exported directly by the boxed builtins namespace.
+pub const BUILTIN_TYPES: &[&str] = &[
+    "bool",
+    "bytearray",
+    "bytes",
+    "complex",
+    "dict",
+    "enumerate",
+    "filter",
+    "float",
+    "frozenset",
+    "int",
+    "list",
+    "map",
+    "memoryview",
+    "object",
+    "property",
+    "classmethod",
+    "staticmethod",
+    "range",
+    "set",
+    "slice",
+    "str",
+    "tuple",
+    "type",
+    "super",
+    "zip",
+];
+
 pub enum Provider {
     Builtin,
     #[cfg(unix)]

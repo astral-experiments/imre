@@ -414,6 +414,9 @@ impl Verifier<'_> {
     fn expression_types(&self, value: &Expr) -> Result<(), String> {
         self.ty(value.ty)?;
         match &value.kind {
+            ExprKind::Builtin(Builtin::Unrepresented, _) => {
+                Err("unrepresented source operand in executable IR".into())
+            }
             ExprKind::Dict { key, value, .. } => {
                 self.ty(*key)?;
                 self.ty(*value)
