@@ -316,7 +316,7 @@ async def factory(seed, rows, mark):
             generators: Some(&generators),
             ..source
         };
-        let sites = RegisteredLambda::collect(&body, source, scopes.lambdas);
+        let mut sites = RegisteredLambda::collect(&body, source, scopes.lambdas);
         let factory = body[0].as_function_def_stmt().unwrap();
         let lambda = |index: usize| {
             factory.body[index]
@@ -355,6 +355,28 @@ async def factory(seed, rows, mark):
         );
 
         let residual = lambda(1);
+        let parameters = residual.parameters.as_ref().unwrap();
+        let thunk = parameters.kwonlyargs[2].default.as_deref().unwrap();
+        let binding = |index: usize| &*factory.body[index].as_assign_stmt().unwrap().value;
+        let owner = RegisteredScope::Function { is_async: true };
+        let complete = values::RegisteredSource {
+            lambdas: Some(&sites),
+            ..source
+        };
+        assert!(RegisteredOperand::prepare(binding(1), complete, owner).is_some());
+
+        // Withhold this child's body and let ordinary default preparation locate its parameter.
+        assert!(sites.get_mut(&thunk.start()).unwrap().body.take().is_some());
+        let mixed = RegisteredLambda::prepare(
+            residual,
+            values::RegisteredSource {
+                lambdas: Some(&sites),
+                ..source
+            },
+            &FunctionScope::lambda(residual, false),
+            owner,
+        );
+        sites.insert(residual.start(), mixed);
         let [
             LambdaDefault::Value(_),
             LambdaDefault::Operand(_),
@@ -366,7 +388,6 @@ async def factory(seed, rows, mark):
         else {
             panic!("only the lambda with an unprepared body should need its physical parameter");
         };
-        let parameters = residual.parameters.as_ref().unwrap();
         let stream = parameters.posonlyargs[2].default.as_deref().unwrap();
         let deferred = parameters.kwonlyargs[1].default.as_deref().unwrap();
         for (value, site, is_async) in [
@@ -383,15 +404,12 @@ async def factory(seed, rows, mark):
             assert_eq!(children, [site]);
             assert_eq!(generators[&site].is_async, is_async);
         }
-        let thunk = parameters.kwonlyargs[2].default.as_deref().unwrap();
         assert!(std::ptr::eq(parameter.source(residual), thunk));
 
         let source = values::RegisteredSource {
             lambdas: Some(&sites),
             ..source
         };
-        let owner = RegisteredScope::Function { is_async: true };
-        let binding = |index: usize| &*factory.body[index].as_assign_stmt().unwrap().value;
         assert!(RegisteredOperand::prepare(binding(0), source, owner).is_some());
         assert!(RegisteredOperand::prepare(binding(1), source, owner).is_none());
     }
