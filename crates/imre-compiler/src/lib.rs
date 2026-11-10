@@ -1597,6 +1597,31 @@ print("result", call(b=2, a=1))
     }
 
     #[test]
+    fn comments_do_not_change_normalized_provider_imports() {
+        let root = tempfile::tempdir().unwrap();
+        let entry = root.path().join("main.py");
+        let source = "import ｊｓｏｎ\nprint(ｊｓｏｎ.loads('42'))\n";
+        for comment in ["", "# code\n"] {
+            std::fs::write(&entry, format!("{source}{comment}")).unwrap();
+            super::check_file(&entry, None).unwrap();
+            super::compile_file(&entry, None, &CompileOptions::default()).unwrap();
+        }
+
+        std::fs::write(
+            root.path().join("scores.py"),
+            "def twice(x: int) -> int:\n    return x + x\n\ndef total() -> int:\n    return twice('x')\n",
+        )
+        .unwrap();
+        let source = "import ｊｓｏｎ\nimport scores\nif False:\n    print(ｊｓｏｎ.loads('42'))\nprint(scores.total())\n";
+        let errors = ["", "# code\n"].map(|comment| {
+            std::fs::write(&entry, format!("{source}{comment}")).unwrap();
+            super::check_file(&entry, None).unwrap_err()
+        });
+        assert!(errors[0].contains("scores.py:5:18"), "{}", errors[0]);
+        assert_eq!(errors[0], errors[1]);
+    }
+
+    #[test]
     fn dictionary_set_construction_preserves_object_fallback() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("main.py");

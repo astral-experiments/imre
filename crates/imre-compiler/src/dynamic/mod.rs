@@ -803,55 +803,8 @@ pub(crate) fn compile(
         }
         (source, Some(identity))
     };
-    // An ordinary entry can import a package that uses the object runtime without
-    // accessing sys.path or installation metadata in the entry itself.
-    let object_hint = object_imports
-        || startup.is_some()
-            && (src.contains("urllib") || src.contains("ftplib") || src.contains("argparse"))
-        || src.contains("class") && src.contains('=')
-        || cfg!(unix) && src.contains("signal")
-        || [
-            "__future__",
-            "hashlib",
-            "ssl",
-            "_imp",
-            "atexit",
-            "faulthandler",
-            "code",
-            "copyreg",
-            "weakref",
-            "pathlib",
-            "sys",
-            "platform",
-            "pyexpat",
-            "xml.parsers",
-            "keyword",
-            "site",
-            "importlib",
-            "runpy",
-            "json",
-            "tomllib",
-            "zoneinfo",
-            "xml",
-            "opcode",
-            "operator",
-            "struct",
-            "traceback",
-            "unittest",
-            "SystemExit",
-            "__import__",
-            "__reduce",
-            "__getstate__",
-            "__getinitargs__",
-            "templatelib",
-        ]
-        .iter()
-        .any(|name| src.contains(name));
     let startup_fallback = startup.is_some();
     let ordered_command = matches!(operation, Some(ObjectOperation::OrderedCommandImport));
-    if !object_hint && !startup_fallback && !ordered_command {
-        return Ok(None);
-    }
     let kind = if command.is_some() {
         SourceKind::Command
     } else {
@@ -916,10 +869,9 @@ pub(crate) fn compile(
         || (first.uses_import_builtin && startup.is_some())
         || provider_script;
     let object_entry = first.invalid_executable.is_some()
-        || object_hint
-            && (entry_requests_objects
-                || (operation.is_some() && !ordered_command)
-                || (object_imports && !first.names.is_empty()));
+        || entry_requests_objects
+        || (operation.is_some() && !ordered_command)
+        || (object_imports && !first.names.is_empty());
     // Existing object imports keep their normal project-module lookup. Only a new
     // startup fallback needs to verify that the imported provider is bundled.
     let consider_startup =
