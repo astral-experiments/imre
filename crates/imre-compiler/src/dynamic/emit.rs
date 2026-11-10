@@ -1112,7 +1112,7 @@ impl std::ops::DerefMut for Function<'_, '_> {
     }
 }
 
-use crate::llvm::registered::context::ContextExit;
+use crate::llvm::registered::context::ContextRegion;
 
 /// The lexical cleanup selected at try entry, valid on every edge leaving the body.
 #[derive(Clone, Copy)]
@@ -1122,7 +1122,7 @@ enum FinallySuite<'p> {
 }
 
 enum Cleanup<'p> {
-    With(ContextExit),
+    With(ContextRegion),
     ExceptionName(String),
     RetainedValue {
         value: String,
@@ -1349,6 +1349,36 @@ mod tests {
         let suite = &prepared.source.nested_bodies[&loop_.body[0].start()];
         let gaps: Vec<_> = suite.residual.iter().map(|run| run.statements.clone()).collect();
         assert_eq!(gaps, [0..1, 2..4]);
+    }
+
+    #[test]
+    fn residual_with_reads_its_prepared_manager_after_erasing_the_call() {
+        let text = "def entries(path):\n    with scandir(path) as stream:\n        for entry in stream:\n            yield entry\n";
+        let mut prepared = PreparedBody::module(
+            "scan",
+            Path::new("scan.py"),
+            text,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let original = prepared.standalone().unwrap().unwrap();
+        let function = prepared.body[0].as_function_def_stmt_mut().unwrap();
+        let context = function.body[0].as_with_stmt_mut().unwrap();
+        let context_range = context.range();
+        let manager = &mut context.items[0].context_expr;
+
+        assert!(
+            prepared.source.statement_sites.contexts[&context_range][0]
+                .manager
+                .is_some()
+        );
+        let call = manager.as_call_expr_mut().unwrap();
+        *call.func = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+            range: call.func.range(),
+            node_index: Default::default(),
+        });
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
     }
 
     #[test]
