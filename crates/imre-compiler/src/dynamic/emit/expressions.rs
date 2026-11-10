@@ -6,7 +6,7 @@ use super::Function;
 use crate::frontend::{ExpressionInput, ExpressionSelection, LogicalOperand, SourceOperand};
 use crate::ir::control::Context as BooleanContext;
 use crate::llvm::operations::branches::{Logical, LogicalEmitter, LogicalInput};
-use crate::llvm::operations::{CheckedBody, CheckedValue, ComparisonChain, ValueJoin};
+use crate::llvm::operations::{CheckedBody, CheckedValue, ValueJoin};
 use crate::llvm::registered::PreparedSuiteEmitter;
 
 impl LogicalEmitter<LogicalOperand> for Function<'_, '_> {
@@ -83,24 +83,10 @@ impl Function<'_, '_> {
         let physical = selected.physical();
         let position = physical.map_or(range.start(), |inputs| inputs.position);
         let previous = self.enter_expression(range, position);
-        let value = if let ExpressionSelection::Comparison { ops, operands, .. } = selected {
-            let result = ComparisonChain::emit_registered(
-                self,
-                ops,
-                condition,
-                |code| &mut code.frame,
-                operands.iter().map(|child| child.operand()),
-                Self::source_operand,
-            );
-            if condition {
-                result.into_condition()
-            } else {
-                result.into_handle()
-            }
-        } else if let ExpressionSelection::Suspension(kind, child) = selected {
+        let value = if let ExpressionSelection::Suspension(kind, child) = selected {
             self.suspend_value(*kind, range, |code| code.input_value(child.as_input()))
         } else if let Some(inputs) = physical {
-            crate::llvm::registered::Frame::prepared_operation(self, inputs)
+            crate::llvm::registered::Frame::prepared_operation(self, inputs, condition)
         } else if let ExpressionSelection::Mixed {
             value: Some(plan), ..
         } = selected

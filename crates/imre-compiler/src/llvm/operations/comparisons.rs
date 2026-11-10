@@ -1,7 +1,6 @@
 //! Source-ordered comparison links, with an early exit for each false middle result.
 use super::super::{Compare, Emitter, Expr, Operand, Type, Value};
 use super::{CheckedBody, CheckedValue, ValueJoin};
-use crate::llvm::registered::{Frame, RegisteredFrame, sites::CheckedSites};
 use ruff_python_ast::CmpOp;
 
 enum Relation {
@@ -47,17 +46,15 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
         ops: &[CmpOp],
         truth: bool,
     ) -> CheckedValue {
-        ComparisonChain::emit_registered(
-            self,
-            ops,
-            truth,
-            |body| body.python(),
-            values,
-            |body, expr| {
-                let value = body.evaluate(expr);
-                body.python().materialize(&value)
-            },
-        )
+        let mut chain = ComparisonChain::new(self, Relations::Python(ops), truth);
+        values
+            .iter()
+            .find_map(|expr| {
+                let value = self.evaluate(expr);
+                let handle = self.python().materialize(&value);
+                chain.push(self, CheckedValue::handle(handle))
+            })
+            .expect("complete registered comparison")
     }
 
     fn compare_pair(
@@ -110,7 +107,7 @@ impl Relations<'_> {
 }
 
 /// Owns the CFG and live middle operand between successive, source-ordered values.
-pub(crate) struct ComparisonChain<'a> {
+struct ComparisonChain<'a> {
     ops: Relations<'a>,
     truth: bool,
     root: Option<(String, (String, String))>,
@@ -141,31 +138,6 @@ impl<'a> ComparisonChain<'a> {
             join: ValueJoin::default(),
             branched: false,
         }
-    }
-
-    /// Each reached link pulls its next rooted operand in the active frame.
-    pub(crate) fn emit_registered<'f, 'p, C, T>(
-        context: &mut C,
-        ops: &'a [CmpOp],
-        truth: bool,
-        frame: impl Fn(&mut C) -> &mut RegisteredFrame<'f, 'p>,
-        operands: impl IntoIterator<Item = T>,
-        mut evaluate: impl FnMut(&mut C, T) -> String,
-    ) -> CheckedValue {
-        let sites = CheckedSites::default();
-        let mut chain = Self::new(
-            &mut CheckedBody::registered(Frame::for_expression(frame(context), &sites)),
-            Relations::Python(ops),
-            truth,
-        );
-        for operand in operands {
-            let handle = evaluate(context, operand);
-            let mut body = CheckedBody::registered(Frame::for_expression(frame(context), &sites));
-            if let Some(result) = chain.push(&mut body, CheckedValue::handle(handle)) {
-                return result;
-            }
-        }
-        unreachable!("a comparison has a final link")
     }
 
     fn push(
