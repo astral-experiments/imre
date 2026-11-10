@@ -428,10 +428,11 @@ impl<'a> PreparedBody<'a, '_> {
             });
         }
         for annotation in sites.annotations.values() {
-            if let crate::frontend::AnnotationValue::Source(value) = &annotation.value {
-                let value = value
-                    .as_starred_expr()
-                    .map_or(value, |star| star.value.as_ref());
+            if let crate::frontend::AnnotationValue::Input {
+                operand: crate::frontend::PhysicalOperand::Source(value),
+                ..
+            } = &annotation.value
+            {
                 prepare.sites.expressions.prepare_input(
                     value,
                     values,
@@ -1169,7 +1170,7 @@ impl SourceMap<'_> {
                 f.frame.annotation_scope = scope;
                 f.prepared_function(plan, |code, run| {
                     for index in run.statements.clone() {
-                        code.unprepared_annotation(entries[index]);
+                        code.insert_annotation_input(entries[index]);
                     }
                 });
             }
@@ -1362,6 +1363,37 @@ mod tests {
             .statement_sites
             .expressions
             .replace_residual_input(value, index, crate::ir::Expr::none());
+    }
+
+    #[test]
+    fn starred_annotation_retains_the_scoped_input_and_its_unpack() {
+        use crate::frontend::{AnnotationValue, PhysicalOperand};
+        let source = "def f(*items: *[row for row in rows()]): pass\n";
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let before = prepared.standalone().unwrap().unwrap();
+        let field = prepared
+            .source
+            .annotations
+            .values_mut()
+            .find(|field| field.name == "items")
+            .unwrap();
+        let AnnotationValue::Input {
+            operand: PhysicalOperand::Checked(input),
+            unpack: Some(unpack),
+        } = &mut field.value
+        else {
+            panic!("expected the starred annotation's checked comprehension and unpack");
+        };
+        crate::verify::registered(input.region()).unwrap();
+        **unpack = crate::ir::Expr::local(0, crate::ir::Type::PythonObject);
+        assert_ne!(prepared.standalone().unwrap().unwrap(), before);
     }
 
     #[test]

@@ -599,7 +599,7 @@ impl ParameterAnnotations {
                 });
             sites.insert(
                 site,
-                DeferredAnnotation::new(name.to_owned(), expression, value),
+                DeferredAnnotation::new(name.to_owned(), expression, value, source),
             );
             entries.push(ir::AnnotationOccurrence { site, index: None });
         }
@@ -629,13 +629,41 @@ fn scalar_reference(expr: &ast::Expr) -> Option<String> {
 
 pub(crate) enum AnnotationValue {
     Checked(Expr),
-    Source(ast::Expr),
+    Input {
+        operand: PhysicalOperand,
+        unpack: Option<Box<Expr>>,
+    },
 }
 
 impl DeferredAnnotation {
-    fn new(name: String, expression: &ast::Expr, checked: Option<Expr>) -> Self {
+    fn new(
+        name: String,
+        expression: &ast::Expr,
+        checked: Option<Expr>,
+        source: values::RegisteredSource<'_>,
+    ) -> Self {
         let value = checked.map_or_else(
-            || AnnotationValue::Source(expression.clone()),
+            || {
+                let (input, unpack) = match expression {
+                    ast::Expr::Starred(starred) => (
+                        starred.value.as_ref(),
+                        Some(Box::new(super::annotation_operands::unpack_annotation(
+                            Expr::local(0, Type::PythonObject),
+                        ))),
+                    ),
+                    _ => (expression, None),
+                };
+                let operand = RegisteredOperand::prepare(
+                    input,
+                    source,
+                    RegisteredScope::Function { is_async: false },
+                )
+                .map_or_else(
+                    || PhysicalOperand::Source(Box::new(input.clone())),
+                    |value| PhysicalOperand::Checked(Box::new(value)),
+                );
+                AnnotationValue::Input { operand, unpack }
+            },
             AnnotationValue::Checked,
         );
         Self {
@@ -659,7 +687,7 @@ impl DeferredAnnotation {
         for (index, occurrence) in entries.iter().enumerate() {
             let value = match &sites[&occurrence.site].value {
                 AnnotationValue::Checked(value) => value.clone(),
-                AnnotationValue::Source(_) => {
+                AnnotationValue::Input { .. } => {
                     SourceRun::record(&mut residual, index, body.len());
                     continue;
                 }
@@ -854,6 +882,7 @@ pub(crate) fn registered_sites<'a, R>(
                                 self.operands
                                     .get(&ann.annotation.start())
                                     .map(|operand| operand.operand(ann.annotation.start())),
+                                self.source,
                             ),
                         );
                         (
@@ -3552,7 +3581,7 @@ mod tests {
                 AnnotationValue::Checked(_)
             ));
             let unavailable = &sites[&stmts[5].start()];
-            assert!(matches!(unavailable.value, AnnotationValue::Source(_)));
+            assert!(matches!(unavailable.value, AnnotationValue::Input { .. }));
             assert!(matches!(
                 sites[&stmts[6].start()].value,
                 AnnotationValue::Checked(_)

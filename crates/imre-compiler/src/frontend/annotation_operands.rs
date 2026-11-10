@@ -69,6 +69,13 @@ fn checked_annotation_value(expr: &ast::Expr, source: RegisteredSource<'_>) -> O
     let ast::Expr::Starred(starred) = expr else {
         return Region::Suite.operand(expr, source);
     };
+    Some(unpack_annotation(
+        Region::Suite.operand(&starred.value, source)?,
+    ))
+}
+
+/// A starred annotation must yield exactly one type.
+pub(super) fn unpack_annotation(value: Expr) -> Expr {
     let items = Expr {
         ty: Type::PythonObject,
         kind: ExprKind::Builtin(
@@ -77,13 +84,13 @@ fn checked_annotation_value(expr: &ast::Expr, source: RegisteredSource<'_>) -> O
                 star: None,
                 target: None,
             },
-            vec![Region::Suite.operand(&starred.value, source)?],
+            vec![value],
         ),
     };
-    Some(Expr {
+    Expr {
         ty: Type::PythonObject,
         kind: ExprKind::Builtin(Builtin::ListGet, vec![items, Expr::integer(0)]),
-    })
+    }
 }
 
 /// Prepare each operand in its declaring source and key it by its expression’s byte offset.
