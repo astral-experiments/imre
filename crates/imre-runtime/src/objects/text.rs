@@ -421,6 +421,13 @@ pub(crate) fn python_isdigit(text: &str) -> bool {
     text.chars().all(crate::integer_text::is_digit)
 }
 
+pub(crate) fn python_isnumeric(text: &str) -> bool {
+    if text.is_ascii() {
+        return !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());
+    }
+    text.chars().all(crate::integer_text::is_numeric)
+}
+
 /// Tests for a nonempty string of Unicode 16 letters.
 ///
 /// # Safety
@@ -439,6 +446,16 @@ pub unsafe extern "C" fn imre_str_isalpha(value: *const Str) -> u32 {
 pub unsafe extern "C" fn imre_str_isdigit(value: *const Str) -> u32 {
     // SAFETY: the receiver stays alive for this call.
     u32::from(python_isdigit(unsafe { &*value }))
+}
+
+/// Tests for a nonempty string of Unicode numeric characters.
+///
+/// # Safety
+/// The caller roots the immutable string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_isnumeric(value: *const Str) -> u32 {
+    // SAFETY: the receiver stays alive for this call.
+    u32::from(python_isnumeric(unsafe { &*value }))
 }
 
 /// Tests a native string with Python's alphanumeric predicate.

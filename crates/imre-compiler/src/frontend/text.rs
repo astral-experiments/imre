@@ -403,6 +403,7 @@ impl Checker<'_> {
                     "isascii" => ir::TextPredicate::Ascii,
                     "isalpha" => ir::TextPredicate::Alpha,
                     "isdigit" => ir::TextPredicate::Digit,
+                    "isnumeric" => ir::TextPredicate::Numeric,
                     "isspace" => ir::TextPredicate::Space,
                     "islower" => ir::TextPredicate::Lower,
                     "istitle" => ir::TextPredicate::Title,

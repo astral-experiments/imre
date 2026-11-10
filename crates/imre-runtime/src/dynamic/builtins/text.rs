@@ -2811,6 +2811,7 @@ pub(super) fn method(
         "isdigit" => Some(crate::objects::python_isdigit),
         "isidentifier" => Some(crate::objects::python_isidentifier),
         "islower" => Some(|text| crate::objects::python_islower(text.chars())),
+        "isnumeric" => Some(crate::objects::python_isnumeric),
         "isprintable" => Some(crate::objects::python_isprintable),
         "isspace" => Some(crate::objects::python_isspace),
         "istitle" => Some(|text| crate::objects::python_istitle(text.chars())),
@@ -2857,6 +2858,7 @@ pub(super) fn method(
                 | "isalpha"
                 | "isdigit"
                 | "isidentifier"
+                | "isnumeric"
                 | "isprintable"
                 | "isspace"
         ) && matches!(

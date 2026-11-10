@@ -34,6 +34,7 @@ pub const STR_METHODS: &[&str] = &[
     "isdigit",
     "isidentifier",
     "islower",
+    "isnumeric",
     "isprintable",
     "isspace",
     "istitle",

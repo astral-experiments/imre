@@ -366,6 +366,20 @@ pub(super) fn is_digit(c: char) -> bool {
         0x1f100..=0x1f10a)
 }
 
+/// CPython 3.14 uses the Unicode 16 Decimal, Digit, and Numeric properties.
+pub(super) fn is_numeric(c: char) -> bool {
+    use icu_properties::{CodePointMapData, props::NumericType};
+
+    // ICU also marks newly assigned characters and eight older cuneiform signs
+    // as numeric in Unicode 17.
+    CodePointMapData::<NumericType>::new().get(c) != NumericType::None
+        && !newer_printable(c)
+        && !matches!(
+            c as u32,
+            0x12038..=0x12039 | 0x12079 | 0x12226 | 0x1222b | 0x1230b | 0x1230d | 0x12399
+        )
+}
+
 /// Identifies characters printable in locked ICU 2.3 data but not Unicode 16.
 ///
 /// These sorted half-open ranges are the complete difference between Ruff's

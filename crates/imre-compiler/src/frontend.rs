@@ -12341,6 +12341,7 @@ impl<'a> Checker<'a> {
                     | "isascii"
                     | "isalpha"
                     | "isdigit"
+                    | "isnumeric"
                     | "isspace"
                     | "islower"
                     | "istitle"
