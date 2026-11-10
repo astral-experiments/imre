@@ -8,44 +8,6 @@ pub(crate) enum Context {
     Value,
 }
 
-pub(crate) enum Split<'a, E> {
-    Operands(bool, &'a [E]),
-    Pair(bool, &'a E, &'a E, Option<&'a TruthPredicate>),
-    Not(&'a E),
-    Conditional(&'a E, &'a E, &'a E),
-    Leaf,
-}
-
-/// Structural decomposition for planning. The graph contains only successor indices.
-pub(crate) trait BranchShape: Sized {
-    fn split(&self, context: Context) -> Split<'_, Self>;
-}
-
-impl BranchShape for Expr {
-    fn split(&self, context: Context) -> Split<'_, Self> {
-        match &self.kind {
-            ExprKind::BooleanValue(and, left, right, predicate) => {
-                Split::Pair(*and, left, right, predicate.as_ref())
-            }
-            ExprKind::Boolean(and, operands) => Split::Operands(*and, operands),
-            ExprKind::Conditional(test, yes, no) => Split::Conditional(test, yes, no),
-            ExprKind::Not(operand) if context == Context::Condition => Split::Not(operand),
-            ExprKind::Builtin(Builtin::RegisteredUnary(ObjectUnary::Not), operands)
-                if context == Context::Condition =>
-            {
-                Split::Not(&operands[0])
-            }
-            ExprKind::Builtin(Builtin::Bool, operands) if context == Context::Condition => {
-                operands[0].split(context)
-            }
-            ExprKind::Builtin(Builtin::RegisteredLocation(..), operands) => {
-                operands[0].split(context)
-            }
-            _ => Split::Leaf,
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
 pub(crate) enum Target {
     Step(usize),
@@ -54,20 +16,15 @@ pub(crate) enum Target {
 }
 /// Successors of each operand, in reverse execution order. The leaves stay
 /// with the caller and are never evaluated while planning.
-#[derive(Clone)]
 pub(crate) struct Edges(pub(crate) Vec<(Target, Target)>);
 
 /// The expression to evaluate and, when needed, its specialized truth operation.
-pub(crate) struct Input<'a, E> {
-    pub(crate) value: &'a E,
+pub(crate) struct Input<'a> {
+    pub(crate) value: &'a Expr,
     pub(crate) predicate: Option<&'a TruthPredicate>,
 }
 
-pub(crate) fn edges<E: BranchShape>(
-    expr: &E,
-    context: Context,
-    depth: Depth,
-) -> (Edges, Vec<Input<'_, E>>) {
+pub(crate) fn edges(expr: &Expr, context: Context, depth: Depth) -> (Edges, Vec<Input<'_>>) {
     let mut plan = Edges(Vec::new());
     let mut inputs = Vec::new();
     plan.lower(
@@ -92,10 +49,10 @@ pub(crate) enum Depth {
 }
 
 impl Edges {
-    fn leaf<'a, E>(
+    fn leaf<'a>(
         &mut self,
-        inputs: &mut Vec<Input<'a, E>>,
-        input: Input<'a, E>,
+        inputs: &mut Vec<Input<'a>>,
+        input: Input<'a>,
         yes: Target,
         no: Target,
     ) -> Target {
@@ -105,10 +62,10 @@ impl Edges {
         Target::Step(index)
     }
 
-    fn lower<'a, E: BranchShape>(
+    fn lower<'a>(
         &mut self,
-        inputs: &mut Vec<Input<'a, E>>,
-        input: Input<'a, E>,
+        inputs: &mut Vec<Input<'a>>,
+        input: Input<'a>,
         context: Context,
         depth: Depth,
         yes: Target,
@@ -122,12 +79,21 @@ impl Edges {
                 Depth::All => self.lower(inputs, input, context, depth, yes, no),
             }
         };
-        match input.value.split(context) {
-            Split::Operands(and, operands) => {
+        let mut expression = input.value;
+        while let ExprKind::Builtin(op, operands) = &expression.kind {
+            match op {
+                Builtin::RegisteredLocation(..) => {}
+                Builtin::Bool if context == Context::Condition => {}
+                _ => break,
+            }
+            expression = &operands[0];
+        }
+        match &expression.kind {
+            ExprKind::Boolean(and, operands) => {
                 let (last, prefix) = operands.split_last().expect("nonempty boolean expression");
                 let mut next = child(last, yes, no, predicate);
                 for operand in prefix.iter().rev() {
-                    next = if and {
+                    next = if *and {
                         child(operand, next, no, None)
                     } else {
                         child(operand, yes, next, None)
@@ -135,16 +101,23 @@ impl Edges {
                 }
                 next
             }
-            Split::Pair(and, left, right, left_test) => {
+            ExprKind::BooleanValue(and, left, right, left_test) => {
                 let next = child(right, yes, no, predicate);
-                if and {
-                    child(left, next, no, left_test)
+                if *and {
+                    child(left, next, no, left_test.as_ref())
                 } else {
-                    child(left, yes, next, left_test)
+                    child(left, yes, next, left_test.as_ref())
                 }
             }
-            Split::Not(operand) => child(operand, no, yes, None),
-            Split::Conditional(test, body, otherwise) => {
+            ExprKind::Not(operand) if context == Context::Condition => {
+                child(operand, no, yes, None)
+            }
+            ExprKind::Builtin(Builtin::RegisteredUnary(ObjectUnary::Not), operands)
+                if context == Context::Condition =>
+            {
+                child(&operands[0], no, yes, None)
+            }
+            ExprKind::Conditional(test, body, otherwise) => {
                 let no_arm = child(otherwise, yes, no, predicate);
                 // The else arm falls through into the enclosing Boolean expression.
                 // The then arm jumps over it with a materialized result.
@@ -176,7 +149,7 @@ impl Edges {
                     ),
                 }
             }
-            Split::Leaf => self.leaf(inputs, input, yes, no),
+            _ => self.leaf(inputs, input, yes, no),
         }
     }
 }

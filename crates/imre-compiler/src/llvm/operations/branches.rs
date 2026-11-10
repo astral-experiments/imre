@@ -4,7 +4,7 @@ use crate::ir::control::{Context, Depth, Edges, Input, Target, edges};
 use crate::ir::{Builtin, Expr, ExprKind, TruthPredicate, Type};
 
 /// A logical plan owns the short-circuit edges and the selected value join.
-pub(crate) struct Logical {
+struct Logical {
     edges: Edges,
     labels: Vec<String>,
     result: ResultEdges,
@@ -19,28 +19,6 @@ enum ResultEdges {
     },
 }
 
-/// A checked leaf, or the result of emitting an irreducible input in its source frame.
-pub(crate) enum LogicalInput<'a> {
-    Checked(&'a Expr, Option<&'a TruthPredicate>),
-    Handle(String),
-    Predicate(String),
-}
-
-pub(crate) trait LogicalEmitter<I> {
-    fn logical_input<'a>(&mut self, input: &'a I, context: Context) -> LogicalInput<'a>;
-    fn with_logical_body<R>(&mut self, emit: impl FnOnce(&mut CheckedBody) -> R) -> R;
-}
-
-impl LogicalEmitter<Input<'_, Expr>> for CheckedBody<'_, '_, '_, '_> {
-    fn logical_input<'a>(&mut self, input: &'a Input<'_, Expr>, _: Context) -> LogicalInput<'a> {
-        LogicalInput::Checked(input.value, input.predicate)
-    }
-
-    fn with_logical_body<R>(&mut self, emit: impl FnOnce(&mut CheckedBody) -> R) -> R {
-        emit(self)
-    }
-}
-
 impl Logical {
     fn new(body: &mut super::FunctionBody, edges: Edges, result: ResultEdges) -> Self {
         let labels = (1..edges.0.len()).map(|_| body.name("logical")).collect();
@@ -51,12 +29,7 @@ impl Logical {
         }
     }
 
-    pub(crate) fn branch(
-        body: &mut super::FunctionBody,
-        edges: Edges,
-        yes: &str,
-        no: &str,
-    ) -> Self {
+    fn branch(body: &mut super::FunctionBody, edges: Edges, yes: &str, no: &str) -> Self {
         Self::new(
             body,
             edges,
@@ -64,7 +37,7 @@ impl Logical {
         )
     }
 
-    pub(crate) fn value(body: &mut super::FunctionBody, edges: Edges, result_type: Type) -> Self {
+    fn value(body: &mut super::FunctionBody, edges: Edges, result_type: Type) -> Self {
         let done = body.name("logical");
         Self::new(
             body,
@@ -79,33 +52,26 @@ impl Logical {
 
     /// Request each input on its own CFG edge. The last operand in value context
     /// is returned directly, without a truth callback.
-    pub(crate) fn emit<I>(
-        mut self,
-        code: &mut impl LogicalEmitter<I>,
-        inputs: &[I],
-    ) -> Option<CheckedValue> {
+    fn emit(mut self, code: &mut CheckedBody, inputs: &[Input<'_>]) -> Option<CheckedValue> {
         let context = match self.result {
             ResultEdges::Branch(..) => Context::Condition,
             ResultEdges::Value { .. } => Context::Value,
         };
         for (i, leaf) in inputs.iter().enumerate().rev() {
             let tested = context == Context::Value && !self.final_value(i);
-            let mark = code.with_logical_body(|code| {
-                if let Some(block) = self.labels.get(i) {
-                    code.body().start(block);
-                }
-                if tested { code.root_mark() } else { None }
-            });
-            let leaf = code.logical_input(leaf, context);
-            code.with_logical_body(|code| self.accept(code, i, leaf, mark));
+            if let Some(block) = self.labels.get(i) {
+                code.body().start(block);
+            }
+            let mark = if tested { code.root_mark() } else { None };
+            self.accept(code, i, leaf, mark);
         }
         match self.result {
             ResultEdges::Branch(..) => None,
-            ResultEdges::Value { done, join, .. } => code.with_logical_body(|code| {
+            ResultEdges::Value { done, join, .. } => {
                 let body = code.body();
                 body.start(&done);
                 join.finish(body)
-            }),
+            }
         }
     }
 
@@ -120,7 +86,7 @@ impl Logical {
         &mut self,
         code: &mut CheckedBody,
         i: usize,
-        input: LogicalInput,
+        input: &Input<'_>,
         mark: Option<String>,
     ) {
         let (t, f) = self.edges.0[i];
@@ -131,15 +97,13 @@ impl Logical {
         };
         let (done, join, result_type) = match &mut self.result {
             ResultEdges::Branch(yes, no) => {
-                let bit = match input {
-                    LogicalInput::Checked(expr, None) => code.test_operand(expr),
-                    LogicalInput::Checked(expr, Some(predicate)) => {
-                        let (value, bit) = code.logical_operand(expr, Some(predicate));
+                let bit = match input.predicate {
+                    None => code.test_operand(input.value),
+                    Some(predicate) => {
+                        let (value, bit) = code.logical_operand(input.value, Some(predicate));
                         code.release_input(value);
                         bit
                     }
-                    LogicalInput::Predicate(bit) => bit,
-                    LogicalInput::Handle(_) => unreachable!("expected a predicate"),
                 };
                 code.body()
                     .branch(&bit, label(t, yes, no), label(f, yes, no));
@@ -154,23 +118,12 @@ impl Logical {
         let yes = label(t, done, done);
         let no = label(f, done, done);
         if yes == done && no == done {
-            let value = match input {
-                LogicalInput::Checked(expr, _) => code.evaluate(expr),
-                LogicalInput::Handle(id) => CheckedValue::handle(id),
-                LogicalInput::Predicate(_) => unreachable!("expected a value"),
-            };
+            let value = code.evaluate(input.value);
             code.transfer(&value);
             join.jump(code.body(), done, value);
             return;
         }
-        let (value, truth) = match input {
-            LogicalInput::Checked(expr, predicate) => code.logical_operand(expr, predicate),
-            LogicalInput::Handle(id) => {
-                let truth = code.python().truth(&id);
-                (CheckedValue::handle(id), truth)
-            }
-            LogicalInput::Predicate(_) => unreachable!("expected a value"),
-        };
+        let (value, truth) = code.logical_operand(input.value, input.predicate);
         if yes != done && no != done {
             code.release_input(value);
             code.end_roots(mark);

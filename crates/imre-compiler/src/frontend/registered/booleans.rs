@@ -1,24 +1,10 @@
 //! Prepare expression inputs owned by residual source suites.
 use super::values::{self, RegisteredSource};
 use crate::ir;
-use ir::control::{BranchShape, Context, Depth, Edges, Split, edges};
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use std::collections::HashMap;
 use std::rc::Rc;
-
-impl BranchShape for ast::Expr {
-    fn split(&self, context: Context) -> Split<'_, Self> {
-        match self {
-            Self::BoolOp(op) => Split::Operands(op.op == ast::BoolOp::And, &op.values),
-            Self::If(test) => Split::Conditional(&test.test, &test.body, &test.orelse),
-            Self::UnaryOp(op) if context == Context::Condition && op.op == ast::UnaryOp::Not => {
-                Split::Not(&op.operand)
-            }
-            _ => Split::Leaf,
-        }
-    }
-}
 
 /// Complete expressions own their checked children. Mixed sites retain the operation
 /// and the inputs the frontend could check in their physical activation.
@@ -34,41 +20,23 @@ pub(crate) enum Selection {
     Inputs(Box<PhysicalInputs>),
     /// Only the child remains physical. It runs under the suspension's operand mark.
     Suspension(ir::SuspendValue, OwnedExpression),
-    Mixed {
-        parts: Option<Box<[LogicalOperand; 3]>>,
-        branch: PreparedSteps,
-        value: Option<PreparedSteps>,
-        physical: Option<Box<PhysicalInputs>>,
-    },
 }
 
 impl Selection {
     pub(crate) fn physical(&self) -> Option<&PhysicalInputs> {
         match self {
-            Self::Inputs(inputs)
-            | Self::Mixed {
-                physical: Some(inputs),
-                ..
-            } => Some(inputs),
+            Self::Inputs(inputs) => Some(inputs),
             _ => None,
         }
     }
 
     #[cfg(test)]
     pub(crate) fn replace_residual_input(&mut self, at: usize, value: ir::Expr) {
-        let inputs: &mut [LogicalOperand] = match self {
-            Self::Inputs(inputs)
-            | Self::Mixed {
-                physical: Some(inputs),
-                ..
-            } => &mut inputs.children,
-            Self::Mixed {
-                parts: Some(parts), ..
-            } => parts.as_mut_slice(),
-            _ => panic!("expected prepared mixed operands"),
+        let Self::Inputs(inputs) = self else {
+            panic!("expected prepared mixed operands");
         };
-        assert!(matches!(inputs[at].as_ref(), SourceOperand::Residual(_)));
-        inputs[at] = Rc::new(SourceOperand::Checked(value));
+        assert!(matches!(inputs.children[at], SourceOperand::Residual(_)));
+        inputs.children[at] = SourceOperand::Checked(value);
     }
 }
 
@@ -81,7 +49,7 @@ enum InputEvaluation {
 pub(crate) struct PhysicalInputs {
     pub(crate) operation: ir::Expr,
     pub(crate) position: TextSize,
-    children: Box<[LogicalOperand]>,
+    children: Box<[PreparedInput]>,
     evaluation: InputEvaluation,
 }
 
@@ -108,14 +76,6 @@ impl PreparedInput {
             Self::Residual(input) => SourceOperand::Residual(input.as_input()),
         }
     }
-}
-
-/// A projection shares the same physical operand as every other use of this occurrence.
-pub(crate) type LogicalOperand = Rc<PreparedInput>;
-
-pub(crate) struct PreparedSteps {
-    pub(crate) edges: Edges,
-    pub(crate) operands: Vec<LogicalOperand>,
 }
 
 impl ExpressionSites {
@@ -178,8 +138,6 @@ struct PhysicalPreparation<'a, 's> {
     source: RegisteredSource<'s>,
     scope: super::RegisteredScope,
     suspended: bool,
-    // The source tree stays borrowed for this root. Only the owned operand escapes.
-    occurrences: Option<HashMap<*const ast::Expr, LogicalOperand>>,
 }
 
 impl<'a, 's> PhysicalPreparation<'a, 's> {
@@ -194,7 +152,6 @@ impl<'a, 's> PhysicalPreparation<'a, 's> {
             source,
             scope,
             suspended,
-            occurrences: None,
         }
     }
 }
@@ -271,68 +228,42 @@ impl PhysicalPreparation<'_, '_> {
         self.residual(node)
     }
 
-    fn shared_input(&mut self, node: &ast::Expr) -> LogicalOperand {
-        let source = self.source;
-        self.share(node, || values::registered_value(node, source))
+    fn ordinary_input(&mut self, node: &ast::Expr) -> PreparedInput {
+        self.input(node, values::registered_value(node, self.source))
     }
 
-    fn share(
-        &mut self,
-        node: &ast::Expr,
-        ordinary: impl FnOnce() -> Option<ir::Expr>,
-    ) -> LogicalOperand {
-        let occurrence = std::ptr::from_ref(node);
-        if let Some(input) = self
-            .occurrences
-            .as_ref()
-            .and_then(|inputs| inputs.get(&occurrence))
-        {
-            return Rc::clone(input);
+    /// Keep control flow in the checked operation and bind each leaf at its own use.
+    fn logical_operation(&mut self, node: &ast::Expr, inputs: &mut Vec<PreparedInput>) -> ir::Expr {
+        if ExpressionSites::governs(node) || node.is_compare_expr() {
+            let value = values::operation(
+                node,
+                self.source,
+                None,
+                false,
+                |_| true,
+                |child| Ok::<_, std::convert::Infallible>(self.logical_operation(child, inputs)),
+            )
+            .unwrap()
+            .expect("a logical or comparison expression has a checked operation");
+            return self.source.located(node, value);
         }
-        let input = Rc::new(self.input(node, ordinary()));
-        if let Some(inputs) = &mut self.occurrences {
-            inputs.insert(occurrence, Rc::clone(&input));
-        }
-        input
-    }
-
-    fn steps(&mut self, node: &ast::Expr, context: Context) -> PreparedSteps {
-        let (edges, leaves) = edges(node, context, Depth::All);
-        let operands = leaves
-            .into_iter()
-            .map(|input| input.value)
-            .map(|child| self.shared_input(child))
-            .collect();
-        PreparedSteps { edges, operands }
+        let slot = inputs.len();
+        inputs.push(self.ordinary_input(node));
+        self.source
+            .located(node, ir::Expr::local(slot, ir::Type::PythonObject))
     }
 
     fn residual(&mut self, node: &ast::Expr) -> Option<Selection> {
         let source = self.source;
         if ExpressionSites::governs(node) {
-            self.occurrences.get_or_insert_with(HashMap::new);
-            let branch = self.steps(node, Context::Condition);
-            let value = node
-                .is_bool_op_expr()
-                .then(|| self.steps(node, Context::Value));
-            let parts = node.as_if_expr().map(|choice| {
-                Box::new(
-                    [&*choice.test, &*choice.body, &*choice.orelse]
-                        .map(|part| self.shared_input(part)),
-                )
-            });
-            let physical = node.as_unary_op_expr().map(|unary| {
-                self.slotted_operation(
-                    node,
-                    ir::Builtin::RegisteredUnary(unary.op.into()),
-                    std::iter::once(unary.operand.as_ref()),
-                )
-            });
-            return Some(Selection::Mixed {
-                parts,
-                branch,
-                value,
-                physical,
-            });
+            let mut inputs = Vec::new();
+            let operation = self.logical_operation(node, &mut inputs);
+            return Some(Selection::Inputs(self.inputs(
+                node,
+                operation,
+                inputs.into_boxed_slice(),
+                InputEvaluation::AtUse,
+            )));
         }
         if let ast::Expr::Compare(cmp) = node {
             return Some(Selection::Inputs(self.slotted_operation(
@@ -351,7 +282,7 @@ impl PhysicalPreparation<'_, '_> {
                 operation,
                 operands
                     .into_iter()
-                    .map(|child| self.shared_input(child))
+                    .map(|child| self.ordinary_input(child))
                     .collect(),
             )
         } else if let Some(index) = values::index_operands(node, source) {
@@ -360,7 +291,7 @@ impl PhysicalPreparation<'_, '_> {
                 index
                     .inputs
                     .into_iter()
-                    .map(|(child, ordinary)| self.share(child, || ordinary))
+                    .map(|(child, ordinary)| self.input(child, ordinary))
                     .collect(),
             )
         } else if let Some(object) = source.object_operation(node) {
@@ -387,7 +318,7 @@ impl PhysicalPreparation<'_, '_> {
         opcode: ir::Builtin,
         operands: impl Iterator<Item = &'n ast::Expr>,
     ) -> Box<PhysicalInputs> {
-        let children: Box<[_]> = operands.map(|child| self.shared_input(child)).collect();
+        let children: Box<[_]> = operands.map(|child| self.ordinary_input(child)).collect();
         let slots = (0..children.len())
             .map(|slot| ir::Expr::local(slot, ir::Type::PythonObject))
             .collect();
@@ -399,7 +330,7 @@ impl PhysicalPreparation<'_, '_> {
         &self,
         node: &ast::Expr,
         operation: ir::Expr,
-        children: Box<[LogicalOperand]>,
+        children: Box<[PreparedInput]>,
         evaluation: InputEvaluation,
     ) -> Box<PhysicalInputs> {
         Box::new(PhysicalInputs {
@@ -541,7 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn logical_projections_share_occurrences_with_distinct_comparison_operators() {
+    fn logical_inputs_keep_distinct_comparisons_at_the_same_range() {
         let text = "result = ((lambda: 2)() < before) and ((lambda: 3)() > after)\n";
         let graph = crate::modules::SourceGraph::single(text).unwrap();
         let module = &graph.modules[graph.entry];
@@ -563,37 +494,20 @@ mod tests {
             super::super::RegisteredScope::Module,
             false,
         );
-        let Selection::Mixed {
-            branch,
-            value: Some(value),
-            ..
-        } = prepare.select_value(&root).unwrap()
-        else {
-            panic!("expected both short-circuit projections");
+        let Selection::Inputs(inputs) = prepare.select_value(&root).unwrap() else {
+            panic!("expected a checked logical operation with prepared inputs");
         };
-        assert_eq!(branch.operands.len(), 2);
-        assert_eq!(value.operands.len(), 2);
-        assert!(!Rc::ptr_eq(&branch.operands[0], &branch.operands[1]));
-        for ((condition, value), (op, expected_name)) in branch
-            .operands
-            .iter()
-            .zip(&value.operands)
-            .rev()
-            .zip([(ast::CmpOp::Lt, "before"), (ast::CmpOp::Gt, "after")])
-        {
-            assert!(Rc::ptr_eq(condition, value));
-            let SourceOperand::Residual(input) = condition.operand() else {
-                panic!("expected a selected comparison");
-            };
-            assert_eq!(input.range, range);
-            let inputs = input.selected.physical().unwrap();
-            let ir::ExprKind::Builtin(ir::Builtin::RegisteredCompare(ops), _) =
-                &inputs.operation.kind
-            else {
-                panic!("expected a checked comparison");
-            };
-            assert_eq!(ops.as_slice(), [op]);
-            let SourceOperand::Checked(name) = inputs.operand(1) else {
+        let mut ops = Vec::new();
+        ir::walk_operand_expressions(&inputs.operation, &mut |expr| {
+            if let ir::ExprKind::Builtin(ir::Builtin::RegisteredCompare(comparison), _) = &expr.kind
+            {
+                ops.extend_from_slice(comparison);
+            }
+        });
+        assert_eq!(ops, [ast::CmpOp::Lt, ast::CmpOp::Gt]);
+        assert_eq!(inputs.children.len(), 4);
+        for (slot, expected_name) in [(1, "before"), (3, "after")] {
+            let SourceOperand::Checked(name) = inputs.operand(slot) else {
                 panic!("expected the checked name operand");
             };
             let mut names = Vec::new();

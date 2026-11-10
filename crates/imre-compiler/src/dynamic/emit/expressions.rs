@@ -3,36 +3,7 @@ use ruff_text_size::TextRange;
 
 use super::FrameEmitter;
 use super::Function;
-use crate::frontend::{ExpressionInput, ExpressionSelection, LogicalOperand, SourceOperand};
-use crate::ir::control::Context as BooleanContext;
-use crate::llvm::operations::branches::{Logical, LogicalEmitter, LogicalInput};
-use crate::llvm::operations::{CheckedBody, CheckedValue, ValueJoin};
-use crate::llvm::registered::PreparedSuiteEmitter;
-
-impl LogicalEmitter<LogicalOperand> for Function<'_, '_> {
-    fn logical_input<'a>(
-        &mut self,
-        leaf: &'a LogicalOperand,
-        context: BooleanContext,
-    ) -> LogicalInput<'a> {
-        match leaf.operand() {
-            SourceOperand::Checked(value) => {
-                self.prepare_checked_value(value);
-                LogicalInput::Checked(value, None)
-            }
-            SourceOperand::Residual(expr) if context == BooleanContext::Condition => {
-                LogicalInput::Predicate(self.test_operand(expr))
-            }
-            SourceOperand::Residual(expr) => LogicalInput::Handle(self.input_value(expr)),
-        }
-    }
-
-    fn with_logical_body<R>(&mut self, emit: impl FnOnce(&mut CheckedBody) -> R) -> R {
-        self.frame.with_checked_frame(&self.sites, None, |frame| {
-            emit(&mut CheckedBody::registered(frame))
-        })
-    }
-}
+use crate::frontend::{ExpressionInput, ExpressionSelection};
 
 impl Function<'_, '_> {
     pub(super) fn input_value(&mut self, input: ExpressionInput<'_>) -> String {
@@ -87,42 +58,6 @@ impl Function<'_, '_> {
             self.suspend_value(*kind, range, |code| code.input_value(child.as_input()))
         } else if let Some(inputs) = physical {
             crate::llvm::registered::Frame::prepared_operation(self, inputs, condition)
-        } else if let ExpressionSelection::Mixed {
-            value: Some(plan), ..
-        } = selected
-        {
-            let value = Logical::value(
-                &mut self.frame.body,
-                plan.edges.clone(),
-                crate::ir::Type::PythonObject,
-            )
-            .emit(self, &plan.operands)
-            .expect("a selected operand reaches the join");
-            self.frame
-                .with_checked_frame(&self.sites, None, |mut frame| frame.materialize(&value))
-        } else if let ExpressionSelection::Mixed {
-            parts: Some(parts), ..
-        } = selected
-        {
-            let [test, yes, no] = parts.each_ref().map(|child| child.operand());
-            ValueJoin::select(
-                self,
-                |code| {
-                    code.flush_check();
-                    &mut code.frame.body
-                },
-                |code, yes, no| match test {
-                    SourceOperand::Checked(test) => {
-                        code.prepare_checked_value(test);
-                        code.frame.registered_branch(test, &code.sites, yes, no);
-                    }
-                    SourceOperand::Residual(test) => code.branch_input(test, yes, no),
-                },
-                |code| CheckedValue::handle(code.source_operand(yes)),
-                |code| CheckedValue::handle(code.source_operand(no)),
-            )
-            .expect("value-producing conditional")
-            .into_handle()
         } else {
             self.build_diagnostic("expression has no checked operand")
         };
@@ -145,10 +80,6 @@ impl Function<'_, '_> {
                 self.frame
                     .registered_branch(condition, &self.sites, yes, no);
             }
-            ExpressionSelection::Mixed { branch, .. } => {
-                Logical::branch(&mut self.frame.body, branch.edges.clone(), yes, no)
-                    .emit(self, &branch.operands);
-            }
             ExpressionSelection::Operand(operand) => {
                 self.prepare_checked_value(&operand.value);
                 let bit = self.frame.prepared_operand(operand, &self.sites, true);
@@ -164,7 +95,7 @@ impl Function<'_, '_> {
     fn test_operand(&mut self, input: ExpressionInput<'_>) -> String {
         self.test_with_temporaries(|f| {
             let range = input.range;
-            if input.kind == ast::NodeKind::ExprCompare {
+            if input.kind == ast::NodeKind::ExprCompare || input.selected.physical().is_some() {
                 f.registered_region(input.selected, true)
                     .unwrap_or_else(|| {
                         f.with_expression_range(range, |f| f.located_operand(input, true))

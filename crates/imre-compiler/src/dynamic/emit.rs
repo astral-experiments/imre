@@ -3131,9 +3131,8 @@ mod tests {
         inject_residual_child_module(&mut prepared);
 
         let original = prepared.standalone().unwrap();
-        let ExpressionSelection::Mixed {
-            parts: Some(parts), ..
-        } = residual_selection(prepared.source.initializer.as_mut().unwrap())
+        let ExpressionSelection::Inputs(inputs) =
+            residual_selection(prepared.source.initializer.as_mut().unwrap())
         else {
             panic!("expected a mixed conditional");
         };
@@ -3145,7 +3144,7 @@ mod tests {
                 selected: ExpressionSelection::Inputs(_),
                 ..
             }),
-        ] = parts.each_ref().map(|child| child.operand())
+        ] = inputs.operands().collect::<Vec<_>>()[..]
         else {
             panic!("expected a checked test and true arm, and a residual false arm");
         };
@@ -3169,16 +3168,15 @@ mod tests {
         inject_residual_child_module(&mut prepared);
         let original = prepared.standalone().unwrap();
         use crate::frontend::{ExpressionInput, ExpressionSelection, SourceOperand};
-        let ExpressionSelection::Mixed {
-            parts: Some(parts), ..
-        } = residual_selection(prepared.source.initializer.as_mut().unwrap())
+        let ExpressionSelection::Inputs(inputs) =
+            residual_selection(prepared.source.initializer.as_mut().unwrap())
         else {
             panic!("expected a mixed choice");
         };
         assert!(matches!(
-            parts[0].operand(),
+            inputs.operand(1),
             SourceOperand::Residual(ExpressionInput {
-                selected: ExpressionSelection::Mixed { .. },
+                selected: ExpressionSelection::Inputs(_),
                 ..
             })
         ));
