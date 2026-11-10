@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use ruff_python_ast as ast;
-use ruff_text_size::{Ranged, TextRange};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use crate::CodegenUnit;
 use crate::frontend::module_source::{self, ParsedModule};
@@ -340,7 +340,7 @@ impl<'a> PreparedBody<'a, '_> {
             .iter()
             .filter(|token| token.kind() == ast::token::TokenKind::Class)
             .map(Ranged::start)
-            .collect();
+            .collect::<Vec<_>>();
         let mut body = match input {
             Input::Module(parsed) => module_source::into_body(parsed),
             Input::Expression(syntax, ..) => syntax.body,
@@ -442,7 +442,7 @@ impl<'a> PreparedBody<'a, '_> {
             }
         }
         let mut function_bodies = HashMap::new();
-        let class_bodies = prepare.class_suites(sites.classes, |start| {
+        let class_bodies = prepare.class_suites(sites.classes, &class_keywords, |start| {
             scopes.functions[&start].suspension_flags != 0
         });
         let mut thread_entries = HashMap::new();
@@ -520,6 +520,7 @@ impl<'a> PreparedBody<'a, '_> {
             python_annotations: provider
                 || bundled && matches!(name, "_py_warnings" | "tomllib._parser" | "typing"),
             module_start,
+            #[cfg(test)]
             class_keywords,
             docs,
             has_templates,
@@ -756,14 +757,18 @@ enum Input<'a> {
 
 enum DefinitionName<'a> {
     Binding(&'a ast::Identifier),
-    Plain(&'a str),
     Generator(TextRange),
     TypeAlias(&'a str),
+    ClassHeader(&'a str),
+}
+
+enum ReturnOperand<'a> {
+    Prepared(&'a crate::frontend::RegisteredOperand),
+    ClassArguments(TextSize),
 }
 
 enum Body<'a> {
-    Namespace(&'a [ast::Stmt]),
-    ClassParameters(&'a ast::StmtClassDef),
+    Namespace,
     /// A function suite and its suspension flags, shared by complete and mixed frames.
     Function(&'a [ast::Stmt], u32),
     AnnotationProvider(
@@ -776,7 +781,7 @@ enum Body<'a> {
         &'a crate::frontend::RegisteredFunction,
         Option<&'a BTreeSet<String>>,
     ),
-    AnnotationOperand(&'a crate::frontend::AnnotationCode),
+    Operand(TextRange, ReturnOperand<'a>),
 }
 
 enum Entry {
@@ -784,25 +789,13 @@ enum Entry {
     Suspended(u32),
 }
 
-#[derive(Clone, Copy)]
-enum DefinitionSite<'a> {
-    Function(&'a ast::StmtFunctionDef),
-    Class(&'a ast::StmtClassDef),
-}
-
-type Definitions<'a> = HashMap<ruff_text_size::TextSize, DefinitionSite<'a>>;
+type Definitions<'a> = HashMap<TextSize, &'a ast::StmtFunctionDef>;
 
 fn source_declarations<'a>(sites: &crate::frontend::RegisteredSites<'a>) -> Definitions<'a> {
     sites
         .functions
         .iter()
-        .map(|site| (site.def.start(), DefinitionSite::Function(site.def)))
-        .chain(
-            sites
-                .classes
-                .iter()
-                .map(|site| (site.def.start(), DefinitionSite::Class(site.def))),
-        )
+        .map(|site| (site.def.start(), site.def))
         .collect()
 }
 
@@ -953,6 +946,7 @@ struct SourceInfo<'a> {
     path: &'a Path,
     python_annotations: bool,
     module_start: ruff_text_size::TextSize,
+    #[cfg(test)]
     class_keywords: Vec<ruff_text_size::TextSize>,
     docs: Option<crate::modules::doctest::SealedDocs>,
     has_templates: bool,
@@ -1002,14 +996,6 @@ impl SourceInfo<'_> {
             .as_ref()?
             .object_docstring(qualname)
             .map(str::to_owned)
-    }
-
-    fn class(&self, class: &ast::StmtClassDef) -> &crate::frontend::RegisteredClass {
-        let start = class
-            .decorator_list
-            .first()
-            .map_or(class.start(), Ranged::start);
-        &self.class_bodies[&start]
     }
 
     fn registered_source(&self) -> crate::frontend::RegisteredSource<'_> {
@@ -1119,7 +1105,7 @@ impl SourceMap<'_> {
             self.module_start,
         );
         frame.async_generator = suspension == imre_ast::code_flags::ASYNC_GENERATOR;
-        if let Body::Namespace(_) = body {
+        if let Body::Namespace = body {
             frame.class_locals = Some(
                 self.scopes.classes[&start.expect("class definition")]
                     .bindings
@@ -1127,7 +1113,6 @@ impl SourceMap<'_> {
             );
         }
         let prepared = match body {
-            Body::Namespace(_) => Some(&self.class_bodies[&start.expect("class definition")].body),
             Body::Function(..) => start.and_then(|key| self.function_bodies.get(&key)?.suite()),
             _ => None,
         };
@@ -1136,7 +1121,7 @@ impl SourceMap<'_> {
             suspension,
             imre_ast::code_flags::COROUTINE | imre_ast::code_flags::ASYNC_GENERATOR
         );
-        if matches!(body, Body::Namespace(_))
+        if matches!(body, Body::Namespace)
             && let Some(entries) = self.namespace_annotations.get(&start)
         {
             for site in entries {
@@ -1144,35 +1129,35 @@ impl SourceMap<'_> {
             }
         }
         match body {
-            Body::Namespace(stmts) | Body::Function(stmts, _) => {
-                if matches!(body, Body::Namespace(..))
-                    && f.output.keep_docstrings
-                    && let Some(doc) = self.docstring(f.prefix.trim_end_matches('.'), stmts)
+            Body::Namespace => {
+                let site = start.expect("class definition");
+                let prepared = &self.class_bodies[&site];
+                if f.output.keep_docstrings
+                    && let Some(doc) = prepared.doc.as_deref().or_else(|| {
+                        self.docs
+                            .as_ref()?
+                            .object_docstring(f.prefix.trim_end_matches('.'))
+                    })
                 {
-                    let value = f.text(&doc);
+                    let value = f.text(doc);
                     f.bind("__doc__", &value);
                 }
-                let globals = if matches!(body, Body::Namespace(..)) {
-                    &self.scopes.classes[&start.expect("class definition")]
-                        .bindings
-                        .globals
-                } else {
-                    self.scopes.functions[&start.expect("function definition")]
-                        .lexical
-                        .globals()
-                };
+                let class = &self.scopes.classes[&site];
+                f.declare_globals(&class.bindings.globals);
+                f.physical_suite(&prepared.body);
+                f.finish_class_annotations(&class.annotations, &class.bindings.globals);
+            }
+            Body::Function(stmts, _) => {
+                let globals = self.scopes.functions[&start.expect("function definition")]
+                    .lexical
+                    .globals();
                 f.declare_globals(globals);
                 if let Some(prepared) = prepared {
                     f.prepared_function(prepared, |code, run| code.source_run(stmts, run));
                 } else {
                     f.statements(stmts);
                 }
-                if matches!(body, Body::Namespace(_)) {
-                    let class = &self.scopes.classes[&start.expect("class definition")];
-                    f.finish_class_annotations(&class.annotations, &class.bindings.globals);
-                }
             }
-            Body::ClassParameters(class) => f.parameterized_class(class),
             Body::AnnotationProvider(plan, entries, scope) => {
                 f.frame.annotation_scope = scope;
                 f.prepared_function(plan, |code, run| {
@@ -1181,11 +1166,26 @@ impl SourceMap<'_> {
                     }
                 });
             }
-            Body::AnnotationOperand(code) => {
-                let operand = &code.operand;
-                f.checkpoint(&code.range);
-                f.prepare_checked_value(&operand.value);
-                let value = f.frame.prepared_operand(operand, &f.sites, false);
+            Body::Operand(range, operand) => {
+                f.checkpoint(&range);
+                let value = match operand {
+                    ReturnOperand::Prepared(operand) => {
+                        f.prepare_checked_value(&operand.value);
+                        f.frame.prepared_operand(operand, &f.sites, false)
+                    }
+                    ReturnOperand::ClassArguments(site) => {
+                        let class = &self.class_bodies[&site];
+                        let parameters = class.header.parameters.as_deref().expect("generic class");
+                        let namespace = f.compile_class_namespace(site);
+                        namespace.generic_class(
+                            &mut f,
+                            parameters,
+                            class.range,
+                            &class.header.layout,
+                            |code, index| code.physical_operand(&class.header.operands[index]),
+                        )
+                    }
+                };
                 f.return_value(&value);
             }
             Body::Checked(checked, globals) => {
@@ -1321,7 +1321,7 @@ mod tests {
             SuitePreparation::new(&prepared.source.namespace_operations, source, body, true);
         suites.sites.expressions = logicals;
         let initializer = suites.suite(body, RegisteredScope::Module);
-        let class_bodies = suites.class_suites(classes, |start| {
+        let class_bodies = suites.class_suites(classes, &prepared.source.class_keywords, |start| {
             prepared.source.scopes.functions[&start].suspension_flags != 0
         });
         let (sites, nested) = (suites.sites, suites.nested);
@@ -1897,6 +1897,108 @@ mod tests {
     }
 
     #[test]
+    fn suspended_class_header_emits_after_erasing_its_class_statement() {
+        let source = concat!(
+            "def build():\n",
+            "    @(yield 'decorator')\n",
+            "    class Child((yield 'base')):\n",
+            "        marker = 'child'\n",
+            "    yield Child\n",
+        );
+        let mut module = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let mut body = ruff_python_parser::parse_module(source)
+            .unwrap()
+            .into_syntax()
+            .body;
+        let def = body[0].as_function_def_stmt_mut().unwrap();
+        let site = def.body[0].start();
+        let plan = module.source.function_bodies[&def.start()].suite().unwrap();
+        assert!(plan.residual.iter().any(|run| matches!(
+            run.effect, Some(crate::frontend::SourceEffect::Class(class)) if class == site
+        )));
+        let expected = module.standalone().unwrap().unwrap();
+        def.body[0] = ast::StmtPass {
+            range: def.body[0].range(),
+            node_index: Default::default(),
+        }
+        .into();
+        module.syntax = Some(Cow::Owned(body));
+        assert_eq!(module.standalone().unwrap().unwrap(), expected);
+    }
+
+    #[test]
+    fn generic_typing_protocols_emit_without_their_class_syntax() {
+        use crate::ir::{Builtin, ExprKind};
+
+        let source = include_str!("../../stdlib/typing.py");
+        PreparedBody::with_module(
+            "typing",
+            Path::new("<imre stdlib>/typing.py"),
+            source,
+            0,
+            ModuleOrigin::Bundled,
+            |mut typing| {
+                let expected = typing.standalone()?.unwrap();
+                let mut body = typing.syntax.as_deref().unwrap().clone();
+                let mut protocols = Vec::new();
+                for stmt in &mut body {
+                    let Some(class) = stmt.as_class_def_stmt() else {
+                        continue;
+                    };
+                    if matches!(class.name.as_str(), "SupportsAbs" | "SupportsRound") {
+                        let start = class.start();
+                        protocols.push((class.name.to_string(), start));
+                        assert!(typing.source.class_bodies[&start].body.plan.fully_checked());
+                        typing.declarations.remove(&start);
+                        *stmt = ast::StmtPass {
+                            node_index: Default::default(),
+                            range: class.range(),
+                        }
+                        .into();
+                    }
+                }
+                assert_eq!(
+                    protocols
+                        .iter()
+                        .map(|(name, _)| name.as_str())
+                        .collect::<Vec<_>>(),
+                    ["SupportsAbs", "SupportsRound"]
+                );
+                let mut bindings = Vec::new();
+                let initializer = typing.source.initializer.as_ref().unwrap();
+                crate::ir::walk_expressions(&initializer.checked.function.body, &mut |expr| {
+                    if let ExprKind::Builtin(
+                        Builtin::RegisteredDefinition(crate::ir::DefinitionSite::Class {
+                            start,
+                            ..
+                        }),
+                        _,
+                    ) = &expr.kind
+                        && protocols.iter().any(|(_, site)| site == start)
+                    {
+                        bindings.push(*start);
+                    }
+                });
+                assert_eq!(bindings, [protocols[0].1, protocols[1].1]);
+                let withheld = PreparedBody {
+                    syntax: Some(Cow::Borrowed(&body)),
+                    ..typing
+                };
+                assert!(withheld.standalone()?.unwrap() == expected);
+                Ok(())
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
     fn bundled_generic_method_uses_the_prepared_class_suite() {
         let source = include_str!("../../stdlib/typing.py");
         let module = PreparedBody::module(
@@ -1910,7 +2012,7 @@ mod tests {
         let class = source.find("class _IdentityCallable(Protocol):").unwrap();
         let method = class + source[class..].find("def __call__[T]").unwrap();
         let start = |offset: usize| ruff_text_size::TextSize::try_from(offset).unwrap();
-        let body = &module.source.class_bodies[&start(class)].body;
+        let body = &module.source.class_bodies[&start(class)].body.plan;
         assert!(body.fully_checked());
         let mut bindings = Vec::new();
         crate::ir::walk_expressions(&body.checked.function.body, &mut |value| {
@@ -1958,7 +2060,17 @@ mod tests {
             let owner = &typing.source.class_bodies[&class.decorator_list[0].start()];
             let parameters = owner.header.parameters.as_ref().unwrap();
             assert_eq!(parameters[0].name, "T");
-            assert!(matches!(owner.header.operands.as_slice(), [Some(_)]));
+            let header = owner.header.function.as_ref().unwrap();
+            let mut arguments = Vec::new();
+            crate::ir::walk_expressions(&header.function.body, &mut |expr| {
+                if let ExprKind::Builtin(Builtin::RegisteredClassNamespace(site, _), children) =
+                    &expr.kind
+                {
+                    assert_eq!(*site, class.start());
+                    arguments.push(children.len());
+                }
+            });
+            assert_eq!(arguments, [1], "{name}");
             let mut decorations = Vec::new();
             crate::ir::walk_expressions(body, &mut |expr| {
                 if let ExprKind::Builtin(
@@ -1985,10 +2097,19 @@ mod tests {
         )
         .unwrap();
         let header = &program.source.class_bodies[&ruff_text_size::TextSize::new(0)].header;
-        assert!(matches!(header.decorators.as_slice(), [Some(_), Some(_)]));
         assert!(matches!(
-            header.operands.as_slice(),
-            [Some(_), Some(_), Some(_)]
+            header.decorators.as_slice(),
+            [
+                crate::frontend::PhysicalOperand::Checked(_),
+                crate::frontend::PhysicalOperand::Checked(_)
+            ]
+        ));
+        let function = header.function.as_ref().unwrap();
+        assert!(matches!(
+            function.function.body.last(),
+            Some(crate::ir::Statement::Return(crate::ir::Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredClassNamespace(_, _), operands), ..
+            })) if operands.len() == 3
         ));
     }
 
@@ -3476,7 +3597,8 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 let methods = &prepared.source.function_bodies;
                 assert_eq!(methods.len(), 1);
                 assert!(methods.values().all(|plan| plan.suite().unwrap().fully_checked()));
-                assert!(matches!(prepared.syntax, Some(Cow::Borrowed(_))));
+                assert!(prepared.syntax.is_none());
+                assert!(prepared.declarations.is_empty());
                 prepared.standalone()
             },
         ).unwrap();
@@ -4865,7 +4987,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 .source
                 .class_bodies
                 .values()
-                .all(|class| class.body.fully_checked())
+                .all(|class| class.body.plan.fully_checked())
         );
         inject_residual_child_module(&mut prepared);
         let outer = prepared.syntax.as_ref().unwrap()[0]
@@ -4874,7 +4996,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let class = outer.body[0].as_class_def_stmt().unwrap();
         assert!(!prepared.source.function_bodies.contains_key(&outer.start()));
         let class_start = class.start();
-        let suite = &prepared.source.class_bodies[&class_start].body;
+        let suite = &prepared.source.class_bodies[&class_start].body.plan;
         assert!(
             !prepared
                 .source
@@ -4886,7 +5008,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let [rhs, whole] = suite.residual.as_slice() else {
             panic!("expected a residual RHS followed by a residual statement");
         };
-        assert_eq!(rhs.statements, 2..3);
+        assert!(rhs.statements.is_empty());
         assert!(matches!(
             rhs.effect,
             Some(crate::frontend::SourceEffect::Value(
@@ -4894,7 +5016,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 _
             ))
         ));
-        assert_eq!(whole.statements, 3..4);
+        assert_eq!(whole.statements, 0..1);
         assert!(whole.effect.is_none());
 
         let emit = |prepared: &PreparedBody<'_, '_>| {
@@ -4919,7 +5041,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
 
         let class = prepared.source.class_bodies.get_mut(&class_start).unwrap();
         let Some(crate::frontend::SourceEffect::Value(_, inputs)) =
-            &mut class.body.residual[0].effect
+            &mut class.body.plan.residual[0].effect
         else {
             panic!("expected the retained assignment value");
         };

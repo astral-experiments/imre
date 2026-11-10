@@ -14,9 +14,7 @@ use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Statement, Type};
 use crate::llvm::body::FunctionBody;
 pub(crate) use abi::{ABI, CallArguments, Output, permanent};
 use abi::{GUARDED_LIT, GUARDED_NAMED_OP, NAMED_OP};
-pub(crate) use frame::{
-    AnnotationScope, ArgumentPack, FrameEmitter, Place, RegisteredFrame, SourcePositions,
-};
+pub(crate) use frame::{AnnotationScope, FrameEmitter, Place, RegisteredFrame, SourcePositions};
 use sites::CheckedSites;
 
 use crate::llvm::operations::{CheckedBody, CheckedValue, LoopEdges};
@@ -972,16 +970,19 @@ impl Frame<'_, '_, '_> {
                     .map(|value| self.evaluate_eager_handle(value))
                     .collect::<Vec<_>>();
                 let class_arguments = arguments.map(|(layout, operands)| {
-                    let mut pack = ArgumentPack::new(self.code, layout, None);
-                    for (index, operand) in operands.iter().enumerate() {
-                        let slot = pack.prepare(self.code, index);
-                        let value = self.evaluate_handle(operand);
-                        pack.insert(self.code, slot, &value);
-                    }
-                    pack.finish(self.code)
+                    self.class_arguments(layout, |code, index| {
+                        code.evaluate_handle(&operands[index])
+                    })
                 });
                 self.sites
                     .definition(self.code, site.start(), &header, class_arguments)
+            }
+            (Builtin::RegisteredClassNamespace(site, layout), operands) => {
+                let sites = self.sites;
+                let (namespace, parameters, range) = &sites.class_namespaces[site];
+                namespace.generic_class(self, parameters, *range, layout, |code, index| {
+                    code.evaluate_handle(&operands[index])
+                })
             }
             (Builtin::RegisteredTypeAlias(site), []) => match &self.sites.aliases[site] {
                 Ok(alias) => alias.instantiate(self.code),

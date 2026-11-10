@@ -4837,6 +4837,7 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredAnnotationResult
             | Builtin::RegisteredDeleteName(..)
             | Builtin::RegisteredDefinition(_)
+            | Builtin::RegisteredClassNamespace(..)
             | Builtin::RegisteredLambda(..)
             | Builtin::RegisteredGenerator(..)
             | Builtin::RegisteredTypeAlias(_)

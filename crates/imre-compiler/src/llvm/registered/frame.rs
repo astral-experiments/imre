@@ -1336,6 +1336,21 @@ impl<'a> ArgumentPack<'a> {
 pub(crate) trait FrameEmitter<'a, 'p>:
     std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>> + Sized
 {
+    /// Class argument expansion is interleaved with the next Python operand.
+    fn class_arguments(
+        &mut self,
+        layout: &ir::PackedArguments,
+        mut operand: impl FnMut(&mut Self, usize) -> String,
+    ) -> (String, String) {
+        let mut pack = ArgumentPack::new(self, layout, None);
+        for index in 0..layout.starred.len() + layout.keywords.len() {
+            let slot = pack.prepare(self, index);
+            let value = operand(self, index);
+            pack.insert(self, slot, &value);
+        }
+        pack.finish(self)
+    }
+
     fn discard_operand(&mut self, evaluate: impl FnOnce(&mut Self) -> String) {
         let mark = self.temporary_mark();
         evaluate(self);
