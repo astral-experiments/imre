@@ -181,7 +181,14 @@ REJECTED = {
             "def typed(n: int) -> int: return n\n"
         ),
         "main.py": "from helper import values, typed\nprint(next(values()))\ntyped('wrong')\n",
-    }, "invalid-argument-type"),
+    }, "main.py:3:7: Imre: expected int, got str"),
+    "generator_next_checks_default": ({
+        "helper.py": "def values(): yield 5\n",
+        "main.py": "from helper import values\nif False:\n    print(next(values(), 1 + 'wrong'))\n",
+    }, "arithmetic requires int or float operands"),
+    "generator_next_rejects_rebound_noniterator": ({
+        "main.py": "def values(): yield 5\ngen = values()\ngen = hex(3)\nprint(next(gen))\n",
+    }, "next requires a supported iterator"),
     "docfile_suite_preserves_typed_call": ({
         "main.py": (
             "from doctest import DocFileSuite\n"

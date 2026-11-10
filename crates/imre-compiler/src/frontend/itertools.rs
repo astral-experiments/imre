@@ -505,8 +505,20 @@ impl Checker<'_> {
         if rest.len() > 1 {
             return Err(error(self.source, call, "next takes at most one default"));
         }
-        let source = self.expr(source)?;
-        self.next_value(source, rest, call)
+        let iterator = self.expr(source)?;
+        if iterator.ty == Type::PythonObject {
+            if let [default] = rest {
+                self.expr(default)?;
+            }
+            if self
+                .graph
+                .session
+                .is_source_generator_result(self.module, source)
+            {
+                return Err(self.scoped_builtin_error("next", call));
+            }
+        }
+        self.next_value(iterator, rest, call)
     }
 
     pub(super) fn next_value(

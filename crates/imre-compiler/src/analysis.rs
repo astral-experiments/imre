@@ -1051,6 +1051,52 @@ impl Session {
         untyped_generator_local(index, function).is_some()
     }
 
+    /// Recognize a generator call even when its return type has no annotation.
+    pub(crate) fn is_source_generator_result(&self, module: usize, value: &Expr) -> bool {
+        use ty_python_core::definition::DefinitionKind;
+        use ty_python_semantic::types::{Type, TypeDefinition};
+
+        let file = self.files[module];
+        let parsed;
+        let value = if value.is_name_expr() {
+            let Some(binding) = self.sole_binding(module, value) else {
+                return false;
+            };
+            let DefinitionKind::Assignment(assignment) = binding.kind(&self.db) else {
+                return false;
+            };
+            if assignment.unpack().is_some() {
+                return false;
+            }
+            parsed = self.parsed(file);
+            assignment.value(&parsed)
+        } else {
+            value
+        };
+        let Some(call) = value.as_call_expr() else {
+            return false;
+        };
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let model = SemanticModel::new(&self.db, self.db.program_file(file));
+        let Some(callee @ Type::FunctionLiteral(_)) = call.func.inferred_type(&model) else {
+            return false;
+        };
+        let Some(TypeDefinition::Function(definition)) =
+            callee.definition(&self.db, &model.program_environment())
+        else {
+            return false;
+        };
+        let owner = definition.file(&self.db);
+        let DefinitionKind::Function(function) = definition.kind(&self.db) else {
+            return false;
+        };
+        let parsed = self.parsed(owner);
+        let function = function.node(&parsed);
+        !function.is_async
+            && function.decorator_list.is_empty()
+            && imre_ast::code_flags::is_generator(&function.body)
+    }
+
     fn sole_binding(
         &self,
         module: usize,
