@@ -1010,6 +1010,7 @@ impl PhysicalSuite {
                 run.effect,
                 Some(
                     SourceEffect::Class(_)
+                        | SourceEffect::Assertion(_)
                         | SourceEffect::While(_)
                         | SourceEffect::If { .. }
                         | SourceEffect::For(_)
@@ -1066,55 +1067,10 @@ impl RegisteredSuite {
 }
 
 pub(crate) struct AssertionSite {
-    pub(crate) body: Vec<Statement>,
-    pub(crate) external_test: bool,
-    pub(crate) external_message: bool,
-}
-
-impl AssertionSite {
-    fn prepare(
-        stmt: &ast::StmtAssert,
-        mut operand: impl FnMut(&ast::Expr) -> Option<Expr>,
-    ) -> Self {
-        let condition = operand(&stmt.test);
-        let external_test = condition.is_none();
-        let message = stmt.msg.as_deref().map(&mut operand);
-        let external_message = matches!(message, Some(None));
-        let input = || Expr::local(0, Type::PythonObject);
-        let test = operation(
-            Builtin::Bool,
-            Type::Bool,
-            vec![condition.unwrap_or_else(input)],
-        );
-        let failure = operation(
-            Builtin::RegisteredAssertionFailure {
-                statement: stmt.start(),
-                test: stmt.test.start(),
-            },
-            Type::None,
-            message
-                .into_iter()
-                .map(|value| value.unwrap_or_else(input))
-                .collect(),
-        );
-        // The implicit truth conversion can call Python on the test's physical line.
-        Self {
-            body: vec![
-                Statement::Expr(operation(
-                    Builtin::RegisteredStatement(stmt.test.range(), None),
-                    Type::None,
-                    vec![],
-                )),
-                Statement::If(test, Vec::new(), vec![Statement::Expr(failure)]),
-            ],
-            external_test,
-            external_message,
-        }
-    }
-
-    pub(crate) fn complete(&self) -> bool {
-        !self.external_test && !self.external_message
-    }
+    pub(crate) statement: TextSize,
+    pub(crate) test_range: TextRange,
+    pub(crate) test: PhysicalOperand,
+    pub(crate) message: Option<PhysicalOperand>,
 }
 
 /// Physical source locations and semantic operations shared by complete and residual suites.
@@ -1375,29 +1331,21 @@ impl<'a> SuitePreparation<'a> {
             let source = self.source;
             let sites = &mut self.sites.expressions;
             for stmt in &stmts[run.statements.clone()] {
+                let mut prepare_operand = |input: &PhysicalOperand| {
+                    if let PhysicalOperand::Source(expr) = input {
+                        sites.prepare_input(expr, source, kind, suspended);
+                    }
+                };
                 match &run.effect {
                     Some(
                         SourceEffect::ObjectOperation(_, inputs)
                         | SourceEffect::Discard(inputs)
                         | SourceEffect::Value(_, inputs),
-                    ) => {
-                        for input in inputs {
-                            if let PhysicalOperand::Source(expr) = input {
-                                sites.prepare_input(expr, source, kind, suspended);
-                            }
-                        }
-                    }
+                    ) => inputs.iter().for_each(prepare_operand),
                     Some(SourceEffect::Assertion(site)) => {
-                        let assertion = stmt.as_assert_stmt().expect("prepared assertion");
-                        if site.external_test {
-                            sites.prepare_input(&assertion.test, source, kind, suspended);
-                        }
-                        if site.external_message {
-                            let message = assertion
-                                .msg
-                                .as_deref()
-                                .expect("external assertion message");
-                            sites.prepare_input(message, source, kind, suspended);
+                        prepare_operand(&site.test);
+                        if let Some(message) = &site.message {
+                            prepare_operand(message);
                         }
                     }
                     None if !matches!(
@@ -1760,21 +1708,6 @@ impl<'a> SuitePreparation<'a> {
                 });
                 continue;
             }
-            if let ast::Stmt::Assert(assertion) = stmt {
-                if !self.sites.omit_assertions {
-                    let site = scope.assertion(assertion);
-                    if site.complete() {
-                        body.extend(site.body);
-                    } else {
-                        residual.push(SourceRun {
-                            at: body.len(),
-                            statements: i..i + 1,
-                            effect: Some(SourceEffect::Assertion(Box::new(site))),
-                        });
-                    }
-                }
-                continue;
-            }
             let slots_before = scope.locals.len();
             scope.refusal = None;
             let lowered = match select {
@@ -1793,6 +1726,20 @@ impl<'a> SuitePreparation<'a> {
                     at: body.len(),
                     statements: i..i + 1,
                     effect: Some(SourceEffect::Class(class.start())),
+                });
+                continue;
+            }
+            if let ast::Stmt::Assert(assertion) = stmt {
+                let site = AssertionSite {
+                    statement: assertion.start(),
+                    test_range: assertion.test.range(),
+                    test: frame_value(&assertion.test),
+                    message: assertion.msg.as_deref().map(frame_value),
+                };
+                residual.push(SourceRun {
+                    at: body.len(),
+                    statements: i..i + 1,
+                    effect: Some(SourceEffect::Assertion(Box::new(site))),
                 });
                 continue;
             }
@@ -2699,6 +2646,7 @@ impl SourceScope<'_> {
                 ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_)
             )
             || stmt.is_class_def_stmt()
+            || stmt.is_assert_stmt()
             || stmt.is_return_stmt()
             || stmt.is_expr_stmt()
             || stmt.is_delete_stmt()
@@ -2728,25 +2676,36 @@ impl SourceScope<'_> {
         Ok(continues)
     }
 
-    fn assertion(&mut self, stmt: &ast::StmtAssert) -> AssertionSite {
-        AssertionSite::prepare(stmt, |expr| {
-            let before = self.locals.len();
-            let value = self.operand(expr);
-            if value.is_none() {
-                self.truncate_locals(before);
-            }
-            value
-        })
+    fn assertion(&mut self, stmt: &ast::StmtAssert) -> StdResult<[Statement; 2], ()> {
+        let test = self.operand(&stmt.test).ok_or(())?;
+        let message = stmt
+            .msg
+            .as_deref()
+            .map(|message| self.operand(message).ok_or(()))
+            .transpose()?;
+        let failure = operation(
+            Builtin::RegisteredAssertionFailure {
+                statement: stmt.start(),
+                test: stmt.test.start(),
+            },
+            Type::None,
+            message.into_iter().collect(),
+        );
+        // The implicit truth conversion can call Python on the test's physical line.
+        Ok([
+            Statement::Expr(operation(
+                Builtin::RegisteredStatement(stmt.test.range(), None),
+                Type::None,
+                vec![],
+            )),
+            Statement::If(truth(test), Vec::new(), vec![Statement::Expr(failure)]),
+        ])
     }
 
     fn statement(&mut self, stmt: &ast::Stmt, body: &mut Vec<Statement>) -> StdResult<bool, ()> {
         if let ast::Stmt::Assert(assertion) = stmt {
             if !self.sites.omit_assertions {
-                let site = self.assertion(assertion);
-                if !site.complete() {
-                    return Err(());
-                }
-                body.extend(site.body);
+                body.extend(self.assertion(assertion)?);
             }
             return Ok(true);
         }
@@ -3306,18 +3265,22 @@ mod tests {
                 .suite(body, RegisteredScope::Function { is_async: false })
         };
         let plan = prepare(true);
-        assert_eq!(plan.checked.local_names.len(), 2);
-        assert_eq!(plan.checked.local_names[&0].name, "early");
-        assert_eq!(plan.checked.local_names[&1].name, "selected");
+        assert_eq!(plan.checked.local_names.len(), 1);
+        assert_eq!(plan.checked.local_names[&0].name, "selected");
         let [physical] = plan.residual.as_slice() else {
             panic!("expected the generator-expression message to remain physical");
         };
         assert_eq!(physical.at, 0);
         assert_eq!(physical.statements, 0..1);
-        assert!(matches!(
-            &physical.effect,
-            Some(SourceEffect::Assertion(site)) if !site.external_test && site.external_message
-        ));
+        let Some(SourceEffect::Assertion(site)) = &physical.effect else {
+            panic!("expected a prepared assertion");
+        };
+        let PhysicalOperand::Checked(test) = &site.test else {
+            panic!("expected the test to own its walrus binding");
+        };
+        assert_eq!(test.local_names.len(), 1);
+        assert_eq!(test.local_names[&0].name, "early");
+        assert!(matches!(site.message, Some(PhysicalOperand::Source(_))));
         let [_, Statement::If(test, succeeds, fails)] = plan.checked.function.body.as_slice()
         else {
             panic!("expected only the checked assertion checkpoint and branch");

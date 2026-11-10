@@ -4510,116 +4510,173 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
-    fn physical_assertion_retains_its_test_before_a_suspending_message() {
-        let mut module = PreparedBody::module(
+    fn checked_assertion_emits_after_erasing_its_entire_suite() {
+        let text = "assert probe(), message()\n";
+        let mut prepared = PreparedBody::module(
             "proof",
             Path::new("proof.py"),
-            "def verify(check, message):\n    assert check(), (yield (lambda: message())())\n",
+            text,
             0,
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let def = module.syntax.as_ref().unwrap()[0]
-            .as_function_def_stmt()
-            .unwrap();
-        let function = def.start();
-        // Withhold the child descriptor only from suite lowering. The physical
-        // message still uses the real compiled child when the assertion fails.
-        let lexical = module.source.statement_sites.expressions.take_lexical();
-        let missing = HashMap::new();
-        let source = crate::frontend::RegisteredSource {
-            lambdas: Some(&missing),
-            ..module.source.registered_source()
-        };
-        let mut physical = crate::frontend::SuitePreparation::new(
-            &module.source.namespace_operations,
-            source,
-            &def.body,
-            true,
-        );
-        physical.sites.expressions = lexical;
-        let body = physical.named_body(
-            &def.body,
-            crate::frontend::RegisteredScope::Function { is_async: false },
-            true,
-            false,
-            &|_| false,
-        );
-        let message = def.body[0]
-            .as_assert_stmt()
-            .unwrap()
-            .msg
-            .as_deref()
-            .unwrap();
+        let plan = &prepared.initializer().plan;
+        assert!(plan.fully_checked());
         assert!(matches!(
-            physical.sites.expressions.get(message),
-            Some(crate::frontend::ExpressionSelection::Suspension(
-                crate::ir::SuspendValue::Yield,
-                _
-            ))
+            plan.checked.function.body.as_slice(),
+            [_, crate::ir::Statement::If(_, _, _)]
         ));
-        let replacement = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
-            range: message.range(),
-            node_index: Default::default(),
-        });
-        // The alternate physical input also needs an entry in the expression table.
-        physical.sites.expressions.prepare_input(
-            &replacement,
-            source,
-            crate::frontend::RegisteredScope::Function { is_async: false },
-            true,
-        );
-        module.source.statement_sites = physical.sites;
-        install_test_function_body(&mut module.source, def, body);
-        let [run] = test_function_suite(&mut module.source, function)
-            .plan
-            .residual
-            .as_slice()
-        else {
-            panic!("expected the assertion's external message");
-        };
-        let Some(crate::frontend::SourceEffect::Assertion(site)) = &run.effect else {
-            panic!("expected a mixed assertion");
-        };
-        assert!(!site.external_test && site.external_message);
-        let original = module.standalone().unwrap();
-        let def = module.syntax.as_mut().unwrap().to_mut()[0]
-            .as_function_def_stmt_mut()
-            .unwrap();
+        prepared.syntax = Some(Cow::Owned(
+            ruff_python_parser::parse_module(text)
+                .unwrap()
+                .into_syntax()
+                .body,
+        ));
+        let original = prepared.standalone().unwrap();
+        prepared.syntax = None;
+        assert_eq!(prepared.standalone().unwrap(), original);
+    }
 
-        fn erase(value: &mut ast::Expr) {
-            *value = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
-                range: value.range(),
+    #[test]
+    fn physical_assertion_retains_its_test_before_a_suspending_message() {
+        use crate::frontend::{
+            PhysicalOperand, RegisteredScope, RegisteredSource, SourceEffect, SuitePreparation,
+        };
+
+        for (text, external_test) in [
+            (
+                "def verify(check, message):\n    assert (value := check()), (yield (lambda: message())())\n",
+                false,
+            ),
+            (
+                "def verify(check, message):\n    assert (yield (lambda: check())()), (value := message())\n",
+                true,
+            ),
+        ] {
+            let mut module = PreparedBody::module(
+                "proof",
+                Path::new("proof.py"),
+                text,
+                0,
+                ModuleOrigin::Program(None),
+            )
+            .unwrap();
+            let parsed = ruff_python_parser::parse_module(text).unwrap();
+            module.syntax = Some(Cow::Owned(parsed.into_syntax().body));
+            let def = module.syntax.as_ref().unwrap()[0]
+                .as_function_def_stmt()
+                .unwrap();
+            let function = def.start();
+            let assertion = def.body[0].as_assert_stmt().unwrap();
+            let start = assertion.start();
+            let test_range = assertion.test.range();
+            let input = if external_test {
+                &*assertion.test
+            } else {
+                assertion.msg.as_deref().unwrap()
+            };
+            let replacement = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+                range: input.range(),
                 node_index: Default::default(),
             });
+            // Withhold the lambda from suite lowering alone. Its real compiled
+            // child is still available when the owned physical operand executes.
+            let lexical = module.source.statement_sites.expressions.take_lexical();
+            let missing = HashMap::new();
+            let source = RegisteredSource {
+                lambdas: Some(&missing),
+                ..module.source.registered_source()
+            };
+            let kind = RegisteredScope::Function { is_async: false };
+            let mut physical =
+                SuitePreparation::new(&module.source.namespace_operations, source, &def.body, true);
+            physical.sites.expressions = lexical;
+            let body = physical.named_body(&def.body, kind, true, false, &|_| false);
+            assert!(matches!(
+                physical.sites.expressions.get(input),
+                Some(crate::frontend::ExpressionSelection::Suspension(
+                    crate::ir::SuspendValue::Yield,
+                    _
+                ))
+            ));
+            physical
+                .sites
+                .expressions
+                .prepare_input(&replacement, source, kind, true);
+            module.source.statement_sites = physical.sites;
+            install_test_function_body(&mut module.source, def, body);
+            let suite = test_function_suite(&mut module.source, function);
+            assert!(suite.sources.is_empty());
+            let [run] = suite.plan.residual.as_slice() else {
+                panic!("expected one mixed assertion")
+            };
+            let Some(SourceEffect::Assertion(site)) = &run.effect else {
+                panic!("expected a prepared assertion")
+            };
+            assert_eq!(site.statement, start);
+            assert_eq!(site.test_range, test_range);
+            let message = site.message.as_ref().unwrap();
+            let (owned, checked) = if external_test {
+                (&site.test, message)
+            } else {
+                (message, &site.test)
+            };
+            assert!(matches!(owned, PhysicalOperand::Source(_)));
+            let PhysicalOperand::Checked(checked) = checked else {
+                panic!("expected a checked walrus")
+            };
+            assert_eq!(checked.local_names[&0].name, "value");
+            let original = module.standalone().unwrap();
+            let def = module.syntax.as_mut().unwrap().to_mut()[0]
+                .as_function_def_stmt_mut()
+                .unwrap();
+            let assertion = def.body[0].as_assert_stmt_mut().unwrap();
+            let original_input = if external_test {
+                &mut *assertion.test
+            } else {
+                assertion.msg.as_deref_mut().unwrap()
+            };
+            *original_input = replacement.clone();
+            assert_eq!(module.standalone().unwrap(), original);
+
+            let def = module.syntax.as_mut().unwrap().to_mut()[0]
+                .as_function_def_stmt_mut()
+                .unwrap();
+            def.body[0] = ast::StmtPass {
+                range: def.body[0].range(),
+                node_index: Default::default(),
+            }
+            .into();
+            assert_eq!(module.standalone().unwrap(), original);
+
+            fn residual<'a>(
+                module: &'a mut PreparedBody<'_, '_>,
+                function: TextSize,
+                external_test: bool,
+            ) -> &'a mut ast::Expr {
+                let run = &mut test_function_suite(&mut module.source, function).plan.residual[0];
+                let Some(SourceEffect::Assertion(site)) = &mut run.effect else {
+                    unreachable!()
+                };
+                let input = if external_test {
+                    &mut site.test
+                } else {
+                    site.message.as_mut().unwrap()
+                };
+                let PhysicalOperand::Source(input) = input else {
+                    unreachable!()
+                };
+                input
+            }
+            // The physical suspension owns its yielded value even inside the residual leaf.
+            residual(&mut module, function, external_test)
+                .as_yield_expr_mut()
+                .unwrap()
+                .value = None;
+            assert_eq!(module.standalone().unwrap(), original);
+            *residual(&mut module, function, external_test) = replacement;
+            assert_ne!(module.standalone().unwrap(), original);
         }
-
-        let assertion = def.body[0].as_assert_stmt_mut().unwrap();
-        erase(&mut assertion.test);
-        // The physical suspension owns its input even when the source child is erased.
-        let suspension = assertion
-            .msg
-            .as_deref_mut()
-            .unwrap()
-            .as_yield_expr_mut()
-            .unwrap();
-        suspension.value = None;
-        assert_eq!(module.standalone().unwrap(), original);
-
-        let def = module.syntax.as_mut().unwrap().to_mut()[0]
-            .as_function_def_stmt_mut()
-            .unwrap();
-        let assertion = def.body[0].as_assert_stmt_mut().unwrap();
-        *assertion.msg.as_deref_mut().unwrap() = replacement.clone();
-        assert_eq!(module.standalone().unwrap(), original);
-        let suite = test_function_suite(&mut module.source, function);
-        *suite.sources[0]
-            .as_assert_stmt_mut()
-            .unwrap()
-            .msg
-            .as_deref_mut()
-            .unwrap() = replacement;
-        assert_ne!(module.standalone().unwrap(), original);
     }
 
     #[test]
