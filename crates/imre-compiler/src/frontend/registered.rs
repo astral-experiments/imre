@@ -2018,14 +2018,18 @@ impl SourceScope<'_> {
         targets: &[ast::Expr],
         value: Expr,
     ) -> StdResult<Vec<Statement>, ()> {
-        let bind = |scope: &mut Self| unpacking::bind_assignment(scope, targets, value);
+        self.with_assignment_operands(|scope| {
+            unpacking::bind_assignment(scope, targets, value)
+        })
+    }
+
+    fn with_assignment_operands<T>(&mut self, lower: impl FnOnce(&mut Self) -> T) -> T {
         if self.loop_scope == LoopScope::WithCursor
             && matches!(self.kind, RegisteredScope::Function { is_async: true })
         {
-            return bind(self);
+            return lower(self);
         }
-        // A receiver or key runs in the assigning frame, after the binder captures its value.
-        self.with_suspending_operands(bind)
+        self.with_suspending_operands(lower)
     }
 
     fn physical_statement(
@@ -2339,8 +2343,8 @@ impl SourceScope<'_> {
             binding
         } else if let ast::Expr::Named(named) = expr {
             let target = named.target.as_name_expr()?;
-            // Binding has no preceding operand to keep live across a suspension.
-            let value = self.lower_operand(&named.value, whole)?;
+            let value =
+                self.with_assignment_operands(|scope| scope.lower_operand(&named.value, whole))?;
             Expr {
                 ty: value.ty,
                 kind: ExprKind::Bind(self.slot(&target.id), Box::new(value)),
@@ -3025,9 +3029,10 @@ mod tests {
     }
 
     #[test]
-    fn inline_bind_inherits_the_whole_operand_suspension_boundary() {
-        let prepare = |rhs: &str, is_async| {
-            let text = format!("async def run(value):\n    return (saved := {rhs})\n");
+    fn inline_bind_uses_the_assigning_frame() {
+        let prepare = |expr: &str, is_async| {
+            let prefix = if is_async { "async " } else { "" };
+            let text = format!("{prefix}def run(value):\n    return {expr}\n");
             let graph = SourceGraph::single(&text).unwrap();
             let module = &graph.modules[graph.entry];
             let def = module.parsed.syntax().body[0].as_function_def_stmt().unwrap();
@@ -3035,11 +3040,17 @@ mod tests {
             let literals = values::ModuleSource::new(module);
             inline_operand(expr, literals.context(&text), RegisteredScope::Function { is_async })
         };
-        let operand = prepare("(inner := await value)", true).unwrap();
+        let operand = prepare("(saved := (inner := await value))", true).unwrap();
         crate::verify::registered(operand.region()).unwrap();
         assert_eq!(operand.local_names.len(), 2);
-        assert!(prepare("await value", false).is_none());
-        assert!(prepare("[value, (inner := await value)]", true).is_none());
+        assert!(prepare("(saved := await value)", false).is_none());
+        let operand = prepare(
+            r#"{"eager": [item for item in [1]], "value": keep((bound := (yield "nested")))}"#,
+            false,
+        )
+        .unwrap();
+        crate::verify::registered(operand.region()).unwrap();
+        assert!(operand.local_names.values().any(|local| local.name == "bound"));
     }
 
     #[test]
