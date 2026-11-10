@@ -3131,9 +3131,13 @@ mod tests {
                 checkpoints.push(&graph.modules[graph.entry].source[range]);
             }
             ExprKind::Binary(Binary::Add, ..) => checked_adds += 1,
-            ExprKind::Invoke { ref callable, ref args } => {
-                let range = callable.registered_local_range().unwrap();
-                assert_eq!(&graph.modules[graph.entry].source[range], "sink");
+            ExprKind::Invoke { ref args, .. } => {
+                let site = args.python_site.as_ref().unwrap();
+                let source = &graph.modules[graph.entry].source;
+                assert_eq!(&source[site.range], "sink(answer)");
+                let name = site.suspended_name.unwrap();
+                assert_eq!(&source[name], "sink");
+                assert_eq!(name.end(), site.callee_end);
                 assert_eq!(args.order, [0]);
                 assert_eq!(expr.ty, Type::PythonObject);
                 invokes += 1;
@@ -3142,6 +3146,62 @@ mod tests {
         });
         assert_eq!(checkpoints, ["answer = x + y", "pass", "sink(answer)"]);
         assert_eq!((checked_adds, invokes), (1, 1));
+    }
+
+    #[test]
+    fn computed_positional_calls_bind_the_evaluated_callee() {
+        let source = concat!(
+            "def apply(factory, obj, value):\n",
+            "    factory()(value)\n",
+            "    (obj.action if value else factory)(value)\n",
+            "    obj.action(value)\n",
+            "    factory(*value)\n",
+        );
+        let graph = SourceGraph::single(source).unwrap();
+        let _ = super::super::lower(&graph);
+        let functions = graph.registered_functions();
+        let checked = &functions[&graph.entry][&TextSize::default()];
+        assert!(crate::llvm::registered::supports(checked));
+        let mut calls = Vec::new();
+        ir::walk_expressions(&checked.function.body, &mut |expr| match &expr.kind {
+            ExprKind::Invoke { callable, args } => {
+                let site = args.python_site.as_ref().unwrap();
+                let ExprKind::Builtin(Builtin::RegisteredLocation(range, _), callee) =
+                    &callable.kind
+                else {
+                    panic!("expected the checked callable operand");
+                };
+                assert_eq!(site.callee_end, range.end());
+                let kind = match &callee[0].kind {
+                    ExprKind::Local(_) => "local",
+                    ExprKind::Invoke { .. } => "result",
+                    ExprKind::Conditional(..) => "conditional",
+                    _ => panic!("unexpected positional callable"),
+                };
+                calls.push((&source[site.range], kind));
+            }
+            ExprKind::Builtin(Builtin::RegisteredCall(site), _) => {
+                let kind = match (&site.target, &site.arguments) {
+                    (ir::RegisteredCallTarget::Method { .. }, ir::RegisteredArguments::Positional) => {
+                        "method"
+                    }
+                    (_, ir::RegisteredArguments::Packed(_)) => "packed",
+                    _ => panic!("unexpected registered call"),
+                };
+                calls.push((&source[site.range], kind));
+            }
+            _ => {}
+        });
+        assert_eq!(
+            calls,
+            [
+                ("factory()(value)", "result"),
+                ("factory()", "local"),
+                ("(obj.action if value else factory)(value)", "conditional"),
+                ("obj.action(value)", "method"),
+                ("factory(*value)", "packed"),
+            ]
+        );
     }
 
     #[test]
@@ -3911,6 +3971,7 @@ mod tests {
             "    sink([project(rows) for rows in rows if accept(rows)])\n",
             "    sink({project(x) for x in rows})\n",
             "    sink({project(x): project(x) for x in rows})\n",
+            "    sink([(locals if observed else globals)() for observed in rows])\n",
         ))
         .unwrap();
         let _ = super::super::lower(&graph);
@@ -3918,25 +3979,40 @@ mod tests {
         let checked = &bodies[&graph.entry][&TextSize::default()];
         let mut namespaces = 0;
         let mut scoped_calls = 0;
+        let mut observers = 0;
         let mut pulls = 0;
         ir::walk_expressions(&checked.function.body, &mut |expr| match &expr.kind {
             ExprKind::Builtin(Builtin::RegisteredNamespace(_), _) => namespaces += 1,
-            ExprKind::Builtin(Builtin::RegisteredCall(call), _) if call.explicit_scope => {
-                scoped_calls += 1
+            ExprKind::Invoke { args, .. }
+                if let Some(site) = &args.python_site
+                    && let Some(scope) = &site.scope =>
+            {
+                let ExprKind::Local(namespace) = scope.kind else {
+                    panic!("expected the comprehension's namespace slot")
+                };
+                scoped_calls += 1;
+                if &graph.modules[graph.entry].source[site.range]
+                    == "(locals if observed else globals)()"
+                {
+                    assert!(checked.local_names.values().any(|binding| {
+                        binding.name == "observed" && binding.namespace == Some(namespace)
+                    }));
+                    observers += 1;
+                }
             }
             _ => {}
         });
         ir::walk_statements(&checked.function.body, &mut |stmt| {
             pulls += usize::from(matches!(stmt, Statement::IterNext { .. }));
         });
-        assert_eq!((namespaces, scoped_calls, pulls), (3, 5, 3));
+        assert_eq!((namespaces, scoped_calls, observers, pulls), (4, 6, 1, 4));
         assert_eq!(
             checked
                 .local_names
                 .values()
                 .filter(|binding| binding.namespace.is_some())
                 .count(),
-            3
+            4
         );
     }
 

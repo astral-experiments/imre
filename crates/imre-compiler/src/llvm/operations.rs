@@ -168,53 +168,61 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         args: &crate::ir::CallArgs,
         returns: Type,
     ) -> CheckedValue {
-        let position = match &mut self.0 {
-            Entry::Native(_) => None,
-            Entry::Registered(frame) => {
-                let range = callable
-                    .registered_local_range()
-                    .expect("checked local callable");
-                let mark = frame.temporary_mark();
-                if frame.native_suspension {
-                    frame.call_position(range);
-                }
-                Some((mark, frame.scope.clone(), range.end()))
-            }
-        };
-        let mut operand = |expr: &Expr| match &mut self.0 {
-            Entry::Native(emitter) => CheckedValue::native(emitter.operand(expr)),
-            Entry::Registered(frame) => CheckedValue::handle(frame.evaluate_handle(expr)),
-        };
-        let target = operand(callable);
-        let values: Vec<_> = args.values.iter().map(operand).collect();
+        fn operands<T>(
+            callable: &Expr,
+            args: &crate::ir::CallArgs,
+            mut evaluate: impl FnMut(&Expr) -> T,
+        ) -> (T, Vec<T>) {
+            let target = evaluate(callable);
+            let values = args.values.iter().map(evaluate).collect();
+            (target, values)
+        }
+
         match &mut self.0 {
             Entry::Native(emitter) => {
-                let values = values.into_iter().map(CheckedValue::into_native).collect();
-                CheckedValue::owned(emitter.invoke_callable(
-                    target.into_native(),
-                    values,
-                    &args.order,
-                    returns,
-                ))
+                let (target, values) = operands(callable, args, |expr| emitter.operand(expr));
+                CheckedValue::owned(emitter.invoke_callable(target, values, &args.order, returns))
             }
             Entry::Registered(frame) => {
-                let (mark, scope, end) = position.expect("registered call position");
-                let handles: Vec<_> = values.into_iter().map(CheckedValue::into_handle).collect();
-                let (array, count) = frame.handle_array(&handles);
-                let operands = super::registered::CallArguments::Positional {
-                    array,
-                    count,
-                    receiver_slot: false,
-                };
-                let range = frame.current_range;
-                CheckedValue::handle(frame.positioned_call(
-                    &target.into_handle(),
-                    operands,
-                    &mark,
-                    range,
-                    end,
-                    &scope,
-                ))
+                let site = args.python_site.as_ref().expect("checked Python call site");
+                let enclosing_scope = frame.scope.clone();
+                let mark = frame.temporary_mark();
+                let result = frame.unwind_stack_operands(&mark, |frame| {
+                    if frame.native_suspension
+                        && let Some(name) = site.suspended_name
+                    {
+                        frame.call_position(name);
+                    }
+                    // Each evaluation leaves just its result above the previous operands.
+                    // Release intermediate owners before the next argument can run Python.
+                    let mut next = mark.clone();
+                    let mut evaluate = |expr: &Expr| {
+                        let value = frame.evaluate_handle(expr);
+                        next = frame.keep_operands(&next, &value, "0");
+                        value
+                    };
+                    let scope = site
+                        .scope
+                        .as_deref()
+                        .map(&mut evaluate)
+                        .unwrap_or(enclosing_scope);
+                    let (target, values) = operands(callable, args, evaluate);
+                    let (array, count) = frame.handle_array(&values);
+                    let positional = super::registered::CallArguments::Positional {
+                        array,
+                        count,
+                        receiver_slot: false,
+                    };
+                    frame.positioned_call(
+                        &target,
+                        positional,
+                        &mark,
+                        site.range,
+                        site.callee_end,
+                        &scope,
+                    )
+                });
+                CheckedValue::handle(result)
             }
         }
     }

@@ -551,6 +551,7 @@ mod tests {
             kind: ExprKind::Call(
                 0,
                 crate::ir::CallArgs {
+                    python_site: None,
                     exhaustive_enum_match: false,
                     values: vec![
                         Expr {

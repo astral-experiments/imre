@@ -1333,8 +1333,8 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         self.unwind_with(|f| f.discard_truth(mark), body)
     }
 
-    /// Release incomplete formatting operands in evaluation-stack order on the error edge.
-    fn unwind_format_operands<T>(&mut self, mark: &str, body: impl FnOnce(&mut Self) -> T) -> T {
+    /// Release incomplete operands in evaluation-stack order before entering the handler.
+    fn unwind_stack_operands<T>(&mut self, mark: &str, body: impl FnOnce(&mut Self) -> T) -> T {
         self.unwind_with(
             |frame| {
                 frame.line(&format!(
