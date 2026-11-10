@@ -203,29 +203,6 @@ impl ExpressionSites {
         }
     }
 
-    pub(crate) fn comparison<'a>(
-        &'a self,
-        node: &'a ast::Expr,
-        suspended: bool,
-    ) -> Option<(
-        &'a [ast::CmpOp],
-        impl Iterator<Item = BorrowedOperand<'a>> + 'a,
-    )> {
-        let cmp = node.as_compare_expr()?;
-        let inputs = match self.get(node) {
-            Some(Selection::Comparison(inputs)) => inputs.as_slice(),
-            _ => &[],
-        };
-        let operands = cmp.operands.iter().enumerate().map(move |(index, child)| {
-            let value = inputs
-                .get(index)
-                .and_then(Option::as_ref)
-                .and_then(|v| v.value(suspended));
-            BorrowedOperand::prepared(child, value)
-        });
-        Some((&cmp.ops, operands))
-    }
-
     #[cfg(test)]
     pub(crate) fn get_mut(&mut self, node: &ast::Expr) -> Option<&mut Selection> {
         self.selected.get_mut(&site(node))
