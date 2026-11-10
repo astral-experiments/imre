@@ -444,6 +444,39 @@ pub(super) fn checkpoint(stmt: &ast::Stmt) -> Statement {
     ))
 }
 
+fn store_input(slot: usize, input: PhysicalOperand) -> SourceEffect {
+    SourceEffect::Value(
+        Box::new(Statement::Assign(
+            slot,
+            Expr::registered_input(0, Type::PythonObject),
+        )),
+        vec![input],
+    )
+}
+
+fn assertion_statements(
+    stmt: &ast::StmtAssert,
+    test: Expr,
+    message: Option<Expr>,
+) -> [Statement; 2] {
+    let failure = operation(
+        Builtin::RegisteredAssertionFailure {
+            statement: stmt.start(),
+            test: stmt.test.start(),
+        },
+        Type::None,
+        message.into_iter().collect(),
+    );
+    [
+        Statement::Expr(operation(
+            Builtin::RegisteredStatement(stmt.test.range(), None),
+            Type::None,
+            vec![],
+        )),
+        Statement::If(test, Vec::new(), vec![Statement::Expr(failure)]),
+    ]
+}
+
 fn operation(op: Builtin, ty: Type, operands: Vec<Expr>) -> Expr {
     Expr {
         ty,
@@ -1002,8 +1035,6 @@ struct LoweredSuite<'s> {
 pub(crate) enum SourceEffect {
     /// The statement reads each prepared operand by its position in the input list.
     Value(Box<Statement>, Vec<PhysicalOperand>),
-    /// The enclosing suite owns any source inputs on their test or failure edge.
-    Assertion(Box<AssertionSite>),
     /// Checked control flow with guards and child suites bound in their lexical frame.
     Region(Box<PreparedRegion>),
     /// Patterns, guards and case suites belong to the same evaluation of the subject.
@@ -1086,13 +1117,6 @@ impl RegisteredSuite {
     pub(crate) fn fully_checked(&self) -> bool {
         self.residual.is_empty()
     }
-}
-
-pub(crate) struct AssertionSite {
-    pub(crate) statement: TextSize,
-    pub(crate) test_range: TextRange,
-    pub(crate) test: PhysicalOperand,
-    pub(crate) message: Option<PhysicalOperand>,
 }
 
 /// Physical source locations and semantic operations shared by complete and residual suites.
@@ -1385,10 +1409,6 @@ impl<'a> SuitePreparation<'a> {
                     .or_else(|| {
                         self.checked_declaration_refusal(std::slice::from_ref(statement.as_ref()))
                     }),
-                Ok(SourceEffect::Assertion(site)) => site
-                    .test
-                    .refusal()
-                    .or_else(|| site.message.as_ref()?.refusal()),
                 _ => None,
             };
             let operation = self.refusal.take().or(selected);
@@ -1790,12 +1810,6 @@ impl<'a> SuitePreparation<'a> {
             self.retain_operand(expr, kind, suspended, checked)
         };
         let input_slot = |slot| Expr::registered_input(slot, Type::PythonObject);
-        let store_input = |slot, input| {
-            SourceEffect::Value(
-                Box::new(Statement::Assign(slot, input_slot(0))),
-                vec![input],
-            )
-        };
         let operation_with_inputs = |opcode, inputs: Vec<PhysicalOperand>| {
             let slots = (0..inputs.len()).map(input_slot).collect();
             let effect = Statement::Expr(operation(opcode, Type::None, slots));
@@ -1827,15 +1841,23 @@ impl<'a> SuitePreparation<'a> {
             }
             scope.truncate_locals(slots_before);
             if let ast::Stmt::Assert(assertion) = stmt {
-                let site = AssertionSite {
-                    statement: assertion.start(),
-                    test_range: assertion.test.range(),
-                    test: frame_value(&assertion.test),
-                    message: assertion.msg.as_deref().map(frame_value),
-                };
+                let test = RegisteredOperand::prepare_with(self.source, kind, |scope| {
+                    scope.condition_operand(&assertion.test)
+                });
+                let mut inputs = vec![self.retain_operand(&assertion.test, kind, suspended, test)];
+                let message = assertion.msg.as_deref().map(|message| {
+                    let checked = RegisteredOperand::prepare_with(self.source, kind, |scope| {
+                        scope.frame_value(message)
+                    });
+                    inputs.push(self.retain_operand(message, kind, suspended, checked));
+                    input_slot(1)
+                });
+                let [checkpoint, branch] =
+                    assertion_statements(assertion, Expr::registered_input(0, Type::Bool), message);
+                body.push(checkpoint);
                 residual.push(PendingStatement {
                     at: body.len(),
-                    effect: PendingEffect::Prepared(SourceEffect::Assertion(Box::new(site))),
+                    effect: PendingEffect::Prepared(SourceEffect::Value(Box::new(branch), inputs)),
                 });
                 continue;
             }
@@ -2864,30 +2886,14 @@ impl SourceScope<'_> {
     }
 
     fn assertion(&mut self, stmt: &ast::StmtAssert) -> StdResult<[Statement; 2], ()> {
-        let test = self.operand(&stmt.test).ok_or(())?;
+        let test = self.condition_operand(&stmt.test).ok_or(())?;
         let message = stmt
             .msg
             .as_deref()
             .filter(|_| ir::control::boolean_literal(&test) != Some(true))
-            .map(|message| self.operand(message).ok_or(()))
+            .map(|message| self.frame_value(message).ok_or(()))
             .transpose()?;
-        let failure = operation(
-            Builtin::RegisteredAssertionFailure {
-                statement: stmt.start(),
-                test: stmt.test.start(),
-            },
-            Type::None,
-            message.into_iter().collect(),
-        );
-        // The implicit truth conversion can call Python on the test's physical line.
-        Ok([
-            Statement::Expr(operation(
-                Builtin::RegisteredStatement(stmt.test.range(), None),
-                Type::None,
-                vec![],
-            )),
-            Statement::If(truth(test), Vec::new(), vec![Statement::Expr(failure)]),
-        ])
+        Ok(assertion_statements(stmt, truth(test), message))
     }
 
     fn statement(&mut self, stmt: &ast::Stmt, body: &mut Vec<Statement>) -> StdResult<bool, ()> {
@@ -3508,18 +3514,57 @@ mod tests {
         let [physical] = plan.residual.as_slice() else {
             panic!("expected the generator-expression message to remain physical");
         };
-        assert_eq!(physical.at, 0);
-
-        let Ok(SourceEffect::Assertion(site)) = &physical.effect else {
-            panic!("expected a prepared assertion");
+        let assertion = body[0].as_assert_stmt().unwrap();
+        assert_eq!(physical.at, 1);
+        let Some(Statement::Expr(checkpoint)) = plan.checked.function.body.first() else {
+            panic!("expected a checkpoint before the physical assertion");
         };
-        let PhysicalOperand::Checked(test) = &site.test else {
-            panic!("expected the test to own its walrus binding");
+        assert!(matches!(&checkpoint.kind,
+            ExprKind::Builtin(Builtin::RegisteredStatement(range, None), _) if *range == assertion.test.range()
+        ));
+        let Ok(SourceEffect::Value(statement, inputs)) = &physical.effect else {
+            panic!("expected a checked statement with prepared inputs");
+        };
+        let [
+            PhysicalOperand::Checked(test),
+            PhysicalOperand::Residual(message),
+        ] = inputs.as_slice()
+        else {
+            panic!("expected the checked test followed by its physical message");
         };
         assert_eq!(test.local_names.len(), 1);
         assert_eq!(test.local_names[&0].name, "early");
-        assert!(matches!(site.message, Some(PhysicalOperand::Residual(_))));
-        let [_, Statement::If(test, succeeds, fails)] = plan.checked.function.body.as_slice()
+        assert_eq!(message.range, assertion.msg.as_deref().unwrap().range());
+        let Statement::If(test, success, failure) = statement.as_ref() else {
+            panic!("expected a conditional assertion");
+        };
+        assert!(matches!(
+            test.kind,
+            ExprKind::Builtin(crate::ir::Builtin::RegisteredInput(0), _)
+        ));
+        assert_eq!(test.ty, Type::Bool);
+        assert!(success.is_empty());
+        let [Statement::Expr(fail)] = failure.as_slice() else {
+            panic!("expected only the checked assertion failure");
+        };
+        let ExprKind::Builtin(Builtin::RegisteredAssertionFailure { statement, test }, args) =
+            &fail.kind
+        else {
+            panic!("expected the shared assertion failure");
+        };
+        assert_eq!(
+            (*statement, *test),
+            (assertion.start(), assertion.test.start())
+        );
+        assert!(matches!(
+            args.as_slice(),
+            [Expr {
+                ty: Type::PythonObject,
+                kind: ExprKind::Builtin(crate::ir::Builtin::RegisteredInput(1), _),
+                ..
+            }]
+        ));
+        let [_, Statement::If(test, succeeds, fails)] = &plan.checked.function.body[physical.at..]
         else {
             panic!("expected only the checked assertion checkpoint and branch");
         };
@@ -3549,6 +3594,60 @@ mod tests {
         let optimized = prepare(false);
         assert!(optimized.fully_checked());
         assert!(optimized.checked.function.body.is_empty());
+    }
+
+    #[test]
+    fn suspending_assertion_operands_stay_checked_on_their_own_edges() {
+        let text = "def g():assert+(yield)\ndef m():assert False, +(yield)\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let literals = values::ModuleSource::new(module);
+        let operations = HashMap::new();
+        for def in &module.parsed.syntax().body {
+            let def = def.as_function_def_stmt().unwrap();
+            let prepare = |enabled| {
+                SuitePreparation::new(&operations, literals.context(text), &def.body, enabled)
+                    .function_suite(
+                        &def.body,
+                        RegisteredScope::Function { is_async: false },
+                        true,
+                    )
+            };
+            let plan = prepare(true);
+            assert!(plan.fully_checked());
+            let [_, Statement::If(test, yes, no)] = plan.checked.function.body.as_slice() else {
+                panic!("expected a checked assertion");
+            };
+            assert!(yes.is_empty());
+            let [Statement::Expr(failure)] = no.as_slice() else {
+                panic!("expected only the assertion failure");
+            };
+            let yields = |expr| {
+                let mut count = 0;
+                ir::walk_operand_expressions(expr, &mut |node| {
+                    if matches!(
+                        node.kind,
+                        ExprKind::Builtin(
+                            Builtin::RegisteredSuspend(ir::SuspendValue::Yield, _),
+                            _
+                        )
+                    ) {
+                        count += 1;
+                    }
+                });
+                count
+            };
+            assert_eq!(
+                (yields(test), yields(failure)),
+                if def.name.as_str() == "g" {
+                    (1, 0)
+                } else {
+                    (0, 1)
+                }
+            );
+            let omitted = prepare(false);
+            assert!(omitted.fully_checked() && omitted.checked.function.body.is_empty());
+        }
     }
 
     #[test]
