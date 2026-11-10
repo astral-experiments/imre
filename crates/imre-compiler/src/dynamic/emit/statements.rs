@@ -1143,7 +1143,9 @@ impl<'p> Function<'_, 'p> {
                 self.frame
                     .checked_binding(binding, *entered, value, &self.sites);
             }
-            PhysicalBinding::Source(target) => self.assign_target(target, value),
+            PhysicalBinding::Refused(range, reason) => {
+                self.with_expression_range(*range, |code| code.build_diagnostic(reason));
+            }
         }
     }
 

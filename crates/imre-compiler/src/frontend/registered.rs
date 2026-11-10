@@ -926,7 +926,7 @@ pub(crate) enum PhysicalBinding {
         entered: usize,
         binding: Box<RegisteredFunction>,
     },
-    Source(Box<ast::Expr>),
+    Refused(TextRange, &'static str),
 }
 
 pub(crate) struct PhysicalSuite {
@@ -1081,21 +1081,6 @@ pub(crate) struct ContextInput {
     pub(crate) site: ir::ContextSite,
     pub(crate) manager: PhysicalOperand,
     pub(crate) target: Option<PhysicalBinding>,
-}
-
-/// Bind one externally supplied value with the scope and slot layout of its target.
-fn checked_binding(
-    target: &ast::Expr,
-    source: values::RegisteredSource<'_>,
-    kind: RegisteredScope,
-) -> Option<(usize, Box<RegisteredFunction>)> {
-    let operations = HashMap::new();
-    let sites = StatementSites::default();
-    let mut scope = SourceScope::new(kind, source, &operations, &sites);
-    let ir::ContextBinding { entered, body } = scope.with_binding(target).ok()?;
-    PhysicalRegion::Fallthrough
-        .accepts(&body)
-        .then(|| (entered, Box::new(scope.finish(body))))
 }
 
 fn for_pull(loop_: &ast::StmtFor) -> Option<ir::AsyncPull> {
@@ -1599,18 +1584,24 @@ impl<'a> SuitePreparation<'a> {
     }
 
     fn physical_binding(
-        &mut self,
+        &self,
         target: &ast::Expr,
         kind: RegisteredScope,
         suspended: bool,
     ) -> PhysicalBinding {
-        match checked_binding(target, self.source, kind) {
-            Some((entered, binding)) => PhysicalBinding::Checked { entered, binding },
-            None => {
-                self.sites
-                    .expressions
-                    .prepare_input(target, self.source, kind, suspended);
-                PhysicalBinding::Source(Box::new(target.clone()))
+        let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
+        scope.diagnostic_suspension = Some(suspended);
+        match scope.with_binding(target) {
+            Ok(ir::ContextBinding { entered, body }) => PhysicalBinding::Checked {
+                entered,
+                binding: Box::new(scope.finish(body)),
+            },
+            Err(()) => {
+                let (range, reason) = scope.refusal.unwrap_or((
+                    target.range(),
+                    "cannot compile this assignment target ahead of time",
+                ));
+                PhysicalBinding::Refused(range, reason)
             }
         }
     }
@@ -2740,11 +2731,13 @@ impl SourceScope<'_> {
     fn with_binding(&mut self, target: &ast::Expr) -> StdResult<ir::ContextBinding, ()> {
         let slot = self.hidden(Type::PythonObject);
         let value = Expr::local(slot, Type::PythonObject);
-        let body = if pattern_elements(target).is_some() {
-            unpacking::bind_targets(self, target, value, None)?
+        // Unpacking consumes the container before any individual target can suspend.
+        let value = if pattern_elements(target).is_some() {
+            unpacking::take_pattern_temporary(value, slot)
         } else {
-            self.assignment_targets(std::slice::from_ref(target), value)?
+            value
         };
+        let body = self.assignment_targets(std::slice::from_ref(target), value)?;
         Ok(ir::ContextBinding {
             entered: slot,
             body: vec![Statement::Scope {
