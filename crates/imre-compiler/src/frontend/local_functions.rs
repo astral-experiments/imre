@@ -574,6 +574,7 @@ impl Checker<'_> {
             .collect();
         let signature = Signature {
             id: 0,
+            physical_frame: false,
             asynchronous: false,
             method: None,
             returns: Type::None,
@@ -647,6 +648,7 @@ impl Checker<'_> {
         } else {
             let signature = Signature {
                 id: 0,
+                physical_frame: false,
                 asynchronous: true,
                 method: None,
                 returns: result,

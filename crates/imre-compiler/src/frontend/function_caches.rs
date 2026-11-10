@@ -444,6 +444,7 @@ impl Checker<'_> {
             if let Some(layout) = self.types.cached_function(receiver.ty) {
                 context_field(receiver.clone(), layout, 0, layout.callable)
             } else {
+                self.wrapper_link.set(true);
                 builtin(
                     Builtin::FunctionWrappedGet,
                     receiver.ty,

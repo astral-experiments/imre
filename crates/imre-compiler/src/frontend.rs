@@ -198,6 +198,7 @@ use module_values::{Initialization, ModuleValues};
 #[derive(Clone)]
 struct Signature {
     id: usize,
+    physical_frame: bool,
     asynchronous: bool,
     params: Vec<Parameter>,
     returns: Type,
@@ -671,6 +672,18 @@ fn checked_region<T>(
     }
 }
 
+fn fixed_frame_entry(function: &ast::StmtFunctionDef) -> bool {
+    !function.is_async
+        && function.decorator_list.is_empty()
+        && function.type_params.is_none()
+        && function.parameters.vararg.is_none()
+        && function.parameters.kwarg.is_none()
+        && function
+            .parameters
+            .iter_non_variadic_params()
+            .all(|p| p.default.is_none())
+}
+
 fn lower_graph(
     graph: &SourceGraph,
     mut cache: Option<&mut CallerCache>,
@@ -689,7 +702,6 @@ fn lower_graph(
     // Native wrapper links can prefer registered frames only when a bound
     // callable has a Type::Class receiver. Without classes no definition transfers.
     let can_transfer_frames = !classes.declarations.definitions.is_empty();
-    let mut frame_declarations = HashMap::new();
     for (module_id, module) in graph.modules.iter().enumerate() {
         for (name, binding) in &module.bindings {
             if reserved(name)
@@ -728,19 +740,9 @@ fn lower_graph(
                         continue;
                     }
                     let cached = function_caches::policy(graph, module_id, function)?;
-                    let physical_entry = (can_transfer_frames
+                    let physical_entry = can_transfer_frames
                         && module.is_program_source()
-                        && module.archive.is_none()
-                        && !function.is_async
-                        && function.decorator_list.is_empty()
-                        && function.type_params.is_none()
-                        && function.parameters.vararg.is_none()
-                        && function.parameters.kwarg.is_none()
-                        && function
-                            .parameters
-                            .iter_non_variadic_params()
-                            .all(|p| p.default.is_none()))
-                    .then(|| function.start());
+                        && fixed_frame_entry(function);
                     let mut function = function.clone();
                     if module.overloads.contains(&statement_id) {
                         graph.runtime_overload(module_id, function.name.range());
@@ -770,9 +772,9 @@ fn lower_graph(
                     } else {
                         keyword_forwarding::prepare(graph, module_id, &mut function)
                     };
-                    let frame_entry = physical_entry
-                        .filter(|_| element.is_none() && defaults.forwarded.is_none());
-                    let signature = signature(
+                    let physical_frame =
+                        physical_entry && element.is_none() && defaults.forwarded.is_none();
+                    let mut signature = signature(
                         &function,
                         graph,
                         defaults,
@@ -782,6 +784,7 @@ fn lower_graph(
                         &inference,
                     )
                     .map_err(|error| format!("{}:{error}", module.path.display()))?;
+                    signature.physical_frame = physical_frame;
                     if let Some(policy) = cached {
                         if signature.asynchronous
                             || function.returns.is_none()
@@ -809,9 +812,6 @@ fn lower_graph(
                         },
                         signature.clone(),
                     );
-                    if let Some(start) = frame_entry {
-                        frame_declarations.insert(signature.id, start);
-                    }
                     definitions.push((module_id, function.clone(), signature));
                     callable_definitions.push(DefinitionId {
                         module: module_id,
@@ -898,6 +898,15 @@ fn lower_graph(
                 context,
                 &classes.declarations,
             );
+            // Ordinary methods are the physical class members. Inherited copies,
+            // property aliases and synthesized initializers have separate native slots.
+            let physical_entry = kind == crate::classes::MethodKind::Instance
+                && class.method_origins[index] == class.definition
+                && class.initializer != Some(index)
+                && class.forwarder.is_none()
+                && module.is_program_source()
+                && defaults.forwarded.is_none()
+                && fixed_frame_entry(&class.methods[index]);
             let mut signature = signature(
                 &method,
                 graph,
@@ -960,6 +969,8 @@ fn lower_graph(
             }
             if records::iterator_result(&method, graph, module_id) {
                 classes.generators.insert(signature.id);
+            } else {
+                signature.physical_frame = physical_entry;
             }
             definitions.push((module_id, method, signature));
             callable_definitions.push(class.definition);
@@ -980,7 +991,7 @@ fn lower_graph(
         let renamed = assignments::alias_builtin_parameters(function, graph, *module);
         let (dispatch, packed) = closed_calls::prepare(function, graph, *module);
         if renamed || dispatch || packed {
-            frame_declarations.remove(&signature.id);
+            signature.physical_frame = false;
         }
         if packed {
             inference.discover_packed_arguments();
@@ -1125,6 +1136,7 @@ fn lower_graph(
     }
     let mut functions = Vec::new();
     let mut frame_sources = HashMap::new();
+    let mut has_wrapper_link = false;
     let mut refused_body = None;
     let mut zip_sums = Vec::new();
     let mut owners = Vec::new();
@@ -1201,9 +1213,12 @@ fn lower_graph(
         {
             continue;
         }
+        // A prior checked wrapper link can make a bound method enter a Python
+        // frame. Native analysis still selects the program after specialization.
         checker.fixed_sites = (!needs_registered_entry
-            && frame_declarations.contains_key(&signature.id))
-        .then(Default::default);
+            && (signature.method.is_none() || has_wrapper_link)
+            && signature.physical_frame)
+            .then(Default::default);
         let result = match cache.as_deref_mut() {
             Some(cache) if signature.method.is_none() => cache.body(checker, definition, signature),
             _ => lower_body(checker, definition, signature),
@@ -1222,6 +1237,7 @@ fn lower_graph(
             // definitions and the registered initializer already own this program.
             continue;
         }
+        has_wrapper_link |= body.wrapper_link;
         let LoweredBody {
             function,
             calls,
@@ -1229,9 +1245,9 @@ fn lower_graph(
             ..
         } = body;
         if let Some(source) = body.source
-            && let Some(&start) = frame_declarations.get(&signature.id)
+            && signature.physical_frame
         {
-            frame_sources.insert(functions.len(), (start, source));
+            frame_sources.insert(functions.len(), (definition.start(), source));
         }
         graph.ordered_reads(*module_id, &definition.body, true, &mut reads);
         let (function, calls, reads) = if let Some(&policy) = classes.cached.get(&signature.id) {
@@ -1607,6 +1623,7 @@ fn needs_object_string_order(functions: &[ir::Function], entry: &ir::Function) -
 
 #[derive(Clone)]
 struct LoweredBody {
+    wrapper_link: bool,
     function: ir::Function,
     source: Option<FixedBodySource>,
     calls: HashSet<usize>,
@@ -1758,11 +1775,18 @@ fn lower_function(
     } else if module.archive.is_none() {
         checker.fault_frame(&mut body, definition.name.as_str(), definition.start());
         if let Some(sites) = checker.fixed_sites {
-            source = sites.finish(definition.body.len(), &body, checker.names, &checker.locals);
+            source = sites.finish(
+                definition.body.len(),
+                &body,
+                checker.names,
+                &checker.locals,
+                signature.method.is_some(),
+            );
         }
     }
     Ok((
         LoweredBody {
+            wrapper_link: checker.wrapper_link.get(),
             source,
             function: ir::Function {
                 params,
@@ -2081,6 +2105,7 @@ fn signature(
     let id = inference.register(parameter_types, returns, none_defaults);
     Ok(Signature {
         id,
+        physical_frame: false,
         asynchronous: function.is_async,
         params,
         returns: returns.unwrap_or(Type::None),
@@ -2823,6 +2848,7 @@ struct CalledDefinition {
 }
 
 struct Checker<'a> {
+    wrapper_link: std::cell::Cell<bool>,
     fixed_sites: Option<fixed_body_source::SourceSites>,
     observed_definition: Option<Box<CalledDefinition>>,
     /// Locals in this body are bound in an existing Python activation.
@@ -2913,6 +2939,7 @@ impl<'a> Checker<'a> {
         globals: &'a ModuleValues,
     ) -> Self {
         Self {
+            wrapper_link: Default::default(),
             fixed_sites: None,
             observed_definition: None,
             registered: None,
