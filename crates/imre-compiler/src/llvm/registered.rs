@@ -1356,21 +1356,6 @@ impl RegisteredFrame<'_, '_> {
         result
     }
 
-    pub(crate) fn checked_statement(&mut self, stmt: &Statement, sites: &CheckedSites) {
-        self.checked_statement_with_inputs(stmt, sites, &[]);
-    }
-
-    pub(crate) fn checked_statement_with_inputs(
-        &mut self,
-        stmt: &Statement,
-        sites: &CheckedSites,
-        inputs: &[String],
-    ) {
-        self.with_checked_frame(sites, None, |frame| {
-            CheckedBody::registered(Frame { inputs, ..frame }).emit_statement(stmt)
-        })
-    }
-
     pub(crate) fn unary_handle(&mut self, op: ir::ObjectUnary, operand: String) -> CheckedValue {
         self.with_checked_frame(&CheckedSites::default(), None, |frame| {
             CheckedBody::registered(frame).unary_value(op, CheckedValue::handle(operand), false)

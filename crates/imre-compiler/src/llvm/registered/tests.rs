@@ -323,10 +323,13 @@ fn checked_assertion_message_and_raise_use_the_failure_edge() {
             vec![message],
         ),
     });
-    frame.checked_statement(
-        &Statement::If(Expr::boolean(false), vec![], vec![failure]),
-        &CheckedSites::default(),
-    );
+    frame.with_checked_frame(&CheckedSites::default(), None, |frame| {
+        super::CheckedBody::registered(frame).emit_statement(&Statement::If(
+            Expr::boolean(false),
+            vec![],
+            vec![failure],
+        ));
+    });
 
     let code = &frame.body.code;
     let branch = code

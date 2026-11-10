@@ -3,7 +3,6 @@ mod declarations;
 use super::sites::{CheckedSites, CompiledDefinition, CompiledProvider};
 
 use super::{AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourceMap};
-use crate::ir::Statement;
 use crate::llvm::registered::context::{ContextEmitter, ContextRegion};
 use imre_ast::code_flags;
 use ruff_python_ast as ast;
@@ -100,11 +99,6 @@ impl<'p> Function<'_, 'p> {
         true
     }
 
-    fn checked_statement(&mut self, statement: &Statement) {
-        self.prepare_checked_sites(std::slice::from_ref(statement));
-        self.checked_region(|code| code.frame.checked_statement(statement, &code.sites));
-    }
-
     fn checked_block(
         &mut self,
         statements: &[crate::ir::Statement],
@@ -188,12 +182,7 @@ impl<'p> Function<'_, 'p> {
                 self.simple_call = None;
                 self.unwind_loop(transfer, |code, depth| code.run_cleanups(depth, None));
             }
-            SourceEffect::Assertion(site) => {
-                let source = suite[run.statements.start]
-                    .as_assert_stmt()
-                    .expect("external assertion input");
-                self.emit_assertion_inputs(site, source);
-            }
+            SourceEffect::Assertion(site) => self.emit_assertion_inputs(site),
             SourceEffect::Class(site) => self.mixed_class_definition(*site),
             SourceEffect::Match(range, site) => {
                 self.checkpoint(range);
@@ -221,10 +210,7 @@ impl<'p> Function<'_, 'p> {
                         &mut code.frame.body
                     },
                     arms.iter().map(|(test, suite)| (test.as_ref(), suite)),
-                    |code, test, yes, no| match test {
-                        PhysicalOperand::Checked(operand) => code.branch_operand(operand, yes, no),
-                        PhysicalOperand::Source(expr) => code.branch_expr(expr, yes, no),
-                    },
+                    Self::branch_physical_operand,
                     Self::physical_suite,
                     true,
                 );
@@ -265,46 +251,39 @@ impl<'p> Function<'_, 'p> {
         }
     }
 
-    fn emit_assertion_inputs(
-        &mut self,
-        site: &crate::frontend::AssertionSite,
-        source: &'p ast::StmtAssert,
-    ) {
-        let [checkpoint, Statement::If(test, yes, no)] = site.body.as_slice() else {
-            unreachable!("prepared assertion")
-        };
-        self.checked_statement(checkpoint);
+    fn emit_assertion_inputs(&mut self, site: &'p crate::frontend::AssertionSite) {
+        self.checkpoint(&site.test_range);
+        self.simple_call = None;
         crate::llvm::operations::choose(
             self,
             |code| {
                 code.flush_check();
                 &mut code.frame.body
             },
-            [(Some(test), yes), (None, no)],
-            |code, test, yes, no| {
-                if site.external_test {
-                    code.branch_expr(&source.test, yes, no);
-                } else {
-                    code.prepare_checked_value(test);
-                    code.frame.registered_branch(test, &code.sites, yes, no);
-                }
-            },
-            |code, statements| {
-                for statement in statements {
-                    if site.external_message {
-                        let message = code.expr(source.msg.as_deref().expect("external message"));
-                        code.frame.checked_statement_with_inputs(
-                            statement,
-                            &code.sites,
-                            &[message],
-                        );
-                    } else {
-                        code.checked_statement(statement);
-                    }
+            [(Some(&site.test), false), (None, true)],
+            Self::branch_physical_operand,
+            |code, failed| {
+                if failed {
+                    let message = site
+                        .message
+                        .as_ref()
+                        .map(|input| code.physical_operand(input));
+                    code.frame.assertion_failure(
+                        site.statement,
+                        site.test_range.start(),
+                        message.as_deref(),
+                    );
                 }
             },
             false,
         );
+    }
+
+    fn branch_physical_operand(&mut self, test: &PhysicalOperand, yes: &str, no: &str) {
+        match test {
+            PhysicalOperand::Checked(operand) => self.branch_operand(operand, yes, no),
+            PhysicalOperand::Source(expr) => self.branch_expr(expr, yes, no),
+        }
     }
 
     fn branch_operand(
@@ -889,12 +868,7 @@ impl<'p> Function<'_, 'p> {
                 WhileGuard::Literal(taken) => {
                     code.branch(if *taken { "true" } else { "false" }, yes, no);
                 }
-                WhileGuard::Operand(PhysicalOperand::Checked(operand)) => {
-                    code.branch_operand(operand, yes, no);
-                }
-                WhileGuard::Operand(PhysicalOperand::Source(test)) => {
-                    code.branch_expr(test, yes, no)
-                }
+                WhileGuard::Operand(test) => code.branch_physical_operand(test, yes, no),
             },
             |code, edges, ()| {
                 let depth = code.exits.len();
