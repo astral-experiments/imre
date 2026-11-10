@@ -162,7 +162,9 @@ impl Context {
 
     fn sealed_native(&self, name: &str) -> bool {
         self.is_frozen(name)
-            || (stdlib::is_module(name) && !imre_ast::providers::is_native_fallback(name))
+            || (stdlib::is_module(name)
+                && !imre_ast::providers::is_native_package(name)
+                && !imre_ast::providers::is_native_fallback(name))
     }
 
     /// Look up a module owned by this loader, including native modules without a Python body.
