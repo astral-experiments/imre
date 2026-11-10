@@ -564,35 +564,33 @@ impl<'p> Function<'_, 'p> {
             |code| code.name("b"),
             |code, edges| code.jump(&edges.step),
             |code, item, exhausted| {
-                if let Some((_, _, _, plain)) = &guarded {
-                    code.frame.sync_iteration_edge(
+                let row = if let Some((_, _, _, plain)) = &guarded {
+                    code.frame.pull_item_pair(
                         &cursor,
                         region.range.start(),
                         region.otherwise.is_some(),
-                        Some(plain),
-                        item,
+                        plain,
                         exhausted,
-                    );
-                    None
+                    )
                 } else {
-                    code.frame.iteration_edge(
+                    code.frame.pull_item(
                         &cursor,
                         region.pull,
                         region.range.start(),
                         region.otherwise.is_some(),
-                        item,
                         exhausted,
                     )
-                }
+                };
+                code.jump(item);
+                row
             },
-            |code, edges, pulled| {
+            |code, edges, row| {
                 if let Some((binding, entered, pair, plain)) = &guarded {
                     code.initialize_binding(binding, |frame| {
-                        frame.bind_item_pair(&cursor, plain, *entered, pair)
+                        frame.bind_item_pair(&row, plain, *entered, pair)
                     });
                 } else {
-                    let item = code.frame.iteration_item(&cursor, pulled);
-                    code.physical_binding(&region.target, &item);
+                    code.physical_binding(&region.target, &row);
                 }
                 code.push_loop(edges.clone(), code.regions.len(), enclosing);
                 emit_prepared_suite(code, &region.body);
