@@ -212,7 +212,13 @@ impl<'p> Function<'_, 'p> {
                 self.unwind_loop(transfer);
             }
             SourceEffect::Assertion(site) => self.emit_assertion_inputs(site),
-            SourceEffect::Class(site) => self.mixed_class_definition(*site),
+            SourceEffect::Class {
+                site,
+                layout,
+                inputs,
+            } => {
+                self.mixed_class_definition(*site, layout, inputs);
+            }
             SourceEffect::Match(range, site) => {
                 self.checkpoint(range);
                 self.simple_call = None;
@@ -369,23 +375,25 @@ impl<'p> Function<'_, 'p> {
         }
     }
 
-    fn mixed_class_definition(&mut self, site: TextSize) {
+    fn mixed_class_definition(
+        &mut self,
+        site: TextSize,
+        layout: &crate::ir::PackedArguments,
+        inputs: &[PhysicalOperand],
+    ) {
         let class = &self.source.class_bodies[&site];
-        let header = &class.header;
-        let decorators = header
-            .decorators
+        let (decorators, operands) = inputs.split_at(class.decorator_offsets.len());
+        let decorators = decorators
             .iter()
             .map(|operand| self.physical_operand(operand))
             .collect::<Vec<_>>();
-        let arguments = header.parameters.is_none().then(|| {
-            self.class_arguments(&header.layout, |code, index| {
-                code.physical_operand(&header.operands[index])
-            })
+        let arguments = self.class_arguments(layout, |code, index| {
+            code.physical_operand(&operands[index])
         });
         self.callable_sites().place_definition(site);
         let value = self
             .sites
-            .definition(&mut self.frame, site, &decorators, arguments);
+            .definition(&mut self.frame, site, &decorators, Some(arguments));
         self.bind(class.name.as_str(), &value);
     }
 }

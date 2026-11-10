@@ -463,9 +463,7 @@ impl<'a> PreparedBody<'a> {
             });
         }
         let mut function_bodies = HashMap::new();
-        let class_bodies = prepare.class_suites(sites.classes, &class_keywords, |start| {
-            scopes.functions[&start].metadata.suspension_flags() != 0
-        });
+        let class_bodies = prepare.class_suites(sites.classes, &class_keywords);
         for start in class_bodies.keys() {
             scopes
                 .classes
@@ -1165,12 +1163,7 @@ mod tests {
             SuitePreparation::new(&prepared.source.namespace_operations, source, body, true);
         suites.sites.expressions = logicals;
         let initializer = suites.suite(body, RegisteredScope::Module);
-        let class_bodies = suites.class_suites(classes, &prepared.source.class_keywords, |start| {
-            prepared.source.scopes.functions[&start]
-                .metadata
-                .suspension_flags()
-                != 0
-        });
+        let class_bodies = suites.class_suites(classes, &prepared.source.class_keywords);
         let sites = suites.sites;
         prepared.source.initializer = Some(initializer);
         prepared.source.class_bodies = class_bodies;
@@ -2076,7 +2069,10 @@ mod tests {
             "    @(yield 'decorator')\n",
             "    class Child((yield 'base')):\n",
             "        marker = 'child'\n",
-            "    yield Child\n",
+            "    @(yield 'generic decorator')\n",
+            "    class Packet[T](base(T)):\n",
+            "        pass\n",
+            "    yield Child, Packet\n",
         );
         let mut module = PreparedBody::module(
             "example",
@@ -2091,17 +2087,24 @@ mod tests {
             .into_syntax()
             .body;
         let def = body[0].as_function_def_stmt_mut().unwrap();
-        let site = def.body[0].start();
+        let classes = [def.body[0].start(), def.body[1].start()];
         let plan = module.source.function_bodies[&def.start()].suite().unwrap();
-        assert!(plan.residual.iter().any(|run| matches!(
-            run.effect, crate::frontend::SourceEffect::Class(class) if class == site
-        )));
+        assert!(plan.fully_checked());
+        let mut definitions = Vec::new();
+        sites::CheckedSites::visit(&plan.checked.function.body, &mut |required| {
+            if let sites::RequiredSite::Definition(start) = required {
+                definitions.push(start);
+            }
+        });
+        assert_eq!(definitions, classes);
         let expected = module.standalone().unwrap();
-        def.body[0] = ast::StmtPass {
-            range: def.body[0].range(),
-            node_index: Default::default(),
+        for declaration in &mut def.body[..2] {
+            *declaration = ast::StmtPass {
+                range: declaration.range(),
+                node_index: Default::default(),
+            }
+            .into();
         }
-        .into();
         module.syntax = Some(Cow::Owned(body));
         assert_eq!(module.standalone().unwrap(), expected);
     }
@@ -2230,9 +2233,9 @@ mod tests {
                 .find(|class| class.name.as_str() == name)
                 .unwrap();
             let owner = &typing.source.class_bodies[&class.decorator_list[0].start()];
-            let parameters = owner.header.parameters.as_ref().unwrap();
-            assert_eq!(parameters[0].name, "T");
-            let header = owner.header.function.as_ref().unwrap().as_ref().unwrap();
+            let header = owner.header.as_ref().unwrap();
+            assert_eq!(header.parameters[0].name, "T");
+            let header = header.body.as_ref().unwrap();
             let mut arguments = Vec::new();
             crate::ir::walk_expressions(&header.function.body, &mut |expr| {
                 if let ExprKind::Builtin(Builtin::RegisteredClassNamespace(site, _), children) =
@@ -2269,14 +2272,19 @@ mod tests {
         )
         .unwrap();
         let header = &program.source.class_bodies[&ruff_text_size::TextSize::new(0)].header;
-        assert!(matches!(
-            header.decorators.as_slice(),
-            [
-                crate::frontend::PhysicalOperand::Checked(_),
-                crate::frontend::PhysicalOperand::Checked(_)
-            ]
-        ));
-        let function = header.function.as_ref().unwrap().as_ref().unwrap();
+        assert!(program.initializer().fully_checked());
+        let mut decorators = Vec::new();
+        crate::ir::walk_expressions(&program.initializer().checked.function.body, &mut |expr| {
+            if let ExprKind::Builtin(
+                Builtin::RegisteredDefinition(DefinitionSite::Class { .. }),
+                operands,
+            ) = &expr.kind
+            {
+                decorators.push(operands.len());
+            }
+        });
+        assert_eq!(decorators, [2]);
+        let function = header.as_ref().unwrap().body.as_ref().unwrap();
         assert!(matches!(
             function.function.body.last(),
             Some(crate::ir::Statement::Return(crate::ir::Expr {
@@ -2299,7 +2307,7 @@ mod tests {
 
         inject_residual_child_module(&mut module);
         let header = &module.source.class_bodies.values().next().unwrap().header;
-        assert!(header.operands.is_empty());
+        assert!(header.as_ref().unwrap().body.is_err());
         assert!(module.syntax.take().is_some());
         assert_eq!(
             module.standalone().unwrap_err(),
