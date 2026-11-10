@@ -191,6 +191,15 @@ impl<'ast> Escape<'ast, '_> {
         }
     }
 
+    fn reachable(&self, site: TextRange) -> bool {
+        !ty_python_semantic::types::ide_support::unreachable_ranges(
+            self.model.db(),
+            self.model.program_file(),
+        )
+        .iter()
+        .any(|unreachable| unreachable.range.contains_range(site))
+    }
+
     fn forget_builtin(&mut self, name: &str) {
         self.captured.retain(|_, (_, requirement)| {
             requirement
@@ -453,7 +462,10 @@ impl<'ast> Escape<'ast, '_> {
                     .map(|source| (arg.value().range(), source))
             })
             .collect();
-        if actual.is_empty() {
+        if !actual
+            .iter()
+            .any(|(_, fact)| matches!(fact, ArgumentFact::Source(_)))
+        {
             return None;
         }
         let (owner, declaration) = self.declared_function(&call.func)?;
@@ -741,7 +753,9 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
                 walk_expr(self, &attribute.value);
                 return;
             }
-            if let Some(intrinsic) = ExecutionIntrinsic::possible(self.model, expression) {
+            if let Some(intrinsic) = ExecutionIntrinsic::possible(self.model, expression)
+                && self.reachable(expression.range())
+            {
                 self.first = Some(self.required(
                     SourceCallable::Builtin(intrinsic),
                     expression.range(),
@@ -766,16 +780,10 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
         let live_import = self.has_live_import(expression);
         let capture = live_import.then(|| self.captured_target(call)).flatten();
         let intrinsic = ExecutionIntrinsic::possible(self.model, &call.func);
-        let source_callable = intrinsic.map(SourceCallable::Builtin).or_else(|| {
-            self.selected_builtin(&call.func).filter(|_| {
-                !ty_python_semantic::types::ide_support::unreachable_ranges(
-                    self.model.db(),
-                    self.model.program_file(),
-                )
-                .iter()
-                .any(|site| site.range.contains_range(call.range()))
-            })
-        });
+        let source_callable = intrinsic
+            .map(SourceCallable::Builtin)
+            .or_else(|| self.selected_builtin(&call.func))
+            .filter(|_| self.reachable(call.range()));
         if intrinsic.is_some() {
             // The builtin is the selected consumer here. Its operands still run
             // through ordinary argument and namespace dispatch.
