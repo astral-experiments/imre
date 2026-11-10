@@ -12,7 +12,7 @@ use ruff_python_ast::name::UnqualifiedName;
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
 
-use crate::frontend::module_source::{self, ParsedModule};
+use crate::frontend::module_source::{self, CheckedFile, ParsedModule};
 use crate::{CompileOptions, SourceInputs, SourceKind, UnitCompilation};
 
 /// Only a winning file can add a first-party frozen override while walking SDK dependencies.
@@ -1655,7 +1655,24 @@ pub(crate) fn compile(
                     } else {
                         SourceKind::File
                     };
-                    let imports = match scan_imports(&src, kind, None, alternative) {
+                    // The snapshot above came from the checked resolver's physical file.
+                    // ZIP members, decoded alternatives and sources rewritten for inference
+                    // keep their own parser input.
+                    let checked_package =
+                        checked.filter(|(graph, id)| graph.modules[*id].is_package == package);
+                    let parsed = checked_package
+                        .filter(|_| winner && kind == SourceKind::File)
+                        .and_then(|(graph, id)| CheckedFile::select(graph, id));
+                    let imports = match parsed.map(CheckedFile::parsed) {
+                        Some(module) => imports_from_body(
+                            &module.text,
+                            module_source::into_body(module.parsed),
+                            None,
+                            None,
+                        ),
+                        None => scan_imports(&src, kind, None, alternative),
+                    };
+                    let imports = match imports {
                         Ok(imports) => imports,
                         Err(_) if file_alternatives => continue,
                         Err(error) => return Err(format!("{}: {error}", path.display())),
@@ -1709,12 +1726,17 @@ pub(crate) fn compile(
                             // Only path zero belongs to the program. With safe path
                             // the first remaining search entry may be an installation.
                             let program = initial[..path0_len].contains(root);
+                            if let Some(parsed) = parsed {
+                                registrations
+                                    .checked_units
+                                    .entry(sources.len())
+                                    .or_default()
+                                    .source = Some(parsed);
+                            }
                             selected_sources.push((
                                 sources.len(),
                                 program,
-                                checked.and_then(|(graph, id)| {
-                                    (graph.modules[id].is_package == package).then_some(id)
-                                }),
+                                checked_package.map(|(_, id)| id),
                             ));
                         }
                         sources.push(registration);
@@ -1903,7 +1925,7 @@ pub(crate) fn compile(
                 .is_none_or(|(root, _)| root == Path::new(bundled_root)));
     // Borrow the winners once discovery has finished growing the emitter's source table.
     let checking = matches!(layout, crate::BoxedLayout::Check);
-    let mut checked_units = Vec::new();
+    let mut function_modules = Vec::new();
     let selected_sources: Vec<_> = selected_sources
         .into_iter()
         .enumerate()
@@ -1914,7 +1936,7 @@ pub(crate) fn compile(
                 && let (Some(graph), Some(module_id)) = (checked_graph, module)
                 && graph.modules[module_id].original_source() == sources[id].2
             {
-                checked_units.push((id, module_id));
+                function_modules.push((id, module_id));
             }
             // Emit the selected application's signature. Preserve the existing checker
             // scope: owning a declaration does not prove that a call will reach it.
@@ -2021,8 +2043,10 @@ pub(crate) fn compile(
     }
     let (units, used_archive) = if checking {
         let mut entry = entry_source;
-        for (_, path, source) in sources.iter().chain(&builtins) {
-            let parsed = entry.take();
+        for (unit, (_, path, source)) in sources.iter().chain(&builtins).enumerate() {
+            let parsed = entry
+                .take()
+                .or_else(|| registrations.checked_units.get(&unit)?.parsed());
             if !module_errors.contains_key(path) {
                 ParsedModule::check_file(path, source, parsed, keep_docstrings)?;
             }
@@ -2032,9 +2056,13 @@ pub(crate) fn compile(
         // Admission may have given a fixed definition to its registered frame.
         let checked_functions = checked_graph.map(|graph| graph.registered_functions());
         if let Some(functions) = &checked_functions {
-            for (unit, module) in checked_units {
+            for (unit, module) in function_modules {
                 if let Some(bodies) = functions.get(&module) {
-                    registrations.program_bodies.insert(unit, bodies);
+                    registrations
+                        .checked_units
+                        .entry(unit)
+                        .or_default()
+                        .functions = Some(bodies);
                 }
             }
         }

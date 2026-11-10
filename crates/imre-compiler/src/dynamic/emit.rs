@@ -28,10 +28,24 @@ pub(super) struct PhysicalFile {
     pub(super) future_flags: u32,
 }
 
+/// Frontend inputs for one resolved source slot. Syntax can be shared even if
+/// admission does not attach any checked function bodies.
+#[derive(Default)]
+pub(super) struct CheckedUnit<'a> {
+    pub(super) source: Option<module_source::CheckedFile<'a>>,
+    pub(super) functions: Option<&'a super::CheckedFunctions>,
+}
+
+impl CheckedUnit<'_> {
+    pub(super) fn parsed(&self) -> Option<ParsedModule<'_>> {
+        self.source.map(module_source::CheckedFile::parsed)
+    }
+}
+
 /// Snapshots and admission facts for the bodies selected by import resolution.
 #[derive(Default)]
 pub(super) struct RegisteredBodies<'a> {
-    pub(super) program_bodies: HashMap<usize, &'a super::CheckedFunctions>,
+    pub(super) checked_units: HashMap<usize, CheckedUnit<'a>>,
     // Decoded installed files retain the fingerprint of their original loader bytes.
     pub(super) physical_files: HashMap<PathBuf, PhysicalFile>,
     pub(super) archive_members: HashMap<PathBuf, ([u8; 32], u32)>,
@@ -66,7 +80,7 @@ pub(super) fn emit(
     ),
 ) -> Result<(Vec<CodegenUnit>, bool), String> {
     let RegisteredBodies {
-        program_bodies,
+        checked_units,
         physical_files,
         archive_members,
         python_providers,
@@ -91,7 +105,8 @@ pub(super) fn emit(
     let builtins = builtins.iter().map(|module| (module, true));
     for (unit, (module, builtin)) in files.chain(builtins).enumerate() {
         let (name, path, source) = module;
-        let discovered = entry_source.take();
+        let checked = checked_units.get(&unit);
+        let discovered = entry_source.take().or_else(|| checked?.parsed());
         let zip = archive_members.get(path);
         if !builtin && let Some(error) = module_errors.get(path) {
             for state in std::iter::once(&mut root).chain(whole.as_mut()) {
@@ -112,7 +127,7 @@ pub(super) fn emit(
         } else if python_providers.contains(&unit) {
             ModuleOrigin::Provider
         } else {
-            ModuleOrigin::Program(program_bodies.get(&unit).copied())
+            ModuleOrigin::Program(checked.and_then(|unit| unit.functions))
         };
         // Preserve the loader's digest while compiling its normalized source.
         let physical = physical_files.get(path).filter(|_| !builtin);

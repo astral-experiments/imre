@@ -21,28 +21,44 @@ pub(crate) fn into_body(parsed: Cow<'_, Parsed<ast::ModModule>>) -> ast::Suite {
     }
 }
 
+/// A physical file whose checked parser input still matches its executable source.
+#[derive(Clone, Copy)]
+pub(crate) struct CheckedFile<'a>(&'a crate::modules::SourceModule);
+
+impl<'a> CheckedFile<'a> {
+    pub(crate) fn select(
+        graph: &'a crate::modules::SourceGraph,
+        id: crate::modules::ModuleId,
+    ) -> Option<Self> {
+        let module = &graph.modules[id];
+        if module.path.extension()? != "py" || !module.parsed.has_no_syntax_errors() {
+            return None;
+        }
+        // Inference may have replaced the parser input with an offset-preserving rewrite.
+        let input = imre_ast::indentation::prepare(&module.source);
+        graph
+            .session
+            .matches_parser_input(id, &input.text)
+            .then_some(Self(module))
+    }
+
+    pub(crate) fn parsed(self) -> ParsedModule<'a> {
+        ParsedModule {
+            text: Cow::Borrowed(&self.0.source),
+            parsed: Cow::Borrowed(&self.0.parsed),
+        }
+    }
+}
+
 impl<'a> ParsedModule<'a> {
-    /// The physical entry snapshot has already passed file and indentation checks in
-    /// Session::add. Inference can subsequently replace its syntax with a rewritten view.
     pub(crate) fn checked_entry(
         graph: &'a crate::modules::SourceGraph,
         path: &Path,
     ) -> Option<Self> {
-        let module = &graph.modules[graph.entry];
-        if module.path != std::path::absolute(path).ok()?
-            || module.path.extension()? != "py"
-            || !module.parsed.has_no_syntax_errors()
-        {
+        if graph.modules[graph.entry].path != std::path::absolute(path).ok()? {
             return None;
         }
-        let input = imre_ast::indentation::prepare(&module.source);
-        graph
-            .session
-            .matches_parser_input(graph.entry, &input.text)
-            .then(|| Self {
-                text: Cow::Borrowed(&module.source),
-                parsed: Cow::Borrowed(&module.parsed),
-            })
+        CheckedFile::select(graph, graph.entry).map(CheckedFile::parsed)
     }
 
     /// Check the original file offsets. A discovered CRLF file can have normalized offsets.
