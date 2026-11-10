@@ -109,10 +109,17 @@ pub(super) struct Saved(Rc<RefCell<Option<(Continuation, Frame)>>>);
 impl Saved {
     /// Recheck at most the caller's remaining budget of strong roots while parked.
     pub(super) fn any_root(&self, limit: usize, predicate: impl FnMut(Id) -> bool) -> bool {
-        self.0
-            .borrow()
-            .as_ref()
-            .is_some_and(|(_, frame)| frame.roots().take(limit).any(predicate))
+        self.0.borrow().as_ref().is_some_and(|(state, frame)| {
+            let mut roots = frame.roots().take(limit);
+            // A delegation chain can exhaust the budget on unrelated frame roots.
+            let Some(delegate) = state.delegate_root.and_then(|slot| frame.operand(slot)) else {
+                return roots.any(predicate);
+            };
+            std::iter::once(delegate)
+                .chain(roots.filter(|&id| id != delegate))
+                .take(limit)
+                .any(predicate)
+        })
     }
 
     /// Number of strong edges owned by the parked native frame.
@@ -391,4 +398,33 @@ pub(super) unsafe extern "C" fn imre_dyn_resume_input(activation: *mut Activatio
         error
     });
     super::ffi::finish(ctx, result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dynamic::value::Heap;
+
+    #[test]
+    fn parked_delegate_respects_the_root_budget() {
+        unsafe extern "C" fn unused_resume(_: *mut Activation, _: Id) -> *mut c_void {
+            std::ptr::null_mut()
+        }
+
+        let mut heap = Heap::new();
+        heap.enter(NONE, NONE, FrameOwner::Module(NONE));
+        heap.keep(NONE);
+        let delegate_slot = heap.temporary_mark();
+        let delegate = heap.alloc(Value::List(Vec::new()));
+        heap.keep(delegate);
+        let last = heap.alloc(Value::List(Vec::new()));
+        let mut state = Continuation::new(unused_resume, NONE).unwrap();
+        state.delegate_root = Some(delegate_slot);
+        let saved = Saved::default();
+        *saved.0.borrow_mut() = Some((state, heap.suspend_native_frame()));
+
+        assert!(saved.any_root(1, |root| root == delegate));
+        assert!(!saved.any_root(0, |_| true));
+        assert!(!saved.any_root(saved.root_count() - 1, |root| root == last));
+    }
 }

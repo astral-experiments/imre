@@ -3778,6 +3778,10 @@ impl WorkerStack {
 }
 
 impl Frame {
+    pub(super) fn operand(&self, slot: usize) -> Option<Id> {
+        self.live.get(slot).copied()
+    }
+
     /// The strong handles owned by this activation, in marking order.
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
         [self.scope, self.code, self.active, self.inherited]
