@@ -230,15 +230,9 @@ impl CallableSites<'_, '_> {
             .interned_identifiers
             .extend(metadata.parameter_names().map(str::to_owned));
         CompiledDefinition {
-            code,
-            signature: signature.to_string(),
-            name: name.to_owned(),
-            qualname,
             doc,
-            provider: None,
             default_names: metadata.defaults.clone(),
-            type_alias: false,
-            class_header: None,
+            ..CompiledDefinition::new(code, signature, name, qualname, false)
         }
     }
 

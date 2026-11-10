@@ -15,15 +15,11 @@ pub(crate) struct CompiledDefinition {
     pub(crate) name: String,
     pub(crate) qualname: String,
     pub(crate) doc: Option<String>,
-    pub(crate) provider: Option<CompiledProvider>,
+    pub(crate) provider: Option<Box<Self>>,
+    pub(crate) annotation_scope: bool,
     pub(crate) default_names: Vec<String>,
     pub(crate) type_alias: bool,
     pub(crate) class_header: Option<TextRange>,
-}
-
-pub(crate) struct CompiledProvider {
-    pub(crate) code: String,
-    pub(crate) signature: String,
 }
 
 pub(crate) struct DefinitionOperands {
@@ -41,6 +37,27 @@ impl DefinitionOperands {
 }
 
 impl CompiledDefinition {
+    pub(crate) fn new(
+        code: String,
+        signature: serde_json::Value,
+        name: &str,
+        qualname: String,
+        annotation_scope: bool,
+    ) -> Self {
+        Self {
+            code,
+            signature: signature.to_string(),
+            name: name.to_owned(),
+            qualname,
+            annotation_scope,
+            doc: None,
+            provider: None,
+            default_names: Vec::new(),
+            type_alias: false,
+            class_header: None,
+        }
+    }
+
     /// Evaluate bases in the parameter frame with the enclosing class dictionary
     /// visible, then bind the namespace to the parameters alone.
     pub(crate) fn generic_class<'a, 'p, E: FrameEmitter<'a, 'p>>(
@@ -95,15 +112,10 @@ impl CompiledDefinition {
         scope: &str,
         doc: String,
     ) -> DefinitionOperands {
-        let annotate = if let Some(provider) = &self.provider {
-            let signature = frame.text(&provider.signature);
-            let name = frame.text("__annotate__");
-            let qualname = frame.text(&format!("{}.__annotate__", self.qualname));
-            let code = &provider.code;
-            frame.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {scope}, i64 {name}, i64 {signature}, i64 0, i64 {qualname}, i64 0, i64 0, i1 true)"))
-        } else {
-            "0".into()
-        };
+        let annotate = self.provider.as_ref().map_or_else(
+            || "0".into(),
+            |provider| provider.bind_defaults(frame, scope, &[]),
+        );
         let qualname = frame.text(&self.qualname);
         let defaults = if self.type_alias || !self.default_names.is_empty() {
             frame.op("dict", &[])
@@ -153,7 +165,7 @@ impl CompiledDefinition {
             defaults,
         } = operands;
         let code = &self.code;
-        let annotation_scope = self.class_header.is_some() || self.type_alias;
+        let annotation_scope = self.annotation_scope;
         frame.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {scope}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 {annotation_scope})"))
     }
 }
