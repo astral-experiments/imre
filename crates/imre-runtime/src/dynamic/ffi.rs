@@ -2558,7 +2558,13 @@ impl Context {
                     !annotation_class || *name != "__classdict__"
                 }
             });
-        let lexical = if annotation_class {
+        let lexical = if annotation_class
+            && !self
+                .scope_data(scope)
+                .closure
+                .cells
+                .contains_key("__classdict__")
+        {
             self.scope_data(scope).parent.unwrap_or(scope)
         } else {
             scope

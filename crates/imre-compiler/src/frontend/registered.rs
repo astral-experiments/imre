@@ -438,58 +438,6 @@ pub(crate) enum RegisteredScope {
     Function { is_async: bool },
 }
 
-/// Source facts needed to prepare registered bodies, including definitions inside class scopes.
-#[derive(Default)]
-pub(crate) struct RegisteredSites<'a> {
-    pub(crate) operations: HashMap<TextRange, Expr>,
-    pub(crate) workers: Vec<(&'a ast::StmtFunctionDef, imre_ast::ThreadEntry)>,
-    pub(crate) deletions: Vec<&'a ast::Stmt>,
-}
-
-pub(crate) fn registered_sites<'a>(
-    stmts: &'a [ast::Stmt],
-    private_names: &imre_ast::Names,
-) -> RegisteredSites<'a> {
-    use ast::statement_visitor::{StatementVisitor, walk_stmt};
-    struct Collector<'s, 'a> {
-        private_names: &'s imre_ast::Names,
-        sites: RegisteredSites<'a>,
-    }
-    impl<'a> StatementVisitor<'a> for Collector<'_, 'a> {
-        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-            if let ast::Stmt::FunctionDef(def) = stmt {
-                if let Some(entry) = imre_ast::thread_entry(def) {
-                    self.sites.workers.push((def, entry));
-                    // An admitted suite contains no imports, deletes, or declarations.
-                    return;
-                }
-            } else if let Some(import) = registered_import(stmt, self.private_names) {
-                self.sites.operations.insert(stmt.range(), import);
-            } else if stmt.is_delete_stmt() {
-                self.sites.deletions.push(stmt);
-            }
-            walk_stmt(self, stmt);
-        }
-    }
-    let mut collector = Collector {
-        private_names,
-        sites: RegisteredSites::default(),
-    };
-    collector.visit_body(stmts);
-    collector.sites
-}
-
-pub(crate) struct DeferredModuleAnnotation {
-    pub(crate) site: TextSize,
-    pub(crate) name: String,
-    pub(crate) value: AnnotationValue,
-}
-
-pub(crate) enum AnnotationValue {
-    Checked(Expr),
-    Source(ast::Expr),
-}
-
 /// Only compound, valid strings outside the bundled library get a separately bound
 /// expression. A literal or name retains exactly the ordinary Python str.
 pub(crate) fn annotation_expression(
@@ -501,51 +449,54 @@ pub(crate) fn annotation_expression(
     (!expr.is_name_expr() && !expr.is_literal_expr()).then_some(parsed)
 }
 
-impl DeferredModuleAnnotation {
+pub(crate) struct DeferredAnnotation {
+    pub(crate) range: TextRange,
+    pub(crate) name: String,
+    pub(crate) value: AnnotationValue,
+}
+
+pub(crate) enum AnnotationValue {
+    Checked(Expr),
+    Source(ast::Expr),
+}
+
+impl DeferredAnnotation {
     fn new<R>(
         name: String,
         expression: &ast::Expr,
-        operands: &HashMap<TextSize, PreparedAnnotation<R>>,
+        operands: &HashMap<TextSize, super::PreparedAnnotation<R>>,
     ) -> Self {
-        let checked = match operands.get(&expression.start()) {
-            Some(PreparedAnnotation::Value(value)) => Some(value.clone()),
-            Some(PreparedAnnotation::String { text, body }) => {
-                match body.as_ref().map(|body| &body.code) {
-                    Some(AnnotationCode::Checked(_)) => Some(operation(
-                        Builtin::BindAnnotationExpression(expression.start()),
-                        Type::Str,
-                        vec![],
-                    )),
-                    Some(AnnotationCode::Residual(_)) => None,
-                    None => Some(Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Str(text.clone()),
-                    }),
-                }
-            }
+        let value = match operands.get(&expression.start()) {
+            Some(PreparedAnnotation::String {
+                body: Some(body), ..
+            }) if matches!(body.code, AnnotationCode::Residual(_)) => None,
+            Some(operand) => Some(operand.operand(expression.start())),
             None => None,
-        };
-        let value = checked.map_or_else(
+        }
+        .map_or_else(
             || AnnotationValue::Source(expression.clone()),
             AnnotationValue::Checked,
         );
         Self {
             name,
-            site: expression.start(),
+            range: expression.range(),
             value,
         }
     }
 
     /// Number already-checked operands in physical marker order, including repeated finally edges.
-    pub(crate) fn prepare_body(entries: &[&Self]) -> RegisteredSuite {
+    pub(crate) fn prepare_body(
+        sites: &HashMap<TextSize, Self>,
+        entries: &[ir::AnnotationOccurrence],
+    ) -> RegisteredSuite {
         let mut residual = Vec::new();
         let mut body = vec![Statement::Expr(operation(
             Builtin::RegisteredAnnotationStart,
             Type::None,
             vec![],
         ))];
-        for (index, entry) in entries.iter().enumerate() {
-            let value = match &entry.value {
+        for (index, occurrence) in entries.iter().enumerate() {
+            let value = match &sites[&occurrence.site].value {
                 AnnotationValue::Checked(value) => value.clone(),
                 AnnotationValue::Source(_) => {
                     SourceRun::record(&mut residual, index, body.len());
@@ -553,10 +504,7 @@ impl DeferredModuleAnnotation {
                 }
             };
             body.push(Statement::Expr(operation(
-                Builtin::RegisteredAnnotationInsert {
-                    index,
-                    name: entry.name.clone(),
-                },
+                Builtin::RegisteredAnnotationInsert(*occurrence),
                 Type::None,
                 vec![value],
             )));
@@ -581,66 +529,123 @@ impl DeferredModuleAnnotation {
     }
 }
 
-/// Prepare module markers and the delayed operands of their native annotation callback.
-pub(crate) fn module_annotations<R>(
-    body: &[ast::Stmt],
-    string_annotations: bool,
-    operations: &mut HashMap<TextRange, Expr>,
+/// Physical source operands shared by namespace initialization and lazy annotation providers.
+#[derive(Default)]
+pub(crate) struct RegisteredSites<'a> {
+    pub(crate) operations: HashMap<TextRange, Expr>,
+    pub(crate) workers: Vec<(&'a ast::StmtFunctionDef, imre_ast::ThreadEntry)>,
+    pub(crate) deletions: Vec<&'a ast::Stmt>,
+    pub(crate) classes: Vec<&'a ast::StmtClassDef>,
+    pub(crate) annotations: HashMap<TextSize, DeferredAnnotation>,
+}
+
+pub(crate) fn registered_sites<'a, R>(
+    body: &'a [ast::Stmt],
+    names: &imre_ast::Names,
     operands: &HashMap<TextSize, PreparedAnnotation<R>>,
-) -> HashMap<TextSize, DeferredModuleAnnotation> {
+) -> RegisteredSites<'a> {
     use ast::statement_visitor::{StatementVisitor, walk_stmt};
-    struct Annotations<'a, R> {
-        string_annotations: bool,
-        operations: &'a mut HashMap<TextRange, Expr>,
-        deferred: HashMap<TextSize, DeferredModuleAnnotation>,
-        operands: &'a HashMap<TextSize, PreparedAnnotation<R>>,
+    struct Collector<'s, 'a, R> {
+        names: &'s imre_ast::Names,
+        operands: &'s HashMap<TextSize, PreparedAnnotation<R>>,
+        scope: RegisteredScope,
+        output: RegisteredSites<'a>,
     }
-    impl<'a, R> StatementVisitor<'a> for Annotations<'_, R> {
+    impl<'a, R> StatementVisitor<'a> for Collector<'_, 'a, R> {
         fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+            if let Some(import) = registered_import(stmt, self.names) {
+                self.output.operations.insert(stmt.range(), import);
+            }
             match stmt {
-                ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => {}
-                ast::Stmt::AnnAssign(ann) => {
-                    if ann.simple
-                        && let Some(name) = ann.target.as_name_expr()
+                ast::Stmt::ClassDef(class) => {
+                    self.output.classes.push(class);
+                    let outer = std::mem::replace(&mut self.scope, RegisteredScope::Class);
+                    walk_stmt(self, stmt);
+                    self.scope = outer;
+                }
+                ast::Stmt::FunctionDef(def) => {
+                    if matches!(self.scope, RegisteredScope::Class)
+                        && super::function_scope::boxed_function_type_params(
+                            def,
+                            self.names.string_annotations,
+                            true,
+                            Some(self.names),
+                        )
+                        .is_some()
                     {
-                        let name = name.id.to_string();
-                        let annotation = if self.string_annotations {
-                            ir::ModuleAnnotation::String {
-                                name,
-                                site: ann.annotation.start(),
-                            }
-                        } else {
-                            let site =
-                                DeferredModuleAnnotation::new(name, &ann.annotation, self.operands);
-                            let name = site.name.clone();
-                            self.deferred.insert(ann.start(), site);
-                            ir::ModuleAnnotation::Deferred {
-                                site: ann.start(),
-                                name,
-                            }
-                        };
-                        self.operations.insert(
-                            ann.target.range(),
+                        self.output.operations.insert(
+                            def.name.range(),
                             operation(
-                                Builtin::RegisteredModuleAnnotation(annotation),
-                                Type::None,
-                                vec![],
+                                Builtin::RegisteredDefinition(ir::DefinitionSite::Function(
+                                    def.start(),
+                                )),
+                                Type::PythonObject,
+                                Vec::new(),
                             ),
                         );
                     }
+                    if let Some(entry) = imre_ast::thread_entry(def) {
+                        self.output.workers.push((def, entry));
+                        return;
+                    }
+                    let outer = std::mem::replace(
+                        &mut self.scope,
+                        RegisteredScope::Function {
+                            is_async: def.is_async,
+                        },
+                    );
+                    walk_stmt(self, stmt);
+                    self.scope = outer;
+                }
+                ast::Stmt::Delete(_) => self.output.deletions.push(stmt),
+                ast::Stmt::AnnAssign(ann)
+                    if !matches!(self.scope, RegisteredScope::Function { .. }) && ann.simple =>
+                {
+                    let Some(name) = ann.target.as_name_expr() else {
+                        return;
+                    };
+
+                    let name = name.id.to_string();
+                    let (annotation, values) = if self.names.string_annotations {
+                        let site = ann.annotation.start();
+                        (
+                            ir::NamespaceAnnotation::String { name },
+                            vec![self.operands[&site].operand(site)],
+                        )
+                    } else {
+                        self.output.annotations.insert(
+                            ann.start(),
+                            DeferredAnnotation::new(name.clone(), &ann.annotation, self.operands),
+                        );
+                        (
+                            ir::NamespaceAnnotation::Deferred {
+                                site: ann.start(),
+                                name,
+                            },
+                            Vec::new(),
+                        )
+                    };
+                    self.output.operations.insert(
+                        ann.target.range(),
+                        operation(
+                            Builtin::RegisteredNamespaceAnnotation(annotation),
+                            Type::None,
+                            values,
+                        ),
+                    );
                 }
                 _ => walk_stmt(self, stmt),
             }
         }
     }
-    let mut annotations = Annotations {
-        string_annotations,
-        operations,
-        deferred: HashMap::new(),
+    let mut sites = Collector {
+        names,
         operands,
+        scope: RegisteredScope::Module,
+        output: RegisteredSites::default(),
     };
-    annotations.visit_body(body);
-    annotations.deferred
+    sites.visit_body(body);
+    sites.output
 }
 
 /// Checked instructions retain their canonical function layout. Source runs are owned
@@ -674,10 +679,6 @@ impl RegisteredSuite {
     pub(crate) fn fully_checked(&self) -> bool {
         self.residual.is_empty()
     }
-}
-
-fn plain_class_header(class: &ast::StmtClassDef) -> bool {
-    class.type_params.is_none() && class.arguments.as_ref().is_none_or(|args| args.is_empty())
 }
 
 fn checked_assertion(
@@ -816,6 +817,22 @@ impl<'a> SuitePreparation<'a> {
         }
     }
 
+    pub(crate) fn class_suites(
+        &mut self,
+        classes: &[&ast::StmtClassDef],
+    ) -> HashMap<TextSize, RegisteredSuite> {
+        classes
+            .iter()
+            .map(|class| {
+                let start = class
+                    .decorator_list
+                    .first()
+                    .map_or(class.start(), Ranged::start);
+                (start, self.suite(&class.body, RegisteredScope::Class))
+            })
+            .collect()
+    }
+
     pub(crate) fn suite(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope) -> RegisteredSuite {
         use ast::statement_visitor::{StatementVisitor, walk_stmt};
         let plan = self.lower(stmts, kind);
@@ -875,20 +892,6 @@ impl<'a> SuitePreparation<'a> {
     ) -> Option<RegisteredSuite> {
         let plan = self.lower(stmts, kind);
         plan.fully_checked().then_some(plan)
-    }
-
-    pub(crate) fn class_body(&self, class: &ast::StmtClassDef) -> Option<RegisteredSuite> {
-        if !plain_class_header(class)
-            || !class.body.iter().all(|stmt| {
-                matches!(
-                    stmt,
-                    ast::Stmt::Assign(_) | ast::Stmt::Expr(_) | ast::Stmt::Pass(_)
-                )
-            })
-        {
-            return None;
-        }
-        self.complete(&class.body, RegisteredScope::Class)
     }
 }
 
@@ -1098,7 +1101,17 @@ impl statements::StatementLowering for SourceScope<'_> {
 
     fn definition(&mut self, def: &ast::StmtFunctionDef) -> StdResult<Option<Statement>, ()> {
         if def.type_params.is_some() {
-            return Err(());
+            if !matches!(self.kind, RegisteredScope::Class)
+                || !def.decorator_list.is_empty()
+                || def
+                    .parameters
+                    .iter_non_variadic_params()
+                    .any(|p| p.default.is_some())
+            {
+                return Err(());
+            }
+            let function = self.operations.get(&def.name.range()).ok_or(())?.clone();
+            return Ok(Some(self.store(def.name.as_str(), function)));
         }
         let decorators = def.decorator_list.iter().map(|d| &d.expression);
         let defaults = def
@@ -1114,7 +1127,7 @@ impl statements::StatementLowering for SourceScope<'_> {
             .collect::<Option<_>>()
             .ok_or(())?;
         let function = operation(
-            Builtin::RegisteredDefinition(def.start()),
+            Builtin::RegisteredDefinition(ir::DefinitionSite::Function(def.start())),
             Type::PythonObject,
             header,
         );
@@ -1190,17 +1203,28 @@ impl statements::StatementLowering for SourceScope<'_> {
                 false,
             )),
             ast::Stmt::Match(branch) => self.match_statement(branch),
-            ast::Stmt::ClassDef(class) if plain_class_header(class) => {
-                let decorators = class
+            ast::Stmt::ClassDef(class) if class.type_params.is_none() => {
+                let mut operands = class
                     .decorator_list
                     .iter()
                     .map(|d| self.ordinary_operand(&d.expression))
-                    .collect::<Option<_>>()
+                    .collect::<Option<Vec<_>>>()
                     .ok_or(())?;
+                let mut layout = ir::PackedArguments::default();
+                if let Some(arguments) = &class.arguments {
+                    layout = super::packed_arguments(arguments);
+                    for operand in super::registered_arguments(arguments) {
+                        operands.push(self.ordinary_operand(operand).ok_or(())?);
+                    }
+                }
+                let site = ir::DefinitionSite::Class {
+                    start: class.start(),
+                    arguments: layout,
+                };
                 let value = operation(
-                    Builtin::RegisteredDefinition(class.start()),
+                    Builtin::RegisteredDefinition(site),
                     Type::PythonObject,
-                    decorators,
+                    operands,
                 );
                 Ok((vec![self.store(class.name.as_str(), value)], true))
             }
@@ -1257,7 +1281,7 @@ impl statements::StatementLowering for SourceScope<'_> {
                 Ok((vec![Statement::Continue], false))
             }
             ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => Ok((Vec::new(), true)),
-            ast::Stmt::AnnAssign(ann) if !matches!(self.kind, RegisteredScope::Class) => {
+            ast::Stmt::AnnAssign(ann) => {
                 let name = ann.target.as_name_expr().ok_or(())?;
                 let mut body = Vec::new();
                 if let Some(value) = &ann.value {
@@ -1265,8 +1289,8 @@ impl statements::StatementLowering for SourceScope<'_> {
                     body.push(self.store(name.id.as_str(), value));
                 }
                 // A function-local annotation has no runtime operand. A simple
-                // module annotation records its declaration for later evaluation.
-                if matches!(self.kind, RegisteredScope::Module) && ann.simple {
+                // namespace annotation records its declaration for later evaluation.
+                if !matches!(self.kind, RegisteredScope::Function { .. }) && ann.simple {
                     let marker = self.operations.get(&ann.target.range()).ok_or(())?;
                     body.push(Statement::Expr(marker.clone()));
                 }
@@ -1598,6 +1622,7 @@ impl SourceScope<'_> {
                 expr,
                 self.source,
                 None,
+                matches!(self.kind, RegisteredScope::Class),
                 |_| true,
                 |child| self.ordinary_operand(child).ok_or(()),
             )
@@ -1659,22 +1684,22 @@ impl ir::SuspendValue {
 mod tests {
     use super::*;
 
-    fn prepared_annotations(
-        stmts: &[ast::Stmt],
-        string_annotations: bool,
-        operations: &mut HashMap<TextRange, Expr>,
+    fn prepared_sites<'a>(
+        stmts: &'a [ast::Stmt],
         source: values::RegisteredSource<'_>,
         bundled: bool,
-    ) -> HashMap<TextSize, DeferredModuleAnnotation> {
+    ) -> RegisteredSites<'a> {
+        let default_names = imre_ast::Names::default();
+        let names = source.private_names.unwrap_or(&default_names);
         let strings = annotation_operands(
             stmts,
-            string_annotations,
+            names.string_annotations,
             source,
             bundled,
             crate::frontend::annotation_operands::test_annotation_body,
             &mut HashMap::new(),
         );
-        module_annotations(stmts, string_annotations, operations, &strings)
+        registered_sites(stmts, names, &strings)
     }
 
     pub(super) fn registered_suite(
@@ -1682,18 +1707,7 @@ mod tests {
         kind: RegisteredScope,
         source: values::RegisteredSource<'_>,
     ) -> Option<RegisteredFunction> {
-        let default_names = imre_ast::Names::default();
-        let names = source.private_names.unwrap_or(&default_names);
-        let mut operations = registered_sites(stmts, names).operations;
-        if matches!(kind, RegisteredScope::Module) {
-            prepared_annotations(
-                stmts,
-                names.string_annotations,
-                &mut operations,
-                source,
-                false,
-            );
-        }
+        let operations = prepared_sites(stmts, source, false).operations;
         SuitePreparation::new(&operations, source, stmts, true)
             .complete(stmts, kind)
             .map(|plan| plan.checked)
@@ -1832,10 +1846,20 @@ mod tests {
         let stmts = &module.parsed.syntax().body;
         let literals = values::ModuleSource::new(module);
         let source = literals.context(text);
-        let sites = prepared_annotations(stmts, false, &mut HashMap::new(), source, false);
-        let first = &sites[&stmts[0].start()];
-        let second = &sites[&stmts[1].start()];
-        let whole = DeferredModuleAnnotation::prepare_body(&[first, second, first]);
+        let prepared = |bundled| prepared_sites(stmts, source, bundled).annotations;
+        let sites = prepared(false);
+        let callback = |occurrences: &[usize]| {
+            let entries: Vec<_> = occurrences
+                .iter()
+                .enumerate()
+                .map(|(index, slot)| ir::AnnotationOccurrence {
+                    site: stmts[*slot].start(),
+                    index: Some(index),
+                })
+                .collect();
+            DeferredAnnotation::prepare_body(&sites, &entries)
+        };
+        let whole = callback(&[0, 1, 0]);
         assert!(whole.fully_checked());
         let checked = &whole.checked;
         let [
@@ -1861,7 +1885,7 @@ mod tests {
                     let Statement::Expr(Expr {
                         kind:
                             ExprKind::Builtin(
-                                Builtin::RegisteredAnnotationInsert { index, name },
+                                Builtin::RegisteredAnnotationInsert(occurrence),
                                 operands,
                             ),
                         ..
@@ -1870,27 +1894,28 @@ mod tests {
                         panic!("expected a guarded annotation insertion")
                     };
                     assert_eq!(operands.len(), 1);
-                    (*index, name.as_str())
+                    (occurrence.index, sites[&occurrence.site].name.as_str())
                 })
                 .collect();
-        assert_eq!(numbered, [(0, "first"), (1, "second"), (2, "first")]);
-        let bundled_sites = prepared_annotations(stmts, false, &mut HashMap::new(), source, true);
+        assert_eq!(
+            numbered,
+            [(Some(0), "first"), (Some(1), "second"), (Some(2), "first")]
+        );
+        let bundled_sites = prepared(true);
         let quoted_site = stmts[3].start();
-        let ast::Stmt::AnnAssign(declaration) = &stmts[3] else {
-            unreachable!()
-        };
-        let annotation_site = declaration.annotation.start();
-        assert!(matches!(
-            &sites[&quoted_site].value,
-            AnnotationValue::Checked(Expr { kind: ExprKind::Builtin(Builtin::BindAnnotationExpression(site), args), .. })
-                if *site == annotation_site && args.is_empty()
-        ));
-        assert!(matches!(
-            &bundled_sites[&quoted_site].value,
-            AnnotationValue::Checked(Expr {kind: ExprKind::Str(text), ..}) if text == "list[int]"
-        ));
-        let forward = DeferredModuleAnnotation::prepare_body(&[&sites[&quoted_site]]);
+        assert!(
+            matches!(&sites[&quoted_site].value, AnnotationValue::Checked(Expr { kind: ExprKind::Builtin(Builtin::BindAnnotationExpression(site), _), .. }) if *site == stmts[3].as_ann_assign_stmt().unwrap().annotation.start())
+        );
+        assert!(
+            matches!(&bundled_sites[&quoted_site].value, AnnotationValue::Checked(Expr {kind: ExprKind::Str(text), ..}) if text == "list[int]")
+        );
+        let forward = callback(&[3]);
         assert!(forward.fully_checked());
+        assert!(matches!(&forward.checked.function.body[1],
+            Statement::Expr(Expr { kind: ExprKind::Builtin(
+                Builtin::RegisteredAnnotationInsert(ir::AnnotationOccurrence { index: Some(0), .. }), values), .. })
+                if matches!(values.as_slice(), [Expr { kind: ExprKind::Builtin(
+                    Builtin::BindAnnotationExpression(site), _), .. }] if *site == stmts[3].as_ann_assign_stmt().unwrap().annotation.start())));
         {
             assert!(matches!(
                 sites[&stmts[2].start()].value,
@@ -1906,7 +1931,7 @@ mod tests {
                 sites[&stmts[6].start()].value,
                 AnnotationValue::Checked(_)
             ));
-            let mixed = DeferredModuleAnnotation::prepare_body(&[first, unavailable, second]);
+            let mixed = callback(&[0, 5, 1]);
             let [gap] = mixed.residual.as_slice() else {
                 panic!("expected one unprepared operand")
             };
@@ -1924,7 +1949,6 @@ mod tests {
             .into_syntax()
             .body;
         let names = imre_ast::lower(&mut stmts);
-        let mut ops = registered_sites(&stmts, &names).operations;
         let replacements = HashMap::new();
         let imports = imre_ast::module_imports(&stmts);
         let source = RegisteredSource {
@@ -1936,8 +1960,9 @@ mod tests {
             has_templates: false,
             method_imports: &imports,
         };
-        let annotations =
-            prepared_annotations(&stmts, names.string_annotations, &mut ops, source, false);
+        let operands = prepared_sites(&stmts, source, false);
+        let ops = operands.operations;
+        let annotations = operands.annotations;
         assert_eq!(annotations.len(), 2);
         let mut prepare = SuitePreparation::new(&ops, source, &stmts, true);
         let plan = prepare.suite(&stmts, RegisteredScope::Module);
@@ -2175,6 +2200,34 @@ mod tests {
         });
         assert_eq!(binds, ["outer", "inner"]);
         assert_eq!(calls, ["method", "packed"]);
+    }
+
+    #[test]
+    fn starred_class_header_carries_its_argument_layout() {
+        let graph = SourceGraph::single("@dec\nclass C(*bases, metaclass=meta, **options): pass\n")
+            .unwrap();
+        let entry = &graph.modules[graph.entry];
+        let source = values::ModuleSource::new(entry);
+        let suite = registered_suite(
+            &entry.parsed.syntax().body,
+            RegisteredScope::Module,
+            source.context(&entry.source),
+        )
+        .unwrap();
+        let mut headers = 0;
+        ir::walk_expressions(&suite.function.body, &mut |expr| {
+            if let ExprKind::Builtin(
+                Builtin::RegisteredDefinition(ir::DefinitionSite::Class { arguments, .. }),
+                operands,
+            ) = &expr.kind
+            {
+                headers += 1;
+                assert_eq!(arguments.starred, [true]);
+                assert_eq!(arguments.keywords, [Some("metaclass".into()), None]);
+                assert_eq!(operands.len(), 4);
+            }
+        });
+        assert_eq!(headers, 1);
     }
 
     #[test]

@@ -14,7 +14,7 @@ use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Statement, Type};
 use crate::llvm::body::FunctionBody;
 pub(crate) use abi::{ABI, CallArguments, Output, permanent};
 use abi::{GUARDED_LIT, GUARDED_NAMED_OP, NAMED_OP};
-pub(crate) use frame::{FrameEmitter, Place, RegisteredFrame, SourcePositions};
+pub(crate) use frame::{ArgumentPack, FrameEmitter, Place, RegisteredFrame, SourcePositions};
 use sites::CheckedSites;
 
 use crate::llvm::operations::{CheckedBody, CheckedValue, LoopEdges};
@@ -632,10 +632,10 @@ impl Frame<'_, '_, '_> {
                 Builtin::GlobalSet(_)
                     | Builtin::RegisteredImport(_)
                     | Builtin::RegisteredDeleteName(..)
-                    | Builtin::RegisteredModuleAnnotation(_)
+                    | Builtin::RegisteredNamespaceAnnotation(_)
                     | Builtin::RegisteredAnnotationStart
                     | Builtin::RegisteredAnnotationFormat
-                    | Builtin::RegisteredAnnotationInsert { .. }
+                    | Builtin::RegisteredAnnotationInsert(_)
                     | Builtin::RegisteredAttribute {
                         action: ir::AttributeAction::Delete | ir::AttributeAction::InPlace(_),
                         ..
@@ -808,11 +808,29 @@ impl Frame<'_, '_, '_> {
                 self.sites.bind_lambda(self.code, *site, &scope, &defaults)
             }
             (Builtin::RegisteredDefinition(site), header) => {
-                let header = header
+                let (prefix, arguments) = match site {
+                    ir::DefinitionSite::Class { arguments, .. } => {
+                        let count = arguments.starred.len() + arguments.keywords.len();
+                        let (decorators, operands) = header.split_at(header.len() - count);
+                        (decorators, Some((arguments, operands)))
+                    }
+                    ir::DefinitionSite::Function(_) => (header, None),
+                };
+                let header = prefix
                     .iter()
                     .map(|value| self.evaluate_handle(value))
                     .collect::<Vec<_>>();
-                self.sites.definition(self.code, *site, &header)
+                let class_arguments = arguments.map(|(layout, operands)| {
+                    let mut pack = ArgumentPack::new(self.code, layout, None);
+                    for (index, operand) in operands.iter().enumerate() {
+                        let slot = pack.prepare(self.code, index);
+                        let value = self.evaluate_handle(operand);
+                        pack.insert(self.code, slot, &value);
+                    }
+                    pack.finish(self.code)
+                });
+                self.sites
+                    .definition(self.code, site, &header, class_arguments)
             }
             (Builtin::RegisteredTypeAlias(site), []) => {
                 self.sites.aliases[site].instantiate(self.code)
@@ -826,19 +844,38 @@ impl Frame<'_, '_, '_> {
                 self.code.op("annotation_format", &[&format])
             }
             (Builtin::RegisteredAnnotationStart, []) => {
-                self.code.begin_annotations(None);
+                self.code.begin_annotations();
                 "0".to_owned()
             }
-            (Builtin::RegisteredAnnotationInsert { index, name }, [value]) => {
-                self.insert_annotation(Some(*index), name, |code| code.evaluate_handle(value));
+            (Builtin::RegisteredAnnotationInsert(occurrence), [value]) => {
+                let (name, range) = &self.sites.annotation_fields[&occurrence.site];
+                let target = self.code.annotation_target(occurrence.index, name, *range);
+                let value = self.evaluate_handle(value);
+                self.code.store_annotation(target, &value);
                 "0".to_owned()
             }
             (Builtin::BindAnnotationExpression(site), []) => {
                 self.sites.annotation_string(self.code, *site)
             }
             (Builtin::RegisteredAnnotationResult, []) => self.code.take_annotation_result(),
-            (Builtin::RegisteredModuleAnnotation(annotation), []) => {
-                self.code.module_annotation(annotation, self.sites);
+            (
+                Builtin::RegisteredNamespaceAnnotation(ir::NamespaceAnnotation::Deferred {
+                    site,
+                    name,
+                }),
+                [],
+            ) => {
+                self.code.mark_annotation(*site, name);
+                "0".to_owned()
+            }
+            (
+                Builtin::RegisteredNamespaceAnnotation(ir::NamespaceAnnotation::String { name }),
+                [value],
+            ) => {
+                let key = self.code.code_name(name);
+                let value = self.evaluate_handle(value);
+                self.code
+                    .op("annotate", &[&self.code.scope.clone(), &key, &value]);
                 "0".to_owned()
             }
             (Builtin::RegisteredDeleteName(name, range), []) => self.code.delete_name(name, *range),
@@ -1069,39 +1106,48 @@ impl RegisteredFrame<'_, '_> {
     }
 }
 
-/// Give each prepared suite private storage in the prologue of its physical function.
-/// Residual source can enter another prepared suite before returning to this one.
-pub(crate) fn with_checked_slots<'a, 'p, E: FrameEmitter<'a, 'p>>(
-    code: &mut E,
-    checked: RegisteredRegion<'_>,
-    emit: impl FnOnce(&mut E),
-) {
-    #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
-    if let Err(error) = crate::verify::registered(checked) {
-        code.output.diagnostic = Some(format!(
-            "internal compiler error: invalid registered IR: {error}"
-        ));
-        return;
-    }
-    let enclosing = std::mem::take(&mut code.iteration);
-    let roots = code.live_slots.len();
-    let first = code.private_slot_count;
-    code.iteration.private_slots = checked.private_slots().into_iter().collect();
-    code.iteration.first_slot = first;
-    let end = first + code.iteration.private_slots.len();
-    code.private_slot_count = end;
-    code.live_slots.extend(first..end);
-    checked.walk(&mut |node, _| {
-        if let ir::Node::Statement(Statement::IterNext { iterator, .. }) = node {
-            code.iteration.cursors.insert(*iterator);
-        }
-    });
-    emit(code);
-    code.live_slots.truncate(roots);
-    code.iteration = enclosing;
+pub(crate) struct EnclosingSlots {
+    iteration: IterationState,
+    live_roots: usize,
 }
 
 impl RegisteredFrame<'_, '_> {
+    /// Give a prepared suite private slots within its physical function.
+    pub(crate) fn enter_checked_slots(
+        &mut self,
+        checked: RegisteredRegion<'_>,
+    ) -> Option<EnclosingSlots> {
+        #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+        if let Err(error) = crate::verify::registered(checked) {
+            self.output.diagnostic = Some(format!(
+                "internal compiler error: invalid registered IR: {error}"
+            ));
+            return None;
+        }
+        let iteration = std::mem::take(&mut self.iteration);
+        let live_roots = self.live_slots.len();
+        let first = self.private_slot_count;
+        self.iteration.private_slots = checked.private_slots().into_iter().collect();
+        self.iteration.first_slot = first;
+        let end = first + self.iteration.private_slots.len();
+        self.private_slot_count = end;
+        self.live_slots.extend(first..end);
+        checked.walk(&mut |node, _| {
+            if let ir::Node::Statement(Statement::IterNext { iterator, .. }) = node {
+                self.iteration.cursors.insert(*iterator);
+            }
+        });
+        Some(EnclosingSlots {
+            iteration,
+            live_roots,
+        })
+    }
+
+    pub(crate) fn restore_checked_slots(&mut self, enclosing: EnclosingSlots) {
+        self.live_slots.truncate(enclosing.live_roots);
+        self.iteration = enclosing.iteration;
+    }
+
     /// Emit a registered expression whose names are resolved through this live frame.
     fn with_checked_frame<R>(
         &mut self,
@@ -1190,16 +1236,12 @@ impl RegisteredFrame<'_, '_> {
         sites: &CheckedSites,
         condition: bool,
     ) -> String {
-        let mut result = String::from("0");
-        let mut code = self;
-        with_checked_slots(&mut code, operand.region(), |code| {
-            result = code.registered_operand(
-                &operand.value,
-                sites,
-                condition,
-                Some(&operand.local_names),
-            );
-        });
+        let Some(enclosing) = self.enter_checked_slots(operand.region()) else {
+            return "0".to_owned();
+        };
+        let result =
+            self.registered_operand(&operand.value, sites, condition, Some(&operand.local_names));
+        self.restore_checked_slots(enclosing);
         result
     }
 
@@ -1217,19 +1259,17 @@ impl RegisteredFrame<'_, '_> {
         .emit_block(statements);
     }
 
-    pub(crate) fn checked_body(
-        mut code: &mut Self,
-        checked: &RegisteredFunction,
-        sites: &CheckedSites,
-    ) {
-        with_checked_slots(&mut code, checked.region(), |code| {
-            CheckedBody::registered(Frame {
-                code,
-                names: Some(&checked.local_names),
-                sites,
-            })
-            .emit_function(&checked.function);
-        });
+    pub(crate) fn checked_body(&mut self, checked: &RegisteredFunction, sites: &CheckedSites) {
+        let Some(enclosing) = self.enter_checked_slots(checked.region()) else {
+            return;
+        };
+        CheckedBody::registered(Frame {
+            code: self,
+            names: Some(&checked.local_names),
+            sites,
+        })
+        .emit_function(&checked.function);
+        self.restore_checked_slots(enclosing);
     }
 }
 

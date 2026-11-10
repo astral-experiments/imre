@@ -24,6 +24,7 @@ pub(crate) use annotation_operands::{
     AnnotationBody, AnnotationCode, PreparedAnnotation, annotation_operands,
 };
 pub(crate) use annotations::{parameter_annotations, spelling as annotation_spelling};
+pub(crate) use function_scope::ClassAnnotations;
 mod argparse;
 mod ascii;
 mod assertion_syntax;
@@ -125,16 +126,16 @@ pub(crate) use registered::booleans::{
 pub(crate) use registered::patterns::MatchGuard;
 pub(crate) use registered::type_alias::type_alias_body;
 pub(crate) use registered::values::{
-    RegisteredSource, ValueStatement, binary_operands, display_elements, lambda_defaults, literal_membership,
-    literal_replacements, module_literal_replacements, packed_arguments, push_codepoints, registered_arguments,
-    registered_constant_key, registered_index_key, registered_value,
-    suspended_operand, value_statement,
+    RegisteredSource, ValueStatement, binary_operands, display_elements, lambda_defaults,
+    literal_membership, literal_replacements, module_literal_replacements, packed_arguments,
+    push_codepoints, registered_arguments, registered_constant_key, registered_index_key,
+    registered_value, suspended_operand, value_statement,
 };
 pub(crate) use registered::{
-    AnnotationValue, DeferredModuleAnnotation, PreparedStrings, RegisteredFunction, RegisteredLambda,
-    RegisteredScope, RegisteredSuite, StatementSites, SuitePreparation, annotation_expression, attribute_write,
-    delete_targets, module_annotations, prepare_strings, registered_index_target,
-    registered_sites, registered_type_alias, registered_type_parameters,
+    AnnotationValue, DeferredAnnotation, PreparedStrings, RegisteredFunction, RegisteredLambda,
+    RegisteredScope, RegisteredSuite, StatementSites, SuitePreparation, annotation_expression,
+    attribute_write, delete_targets, prepare_strings, registered_index_target, registered_sites,
+    registered_type_alias, registered_type_parameters,
 };
 pub(crate) use registered::{LocalBinding, RegisteredOperand, RegisteredRegion, eager_operand};
 mod sequences;

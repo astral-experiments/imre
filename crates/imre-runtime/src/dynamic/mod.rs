@@ -2579,6 +2579,12 @@ impl Context {
 
     /// Share the class namespace cell across source-loaded and precompiled method providers.
     pub(super) fn class_annotation_dict_cell(&mut self, scope: Id) -> Id {
+        let owner = self.scope_data(scope);
+        if owner.class_body.is_none()
+            && let Some(&cell) = owner.closure.cells.get("__classdict__")
+        {
+            return cell;
+        }
         if let Some(cell) = self
             .scope_data(scope)
             .class_namespace

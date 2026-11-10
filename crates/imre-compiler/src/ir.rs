@@ -1201,15 +1201,20 @@ pub(crate) enum TypeParameterKind {
 }
 
 /// The source declaration or future spelling of one simple module annotation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct AnnotationOccurrence {
+    pub(crate) site: ruff_text_size::TextSize,
+    pub(crate) index: Option<usize>,
+}
+
 #[derive(Clone)]
-pub(crate) enum ModuleAnnotation {
+pub(crate) enum NamespaceAnnotation {
     Deferred {
         site: ruff_text_size::TextSize,
         name: String,
     },
     String {
         name: String,
-        site: ruff_text_size::TextSize,
     },
 }
 
@@ -1291,10 +1296,28 @@ pub(crate) enum RegisteredArguments {
 }
 
 /// Source order of the positional items, starred iterables, named keywords and mappings.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PackedArguments {
     pub(crate) starred: Vec<bool>,
     pub(crate) keywords: Vec<Option<String>>,
+}
+
+/// A physical declaration and the layout of its evaluated header operands.
+#[derive(Clone)]
+pub(crate) enum DefinitionSite {
+    Function(ruff_text_size::TextSize),
+    Class {
+        start: ruff_text_size::TextSize,
+        arguments: PackedArguments,
+    },
+}
+
+impl DefinitionSite {
+    pub(crate) fn start(&self) -> ruff_text_size::TextSize {
+        match self {
+            Self::Function(start) | Self::Class { start, .. } => *start,
+        }
+    }
 }
 
 /// A statically named import that executes in a live Python namespace.
@@ -1912,7 +1935,7 @@ pub(crate) enum Builtin {
     /// The source position in effect while this registered operand is evaluated.
     RegisteredLocation(ruff_text_size::TextRange, ruff_text_size::TextSize),
     /// Construct the native function at this physical definition site from its evaluated header.
-    RegisteredDefinition(ruff_text_size::TextSize),
+    RegisteredDefinition(DefinitionSite),
     /// Bind the prepared lambda at this site. An explicit lexical scope, when present,
     /// precedes the default values in Python parameter order.
     RegisteredLambda(ruff_text_size::TextSize, bool),
@@ -1925,14 +1948,10 @@ pub(crate) enum Builtin {
         statement: ruff_text_size::TextSize,
         test: ruff_text_size::TextSize,
     },
-    /// A module annotation records execution at startup; its provider evaluates values on demand.
-    RegisteredModuleAnnotation(ModuleAnnotation),
+    RegisteredNamespaceAnnotation(NamespaceAnnotation),
     RegisteredAnnotationStart,
     RegisteredAnnotationFormat,
-    RegisteredAnnotationInsert {
-        index: usize,
-        name: String,
-    },
+    RegisteredAnnotationInsert(AnnotationOccurrence),
     /// Bind the string operand to a checked child function in this provider.
     BindAnnotationExpression(ruff_text_size::TextSize),
     RegisteredAnnotationResult,

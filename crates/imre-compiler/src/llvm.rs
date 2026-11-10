@@ -4769,10 +4769,10 @@ impl Emitter<'_, '_> {
             Builtin::RegisteredImport(_)
             | Builtin::RegisteredSuspend(..)
             | Builtin::RegisteredAssertionFailure { .. }
-            | Builtin::RegisteredModuleAnnotation(_)
+            | Builtin::RegisteredNamespaceAnnotation(_)
             | Builtin::RegisteredAnnotationStart
             | Builtin::RegisteredAnnotationFormat
-            | Builtin::RegisteredAnnotationInsert { .. }
+            | Builtin::RegisteredAnnotationInsert(_)
             | Builtin::BindAnnotationExpression(_)
             | Builtin::RegisteredAnnotationResult
             | Builtin::RegisteredDeleteName(..)

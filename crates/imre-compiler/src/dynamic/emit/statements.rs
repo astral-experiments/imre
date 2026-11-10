@@ -1,11 +1,10 @@
-pub(super) mod class_annotations;
 use crate::frontend::function_scope::ClassBindings;
 mod declarations;
 use super::sites::{CompiledDefinition, CompiledProvider};
 
 use super::FrameEmitter;
 use crate::ir::{ItemUpdate, Statement};
-use crate::llvm::registered::{Place, with_checked_slots};
+use crate::llvm::registered::Place;
 use imre_ast::code_flags;
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
@@ -100,20 +99,22 @@ impl Function<'_, '_> {
         prepared: &crate::frontend::RegisteredSuite,
         mut emit_source: impl FnMut(&mut Self, std::ops::Range<usize>),
     ) {
-        with_checked_slots(self, prepared.checked.region(), |code| {
-            let body = &prepared.checked.function.body;
-            let mut offset = 0;
-            for run in &prepared.residual {
-                if offset < run.at && code.start_statement() {
-                    code.checked_block(&body[offset..run.at], &prepared.checked);
-                }
-                emit_source(code, run.statements.clone());
-                offset = run.at;
+        let Some(enclosing) = self.frame.enter_checked_slots(prepared.checked.region()) else {
+            return;
+        };
+        let body = &prepared.checked.function.body;
+        let mut offset = 0;
+        for run in &prepared.residual {
+            if offset < run.at && self.start_statement() {
+                self.checked_block(&body[offset..run.at], &prepared.checked);
             }
-            if offset < body.len() && code.start_statement() {
-                code.checked_block(&body[offset..], &prepared.checked);
-            }
-        });
+            emit_source(self, run.statements.clone());
+            offset = run.at;
+        }
+        if offset < body.len() && self.start_statement() {
+            self.checked_block(&body[offset..], &prepared.checked);
+        }
+        self.frame.restore_checked_slots(enclosing);
     }
 
     pub(super) fn statements(&mut self, suite: &[ast::Stmt]) {
@@ -205,9 +206,10 @@ impl Function<'_, '_> {
                 continue;
             }
             if let Some(checked) = self.source.checked_deletions.get(&stmt.range()) {
-                with_checked_slots(self, checked.region(), |code| {
-                    code.checked_block(&checked.function.body, checked);
-                });
+                if let Some(enclosing) = self.frame.enter_checked_slots(checked.region()) {
+                    self.checked_block(&checked.function.body, checked);
+                    self.frame.restore_checked_slots(enclosing);
+                }
                 continue;
             }
             let position = stmt
@@ -329,26 +331,11 @@ impl Function<'_, '_> {
                             _ => {}
                         }
                     }
-                    if self.module
+                    if (self.module || self.class_locals.is_some())
                         && let Some(marker) =
                             self.source.namespace_operations.get(&v.target.range())
                     {
                         self.registered_value(marker);
-                    } else if let ast::Expr::Name(name) = &*v.target
-                        && v.simple
-                        && (self.class_locals.is_some()
-                            || self.module && self.source.string_annotations)
-                    {
-                        let key = self.code_name(name.id.as_str());
-                        if !self.source.string_annotations {
-                            self.remember_annotation(v, name.id.as_str());
-                            let offset = v.start().to_u32();
-                            self.frame.checked(&format!("call i64 @imre_dyn_mark_class_annotation(ptr %ctx, i64 {}, i64 {key}, i32 {offset})", self.scope));
-                        } else {
-                            let value = self.annotation_string(v.annotation.start());
-                            self.frame
-                                .op("annotate", &[&self.scope.clone(), &key, &value]);
-                        }
                     }
                 }
                 ast::Stmt::AugAssign(v) => {
@@ -505,12 +492,14 @@ impl Function<'_, '_> {
 
     fn create_class(&mut self, class: &ast::StmtClassDef, parameters: Option<String>) -> String {
         let (bases, kwargs) = if let Some(args) = class.arguments.as_deref() {
-            self.argument_pack(
-                &crate::frontend::packed_arguments(args),
-                crate::frontend::registered_arguments(args),
-                None,
-                &mut Self::expr,
-            )
+            let layout = crate::frontend::packed_arguments(args);
+            let mut pack = crate::llvm::registered::ArgumentPack::new(self, &layout, None);
+            for (index, operand) in crate::frontend::registered_arguments(args).enumerate() {
+                let slot = pack.prepare(self, index);
+                let value = self.expr(operand);
+                pack.insert(self, slot, &value);
+            }
+            pack.finish(self)
         } else {
             (self.op("list", &[]), "0".into())
         };
@@ -559,12 +548,25 @@ impl Function<'_, '_> {
         }
     }
 
+    fn method_type_parameters<'a>(
+        &self,
+        function: &'a ast::StmtFunctionDef,
+    ) -> Option<&'a ast::TypeParams> {
+        function.type_params.as_deref().filter(|_| {
+            self.class_locals.is_some()
+                && self
+                    .source
+                    .namespace_operations
+                    .contains_key(&function.name.range())
+        })
+    }
+
     fn function_definition(&mut self, v: &ast::StmtFunctionDef) -> String {
         // A method's lazy annotations also need its defining class namespace.
         let type_params = if self.class_locals.is_some() && !self.source.string_annotations {
-            None
+            self.method_type_parameters(v)
         } else {
-            crate::dynamic::boxed_function_type_params(
+            crate::frontend::function_scope::boxed_function_type_params(
                 v,
                 self.source.string_annotations,
                 !self.prefix.is_empty(),
@@ -876,9 +878,12 @@ impl Function<'_, '_> {
         if !sites.is_empty() {
             let entries: Vec<_> = sites
                 .iter()
-                .map(|site| &self.source.module_annotations[site])
+                .enumerate()
+                .map(|(index, site)| crate::ir::AnnotationOccurrence {
+                    site: *site,
+                    index: Some(index),
+                })
                 .collect();
-            let plan = crate::frontend::DeferredModuleAnnotation::prepare_body(&entries);
             let signature = self.frame.text(
                 &json!({
                     "posonly": ["format"], "scope_complete": true, "scope_locals_complete": true,
@@ -886,14 +891,7 @@ impl Function<'_, '_> {
                 })
                 .to_string(),
             );
-            let code = self.source.definition(
-                self.frame.output,
-                String::new(),
-                Body::ModuleAnnotations(&plan, &entries),
-                self.source.module_start,
-                false,
-                Entry::Compiled,
-            );
+            let code = self.annotation_body(&entries, None, self.source.module_start);
             let name = self.text("__annotate__");
             let provider = self.frame.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {signature}, i64 0, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
             self.bind("__annotate__", &provider);
@@ -902,17 +900,72 @@ impl Function<'_, '_> {
             .op("setup_module_annotations", &[&self.scope.clone()]);
     }
 
-    pub(super) fn unprepared_annotation(
+    pub(in crate::dynamic::emit) fn finish_class_annotations(
         &mut self,
-        index: usize,
-        entry: &crate::frontend::DeferredModuleAnnotation,
+        plan: &crate::frontend::ClassAnnotations,
+        globals: &std::collections::BTreeSet<String>,
     ) {
-        let crate::frontend::AnnotationValue::Source(expression) = &entry.value else {
+        let Some(first) = plan.sites.first() else {
+            return;
+        };
+        if self.body.terminated {
+            return;
+        }
+        let offsets = if plan.sites.iter().any(|site| site.index.is_some()) {
+            let offsets = self.op("list", &[]);
+            for site in plan.sites.iter().filter(|site| site.index.is_some()) {
+                let offset = self.integer(site.site.to_u32());
+                self.op("append", &[&offsets, &offset]);
+            }
+            offsets
+        } else {
+            "0".into()
+        };
+        let signature = self.frame.text(&json!({
+            "posonly": ["format"], "scope_complete": !plan.incomplete, "scope_reads": plan.reads,
+            "code_flags": self.source.function_flags(None, self.in_function, false),
+        }).to_string());
+        let code = self.annotation_body(&plan.sites, Some(globals), first.site);
+        let environment = self.frame.op(
+            "class_annotation_environment",
+            &[&self.scope.clone(), &offsets],
+        );
+        let name = self.text("__annotate__");
+        let qualname = self.frame.text(&format!("{}__annotate__", self.prefix));
+        let defaults = self.op("dict", &[]);
+        let function = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {environment}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {qualname}, i64 0, i64 0, i1 false)"));
+        self.bind("__annotate_func__", &function);
+    }
+
+    fn annotation_body(
+        &mut self,
+        entries: &[crate::ir::AnnotationOccurrence],
+        globals: Option<&std::collections::BTreeSet<String>>,
+        start: TextSize,
+    ) -> String {
+        let plan =
+            crate::frontend::DeferredAnnotation::prepare_body(&self.source.annotations, entries);
+        self.source.definition(
+            self.frame.output,
+            String::new(),
+            Body::NamespaceAnnotations(&plan, entries, globals),
+            start,
+            false,
+            Entry::Compiled,
+        )
+    }
+
+    pub(super) fn unprepared_annotation(&mut self, occurrence: crate::ir::AnnotationOccurrence) {
+        let decl = &self.source.annotations[&occurrence.site];
+        let crate::frontend::AnnotationValue::Source(expression) = &decl.value else {
             unreachable!("checked annotation outside its prepared run")
         };
-        self.insert_annotation(Some(index), &entry.name, |code| {
-            code.annotation_value(expression)
-        });
+        let target = self
+            .frame
+            .annotation_target(occurrence.index, &decl.name, decl.range);
+        self.place_annotation_string(expression.start());
+        let value = self.annotation_value(expression);
+        self.frame.store_annotation(target, &value);
     }
 
     pub(super) fn annotations(
@@ -920,9 +973,12 @@ impl Function<'_, '_> {
         entries: &[(&str, &ast::Expr)],
         class: Option<ClassBindings>,
     ) {
-        self.begin_annotations(class);
+        self.begin_annotations();
+        self.frame.class_locals = class;
         for &(name, expression) in entries {
-            self.insert_annotation(None, name, |code| code.annotation_value(expression));
+            let target = self.frame.annotation_target(None, name, expression.range());
+            let value = self.annotation_value(expression);
+            self.frame.store_annotation(target, &value);
         }
         let values = self.take_annotation_result();
         self.return_value(&values);
