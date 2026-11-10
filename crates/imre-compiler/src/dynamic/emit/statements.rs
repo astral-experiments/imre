@@ -560,7 +560,7 @@ impl Function<'_, '_> {
             Some(&v.parameters),
             Some(v),
             type_params,
-            Body::function(v),
+            self.source.function_body(v),
         )
     }
 
@@ -728,7 +728,9 @@ impl Function<'_, '_> {
         };
         let scopes = &self.source.scopes;
         let scope_facts = match &body {
-            Body::Statements(_) | Body::GeneratorFunction(..) => Some(&scopes.functions[&start]),
+            Body::Statements(_) | Body::GeneratorFunction(..) => {
+                Some(&scopes.functions[&start].lexical)
+            }
             Body::Namespace(_) => {
                 let class = &scopes.classes[&start];
                 signature["postponed_annotations"] = json!(class.postponed_annotations);

@@ -1,20 +1,18 @@
 //! Resolve declaration and annotation code sites before emitting the checked block.
 use super::super::sites::{AnnotationString, CompiledAlias, CompiledDefinition, Declaration};
-use super::super::{AliasValue, Body, DefinitionName, DefinitionSite, Entry, Function};
+use super::super::{AliasValue, Body, DefinitionName, DefinitionSite, Entry, Function, SourceInfo};
 use crate::frontend::{AnnotationCode, PreparedAnnotation};
 use crate::ir::{self, Builtin, Expr, ExprKind, Statement};
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextSize};
 
-impl<'s> Body<'s> {
-    pub(super) fn function(def: &'s ast::StmtFunctionDef) -> Self {
-        match (def.is_async, imre_ast::code_flags::is_generator(&def.body)) {
-            (false, false) => Self::Statements(&def.body),
-            (false, true) => Self::GeneratorFunction(&def.body, imre_ast::code_flags::GENERATOR),
-            (true, false) => Self::GeneratorFunction(&def.body, imre_ast::code_flags::COROUTINE),
-            (true, true) => {
-                Self::GeneratorFunction(&def.body, imre_ast::code_flags::ASYNC_GENERATOR)
-            }
+impl SourceInfo<'_> {
+    pub(super) fn function_body<'s>(&self, def: &'s ast::StmtFunctionDef) -> Body<'s> {
+        let suspension_flags = self.scopes.function(def).suspension_flags;
+        if suspension_flags == 0 {
+            Body::Statements(&def.body)
+        } else {
+            Body::GeneratorFunction(&def.body, suspension_flags)
         }
     }
 }
@@ -215,7 +213,7 @@ impl Function<'_, '_> {
         if !self.sites.definitions.contains_key(&start) {
             let syntax = self.source.definitions.as_ref().expect("registered scope")[&start];
             let (definition, decorators, type_params) = match syntax {
-                DefinitionSite::Function { def, .. } => {
+                DefinitionSite::Function(def) => {
                     let params = self.method_type_parameters(def);
                     let definition = self.compile_definition(
                         def.decorator_list
@@ -225,7 +223,7 @@ impl Function<'_, '_> {
                         Some(&def.parameters),
                         Some(def),
                         params,
-                        Body::function(def),
+                        self.source.function_body(def),
                     );
                     (definition, &def.decorator_list, params)
                 }

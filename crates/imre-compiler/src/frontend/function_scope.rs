@@ -351,10 +351,15 @@ impl FunctionScope {
     }
 }
 
+pub(crate) struct NamedFunctionScope {
+    pub(crate) lexical: FunctionScope,
+    pub(crate) suspension_flags: u32,
+}
+
 #[derive(Default)]
 pub(crate) struct ScopeFacts {
     pub(crate) module_annotations: bool,
-    pub(crate) functions: HashMap<TextSize, FunctionScope>,
+    pub(crate) functions: HashMap<TextSize, NamedFunctionScope>,
     pub(crate) lambdas: HashMap<TextSize, FunctionScope>,
     pub(crate) aliases: HashMap<TextSize, FunctionScope>,
     pub(crate) generators: HashMap<TextSize, FunctionScope>,
@@ -365,6 +370,13 @@ pub(crate) struct ScopeFacts {
 }
 
 impl ScopeFacts {
+    pub(crate) fn function(&self, def: &ast::StmtFunctionDef) -> &NamedFunctionScope {
+        &self.functions[&def
+            .decorator_list
+            .first()
+            .map_or(def.start(), Ranged::start)]
+    }
+
     pub(crate) fn prepare(
         body: &[ast::Stmt],
         names: &imre_ast::Names,
@@ -409,9 +421,20 @@ impl<'a, A: FnMut(&ast::StmtTypeAlias), E: FnMut(&ast::Expr)> Visitor<'a> for Co
                     .decorator_list
                     .first()
                     .map_or(def.start(), Ranged::start);
-                self.scopes
-                    .functions
-                    .insert(start, FunctionScope::function(def, strings));
+                use imre_ast::code_flags::{ASYNC_GENERATOR, COROUTINE, GENERATOR, is_generator};
+                let suspension_flags = match (def.is_async, is_generator(&def.body)) {
+                    (false, false) => 0,
+                    (false, true) => GENERATOR,
+                    (true, false) => COROUTINE,
+                    (true, true) => ASYNC_GENERATOR,
+                };
+                self.scopes.functions.insert(
+                    start,
+                    NamedFunctionScope {
+                        lexical: FunctionScope::function(def, strings),
+                        suspension_flags,
+                    },
+                );
                 self.scopes.annotations.function(def, strings);
                 self.scope = Scope::Function;
             }

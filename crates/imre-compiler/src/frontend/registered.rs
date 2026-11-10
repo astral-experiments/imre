@@ -529,10 +529,16 @@ impl DeferredAnnotation {
 }
 
 /// Physical source operands shared by namespace initialization and lazy annotation providers.
+pub(crate) struct FunctionSite<'a> {
+    pub(crate) def: &'a ast::StmtFunctionDef,
+    pub(crate) prepare_entry: bool,
+    pub(crate) thread_entry: Option<imre_ast::ThreadEntry>,
+}
+
 #[derive(Default)]
 pub(crate) struct RegisteredSites<'a> {
     pub(crate) operations: HashMap<TextRange, Expr>,
-    pub(crate) workers: Vec<(&'a ast::StmtFunctionDef, imre_ast::ThreadEntry)>,
+    pub(crate) functions: Vec<FunctionSite<'a>>,
     pub(crate) classes: Vec<&'a ast::StmtClassDef>,
     pub(crate) annotations: HashMap<TextSize, DeferredAnnotation>,
 }
@@ -547,6 +553,7 @@ pub(crate) fn registered_sites<'a, R>(
         names: &'s imre_ast::Names,
         operands: &'s HashMap<TextSize, PreparedAnnotation<R>>,
         scope: RegisteredScope,
+        in_generic_function: bool,
         output: RegisteredSites<'a>,
     }
     impl<'a, R> StatementVisitor<'a> for Collector<'_, 'a, R> {
@@ -562,15 +569,15 @@ pub(crate) fn registered_sites<'a, R>(
                     self.scope = outer;
                 }
                 ast::Stmt::FunctionDef(def) => {
-                    if matches!(self.scope, RegisteredScope::Class)
+                    let generic_method = matches!(self.scope, RegisteredScope::Class)
                         && super::function_scope::boxed_function_type_params(
                             def,
                             self.names.string_annotations,
                             true,
                             Some(self.names),
                         )
-                        .is_some()
-                    {
+                        .is_some();
+                    if generic_method {
                         self.output.operations.insert(
                             def.name.range(),
                             operation(
@@ -582,10 +589,19 @@ pub(crate) fn registered_sites<'a, R>(
                             ),
                         );
                     }
-                    if let Some(entry) = imre_ast::thread_entry(def) {
-                        self.output.workers.push((def, entry));
+                    let generic = self.in_generic_function || def.type_params.is_some();
+                    let thread_entry = imre_ast::thread_entry(def);
+                    let worker = thread_entry.is_some();
+                    self.output.functions.push(FunctionSite {
+                        def,
+                        prepare_entry: !generic || generic_method || worker,
+                        thread_entry,
+                    });
+                    if worker {
+                        // A proven worker contains no nested declarations or namespace effects.
                         return;
                     }
+                    let outer_generic = std::mem::replace(&mut self.in_generic_function, generic);
                     let outer = std::mem::replace(
                         &mut self.scope,
                         RegisteredScope::Function {
@@ -594,6 +610,7 @@ pub(crate) fn registered_sites<'a, R>(
                     );
                     walk_stmt(self, stmt);
                     self.scope = outer;
+                    self.in_generic_function = outer_generic;
                 }
                 ast::Stmt::AnnAssign(ann)
                     if !matches!(self.scope, RegisteredScope::Function { .. }) && ann.simple =>
@@ -639,6 +656,7 @@ pub(crate) fn registered_sites<'a, R>(
         names,
         operands,
         scope: RegisteredScope::Module,
+        in_generic_function: false,
         output: RegisteredSites::default(),
     };
     sites.visit_body(body);
