@@ -120,13 +120,8 @@ impl<'a> Visitor<'a> for Check {
                 self.scope(&f.body, true, f.is_async);
             }
             Stmt::ClassDef(c) => {
-                for decorator in &c.decorator_list {
-                    self.visit_decorator(decorator);
-                }
-                if c.type_params.is_none()
-                    && let Some(args) = &c.arguments
-                {
-                    self.visit_arguments(args);
+                for expr in crate::class_definition_expressions(c) {
+                    self.visit_expr(expr);
                 }
                 self.scope(&c.body, false, false);
             }
