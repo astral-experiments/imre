@@ -547,6 +547,14 @@ impl<'a> PreparedBody<'a, '_> {
         );
         let initializer =
             (!expression).then(|| prepare.suite(&body, crate::frontend::RegisteredScope::Module));
+        let mut initializer_sites = Vec::new();
+        if let Some(suite) = &initializer
+            && suite.fully_checked()
+        {
+            sites::CheckedSites::visit(&suite.checked.function.body, &mut |site| {
+                initializer_sites.push(site);
+            });
+        }
         let mut function_bodies = HashMap::new();
         let class_bodies = prepare.class_suites(&sites.classes);
         let mut thread_entries = HashMap::new();
@@ -592,6 +600,7 @@ impl<'a> PreparedBody<'a, '_> {
             function_bodies,
             class_bodies,
             initializer,
+            initializer_sites,
             program_bodies,
             bundled,
             path,
@@ -616,7 +625,7 @@ impl<'a> PreparedBody<'a, '_> {
         let retain_syntax = source.initializer.as_ref().is_some_and(|suite| {
             !suite.fully_checked()
                 || source.scopes.module_annotations
-                || statements::declarations::needs_checked_sites(&suite.checked.function.body)
+                || !source.initializer_sites.is_empty()
         });
         if retain_syntax {
             use_module(PreparedBody {
@@ -738,7 +747,14 @@ impl<'a> PreparedBody<'a, '_> {
             function
                 .declared_globals
                 .clone_from(&self.source.scopes.module_globals);
-            function.prepared_function(suite, |code, run| code.source_run(stmts, run));
+            if suite.fully_checked() {
+                for &site in &self.source.initializer_sites {
+                    function.prepare_site(site);
+                }
+                function.frame.checked_body(&suite.checked, &function.sites);
+            } else {
+                function.checked_runs(suite, |code, run| code.source_run(stmts, run));
+            }
             if let Some(sites) = function.module_annotation_sites.take() {
                 function.end("ret i64 0");
                 function.label("annotations_init");
@@ -937,6 +953,8 @@ struct SourceInfo<'a> {
     function_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
     class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
     initializer: Option<crate::frontend::RegisteredSuite>,
+    // Module admission and each output layout use the same ordered site references.
+    initializer_sites: Vec<sites::RequiredSite>,
     program_bodies: Option<&'a super::CheckedFunctions>,
     bundled: bool,
     path: &'a Path,
@@ -1707,6 +1725,9 @@ mod tests {
             "global offset\n",
             "inputs = [2, 3]\n",
             "offset = inputs[0] + inputs[1]\n",
+            "while offset:\n",
+            "    break\n",
+            "    def skipped(): pass\n",
         );
         for optimization in [0, 2] {
             let mut module = PreparedBody::module(
