@@ -1208,7 +1208,7 @@ impl SourceMap<'_> {
                     ReturnOperand::ClassArguments(site) => {
                         let class = &self.class_bodies[&site];
                         let parameters = class.header.parameters.as_deref().expect("generic class");
-                        let namespace = f.compile_class_namespace(site);
+                        let namespace = f.callable_sites().compile_class_namespace(site);
                         namespace.generic_class(
                             &mut f,
                             parameters,

@@ -6,6 +6,7 @@ use super::super::sites::{
 use super::super::{
     Body, DefinitionName, Entry, Function, Output, ReturnOperand, SourceInfo, SourceMap,
 };
+use super::CallableSites;
 use crate::frontend::PreparedAnnotation;
 use crate::frontend::function_scope::OrdinaryFunction;
 use crate::ir::{Expr, Statement};
@@ -36,8 +37,7 @@ enum Callable<'a> {
 }
 
 impl SourceMap<'_> {
-    /// Place the checked callable prefix in order. The first richer declaration and
-    /// its successors keep their original order and their existing placement service.
+    /// Place checked declarations in lexical order up to the first site that needs its frame.
     pub(in crate::dynamic::emit) fn place_module_callables<'s>(
         &self,
         output: &mut Output,
@@ -52,11 +52,22 @@ impl SourceMap<'_> {
             declared_globals: &self.scopes.module_globals,
             in_function: false,
             method_scope: false,
+            class_locals: None,
         };
         for (index, &site) in required.iter().enumerate() {
             match site {
                 RequiredSite::Lambda(site, scoped) => callables.place_checked_lambda(site, scoped),
                 RequiredSite::Definition(site) if callables.prepare_ordinary_function(site) => {}
+                RequiredSite::Definition(site) => {
+                    let Some(class) = self
+                        .class_bodies
+                        .get(&site)
+                        .filter(|c| c.header.parameters.is_none())
+                    else {
+                        return &required[index..];
+                    };
+                    callables.place_class(site, class);
+                }
                 _ => return &required[index..],
             }
         }
@@ -124,21 +135,11 @@ impl Function<'_, '_> {
             prefix: &self.prefix,
             declared_globals: &self.declared_globals,
             in_function: self.in_function,
+            class_locals: self.frame.class_locals.as_ref(),
             method_scope: self.frame.class_locals.is_some()
                 && self.frame.annotation_values.is_none(),
         }
     }
-}
-
-/// The enclosing lexical scope and the existing address table used to place checked callables.
-pub(in crate::dynamic::emit) struct CallableSites<'a, 'p> {
-    source: &'a SourceMap<'p>,
-    output: &'a mut Output,
-    sites: &'a mut CheckedSites,
-    prefix: &'a str,
-    declared_globals: &'a std::collections::BTreeSet<String>,
-    in_function: bool,
-    method_scope: bool,
 }
 
 impl CallableSites<'_, '_> {
@@ -241,6 +242,39 @@ impl CallableSites<'_, '_> {
         }
     }
 
+    fn place_class(&mut self, start: TextSize, class: &crate::frontend::RegisteredClass) {
+        if self.sites.definitions.contains_key(&start) {
+            return;
+        }
+        let definition = if class.header.parameters.is_some() {
+            let name = format!("<generic parameters of {}>", class.name);
+            let body = class.header.function.as_ref().map_or_else(
+                || Body::Operand(class.name.range(), ReturnOperand::ClassArguments(start)),
+                |checked| Body::Checked(checked, None),
+            );
+            self.compile_definition(
+                start,
+                DefinitionName::ClassHeader(&name),
+                None,
+                None,
+                None,
+                body,
+            )
+        } else {
+            self.compile_class_namespace(start)
+        };
+        let declaration = Declaration {
+            definition,
+            decorator_lines: class
+                .decorator_offsets
+                .iter()
+                .map(|&offset| self.source.positions.line(offset))
+                .collect(),
+            type_params: Vec::new(),
+        };
+        self.sites.definitions.insert(start, declaration);
+    }
+
     pub(super) fn prepare_ordinary_function(&mut self, site: TextSize) -> bool {
         let source = self.source;
         let Some((header, body)) = source.ordinary_function(site) else {
@@ -275,20 +309,20 @@ impl Function<'_, '_> {
             self.check_suspended_parameters(parameters, alias.range);
         }
         let compiled = match &alias.body {
-            Ok(code) => Some(CompiledAlias {
-                definition: self.compile_definition(
-                    site,
-                    DefinitionName::TypeAlias(&alias.name),
-                    None,
-                    None,
-                    None,
-                    Body::Operand(
-                        code.range,
-                        ReturnOperand::Prepared(&code.operand, self.class_locals.clone()),
+            Ok(code) => {
+                let operand = ReturnOperand::Prepared(&code.operand, self.class_locals.clone());
+                Some(CompiledAlias {
+                    definition: self.callable_sites().compile_definition(
+                        site,
+                        DefinitionName::TypeAlias(&alias.name),
+                        None,
+                        None,
+                        None,
+                        Body::Operand(code.range, operand),
                     ),
-                ),
-                parameters: alias.parameters.clone(),
-            }),
+                    parameters: alias.parameters.clone(),
+                })
+            }
             Err(range) => {
                 self.with_expression_range(*range, |code| {
                     code.build_diagnostic("type alias value has no checked expression operand")
@@ -307,7 +341,7 @@ impl Function<'_, '_> {
             return;
         }
         let body = &self.source.generators[&site];
-        let definition = self.compile_definition(
+        let definition = self.callable_sites().compile_definition(
             site.start(),
             DefinitionName::Generator(site),
             None,
@@ -358,7 +392,7 @@ impl Function<'_, '_> {
             RequiredSite::ClassNamespace(start) => {
                 if !self.sites.class_namespaces.contains_key(&start) {
                     let class = &self.source.class_bodies[&start];
-                    let namespace = self.compile_class_namespace(start);
+                    let namespace = self.callable_sites().compile_class_namespace(start);
                     let parameters = class.header.parameters.clone().expect("generic class");
                     self.sites
                         .class_namespaces
@@ -377,61 +411,37 @@ impl Function<'_, '_> {
         {
             return;
         }
-        let declaration = if let Some(class) = self.source.class_bodies.get(&start) {
-            let definition = if class.header.parameters.is_some() {
-                let name = format!("<generic parameters of {}>", class.name);
-                let body = class.header.function.as_ref().map_or_else(
-                    || Body::Operand(class.name.range(), ReturnOperand::ClassArguments(start)),
-                    |checked| Body::Checked(checked, None),
-                );
-                self.compile_definition(
-                    start,
-                    DefinitionName::ClassHeader(&name),
-                    None,
-                    None,
-                    None,
-                    body,
-                )
-            } else {
-                self.compile_class_namespace(start)
-            };
-            Declaration {
-                definition,
-                decorator_lines: class
-                    .decorator_offsets
-                    .iter()
-                    .map(|&offset| self.source.positions.line(offset))
-                    .collect(),
-                type_params: Vec::new(),
-            }
-        } else {
-            let def = self
-                .source
-                .function_header(start)
-                .or_else(|| self.source.definitions?.get(&start).copied())
-                .expect("prepared function declaration");
-            let params = self.namespace_type_parameters(def);
-            let definition = self.compile_definition(
-                def.decorator_list
-                    .first()
-                    .map_or(def.start(), Ranged::start),
-                DefinitionName::Binding(&def.name),
-                Some(&def.parameters),
-                Some(def),
-                params,
-                self.source.function_body(def),
-            );
-            Declaration {
-                definition,
-                decorator_lines: def
-                    .decorator_list
-                    .iter()
-                    .map(|d| self.source.positions.line(d.expression.start()))
-                    .collect(),
-                type_params: params.map_or_else(Vec::new, |params| {
-                    crate::frontend::registered_type_parameters(params, &self.source.private_names)
-                }),
-            }
+        if let Some(class) = self.source.class_bodies.get(&start) {
+            self.callable_sites().place_class(start, class);
+            return;
+        }
+        let def = self
+            .source
+            .function_header(start)
+            .or_else(|| self.source.definitions?.get(&start).copied())
+            .expect("prepared function declaration");
+        let params = self.namespace_type_parameters(def);
+        let body = self.source.function_body(def);
+        let definition = self.callable_sites().compile_definition(
+            def.decorator_list
+                .first()
+                .map_or(def.start(), Ranged::start),
+            DefinitionName::Binding(&def.name),
+            Some(&def.parameters),
+            Some(def),
+            params,
+            body,
+        );
+        let declaration = Declaration {
+            definition,
+            decorator_lines: def
+                .decorator_list
+                .iter()
+                .map(|d| self.source.positions.line(d.expression.start()))
+                .collect(),
+            type_params: params.map_or_else(Vec::new, |params| {
+                crate::frontend::registered_type_parameters(params, &self.source.private_names)
+            }),
         };
         self.sites.definitions.insert(start, declaration);
     }
@@ -443,7 +453,7 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn checked_module_callables_stop_at_the_first_class() {
+    fn checked_module_places_class_and_following_lambda() {
         use super::{CheckedSites, RequiredSite, SourceMap};
         use crate::dynamic::emit::SourcePositions;
 
@@ -476,19 +486,22 @@ mod tests {
         let [
             RequiredSite::Definition(read),
             RequiredSite::Lambda(first, _),
-            ..,
+            RequiredSite::Definition(class),
+            RequiredSite::Lambda(last, _),
         ] = required.as_slice()
         else {
-            panic!("expected the ordinary function and lambda");
+            panic!("expected the function, lambda, class and final lambda");
         };
         assert!(module.source.ordinary_function(*read).is_some());
         let rest = location.place_module_callables(&mut output, &mut sites, required);
-        assert!(matches!(
-            rest,
-            [RequiredSite::Definition(_), RequiredSite::Lambda(_, _)]
-        ));
-        assert_eq!(sites.definitions.len(), 1);
-        assert_eq!(sites.lambdas.len(), 1);
+        assert!(rest.is_empty());
+        assert_eq!(sites.definitions.len(), 2);
+        assert_eq!(sites.lambdas.len(), 2);
+        assert_eq!(sites.definitions[class].definition.qualname, "C");
+        assert_eq!(
+            sites.lambdas[last].code,
+            location.callable_code.borrow()[last]
+        );
         assert_eq!(sites.definitions[read].definition.name, "read");
         assert_eq!(
             sites.lambdas[first].code,
@@ -497,10 +510,32 @@ mod tests {
         let count = output.count;
         assert!(
             location
-                .place_module_callables(&mut output, &mut sites, &required[..2])
+                .place_module_callables(&mut output, &mut sites, required)
                 .is_empty()
         );
         assert_eq!(output.count, count);
+    }
+
+    #[test]
+    fn checked_class_site_uses_registered_metadata_after_module_erasure() {
+        let mut module = PreparedBody::module(
+            "children",
+            Path::new("children.py"),
+            "class C:\n    'class doc'\nlast = lambda: C\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        assert!(module.initializer().plan.fully_checked());
+        assert!(module.initializer().sources.is_empty());
+        let original = module.standalone().unwrap();
+        assert!(module.syntax.take().is_some());
+        assert!(module.linked_declarations().is_empty());
+        assert_eq!(module.standalone().unwrap(), original);
+
+        let class = module.source.class_bodies.values_mut().next().unwrap();
+        assert_eq!(class.doc.take().as_deref(), Some("class doc"));
+        assert_ne!(module.standalone().unwrap(), original);
     }
 
     #[test]

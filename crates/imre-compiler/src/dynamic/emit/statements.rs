@@ -1,8 +1,8 @@
 use crate::frontend::{PhysicalOperand, SourceEffect};
 mod declarations;
-use super::sites::{CompiledDefinition, CompiledProvider};
+use super::sites::{CheckedSites, CompiledDefinition, CompiledProvider};
 
-use super::{AnnotationScope, FrameEmitter, RegisteredFrame, SourceMap};
+use super::{AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourceMap};
 use crate::ir::Statement;
 use crate::llvm::registered::context::{ContextEmitter, ContextRegion};
 use imre_ast::code_flags;
@@ -11,6 +11,18 @@ use ruff_text_size::{Ranged, TextRange, TextSize};
 use serde_json::json;
 
 use super::{Body, Cleanup, DefinitionName, Entry, Function};
+
+/// The enclosing lexical scope and the existing address table used to place checked callables.
+pub(in crate::dynamic::emit) struct CallableSites<'a, 'p> {
+    source: &'a SourceMap<'p>,
+    output: &'a mut Output,
+    sites: &'a mut CheckedSites,
+    prefix: &'a str,
+    declared_globals: &'a std::collections::BTreeSet<String>,
+    in_function: bool,
+    method_scope: bool,
+    class_locals: Option<&'a crate::frontend::function_scope::ClassBindings>,
+}
 
 impl<'a, 'p> ContextEmitter<'a, 'p> for Function<'a, 'p> {
     fn push_context(&mut self, exit: ContextRegion, outer: String) {
@@ -397,17 +409,6 @@ impl<'p> Function<'_, 'p> {
         self.bind(class.name.as_str(), &value);
     }
 
-    pub(super) fn compile_class_namespace(&mut self, site: TextSize) -> CompiledDefinition {
-        self.compile_definition(
-            site,
-            DefinitionName::Binding(&self.source.class_bodies[&site].name),
-            None,
-            None,
-            None,
-            Body::Namespace,
-        )
-    }
-
     fn function_parameter_scope(&mut self, outer: &str, params: &ast::TypeParams) -> String {
         let params =
             crate::frontend::registered_type_parameters(params, &self.source.private_names);
@@ -489,7 +490,14 @@ impl<'p> Function<'_, 'p> {
         type_params: Option<&ast::TypeParams>,
         body: Body<'_>,
     ) -> String {
-        let compiled = self.compile_definition(start, name, params, function, type_params, body);
+        let compiled = self.callable_sites().compile_definition(
+            start,
+            name,
+            params,
+            function,
+            type_params,
+            body,
+        );
         let doc = compiled.doc(&mut self.frame);
         let outer = self.scope.clone();
         let scope = type_params
@@ -512,6 +520,22 @@ impl<'p> Function<'_, 'p> {
             self.op("setattr", &[&function, &key, &params]);
         }
         function
+    }
+}
+
+impl CallableSites<'_, '_> {
+    pub(in crate::dynamic::emit) fn compile_class_namespace(
+        &mut self,
+        site: TextSize,
+    ) -> CompiledDefinition {
+        self.compile_definition(
+            site,
+            DefinitionName::Binding(&self.source.class_bodies[&site].name),
+            None,
+            None,
+            None,
+            Body::Namespace,
+        )
     }
 
     /// Compile the body and its annotation provider with the declaring lexical scope.
@@ -552,7 +576,7 @@ impl<'p> Function<'_, 'p> {
             if self.declared_globals.contains(class.name.as_str()) {
                 String::new()
             } else {
-                self.prefix.clone()
+                self.prefix.to_owned()
             }
         } else if matches!(body, Body::Namespace) || generator.is_some() {
             // Nested code in a comprehension uses its name without a <locals> segment.
@@ -588,11 +612,7 @@ impl<'p> Function<'_, 'p> {
                 let mut flags = self.source.function_flags(
                     params,
                     nested,
-                    self.class_locals.is_some()
-                        && self.annotation_values.is_none()
-                        && class_header.is_none()
-                        && !generic
-                        && !type_alias,
+                    self.method_scope && class_header.is_none() && !generic && !type_alias,
                 );
                 if doc.is_some() {
                     flags |= code_flags::HAS_DOCSTRING;
@@ -604,7 +624,6 @@ impl<'p> Function<'_, 'p> {
         let provider = annotations.map(|annotations| {
             let class = self
                 .class_locals
-                .as_ref()
                 .filter(|_| !self.source.string_annotations);
             let start = params.expect("annotated function parameters").start();
             let reads = self.source.scopes.annotations.parameter_reads(start, class);
@@ -628,7 +647,7 @@ impl<'p> Function<'_, 'p> {
                 .cloned()
                 .map_or(AnnotationScope::Plain, AnnotationScope::Method);
             let code = self.source.definition(
-                self.frame.output,
+                self.output,
                 String::new(),
                 Body::AnnotationProvider(&annotations.body, &annotations.entries, scope),
                 start,
@@ -677,11 +696,7 @@ impl<'p> Function<'_, 'p> {
             if callable && facts.captures_class {
                 signature["class_cell"] = json!(true);
             }
-            if (callable || generator.is_some())
-                && self.class_locals.is_some()
-                && self.annotation_values.is_none()
-                && type_params.is_none()
-            {
+            if (callable || generator.is_some()) && self.method_scope && type_params.is_none() {
                 signature["method_class_cell"] = json!(facts.captures_class);
             }
         } else {
@@ -728,9 +743,9 @@ impl<'p> Function<'_, 'p> {
         {
             signature["return_type"] = json!(ty);
         }
-        let code =
-            self.source
-                .definition(self.frame.output, prefix, body, start, in_function, entry);
+        let code = self
+            .source
+            .definition(self.output, prefix, body, start, in_function, entry);
         if let Some(p) = params {
             self.output
                 .interned_identifiers
@@ -762,7 +777,9 @@ impl<'p> Function<'_, 'p> {
             type_alias,
         }
     }
+}
 
+impl<'p> Function<'_, 'p> {
     pub(in crate::dynamic::emit) fn finish_class_annotations(
         &mut self,
         plan: &crate::frontend::ClassAnnotations,
