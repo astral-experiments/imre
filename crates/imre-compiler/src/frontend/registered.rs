@@ -517,7 +517,7 @@ pub(crate) fn registered_type_alias(site: TextSize) -> Expr {
 }
 
 /// Preserve the requested module separately from the names bound in the current namespace.
-fn registered_import(stmt: &ast::Stmt, private_names: &imre_ast::Names) -> Option<Expr> {
+pub(super) fn registered_import(stmt: &ast::Stmt, private_names: &imre_ast::Names) -> Option<Expr> {
     let import = match stmt {
         ast::Stmt::Import(import) => ir::NamespaceImport::Modules(
             import

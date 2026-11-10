@@ -434,6 +434,10 @@ impl Inference {
         Some(signature)
     }
 
+    pub(super) fn used_as_value(&self, id: usize) -> bool {
+        self.pending.borrow()[id].used_as_value
+    }
+
     pub(super) fn registered_signature(&self, signature: &Signature) -> Option<Signature> {
         let pending = self.pending.borrow();
         let params = &pending[signature.id].params;

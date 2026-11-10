@@ -1182,6 +1182,10 @@ fn lower_graph(
         let accepted =
             signature.registered_frame() && source_checks.accepts(graph, *module_id, definition);
         if accepted || original.is_some() {
+            // A read of the callable establishes a live namespace binding. An
+            // unused, unresolved signature cannot select this calling convention.
+            checker.bound_function_imports =
+                signature.registered_frame() && inference.used_as_value(signature.id);
             let literals = literals
                 .entry(*module_id)
                 .or_insert_with(|| registered::values::ModuleSource::new(module));
@@ -2875,6 +2879,7 @@ struct Checker<'a> {
     observed_definition: Option<Box<CalledDefinition>>,
     /// Locals in this body are bound in an existing Python activation.
     registered: Option<&'a registered::values::ModuleSource>,
+    bound_function_imports: bool,
     checked_callback_effects: bool,
     /// The first operation whose execution requires a different representation. All
     /// later source operations still see the facts from the ordinary checker.
@@ -2967,6 +2972,7 @@ impl<'a> Checker<'a> {
             fixed_sites: None,
             observed_definition: None,
             registered: None,
+            bound_function_imports: false,
             checked_callback_effects: false,
             unrepresented: Default::default(),
             namespace_calls: HashSet::new(),
@@ -5441,6 +5447,23 @@ impl<'a> Checker<'a> {
     }
 
     fn statement(&mut self, statement: &ast::Stmt) -> Result<(Vec<Statement>, bool), String> {
+        if self.bound_function_imports
+            && self.graph.session.sole_local_import(self.module, statement)
+        {
+            let (body, falls_through) = self.lower_statement(statement)?;
+            // A native intrinsic may have consumed the import without producing its
+            // Python namespace operation. Keep its original prepared function in that case.
+            if !matches!(
+                body.as_slice(),
+                [Statement::Expr(Expr {
+                    kind: ExprKind::Builtin(Builtin::RegisteredImport(_), _),
+                    ..
+                })]
+            ) {
+                self.require_registered_operation(statement);
+            }
+            return Ok((body, falls_through));
+        }
         if self.registered.is_some() {
             // Fixed layouts can erase Python stores (for example, a local += becomes +).
             // Keep every operation in this frame explicit until it has an object-ABI lowering.
@@ -5527,6 +5550,11 @@ impl<'a> Checker<'a> {
             && let Some(bindings) = self.local_sys_import(import)?
         {
             return Ok((bindings, true));
+        }
+        if self.bound_function_imports
+            && let Some(import) = registered::registered_import(statement, &Default::default())
+        {
+            return Ok((vec![Statement::Expr(import)], true));
         }
         if self.module_scope && local_functions::type_variable(self.graph, self.module, statement) {
             return Ok((Vec::new(), true));
