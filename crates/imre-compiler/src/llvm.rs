@@ -31,6 +31,7 @@ mod integer_regions;
 mod json;
 mod line_views;
 mod literals;
+mod module_registration;
 pub(crate) mod operations;
 mod paths;
 mod posixpath;

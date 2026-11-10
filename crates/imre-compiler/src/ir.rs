@@ -470,6 +470,31 @@ pub(crate) enum SourceFrame {
     Module(String),
 }
 
+/// Loader identity and payload selected for one module initializer.
+pub(crate) struct ModuleRegistration<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) file: &'a std::path::Path,
+    pub(crate) loader: ModuleLoader<'a>,
+}
+
+pub(crate) enum ModuleLoader<'a> {
+    Source {
+        builtin: bool,
+        text: Option<&'a [u8]>,
+    },
+    Physical {
+        kind: PhysicalModuleKind,
+        digest: [u8; 32],
+        future_flags: u32,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PhysicalModuleKind {
+    File,
+    Zip,
+}
+
 pub(crate) struct Module {
     /// Interpreter settings already selected by the Python-style launcher.
     pub command_flags: Option<crate::CommandFlags>,

@@ -217,6 +217,7 @@ pub(super) fn emit(
             origin,
             Input::Module(module.parsed),
         )?;
+        let registration = initializer.registration(source, builtin, physical, zip);
         let check_archive = bundled && !providers.is_empty();
         let separate = split && unit != 0 && !source.is_empty();
         let mut external = None;
@@ -245,44 +246,16 @@ pub(super) fn emit(
                 main,
                 declarations,
             } = state;
-            let module_name = output.data(name.as_bytes());
-            let file = output.data(path.as_os_str().as_encoded_bytes());
+            let module = output.module_registration(&registration);
             let code = if let Some(symbol) = symbol {
                 if declarations.insert(symbol.to_owned()) {
                     writeln!(output.functions, "declare i64 @{symbol}(ptr, i64)").unwrap();
                 }
                 format!("@{symbol}")
             } else {
-                initializer.emit(output, unit, &file)?
+                initializer.emit(output, unit, &module.file)?
             };
-            if let Some((digest, flags)) = zip {
-                let hash = output.data(digest);
-                writeln!(main, "  call void @imre_dyn_register_zip_source(ptr %ctx, ptr {module_name}, ptr {file}, ptr {hash}, i32 {flags}, ptr {code})").unwrap();
-                return Ok(());
-            }
-            // Physical code reads keep using the file. Identify its compiled snapshot without
-            // embedding the source or exposing stale bytes through SourceFileLoader.get_data().
-            if let Some(physical) = physical {
-                use sha2::{Digest, Sha256};
-                let digest = physical
-                    .digest
-                    .unwrap_or_else(|| Sha256::digest(source.as_bytes()).into());
-                let hash = output.data(&digest);
-                let flags = physical.future_flags;
-                writeln!(main, "  call void @imre_dyn_register_file_code(ptr %ctx, ptr {module_name}, ptr {file}, ptr {hash}, i32 {flags}, ptr {code})").unwrap();
-                return Ok(());
-            }
-            let (text, len) = if bundled {
-                (output.data(source.as_bytes()), source.len())
-            } else {
-                ("null".to_owned(), 0)
-            };
-            let register = if builtin {
-                "imre_dyn_register_builtin_source"
-            } else {
-                "imre_dyn_register_source"
-            };
-            writeln!(main, "  call void @{register}(ptr %ctx, ptr {module_name}, ptr {file}, ptr {text}, i64 {len}, ptr {code})").unwrap();
+            module.write_call(output, main, &code);
             Ok(())
         };
         register(&mut root, external.as_deref())?;
@@ -343,6 +316,44 @@ pub(super) struct PreparedBody<'a> {
 }
 
 impl<'a> PreparedBody<'a> {
+    fn registration(
+        &self,
+        original_source: &'a str,
+        builtin: bool,
+        physical: Option<&PhysicalFile>,
+        zip: Option<&([u8; 32], u32)>,
+    ) -> crate::ir::ModuleRegistration<'a> {
+        use crate::ir::{ModuleLoader, ModuleRegistration, PhysicalModuleKind};
+        use sha2::{Digest, Sha256};
+
+        let loader = if let Some(&(digest, future_flags)) = zip {
+            ModuleLoader::Physical {
+                kind: PhysicalModuleKind::Zip,
+                digest,
+                future_flags,
+            }
+        } else if let Some(file) = physical {
+            // A file loader fingerprints the original bytes even when the body was normalized.
+            ModuleLoader::Physical {
+                kind: PhysicalModuleKind::File,
+                digest: file
+                    .digest
+                    .unwrap_or_else(|| Sha256::digest(original_source.as_bytes()).into()),
+                future_flags: file.future_flags,
+            }
+        } else {
+            ModuleLoader::Source {
+                builtin,
+                text: self.source.bundled.then_some(original_source.as_bytes()),
+            }
+        };
+        ModuleRegistration {
+            name: self.name,
+            file: self.source.path,
+            loader,
+        }
+    }
+
     pub(super) fn module(
         name: &'a str,
         path: &'a Path,
@@ -1657,16 +1668,29 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
                 root.join("archived.py"),
                 "value = 1\n".into(),
             ),
+            ("plain".into(), PathBuf::from("plain.py"), "pass".into()),
         ];
+        let builtins = [(
+            "native".into(),
+            root.join("native.py"),
+            "answer = 42".into(),
+        )];
         let (name, path, source) = &modules[3];
         let (symbol, _) = PreparedBody::module(name, path, source, 0, ModuleOrigin::Bundled)
             .unwrap()
             .standalone()
             .unwrap()
             .unwrap();
-        let providers = HashSet::from([symbol]);
+        let providers = HashSet::from([symbol.clone()]);
         let registrations = RegisteredBodies {
-            archive_members: HashMap::from([(modules[1].1.clone(), ([23; 32], 16))]),
+            physical_files: HashMap::from([(
+                modules[0].1.clone(),
+                PhysicalFile {
+                    digest: Some([b'F'; 32]),
+                    future_flags: 8,
+                },
+            )]),
+            archive_members: HashMap::from([(modules[1].1.clone(), ([b'Z'; 32], 16))]),
             ..Default::default()
         };
         let errors = HashMap::from([(
@@ -1680,7 +1704,7 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
         )]);
         let build = |layout| {
             emit(
-                (&modules, &[], None),
+                (&modules, &builtins, None),
                 "{}",
                 0,
                 root,
@@ -1695,6 +1719,56 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
         let mut native = Vec::new();
         let (combined, packed) = build(BoxedLayout::WholeWithUnits(&mut native));
         assert!(packed && whole_packed && split_packed);
+        for ir in [&whole[0].llvm_ir, &split[0].llvm_ir] {
+            let main = ir.split_once("define i32 @main(").unwrap().1;
+            let calls: Vec<_> = main
+                .lines()
+                .filter_map(|line| {
+                    line.trim_start()
+                        .strip_prefix("call void @imre_dyn_register_")
+                })
+                .map(|call| call.split_once('(').unwrap())
+                .collect();
+            assert_eq!(
+                calls.iter().map(|(op, _)| *op).collect::<Vec<_>>(),
+                [
+                    "file_code",
+                    "zip_source",
+                    "module_error",
+                    "source",
+                    "source",
+                    "builtin_source"
+                ],
+            );
+            let constant = |encoded: &str| {
+                let suffix = format!(r#"c"{encoded}\00""#);
+                ir.lines()
+                    .filter_map(|line| line.split_once(" = "))
+                    .find(|(_, data)| data.ends_with(&suffix))
+                    .unwrap()
+                    .0
+            };
+            for (i, payload, flags) in [(0, "F".repeat(32), 8), (1, "Z".repeat(32), 16)] {
+                assert!(
+                    calls[i]
+                        .1
+                        .contains(&format!("ptr {}, i32 {flags}, ptr @", constant(&payload)))
+                );
+            }
+            let archived = constant(r"value = 1\0A");
+            assert!(
+                calls[3]
+                    .1
+                    .ends_with(&format!("ptr {archived}, i64 10, ptr @{symbol})"))
+            );
+            assert!(calls[4].1.contains("ptr null, i64 0, ptr @"));
+            let builtin = constant("answer = 42");
+            assert!(
+                calls[5]
+                    .1
+                    .contains(&format!("ptr {builtin}, i64 11, ptr @"))
+            );
+        }
         assert_eq!(combined.len(), 1);
         assert_eq!(whole[0].llvm_ir, combined[0].llvm_ir);
         assert_eq!(native.len(), split.len());
