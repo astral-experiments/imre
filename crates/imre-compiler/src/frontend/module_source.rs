@@ -59,23 +59,6 @@ impl CheckedFile {
 }
 
 impl<'a> ParsedModule<'a> {
-    /// Check the original file offsets. A discovered CRLF file can have normalized offsets.
-    pub(crate) fn check_file(
-        path: &Path,
-        source: &'a str,
-        discovered: Option<Self>,
-        keep_docstrings: bool,
-    ) -> Result<(), String> {
-        let module = match discovered.filter(|entry| entry.text == source) {
-            Some(entry) => entry,
-            None => Self::parse(path, source.into())?,
-        };
-        validate(path, &module.text, &module.parsed, keep_docstrings)?;
-        let mut body = into_body(module.parsed);
-        lower(path, &module.text, &mut body)?;
-        Ok(())
-    }
-
     pub(crate) fn parse(path: &Path, text: Cow<'a, str>) -> Result<Self, String> {
         let parsed = imre_ast::indentation::prepare(&text)
             .parse_module()
@@ -85,6 +68,27 @@ impl<'a> ParsedModule<'a> {
             parsed: Cow::Owned(parsed),
         })
     }
+}
+
+/// Registered operands use one-based byte columns for both ends of their diagnostic.
+pub(crate) fn operand_diagnostic(
+    path: &Path,
+    source: &str,
+    range: TextRange,
+    reason: &str,
+) -> String {
+    let position = |offset: ruff_text_size::TextSize| {
+        let prefix = &source[..usize::from(offset)];
+        let line = prefix.bytes().filter(|&byte| byte == b'\n').count() + 1;
+        let column = prefix.rsplit('\n').next().unwrap_or_default().len() + 1;
+        (line, column)
+    };
+    let (line, col) = position(range.start());
+    let (end_line, end_col) = position(range.end());
+    format!(
+        "{}:{line}:{col}: {reason} (through {end_line}:{end_col})",
+        path.display()
+    )
 }
 
 /// Check syntax and prepare the literal escapes that this module can emit.

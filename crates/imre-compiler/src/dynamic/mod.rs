@@ -2,6 +2,7 @@
 
 mod emit;
 mod import_module;
+mod prepare;
 mod provider_archive;
 pub(crate) mod provider_pack;
 
@@ -754,14 +755,14 @@ pub(crate) fn compile(
     options: &CompileOptions,
     object_imports: bool,
     operation: Option<ObjectOperation>,
-    mut project: Option<&mut crate::modules::SourceGraph>,
-    layout: crate::BoxedLayout<'_>,
+    project: &mut Option<crate::modules::SourceGraph>,
+    mode: crate::CompilationMode<'_>,
     check: impl FnOnce(
         Option<&mut crate::modules::SourceGraph>,
         bool,
         Option<RegisteredSources<'_>>,
     ) -> Result<(), String>,
-) -> Result<Option<UnitCompilation>, String> {
+) -> Result<Option<crate::CompilationResult>, String> {
     let (path, module_root, source_entry) = match operand {
         crate::ProgramEntry::Source(_) => {
             (Path::new(crate::modules::MEMORY_SOURCE_PATH), None, true)
@@ -774,7 +775,7 @@ pub(crate) fn compile(
     let command = invocation.map(|i| &i.source);
     let module_entry = options.module_entry.as_deref();
     let in_memory = command.is_some() || module_entry.is_some();
-    let checked_graph = project.as_deref();
+    let checked_graph = project.as_ref();
     let typed_graph = checked_graph.filter(|graph| !graph.has_checked_only_import);
     let file_entry = checked_graph.filter(|_| !in_memory);
     let (src, entry_identity) = if module_entry.is_some() {
@@ -854,7 +855,7 @@ pub(crate) fn compile(
     {
         // Preserve diagnostics owned by the original first-party graph before
         // reporting why this entry cannot supply an executable Python body.
-        check(project, false, None)?;
+        check(project.as_mut(), false, None)?;
         let source = crate::normalize_source(&src, SourceKind::File)?;
         let diagnostic = crate::frontend::phase::Diagnostic::at(
             &source,
@@ -1862,71 +1863,6 @@ pub(crate) fn compile(
             registrations.python_providers.insert(id);
         }
     }
-    // The bundle lives in the launcher. This absolute, non-directory path can neither
-    // expose the working directory under -I nor collide with an explicit source root.
-    let bundle_entry = startup
-        .filter(|_| installed_layout)
-        .map(|(_, executable)| Path::new(executable).join(bundled_root));
-    initial.extend(bundle_entry.iter().cloned());
-    let mut after_user_site = Vec::new();
-    if let Some(user) = &options.user_site_pth
-        && let Some(i) = options.site_dirs.iter().position(|p| p == user)
-    {
-        // A user's .pth files run before the following prefix site is visible.
-        for site in installed_dirs {
-            if options.site_dirs[i + 1..].contains(&site) {
-                after_user_site.push(site);
-            } else {
-                initial.push(site);
-            }
-        }
-    } else {
-        initial.extend(installed_dirs);
-    }
-    // Command and module entries compute path[0] at startup, after site has run.
-    // Preserve the native bytes when a script directory cannot be serialized as JSON text.
-    let mut path0_bytes = None;
-    if path0_len != 0 {
-        let first = &mut initial[0];
-        if in_memory && !options.path_entry {
-            first.clear();
-        } else if first.to_str().is_none() {
-            path0_bytes = Some(std::mem::take(first).into_os_string().into_encoded_bytes());
-        }
-    }
-    let paths = serde_json::to_value(initial)
-        .map_err(|e| format!("cannot represent startup search path: {e}"))?;
-    let stdlib_fallback =
-        serde_json::to_value(&options.stdlib_fallback).map_err(|e| e.to_string())?;
-    let config = serde_json::json!({
-        "bundled_root":bundled_root,
-        "stdlib_fallback":stdlib_fallback,
-        "stdlib_members":include_str!(concat!(env!("OUT_DIR"), "/imre-stdlib-members.txt")),
-        "sitecustomize":options.sitecustomize || options.stdlib_sitecustomize,"user_site_pth":options.user_site_pth,"after_user_site":after_user_site,"path0":path0_len != 0,
-        "bundle_entry":bundle_entry,
-        "module_docs":{"json": keep_docstrings.then_some(include_str!("../../stdlib/docstrings/json.txt"))},
-        "python_version":crate::PYTHON_VERSION.to_string(),
-        "python_hexversion":crate::version::hex(crate::version::components(false)),
-        "implementation_version":env!("CARGO_PKG_VERSION"),
-        "isolated":isolated,"safe_path":safe_path,"no_user_site":startup.is_some_and(|(flags, _)| flags.no_user_site),
-        "no_site":startup.is_some_and(|(flags, _)| flags.no_site),
-        "ignore_environment":startup.is_some_and(|(flags, _)| flags.ignore_environment),
-        "context_aware_warnings":startup.map(|(flags, _)| flags.context_aware_warnings),
-        "cpu_count":startup.map(|(flags, _)| flags.cpu_count),
-        "utf8_mode":startup.and_then(|(flags, _)| flags.utf8_mode),
-        "warnoptions":startup.map(|(flags, _)| &flags.warnoptions),
-        "xoptions":startup.map(|(flags, _)| &flags.xoptions),
-        "frozen_modules":frozen_modules,
-        "faulthandler":startup.map(|(flags, _)| flags.faulthandler),
-        "tracemalloc":startup.map_or(0, |(flags, _)| flags.tracemalloc),
-        "unbuffered":startup.is_some_and(|(flags, _)| flags.unbuffered),
-        "warn_default_encoding":startup.map(|(flags, _)| flags.warn_default_encoding),
-        "optimize":python_optimization,
-        "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),
-        "executable":startup.map(|(_, executable)| executable),
-        "command_source":command,"path0_bytes":path0_bytes,
-        "command":in_memory,"module_entry":module_entry,"path_entry":options.path_entry,"paths":paths,
-    });
     let sdk_runpy = sources
         .iter()
         .any(|(name, path, _)| name == "runpy" && path.starts_with(bundled_root))
@@ -1935,15 +1871,13 @@ pub(crate) fn compile(
                 .get("runpy")
                 .is_none_or(|(root, _)| root == Path::new(bundled_root)));
     // Borrow the winners once discovery has finished growing the emitter's source table.
-    let checking = matches!(layout, crate::BoxedLayout::Check);
     let mut function_modules = Vec::new();
     let selected_sources: Vec<_> = selected_sources
         .into_iter()
         .enumerate()
         .map(|(index, (id, program, module))| {
             let application = !registrations.python_providers.contains(&id);
-            if !checking
-                && application
+            if application
                 && let (Some(graph), Some(module_id)) = (checked_graph, module)
                 && graph.modules[module_id].original_source() == sources[id].2
             {
@@ -2009,7 +1943,7 @@ pub(crate) fn compile(
         })
     };
     check(
-        project.as_deref_mut(),
+        project.as_mut(),
         entry_requests_objects || startup_provider,
         Some(RegisteredSources {
             root: &root,
@@ -2019,17 +1953,12 @@ pub(crate) fn compile(
             has_file_body: sdk_runpy.then_some(&has_file_body),
         }),
     )?;
-    let checked_graph = project.as_deref();
-    // The selected module IDs outlive the diagnostic borrow of the owning project.
-    registrations.modules = checked_graph.map_or(&[], |graph| graph.modules.as_slice());
-    let entry_source =
-        file_source.or_else(|| entry_file.map(|file| file.parsed(registrations.modules)));
     // A namespace portion has no initializer. Its registered origin is a directory
     // that must remain available for the scratch session to add its child modules.
     let namespace_portions: HashSet<_> = inputs.directories.iter().map(|(path, _)| path).collect();
     crate::analysis::check_native_syntax(
         &root,
-        checked_graph,
+        project.as_ref(),
         sources
             .iter()
             .chain(&builtins)
@@ -2058,51 +1987,120 @@ pub(crate) fn compile(
             ));
         }
     }
-    let (units, used_archive) = if checking {
-        let mut entry = entry_source;
-        for (unit, (_, path, source)) in sources.iter().chain(&builtins).enumerate() {
-            let parsed = entry.take().or_else(|| registrations.parsed(unit));
-            if !module_errors.contains_key(path) {
-                ParsedModule::check_file(path, source, parsed, keep_docstrings)?;
-            }
-        }
-        (Vec::new(), false)
-    } else {
-        // Admission may have given a fixed definition to its registered frame.
-        let checked_functions = checked_graph.map(|graph| graph.registered_functions());
-        if let Some(functions) = &checked_functions {
-            for (unit, module) in function_modules {
-                if let Some(bodies) = functions.get(&module) {
-                    registrations
-                        .checked_units
-                        .entry(unit)
-                        .or_default()
-                        .functions = Some(bodies);
-                }
-            }
-        }
-        let providers = options
-            .bundled_provider_archive
-            .as_deref()
-            .filter(|_| keep_docstrings)
-            .and_then(provider_archive::symbols)
-            .unwrap_or_default();
-        let config = config.to_string();
-        emit::emit(
-            (sources.as_slice(), builtins.as_slice(), entry_source),
-            &config,
-            python_optimization,
-            Path::new(bundled_root),
-            &providers,
-            layout,
-            (&module_errors, &registrations),
-        )?
-    };
     // Nested search roots can register one identical input snapshot under multiple names.
     inputs.files.sort_unstable();
     inputs.files.dedup();
     inputs.boxed_imports = true;
-    Ok(Some(UnitCompilation {
+    // Registration has committed to the selected bodies. Leave the type database
+    // and import graph behind before preparing their source initializers.
+    let (modules, functions) = project
+        .take()
+        .map(crate::modules::SourceGraph::into_registered_files)
+        .unwrap_or_default();
+    registrations.modules = &modules;
+    let entry_source = file_source.or_else(|| entry_file.map(|file| file.parsed(&modules)));
+    for (unit, module) in function_modules {
+        if let Some(bodies) = functions.get(&module) {
+            registrations
+                .checked_units
+                .entry(unit)
+                .or_default()
+                .functions = Some(bodies);
+        }
+    }
+    let mut prepared = prepare::units(
+        &sources,
+        &builtins,
+        entry_source,
+        python_optimization,
+        Path::new(bundled_root),
+        &module_errors,
+        &registrations,
+    );
+    let crate::CompilationMode::Build(layout) = mode else {
+        prepared.try_for_each(|unit| unit.map(drop))?;
+        return Ok(Some(crate::CompilationResult::Checked(inputs)));
+    };
+    let units = prepared.collect::<Result<Vec<_>, _>>()?;
+    // The bundle lives in the launcher. This absolute, non-directory path can neither
+    // expose the working directory under -I nor collide with an explicit source root.
+    let bundle_entry = startup
+        .filter(|_| installed_layout)
+        .map(|(_, executable)| Path::new(executable).join(bundled_root));
+    initial.extend(bundle_entry.iter().cloned());
+    let mut after_user_site = Vec::new();
+    if let Some(user) = &options.user_site_pth
+        && let Some(i) = options.site_dirs.iter().position(|p| p == user)
+    {
+        // A user's .pth files run before the following prefix site is visible.
+        for site in installed_dirs {
+            if options.site_dirs[i + 1..].contains(&site) {
+                after_user_site.push(site);
+            } else {
+                initial.push(site);
+            }
+        }
+    } else {
+        initial.extend(installed_dirs);
+    }
+    // Command and module entries compute path[0] at startup, after site has run.
+    // Preserve the native bytes when a script directory cannot be serialized as JSON text.
+    let mut path0_bytes = None;
+    if path0_len != 0 {
+        let first = &mut initial[0];
+        if in_memory && !options.path_entry {
+            first.clear();
+        } else if first.to_str().is_none() {
+            path0_bytes = Some(std::mem::take(first).into_os_string().into_encoded_bytes());
+        }
+    }
+    let paths = serde_json::to_value(initial)
+        .map_err(|e| format!("cannot represent startup search path: {e}"))?;
+    let stdlib_fallback =
+        serde_json::to_value(&options.stdlib_fallback).map_err(|e| e.to_string())?;
+    let config = serde_json::json!({
+        "bundled_root":bundled_root,
+        "stdlib_fallback":stdlib_fallback,
+        "stdlib_members":include_str!(concat!(env!("OUT_DIR"), "/imre-stdlib-members.txt")),
+        "sitecustomize":options.sitecustomize || options.stdlib_sitecustomize,"user_site_pth":options.user_site_pth,"after_user_site":after_user_site,"path0":path0_len != 0,
+        "bundle_entry":bundle_entry,
+        "module_docs":{"json": keep_docstrings.then_some(include_str!("../../stdlib/docstrings/json.txt"))},
+        "python_version":crate::PYTHON_VERSION.to_string(),
+        "python_hexversion":crate::version::hex(crate::version::components(false)),
+        "implementation_version":env!("CARGO_PKG_VERSION"),
+        "isolated":isolated,"safe_path":safe_path,"no_user_site":startup.is_some_and(|(flags, _)| flags.no_user_site),
+        "no_site":startup.is_some_and(|(flags, _)| flags.no_site),
+        "ignore_environment":startup.is_some_and(|(flags, _)| flags.ignore_environment),
+        "context_aware_warnings":startup.map(|(flags, _)| flags.context_aware_warnings),
+        "cpu_count":startup.map(|(flags, _)| flags.cpu_count),
+        "utf8_mode":startup.and_then(|(flags, _)| flags.utf8_mode),
+        "warnoptions":startup.map(|(flags, _)| &flags.warnoptions),
+        "xoptions":startup.map(|(flags, _)| &flags.xoptions),
+        "frozen_modules":frozen_modules,
+        "faulthandler":startup.map(|(flags, _)| flags.faulthandler),
+        "tracemalloc":startup.map_or(0, |(flags, _)| flags.tracemalloc),
+        "unbuffered":startup.is_some_and(|(flags, _)| flags.unbuffered),
+        "warn_default_encoding":startup.map(|(flags, _)| flags.warn_default_encoding),
+        "optimize":python_optimization,
+        "dont_write_bytecode":startup.is_some_and(|(flags, _)| flags.dont_write_bytecode),
+        "executable":startup.map(|(_, executable)| executable),
+        "command_source":command,"path0_bytes":path0_bytes,
+        "command":in_memory,"module_entry":module_entry,"path_entry":options.path_entry,"paths":paths,
+    });
+    let providers = options
+        .bundled_provider_archive
+        .as_deref()
+        .filter(|_| keep_docstrings)
+        .and_then(provider_archive::symbols)
+        .unwrap_or_default();
+    let (units, used_archive) = emit::emit(
+        units,
+        &config.to_string(),
+        python_optimization,
+        &providers,
+        layout,
+    )?;
+    Ok(Some(crate::CompilationResult::Built(UnitCompilation {
         units,
         input_paths: inputs.files.iter().map(|(p, _, _)| p.clone()).collect(),
         source_inputs: inputs,
@@ -2112,7 +2110,7 @@ pub(crate) fn compile(
             .filter(|_| used_archive)
             .cloned()
             .collect(),
-    }))
+    })))
 }
 
 /// The full threading factory needs these Python dependencies before the startup fallbacks.

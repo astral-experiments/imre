@@ -124,6 +124,7 @@ mod record_inputs;
 mod records;
 mod regex;
 mod registered;
+mod required_sites;
 pub(crate) use registered::booleans::{
     BorrowedOperand, ExpressionInput, ExpressionSites, PhysicalInputs,
     Selection as ExpressionSelection, SourceOperand,
@@ -137,11 +138,11 @@ pub(crate) use registered::values::{
     push_codepoints,
 };
 pub(crate) use registered::{
-    AnnotationProvider, AssertionSite, CheckedProvider, DeferredAnnotation, ModuleAnnotations,
-    ParameterAnnotations, ParameterEvaluator, PhysicalOperand, RegisteredBindings,
-    RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope, RegisteredSuite,
-    SourceEffect, SuitePreparation, TypeParameterValues, ValueStatement, annotation_expression,
-    place_fixed_function, registered_sites, registered_type_alias,
+    AnnotationProvider, AssertionSite, CheckedProvider, DeclarationSite, DeferredAnnotation,
+    ModuleAnnotations, ParameterAnnotations, ParameterEvaluator, PhysicalOperand,
+    RegisteredBindings, RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope,
+    RegisteredSuite, SourceEffect, SuitePreparation, TypeParameterValues, ValueStatement,
+    annotation_expression, place_fixed_function, registered_sites, registered_type_alias,
 };
 pub(crate) use registered::{LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion};
 pub(crate) use registered::{
@@ -149,6 +150,7 @@ pub(crate) use registered::{
 };
 #[cfg(test)]
 pub(crate) use registered::{StatementSites, booleans::OwnedExpression};
+pub(crate) use required_sites::RequiredSite;
 pub(crate) use unpacking::PairBinding;
 mod sequences;
 mod shutil;

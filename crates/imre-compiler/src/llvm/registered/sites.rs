@@ -3,9 +3,7 @@ use ruff_text_size::{TextRange, TextSize};
 use std::collections::HashMap;
 
 use super::{FrameEmitter, RegisteredFrame};
-use crate::ir::{
-    self, Builtin, Expr, ExprKind, RegisteredTypeParameter, Statement, TypeParameterKind,
-};
+use crate::ir::{self, RegisteredTypeParameter, TypeParameterKind};
 
 /// The body's identity is compiled once. Defaults, decorators and the defining scope
 /// are the current activation's handles each time the declaration executes.
@@ -210,32 +208,6 @@ pub(crate) struct Declaration {
     pub(crate) type_params: Option<CompiledTypeParameters>,
 }
 
-/// The compiled-site tables read by checked operations in a registered frame.
-#[derive(Clone, Copy)]
-pub(crate) enum RequiredSite {
-    Definition(TextSize),
-    ClassNamespace(TextSize),
-    Lambda(TextSize, bool),
-    Generator(TextRange),
-    Alias(TextSize),
-    AnnotationString(TextSize),
-}
-
-fn visit_expression_site(expr: &Expr, visit: &mut impl FnMut(RequiredSite)) {
-    let ExprKind::Builtin(op, _) = &expr.kind else {
-        return;
-    };
-    visit(match op {
-        Builtin::RegisteredDefinition(site) => RequiredSite::Definition(site.start()),
-        Builtin::RegisteredClassNamespace(site, _) => RequiredSite::ClassNamespace(*site),
-        Builtin::RegisteredLambda(site, scoped) => RequiredSite::Lambda(*site, *scoped),
-        Builtin::RegisteredGenerator(site, _) => RequiredSite::Generator(*site),
-        Builtin::RegisteredTypeAlias(site) => RequiredSite::Alias(*site),
-        Builtin::BindAnnotationExpression { site, .. } => RequiredSite::AnnotationString(*site),
-        _ => return,
-    });
-}
-
 #[derive(Default)]
 pub(crate) struct CheckedSites {
     pub(crate) annotation_strings: HashMap<TextSize, String>,
@@ -248,52 +220,6 @@ pub(crate) struct CheckedSites {
 }
 
 impl CheckedSites {
-    pub(crate) fn visit_operand(value: &Expr, visit: &mut impl FnMut(RequiredSite)) {
-        ir::walk_operand_expressions(value, &mut |expr| visit_expression_site(expr, visit));
-    }
-
-    /// A block stops emitting after a transfer. Unreachable declaration bodies must
-    /// not compile (or raise diagnostics) merely because their identity is in the IR.
-    pub(crate) fn visit(statements: &[Statement], visit: &mut impl FnMut(RequiredSite)) -> bool {
-        for stmt in statements {
-            match stmt {
-                Statement::If(test, yes, no) => {
-                    Self::visit_operand(test, visit);
-                    let yes_continues = Self::visit(yes, visit);
-                    let no_continues = Self::visit(no, visit);
-                    if !yes_continues && !no_continues {
-                        return false;
-                    }
-                }
-                Statement::While(test, body, otherwise) => {
-                    Self::visit_operand(test, visit);
-                    Self::visit(body, visit);
-                    Self::visit(otherwise, visit);
-                }
-                Statement::Scope { body, .. } => {
-                    if !Self::visit(body, visit) {
-                        return false;
-                    }
-                }
-                _ => {
-                    ir::walk_expressions(std::slice::from_ref(stmt), &mut |expr| {
-                        visit_expression_site(expr, visit)
-                    });
-                    if matches!(
-                        stmt,
-                        Statement::Return(_)
-                            | Statement::Break
-                            | Statement::Continue
-                            | Statement::Exhaust
-                    ) {
-                        return false;
-                    }
-                }
-            }
-        }
-        true
-    }
-
     pub(crate) fn annotation_string(
         &self,
         frame: &mut RegisteredFrame<'_, '_>,

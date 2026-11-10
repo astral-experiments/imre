@@ -1,5 +1,161 @@
 use super::*;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+
+enum Phase {
+    Prepared(PathBuf, bool),
+    Llvm,
+}
+
+thread_local! {
+    static PHASES: RefCell<Option<Vec<Phase>>> = const { RefCell::new(None) };
+}
+
+fn observe_preparation<T>(run: impl FnOnce() -> T) -> (T, Vec<Phase>) {
+    PHASES.set(Some(Vec::new()));
+    let result = run();
+    (result, PHASES.take().unwrap())
+}
+
+pub(crate) fn record_preparation(path: &Path, borrowed: bool) {
+    PHASES.with_borrow_mut(|events| {
+        if let Some(events) = events {
+            events.push(Phase::Prepared(path.to_owned(), borrowed));
+        }
+    });
+}
+
+pub(crate) fn record_llvm_start() {
+    PHASES.with_borrow_mut(|events| {
+        if let Some(events) = events {
+            events.push(Phase::Llvm);
+        }
+    });
+}
+
+#[derive(Clone)]
+pub(crate) struct RegisteredOutputStarted;
+
+impl Default for RegisteredOutputStarted {
+    fn default() -> Self {
+        record_llvm_start();
+        Self
+    }
+}
+
+fn assert_refusal_before_llvm(entry: &Path, expected: &str, builds: &[CompileOptions]) {
+    let (diagnostic, events) = observe_preparation(|| check_file(entry, None).unwrap_err());
+    assert_eq!(diagnostic, expected);
+    assert!(!events.iter().any(|event| matches!(event, Phase::Llvm)));
+    for options in builds {
+        let (diagnostic, events) =
+            observe_preparation(|| compile_file(entry, None, options).err().unwrap());
+        assert_eq!(diagnostic, expected);
+        assert!(!events.iter().any(|event| matches!(event, Phase::Llvm)));
+    }
+}
+
+#[test]
+fn imported_operand_refusal_precedes_llvm_emission() {
+    let project = tempfile::tempdir().unwrap();
+    let main = project.path().join("main.py");
+    let source = project.path().join("source.py");
+    let client = include_str!("../../../tests/fixtures/mix_template/main.py");
+    let body = include_str!("../../../tests/fixtures/mix_template/source.py");
+    std::fs::write(&main, client).unwrap();
+    std::fs::write(&source, body).unwrap();
+    let flags = CommandFlags {
+        frozen_modules: true,
+        ..Default::default()
+    };
+    let script = CompileOptions {
+        script_startup: Some((flags.clone(), "imre".into())),
+        ..Default::default()
+    };
+    let named = CompileOptions {
+        module_entry: Some("main".into()),
+        extension_paths: vec![project.path().to_owned()],
+        script_startup: Some((flags, "imre".into())),
+        ..Default::default()
+    };
+    assert_refusal_before_llvm(
+        &main,
+        &format!(
+            "{}:4:15: cannot compile this comprehension ahead of time (through 4:57)",
+            source.display()
+        ),
+        &[CompileOptions::default(), script, named],
+    );
+
+    std::fs::write(&source, body.replace("await get(x)", "x")).unwrap();
+    for build in [false, true] {
+        let ((), events) = observe_preparation(|| {
+            if build {
+                compile_file(&main, None, &CompileOptions::default()).unwrap();
+            } else {
+                check_file(&main, None).unwrap();
+            }
+        });
+        // Both physical files use their original parse exactly once, before any output.
+        let prepared = events
+            .iter()
+            .position(|event| matches!(event, Phase::Llvm))
+            .unwrap_or(events.len());
+        assert!(
+            events[prepared..]
+                .iter()
+                .all(|event| matches!(event, Phase::Llvm))
+        );
+        assert_eq!(prepared < events.len(), build);
+        for file in [&main, &source] {
+            let observed: Vec<_> = events
+                .iter()
+                .filter_map(|event| match event {
+                    Phase::Prepared(path, borrowed) if path == file => Some(*borrowed),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(observed, [true], "preparations of {}", file.display());
+        }
+    }
+}
+
+#[test]
+fn enclosing_class_header_reports_its_boolean_child_before_llvm() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("class_boolean_refused.py");
+    std::fs::write(
+        &entry,
+        include_str!("../../../tests/fixtures/class_boolean_refused.py"),
+    )
+    .unwrap();
+    assert_refusal_before_llvm(
+        &entry,
+        &format!(
+            "{}:12:33: cannot compile this comprehension ahead of time (through 12:75)",
+            entry.display()
+        ),
+        &[CompileOptions::default()],
+    );
+}
+
+#[test]
+fn suspended_assignment_refusal_precedes_llvm_emission() {
+    let project = tempfile::tempdir().unwrap();
+    let main = project.path().join("subject.py");
+    let augmented = include_str!("../../../tests/fixtures/registered_suspended_assignment.py");
+    let assignment = augmented.replace("values +=", "values =");
+    for (body, col, end) in [(augmented, 15, 54), (assignment.as_str(), 14, 53)] {
+        std::fs::write(&main, body).unwrap();
+        assert_refusal_before_llvm(
+            &main,
+            &format!(
+                "{}:12:{col}: cannot compile this comprehension ahead of time (through 12:{end})",
+                main.display()
+            ),
+            &[CompileOptions::default()],
+        );
+    }
+}
 
 #[test]
 fn bound_wrapper_emits_native_only_if_registration_declines() {
@@ -17,7 +173,7 @@ fn bound_wrapper_emits_native_only_if_registration_declines() {
         std::fs::write(&path, source).unwrap();
         let native_calls = Cell::new(0);
         let compilation = object_fallback(
-            BoxedLayout::Whole,
+            CompilationMode::Build(BoxedLayout::Whole),
             ProgramEntry::File(&path, None),
             &CompileOptions::default(),
             Default::default(),
@@ -40,7 +196,10 @@ fn bound_wrapper_emits_native_only_if_registration_declines() {
         )
         .unwrap();
         assert_eq!(native_calls.get(), usize::from(!registered));
-        assert_eq!(compilation.source_inputs.boxed_imports, registered);
+        assert_eq!(
+            compilation.into_built().source_inputs.boxed_imports,
+            registered
+        );
     }
 }
 
@@ -84,7 +243,7 @@ fn fixed_file_selects_its_product_for_the_requested_startup() {
         };
         let observed = Cell::new(false);
         object_fallback(
-            BoxedLayout::Check,
+            CompilationMode::Check,
             ProgramEntry::File(&path, None),
             &options,
             Default::default(),
@@ -159,4 +318,30 @@ fn interleaved_import_preserves_another_modules_list_contract() {
         compile_file(&entry, None, &options).err().unwrap(),
         expected
     );
+}
+
+#[test]
+fn retained_generator_propagates_its_nested_definition_refusal() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    let source = concat!(
+        "async def get(x):\n",
+        "    return x\n",
+        "\n",
+        "def values():\n",
+        "    yield 0\n",
+        "    async def build():\n",
+        "        return t\"{[lambda v=await get(x): v for x in [1, 2]]}\"\n",
+        "    yield build\n",
+        "\n",
+        "for item in values():\n",
+        "    print(type(item).__name__)\n",
+        "state: int\n",
+    );
+    std::fs::write(&entry, source).unwrap();
+    let expected = format!(
+        "{}:7:19: cannot compile this comprehension ahead of time (through 7:61)",
+        entry.display()
+    );
+    assert_refusal_before_llvm(&entry, &expected, &[CompileOptions::default()]);
 }

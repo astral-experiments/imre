@@ -29,6 +29,15 @@ impl Selection {
         }
     }
 
+    /// Value and branch emission bind the same physical inputs in operation order.
+    fn refusal(&self) -> Option<super::OperandRefusal> {
+        match self {
+            Self::Refused(range, reason) => Some((*range, reason)),
+            Self::Checked(_) | Self::Operand(_) => None,
+            Self::Inputs(inputs) => inputs.children.iter().find_map(PreparedInput::refusal),
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn replace_residual_input(&mut self, at: usize, value: ir::Expr) {
         let Self::Inputs(inputs) = self else {
@@ -389,6 +398,15 @@ impl PhysicalPreparation<'_, '_> {
 pub(crate) enum SourceOperand<C, S> {
     Checked(C),
     Residual(S),
+}
+
+impl<C> SourceOperand<C, OwnedExpression> {
+    pub(super) fn refusal(&self) -> Option<super::OperandRefusal> {
+        match self {
+            Self::Checked(_) => None,
+            Self::Residual(input) => input.selected.refusal(),
+        }
+    }
 }
 
 /// A physical child owns its selection. The range describes its Python location;

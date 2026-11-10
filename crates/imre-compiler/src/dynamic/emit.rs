@@ -8,9 +8,10 @@ use std::path::{Path, PathBuf};
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
+use super::prepare::PreparedUnit;
 use crate::CodegenUnit;
 use crate::frontend::module_source::{self, ParsedModule};
-use crate::frontend::{RegisteredGenerator, RegisteredLambda};
+use crate::frontend::{RegisteredGenerator, RegisteredLambda, RequiredSite};
 use crate::llvm::ModuleLauncher;
 use crate::llvm::registered::{
     ABI, AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourcePositions, permanent, sites,
@@ -18,8 +19,6 @@ use crate::llvm::registered::{
 };
 
 mod statements;
-
-type ModuleSource = (String, PathBuf, String);
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct PhysicalFile {
@@ -65,30 +64,14 @@ pub(super) enum ModuleOrigin<'a> {
     Bundled,
 }
 
-/// All module source has already been resolved. Import execution remains conditional.
+/// Emit the checked initializers after preparation of the entire registration succeeds.
 pub(super) fn emit(
-    (files, builtins, mut entry_source): (
-        &[ModuleSource],
-        &[ModuleSource],
-        Option<ParsedModule<'_>>,
-    ),
+    units_to_emit: Vec<PreparedUnit<'_>>,
     config: &str,
     python_optimization: i32,
-    bundled_root: &Path,
     providers: &HashSet<String>,
     layout: crate::BoxedLayout<'_>,
-    (module_errors, registrations): (
-        &HashMap<PathBuf, Box<super::ModuleSyntaxError>>,
-        &RegisteredBodies<'_>,
-    ),
 ) -> Result<(Vec<CodegenUnit>, bool), String> {
-    let RegisteredBodies {
-        checked_units,
-        physical_files,
-        archive_members,
-        python_providers,
-        ..
-    } = registrations;
     let split = matches!(
         layout,
         crate::BoxedLayout::Split | crate::BoxedLayout::WholeWithUnits(_)
@@ -98,106 +81,74 @@ pub(super) fn emit(
     let mut root = ModuleLauncher::new(
         config,
         python_optimization < 2,
-        !archive_members.is_empty(),
-        !builtins.is_empty(),
-        !module_errors.is_empty(),
+        units_to_emit.iter().any(|unit| unit.zip.is_some()),
+        units_to_emit.iter().any(|unit| unit.builtin),
+        units_to_emit.iter().any(|unit| unit.initializer.is_err()),
     );
     // The requested whole IR and split native root share their exact prefix.
     // Fork only when the split layout acquires its first independent local unit.
     let mut whole: Option<ModuleLauncher> = None;
-    let files = files.iter().map(|module| (module, false));
-    let builtins = builtins.iter().map(|module| (module, true));
-    for (unit, (module, builtin)) in files.chain(builtins).enumerate() {
-        let (name, path, source) = module;
-        let checked = checked_units.get(&unit);
-        let discovered = entry_source.take().or_else(|| registrations.parsed(unit));
-        let zip = archive_members.get(path);
-        if !builtin && let Some(error) = module_errors.get(path) {
-            for state in std::iter::once(&mut root).chain(whole.as_mut()) {
-                state.register_error(
-                    (name, path, source),
-                    &error.message,
-                    error.position,
-                    error.in_args,
-                    error.parse_error,
-                    zip.map(|(digest, _)| digest),
-                );
+    for (unit, prepared) in units_to_emit.into_iter().enumerate() {
+        let PreparedUnit {
+            module: (name, path, source),
+            builtin,
+            physical,
+            zip,
+            initializer,
+        } = prepared;
+        let initializer = match initializer {
+            Ok(initializer) => initializer,
+            Err(error) => {
+                for state in std::iter::once(&mut root).chain(whole.as_mut()) {
+                    state.register_error(
+                        (name, path, source),
+                        &error.message,
+                        error.position,
+                        error.in_args,
+                        error.parse_error,
+                        zip.map(|(digest, _)| digest),
+                    );
+                }
+                continue;
             }
-            continue;
+        };
+        let registration = initializer.registration(source, builtin, physical, zip);
+        let check_archive = initializer.source.bundled && !providers.is_empty();
+        let separate = split && unit != 0 && !source.is_empty();
+        let mut external = None;
+        let mut archived = false;
+        if check_archive || separate {
+            let (symbol, ir) = initializer.standalone()?;
+            archived = check_archive && providers.contains(&symbol);
+            if !archived && separate && !root.declares(&symbol) {
+                if whole.is_none() && matches!(layout, crate::BoxedLayout::WholeWithUnits(_)) {
+                    whole = Some(root.clone());
+                }
+                units.push(CodegenUnit {
+                    name: name.clone(),
+                    llvm_ir: ir,
+                });
+            }
+            used_archive |= archived;
+            if archived || separate {
+                external = Some(symbol);
+            }
         }
-        let bundled = path.starts_with(bundled_root);
-        let origin = if bundled {
-            ModuleOrigin::Bundled
-        } else if python_providers.contains(&unit) {
-            ModuleOrigin::Provider
-        } else {
-            ModuleOrigin::Program(checked.and_then(|unit| unit.functions))
-        };
-        // Preserve the loader's digest while compiling its normalized source.
-        let physical = physical_files.get(path).filter(|_| !builtin);
-        let file_digest = physical_files.get(path).and_then(|file| file.digest);
-        let module = if let Some(entry) = discovered {
-            entry
-        } else {
-            let text = if physical.is_some() && file_digest.is_none() {
-                crate::normalize_source(source, crate::SourceKind::File)?
-            } else if file_digest.is_some() || zip.is_some() {
-                crate::normalize_source(source, crate::SourceKind::DecodedFile)?
-            } else {
-                std::borrow::Cow::Borrowed(source.as_str())
-            };
-            ParsedModule::parse(path, text)?
-        };
-        PreparedBody::prepare(
-            name,
-            path,
-            module.text,
-            python_optimization,
-            origin,
-            Input::Module(module.parsed),
-            |initializer, _| {
-                let registration = initializer.registration(source, builtin, physical, zip);
-                let check_archive = bundled && !providers.is_empty();
-                let separate = split && unit != 0 && !source.is_empty();
-                let mut external = None;
-                let mut archived = false;
-                if check_archive || separate {
-                    let (symbol, ir) = initializer.standalone()?;
-                    archived = check_archive && providers.contains(&symbol);
-                    if !archived && separate && !root.declares(&symbol) {
-                        if whole.is_none()
-                            && matches!(layout, crate::BoxedLayout::WholeWithUnits(_))
-                        {
-                            whole = Some(root.clone());
-                        }
-                        units.push(CodegenUnit {
-                            name: name.clone(),
-                            llvm_ir: ir,
-                        });
-                    }
-                    used_archive |= archived;
-                    if archived || separate {
-                        external = Some(symbol);
-                    }
-                }
-                let register =
-                    |launcher: &mut ModuleLauncher, symbol: Option<&str>| -> Result<(), String> {
-                        let module = launcher.module_registration(&registration);
-                        let code = if let Some(symbol) = symbol {
-                            launcher.external(symbol)
-                        } else {
-                            initializer.emit(&mut launcher.output, unit, &module.file)?
-                        };
-                        module.write_call(launcher, &code);
-                        Ok(())
-                    };
-                register(&mut root, external.as_deref())?;
-                if let Some(whole) = &mut whole {
-                    register(whole, external.as_deref().filter(|_| archived))?;
-                }
+        let register =
+            |launcher: &mut ModuleLauncher, symbol: Option<&str>| -> Result<(), String> {
+                let module = launcher.module_registration(&registration);
+                let code = if let Some(symbol) = symbol {
+                    launcher.external(symbol)
+                } else {
+                    initializer.emit(&mut launcher.output, unit, &module.file)?
+                };
+                module.write_call(launcher, &code);
                 Ok(())
-            },
-        )?;
+            };
+        register(&mut root, external.as_deref())?;
+        if let Some(whole) = &mut whole {
+            register(whole, external.as_deref().filter(|_| archived))?;
+        }
     }
     units.insert(0, root.finish());
     if let (crate::BoxedLayout::WholeWithUnits(native), Some(whole)) = (layout, whole) {
@@ -288,6 +239,7 @@ impl<'a> PreparedBody<'a> {
         Ok(body)
     }
 
+    #[cfg(test)]
     pub(super) fn with_module<R>(
         name: &'a str,
         path: &'a Path,
@@ -296,29 +248,56 @@ impl<'a> PreparedBody<'a> {
         origin: ModuleOrigin<'a>,
         use_module: impl FnOnce(PreparedBody<'a>) -> Result<R, String>,
     ) -> Result<R, String> {
-        Self::prepare(
+        let (module, _) = Self::prepare(
             name,
             path,
             Cow::Borrowed(source),
             python_optimization,
             origin,
             Input::Module(ParsedModule::parse(path, source.into())?.parsed),
-            |module, _| use_module(module),
-        )
+        )?;
+        use_module(module)
     }
 
-    fn prepare<R>(
+    pub(super) fn from_parsed(
+        name: &'a str,
+        path: &'a Path,
+        module: ParsedModule<'a>,
+        python_optimization: i32,
+        origin: ModuleOrigin<'a>,
+    ) -> Result<Self, String> {
+        let (body, _) = Self::prepare(
+            name,
+            path,
+            module.text,
+            python_optimization,
+            origin,
+            Input::Module(module.parsed),
+        )?;
+        if let Some((range, reason)) = body.initializer().refusal {
+            return Err(module_source::operand_diagnostic(
+                path,
+                &body.source.text,
+                range,
+                reason,
+            ));
+        }
+        Ok(body)
+    }
+
+    fn prepare(
         name: &'a str,
         path: &'a Path,
         text: Cow<'a, str>,
         python_optimization: i32,
         origin: ModuleOrigin<'a>,
         input: Input<'_>,
-        use_module: impl FnOnce(
-            PreparedBody<'a>,
-            Option<crate::frontend::AnnotationCode>,
-        ) -> Result<R, String>,
-    ) -> Result<R, String> {
+    ) -> Result<(Self, Option<crate::frontend::AnnotationCode>), String> {
+        #[cfg(test)]
+        crate::single_emission_tests::record_preparation(
+            path,
+            matches!(&input, Input::Module(Cow::Borrowed(_))),
+        );
         let keep_docstrings = python_optimization < 2;
         let source = text.as_ref();
         let bundled = matches!(origin, ModuleOrigin::Bundled);
@@ -457,35 +436,22 @@ impl<'a> PreparedBody<'a> {
             python_optimization == 0,
         );
         prepare.sites.expressions = logicals;
-        let initializer =
-            (!expression).then(|| prepare.suite(&body, crate::frontend::RegisteredScope::Module));
-        let mut initializer_sites = Vec::new();
-        if let Some(suite) = &initializer
-            && suite.fully_checked()
-        {
-            sites::CheckedSites::visit(&suite.checked.function.body, &mut |site| {
-                initializer_sites.push(site);
-            });
-        }
+        // Preparing inner declarations first lets their binding sites consume
+        // the selected body's decision in the enclosing suite.
+        use crate::frontend::DeclarationSite;
         let mut function_bodies = HashMap::new();
-        let class_bodies =
-            prepare.class_suites(sites.classes, &class_keywords, &private_names, &scopes);
-        for start in class_bodies.keys() {
-            scopes
-                .classes
-                .get_mut(start)
-                .expect("registered class scope")
-                .annotations
-                .prepare_body(
-                    &mut sites.class_annotations,
-                    sites
-                        .class_annotation_bindings
-                        .remove(start)
-                        .unwrap_or_default(),
-                );
-        }
+        let mut class_bodies = HashMap::new();
         let mut thread_entries = HashMap::new();
-        for site in sites.functions.into_iter().rev() {
+        for declaration in sites.declarations.into_iter().rev() {
+            let site = match declaration {
+                DeclarationSite::Function(site) => site,
+                DeclarationSite::Class(site) => {
+                    let (start, class) =
+                        prepare.class_suite(site, &class_keywords, &private_names, &scopes);
+                    class_bodies.insert(start, class);
+                    continue;
+                }
+            };
             let def = site.def;
             let start = def.start();
             if let Some(entry) = site.thread_entry {
@@ -514,17 +480,26 @@ impl<'a> PreparedBody<'a> {
                 let kind = crate::frontend::RegisteredScope::Function {
                     is_async: def.is_async,
                 };
-                FunctionBody::Suite(prepare.named_body(
+                FunctionBody::Suite(Box::new(prepare.named_body(
                     &def.body,
                     kind,
                     suspended,
                     site.prepare_entry,
-                ))
+                )))
             };
             let checked_entry = match &body {
                 FunctionBody::Program(_) => true,
                 FunctionBody::Suite(suite) => site.prepare_entry && suite.fully_checked(),
             };
+            let refusal = match &body {
+                FunctionBody::Program(checked) => {
+                    prepare.checked_declaration_refusal(&checked.function.body)
+                }
+                FunctionBody::Suite(suite) => suite.refusal,
+            };
+            if let Some(refusal) = refusal {
+                prepare.declaration_refusals.insert(start, refusal);
+            }
             function_bodies.insert(
                 start,
                 PreparedFunction {
@@ -532,6 +507,30 @@ impl<'a> PreparedBody<'a> {
                     checked_entry,
                 },
             );
+        }
+        for start in class_bodies.keys() {
+            scopes
+                .classes
+                .get_mut(start)
+                .expect("registered class scope")
+                .annotations
+                .prepare_body(
+                    &mut sites.class_annotations,
+                    sites
+                        .class_annotation_bindings
+                        .remove(start)
+                        .unwrap_or_default(),
+                );
+        }
+        let initializer =
+            (!expression).then(|| prepare.suite(&body, crate::frontend::RegisteredScope::Module));
+        let mut initializer_sites = Vec::new();
+        if let Some(suite) = &initializer
+            && suite.fully_checked()
+        {
+            RequiredSite::visit(&suite.checked.function.body, &mut |site| {
+                initializer_sites.push(site);
+            });
         }
         let source = SourceInfo {
             annotation_children,
@@ -581,7 +580,7 @@ impl<'a> PreparedBody<'a> {
             None
         };
         drop(body);
-        use_module(
+        Ok((
             PreparedBody {
                 name,
                 #[cfg(test)]
@@ -590,7 +589,7 @@ impl<'a> PreparedBody<'a> {
                 source,
             },
             annotation,
-        )
+        ))
     }
 
     /// Prepare the decoded expression and its lexical definitions in their own source unit.
@@ -610,22 +609,19 @@ impl<'a> PreparedBody<'a> {
             range: expression.range(),
             body: std::iter::once(stmt).collect(),
         };
-        PreparedBody::prepare(
+        let (prepared, code) = PreparedBody::prepare(
             "",
             Path::new("<string>"),
             Cow::Owned(text.to_owned()),
             python_optimization,
             ModuleOrigin::Program(None),
             Input::Expression(syntax, parsed.tokens()),
-            |prepared, code| {
-                Ok(code.map(|code| crate::frontend::AnnotationBody {
-                    code,
-                    scope: Box::new(prepared.source),
-                }))
-            },
         )
-        .ok()
-        .flatten()
+        .ok()?;
+        Some(crate::frontend::AnnotationBody {
+            code: code?,
+            scope: Box::new(prepared.source),
+        })
     }
 
     fn initializer(&self) -> &crate::frontend::RegisteredSuite {
@@ -771,7 +767,7 @@ struct TypeAliasDefinition {
 /// Graph analysis owns program entries; physical preparation owns the other function suites.
 enum FunctionBody<'a> {
     Program(&'a crate::frontend::RegisteredFunction),
-    Suite(crate::frontend::RegisteredSuite),
+    Suite(Box<crate::frontend::RegisteredSuite>),
 }
 
 struct PreparedFunction<'a> {
@@ -820,7 +816,7 @@ struct SourceInfo<'a> {
     class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredClass>,
     initializer: Option<crate::frontend::RegisteredSuite>,
     // Module admission and each output layout use the same ordered site references.
-    initializer_sites: Vec<sites::RequiredSite>,
+    initializer_sites: Vec<RequiredSite>,
     bundled: bool,
     path: &'a Path,
     python_annotations: bool,
@@ -1068,9 +1064,7 @@ impl SourceMap<'_> {
                 let globals = BTreeSet::new();
                 let mut callables =
                     self.frame_callables(&mut frame, &mut sites, &prefix, &globals, in_function);
-                sites::CheckedSites::visit_operand(&operand.value, &mut |site| {
-                    callables.place_site(site)
-                });
+                RequiredSite::visit_operand(&operand.value, &mut |site| callables.place_site(site));
                 let value = frame.prepared_operand(operand, &sites, false);
                 frame.return_value(&value);
                 frame
@@ -1112,7 +1106,37 @@ impl Function<'_, '_> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::prepare::ModuleSource;
     use super::*;
+
+    fn emit_modules(
+        (files, builtins, entry_source): (
+            &[ModuleSource],
+            &[ModuleSource],
+            Option<ParsedModule<'_>>,
+        ),
+        config: &str,
+        python_optimization: i32,
+        bundled_root: &Path,
+        providers: &HashSet<String>,
+        layout: crate::BoxedLayout<'_>,
+        (module_errors, registrations): (
+            &HashMap<PathBuf, Box<super::super::ModuleSyntaxError>>,
+            &RegisteredBodies<'_>,
+        ),
+    ) -> Result<(Vec<CodegenUnit>, bool), String> {
+        let units = super::super::prepare::units(
+            files,
+            builtins,
+            entry_source,
+            python_optimization,
+            bundled_root,
+            module_errors,
+            registrations,
+        )
+        .collect::<Result<Vec<_>, _>>()?;
+        super::emit(units, config, python_optimization, providers, layout)
+    }
 
     /// Plan the consuming suites without their lambda descriptors. The physical
     /// emitter still has the real, checked children when it reads a residual operand.
@@ -1150,7 +1174,13 @@ mod tests {
             source,
             annotations.values,
         )
-        .classes;
+        .declarations
+        .into_iter()
+        .filter_map(|site| match site {
+            crate::frontend::DeclarationSite::Class(class) => Some(class),
+            _ => None,
+        })
+        .collect();
         let mut suites =
             SuitePreparation::new(&prepared.source.namespace_operations, source, body, true);
         suites.sites.expressions = logicals;
@@ -1173,7 +1203,7 @@ mod tests {
         body: crate::frontend::RegisteredSuite,
     ) {
         let function = source.function_bodies.get_mut(&def.start()).unwrap();
-        function.body = FunctionBody::Suite(body);
+        function.body = FunctionBody::Suite(Box::new(body));
         function.checked_entry = false;
     }
 
@@ -2072,9 +2102,8 @@ mod tests {
         let table = graph.registered_functions();
         let bodies = &table[&graph.entry];
         let retained = &bodies[&ruff_text_size::TextSize::default()];
-        use sites::RequiredSite;
         let mut required = Vec::new();
-        sites::CheckedSites::visit(&retained.function.body, &mut |site| match site {
+        RequiredSite::visit(&retained.function.body, &mut |site| match site {
             RequiredSite::Definition(_) => required.push("definition"),
             RequiredSite::Lambda(..) => required.push("lambda"),
             _ => {}
@@ -2159,8 +2188,8 @@ mod tests {
         let plan = module.source.function_bodies[&def.start()].suite().unwrap();
         assert!(plan.fully_checked());
         let mut definitions = Vec::new();
-        sites::CheckedSites::visit(&plan.checked.function.body, &mut |required| {
-            if let sites::RequiredSite::Definition(start) = required {
+        RequiredSite::visit(&plan.checked.function.body, &mut |required| {
+            if let RequiredSite::Definition(start) = required {
                 definitions.push(start);
             }
         });
@@ -3761,17 +3790,14 @@ mod tests {
             assert!(plan.fully_checked());
             let body = plan.checked();
             let mut required = Vec::new();
-            sites::CheckedSites::visit(&body.function.body, &mut |site| required.push(site));
+            RequiredSite::visit(&body.function.body, &mut |site| required.push(site));
             if i == 0 {
                 assert!(required.is_empty());
                 let header = &module.source.scopes.functions[&def.start()];
                 assert_eq!(header.doc.as_deref(), Some("Record the sign."));
                 assert_eq!(header.integer_sign_parameters, ["value"]);
             } else {
-                assert!(matches!(
-                    required.as_slice(),
-                    [sites::RequiredSite::Lambda(..)]
-                ));
+                assert!(matches!(required.as_slice(), [RequiredSite::Lambda(..)]));
             }
             def.body.clear();
         }
@@ -5032,7 +5058,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             )),
         )]);
         let build = |layout| {
-            emit(
+            emit_modules(
                 (&modules, &builtins, None),
                 "{}",
                 0,
@@ -5166,7 +5192,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         };
         let initializers = (&HashMap::new(), &registrations);
         let refs = |modules: &[_]| {
-            let (units, used) = emit(
+            let (units, used) = emit_modules(
                 (modules, &[], None),
                 "{}",
                 0,
@@ -5199,7 +5225,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         );
         for missing in [&project, &changed] {
             assert!(
-                !emit(
+                !emit_modules(
                     (std::slice::from_ref(missing), &[], None),
                     "{}",
                     0,
@@ -5214,7 +5240,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         }
         assert_eq!(refs(&[project.clone(), bundled.clone()]), [false, true]);
 
-        let (units, used) = emit(
+        let (units, used) = emit_modules(
             (&[bundled.clone(), project.clone()], &[], None),
             "{}",
             0,
@@ -5261,7 +5287,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ]),
             ..Default::default()
         };
-        let (units, used) = emit(
+        let (units, used) = emit_modules(
             (&[bundled, project.clone(), shadow, project], &[], None),
             "{}",
             0,

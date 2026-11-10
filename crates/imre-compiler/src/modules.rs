@@ -3310,6 +3310,17 @@ impl SourceGraph {
         self.registered_functions.borrow()
     }
 
+    /// Registration has finished using the type database and import graph. Keep the
+    /// checked file snapshots and fixed frames that the selected units will borrow.
+    pub(crate) fn into_registered_files(
+        self,
+    ) -> (
+        Vec<SourceModule>,
+        HashMap<ModuleId, crate::dynamic::CheckedFunctions>,
+    ) {
+        (self.modules, self.registered_functions.into_inner())
+    }
+
     /// A concrete Python file registered by the checked resolver, before object lowering.
     pub(crate) fn python_file(&self, name: &str) -> Option<ModuleId> {
         let id = *self.by_name.get(name)?;
