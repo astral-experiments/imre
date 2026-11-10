@@ -16,7 +16,7 @@ impl RegisteredLambda {
         body: &[ast::Stmt],
         source: values::RegisteredSource<'_>,
         scopes: &mut ScopeFacts,
-        templates: &mut HashMap<TextRange, PreparedTemplate>,
+        expressions: &mut ExpressionSites,
     ) -> HashMap<TextSize, Self> {
         if scopes.lambdas.is_empty() && !source.has_templates {
             return HashMap::new();
@@ -24,7 +24,7 @@ impl RegisteredLambda {
         use ast::visitor::{Visitor, walk_body, walk_expr, walk_stmt};
         struct Collector<'a, 't> {
             source: values::RegisteredSource<'a>,
-            templates: &'t mut HashMap<TextRange, PreparedTemplate>,
+            expressions: &'t mut ExpressionSites,
             scopes: HashMap<TextSize, FunctionScope>,
             sites: HashMap<TextSize, RegisteredLambda>,
             owner: RegisteredScope,
@@ -90,14 +90,7 @@ impl RegisteredLambda {
                         self.sites.insert(lambda.start(), plan);
                     }
                     ast::Expr::TString(_) => {
-                        let value = RegisteredOperand::prepare_required(
-                            expr,
-                            source,
-                            self.owner,
-                            "cannot compile this template ahead of time",
-                            |scope| scope.report_child_refusals = true,
-                        );
-                        self.templates.insert(expr.range(), value);
+                        self.expressions.prepare_template(expr, source, self.owner)
                     }
                     _ => {}
                 }
@@ -105,7 +98,7 @@ impl RegisteredLambda {
         }
         let mut collector = Collector {
             source,
-            templates,
+            expressions,
             scopes: std::mem::take(&mut scopes.lambdas),
             sites: HashMap::new(),
             owner: RegisteredScope::Module,
@@ -200,7 +193,8 @@ async def factory(seed, rows, mark):
             generators: Some(&generators),
             ..source
         };
-        let mut sites = RegisteredLambda::collect(&body, source, &mut scopes, &mut HashMap::new());
+        let mut sites =
+            RegisteredLambda::collect(&body, source, &mut scopes, &mut ExpressionSites::default());
         let factory = body[0].as_function_def_stmt().unwrap();
         let lambda = |index: usize| {
             factory.body[index]

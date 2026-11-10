@@ -51,30 +51,23 @@ impl Function<'_, '_> {
                 expr.as_lambda_expr()
                     .map(|lambda| &self.source.lambdas[&lambda.start()].binding)
             });
-        if let Some(ExpressionSelection::Checked(value)) = selected {
-            self.prepare_checked_value(value);
-            return Some(
-                self.frame
-                    .registered_expression(value, &self.sites, condition),
-            );
+        match selected? {
+            ExpressionSelection::Checked(value) => {
+                self.prepare_checked_value(value);
+                Some(
+                    self.frame
+                        .registered_expression(value, &self.sites, condition),
+                )
+            }
+            ExpressionSelection::Operand(operand) => {
+                self.prepare_checked_value(&operand.value);
+                Some(self.frame.prepared_operand(operand, &self.sites, condition))
+            }
+            ExpressionSelection::Refused(range, reason) => {
+                Some(self.with_expression_range(*range, |code| code.build_diagnostic(reason)))
+            }
+            _ => None,
         }
-        if let Some(ExpressionSelection::Refused(range, reason)) = selected {
-            return Some(self.with_expression_range(*range, |code| code.build_diagnostic(reason)));
-        }
-        let operand = match selected {
-            Some(ExpressionSelection::Operand(operand)) => operand.as_ref(),
-            _ => match self.source.strings.templates.get(&expr.range()) {
-                Some(Ok(operand)) => operand,
-                Some(Err((range, reason))) => {
-                    return Some(
-                        self.with_expression_range(*range, |code| code.build_diagnostic(reason)),
-                    );
-                }
-                _ => return None,
-            },
-        };
-        self.prepare_checked_value(&operand.value);
-        Some(self.frame.prepared_operand(operand, &self.sites, condition))
     }
 
     pub(super) fn with_expression_range(

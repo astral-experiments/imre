@@ -150,6 +150,45 @@ impl ExpressionSites {
         self.selected.get(&site(node))
     }
 
+    /// A template owns its lexical operand and any refusal in its interpolation.
+    pub(super) fn prepare_template(
+        &mut self,
+        node: &ast::Expr,
+        source: RegisteredSource<'_>,
+        owner: super::RegisteredScope,
+    ) {
+        let operand = super::RegisteredOperand::prepare_required(
+            node,
+            source,
+            owner,
+            "cannot compile this template ahead of time",
+            |scope| scope.report_child_refusals = true,
+        );
+        let selection = match operand {
+            Ok(operand) => Selection::Operand(Box::new(operand)),
+            Err((range, reason)) => Selection::Refused(range, reason),
+        };
+        self.selected.insert(site(node), selection);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn templates(&self) -> impl Iterator<Item = (TextRange, &Selection)> {
+        self.selected.iter().filter_map(|(&(range, kind), value)| {
+            (kind == ast::NodeKind::ExprTString).then_some((range, value))
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_templates(&mut self) -> Self {
+        Self {
+            selected: self
+                .selected
+                .extract_if(|(_, kind), _| *kind == ast::NodeKind::ExprTString)
+                .collect(),
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn comparison<'a>(
         &'a self,
         node: &'a ast::Expr,
