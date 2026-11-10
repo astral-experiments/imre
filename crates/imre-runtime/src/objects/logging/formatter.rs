@@ -810,7 +810,7 @@ pub(super) fn format_specifier(value: &OwnedWord, spec: &str, type_name: &str) -
         .and_then(|n| n.checked_add(s.len()))
         .ok_or_else(|| Error::new(Kind::OverflowError, "formatted string is too long"))?;
     out.try_reserve_exact(bytes)
-        .map_err(|_| Error::new(Kind::MemoryError, "formatted string is too long"))?;
+        .map_err(|_| Error::memory_error())?;
     out.push_str(&s[..pos]);
     out.extend(std::iter::repeat_n(fill, left));
     out.push_str(&s[pos..]);

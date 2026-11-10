@@ -1900,7 +1900,7 @@ pub(super) unsafe extern "C" fn imre_dyn_lookup(
     let mut result = std::str::from_utf8(name)
         .map_err(|error| Error::new("UnicodeError", error.to_string()))
         .and_then(|name| ctx.lookup(scope, name));
-    finish_operand_position(ctx, &mut result);
+    finish_operand_position(ctx, &mut result, false);
     finish(ctx, result)
 }
 
@@ -1974,6 +1974,7 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
     }
     let reraise = op == "reraise" && (a != NONE || ctx.heap.active_exception() != NONE);
     let mut result = ctx.op(op, a, b, c);
+    let format_field = matches!(op, "format" | "format_conversion");
     if matches!(
         op,
         "attr"
@@ -1987,8 +1988,9 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
             | "async_exit_context"
             | "truth"
     ) || (b == TRUE && matches!(op, "lookup_enter" | "lookup_exit"))
+        || format_field
     {
-        finish_operand_position(ctx, &mut result);
+        finish_operand_position(ctx, &mut result, format_field);
     }
     if reraise && let Err(error) = result {
         ctx.pending = Some(error);
@@ -2098,7 +2100,7 @@ fn finish_method_target(
         *bound_receiver = receiver;
         callable
     });
-    finish_operand_position(ctx, &mut result);
+    finish_operand_position(ctx, &mut result, false);
     finish(ctx, result)
 }
 
@@ -2274,13 +2276,14 @@ pub(super) unsafe extern "C" fn imre_dyn_keyword_call_at(
 }
 
 /// A failing packed operand or call may span multiple lines in a native resumable frame.
-fn finish_operand_position(ctx: &mut Context, result: &mut Result<Id>) {
+fn finish_operand_position(ctx: &mut Context, result: &mut Result<Id>, include_ordinary: bool) {
     if let Some([line, end_line, start, end]) = ctx.heap.take_call_position()
         && let Err(error) = result
-        && matches!(
-            ctx.code_object(ctx.heap.current_code()).body,
-            value::Body::Suspended(_)
-        )
+        && (include_ordinary
+            || matches!(
+                ctx.code_object(ctx.heap.current_code()).body,
+                value::Body::Suspended(_)
+            ))
     {
         error.tracing().source_position = Some((
             line,
@@ -2305,7 +2308,7 @@ fn scoped_call(
         return NONE;
     }
     let mut result = invoke(ctx);
-    finish_operand_position(ctx, &mut result);
+    finish_operand_position(ctx, &mut result, false);
     finish_at(ctx, result, span)
 }
 
@@ -2776,6 +2779,37 @@ pub(super) unsafe extern "C" fn imre_dyn_discard_expression(ctx: *mut Context, v
 pub(super) unsafe extern "C" fn imre_dyn_discard_truth(ctx: *mut Context, mark: usize) {
     // SAFETY: the mark comes from the same active Python frame.
     unsafe { (&mut *ctx).discard_truth(mark) }
+}
+
+/// Unwind a partially evaluated operand stack from the top, keeping the exception live.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_unwind_operands(ctx: *mut Context, mark: usize) {
+    // SAFETY: the generated caller owns this context and marked the same activation.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.heap.observes_released_roots() {
+        for slot in (mark..ctx.heap.temporary_mark()).rev() {
+            ctx.discard_truth(slot);
+        }
+    } else {
+        ctx.discard_truth(mark);
+    }
+}
+
+/// Keep a completed joined string while popping its inputs in Python evaluation-stack order.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_finish_format_join(
+    ctx: *mut Context,
+    mark: usize,
+    result: Id,
+) {
+    // SAFETY: the result and operand boundary belong to the caller's active frame.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.heap.observes_released_roots() {
+        for slot in (mark + 1..ctx.heap.temporary_mark()).rev() {
+            ctx.discard_temporaries(slot, [result]);
+        }
+    }
+    ctx.discard_temporaries(mark, [result]);
 }
 
 /// Publish surviving operands before collecting, returning the boundary above the first one.

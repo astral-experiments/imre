@@ -4,7 +4,6 @@ use super::*;
 
 pub(super) mod booleans;
 mod eager;
-pub(crate) use eager::eager_operand;
 mod lambdas;
 pub(crate) use lambdas::RegisteredLambda;
 mod templates;
@@ -1390,6 +1389,24 @@ struct SourceScope<'a> {
     comprehension: Option<eager::Namespace>,
     locals: Vec<Type>,
     loop_depth: usize,
+    in_format: bool,
+}
+
+/// Prepare an inline expression that can require private slots in the enclosing activation.
+pub(crate) fn inline_operand(
+    expr: &ast::Expr,
+    source: values::RegisteredSource<'_>,
+) -> Option<RegisteredOperand> {
+    if !matches!(
+        expr,
+        ast::Expr::ListComp(_)
+            | ast::Expr::SetComp(_)
+            | ast::Expr::DictComp(_)
+            | ast::Expr::FString(_)
+    ) {
+        return None;
+    }
+    RegisteredOperand::prepare(expr, source, RegisteredScope::Function { is_async: false })
 }
 
 impl unpacking::PatternBinder for SourceScope<'_> {
@@ -1444,6 +1461,7 @@ impl<'a> SourceScope<'a> {
             comprehension: None,
             locals: Vec::new(),
             loop_depth: 0,
+            in_format: false,
         }
     }
 
@@ -1693,10 +1711,24 @@ impl SourceScope<'_> {
     }
 
     fn ordinary_operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
-        let mut value = if matches!(
-            expr,
-            ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_)
-        ) {
+        let mut value = if let ast::Expr::FString(formatted) = expr {
+            let previous = std::mem::replace(&mut self.in_format, true);
+            let value = fstrings::registered_fstring(formatted, self.source, |child| {
+                self.ordinary_operand(child).ok_or(())
+            });
+            self.in_format = previous;
+            value.ok()?
+        } else if self.in_format && let Some((kind, child)) = ir::SuspendValue::operand(expr) {
+            let child = match child {
+                Some(child) => self.ordinary_operand(child)?,
+                None => Expr::none(),
+            };
+            operation(
+                Builtin::RegisteredSuspend(kind, expr.range()),
+                Type::PythonObject,
+                vec![child],
+            )
+        } else if matches!(expr, ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_)) {
             self.eager_comprehension(expr)?
         } else if self.comprehension.is_some()
             && matches!(self.kind, RegisteredScope::Function { is_async: true })
@@ -1836,7 +1868,7 @@ mod tests {
     }
 
     #[test]
-    fn unprepared_datetime_assertion_stays_physical() {
+    fn datetime_assertion_formats_its_message_on_the_failure_edge() {
         let text = include_str!("../../stdlib/_pydatetime.py");
         let module = ruff_python_parser::parse_module(text).unwrap();
         let body = &module.syntax().body;
@@ -1869,14 +1901,27 @@ mod tests {
         let operations = HashMap::new();
         let mut preparation = SuitePreparation::new(&operations, source, stmts, true);
         let plan = preparation.suite(stmts, RegisteredScope::Function { is_async: false });
-        assert!(plan.checked.function.body.is_empty());
-        assert_eq!(plan.residual.len(), 1);
-        assert_eq!(plan.residual[0].statements, 0..1);
+        assert!(plan.fully_checked());
+        let [_, Statement::If(_, succeeds, fails)] = plan.checked.function.body.as_slice() else {
+            panic!("expected the checked assertion checkpoint and branch");
+        };
+        assert!(succeeds.is_empty());
+        let mut fields = 0;
+        ir::walk_nodes(fails, &mut |node, _| {
+            if let ir::Node::Expression(Expr {
+                kind: ExprKind::Builtin(Builtin::FormatField, _),
+                ..
+            }) = node
+            {
+                fields += 1;
+            }
+        });
+        assert_eq!(fields, 1);
     }
 
     #[test]
     fn assertion_admission_keeps_the_message_on_the_failure_edge() {
-        let text = "assert (lost := probe()), f'{value}'\nassert (selected := [value][0]), [message(), values[1:]]\n";
+        let text = "assert (lost := probe()), f'{(item for item in values)}'\nassert (selected := [value][0]), [message(), values[1:]]\n";
         let graph = SourceGraph::single(text).unwrap();
         let module = &graph.modules[graph.entry];
         let body = &module.parsed.syntax().body;
@@ -1890,7 +1935,7 @@ mod tests {
         assert_eq!(plan.checked.local_names.len(), 1);
         assert_eq!(plan.checked.local_names[&0].name, "selected");
         let [physical] = plan.residual.as_slice() else {
-            panic!("expected only the f-string assertion to remain physical");
+            panic!("expected the generator-expression message to remain physical");
         };
         assert_eq!(physical.at, 0);
         assert_eq!(physical.statements, 0..1);

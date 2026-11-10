@@ -67,7 +67,7 @@ impl Function<'_, '_> {
                     .registered_expression(&value, &self.sites, condition),
             );
         }
-        let operand = crate::frontend::eager_operand(expr, source)?;
+        let operand = crate::frontend::inline_operand(expr, source)?;
         self.prepare_checked_value(&operand.value);
         Some(
             self.frame
@@ -179,21 +179,24 @@ impl Function<'_, '_> {
             }
             ast::Expr::Lambda(lambda) => self.source_lambda(lambda),
             ast::Expr::TString(template) => self.residual_template(template),
-            ast::Expr::FString(v) => {
-                let mut parts = Vec::new();
-                for part in v.value.iter() {
-                    match part {
-                        ast::FStringPartRef::Literal(lit) => {
-                            if let Some(value) = self.source.strings.literals.get(&lit.range()) {
-                                parts.push(self.registered_value(value));
+            ast::Expr::FString(value) => {
+                let mark = self.temporary_mark();
+                self.unwind_format_operands(&mark, |code| {
+                    let mut parts = Vec::new();
+                    for part in value.value.iter() {
+                        match part {
+                            ast::FStringPartRef::Literal(literal) => {
+                                if let Some(value) = code.source.strings.literals.get(&literal.range()) {
+                                    parts.push(code.registered_value(value));
+                                }
+                            }
+                            ast::FStringPartRef::FString(formatted) => {
+                                code.format_parts(&formatted.elements, &mut parts);
                             }
                         }
-                        ast::FStringPartRef::FString(s) => {
-                            self.format_parts(&s.elements, &mut parts)
-                        }
                     }
-                }
-                self.join_format_parts(parts)
+                    code.format_join(&mark, parts)
+                })
             }
             expr if let Some(plan) = imre_ast::comprehension::Plan::from_expr(expr) => {
                 self.comprehension(expr, plan)
@@ -400,19 +403,31 @@ impl Function<'_, '_> {
                     if let Some(prefix) = self.source.strings.literals.get(&field.range()) {
                         parts.push(self.registered_value(prefix));
                     }
-                    let mut value = self.expr(&field.expression);
-                    if let Some(conversion) = imre_ast::strings::interpolation_conversion(field) {
-                        value = self.convert_format_value(&value, conversion);
-                    }
-                    let spec = match &field.format_spec {
-                        Some(s) => {
-                            let mut spec = Vec::new();
-                            self.format_parts(&s.elements, &mut spec);
-                            self.join_format_parts(spec)
-                        }
-                        None => self.text(""),
-                    };
-                    self.format_value(&value, &spec)
+                    let mark = self.temporary_mark();
+                    self.with_expression_range(field.range(), |code| {
+                        code.unwind_format_operands(&mark, |code| {
+                            let mut value = code.expr(&field.expression);
+                            code.keep_operands(&mark, &value, "0");
+                            if let Some(conversion) = imre_ast::strings::interpolation_conversion(field) {
+                                value = code.format_conversion(&value, conversion);
+                                code.keep_operands(&mark, &value, "0");
+                            }
+                            let spec = match &field.format_spec {
+                                Some(spec) => {
+                                    let mark = code.temporary_mark();
+                                    code.unwind_format_operands(&mark, |code| {
+                                        let mut parts = Vec::new();
+                                        code.format_parts(&spec.elements, &mut parts);
+                                        code.format_join(&mark, parts)
+                                    })
+                                }
+                                None => code.text(""),
+                            };
+                            let result = code.format_field(&value, &spec);
+                            code.keep_operands(&mark, &result, "0");
+                            result
+                        })
+                    })
                 }
             };
             parts.push(value);

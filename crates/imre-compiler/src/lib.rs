@@ -964,6 +964,7 @@ fn required_object_diagnostic(
     let (id, operand, call) = ir::required_object_call(module)?;
     let (name, kind) = match call {
         ir::ObjectCall::ExecText => ("exec", LoweringKind::ScopedObject),
+        ir::ObjectCall::FormatField => ("this f-string field", LoweringKind::Ordinary),
         ir::ObjectCall::SocketSendfile => ("socket.sendfile", LoweringKind::Object),
     };
     let source = &graph.modules[id];
@@ -983,9 +984,9 @@ fn checked_lower(graph: &mut modules::SourceGraph) -> Result<CheckedProgram, Str
     let program = checked_lower_with(graph, None, call_error.as_ref())?;
     if let CheckedProgram::Native(ir) = &program
         && let Some(error) = required_object_diagnostic(graph, &ir.0)
-        && error.kind == LoweringKind::Object
+        && matches!(error.kind, LoweringKind::Ordinary | LoweringKind::Object)
     {
-        // In-memory checking and compilation have no file loader to supply a socket body.
+        // Report the original operand when the in-memory entry cannot link its object operation.
         return Ok(CheckedProgram::Runtime(error));
     }
     Ok(program)

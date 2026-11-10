@@ -89,6 +89,22 @@ impl Emitter<'_, '_> {
                     none()
                 }
             }
+            Builtin::FormatField => {
+                let value = &args[0].value;
+                let spec = &args[1].value;
+                debug_assert!(value.ty.is_format_scalar());
+                debug_assert_eq!(spec.ty, Type::Str);
+                let kind = value.ty.word_kind() as u32;
+                let word = self.word(value);
+                Value {
+                    ty: Type::Str,
+                    operand: self.checked_pointer(format!(
+                        "call ptr @imre_format_scalar(i32 {kind}, i64 {word}, ptr {})",
+                        spec.operand
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::StringFormat => {
                 let (template, fields) = args.split_first().unwrap();
                 let (pairs, tail) = fields.as_chunks::<2>();
@@ -245,13 +261,25 @@ print(f"{abs(-0.125):.2%}")
     }
 
     #[test]
+    fn dynamic_and_large_float_precisions_use_native_formatting() {
+        for source in [
+            "print(f'{1.0:.1001f}')",
+            "precision = 2\nprint(f'{1.0:.{precision}f}')",
+        ] {
+            let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+            assert_eq!(
+                llvm.matches("call ptr @imre_format_scalar(i32 7,").count(),
+                1
+            );
+        }
+    }
+
+    #[test]
     fn sorting_and_formatting_reject_unproved_dynamic_operations() {
         for source in [
             "values = sorted([1.0, 2.0])\nprint(len(values))",
             "values = sorted([1, 2], key=lambda value: float(value))\nprint(len(values))",
             "values = sorted([1, 2], reverse=1)\nprint(len(values))",
-            "print(f'{1.0:.1001f}')",
-            "precision = 2\nprint(f'{1.0:.{precision}f}')",
             "print(','.join([1, 2]))",
             "print('{x}'.format('positional'))",
             "print('{x}'.format(x=[1]))",

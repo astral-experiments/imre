@@ -614,6 +614,32 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         ))
     }
 
+    pub(crate) fn format_conversion(&mut self, value: &str, conversion: char) -> String {
+        let flag = self.text(&conversion.to_string());
+        self.format_at_field("format_conversion", &[value, &flag])
+    }
+
+    pub(crate) fn format_field(&mut self, value: &str, spec: &str) -> String {
+        self.format_at_field("format", &[value, "0", spec])
+    }
+
+    fn format_at_field(&mut self, op: &str, args: &[&str]) -> String {
+        self.call_position(self.current_range);
+        self.op(op, args)
+    }
+
+    /// Join completed fields without dispatching to a Python string subclass's addition.
+    pub(crate) fn format_join(&mut self, mark: &str, parts: Vec<String>) -> String {
+        let result = parts
+            .into_iter()
+            .reduce(|left, right| self.op("format_concat", &[&left, &right]))
+            .unwrap_or_else(|| self.text(""));
+        self.line(&format!(
+            "call void @imre_dyn_finish_format_join(ptr %ctx, i64 {mark}, i64 {result})"
+        ));
+        result
+    }
+
     /// Save the caller's earlier operands before an expression can release a writer.
     pub(crate) fn temporary_mark(&mut self) -> String {
         self.value("call i64 @imre_dyn_truth_mark(ptr %ctx)")
@@ -1206,6 +1232,18 @@ pub(crate) trait FrameEmitter<'a, 'p>:
 
     fn unwind_operands<T>(&mut self, mark: &str, body: impl FnOnce(&mut Self) -> T) -> T {
         self.unwind_with(|f| f.discard_truth(mark), body)
+    }
+
+    /// Release incomplete formatting operands in evaluation-stack order on the error edge.
+    fn unwind_format_operands<T>(&mut self, mark: &str, body: impl FnOnce(&mut Self) -> T) -> T {
+        self.unwind_with(
+            |frame| {
+                frame.line(&format!(
+                    "call void @imre_dyn_unwind_operands(ptr %ctx, i64 {mark})"
+                ));
+            },
+            body,
+        )
     }
 
     fn suspend_value(

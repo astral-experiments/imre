@@ -319,6 +319,10 @@ impl Type {
     pub(crate) fn is_path(self) -> bool {
         matches!(self, Self::Path | Self::PurePath(_))
     }
+
+    pub(crate) fn is_format_scalar(self) -> bool {
+        matches!(self, Self::Bool | Self::Int | Self::Float | Self::Str)
+    }
 }
 
 impl std::fmt::Display for Type {
@@ -666,6 +670,14 @@ impl Expr {
             ty: Type::Int,
             kind: ExprKind::Int(value.to_string()),
         }
+    }
+
+    /// Both exact string addition and a joined f-string supply native text fragments.
+    pub(crate) fn is_string_concat(&self) -> bool {
+        matches!(
+            self.kind,
+            ExprKind::Binary(Binary::Concat, ..) | ExprKind::Builtin(Builtin::FormatJoin, _)
+        )
     }
 
     /// The freshly allocated list has no externally visible alias during argument evaluation.
@@ -1126,37 +1138,32 @@ impl CharacterFilter {
     }
 }
 
-/// Calls whose implementation is owned by the Python object runtime. Keep their
-/// operands and result types in checked IR until the whole graph has been checked.
-#[derive(Clone, Copy)]
+/// Operations that need a registered Python frame after the complete graph has
+/// been checked. Field formatting can share a frame required by executable
+/// text or a socket sendfile call.
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) enum ObjectCall {
     ExecText,
     SocketSendfile,
+    FormatField,
 }
 
 pub(crate) fn required_object_call(
     module: &Module,
 ) -> Option<(usize, ruff_text_size::TextRange, ObjectCall)> {
-    let mut executable_text = None;
-    let mut socket_sendfile = None;
+    let mut first = None;
     for function in module.functions.iter().chain([&module.entry]) {
         walk_expressions(&function.body, &mut |expr| {
-            if let ExprKind::Builtin(Builtin::ObjectCall(call, module, span), _) = &expr.kind {
-                let first = match call {
-                    ObjectCall::ExecText => &mut executable_text,
-                    ObjectCall::SocketSendfile => &mut socket_sendfile,
-                };
-                if first.is_none_or(|(id, range, _): (_, ruff_text_size::TextRange, _)| {
-                    (*module, span.start()) < (id, range.start())
-                }) {
-                    *first = Some((*module, *span, *call));
-                }
+            if let ExprKind::Builtin(Builtin::ObjectCall(call, module, span), _) = &expr.kind
+                && first.is_none_or(|(id, range, kind): (_, ruff_text_size::TextRange, _)| {
+                    (*call, *module, span.start()) < (kind, id, range.start())
+                })
+            {
+                first = Some((*module, *span, *call));
             }
         });
     }
-    // Unknown executable text independently requires the object runtime. A socket
-    // call can use that runtime when it is already required elsewhere in the graph.
-    executable_text.or(socket_sendfile)
+    first
 }
 
 /// Unary protocol to invoke on a materialized Python object.
@@ -1694,6 +1701,12 @@ pub(crate) enum Builtin {
     JoinBufferAppend,
     JoinBufferFinish,
     StringFormat,
+    /// Convert the field value before evaluating its nested format specification.
+    FormatConversion(char),
+    /// Format an already converted value with its checked specification.
+    FormatField,
+    /// Join formatted operands in order, without invoking a str subclass's addition.
+    FormatJoin,
     StringReplace,
     Text(TextOperation),
     HexFormat {
@@ -1997,12 +2010,6 @@ pub(crate) enum Builtin {
         expression: String,
         conversion: Option<char>,
     },
-    /// Convert one Python object before evaluating a nested format spec.
-    RegisteredFormatConversion(char),
-    /// Format an evaluated Python object with its evaluated format spec.
-    RegisteredFormat,
-    /// Join formatted parts using Python's string formatting semantics.
-    RegisteredFormatJoin,
     /// Acquire an iterator through the Python protocol on the original heap object.
     RegisteredIter,
     /// Acquire a Python async iterator at the iterable expression.
