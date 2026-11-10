@@ -1431,39 +1431,22 @@ mod tests {
     }
 
     #[test]
-    fn suspending_functions_keep_their_single_residual_child() {
-        for (name, text, definition, child) in [
-            (
-                "os",
-                include_str!("../../stdlib/os.py"),
-                "def _fwalk(",
-                None,
-            ),
+    fn bundled_directory_and_datagram_loops_use_checked_suspensions() {
+        for (name, text, definition) in [
+            ("os", include_str!("../../stdlib/os.py"), "def _fwalk("),
             (
                 "asyncio.base_events",
                 include_str!("../../stdlib/asyncio/base_events.py"),
                 "async def create_datagram_endpoint(",
-                Some("if sock is not None:"),
             ),
         ] {
             let module =
                 PreparedBody::module(name, Path::new("module.py"), text, 0, ModuleOrigin::Bundled)
                     .unwrap();
             let start = ruff_text_size::TextSize::try_from(text.find(definition).unwrap()).unwrap();
-            let sites = module.linked_declarations();
-            let DefinitionSite::Function(def) = sites[&start] else {
-                unreachable!()
-            };
             let suite = &module.source.function_bodies[&start];
-            if let Some(child) = child {
-                let [run] = suite.residual.as_slice() else {
-                    panic!("expected one residual in {name}")
-                };
-                assert_eq!(run.statements.len(), 1);
-                assert!(text[def.body[run.statements.start].range()].starts_with(child));
-            } else {
-                assert!(suite.fully_checked());
-            }
+            assert!(suite.fully_checked(), "{name}");
+            crate::verify::registered(suite.checked.region()).unwrap();
             let mut suspends = false;
             crate::ir::walk_expressions(&suite.checked.function.body, &mut |expr| {
                 suspends |= matches!(
@@ -1661,10 +1644,19 @@ mod tests {
             );
         }
         let def = prepared.syntax.as_ref().unwrap()[1].as_function_def_stmt().unwrap();
-        let loop_ = def.body[0].as_for_stmt().unwrap();
-        let suite = &prepared.source.nested_bodies[&loop_.body[0].start()];
-        let gaps: Vec<_> = suite.residual.iter().map(|run| run.statements.clone()).collect();
-        assert_eq!(gaps, [0..1, 2..4]);
+        let suite = &prepared.source.function_bodies[&def.start()];
+        assert!(suite.fully_checked());
+        crate::verify::registered(suite.checked.region()).unwrap();
+        let mut suspensions = Vec::new();
+        crate::ir::walk_expressions(&suite.checked.function.body, &mut |expr| {
+            if let crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredSuspend(_, range), _) =
+                &expr.kind
+            {
+                suspensions.push(&source[*range]);
+            }
+        });
+        assert!(suspensions.contains(&"yield item"));
+        assert!(suspensions.contains(&"await consume(item)"));
     }
 
     #[test]
@@ -2502,22 +2494,17 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 },
             )
             .unwrap();
-            let selected: Vec<_> = prepared
-                .syntax
-                .as_ref()
-                .unwrap()
-                .iter()
-                .filter_map(|stmt| {
-                    let def = stmt.as_function_def_stmt()?;
-                    prepared
-                        .source
-                        .function_bodies
-                        .get(&def.start())
-                        .is_some_and(crate::frontend::RegisteredSuite::fully_checked)
-                        .then_some(def.name.as_str())
-                })
-                .collect();
-            assert_eq!(selected, ["items", "consume"]);
+            let syntax = prepared.syntax.as_ref().unwrap();
+            for name in ["items", "more", "consume"] {
+                let def = syntax
+                    .iter()
+                    .filter_map(ast::Stmt::as_function_def_stmt)
+                    .find(|def| def.name.as_str() == name)
+                    .unwrap();
+                let suite = &prepared.source.function_bodies[&def.start()];
+                assert!(suite.fully_checked(), "{name}");
+                crate::verify::registered(suite.checked.region()).unwrap();
+            }
             // The prepared generator entry retains its flags and instructions across emission.
             prepared.syntax.as_mut().unwrap().to_mut()[0]
                 .as_function_def_stmt_mut()
