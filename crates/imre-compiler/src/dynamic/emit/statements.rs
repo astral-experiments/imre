@@ -213,6 +213,22 @@ impl<'p> Function<'_, 'p> {
                 let value = self.expr(&assignment.value);
                 self.frame.store_private(*slot, &value);
             }
+            SourceEffect::Value(output, inputs) => match output {
+                crate::frontend::ValueStatement::Return => {
+                    let value = inputs.first().map_or_else(
+                        || super::permanent::NONE.to_string(),
+                        |input| self.physical_operand(input),
+                    );
+                    self.return_from_scope(value);
+                }
+                crate::frontend::ValueStatement::Expression => {
+                    let value = self.physical_operand(&inputs[0]);
+                    self.discard_handle(&value);
+                }
+                crate::frontend::ValueStatement::Raise => {
+                    self.raise_operands(inputs.first(), inputs.get(1), Self::physical_operand);
+                }
+            },
             SourceEffect::Discard(inputs) => {
                 for input in inputs {
                     self.discard_operand(|code| code.physical_operand(input));
@@ -323,25 +339,6 @@ impl<'p> Function<'_, 'p> {
         }
     }
 
-    fn emit_value_statement(&mut self, output: crate::frontend::ValueStatement<'_>) {
-        use crate::frontend::ValueStatement;
-        match output {
-            ValueStatement::Checked(stmt) => self.checked_statement(&stmt),
-            ValueStatement::ReturnOperand(expr) | ValueStatement::DiscardOperand(expr) => {
-                let handle = self.expr(expr);
-                if matches!(output, ValueStatement::ReturnOperand(_)) {
-                    self.return_from_scope(handle);
-                } else {
-                    self.discard_handle(&handle);
-                }
-            }
-            ValueStatement::RaiseOperands(exception, cause) => {
-                self.raise_operands(exception, cause, Self::expr);
-            }
-            ValueStatement::Ignore => {}
-        }
-    }
-
     pub(super) fn source_statements(&mut self, suite: &'p [ast::Stmt]) {
         for stmt in suite {
             if !self.start_statement() {
@@ -402,14 +399,6 @@ impl<'p> Function<'_, 'p> {
                 .and_then(|sites| sites.get(&stmt.start()))
             {
                 self.mixed_class_definition(class);
-                continue;
-            }
-            if let Some(output) = crate::frontend::value_statement(
-                stmt,
-                self.source.registered_source(),
-                &self.source.statement_sites.expressions,
-            ) {
-                self.emit_value_statement(output);
                 continue;
             }
             if let Some(operation) = self.source.namespace_operations.get(&stmt.range()) {

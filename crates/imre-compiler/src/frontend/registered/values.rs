@@ -1031,44 +1031,6 @@ impl Region {
     }
 }
 
-/// An output statement encountered in a source suite. Only a residual operand needs syntax.
-pub(crate) enum ValueStatement<'a> {
-    Checked(Statement),
-    RaiseOperands(Option<&'a ast::Expr>, Option<&'a ast::Expr>),
-    ReturnOperand(&'a ast::Expr),
-    DiscardOperand(&'a ast::Expr),
-    Ignore,
-}
-
-pub(crate) fn value_statement<'a>(
-    stmt: &'a ast::Stmt,
-    source: RegisteredSource<'_>,
-    logicals: &super::booleans::ExpressionSites,
-) -> Option<ValueStatement<'a>> {
-    let operand = |value: &ast::Expr| match logicals.get(value) {
-        Some(super::booleans::Selection::Checked(value)) => Some(value.clone()),
-        Some(_) => None,
-        None => registered_value(value, source),
-    };
-    Some(match stmt {
-        ast::Stmt::Raise(raise) => {
-            ValueStatement::RaiseOperands(raise.exc.as_deref(), raise.cause.as_deref())
-        }
-        ast::Stmt::Return(ret) => match ret.value.as_deref() {
-            None => ValueStatement::Checked(Statement::Return(Expr::none())),
-            Some(value) => operand(value).map_or(ValueStatement::ReturnOperand(value), |value| {
-                ValueStatement::Checked(Statement::Return(value))
-            }),
-        },
-        ast::Stmt::Expr(expr) if expr.value.is_string_literal_expr() => ValueStatement::Ignore,
-        ast::Stmt::Expr(expr) => operand(&expr.value)
-            .map_or(ValueStatement::DiscardOperand(&expr.value), |value| {
-                ValueStatement::Checked(Statement::Expr(value))
-            }),
-        _ => return None,
-    })
-}
-
 pub(crate) fn suspended_operand(node: &ast::Expr, source: RegisteredSource<'_>) -> Option<Expr> {
     Region::SuspendedOperand.operand(node, source)
 }

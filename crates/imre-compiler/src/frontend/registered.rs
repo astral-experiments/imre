@@ -830,7 +830,15 @@ pub(crate) struct SourceRun {
     pub(crate) effect: Option<SourceEffect>,
 }
 
+pub(crate) enum ValueStatement {
+    Return,
+    Expression,
+    Raise,
+}
+
 pub(crate) enum SourceEffect {
+    /// Transfer control or discard a value using operands prepared in this frame.
+    Value(ValueStatement, Vec<PhysicalOperand>),
     /// Evaluate the RHS once for the following checked assignment targets.
     AssignmentInput(usize),
     /// Evaluate and release each operand of an annotation without an assigned value.
@@ -883,6 +891,7 @@ impl PhysicalSuite {
                         | SourceEffect::Context(_)
                         | SourceEffect::ObjectOperation(..)
                         | SourceEffect::Discard(_)
+                        | SourceEffect::Value(..)
                 )
             ) {
                 sources.extend_from_slice(&stmts[run.statements.clone()]);
@@ -1315,7 +1324,7 @@ impl<'a> SuitePreparation<'a> {
         suspended: bool,
     ) -> RegisteredSuite {
         use ast::statement_visitor::{StatementVisitor, walk_stmt};
-        let mut plan = self.lower(stmts, kind, select);
+        let mut plan = self.lower(stmts, kind, select, suspended);
         struct Children<'p, 's> {
             prepare: &'p mut SuitePreparation<'s>,
             kind: RegisteredScope,
@@ -1345,7 +1354,9 @@ impl<'a> SuitePreparation<'a> {
                         }
                     }
                     Some(
-                        SourceEffect::ObjectOperation(_, inputs) | SourceEffect::Discard(inputs),
+                        SourceEffect::ObjectOperation(_, inputs)
+                        | SourceEffect::Discard(inputs)
+                        | SourceEffect::Value(_, inputs),
                     ) => {
                         for input in inputs {
                             if let PhysicalOperand::Source(expr) = input {
@@ -1583,6 +1594,7 @@ impl<'a> SuitePreparation<'a> {
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
         select: SuiteSelection,
+        suspended: bool,
     ) -> RegisteredSuite {
         let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
         let mut body = Vec::new();
@@ -1612,6 +1624,46 @@ impl<'a> SuitePreparation<'a> {
                 continue;
             }
             scope.truncate_locals(slots_before);
+            let output = match stmt {
+                ast::Stmt::Return(ret) => {
+                    Some((ValueStatement::Return, [ret.value.as_deref(), None]))
+                }
+                ast::Stmt::Expr(value) if !value.value.is_string_literal_expr() => Some((
+                    ValueStatement::Expression,
+                    [Some(value.value.as_ref()), None],
+                )),
+                ast::Stmt::Raise(raise) => Some((
+                    ValueStatement::Raise,
+                    [raise.exc.as_deref(), raise.cause.as_deref()],
+                )),
+                _ => None,
+            };
+            if let Some((output, inputs)) = output {
+                let inputs = inputs
+                    .into_iter()
+                    .flatten()
+                    .map(|expr| {
+                        let checked = RegisteredOperand::prepare_with(self.source, kind, |scope| {
+                            if suspended {
+                                scope.frame_value(expr)
+                            } else {
+                                scope.ordinary_operand(expr)
+                            }
+                        });
+                        match checked {
+                            Some(value) => PhysicalOperand::Checked(Box::new(value)),
+                            None => PhysicalOperand::Source(Box::new(expr.clone())),
+                        }
+                    })
+                    .collect();
+                body.push(checkpoint(stmt));
+                residual.push(SourceRun {
+                    at: body.len(),
+                    statements: i..i + 1,
+                    effect: Some(SourceEffect::Value(output, inputs)),
+                });
+                continue;
+            }
             if let ast::Stmt::AnnAssign(ann) = stmt
                 && ann.value.is_none()
                 && let Some(inputs) = values::bare_target_operands(&ann.target)
@@ -1710,7 +1762,7 @@ impl<'a> SuitePreparation<'a> {
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
     ) -> Option<RegisteredSuite> {
-        let plan = self.lower(stmts, kind, SuiteSelection::All);
+        let plan = self.lower(stmts, kind, SuiteSelection::All, false);
         plan.fully_checked().then_some(plan)
     }
 }
