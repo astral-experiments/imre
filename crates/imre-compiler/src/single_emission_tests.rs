@@ -21,6 +21,7 @@ fn bound_wrapper_emits_native_only_if_registration_declines() {
             ProgramEntry::File(&path, None),
             &CompileOptions::default(),
             Default::default(),
+            false,
             |graph, call_error| {
                 let checked = checked_lower_with(graph, None, call_error)?;
                 assert!(matches!(checked, CheckedProgram::Native(_)));
@@ -87,6 +88,7 @@ fn fixed_file_selects_its_product_for_the_requested_startup() {
             ProgramEntry::File(&path, None),
             &options,
             Default::default(),
+            false,
             |graph, call_error| {
                 let product = checked_lower_with(graph, None, call_error)?;
                 if sitecustomize {

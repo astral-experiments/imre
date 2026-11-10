@@ -404,9 +404,9 @@ fn retained_native_candidate_registers_its_original_source_owner() {
         &options,
         true,
         Some(crate::dynamic::ObjectOperation::CheckedEntry),
-        Some(&graph),
+        Some(&mut graph),
         crate::BoxedLayout::Check,
-        |_, sources| {
+        |_, _, sources| {
             let sources = sources.unwrap();
             for (name, id) in [("helper", helper_id), ("external", external_id)] {
                 let donor = sources.winners.iter().find(|s| s.name == name).unwrap();
@@ -443,9 +443,9 @@ fn retained_native_candidate_registers_its_original_source_owner() {
         &options,
         true,
         Some(crate::dynamic::ObjectOperation::CheckedEntry),
-        Some(&graph),
+        Some(&mut graph),
         crate::BoxedLayout::Check,
-        |_, _| panic!("a different import kind reached object admission"),
+        |_, _, _| panic!("a different import kind reached object admission"),
     )
     .err()
     .unwrap();

@@ -354,6 +354,7 @@ fn check_with(
         entry,
         options,
         filesystem,
+        cache.is_some(),
         |graph, call_error| {
             graph.session.explicit_check = true;
             checked_lower_with(graph, cache.as_deref_mut(), call_error)
@@ -418,6 +419,7 @@ fn object_fallback(
     entry: ProgramEntry<'_>,
     options: &CompileOptions,
     mut filesystem: watch::FileSystem<'_>,
+    incremental: bool,
     mut lower: impl FnMut(
         &mut modules::SourceGraph,
         Option<&LoweringDiagnostic>,
@@ -588,7 +590,7 @@ fn object_fallback(
             _ => Err(refusal_message()),
         }
     };
-    let checked_graph = graph;
+    let mut checked_graph = graph;
     let graph = checked_graph
         .as_ref()
         .filter(|graph| !graph.has_checked_only_import);
@@ -624,8 +626,10 @@ fn object_fallback(
         || graph
             .as_ref()
             .is_some_and(|g| g.needs_object_runtime.get() || g.traceback_objects);
-    let check_returns = |entry_requests_objects: bool| -> Result<(), String> {
-        if let Some(graph) = &graph {
+    let check_returns = |graph: Option<&mut modules::SourceGraph>,
+                         entry_requests_objects: bool|
+     -> Result<(), String> {
+        if let Some(graph) = graph.filter(|g| !g.has_checked_only_import) {
             let requested = graph.check_fallback_calls.get();
             // A runtime class export can admit a new import graph. Keep direct source-call
             // diagnostics unless this entry already requested Python object semantics.
@@ -670,35 +674,47 @@ fn object_fallback(
             } else {
                 analysis::FallbackCalls::None
             };
-            graph.session.diagnostic_copy()?.check_fallback_contracts(
-                skipped.as_deref(),
-                &overloads,
-                checked_calls,
-                graph
-                    .modules
-                    .iter()
-                    .position(|module| module.is_bundled("socketserver")),
-                checked_file.then_some(&graph.modules),
-            )?;
+            let runtime_provider = graph
+                .modules
+                .iter()
+                .position(|module| module.is_bundled("socketserver"));
+            let check = |session: &mut analysis::Session| {
+                session.check_fallback_contracts(
+                    skipped.as_deref(),
+                    &overloads,
+                    checked_calls,
+                    runtime_provider,
+                    checked_file.then_some(&graph.modules),
+                )
+            };
+            if incremental {
+                // The incremental compiler may retain a live Salsa handle for layout queries.
+                check(&mut graph.session.diagnostic_copy()?)?;
+            } else {
+                graph.session.with_diagnostic_rules(check)?;
+            }
         }
         Ok(())
     };
-    let check = |entry_requests_objects, registered: Option<dynamic::RegisteredSources<'_>>| {
+    let check = |mut checked_graph: Option<&mut modules::SourceGraph>,
+                 entry_requests_objects,
+                 registered: Option<dynamic::RegisteredSources<'_>>| {
         // Admission commits to the Python ABI. Keep only bodies with a valid frame
         // map and release the deferred native program before checking its providers.
         if registered.is_some()
-            && let (Some(graph), Some((fixed, _))) = (&checked_graph, deferred_native.take())
+            && let (Some(graph), Some((fixed, _))) =
+                (checked_graph.as_deref(), deferred_native.take())
         {
             fixed.register_definitions(graph);
         }
-        check_returns(entry_requests_objects)?;
+        check_returns(checked_graph.as_deref_mut(), entry_requests_objects)?;
         if let Some(registered) = registered {
             analysis::check_registered_project(
                 registered.root,
                 registered.roots,
                 registered.winners.iter().copied(),
                 registered.has_file_body,
-                checked_graph.as_ref(),
+                checked_graph.as_deref(),
                 refusal.as_ref(),
             )?;
             if registered
@@ -725,7 +741,7 @@ fn object_fallback(
                     registered.roots,
                     files,
                     registered.has_file_body,
-                    checked_graph.as_ref(),
+                    checked_graph.as_deref(),
                     None,
                 )?;
             }
@@ -745,7 +761,7 @@ fn object_fallback(
         object_imports,
         operation
             .or(ordered_command_import.then_some(dynamic::ObjectOperation::OrderedCommandImport)),
-        checked_graph.as_ref(),
+        checked_graph.as_mut(),
         layout,
         check,
     )? {
@@ -818,6 +834,7 @@ fn compile_with_layout(
         entry,
         options,
         Default::default(),
+        false,
         |graph, call_error| checked_lower_with(graph, None, call_error),
         typed,
     )
@@ -981,6 +998,7 @@ fn compile_file_units_with(
         ProgramEntry::File(path, module_root),
         options,
         Default::default(),
+        cache.is_some(),
         |graph, call_error| checked_lower_with(graph, cache.as_deref_mut(), call_error),
         typed,
     )
@@ -1697,6 +1715,7 @@ print("result", call(b=2, a=1))
                 super::ProgramEntry::File(&path, None),
                 &options,
                 Default::default(),
+                false,
                 |graph, call_error| {
                     graph
                         .set_layout_hint
@@ -1733,6 +1752,7 @@ print("result", call(b=2, a=1))
             super::ProgramEntry::File(&path, None),
             &CompileOptions::default(),
             Default::default(),
+            false,
             |graph, call_error| {
                 passes += 1;
                 assert!(graph.set_layout_hint.get() == super::modules::SetLayoutHint::Disabled);
@@ -1769,6 +1789,7 @@ print("result", call(b=2, a=1))
             super::ProgramEntry::File(&path, None),
             &options,
             Default::default(),
+            false,
             |graph, call_error| {
                 assert_eq!(graph.modules[graph.entry].original_source(), source);
                 graph.session.explicit_check = true;

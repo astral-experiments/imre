@@ -988,6 +988,15 @@ impl Session {
         Ok(self.parsed(file))
     }
 
+    /// Use the existing parsed files for a check, then restore the caller's inference rules.
+    pub(crate) fn with_diagnostic_rules<T>(&mut self, check: impl FnOnce(&mut Self) -> T) -> T {
+        let input = DiagnosticRules::get(&self.db);
+        let previous = input.rules(&self.db).clone();
+        let result = check(self);
+        input.set_rules(&mut self.db).to(previous);
+        result
+    }
+
     /// Start diagnostics with independent rules and Salsa storage. Every file has already
     /// passed the loader's preflight in this snapshot.
     pub(crate) fn diagnostic_copy(&self) -> Result<Self, String> {

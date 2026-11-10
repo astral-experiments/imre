@@ -23,11 +23,11 @@ pub(crate) fn into_body(parsed: Cow<'_, Parsed<ast::ModModule>>) -> ast::Suite {
 
 /// A physical file whose checked parser input still matches its executable source.
 #[derive(Clone, Copy)]
-pub(crate) struct CheckedFile<'a>(&'a crate::modules::SourceModule);
+pub(crate) struct CheckedFile(crate::modules::ModuleId);
 
-impl<'a> CheckedFile<'a> {
+impl CheckedFile {
     pub(crate) fn select(
-        graph: &'a crate::modules::SourceGraph,
+        graph: &crate::modules::SourceGraph,
         id: crate::modules::ModuleId,
     ) -> Option<Self> {
         let module = &graph.modules[id];
@@ -39,28 +39,26 @@ impl<'a> CheckedFile<'a> {
         graph
             .session
             .matches_parser_input(id, &input.text)
-            .then_some(Self(module))
+            .then_some(Self(id))
     }
 
-    pub(crate) fn parsed(self) -> ParsedModule<'a> {
+    pub(crate) fn parsed(self, modules: &[crate::modules::SourceModule]) -> ParsedModule<'_> {
+        let module = &modules[self.0];
         ParsedModule {
-            text: Cow::Borrowed(&self.0.source),
-            parsed: Cow::Borrowed(&self.0.parsed),
+            text: Cow::Borrowed(&module.source),
+            parsed: Cow::Borrowed(&module.parsed),
         }
+    }
+
+    pub(crate) fn entry(graph: &crate::modules::SourceGraph, path: &Path) -> Option<Self> {
+        if graph.modules[graph.entry].path != std::path::absolute(path).ok()? {
+            return None;
+        }
+        Self::select(graph, graph.entry)
     }
 }
 
 impl<'a> ParsedModule<'a> {
-    pub(crate) fn checked_entry(
-        graph: &'a crate::modules::SourceGraph,
-        path: &Path,
-    ) -> Option<Self> {
-        if graph.modules[graph.entry].path != std::path::absolute(path).ok()? {
-            return None;
-        }
-        CheckedFile::select(graph, graph.entry).map(CheckedFile::parsed)
-    }
-
     /// Check the original file offsets. A discovered CRLF file can have normalized offsets.
     pub(crate) fn check_file(
         path: &Path,
@@ -143,16 +141,18 @@ mod tests {
     fn discovery_borrows_only_the_original_entry_parse() {
         let path = Path::new("/input.py");
         let graph = SourceGraph::single("value = 1\r\n").unwrap();
-        let entry = ParsedModule::checked_entry(&graph, path).unwrap();
+        let entry = CheckedFile::entry(&graph, path)
+            .unwrap()
+            .parsed(&graph.modules);
         assert_eq!(entry.text, "value = 1\n");
         assert!(matches!(entry.parsed, Cow::Borrowed(_)));
-        assert!(ParsedModule::checked_entry(&graph, Path::new("/other.py")).is_none());
+        assert!(CheckedFile::entry(&graph, Path::new("/other.py")).is_none());
 
         // The checked namedtuple declaration replaces the separator escape with spaces.
         let graph = SourceGraph::single(
             "from collections import namedtuple\nPair = namedtuple('Pair', 'left\\x1cright')\n",
         )
         .unwrap();
-        assert!(ParsedModule::checked_entry(&graph, path).is_none());
+        assert!(CheckedFile::entry(&graph, path).is_none());
     }
 }

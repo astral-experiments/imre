@@ -32,20 +32,15 @@ pub(super) struct PhysicalFile {
 /// admission does not attach any checked function bodies.
 #[derive(Default)]
 pub(super) struct CheckedUnit<'a> {
-    pub(super) source: Option<module_source::CheckedFile<'a>>,
+    pub(super) source: Option<module_source::CheckedFile>,
     pub(super) functions: Option<&'a super::CheckedFunctions>,
-}
-
-impl CheckedUnit<'_> {
-    pub(super) fn parsed(&self) -> Option<ParsedModule<'_>> {
-        self.source.map(module_source::CheckedFile::parsed)
-    }
 }
 
 /// Snapshots and admission facts for the bodies selected by import resolution.
 #[derive(Default)]
 pub(super) struct RegisteredBodies<'a> {
     pub(super) checked_units: HashMap<usize, CheckedUnit<'a>>,
+    pub(super) modules: &'a [crate::modules::SourceModule],
     // Decoded installed files retain the fingerprint of their original loader bytes.
     pub(super) physical_files: HashMap<PathBuf, PhysicalFile>,
     pub(super) archive_members: HashMap<PathBuf, ([u8; 32], u32)>,
@@ -53,6 +48,15 @@ pub(super) struct RegisteredBodies<'a> {
     // Providers contribute declarations to the checked program. Their Python bodies
     // retain Python argument binding, including annotations available to reflection.
     pub(super) python_providers: HashSet<usize>,
+}
+
+impl RegisteredBodies<'_> {
+    pub(super) fn parsed(&self, unit: usize) -> Option<ParsedModule<'_>> {
+        self.checked_units
+            .get(&unit)?
+            .source
+            .map(|file| file.parsed(self.modules))
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -84,6 +88,7 @@ pub(super) fn emit(
         physical_files,
         archive_members,
         python_providers,
+        ..
     } = registrations;
     let split = matches!(
         layout,
@@ -106,7 +111,7 @@ pub(super) fn emit(
     for (unit, (module, builtin)) in files.chain(builtins).enumerate() {
         let (name, path, source) = module;
         let checked = checked_units.get(&unit);
-        let discovered = entry_source.take().or_else(|| checked?.parsed());
+        let discovered = entry_source.take().or_else(|| registrations.parsed(unit));
         let zip = archive_members.get(path);
         if !builtin && let Some(error) = module_errors.get(path) {
             for state in std::iter::once(&mut root).chain(whole.as_mut()) {
@@ -1578,7 +1583,10 @@ mod tests {
         let initializer = module.initializer();
         assert!(initializer.fully_checked());
         assert_eq!(
-            module.source.scopes.functions[&site].metadata.defaults.as_ref(),
+            module.source.scopes.functions[&site]
+                .metadata
+                .defaults
+                .as_ref(),
             ["rows"]
         );
         let context = module.source.registered_source();
