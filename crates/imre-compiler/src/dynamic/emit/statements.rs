@@ -195,11 +195,7 @@ impl<'p> Function<'_, 'p> {
             SourceEffect::LoopTransfer(range, transfer) => {
                 self.checkpoint(range);
                 self.simple_call = None;
-                if self.loops.is_empty() {
-                    self.unsupported("loop control outside a loop");
-                } else {
-                    self.unwind_loop(transfer, |code, depth| code.run_cleanups(depth, None));
-                }
+                self.unwind_loop(transfer, |code, depth| code.run_cleanups(depth, None));
             }
             SourceEffect::Assertion(site) => {
                 let source = suite[run.statements.start]
