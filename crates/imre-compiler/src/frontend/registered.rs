@@ -792,6 +792,12 @@ fn statement_sites(
     collector.sites
 }
 
+#[derive(Clone, Copy)]
+enum SuiteSelection {
+    All,
+    Physical,
+}
+
 /// Prepare ordered suites while the source tree and its namespace operands are available.
 pub(crate) struct SuitePreparation<'a> {
     operations: &'a HashMap<TextRange, Expr>,
@@ -832,29 +838,16 @@ impl<'a> SuitePreparation<'a> {
     }
 
     pub(crate) fn suite(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope) -> RegisteredSuite {
-        self.selected_suite(stmts, kind, |_, _| true)
+        self.selected_suite(stmts, kind, SuiteSelection::All)
     }
 
     /// Keep the enclosing physical frame's entry and cleanup. Its complete target effects
     /// share one slot layout per suite, including when another statement must run from source.
     pub(crate) fn physical_body(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope) {
-        self.nested_suite(stmts, kind, |sites, stmt| {
-            if let ast::Stmt::Assign(assign) = stmt {
-                // A physical generator keeps its suspension and live operands in the source frame.
-                return ir::SuspendValue::operand(&assign.value).is_none();
-            }
-            stmt.is_delete_stmt()
-                || sites.assertions.contains_key(&stmt.range())
-                || attribute_effects(stmt).is_some()
-        });
+        self.nested_suite(stmts, kind, SuiteSelection::Physical);
     }
 
-    fn nested_suite(
-        &mut self,
-        stmts: &[ast::Stmt],
-        kind: RegisteredScope,
-        select: fn(&StatementSites, &ast::Stmt) -> bool,
-    ) {
+    fn nested_suite(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope, select: SuiteSelection) {
         if let Some(first) = stmts.first() {
             let plan = self.selected_suite(stmts, kind, select);
             // An optimized-away assertion has no instructions and still owns its source slot.
@@ -868,14 +861,14 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
-        select: fn(&StatementSites, &ast::Stmt) -> bool,
+        select: SuiteSelection,
     ) -> RegisteredSuite {
         use ast::statement_visitor::{StatementVisitor, walk_stmt};
         let plan = self.lower(stmts, kind, select);
         struct Children<'p, 's> {
             prepare: &'p mut SuitePreparation<'s>,
             kind: RegisteredScope,
-            select: fn(&StatementSites, &ast::Stmt) -> bool,
+            select: SuiteSelection,
         }
         impl<'a> StatementVisitor<'a> for Children<'_, '_> {
             fn visit_body(&mut self, stmts: &'a [ast::Stmt]) {
@@ -902,14 +895,18 @@ impl<'a> SuitePreparation<'a> {
         &self,
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
-        select: fn(&StatementSites, &ast::Stmt) -> bool,
+        select: SuiteSelection,
     ) -> RegisteredSuite {
         let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
         let mut body = Vec::new();
         let mut residual: Vec<SourceRun> = Vec::new();
         for (i, stmt) in stmts.iter().enumerate() {
             let slots_before = scope.locals.len();
-            if !select(&self.sites, stmt) || scope.statement(stmt, &mut body).is_err() {
+            let lowered = match select {
+                SuiteSelection::All => scope.statement(stmt, &mut body),
+                SuiteSelection::Physical => scope.physical_statement(stmt, &mut body),
+            };
+            if lowered.is_err() {
                 // A partially lowered target can allocate slots before a later operand fails.
                 if scope.locals.len() != slots_before {
                     scope.locals.truncate(slots_before);
@@ -930,7 +927,7 @@ impl<'a> SuitePreparation<'a> {
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
     ) -> Option<RegisteredSuite> {
-        let plan = self.lower(stmts, kind, |_, _| true);
+        let plan = self.lower(stmts, kind, SuiteSelection::All);
         plan.fully_checked().then_some(plan)
     }
 }
@@ -1310,12 +1307,6 @@ impl statements::StatementLowering for SourceScope<'_> {
             ast::Stmt::With(stmt) if !stmt.is_async => {
                 Ok((self.with_items(&stmt.items, &stmt.body)?, true))
             }
-            ast::Stmt::If(branch) if branch.elif_else_clauses.is_empty() => {
-                let test = self.ordinary_operand(&branch.test).ok_or(())?;
-                let condition = operation(Builtin::Bool, Type::Bool, vec![test]);
-                let body = self.suite(&branch.body)?;
-                Ok((vec![Statement::If(condition, body, Vec::new())], true))
-            }
             ast::Stmt::While(loop_) => {
                 let condition = self.ordinary_operand(&loop_.test).ok_or(())?;
                 let body = self.loop_body(&loop_.body)?;
@@ -1489,6 +1480,57 @@ impl<'a> SourceScope<'a> {
 }
 
 impl SourceScope<'_> {
+    fn physical_statement(
+        &mut self,
+        stmt: &ast::Stmt,
+        body: &mut Vec<Statement>,
+    ) -> StdResult<bool, ()> {
+        if let ast::Stmt::Assign(assign) = stmt {
+            // The physical frame owns an assignment that yields or awaits its value.
+            if ir::SuspendValue::operand(&assign.value).is_some() {
+                return Err(());
+            }
+            return self.statement(stmt, body);
+        }
+        if stmt.is_delete_stmt()
+            || self.sites.assertions.contains_key(&stmt.range())
+            || attribute_effects(stmt).is_some()
+        {
+            return self.statement(stmt, body);
+        }
+        if !matches!(self.kind, RegisteredScope::Function { .. }) || !stmt.is_if_stmt() {
+            return Err(());
+        }
+
+        let begin = body.len();
+        let continues = self.statement(stmt, body)?;
+        // The enclosing physical activation owns suspension and transfers out of this suite.
+        let mut falls_through = true;
+        ir::walk_nodes(&body[begin..], &mut |node, _| {
+            if matches!(
+                node,
+                ir::Node::Statement(
+                    Statement::Break
+                        | Statement::Continue
+                        | Statement::Exhaust
+                        | Statement::IterNext { kind: ir::IterNextKind::Async(_), .. }
+                        | Statement::Return(_)
+                        | Statement::Raise(_)
+                ) | ir::Node::Expression(Expr {
+                    kind: ExprKind::Builtin(Builtin::RegisteredSuspend(..), _),
+                    ..
+                })
+            ) {
+                falls_through = false;
+            }
+        });
+        if !falls_through {
+            body.truncate(begin);
+            return Err(());
+        }
+        Ok(continues)
+    }
+
     fn statement(&mut self, stmt: &ast::Stmt, body: &mut Vec<Statement>) -> StdResult<bool, ()> {
         if let ast::Stmt::Assert(assertion) = stmt {
             if let Some(statements) = self.sites.assertions.get(&stmt.range()) {
