@@ -104,6 +104,12 @@ pub(crate) fn check_nonlocals(source: &str, body: &[ast::Stmt]) -> Result<(), St
     check.error.map_or(Ok(()), Err)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TypeParameterScope {
+    Function,
+    MethodClosure,
+}
+
 /// A synchronous boxed function with one body scope can capture its unbounded type parameters.
 pub(crate) fn boxed_function_type_params<'a>(
     function: &'a ast::StmtFunctionDef,
@@ -111,6 +117,20 @@ pub(crate) fn boxed_function_type_params<'a>(
     nested: bool,
     private_names: Option<&imre_ast::Names>,
 ) -> Option<&'a ast::TypeParams> {
+    function.type_params.as_deref().filter(|_| {
+        type_parameter_scope(function, string_annotations, nested, private_names)
+            == Some(TypeParameterScope::Function)
+    })
+}
+
+/// Class layout and registered definition binding share the lexical scope decision.
+/// Ordinary named functions may inherit a method's finite type-parameter scope.
+pub(crate) fn type_parameter_scope(
+    function: &ast::StmtFunctionDef,
+    string_annotations: bool,
+    nested: bool,
+    private_names: Option<&imre_ast::Names>,
+) -> Option<TypeParameterScope> {
     use ast::AnyNodeRef::*;
     use ast::visitor::source_order::{SourceOrderVisitor, TraversalSignal};
 
@@ -137,13 +157,32 @@ pub(crate) fn boxed_function_type_params<'a>(
     struct BodyScope {
         nested: bool,
         unsupported: bool,
+        has_lexical_function: bool,
+        needs_separate_site: bool,
     }
     impl<'a> SourceOrderVisitor<'a> for BodyScope {
+        fn visit_annotation(&mut self, annotation: &'a ast::Expr) {
+            // The annotation provider owns its operands. Keep the lexical
+            // exclusions (including class cells) but not its executable sites.
+            let enclosing = self.needs_separate_site;
+            self.visit_expr(annotation);
+            self.needs_separate_site = enclosing;
+        }
+
         fn enter_node(&mut self, node: ast::AnyNodeRef<'a>) -> TraversalSignal {
+            if let StmtFunctionDef(def) = node {
+                self.has_lexical_function = true;
+                self.unsupported |= def.type_params.is_some() || def.is_async;
+            }
+            // Imports and template fields have separate site owners. A non-name
+            // annotation can use the ordinary attribute store only with a value.
+            self.needs_separate_site |=
+                matches!(node, StmtImport(_) | StmtImportFrom(_) | ExprTString(_))
+                    || matches!(node, StmtAnnAssign(a) if !a.target.is_name_expr()
+                    && !(a.target.is_attribute_expr() && a.value.is_some()));
             self.unsupported |= matches!(
                 node,
-                StmtFunctionDef(_)
-                    | StmtClassDef(_)
+                StmtClassDef(_)
                     | StmtTypeAlias(_)
                     | StmtNonlocal(_)
                     | ExprLambda(_)
@@ -167,7 +206,22 @@ pub(crate) fn boxed_function_type_params<'a>(
     let mut body = BodyScope {
         nested,
         unsupported: false,
+        has_lexical_function: false,
+        needs_separate_site: false,
     };
     body.visit_body(&function.body);
-    (!body.unsupported).then_some(params)
+    if body.unsupported {
+        return None;
+    }
+    if !body.has_lexical_function {
+        return Some(TypeParameterScope::Function);
+    }
+    (nested
+        && !body.needs_separate_site
+        && function.decorator_list.is_empty()
+        && function
+            .parameters
+            .iter_non_variadic_params()
+            .all(|p| p.default.is_none()))
+    .then_some(TypeParameterScope::MethodClosure)
 }

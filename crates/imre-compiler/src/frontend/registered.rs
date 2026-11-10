@@ -555,7 +555,7 @@ pub(crate) fn registered_sites<'a, R>(
         names: &'s imre_ast::Names,
         operands: &'s HashMap<TextSize, PreparedAnnotation<R>>,
         scope: RegisteredScope,
-        in_generic_function: bool,
+        in_unprepared_generic: bool,
         output: RegisteredSites<'a>,
     }
     impl<'a, R> StatementVisitor<'a> for Collector<'_, 'a, R> {
@@ -572,7 +572,7 @@ pub(crate) fn registered_sites<'a, R>(
                 }
                 ast::Stmt::FunctionDef(def) => {
                     let generic_method = matches!(self.scope, RegisteredScope::Class)
-                        && super::function_scope::boxed_function_type_params(
+                        && super::function_scope::type_parameter_scope(
                             def,
                             self.names.string_annotations,
                             true,
@@ -591,19 +591,23 @@ pub(crate) fn registered_sites<'a, R>(
                             ),
                         );
                     }
-                    let generic = self.in_generic_function || def.type_params.is_some();
+                    // Nested ordinary functions of an admitted method take the
+                    // same preparation path as any other lexical function.
+                    let unprepared = !generic_method
+                        && (self.in_unprepared_generic || def.type_params.is_some());
                     let thread_entry = imre_ast::thread_entry(def);
                     let worker = thread_entry.is_some();
                     self.output.functions.push(FunctionSite {
                         def,
-                        prepare_entry: !generic || generic_method || worker,
+                        prepare_entry: !unprepared || worker,
                         thread_entry,
                     });
                     if worker {
                         // A proven worker contains no nested declarations or namespace effects.
                         return;
                     }
-                    let outer_generic = std::mem::replace(&mut self.in_generic_function, generic);
+                    let outer_generic =
+                        std::mem::replace(&mut self.in_unprepared_generic, unprepared);
                     let outer = std::mem::replace(
                         &mut self.scope,
                         RegisteredScope::Function {
@@ -612,7 +616,7 @@ pub(crate) fn registered_sites<'a, R>(
                     );
                     walk_stmt(self, stmt);
                     self.scope = outer;
-                    self.in_generic_function = outer_generic;
+                    self.in_unprepared_generic = outer_generic;
                 }
                 ast::Stmt::AnnAssign(ann)
                     if !matches!(self.scope, RegisteredScope::Function { .. }) && ann.simple =>
@@ -658,7 +662,7 @@ pub(crate) fn registered_sites<'a, R>(
         names,
         operands,
         scope: RegisteredScope::Module,
-        in_generic_function: false,
+        in_unprepared_generic: false,
         output: RegisteredSites::default(),
     };
     sites.visit_body(body);
@@ -2000,6 +2004,23 @@ mod tests {
         SuitePreparation::new(&operations, source, stmts, true)
             .complete(stmts, kind)
             .map(|plan| plan.checked)
+    }
+
+    #[test]
+    fn generic_method_closure_uses_ordinary_function_sites() {
+        let source = "class Box:\n    def capture[T](self, __value: T):\n        def get():\n            return __value\n        return get\n";
+        let mut body = ruff_python_parser::parse_module(source)
+            .unwrap()
+            .into_syntax()
+            .body;
+        let names = imre_ast::lower(&mut body);
+        let sites = registered_sites::<()>(&body, &names, &HashMap::new());
+        let [method, closure] = sites.functions.as_slice() else {
+            panic!("expected the method and its lexical function");
+        };
+        assert!(method.prepare_entry && closure.prepare_entry);
+        assert!(sites.operations.contains_key(&method.def.name.range()));
+        assert_eq!(closure.def.name.as_str(), "get");
     }
 
     #[test]
