@@ -2068,8 +2068,6 @@ impl SourceScope<'_> {
                 kind: ExprKind::Bind(self.slot(&target.id), Box::new(value)),
             }
         } else {
-            // The display keeps earlier operands live while a direct await suspends.
-            let display = matches!(expr, ast::Expr::Set(_) | ast::Expr::Dict(_));
             values::operation(
                 expr,
                 self.source,
@@ -2077,10 +2075,14 @@ impl SourceScope<'_> {
                 matches!(self.kind, RegisteredScope::Class),
                 |_| true,
                 |child| {
-                    if matches!(expr, ast::Expr::Generator(_)) {
-                        self.creating_iterable(|scope| scope.ordinary_operand(child))
-                    } else {
-                        self.lower_operand(child, display && child.is_await_expr())
+                    match expr {
+                        ast::Expr::Generator(_) => {
+                            self.creating_iterable(|scope| scope.ordinary_operand(child))
+                        }
+                        // The dictionary retains earlier operands while a key, value or spread suspends.
+                        ast::Expr::Dict(_) => self.operand(child),
+                        ast::Expr::Set(_) if child.is_await_expr() => self.operand(child),
+                        _ => self.ordinary_operand(child),
                     }
                     .ok_or(())
                 },
