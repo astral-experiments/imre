@@ -119,7 +119,11 @@ impl CallArgs {
         self.values.iter().map(operand).collect()
     }
 
-    fn capture_invoke<T>(&self, callable: &Expr, mut operand: impl FnMut(&Expr) -> T) -> (T, Vec<T>) {
+    fn capture_invoke<T>(
+        &self,
+        callable: &Expr,
+        mut operand: impl FnMut(&Expr) -> T,
+    ) -> (T, Vec<T>) {
         let callable = operand(callable);
         (callable, self.capture(operand))
     }
@@ -204,7 +208,11 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 next = frame.keep_operands(&next, &value, "0");
                 value
             };
-            let scope = site.scope.as_deref().map(&mut evaluate).unwrap_or(enclosing_scope);
+            let scope = site
+                .scope
+                .as_deref()
+                .map(&mut evaluate)
+                .unwrap_or(enclosing_scope);
             let (target, values) = args.capture_invoke(callable, evaluate);
             let (array, count) = frame.handle_array(&values);
             let positional = super::registered::CallArguments::Positional {
@@ -212,7 +220,14 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 count,
                 receiver_slot: false,
             };
-            frame.positioned_call(&target, positional, &mark, site.range, site.callee_end, &scope)
+            frame.positioned_call(
+                &target,
+                positional,
+                &mark,
+                site.range,
+                site.callee_end,
+                &scope,
+            )
         });
         CheckedValue::handle(result)
     }

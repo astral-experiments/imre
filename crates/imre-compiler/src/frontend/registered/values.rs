@@ -1454,7 +1454,7 @@ mod tests {
                     assert_eq!(args.values.len(), count);
                 }
                 ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
-                    assert!(count < 30 || count > 64);
+                    assert!(!(30..=64).contains(&count));
                     assert_eq!(operands.len(), count + 1);
                     assert_eq!(
                         matches!(call.target, ir::RegisteredCallTarget::Method { .. }),
