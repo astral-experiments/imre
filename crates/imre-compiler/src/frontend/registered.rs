@@ -1169,12 +1169,8 @@ impl<'a> SuitePreparation<'a> {
                 let class = site.def;
                 let suspended = site.enclosing_function.is_some_and(&suspends);
                 let start = class.start();
-                let decorators = class
-                    .decorator_list
-                    .iter()
-                    .map(|decorator| {
-                        self.registered_operand(&decorator.expression, site.enclosing, suspended)
-                    })
+                let decorators = imre_ast::decorator_expressions(&class.decorator_list)
+                    .map(|expr| self.registered_operand(expr, site.enclosing, suspended))
                     .collect();
                 let generic = site.parameters.is_some();
                 let bases_scope = if generic {
@@ -1184,7 +1180,7 @@ impl<'a> SuitePreparation<'a> {
                 };
                 let arguments = class.arguments.as_deref();
                 let layout = arguments.map(packed_arguments).unwrap_or_default();
-                let values = || arguments.into_iter().flat_map(registered_arguments);
+                let values = || arguments.into_iter().flat_map(imre_ast::argument_values);
                 let function = if generic {
                     let mut scope =
                         SourceScope::new(bases_scope, self.source, self.operations, &self.sites);
@@ -2116,24 +2112,17 @@ impl statements::StatementLowering for SourceScope<'_> {
             )),
             ast::Stmt::Match(branch) => self.match_statement(branch),
             ast::Stmt::ClassDef(class) => {
-                let mut operands = class
-                    .decorator_list
-                    .iter()
-                    .map(|d| self.ordinary_operand(&d.expression))
+                let operands = imre_ast::class_definition_expressions(class)
+                    .map(|expr| self.ordinary_operand(expr))
                     .collect::<Option<Vec<_>>>()
                     .ok_or(())?;
-                let arguments = if class.type_params.is_some() {
-                    None
-                } else {
-                    let mut layout = ir::PackedArguments::default();
-                    if let Some(arguments) = &class.arguments {
-                        layout = super::packed_arguments(arguments);
-                        for operand in super::registered_arguments(arguments) {
-                            operands.push(self.ordinary_operand(operand).ok_or(())?);
-                        }
-                    }
-                    Some(layout)
-                };
+                let arguments = class.type_params.is_none().then(|| {
+                    class
+                        .arguments
+                        .as_deref()
+                        .map(packed_arguments)
+                        .unwrap_or_default()
+                });
                 let site = ir::DefinitionSite::Class {
                     start: class.start(),
                     arguments,

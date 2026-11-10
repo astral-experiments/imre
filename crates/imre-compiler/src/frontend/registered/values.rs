@@ -116,7 +116,9 @@ pub(crate) struct ObjectOperation<'a> {
 
 impl<'a> ObjectOperation<'a> {
     pub(crate) fn arguments(&self) -> impl Iterator<Item = &'a ast::Expr> + use<'a> {
-        self.arguments.into_iter().flat_map(registered_arguments)
+        self.arguments
+            .into_iter()
+            .flat_map(imre_ast::argument_values)
     }
 }
 
@@ -255,16 +257,6 @@ pub(crate) fn packed_arguments(args: &ast::Arguments) -> ir::PackedArguments {
             .map(|key| key.arg.as_ref().map(ToString::to_string))
             .collect(),
     }
-}
-
-pub(crate) fn registered_arguments(args: &ast::Arguments) -> impl Iterator<Item = &ast::Expr> {
-    args.args
-        .iter()
-        .map(|arg| match arg {
-            ast::Expr::Starred(star) => star.value.as_ref(),
-            value => value,
-        })
-        .chain(args.keywords.iter().map(|keyword| &keyword.value))
 }
 
 impl From<ast::UnaryOp> for ir::ObjectUnary {
@@ -439,7 +431,7 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         target: Expr,
     ) -> Result<Expr, String> {
-        let arguments = registered_arguments(&call.arguments)
+        let arguments = imre_ast::argument_values(&call.arguments)
             .map(|arg| self.expr(arg))
             .collect::<Result<_, _>>()?;
         let mut value = bound_call(call_site(call, callable_target(call)), target, arguments);

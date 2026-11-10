@@ -83,15 +83,36 @@ pub fn parameter_defaults(parameters: &ast::Parameters) -> impl Iterator<Item = 
         .filter_map(|parameter| parameter.default.as_deref())
 }
 
+pub fn decorator_expressions(decorators: &[ast::Decorator]) -> impl Iterator<Item = &ast::Expr> {
+    decorators.iter().map(|decorator| &decorator.expression)
+}
+
 /// Expressions evaluated in the enclosing scope when a function is defined, in order.
 pub fn function_definition_expressions(
     function: &ast::StmtFunctionDef,
 ) -> impl Iterator<Item = &ast::Expr> {
-    function
-        .decorator_list
+    decorator_expressions(&function.decorator_list).chain(parameter_defaults(&function.parameters))
+}
+
+/// Positional and starred operands are evaluated before keyword operands.
+pub fn argument_values(args: &ast::Arguments) -> impl Iterator<Item = &ast::Expr> {
+    args.args
         .iter()
-        .map(|decorator| &decorator.expression)
-        .chain(parameter_defaults(&function.parameters))
+        .map(|arg| match arg {
+            ast::Expr::Starred(star) => star.value.as_ref(),
+            value => value,
+        })
+        .chain(args.keywords.iter().map(|keyword| &keyword.value))
+}
+
+/// Generic class arguments run in the type-parameter scope. Decorators always run outside it.
+pub fn class_definition_expressions(class: &ast::StmtClassDef) -> impl Iterator<Item = &ast::Expr> {
+    let arguments = class
+        .arguments
+        .as_deref()
+        .filter(|_| class.type_params.is_none());
+    decorator_expressions(&class.decorator_list)
+        .chain(arguments.into_iter().flat_map(argument_values))
 }
 
 /// Diagnose the positional-only range constructor before converting any bounds.

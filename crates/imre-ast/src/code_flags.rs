@@ -62,7 +62,11 @@ impl<'a> Visitor<'a> for Yields {
                         self.visit_expr(expr);
                     }
                 }
-                ast::Stmt::ClassDef(_) => {}
+                ast::Stmt::ClassDef(class) => {
+                    for expr in crate::class_definition_expressions(class) {
+                        self.visit_expr(expr);
+                    }
+                }
                 _ => visitor::walk_stmt(self, stmt),
             });
         }
@@ -110,10 +114,15 @@ mod tests {
             "def positional():\n    def inner(x=(yield 1)): pass\n\
              def keyword():\n    def inner(*, x=(yield 2)): pass\n\
              def decorated():\n    @(yield 3)\n    def inner(): pass\n\
-             def ordinary():\n    def inner(): yield 4\n",
+             def ordinary():\n    def inner(): yield 4\n\
+             def base():\n    class Inner((yield 1)): pass\n\
+             def keyword_base():\n    class Inner(metaclass=(yield 2)): pass\n\
+             def decorated_class():\n    @(yield 3)\n    class Inner[T]: pass\n\
+             def method():\n    class Inner:\n        def gen(self): yield 4\n",
         )
         .unwrap();
-        for (stmt, expected) in module.suite().iter().zip([true, true, true, false]) {
+        let expected = [true, true, true, false, true, true, true, false];
+        for (stmt, expected) in module.suite().iter().zip(expected) {
             let function = stmt.as_function_def_stmt().unwrap();
             assert_eq!(is_generator(&function.body), expected, "{}", function.name);
         }
