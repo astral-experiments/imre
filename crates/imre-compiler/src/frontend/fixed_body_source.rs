@@ -95,6 +95,7 @@ impl SourceSites {
         body: &[Statement],
         names: HashMap<String, usize>,
         locals: &[Type],
+        method: bool,
     ) -> Option<FixedBodySource> {
         if self.current.is_some()
             || self.statements != source_statements
@@ -107,15 +108,19 @@ impl SourceSites {
         let local_names: HashMap<_, _> = names
             .into_iter()
             .map(|(name, slot)| {
-                (
+                // The Python binder spells private method locals with their class prefix.
+                if method && ruff_python_stdlib::identifiers::is_mangled_private(&name) {
+                    return None;
+                }
+                Some((
                     slot,
                     registered::LocalBinding {
                         name,
                         namespace: None,
                     },
-                )
+                ))
             })
-            .collect();
+            .collect::<Option<_>>()?;
         if local_names.len() != locals.len() {
             return None;
         }
@@ -161,6 +166,46 @@ mod tests {
                 kind: ExprKind::Binary(Binary::Concat, ..),
             })]
         ));
+    }
+
+    #[test]
+    fn wrapper_links_retain_only_the_owning_instance_method_sites() {
+        let text = concat!(
+            "from functools import update_wrapper\n",
+            "from typing import Callable\n",
+            "class First:\n",
+            "    def send(self, text: str) -> str: return text + text\n",
+            "class Child(First): pass\n",
+            "class Second:\n",
+            "    def send(self, text: str) -> str: return text\n",
+            "    def private(self, __value: str) -> str: return __value\n",
+            "def sink(text: str) -> str: return text\n",
+            "def main() -> None:\n",
+            "    method: Callable[[str], str] = First().send\n",
+            "    print(update_wrapper(sink, method, (), ())('x'))\n",
+            "    print(Child().send('a'), Second().send('b'), Second().private('c'))\n",
+            "main()\n",
+        );
+        let project = tempfile::tempdir().unwrap();
+        let entry = project.path().join("app.py");
+        std::fs::write(&entry, text).unwrap();
+        let mut graph = SourceGraph::load(&entry, Some(project.path()), &[]).unwrap();
+        let crate::CheckedProgram::Native(fixed) = crate::checked_lower(&mut graph).unwrap() else {
+            panic!("expected a fixed wrapper graph")
+        };
+        let mut owners: Vec<_> = fixed
+            .frame_sources
+            .values()
+            .filter(|(_, body)| body.local_names.contains_key(&1))
+            .map(|(start, _)| usize::from(*start))
+            .collect();
+        owners.sort_unstable();
+        assert_eq!(
+            owners,
+            text.match_indices("def send(")
+                .map(|(at, _)| at)
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]

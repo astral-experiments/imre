@@ -3551,6 +3551,41 @@ mod tests {
     }
 
     #[test]
+    fn source_guard_is_prepared_only_for_a_residual_conditional() {
+        let text = concat!(
+            "if checked:\n    del name\n",
+            "if physical:\n    result: int = next(n for n in (1,))\n",
+        );
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let stmts = &module.parsed.syntax().body;
+        let literals = values::ModuleSource::new(module);
+        let source = literals.context(text);
+        let operations = prepared_sites(stmts, source, false).operations;
+        let mut prepare = SuitePreparation::new(&operations, source, stmts, true);
+        let plan = prepare.suite(stmts, RegisteredScope::Module);
+        assert!(
+            plan.checked
+                .function
+                .body
+                .iter()
+                .any(|stmt| matches!(stmt, Statement::If(..)))
+        );
+        let [run] = plan.residual.as_slice() else {
+            panic!("expected only the second conditional to need a physical guard")
+        };
+        assert_eq!(run.statements, 1..2);
+        let Some(SourceEffect::If { range, arms }) = &run.effect else {
+            panic!("expected a prepared mixed conditional")
+        };
+        assert_eq!(*range, stmts[1].range());
+        assert!(matches!(
+            arms.as_slice(),
+            [(Some(PhysicalOperand::Checked(_)), _)]
+        ));
+    }
+
+    #[test]
     fn prepared_source_runs_keep_their_order_and_namespace_ownership() {
         let text = "from . import a\nx: int = a\nif a:\n    del a\ny: int = next(n for n in (1,))\nimport z\n";
         let mut stmts = ruff_python_parser::parse_module(text)

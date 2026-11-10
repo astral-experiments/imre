@@ -142,6 +142,7 @@ impl Checker<'_> {
                 "native wrapper links require two functions with the same callable signature",
             ));
         }
+        self.wrapper_link.set(true);
         Ok(Expr {
             ty: wrapper.ty,
             kind: ExprKind::Builtin(Builtin::FunctionWrappedSet, vec![wrapper, wrapped]),
