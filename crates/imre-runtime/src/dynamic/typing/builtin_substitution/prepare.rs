@@ -1,5 +1,6 @@
 //! Expand fixed-length unpacked tuples and run each parameter's preparation hook.
 
+use crate::dynamic::typing::{ParameterField, ParameterValue};
 use crate::dynamic::value::ELLIPSIS;
 use crate::dynamic::{Context, Error, Id, NONE, Result, Value, builtins};
 
@@ -51,7 +52,7 @@ fn prepare_typevar(
     parameters: &[Id],
     param: Id,
     args: Id,
-    default: Id,
+    default: ParameterValue,
 ) -> Result<Id> {
     // PySequence_Index compares earlier parameters before reaching this TypeVar.
     for (index, &candidate) in parameters.iter().enumerate() {
@@ -62,7 +63,8 @@ fn prepare_typevar(
         if index < actual {
             return Ok(args);
         }
-        if index == actual && !matches!(ctx.heap.get(default), Value::NoDefault) {
+        if index == actual && default.has_default(ctx) {
+            let default = default.read(ctx, param, ParameterField::Default)?;
             let extra = ctx.alloc(Value::Tuple(vec![default]));
             return ctx.binary("+", args, extra);
         }

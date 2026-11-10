@@ -9,8 +9,7 @@ pub(crate) mod classes;
 mod type_parameters;
 
 pub(crate) use type_parameters::{
-    TypeParameterScope, boxed_function_type_params, check_nonlocals, function_parameter_header,
-    type_parameter_scope,
+    TypeParameterScope, boxed_function_type_params, check_nonlocals, type_parameter_scope,
 };
 
 use ruff_python_ast as ast;
@@ -93,16 +92,12 @@ impl<'a> Visitor<'a> for ClosureNames {
                         crate::frontend::parameter_annotations(&f.parameters, f.returns.as_deref())
                     };
                     if let Some(params) = &f.type_params {
-                        for param in params.iter() {
-                            if let ast::TypeParam::TypeVar(v) = param
-                                && let Some(bound) = v.bound.as_deref()
-                            {
-                                annotations.push(("", bound));
-                            }
-                            if let Some(default) = param.default() {
-                                annotations.push(("", default));
-                            }
-                        }
+                        annotations.extend(
+                            params
+                                .iter()
+                                .flat_map(imre_ast::TypeParameterField::expressions)
+                                .map(|(_, expr)| ("", expr)),
+                        );
                     }
                     reads.extend(class_metadata::annotation_reads(&annotations, None, false));
                     if let Some(params) = &f.type_params {
@@ -263,6 +258,18 @@ pub(crate) struct FunctionScope {
 }
 
 impl FunctionScope {
+    pub(super) fn parameter(expr: &ast::Expr, class: Option<&ClassBindings>) -> Self {
+        let mut names = ClosureNames {
+            reads: class_metadata::annotation_reads(&[("", expr)], class, false),
+            ..ClosureNames::default()
+        };
+        if class.is_some() {
+            names.reads.insert("__classdict__".into());
+        }
+        names.locals.insert(".format".into());
+        Self::new(names, None, false)
+    }
+
     fn new(
         mut names: ClosureNames,
         parameters: Option<&ast::Parameters>,

@@ -4136,6 +4136,13 @@ def report(text):
         assert rejected.returncode == 1, rejected
         assert b"scores.py:4:14: Imre: expected int, got str" in rejected.stderr, rejected
 
+        caller.write_text(
+            "def keep(fn): return fn\ndef parent(original):\n"
+            "    @keep\n    def show[T: int](value: T = original) -> T: return value\n"
+            "    return show\nfn = parent(17)\n"
+            "print(fn(), fn.__type_params__[0].__name__)\n"
+        )
+        compare("-IB", caller, native_args=(caller,))
         for name in ("module_generic_function.py", "postponed_generic_method.py"):
             generic = fixtures / name
             compare("-IB", generic, native_args=("run", generic, "--quiet"))

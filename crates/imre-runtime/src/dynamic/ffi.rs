@@ -615,6 +615,7 @@ impl Context {
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
             "class_typevartuple" => Ok(super::typing::declared_pack(self, a)),
             "class_paramspec" => Ok(super::paramspec::declared(self, a)),
+            "type_parameter_evaluator" => super::typing::set_parameter_evaluator(self, a, b, c),
             "class_parameter_scope" | "function_parameter_scope" => {
                 super::typing::parameter_scope(self, a, b, op == "class_parameter_scope")
             }

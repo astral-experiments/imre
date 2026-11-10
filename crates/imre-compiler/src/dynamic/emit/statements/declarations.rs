@@ -1,14 +1,15 @@
 //! Resolve declaration and annotation code sites before emitting the checked block.
 use super::super::sites::{
     AnnotationString, CheckedSites, CompiledAlias, CompiledDefinition, CompiledGenerator,
-    Declaration, RequiredSite,
+    CompiledParameterProvider, Declaration, RequiredSite,
 };
 use super::super::{
     AnnotationScope, Body, DefinitionName, Entry, Function, RegisteredFrame, SourceInfo, SourceMap,
 };
 use super::CallableSites;
-use crate::frontend::function_scope::NamedFunction;
-use crate::ir::{Expr, Statement};
+use crate::frontend::FunctionParameterProvider;
+use crate::frontend::function_scope::{ClassBindings, NamedFunction};
+use crate::ir::{Expr, RegisteredTypeParameter, Statement};
 use ruff_text_size::{TextRange, TextSize};
 use serde_json::json;
 
@@ -133,6 +134,26 @@ impl CallableSites<'_, '_> {
             RequiredSite::ClassNamespace(site) => self.place_class_namespace(site),
             RequiredSite::Definition(site) => self.place_definition(site),
         }
+    }
+
+    pub(in crate::dynamic::emit) fn compile_evaluator(
+        &mut self,
+        site: TextSize,
+        name: &str,
+        scope: &crate::frontend::function_scope::FunctionScope,
+        type_parameter_scope: bool,
+        code: &crate::frontend::AnnotationCode,
+        class: Option<crate::frontend::function_scope::ClassBindings>,
+    ) -> CompiledDefinition {
+        self.compile_definition(
+            site,
+            DefinitionName::Evaluator {
+                name,
+                scope,
+                type_parameter_scope,
+            },
+            Body::Operand(code.range, &code.operand, class),
+        )
     }
 
     /// Python creates a fresh callable at each execution of the binding while the
@@ -281,6 +302,7 @@ impl CallableSites<'_, '_> {
                 .map(|&offset| self.source.positions.line(offset))
                 .collect(),
             type_params: Vec::new(),
+            parameter_providers: Ok(Vec::new()),
         };
         self.sites.definitions.insert(start, declaration);
     }
@@ -298,14 +320,52 @@ impl CallableSites<'_, '_> {
             .iter()
             .map(|&offset| source.positions.line(offset))
             .collect();
+        let parameter_providers = self.compile_parameter_providers(
+            &header.type_params,
+            &header.parameter_providers,
+            self.class_locals,
+        );
         self.sites.definitions.insert(
             site,
             Declaration {
                 definition,
                 decorator_lines,
                 type_params: header.type_params.clone(),
+                parameter_providers,
             },
         );
+    }
+
+    pub(in crate::dynamic::emit) fn compile_parameter_providers(
+        &mut self,
+        parameters: &[RegisteredTypeParameter],
+        providers: &[FunctionParameterProvider],
+        class: Option<&ClassBindings>,
+    ) -> Result<Vec<CompiledParameterProvider>, String> {
+        let mut compiled = Vec::new();
+        for provider in providers {
+            let body = provider.body.as_ref().ok_or_else(|| {
+                self.source.diagnostic_at(
+                    provider.range,
+                    "type parameter evaluator has no checked expression operand",
+                )
+            })?;
+            let parameter = &parameters[provider.parameter];
+            let evaluator = self.compile_evaluator(
+                body.range.start(),
+                &parameter.name,
+                &provider.scope,
+                true,
+                body,
+                class.cloned(),
+            );
+            compiled.push(CompiledParameterProvider {
+                parameter: provider.parameter,
+                field: provider.field,
+                evaluator,
+            });
+        }
+        Ok(compiled)
     }
 
     fn parameter_provider(
@@ -439,17 +499,17 @@ impl CallableSites<'_, '_> {
             ));
         }
         let compiled = match &alias.body {
-            Ok(code) => {
-                let body = Body::Operand(code.range, &code.operand, self.class_locals.cloned());
-                Some(CompiledAlias {
-                    definition: self.compile_definition(
-                        site,
-                        DefinitionName::TypeAlias(&alias.name),
-                        body,
-                    ),
-                    parameters: alias.parameters.clone(),
-                })
-            }
+            Ok(code) => Some(CompiledAlias {
+                definition: self.compile_evaluator(
+                    site,
+                    &alias.name,
+                    &self.source.scopes.aliases[&site],
+                    alias.parameters.is_some(),
+                    code,
+                    self.class_locals.cloned(),
+                ),
+                parameters: alias.parameters.clone(),
+            }),
             Err(range) => {
                 self.output.diagnostic.get_or_insert_with(|| {
                     self.source
