@@ -2,6 +2,24 @@
 
 use super::*;
 
+enum ExpansionSource {
+    Value(Expr),
+    Iteration(Iteration),
+}
+
+impl ExpansionSource {
+    fn into_iteration(
+        self,
+        checker: &mut Checker<'_>,
+        source: &ast::Expr,
+    ) -> Result<Iteration, String> {
+        match self {
+            Self::Value(value) => checker.iteration_value(value, false, source),
+            Self::Iteration(input) => Ok(input),
+        }
+    }
+}
+
 impl Checker<'_> {
     /// Capture keyword values before constructing their dictionary. A later
     /// argument may mutate a previously captured value or raise an exception.
@@ -117,7 +135,19 @@ impl Checker<'_> {
                     }
                 } else {
                     let pair = shape.map(|(k, v)| self.types.tuple(vec![k, v]));
-                    self.expansion_input(source, pair)?
+                    match self.expansion_source(source, pair)? {
+                        ExpansionSource::Value(value)
+                        | ExpansionSource::Iteration(Iteration::Container {
+                            iterable: value,
+                            items: false,
+                            start: None,
+                        }) if value.ty == Type::PythonObject
+                            && self.unshadowed_builtin(&call.func, "dict") =>
+                        {
+                            return self.registered_iterable_call(call, "dict", value);
+                        }
+                        input => input.into_iteration(self, source)?,
+                    }
                 };
                 let Iteration::Container {
                     ref iterable,
@@ -777,22 +807,33 @@ impl Checker<'_> {
         expression: &ast::Expr,
         element: Option<Type>,
     ) -> Result<Iteration, String> {
+        self.expansion_source(expression, element)?
+            .into_iteration(self, expression)
+    }
+
+    fn expansion_source(
+        &mut self,
+        expression: &ast::Expr,
+        element: Option<Type>,
+    ) -> Result<ExpansionSource, String> {
         if let Some(input) = self.pipeline_input(expression, element, None)? {
             if let Iteration::Prepared(prepared) = &input {
                 self.hint_empty_iteration(prepared, element);
             }
-            return Ok(input);
+            return Ok(ExpansionSource::Iteration(input));
         }
         if let ast::Expr::Call(call) = expression {
             if self.resolve(&call.func).is_some() {
-                return Ok(Iteration::Container {
+                return Ok(ExpansionSource::Iteration(Iteration::Container {
                     iterable: self.expr(expression)?,
                     items: false,
                     start: None,
-                });
+                }));
             }
             if matches!(&*call.func, ast::Expr::Name(name) if name.id == "range") {
-                return self.iteration_input(expression, None);
+                return self
+                    .iteration_input(expression, None)
+                    .map(ExpansionSource::Iteration);
             }
             if let ast::Expr::Attribute(attribute) = &*call.func
                 && attribute.attr.as_str() == "items"
@@ -808,11 +849,13 @@ impl Checker<'_> {
                 });
                 let iterable = self.boolean_operand(&attribute.value, hint)?;
                 if iterable.ty == Type::PythonObject {
-                    return self.object_method_iteration(call, iterable);
+                    return self
+                        .call_on(call, Some(iterable))
+                        .map(ExpansionSource::Value);
                 }
                 if let Type::Class(class) = iterable.ty {
                     let iterable = self.iteration_method_call(call, attribute, class, iterable)?;
-                    return self.iteration_value(iterable, false, call);
+                    return Ok(ExpansionSource::Value(iterable));
                 }
                 let iterable = if matches!(iterable.ty, Type::Document(_)) {
                     self.document_map(iterable)
@@ -829,16 +872,16 @@ impl Checker<'_> {
                 if !call.arguments.args.is_empty() || !call.arguments.keywords.is_empty() {
                     return Err(error(self.source, call, "dict.items() takes no arguments"));
                 }
-                return Ok(Iteration::Container {
+                return Ok(ExpansionSource::Iteration(Iteration::Container {
                     iterable,
                     items: true,
                     start: None,
-                });
+                }));
             }
         }
         let hint = element.and_then(|element| self.expansion_hint(expression, element));
-        let iterable = self.iteration_expression(expression, hint)?;
-        self.iteration_value(iterable, false, expression)
+        self.iteration_expression(expression, hint)
+            .map(ExpansionSource::Value)
     }
 
     /// Fixed tuples copy directly from rooted fields. Other sources share the

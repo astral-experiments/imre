@@ -192,17 +192,20 @@ impl Checker<'_> {
         let mut method_input = None;
         if let ast::Expr::Call(view) = source
             && self.resolve(&view.func).is_none()
-            && view.arguments.args.is_empty()
-            && view.arguments.keywords.is_empty()
             && let ast::Expr::Attribute(method) = &*view.func
             && method.attr.as_str() == "values"
             && self.class_reference(&method.value).is_none()
         {
             let receiver = self.expr(&method.value)?;
-            if self
-                .types
-                .mapping(receiver.ty)
-                .is_some_and(|(_, value)| value == Type::Int)
+            if receiver.ty == Type::PythonObject {
+                let iterable = self.call_on(view, Some(receiver))?;
+                return self.registered_iterable_call(call, "sum", iterable);
+            }
+            if view.arguments.is_empty()
+                && self
+                    .types
+                    .mapping(receiver.ty)
+                    .is_some_and(|(_, value)| value == Type::Int)
             {
                 let start = self.integer_fold_start(call, "0")?;
                 return Ok(Expr {
@@ -212,15 +215,19 @@ impl Checker<'_> {
             }
             // A first-party values method still produces its usual iterable.
             // Use the already checked receiver, including any walrus bindings.
-            let (Type::Class(class) | Type::StrEnum(class)) = receiver.ty else {
-                return Err(error(
-                    self.source,
-                    view,
-                    "sum of values requires an integer-valued mapping or method returning an integer iterable",
-                ));
-            };
-            let iterable = self.iteration_method_call(view, method, class, receiver)?;
-            method_input = Some(self.iteration_value(iterable, false, view)?);
+            method_input = Some(if view.arguments.is_empty() {
+                let (Type::Class(class) | Type::StrEnum(class)) = receiver.ty else {
+                    return Err(error(
+                        self.source,
+                        view,
+                        "sum of values requires an integer-valued mapping or method returning an integer iterable",
+                    ));
+                };
+                let iterable = self.iteration_method_call(view, method, class, receiver)?;
+                self.iteration_value(iterable, false, view)?
+            } else {
+                self.mapping_values_iteration(view, method, receiver)?
+            });
         }
         if matches!(source, ast::Expr::ListComp(_)) {
             let subtotal = self.sum_comprehension(source)?;

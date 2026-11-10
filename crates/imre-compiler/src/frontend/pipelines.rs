@@ -776,45 +776,10 @@ impl Checker<'_> {
             && attribute.attr.as_str() == "values"
             && self.class_reference(&attribute.value).is_none()
         {
-            let raw = self.expr(&attribute.value)?;
-            if raw.ty == Type::PythonObject {
-                return self.object_method_iteration(call, raw).map(Some);
-            }
-            if let Type::Class(class) = raw.ty {
-                let iterable = self.iteration_method_call(call, attribute, class, raw)?;
-                return self.iteration_value(iterable, false, call).map(Some);
-            }
-            let source = if matches!(raw.ty, Type::Document(_)) {
-                self.document_map(raw)
-            } else {
-                raw
-            };
-            let (_, item) = self.types.mapping(source.ty).ok_or_else(|| {
-                error(self.source, call, "values() requires a concrete dictionary")
-            })?;
-            if !call.arguments.is_empty() {
-                return Err(error(self.source, call, "dict.values() takes no arguments"));
-            }
-            let mut input = self.prepare_container(source, true, call, false)?;
-            let pair = input.value;
-            let value = self.hidden(item);
-            input.next.push(Statement::If(
-                self.local(input.ready),
-                vec![
-                    Statement::Assign(
-                        value,
-                        Expr {
-                            ty: item,
-                            kind: ExprKind::Field(Box::new(self.local(pair)), 1),
-                        },
-                    ),
-                    Statement::Clear(pair),
-                ],
-                Vec::new(),
-            ));
-            input.value = value;
-            input.clear.push(value);
-            return Ok(Some(Iteration::Prepared(input)));
+            let receiver = self.expr(&attribute.value)?;
+            return self
+                .mapping_values_iteration(call, attribute, receiver)
+                .map(Some);
         }
         if let ast::Expr::Attribute(attribute) = &*call.func
             && matches!(
@@ -1323,6 +1288,53 @@ impl Checker<'_> {
         Ok(Some(Iteration::Prepared(
             self.prepare_cursor(cursor, Type::Str),
         )))
+    }
+
+    pub(super) fn mapping_values_iteration(
+        &mut self,
+        call: &ast::ExprCall,
+        attribute: &ast::ExprAttribute,
+        raw: Expr,
+    ) -> Result<Iteration, String> {
+        if raw.ty == Type::PythonObject {
+            return self.object_method_iteration(call, raw);
+        }
+        if let Type::Class(class) = raw.ty {
+            let iterable = self.iteration_method_call(call, attribute, class, raw)?;
+            return self.iteration_value(iterable, false, call);
+        }
+        let source = if matches!(raw.ty, Type::Document(_)) {
+            self.document_map(raw)
+        } else {
+            raw
+        };
+        let (_, item) = self
+            .types
+            .mapping(source.ty)
+            .ok_or_else(|| error(self.source, call, "values() requires a concrete dictionary"))?;
+        if !call.arguments.is_empty() {
+            return Err(error(self.source, call, "dict.values() takes no arguments"));
+        }
+        let mut input = self.prepare_container(source, true, call, false)?;
+        let pair = input.value;
+        let value = self.hidden(item);
+        input.next.push(Statement::If(
+            self.local(input.ready),
+            vec![
+                Statement::Assign(
+                    value,
+                    Expr {
+                        ty: item,
+                        kind: ExprKind::Field(Box::new(self.local(pair)), 1),
+                    },
+                ),
+                Statement::Clear(pair),
+            ],
+            Vec::new(),
+        ));
+        input.value = value;
+        input.clear.push(value);
+        Ok(Iteration::Prepared(input))
     }
 
     pub(super) fn prepare_object_iteration(
