@@ -1855,11 +1855,11 @@ impl SourceScope<'_> {
     }
 
     fn operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
-        // A for or comprehension cursor needs to survive the next pull, even
-        // inside a nested while. A plain while carries no cursor across a yield.
-        if self.loop_scope != LoopScope::WithCursor
-            && let RegisteredScope::Function { is_async } = self.kind
+        if let RegisteredScope::Function { is_async } = self.kind
             && let Some((kind, value)) = ir::SuspendValue::operand(expr)
+            // A plain generator keeps its live iterator in a private frame slot.
+            && (self.loop_scope != LoopScope::WithCursor
+                || matches!((kind, is_async), (ir::SuspendValue::Yield, false)))
             && !matches!(
                 (kind, is_async),
                 (ir::SuspendValue::Await, false) | (ir::SuspendValue::Delegate, true)
@@ -3374,26 +3374,42 @@ mod tests {
         });
         assert_eq!(yields_per_loop, [1]);
         let nested = "def walk(rows, test):\n    for row in rows:\n        while test(row):\n            yield row\n";
-        assert!(prepare(nested, "walk").is_none());
+        assert!(prepare(nested, "walk").is_some());
     }
 
     #[test]
-    fn suspending_loop_keeps_its_resumable_generator_body() {
-        let graph =
-            SourceGraph::single("def sales(rows):\n    for row in rows:\n        yield row\n")
-                .unwrap();
-        let definition = graph.modules[graph.entry].parsed.syntax().body[0]
+    fn ordinary_yield_retains_the_checked_loop_cursor() {
+        let source = "def sales(rows):\n    for row in rows:\n        received = yield row\n";
+        let graph = SourceGraph::single(source).unwrap();
+        let module = &graph.modules[graph.entry];
+        let definition = module.parsed.syntax().body[0]
             .as_function_def_stmt()
             .unwrap();
-        assert!(
-            registered_suite(
-                &definition.body,
-                RegisteredScope::Function { is_async: false },
-                values::ModuleSource::new(&graph.modules[graph.entry])
-                    .context(&graph.modules[graph.entry].source)
-            )
-            .is_none()
-        );
+        let checked = registered_suite(
+            &definition.body,
+            RegisteredScope::Function { is_async: false },
+            values::ModuleSource::new(module).context(&module.source),
+        )
+        .expect("complete generator body");
+        let mut cursors = Vec::new();
+        let mut yields = Vec::new();
+        ir::walk_statements(&checked.function.body, &mut |stmt| {
+            if let Statement::IterNext { iterator, .. } = stmt {
+                cursors.push(*iterator);
+            }
+        });
+        ir::walk_expressions(&checked.function.body, &mut |expr| {
+            if let ExprKind::Builtin(
+                Builtin::RegisteredSuspend(ir::SuspendValue::Yield, range),
+                _,
+            ) = &expr.kind
+            {
+                yields.push(&source[*range]);
+            }
+        });
+        assert_eq!(cursors.len(), 1);
+        assert!(checked.region().private_slots().contains(&cursors[0]));
+        assert_eq!(yields, ["yield row"]);
     }
 
     #[test]

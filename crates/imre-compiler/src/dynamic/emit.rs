@@ -1272,37 +1272,18 @@ mod tests {
         )
         .unwrap();
         let def = prepared.body[0].as_function_def_stmt().unwrap();
-        let loop_ = def.body[0].as_for_stmt().unwrap();
-        let suite = &prepared.source.nested_bodies[&loop_.body[0].start()];
+        let suite = &prepared.source.function_bodies[&def.start()];
         crate::verify::registered(suite.checked.region()).unwrap();
-        let gaps: Vec<_> = suite
-            .residual
-            .iter()
-            .map(|run| run.statements.clone())
-            .collect();
-        assert_eq!(gaps, [0..1, 2..4]);
-        assert!(
-            suite
-                .checked
-                .function
-                .body
-                .iter()
-                .any(|stmt| matches!(stmt, crate::ir::Statement::If(..)))
-        );
-        assert!(
-            suite
-                .checked
-                .local_names
-                .values()
-                .any(|binding| binding.name == "selected")
-        );
-        assert!(
-            !suite
-                .checked
-                .local_names
-                .values()
-                .any(|binding| binding.name == "suspended")
-        );
+        assert!(suite.residual.is_empty());
+        for name in ["selected", "suspended"] {
+            assert!(
+                suite
+                    .checked
+                    .local_names
+                    .values()
+                    .any(|binding| binding.name == name)
+            );
+        }
         let def = prepared.body[1].as_function_def_stmt().unwrap();
         let loop_ = def.body[0].as_for_stmt().unwrap();
         let suite = &prepared.source.nested_bodies[&loop_.body[0].start()];
