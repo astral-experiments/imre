@@ -954,7 +954,7 @@ fn lower_graph(
     }
     let inference::Solution {
         registered_parameters,
-        checked_bodies,
+        mut checked_bodies,
         registered_generators,
     } = inference.solve(
         graph,
@@ -1016,6 +1016,14 @@ fn lower_graph(
     let helpers = Helpers::new(definitions.len() + graph.initializers(entry_declarations).count());
     let needs_registered_entry =
         !registered_generators.is_empty() || signatures.values().any(Signature::registered_frame);
+    if needs_registered_entry {
+        checked_bodies.retain(|&id| {
+            let (module, definition, _) = &definitions[id];
+            graph.modules[*module].parsed.syntax().body[callable_definitions[id].statement]
+                .as_function_def_stmt()
+                == Some(definition)
+        });
+    }
     let globals = ModuleValues::for_initializers(needs_registered_entry);
     // Fixed FILE compilations need no secondary body. A registered launch or an
     // actual representation failure can still use functions whose signatures solved.
@@ -1029,7 +1037,11 @@ fn lower_graph(
                 &types,
                 &inference,
                 &globals,
-                false,
+                if needs_registered_entry {
+                    registered::Capture::Entry(&checked_bodies)
+                } else {
+                    registered::Capture::Solved
+                },
             );
         }
     };
@@ -1147,9 +1159,9 @@ fn lower_graph(
         // definition with the settled signature; recovery owns its executable checked body.
         if needs_registered_entry
             && checked_bodies.contains(&signature.id)
-            && module.parsed.syntax().body[callable_definitions[signature.id].statement]
-                .as_function_def_stmt() == Some(definition)
-            && graph.registered_functions().get(module_id)
+            && graph
+                .registered_functions()
+                .get(module_id)
                 .is_some_and(|bodies| bodies.contains_key(&definition.start()))
         {
             continue;
@@ -2758,6 +2770,7 @@ struct Checker<'a> {
     observed_definition: Option<Box<CalledDefinition>>,
     /// Locals in this body are bound in an existing Python activation.
     registered: Option<&'a registered::values::ModuleSource>,
+    checked_callback_effects: bool,
     /// The first operation whose execution requires a different representation. All
     /// later source operations still see the facts from the ordinary checker.
     unrepresented: std::cell::RefCell<Option<Failure>>,
@@ -2845,6 +2858,7 @@ impl<'a> Checker<'a> {
         Self {
             observed_definition: None,
             registered: None,
+            checked_callback_effects: false,
             unrepresented: Default::default(),
             namespace_calls: HashSet::new(),
             module_namespace: Default::default(),

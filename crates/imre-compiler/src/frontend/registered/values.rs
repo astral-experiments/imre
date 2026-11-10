@@ -377,27 +377,62 @@ fn bound_call(call: ir::RegisteredCall, target: Expr, mut arguments: Vec<Expr>) 
         && matches!(call.arguments, ir::RegisteredArguments::Positional)
         && let ir::RegisteredCallTarget::Callable { end, suspended_name } = call.target
     {
-        return Expr {
-            ty: Type::PythonObject,
-            kind: ExprKind::Invoke {
-                callable: Box::new(target),
-                args: ir::CallArgs {
-                    python_site: Some(ir::InvokeSite {
-                        range: call.range,
-                        callee_end: end,
-                        suspended_name,
-                        scope: None,
-                    }),
-                    ..ir::CallArgs::positional(arguments)
-                },
-            },
-        };
+        return positional_invoke(call.range, end, suspended_name, target, arguments);
     }
     arguments.insert(0, target);
     super::operation(Builtin::RegisteredCall(call), Type::PythonObject, arguments)
 }
 
+fn positional_invoke(
+    range: TextRange,
+    callee_end: TextSize,
+    suspended_name: Option<TextRange>,
+    target: Expr,
+    arguments: Vec<Expr>,
+) -> Expr {
+    Expr {
+        ty: Type::PythonObject,
+        kind: ExprKind::Invoke {
+            callable: Box::new(target),
+            args: ir::CallArgs {
+                python_site: Some(ir::InvokeSite {
+                    range,
+                    callee_end,
+                    suspended_name,
+                    scope: None,
+                }),
+                ..ir::CallArgs::positional(arguments)
+            },
+        },
+    }
+}
+
 impl Checker<'_> {
+    pub(in crate::frontend) fn located_callback_effect(
+        &self,
+        expr: &ast::Expr,
+        call: &ast::ExprCall,
+        callable: Expr,
+        arguments: Vec<Expr>,
+    ) -> Expr {
+        let source = self
+            .registered
+            .expect("registered callback frame")
+            .context(self.source);
+        let target = source.located(&call.func, callable);
+        let mut value = positional_invoke(
+            call.range(),
+            call.func.end(),
+            Some(call.func.range()),
+            target,
+            arguments,
+        );
+        if let Some(slot) = self.namespace {
+            in_namespace(&mut value, self.local(slot));
+        }
+        source.located(expr, value)
+    }
+
     pub(in crate::frontend) fn call_with_target(
         &mut self,
         call: &ast::ExprCall,

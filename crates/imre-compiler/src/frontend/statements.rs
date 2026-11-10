@@ -164,6 +164,11 @@ impl StatementLowering for Checker<'_> {
                 _ => {}
             }
         }
+        if self.checked_callback_effects
+            && let Some(value) = self.registered_callback_effect(expr)?
+        {
+            return Ok((Some(Statement::Expr(value)), true));
+        }
         let value = self.expr(expr)?;
         // Only a direct call selects one implementation; a dispatched override may return.
         let continues = !matches!(&value.kind, ExprKind::Call(id, _) if self.classes.raising_methods.contains(id));
