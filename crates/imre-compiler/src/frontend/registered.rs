@@ -34,31 +34,6 @@ pub(crate) fn registered_type_parameters(
         .collect()
 }
 
-pub(super) struct Frame<'a> {
-    pub(super) literals: &'a values::ModuleSource,
-    pub(super) deferred: std::cell::RefCell<Option<Failure>>,
-}
-
-impl<'a> Frame<'a> {
-    pub(super) fn new(literals: &'a values::ModuleSource) -> Self {
-        Self {
-            literals,
-            deferred: Default::default(),
-        }
-    }
-
-    pub(super) fn require_object(&self, source: &str, site: &impl Ranged) {
-        self.deferred.borrow_mut().get_or_insert_with(|| {
-            error(
-                source,
-                site,
-                "operation requires its compiled object representation",
-            )
-            .classify(Kind::ScopedObject)
-        });
-    }
-}
-
 pub(crate) struct RegisteredFunction {
     pub(crate) function: ir::Function,
     pub(crate) local_names: HashMap<usize, LocalBinding>,
@@ -126,7 +101,7 @@ pub(super) fn lower_definition<'a>(
     signature: &Signature,
     literals: &'a values::ModuleSource,
 ) -> Result<RegisteredFunction, String> {
-    checker.registered = Some(Frame::new(literals));
+    checker.registered = Some(literals);
     let source = checker.source;
     let helpers = checker.helpers;
     let first_helper = helpers.len();

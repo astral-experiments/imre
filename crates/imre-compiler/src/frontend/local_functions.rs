@@ -160,6 +160,10 @@ impl Binding {
                 .is_some_and(|f| comprehensions::function_reads(f).contains(name))
     }
 
+    pub(super) fn is_bound(&self) -> bool {
+        self.function.is_some() || self.generic.is_some()
+    }
+
     pub(super) fn target(
         &self,
         source: &str,
@@ -790,6 +794,7 @@ impl Checker<'_> {
                 "not every path returns the declared type",
             ));
         }
+        helper.finish_region(Ok(()))?;
         helper.fault_frame(&mut body, definition.name.as_str(), definition.start());
         self.helpers.finish(
             signature.id,

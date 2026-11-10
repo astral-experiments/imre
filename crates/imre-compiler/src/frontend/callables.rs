@@ -361,38 +361,49 @@ impl Checker<'_> {
         }
         // A declared result still needs the fixed Callable type checks.
         let layout = if returns.is_some() {
-            Kind::Ordinary
+            Kind::UnsupportedRepresentation
         } else {
             Kind::ScopedObject
         };
         let declared = lambda.parameters.as_deref();
-        if declared.is_some_and(|parameters| {
+        let object_signature = declared.is_some_and(|parameters| {
             parameters.vararg.is_some()
                 || parameters.kwarg.is_some()
                 || !parameters.kwonlyargs.is_empty()
                 || parameters
                     .iter_non_variadic_params()
                     .any(|parameter| parameter.default.is_some())
-        }) {
-            return Err(self.classified_error(
+        });
+        let mut unavailable = object_signature.then(|| {
+            self.classified_error(
                 layout,
                 lambda,
                 "lambda defaults and variadic parameters require the registered binder",
-            ));
-        }
+            )
+        });
         let names = declared
             .into_iter()
             .flat_map(|parameters| parameters.iter_non_variadic_params())
             .collect::<Vec<_>>();
-        let parameters = parameters
-            .or_else(|| names.is_empty().then(Vec::new))
-            .ok_or_else(|| {
-                self.classified_error(
+        let parameters = if object_signature {
+            for parameter in &names {
+                if let Some(default) = &parameter.default {
+                    self.expr(default)?;
+                }
+            }
+            vec![Type::PythonObject; names.len()]
+        } else if let Some(parameters) = parameters {
+            parameters
+        } else {
+            if !names.is_empty() {
+                unavailable = Some(self.classified_error(
                     Kind::ScopedObject,
                     lambda,
                     "lambda parameter layouts require the registered binder",
-                )
-            })?;
+                ));
+            }
+            vec![Type::PythonObject; names.len()]
+        };
         if parameters.len() != names.len() {
             return Err(error(
                 self.source,
@@ -402,16 +413,35 @@ impl Checker<'_> {
         }
         let mut bound = narrowing::expression_assignments(&lambda.body);
         bound.extend(names.iter().map(|parameter| parameter.name().to_string()));
+        let variadics = declared
+            .into_iter()
+            .flat_map(|params| {
+                params
+                    .vararg
+                    .as_deref()
+                    .map(|param| (param, self.types.var_tuple(Type::PythonObject)))
+                    .into_iter()
+                    .chain(
+                        params
+                            .kwarg
+                            .as_deref()
+                            .map(|param| (param, self.types.dict(Type::Str, Type::PythonObject))),
+                    )
+            })
+            .collect::<Vec<_>>();
+        bound.extend(variadics.iter().map(|(param, _)| param.name.to_string()));
         let mut captures = comprehensions::free_reads(&lambda.body, bound.clone())
             .into_iter()
             .filter_map(|name| self.names.get(&name).map(|&slot| (slot, name)))
             .collect::<Vec<_>>();
         if !pull && !captures.is_empty() {
-            return Err(self.classified_error(
-                layout,
-                lambda,
-                "an escaping lambda requires closure cells in its registered frame",
-            ));
+            unavailable.get_or_insert_with(|| {
+                self.classified_error(
+                    layout,
+                    lambda,
+                    "an escaping lambda requires closure cells in its registered frame",
+                )
+            });
         }
         let id = self.helpers.reserve();
         let omitted_free = self.unbound_assert_captures();
@@ -424,6 +454,9 @@ impl Checker<'_> {
             self.helpers,
             self.globals,
         );
+        // Keep the binder's layout failure while checking the lambda body for
+        // independent source errors, just as for any other checked region.
+        *helper.unrepresented.get_mut() = unavailable;
         helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
         helper.local_iter = bound.contains("iter");
@@ -436,6 +469,9 @@ impl Checker<'_> {
         for (parameter, &ty) in names.iter().zip(&parameters) {
             let slot = helper.bind_parameter(&parameter.parameter, ty)?;
             params.push(slot);
+        }
+        for (parameter, ty) in variadics {
+            params.push(helper.bind_parameter(parameter, ty)?);
         }
         let mut args = Vec::with_capacity(captures.len());
         captures.sort_unstable_by_key(|(slot, _)| *slot);
@@ -454,11 +490,12 @@ impl Checker<'_> {
             params.push(slot);
             args.push(value);
         }
-        let body = if let Some(returns) = returns {
-            helper.expr_expected(&lambda.body, returns)?
+        let result = if let Some(returns) = returns {
+            helper.expr_expected(&lambda.body, returns)
         } else {
-            helper.expr(&lambda.body)?
+            helper.expr(&lambda.body)
         };
+        let body = helper.finish_region(result)?;
         let returns = body.ty;
         let mut body = vec![Statement::Return(body)];
         helper.fault_frame(&mut body, "<lambda>", lambda.start());

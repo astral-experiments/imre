@@ -593,6 +593,13 @@ pub(crate) struct Expr {
 }
 
 impl Expr {
+    pub(crate) fn unrepresented() -> Self {
+        Self {
+            ty: Type::PythonObject,
+            kind: ExprKind::Builtin(Builtin::Unrepresented, vec![]),
+        }
+    }
+
     /// Read a local slot with its type at the use site.
     pub(crate) fn local(slot: usize, ty: Type) -> Self {
         Self {
@@ -1247,6 +1254,9 @@ impl Constant {
 
 #[derive(Clone)]
 pub(crate) enum Builtin {
+    /// An indeterminate operand during source checking. Its containing body retains
+    /// the original representation failure and is ineligible for emission.
+    Unrepresented,
     ByteArrayNew,
     ByteArrayAppend,
     ByteArrayExtend,

@@ -4850,6 +4850,7 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredCall(..)
             | Builtin::RegisteredName(_)
             | Builtin::RegisteredUnary(_)
+            | Builtin::Unrepresented
             | Builtin::RegisteredSubscript(..)
             | Builtin::RegisteredSpread
             | Builtin::RegisteredIndexConstant(_)

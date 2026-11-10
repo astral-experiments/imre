@@ -695,6 +695,7 @@ impl Builtin {
             | Self::RegisteredAttribute { .. }
             | Self::RegisteredSpread
             | Self::RegisteredDict(_)
+            | Self::Unrepresented
             | Self::RegisteredSubscript(..)
             | Self::RegisteredIndexConstant(_)
             | Self::RegisteredSlice

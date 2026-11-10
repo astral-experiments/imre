@@ -262,7 +262,11 @@ impl From<ast::UnaryOp> for ir::ObjectUnary {
     }
 }
 
-fn located(range: TextRange, position: ruff_text_size::TextSize, value: Expr) -> Expr {
+pub(in crate::frontend) fn located(
+    range: TextRange,
+    position: ruff_text_size::TextSize,
+    value: Expr,
+) -> Expr {
     super::operation(
         Builtin::RegisteredLocation(range, position),
         value.ty,
@@ -273,6 +277,14 @@ fn located(range: TextRange, position: ruff_text_size::TextSize, value: Expr) ->
 pub(in crate::frontend) fn loaded_attribute(field: &ast::ExprAttribute, receiver: Expr) -> Expr {
     let value = super::operation(attribute_load(field), Type::PythonObject, vec![receiver]);
     located(field.range(), field.attr.start(), value)
+}
+
+pub(in crate::frontend) fn subscript(index: &ast::ExprSubscript, value: Expr, key: Expr) -> Expr {
+    super::operation(
+        Builtin::RegisteredSubscript(index.range(), index.value.end()),
+        Type::PythonObject,
+        vec![value, key],
+    )
 }
 
 fn attribute_load(field: &ast::ExprAttribute) -> Builtin {
@@ -615,10 +627,11 @@ pub(super) fn operation<E>(
             ExprKind::Builtin(Builtin::RegisteredDict(entries), operands)
         }
         ast::Expr::Subscript(index) if source.partition_index(index).is_none() => {
-            ExprKind::Builtin(
-                Builtin::RegisteredSubscript(node.range(), index.value.end()),
-                vec![child(&index.value)?, index_key(&index.slice, &mut child)?],
-            )
+            return Ok(Some(subscript(
+                index,
+                child(&index.value)?,
+                index_key(&index.slice, &mut child)?,
+            )));
         }
         _ => return Ok(None),
     };

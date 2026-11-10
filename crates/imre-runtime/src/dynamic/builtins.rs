@@ -1,7 +1,7 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
 use super::{attribute_name::AttributeName, calls::ObjectAttribute};
-use imre_ast::providers::BUILTIN_FUNCTIONS;
+use imre_ast::providers::{BUILTIN_FUNCTIONS, BUILTIN_TYPES};
 
 use super::Context;
 use super::value::{
@@ -183,37 +183,9 @@ pub(super) fn exception_ancestors(
     .map(|base| base.name())
 }
 
-const TYPES: &[&str] = &[
-    "bool",
-    "bytearray",
-    "bytes",
-    "complex",
-    "dict",
-    "enumerate",
-    "filter",
-    "float",
-    "frozenset",
-    "int",
-    "list",
-    "map",
-    "memoryview",
-    "object",
-    "property",
-    "classmethod",
-    "staticmethod",
-    "range",
-    "set",
-    "slice",
-    "str",
-    "tuple",
-    "type",
-    "super",
-    "zip",
-];
-
 /// Types supplied by the interpreter before optional modules install their own types.
 pub(super) fn core_types() -> impl Iterator<Item = &'static str> {
-    TYPES
+    BUILTIN_TYPES
         .iter()
         .chain(imre_ast::exceptions::BOXED_BUILTINS)
         .chain(CORE_RUNTIME_TYPES)
@@ -225,7 +197,7 @@ pub(super) fn core_types() -> impl Iterator<Item = &'static str> {
 pub(super) fn names() -> impl Iterator<Item = &'static str> {
     BUILTIN_FUNCTIONS
         .iter()
-        .chain(TYPES)
+        .chain(BUILTIN_TYPES)
         .chain(imre_ast::exceptions::BOXED_BUILTINS)
         .copied()
 }
@@ -529,7 +501,7 @@ pub(super) fn native_method_owner(symbol: &str) -> Option<&str> {
 }
 
 pub(super) fn is_builtin_type(name: &str) -> bool {
-    TYPES.contains(&name)
+    BUILTIN_TYPES.contains(&name)
         || super::stdlib::fixed_structseq::fixed_type(name).is_some()
         || name == super::stdlib::flags::TYPE
         || is_exception(name)
@@ -538,7 +510,7 @@ pub(super) fn is_builtin_type(name: &str) -> bool {
 
 /// The native classes exported directly by the builtins module.
 pub(super) fn is_exported_type(name: &str) -> bool {
-    TYPES.contains(&name) || imre_ast::exceptions::boxed_builtin_kind(name).is_some()
+    BUILTIN_TYPES.contains(&name) || imre_ast::exceptions::boxed_builtin_kind(name).is_some()
 }
 
 /// Static builtin types have a GC-capable metaclass, but are never themselves tracked.

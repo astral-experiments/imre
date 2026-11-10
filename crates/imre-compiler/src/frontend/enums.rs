@@ -881,6 +881,9 @@ impl Checker<'_> {
             if types.iter().all(|ty| matches!(ty, Type::Tuple(_))) {
                 return Err(self.scoped_builtin_error("tuple identity comparison", node));
             }
+            if types.contains(&Type::PythonObject) {
+                return Err(self.scoped_builtin_error("Python object identity comparison", node));
+            }
             return Err(error(
                 self.source,
                 node,

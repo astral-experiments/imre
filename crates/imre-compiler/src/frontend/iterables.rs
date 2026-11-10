@@ -472,6 +472,14 @@ impl Checker<'_> {
         if !convert {
             return Ok(value);
         }
+        if value.ty == Type::PythonObject
+            && self.missing_operation(&self.scoped_builtin_error("int", node))
+        {
+            return Ok(Expr {
+                ty: Type::Int,
+                ..Expr::unrepresented()
+            });
+        }
         if !matches!(value.ty, Type::Int | Type::Float | Type::Bool | Type::Str) {
             return Err(error(
                 self.source,

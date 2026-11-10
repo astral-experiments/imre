@@ -114,8 +114,13 @@ fn protocol_snapshot(
         items: Vec::with_capacity(count),
     };
     for index in 0..count {
+        // Python packs the starred remainder into a list even when its items are opaque.
         let item = builtin(
-            Type::PythonObject,
+            if star == Some(index) {
+                sequence_type
+            } else {
+                Type::PythonObject
+            },
             Builtin::ListGet,
             vec![binder.pattern_local(root), Expr::integer(index)],
         );
@@ -952,7 +957,12 @@ impl PatternBinder for Checker<'_> {
         value: Expr,
         stable: Option<usize>,
     ) -> StdResult<PatternSnapshot, Self::Error> {
-        if self.registered.is_some() && value.ty == Type::PythonObject {
+        if value.ty == Type::PythonObject
+            && (self.registered.is_some() || self.graph.modules[self.module].is_program_source())
+        {
+            if self.registered.is_none() {
+                self.require_registered_operation(target);
+            }
             let sequence = self.types.list(Type::PythonObject);
             return Ok(protocol_snapshot(
                 self,
