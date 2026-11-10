@@ -1538,7 +1538,7 @@ mod tests {
         let mut prepared = PreparedBody::module(
             "program",
             Path::new("program.py"),
-            "result = yes() if flag() else (make(x) async for x in rows())\n",
+            "result = yes() if flag() else ((lambda: (value := make(x)))() async for x in rows())\n",
             0,
             ModuleOrigin::Program(None),
         )
@@ -1577,7 +1577,7 @@ mod tests {
         let source = concat!(
             "match subject():\n",
             "    case 1 as item if allow(item):\n        keep(item)\n",
-            "    case other:\n        before(other)\n        consume(x async for x in other)\n        after(other)\n",
+            "    case other:\n        before(other)\n        consume((lambda: (value := x))() async for x in other)\n        after(other)\n",
         );
         let mut prepared = PreparedBody::module(
             "example",
@@ -1672,7 +1672,7 @@ mod tests {
     #[test]
     fn residual_source_supplies_only_the_interpolation_value() {
         let path = Path::new("field.py");
-        let original = r#"q = t"left{(v async for v in xs)!r:>4}right""#;
+        let original = r#"q = t"left{((lambda: (value := v))() async for v in xs)!r:>4}right""#;
         let mut prepared =
             PreparedBody::module("field", path, original, 0, ModuleOrigin::Program(None)).unwrap();
         assert!(prepared.source.strings.templates.is_empty());
@@ -1693,9 +1693,9 @@ mod tests {
                 .into_syntax()
                 .body
         };
-        prepared.syntax = Some(Cow::Owned(replace_body(r#"q = t"xxxx{(v async for v in xs)!s:^9}yyyyy""#)));
+        prepared.syntax = Some(Cow::Owned(replace_body(r#"q = t"xxxx{((lambda: (value := v))() async for v in xs)!s:^9}yyyyy""#)));
         assert_eq!(emit(&prepared), expected);
-        prepared.syntax = Some(Cow::Owned(replace_body(r#"q = t"xxxx{(v async for v in ys)!s:^9}yyyyy""#)));
+        prepared.syntax = Some(Cow::Owned(replace_body(r#"q = t"xxxx{((lambda: (value := v))() async for v in ys)!s:^9}yyyyy""#)));
         assert_ne!(emit(&prepared), expected);
     }
 
@@ -1877,7 +1877,7 @@ mod tests {
             "query",
             Path::new("query.py"),
             "first = t'{client.lookup(*args)}{v * 2}'
-second = t'{client.lookup(*args)}{(v async for v in values)}'",
+second = t'{client.lookup(*args)}{((lambda: (value := v))() async for v in values)}'",
             0,
             ModuleOrigin::Program(None),
         )
@@ -2593,8 +2593,8 @@ second = t'{client.lookup(*args)}{(v async for v in values)}'",
             "    class Example:\n",
             "        member: int\n",
             "        receiver().field = [item.copy() for item in items]\n",
-            "        saved = [receiver().field, (table()[key()], *tail)] = (item async for item in items)\n",
-            "        select(row async for row in rows).field = fallback()\n",
+            "        saved = [receiver().field, (table()[key()], *tail)] = ((lambda: (value := item))() async for item in items)\n",
+            "        select((lambda: (value := row))() async for row in rows).field = fallback()\n",
             "        del receiver().field\n",
             "        saved = (first, [receiver().field, table()[key()], *rest]) = rows()\n",
             "        def read(self): return self.member\n",
@@ -2654,7 +2654,7 @@ second = t'{client.lookup(*args)}{(v async for v in values)}'",
     fn physical_deletion_uses_the_complete_checked_statement_after_targets_are_dropped() {
         let source = concat!(
             "del first, [(owner := obj).field, obj[lo:hi]], obj[[key for key in keys if key]], last\n",
-            "del rejected, (orphan := obj)[(key async for key in keys if key)]\n",
+            "del rejected, (orphan := obj)[((lambda: (value := key))() async for key in keys if key)]\n",
         );
         let mut prepared = PreparedBody::module(
             "remove",
