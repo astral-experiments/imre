@@ -1355,6 +1355,10 @@ class WithMethod(Exception):
 }
 
 ERRORS = {
+    "mapped_digit_traceback": (
+        (Path(__file__).parent / "fixtures/exceptions/mapped_digit_traceback.py").read_text(),
+        "ValueError",
+    ),
     "unhandled_key_repr_globals": (
         """\
 from dataclasses import dataclass
@@ -1652,6 +1656,14 @@ def main() -> None:
                     reference,
                 )
                 if category:
+                    if name == "mapped_digit_traceback":
+                        assert actual.stdout == (
+                            "callback before\ncallback caught\nidentity True True\n"
+                        )
+                        # Both executions use the same filename. Compare every frame in order.
+                        frames = [line for line in reference.stderr.splitlines() if line.startswith('  File "')]
+                        actual_frames = [line for line in actual.stderr.splitlines() if line.startswith('  File "')]
+                        assert len(frames) == 4 and actual_frames == frames, (actual.stderr, reference.stderr)
                     if name in CHAIN_REPORTS:
                         assert actual.returncode == 1 and exception_report(
                             actual.stderr

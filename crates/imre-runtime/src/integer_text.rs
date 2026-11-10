@@ -322,6 +322,14 @@ pub(super) fn invalid_literal_in_base(value: &str, base: u32) -> Error {
     }
 }
 
+/// Project an exact one-character decimal literal without invoking the integer parser.
+pub(crate) fn single_decimal_digit(text: &str) -> Option<u8> {
+    if let [byte] = text.as_bytes() {
+        return byte.is_ascii_digit().then(|| *byte - b'0');
+    }
+    decimal_digit(text.parse::<char>().ok()?)
+}
+
 /// Returns the decimal value of a Unicode 16.0 digit.
 ///
 /// Each entry is a zero followed by nine consecutive decimal digits. The table
@@ -431,6 +439,16 @@ fn write_literal_repr_prefix(value: &str, text: &mut Str) -> crate::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn single_decimal_digit_requires_exactly_one_decimal_codepoint() {
+        for (text, digit) in [("0", 0), ("9", 9), ("٢", 2), ("５", 5), ("𝟟", 7)] {
+            assert_eq!(single_decimal_digit(text), Some(digit));
+        }
+        for text in ["", "12", "٣4", "+7", " 9", "9\0", "²", "½", "四"] {
+            assert_eq!(single_decimal_digit(text), None);
+        }
+    }
 
     #[test]
     fn decimal_coefficients_preserve_sign_and_zero_padded_groups() {

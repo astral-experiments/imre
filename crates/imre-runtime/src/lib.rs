@@ -1557,6 +1557,9 @@ pub unsafe extern "C" fn imre_int_parse(value: *const Str) -> usize {
 }
 
 fn decimal_word(original: &str) -> Result<usize> {
+    if let Some(digit) = integer_text::single_decimal_digit(original) {
+        return Ok(Int::from(i64::from(digit)).into_raw());
+    }
     parse_decimal_int_with_limit(original, integer_text::decimal_digit_limit())?
         .map(Int::into_raw)
         .ok_or_else(|| integer_text::invalid_literal(original))
