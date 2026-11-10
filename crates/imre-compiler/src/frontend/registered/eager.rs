@@ -112,9 +112,7 @@ impl EagerDisplay for SourceScope<'_> {
             Expr::local(input.value, Type::PythonObject),
             None,
         )?;
-        self.loop_depth += 1;
-        let body = body(self);
-        self.loop_depth -= 1;
+        let body = self.in_loop(super::LoopScope::WithCursor, body);
         Ok(input.for_suite(binding, body?, Vec::new(), Vec::new()))
     }
 
