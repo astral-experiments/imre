@@ -74,6 +74,23 @@ pub fn annotation_visits_target(assignment: &ast::StmtAnnAssign) -> bool {
     assignment.simple || assignment.value.is_some() || !assignment.target.is_name_expr()
 }
 
+pub fn parameter_defaults(parameters: &ast::Parameters) -> impl Iterator<Item = &ast::Expr> {
+    parameters
+        .iter_non_variadic_params()
+        .filter_map(|parameter| parameter.default.as_deref())
+}
+
+/// Expressions evaluated in the enclosing scope when a function is defined, in order.
+pub fn function_definition_expressions(
+    function: &ast::StmtFunctionDef,
+) -> impl Iterator<Item = &ast::Expr> {
+    function
+        .decorator_list
+        .iter()
+        .map(|decorator| &decorator.expression)
+        .chain(parameter_defaults(&function.parameters))
+}
+
 /// Diagnose the positional-only range constructor before converting any bounds.
 pub fn range_constructor_error(positional: usize, keywords: bool) -> Option<String> {
     if keywords {

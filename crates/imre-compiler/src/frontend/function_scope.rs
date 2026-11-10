@@ -115,15 +115,8 @@ impl<'a> Visitor<'a> for ClosureNames {
                 } else {
                     self.incomplete = true;
                 }
-                // Decorator expressions run here and can bind names in this frame.
-                for decorator in &f.decorator_list {
-                    self.visit_decorator(decorator);
-                }
-                for param in f.parameters.iter_non_variadic_params() {
-                    if let Some(default) = &param.default {
-                        // Defaults run here. Their expression walk records enclosing bindings.
-                        self.visit_expr(default);
-                    }
+                for expr in imre_ast::function_definition_expressions(f) {
+                    self.visit_expr(expr);
                 }
             }
             // Local variable annotations never evaluate in a function's scope.
@@ -239,10 +232,8 @@ impl<'a> Visitor<'a> for ClosureNames {
                     self.incomplete = true;
                 }
                 if let Some(parameters) = &lambda.parameters {
-                    for parameter in parameters.iter_non_variadic_params() {
-                        if let Some(default) = &parameter.default {
-                            self.visit_expr(default);
-                        }
+                    for default in imre_ast::parameter_defaults(parameters) {
+                        self.visit_expr(default);
                     }
                 }
             }

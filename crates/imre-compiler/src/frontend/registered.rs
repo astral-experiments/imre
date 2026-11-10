@@ -1647,7 +1647,7 @@ impl<'a> SuitePreparation<'a> {
                 // The binding stays checked even if one header operand needs its physical frame.
                 // Store them in order so an exception or suspension precedes all later operands.
                 body.push(checkpoint(stmt));
-                let header = function_header_inputs(def)
+                let header = imre_ast::function_definition_expressions(def)
                     .map(|expr| {
                         let slot = scope.hidden(Type::PythonObject);
                         residual.push(PendingStatement {
@@ -2050,7 +2050,7 @@ impl statements::StatementLowering for SourceScope<'_> {
 
     fn definition(&mut self, def: &ast::StmtFunctionDef) -> StdResult<Option<Statement>, ()> {
         let prepare_header = |scope: &mut Self| {
-            function_header_inputs(def)
+            imre_ast::function_definition_expressions(def)
                 .map(|expr| scope.ordinary_operand(expr))
                 .collect::<Option<Vec<_>>>()
         };
@@ -2535,13 +2535,6 @@ impl PhysicalRegion {
         });
         self_contained
     }
-}
-
-fn function_header_inputs(def: &ast::StmtFunctionDef) -> impl Iterator<Item = &ast::Expr> {
-    def.decorator_list
-        .iter()
-        .map(|decorator| &decorator.expression)
-        .chain(values::parameter_defaults(&def.parameters))
 }
 
 impl SourceScope<'_> {

@@ -114,10 +114,9 @@ impl<'a> Visitor<'a> for Check {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         match stmt {
             Stmt::FunctionDef(f) => {
-                for decorator in &f.decorator_list {
-                    self.visit_decorator(decorator);
+                for expr in crate::function_definition_expressions(f) {
+                    self.visit_expr(expr);
                 }
-                self.visit_parameters(&f.parameters);
                 self.scope(&f.body, true, f.is_async);
             }
             Stmt::ClassDef(c) => {

@@ -55,9 +55,15 @@ pub fn function_flags(params: Option<&ast::Parameters>, nested: bool, method: bo
 struct Yields(bool);
 impl<'a> Visitor<'a> for Yields {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-        if !self.0 && !matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)) {
-            stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
-                visitor::walk_stmt(self, stmt)
+        if !self.0 {
+            stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || match stmt {
+                ast::Stmt::FunctionDef(function) => {
+                    for expr in crate::function_definition_expressions(function) {
+                        self.visit_expr(expr);
+                    }
+                }
+                ast::Stmt::ClassDef(_) => {}
+                _ => visitor::walk_stmt(self, stmt),
             });
         }
     }
@@ -67,10 +73,8 @@ impl<'a> Visitor<'a> for Yields {
             ast::Expr::Lambda(lambda) if !self.0 => {
                 // Defaults run in the enclosing activation. Only the nested body is deferred.
                 if let Some(parameters) = &lambda.parameters {
-                    for parameter in parameters.iter_non_variadic_params() {
-                        if let Some(default) = &parameter.default {
-                            self.visit_expr(default);
-                        }
+                    for default in crate::parameter_defaults(parameters) {
+                        self.visit_expr(default);
                     }
                 }
             }
@@ -94,4 +98,24 @@ pub fn yields_in_expression(expr: &ast::Expr) -> bool {
     let mut yields = Yields::default();
     yields.visit_expr(expr);
     yields.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nested_definition_yields_in_its_enclosing_scope() {
+        let module = ruff_python_parser::parse_module(
+            "def positional():\n    def inner(x=(yield 1)): pass\n\
+             def keyword():\n    def inner(*, x=(yield 2)): pass\n\
+             def decorated():\n    @(yield 3)\n    def inner(): pass\n\
+             def ordinary():\n    def inner(): yield 4\n",
+        )
+        .unwrap();
+        for (stmt, expected) in module.suite().iter().zip([true, true, true, false]) {
+            let function = stmt.as_function_def_stmt().unwrap();
+            assert_eq!(is_generator(&function.body), expected, "{}", function.name);
+        }
+    }
 }
