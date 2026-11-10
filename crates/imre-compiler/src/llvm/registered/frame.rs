@@ -1463,6 +1463,21 @@ impl<'a> ArgumentPack<'a> {
 pub(crate) trait FrameEmitter<'a, 'p>:
     std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>> + Sized
 {
+    /// Each decorator call consumes the operands from before its callable was evaluated.
+    fn decorator_operands<T>(
+        &mut self,
+        decorators: &[T],
+        mut evaluate: impl FnMut(&mut Self, &T) -> String,
+    ) -> Vec<(String, String)> {
+        decorators
+            .iter()
+            .map(|expr| {
+                let mark = self.temporary_mark();
+                (mark, evaluate(self, expr))
+            })
+            .collect()
+    }
+
     /// Class argument expansion is interleaved with the next Python operand.
     fn class_arguments(
         &mut self,
@@ -2136,6 +2151,16 @@ impl RegisteredFrame<'_, '_> {
         span: Option<[usize; 4]>,
     ) -> String {
         let mark = self.temporary_mark();
+        self.invoke_from_mark(callable, values, &mark, span)
+    }
+
+    pub(crate) fn invoke_from_mark(
+        &mut self,
+        callable: &str,
+        values: &[&str],
+        mark: &str,
+        span: Option<[usize; 4]>,
+    ) -> String {
         let (ptr, count) = self.handle_array(values);
         self.call_at(
             callable,
@@ -2144,7 +2169,7 @@ impl RegisteredFrame<'_, '_> {
                 count,
                 receiver_slot: false,
             },
-            &mark,
+            mark,
             span,
         )
     }
