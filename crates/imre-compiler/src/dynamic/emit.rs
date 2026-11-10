@@ -2040,6 +2040,7 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
             "        receiver().field = [item.copy() for item in items]\n",
             "        receiver().field = (item for item in items)\n",
             "        del receiver().field\n",
+            "        saved = (first, [receiver().field, table()[key()], *rest]) = rows()\n",
             "        def read(self): return self.member\n",
             "    return Example\n",
         );
@@ -2078,6 +2079,8 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
         let store = class.body[1].as_assign_stmt_mut().unwrap();
         let target = store.targets[0].as_attribute_expr_mut().unwrap();
         std::mem::swap(&mut target.value, &mut store.value);
+        store.targets.clear();
+        class.body[4].as_assign_stmt_mut().unwrap().targets.clear();
         assert_eq!(emit(&prepared), before);
     }
 

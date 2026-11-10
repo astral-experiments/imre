@@ -245,16 +245,6 @@ impl Function<'_, '_> {
                     self.bind(&alias.name, &value);
                 }
                 ast::Stmt::Assign(v) => {
-                    if let [target] = v.targets.as_slice()
-                        && let Some((receiver, key)) = self.checked_index_target(target)
-                        && let Some(rhs) = crate::frontend::registered_value(
-                            &v.value,
-                            self.source.registered_source(),
-                        )
-                    {
-                        self.checked_statement(&Statement::SetItem(receiver, key, rhs));
-                        continue;
-                    }
                     let value = self.expr(&v.value);
                     let chained = v.targets.len() > 1;
                     if chained {
@@ -1068,15 +1058,6 @@ impl Function<'_, '_> {
 
     /// Transfer unpacked items to their targets while retaining the outstanding operands.
     fn assign_target(&mut self, target: &ast::Expr, value: &str, owned: bool) {
-        if let Some((receiver, key)) = self.checked_index_target(target) {
-            let receiver = self.registered_value(&receiver);
-            let key = self.registered_value(&key);
-            self.put_item(&receiver, &key, value);
-            if owned {
-                self.release_target(None);
-            }
-            return;
-        }
         let elements = match target {
             ast::Expr::Tuple(t) => &t.elts,
             ast::Expr::List(l) => &l.elts,
