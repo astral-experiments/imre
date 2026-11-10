@@ -408,6 +408,18 @@ impl Session {
         check.first
     }
 
+    pub(super) fn generator_execution_error<'ast, 'db>(
+        &'db self,
+        module: usize,
+        parsed: &'ast ruff_db::parsed::ParsedModuleRef,
+        model: &'ast SemanticModel<'db>,
+        function: &'ast StmtFunctionDef,
+    ) -> Option<(TextRange, String)> {
+        let mut visitor = self.execution_visitor(module, parsed, model);
+        visitor.visit_body(&function.body);
+        visitor.first
+    }
+
     pub(crate) fn check_execution_escapes<'a>(
         &self,
         sources: impl Iterator<Item = (usize, &'a std::path::Path)>,

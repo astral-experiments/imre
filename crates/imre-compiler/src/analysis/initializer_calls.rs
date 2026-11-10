@@ -294,13 +294,16 @@ impl Session {
     ) -> Option<Diagnostic> {
         let (module, path) = source;
         let file = self.files[module];
-        let call = statement_call(stmt, |name| {
-            self.reaching_binding(module, name).is_some()
-                || name.as_name_expr().is_some_and(|n| {
-                    imre_ast::providers::BUILTIN_FUNCTIONS.contains(&n.id.as_str())
-                        && self.is_unbound_module_read(module, name)
-                })
-        })?;
+        let call = match stmt {
+            Stmt::For(loop_) if !loop_.is_async => loop_.iter.as_call_expr()?,
+            _ => statement_call(stmt, |name| {
+                self.reaching_binding(module, name).is_some()
+                    || name.as_name_expr().is_some_and(|n| {
+                        imre_ast::providers::BUILTIN_FUNCTIONS.contains(&n.id.as_str())
+                            && self.is_unbound_module_read(module, name)
+                    })
+            })?,
+        };
         let (name, attr) = match call.func.as_ref() {
             name @ Expr::Name(_) => (name, None),
             Expr::Attribute(attr) if !attr.attr.starts_with("__") => {
@@ -338,6 +341,15 @@ impl Session {
         if !function.decorator_list.is_empty() || function.type_params.is_some() {
             return None;
         }
+        let generator = || {
+            let index = ty_python_core::semantic_index(&self.db, self.db.program_file(owner));
+            index
+                .try_node_scope(ty_python_core::scope::NodeWithScopeRef::Function(function))
+                .map(|scope| scope.is_generator_function(index))
+        };
+        if matches!(stmt, Stmt::For(_)) && (owner == file || function.is_async || !generator()?) {
+            return None;
+        }
         let bound = crate::frontend::fixed_call_arguments(call, &function.parameters)?;
         // Every supplied argument must be passive, including the ones following a mismatch.
         let operands = bound
@@ -359,27 +371,36 @@ impl Session {
         }
         // Read the body only after the real initializer and its passive arguments have
         // selected this function. Literal guards above are also checked for scalar contracts.
-        if owner == file || function.is_async || !matches!(stmt, Stmt::Expr(_) | Stmt::Assign(_)) {
+        if owner == file || function.is_async {
             return None;
         }
-        let first = after_docstring(&function.body)
-            .iter()
-            .find(|stmt| !passive(stmt))?;
-        let expression = match first {
-            Stmt::Expr(stmt) => &*stmt.value,
-            Stmt::Assign(stmt) => &*stmt.value,
-            Stmt::Return(stmt) => stmt.value.as_deref()?,
+        let (site, message) = match stmt {
+            Stmt::For(_) => {
+                self.generator_execution_error(owner_module, &owner_ast, &owner_model, function)?
+            }
+            Stmt::Assign(_) | Stmt::Expr(_) => {
+                let first = after_docstring(&function.body)
+                    .iter()
+                    .find(|stmt| !passive(stmt))?;
+                let expression = match first {
+                    Stmt::Expr(stmt) => &*stmt.value,
+                    Stmt::Assign(stmt) => &*stmt.value,
+                    Stmt::Return(stmt) => stmt.value.as_deref()?,
+                    _ => return None,
+                };
+                let execution = self.external_source_execution(
+                    owner_module,
+                    &owner_ast,
+                    &owner_model,
+                    expression,
+                )?;
+                if generator()? {
+                    return None;
+                }
+                execution
+            }
             _ => return None,
         };
-        let (site, message) =
-            self.external_source_execution(owner_module, &owner_ast, &owner_model, expression)?;
-        let index = ty_python_core::semantic_index(&self.db, self.db.program_file(owner));
-        if index
-            .try_node_scope(ty_python_core::scope::NodeWithScopeRef::Function(function))?
-            .is_generator_function(index)
-        {
-            return None;
-        }
         let text = ruff_db::source::source_text(&self.db, owner);
         Some(
             Diagnostic::at(text.as_str(), &site, message)
