@@ -330,20 +330,14 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
         {
             self.visit_expr(&lambda.body);
         }
-        // Enter only a reached ordinary definition in this checked source.
-        // Calls producing generators and coroutines return a suspended object.
+        // A reached synchronous function needs linked instructions, including those
+        // that its generator frame can resume after returning to the caller.
         if self.first.is_none()
             && let Some(node) = self.local_function(&call.func)
             && !node.is_async
+            && self.entered.insert(node.range())
         {
-            let index = ty_python_core::semantic_index(self.model.db(), self.model.program_file());
-            if index
-                .try_node_scope(ty_python_core::scope::NodeWithScopeRef::Function(node))
-                .is_some_and(|scope| !scope.is_generator_function(index))
-                && self.entered.insert(node.range())
-            {
-                self.visit_body(&node.body);
-            }
+            self.visit_body(&node.body);
         }
     }
 }

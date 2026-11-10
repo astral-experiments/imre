@@ -950,7 +950,11 @@ fn lower_graph(
             inference.discover_packed_arguments();
         }
     }
-    let inference::Solution { registered_parameters, checked_bodies } = inference.solve(
+    let inference::Solution {
+        registered_parameters,
+        checked_bodies,
+        registered_generators,
+    } = inference.solve(
         graph,
         &mut definitions,
         &mut signatures,
@@ -1009,7 +1013,8 @@ fn lower_graph(
             matches!(stmt, ast::Stmt::FunctionDef(def) if inspect::marks_function(graph, graph.entry, def))
         });
     let helpers = Helpers::new(definitions.len() + graph.initializers(entry_declarations).count());
-    let needs_registered_entry = signatures.values().any(Signature::registered_frame);
+    let needs_registered_entry =
+        !registered_generators.is_empty() || signatures.values().any(Signature::registered_frame);
     let globals = ModuleValues::for_initializers(needs_registered_entry);
     // Fixed FILE compilations need no secondary body. A registered launch or an
     // actual representation failure can still use functions whose signatures solved.
@@ -1087,6 +1092,9 @@ fn lower_graph(
             &globals,
         );
         let original = registered_parameters.get(&signature.id);
+        if registered_generators.contains(&signature.id) {
+            continue;
+        }
         let accepted =
             signature.registered_frame() && source_checks.accepts(graph, *module_id, definition);
         if accepted || original.is_some() {
@@ -4749,11 +4757,16 @@ impl<'a> Checker<'a> {
             .types
             .iteration_element(iterable.ty, items)
             .ok_or_else(|| {
-                error(
+                let reason = error(
                     self.source,
                     target,
                     "iteration requires a concrete list, dictionary, set, string, bytes, or range",
-                )
+                );
+                if iterable.ty == Type::PythonObject {
+                    reason.classify(Kind::ScopedObject)
+                } else {
+                    reason
+                }
             })?;
         // A private forward cursor can borrow the UTF-8 bytes of an exact string.
         let (iterable, encoded_bytes) = match iterable {
@@ -9571,6 +9584,14 @@ impl<'a> Checker<'a> {
                     expression,
                     "generator expressions require an immediate for, comprehension, list, sum, min, max, any, or all consumer",
                 ));
+            }
+            ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => {
+                return Err(error(
+                    self.source,
+                    expression,
+                    "generator suspension requires a registered frame",
+                )
+                .classify(Kind::GeneratorSuspension));
             }
             _ => {
                 return Err(error(
