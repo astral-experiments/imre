@@ -6003,7 +6003,8 @@ impl Heap {
         })
     }
 
-    pub(super) fn acyclic_finalizer(
+    /// Resolve ordered ownership on the way to the next ordinary destructor.
+    pub(super) fn next_acyclic_finalizer(
         &mut self,
         globals: [Id; 2],
         roots: impl Iterator<Item = Id>,
@@ -6111,31 +6112,89 @@ impl Heap {
                 self.get(id).children(&mut pending);
             }
         }
-        let mut retention = None;
-        let next = if remaining == 0 {
-            Ok(None)
-        } else {
-            CycleSet::new(self.slots.len()).map(|mut cycles| {
-                let (owner, cyclic) = self.identify_indexed_cycles(
-                    &mut cycles,
-                    std::convert::identity,
-                    std::convert::identity,
-                );
-                if cyclic && owner.is_none() {
-                    retention = Some(weak_roots::CycleRetention::from_residual(self, &mut cycles));
-                }
-                owner
-            })
-        };
         while let Some(id) = pending.pop() {
             self.traces[id as usize].set(UNMARKED);
         }
+        let next = if remaining == 0 {
+            Ok(None)
+        } else {
+            self.release_unreachable_owners(&mut visited, remaining)
+        };
         while visited != END {
             visited = self.traces[visited].replace(UNMARKED);
         }
-        if let Some(proof) = retention {
-            self.cyclic_finalizers = proof;
-        }
+        next
+    }
+
+    /// Detaching edges from an unreachable owner leaves the initial live graph intact.
+    /// Only its newly published temporary roots can make more candidates reachable.
+    /// Return to Python with all scratch restored before invoking any callback.
+    fn release_unreachable_owners(
+        &mut self,
+        visited: &mut usize,
+        remaining: usize,
+    ) -> Result<Option<Id>> {
+        let isolated = remaining == 1 && !self.has_weak_values;
+        let candidates = self
+            .unreachable_slots(&[], usize::MAX)
+            .ok_or_else(|| Error::new("MemoryError", ""))?;
+        let mut cycles = std::mem::take(&mut self.prompt_cycles);
+        let next = cycles.prepare(self.slots.len()).and_then(|()| {
+            loop {
+                let (owner, cyclic) = self.identify_indexed_cycles(
+                    &mut cycles,
+                    candidates.iter().copied(),
+                    std::convert::identity,
+                    std::convert::identity,
+                    |id| match self.get(id) {
+                        // With no competing callback, a sole mortal slot has no sibling
+                        // to keep alive during its release. The permanent slots cannot die.
+                        Value::Tuple(items) if isolated => items
+                            .iter()
+                            .filter(|&&item| item as usize >= FIRST_DYNAMIC_SLOT)
+                            .nth(1)
+                            .is_some(),
+                        _ => self.pending_owner_roots(id).is_some(),
+                    },
+                );
+                if cyclic {
+                    if owner.is_none() {
+                        self.cyclic_finalizers =
+                            weak_roots::CycleRetention::from_residual(self, &mut cycles);
+                    }
+                    for &id in &candidates {
+                        cycles.incoming[id] = 0;
+                    }
+                }
+                let Some(owner) = owner else { return Ok(None) };
+                let mark = self.temporary_mark();
+                if !self.release_owner_edge(owner)? {
+                    return Ok(Some(owner));
+                }
+                let mut pending = MarkQueue {
+                    slots: &self.slots,
+                    traces: &self.traces,
+                    slot_shapes: &self.slot_shapes,
+                    next: END,
+                    mode: MarkMode::CycleEdges,
+                };
+                pending.extend(&self.frames.last().unwrap().live[mark..]);
+                while let Some(id) = pending.pop() {
+                    self.traces[id as usize].set(*visited);
+                    *visited = id as usize;
+                    self.get(id).children(&mut pending);
+                }
+                // A published reference can keep every remaining destructor alive.
+                if self
+                    .ordinary_finalizers
+                    .iter()
+                    .all(|&id| self.traces[id as usize].get() != UNMARKED)
+                {
+                    return Ok(None);
+                }
+            }
+        });
+        self.prompt_cycles = cycles;
         next
     }
 
@@ -6415,7 +6474,7 @@ impl Heap {
     pub(super) fn collect(&mut self, globals: impl Iterator<Item = Id>) -> Option<WeakCallbacks> {
         let mut trace = std::mem::take(&mut self.root_trace);
         trace.mark(self, globals);
-        let small = self.small_unreachable(&trace.covered_runs);
+        let small = self.unreachable_slots(&trace.covered_runs, 256.max(self.slots.len() / 64));
         self.root_trace = trace;
         let size = small.as_ref().map_or(self.slots.len(), |slots| slots.len());
         let mut cycles = std::mem::take(&mut self.prompt_cycles);
@@ -6450,10 +6509,13 @@ impl Heap {
     }
 
     /// Keep cycle scratch proportional to the garbage using only containers with outgoing edges.
-    fn small_unreachable(&self, runs: &[Range<usize>]) -> Option<smallvec::SmallVec<[usize; 256]>> {
+    fn unreachable_slots(
+        &self,
+        runs: &[Range<usize>],
+        limit: usize,
+    ) -> Option<smallvec::SmallVec<[usize; 256]>> {
         let mut slots = smallvec::SmallVec::new();
         // A sparse candidate graph avoids allocating and scanning counters for the whole heap.
-        let limit = slots.inline_size().max(self.slots.len() / 64);
         for gap in RootTrace::gaps(runs, self.slots.len()) {
             let shapes = &self.slot_shapes[gap.clone()];
             for (offset, (mark, shape)) in self.traces[gap.clone()].iter().zip(shapes).enumerate() {
@@ -6500,7 +6562,13 @@ impl Heap {
         slot_at: impl Fn(usize) -> usize,
         index_of: impl Fn(usize) -> usize,
     ) -> bool {
-        let (_, cyclic) = self.identify_indexed_cycles(cycles, &slot_at, index_of);
+        let (_, cyclic) = self.identify_indexed_cycles(
+            cycles,
+            0..cycles.incoming.len(),
+            &slot_at,
+            index_of,
+            |_| false,
+        );
         if cyclic {
             let mut children = MarkCycleChildren {
                 traces: &self.traces,
@@ -6527,6 +6595,41 @@ impl Heap {
             return Ok(false);
         }
         self.released_last_reference(child, roots, Some(child))
+    }
+
+    /// Number of roots needed while this acyclic owner releases its next reference.
+    fn pending_owner_roots(&self, owner: Id) -> Option<usize> {
+        match self.get(owner) {
+            Value::Tuple(items) if items.len() > 1 => Some(items.len() - 1),
+            Value::PythonFrame {
+                scope,
+                back: Some(_),
+                ..
+            } if *scope != NONE => Some(1),
+            _ => None,
+        }
+    }
+
+    /// Move the tuple's remaining slots or the frame's caller to the operand stack.
+    fn release_owner_edge(&mut self, owner: Id) -> Result<bool> {
+        let Some(count) = self.pending_owner_roots(owner) else {
+            return Ok(false);
+        };
+        self.reserve_temporaries(count)?;
+        match self.get_mut(owner) {
+            Value::Tuple(items) => {
+                items.pop();
+                let pending = std::mem::take(items);
+                self.frames.last_mut().unwrap().live.extend(pending);
+            }
+            Value::PythonFrame { scope, back, .. } => {
+                *scope = NONE;
+                let caller = back.take().expect("materialized caller");
+                self.keep(caller);
+            }
+            _ => unreachable!(),
+        }
+        Ok(true)
     }
 
     /// Replace a dead list or tuple operand with its owned elements. Popping those roots
@@ -6674,8 +6777,13 @@ impl Heap {
     /// dead objects that refcounting alone would release from the Python GC count.
     /// The incoming counts must start at zero.
     fn identify_cycles(&self, cycles: &mut CycleSet) -> Option<Id> {
-        let (finalizer, cyclic) =
-            self.identify_indexed_cycles(cycles, std::convert::identity, std::convert::identity);
+        let (finalizer, cyclic) = self.identify_indexed_cycles(
+            cycles,
+            0..cycles.incoming.len(),
+            std::convert::identity,
+            std::convert::identity,
+            |_| false,
+        );
         // Scalars have no outgoing edges and cannot take part in a cycle.
         // Only the scalars retained by a surviving cycle join its isolate.
         if cyclic {
@@ -6699,8 +6807,10 @@ impl Heap {
     fn identify_indexed_cycles(
         &self,
         cycles: &mut CycleSet,
+        candidates: impl Iterator<Item = usize>,
         slot_at: impl Fn(usize) -> usize,
         index_of: impl Fn(usize) -> usize,
+        release_owner: impl Fn(Id) -> bool,
     ) -> (Option<Id>, bool) {
         let mut first_finalizer = None;
         let CycleSet {
@@ -6709,7 +6819,7 @@ impl Heap {
             ..
         } = cycles;
         unowned.clear();
-        for index in 0..incoming.len() {
+        for index in candidates {
             let id = slot_at(index);
             if self.traces[id].get() == UNMARKED && self.slot_shapes[id] == SlotShape::Other {
                 let value = self.slots[id]
@@ -6734,11 +6844,19 @@ impl Heap {
             unowned.clear();
             return (first_finalizer, false);
         }
+        let mut releasing: Option<(Id, usize)> = None;
         while let Some(index) = unowned.pop() {
+            // Reaching an earlier work item finishes this owner's entire branch.
+            if releasing.is_some_and(|(_, base)| unowned.len() < base) {
+                releasing = None;
+            }
             remaining -= 1;
             let id = slot_at(index);
             if first_finalizer.is_none() && self.slots[id].finalization == Finalization::Pending {
-                first_finalizer = Some(id as Id);
+                first_finalizer = Some(releasing.map_or(id as Id, |(parent, _)| parent));
+            }
+            if first_finalizer.is_none() && releasing.is_none() && release_owner(id as Id) {
+                releasing = Some((id as Id, unowned.len()));
             }
             self.unreachable_children(
                 self.slots[id].value.as_ref().unwrap(),
@@ -7975,7 +8093,7 @@ mod tests {
             heap.release_temporaries_since(0);
 
             let check = |heap: &mut Heap| {
-                heap.acyclic_finalizer([NONE; 2], [].into_iter(), None)
+                heap.next_acyclic_finalizer([NONE; 2], [].into_iter(), None)
                     .unwrap()
             };
             assert_eq!(check(&mut heap), None);
@@ -8007,7 +8125,7 @@ mod tests {
         items.push(ring);
         heap.release_temporaries_since(0);
         let check = |heap: &mut Heap| {
-            heap.acyclic_finalizer([NONE; 2], [].into_iter(), None)
+            heap.next_acyclic_finalizer([NONE; 2], [].into_iter(), None)
                 .unwrap()
         };
         assert_eq!(check(&mut heap), None);
@@ -8051,7 +8169,7 @@ mod tests {
         edges.push(retained);
         heap.release_temporaries_since(0);
         assert_eq!(
-            heap.acyclic_finalizer([NONE; 2], [].into_iter(), None)
+            heap.next_acyclic_finalizer([NONE; 2], [].into_iter(), None)
                 .unwrap(),
             None
         );
@@ -8061,7 +8179,7 @@ mod tests {
         heap.register_finalizer(dying);
         heap.release_temporaries_since(0);
         assert_eq!(
-            heap.acyclic_finalizer([NONE; 2], [retained].into_iter(), None)
+            heap.next_acyclic_finalizer([NONE; 2], [retained].into_iter(), None)
                 .unwrap(),
             Some(dying)
         );
@@ -8083,7 +8201,7 @@ mod tests {
         *heap.get_mut(ring) = Value::List(items);
         heap.release_temporaries_since(0);
         let check = |heap: &mut Heap| {
-            heap.acyclic_finalizer([NONE; 2], [].into_iter(), None)
+            heap.next_acyclic_finalizer([NONE; 2], [].into_iter(), None)
                 .unwrap()
         };
         assert_eq!(check(&mut heap), None);
@@ -8142,7 +8260,7 @@ mod tests {
         // Only one distinct pending owner is proven by this chain.
         let chain = [input, buffer, input, NONE, input];
         let mut check = |roots| {
-            heap.acyclic_finalizer([NONE; 2], roots, Some(&chain))
+            heap.next_acyclic_finalizer([NONE; 2], roots, Some(&chain))
                 .unwrap()
         };
         assert_eq!(check(vec![input].into_iter()), Some(dead));
