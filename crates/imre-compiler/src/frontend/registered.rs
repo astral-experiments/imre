@@ -2580,9 +2580,6 @@ pub(crate) fn inline_operand(
         }
         ast::Expr::FString(_) => FORMATTED_STRING_REFUSAL,
         ast::Expr::Generator(_) => GENERATOR_REFUSAL,
-        ast::Expr::DictComp(display) if display.key.is_none() => {
-            return Ok(RegisteredOperand::prepare(expr, source, kind));
-        }
         ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_) => {
             COMPREHENSION_REFUSAL
         }
