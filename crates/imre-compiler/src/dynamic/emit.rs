@@ -1074,30 +1074,35 @@ impl SourceMap<'_> {
                     }
                 }
             }
-            Body::Operand(range, operand) => {
+            Body::Operand(range, ReturnOperand::Prepared(operand, class)) => {
+                frame.current_range = range;
+                frame.checkpoint(range);
+                if let Some(class) = class {
+                    frame.use_class_annotation_names(class);
+                }
+                let globals = BTreeSet::new();
+                let mut callables =
+                    self.frame_callables(&mut frame, &mut sites, &prefix, &globals, in_function);
+                sites::CheckedSites::visit_operand(&operand.value, &mut |site| {
+                    callables.place_site(site)
+                });
+                let value = frame.prepared_operand(operand, &sites, false);
+                frame.return_value(&value);
+                frame
+            }
+            Body::Operand(range, ReturnOperand::ClassArguments(site)) => {
                 let mut f = source_function(frame, sites, prefix);
                 f.checkpoint(&range);
-                let value = match operand {
-                    ReturnOperand::Prepared(operand, class) => {
-                        if let Some(class) = class {
-                            f.frame.use_class_annotation_names(class);
-                        }
-                        f.prepare_checked_value(&operand.value);
-                        f.frame.prepared_operand(operand, &f.sites, false)
-                    }
-                    ReturnOperand::ClassArguments(site) => {
-                        let class = &self.class_bodies[&site];
-                        let parameters = class.header.parameters.as_deref().expect("generic class");
-                        let namespace = f.callable_sites().compile_class_namespace(site);
-                        namespace.generic_class(
-                            &mut f,
-                            parameters,
-                            class.range,
-                            &class.header.layout,
-                            |code, index| code.physical_operand(&class.header.operands[index]),
-                        )
-                    }
-                };
+                let class = &self.class_bodies[&site];
+                let parameters = class.header.parameters.as_deref().expect("generic class");
+                let namespace = f.callable_sites().compile_class_namespace(site);
+                let value = namespace.generic_class(
+                    &mut f,
+                    parameters,
+                    class.range,
+                    &class.header.layout,
+                    |code, index| code.physical_operand(&class.header.operands[index]),
+                );
                 f.return_value(&value);
                 f.frame
             }
@@ -3998,10 +4003,16 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     fn type_alias_returns_a_registered_lambda_with_a_prepared_template_body() {
         use crate::ir::{Builtin, ExprKind};
 
-        let prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "editor",
             Path::new("editor.py"),
-            "type Factory = lambda item: t'{item}'\n",
+            concat!(
+                "class Owner:\n",
+                "    __secret = int\n",
+                "    type Factory = (\n",
+                "        [__secret, lambda item: t'{item}']\n",
+                "    )\n",
+            ),
             0,
             ModuleOrigin::Program(None),
         )
@@ -4023,6 +4034,49 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             panic!("expected one checked lambda binding in the alias evaluator");
         };
         assert!(prepared.source.lambdas[site].body.is_some());
+
+        let emit = |prepared: &PreparedBody<'_>| {
+            let mut output = Output::default();
+            let file = output.data(b"editor.py");
+            prepared.emit(&mut output, 0, &file).unwrap();
+            (output, file)
+        };
+        let (original, _) = emit(&prepared);
+        assert!(prepared.syntax.take().is_some());
+        let (mut output, file) = emit(&prepared);
+        assert_eq!(original.constants, output.constants);
+        assert_eq!(original.functions, output.functions);
+
+        let format_op = output.data(b"annotation_format");
+        let class_lookup = output.data(b"lookup_class_annotation_global");
+        let private_name = output.data(b"_Owner__secret");
+        let evaluator = output
+            .functions
+            .split("\n}")
+            .find(|body| {
+                body.contains(&format!(
+                    "call i64 @imre_dyn_op_at(ptr %ctx, ptr {format_op},"
+                ))
+            })
+            .expect("alias evaluator");
+        assert!(evaluator.lines().any(|line| {
+            line.contains("call void @imre_dyn_statement_with_exception(")
+                && line.contains(&format!(", ptr {file}, i32 4,"))
+        }));
+        assert!(evaluator.lines().any(|line| {
+            line.contains(&format!(
+                "call i64 @imre_boxed_named_op(ptr %ctx, ptr {class_lookup},"
+            )) && line.contains(&format!("ptr {private_name},"))
+        }));
+        let (_, operands) = evaluator
+            .split_once("call i64 @imre_dyn_define(ptr %ctx, ptr ")
+            .expect("lambda binding in the alias evaluator");
+        let (lambda_site, _) = operands.split_once(',').unwrap();
+        assert!(output.constants.lines().any(|line| {
+            line.starts_with(&format!(
+                "{lambda_site} = private constant %code_site {{ ptr "
+            )) && line.ends_with(&format!(", ptr {file}, i32 4, i32 0 }}"))
+        }));
     }
 
     #[test]
