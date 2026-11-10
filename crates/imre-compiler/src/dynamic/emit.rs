@@ -574,7 +574,9 @@ impl<'a> PreparedBody<'a, '_> {
             scopes.functions[&start].suspension_flags != 0
         });
         let mut thread_entries = HashMap::new();
-        for site in sites.functions {
+        // The collector visits a definition before its children. Prepare the children first
+        // so a physical enclosing suite can bind their already checked declarations.
+        for site in sites.functions.into_iter().rev() {
             let def = site.def;
             let start = def.start();
             if let Some(entry) = site.thread_entry {
@@ -591,11 +593,21 @@ impl<'a> PreparedBody<'a, '_> {
                 let kind = crate::frontend::RegisteredScope::Function {
                     is_async: def.is_async,
                 };
+                let has_ordinary_header = |site| {
+                    function_bodies
+                        .get(&site)
+                        .is_some_and(PreparedFunction::has_ordinary_header)
+                };
                 if !site.prepare_entry {
-                    prepare.physical_body(&def.body, kind, suspended);
+                    prepare.physical_body(&def.body, kind, suspended, &has_ordinary_header);
                     continue;
                 }
-                FunctionBody::Suite(prepare.function_suite(&def.body, kind, suspended))
+                FunctionBody::Suite(prepare.function_suite(
+                    &def.body,
+                    kind,
+                    suspended,
+                    &has_ordinary_header,
+                ))
             };
             let complete = match &body {
                 FunctionBody::Program(_) => true,
@@ -975,6 +987,10 @@ struct PreparedFunction<'a> {
 }
 
 impl PreparedFunction<'_> {
+    fn has_ordinary_header(&self) -> bool {
+        matches!(self.header, Some(CheckedHeader::Ordinary))
+    }
+
     fn graph_header(&self) -> Option<&CheckedHeader> {
         match self.body {
             FunctionBody::Program(_) => self.header.as_ref(),
@@ -1100,7 +1116,7 @@ impl SourceInfo<'_> {
         site: ruff_text_size::TextSize,
     ) -> Option<(&crate::frontend::function_scope::OrdinaryFunction, Body<'_>)> {
         let plan = self.function_bodies.get(&site)?;
-        if !matches!(plan.header, Some(CheckedHeader::Ordinary)) {
+        if !plan.has_ordinary_header() {
             return None;
         }
         let scope = &self.scopes.functions[&site];
@@ -1739,6 +1755,7 @@ mod tests {
             &def.body,
             crate::frontend::RegisteredScope::Function { is_async: false },
             false,
+            &|_| false,
         );
         let (sites, nested) = (physical.sites, physical.nested);
         module.source.statement_sites = sites;
@@ -2741,6 +2758,7 @@ mod tests {
             &function.body,
             crate::frontend::RegisteredScope::Function { is_async: false },
             false,
+            &|_| false,
         );
         (
             prepared.source.statement_sites,
@@ -3756,6 +3774,49 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
+    fn both_finally_paths_bind_the_same_function_after_withdrawing_its_declaration() {
+        let source = concat!(
+            "def closing(seed):\n",
+            "    try:\n",
+            "        seed.marker: int\n",
+            "        yield 'open'\n",
+            "    finally:\n",
+            "        @decorate('outer')\n",
+            "        @decorate('inner')\n",
+            "        def cleanup(first=mark(seed), *, last=mark(seed + 1)):\n",
+            "            return first, last, seed\n",
+            "        yield cleanup\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "closing",
+            Path::new("closing.py"),
+            source,
+            0,
+            ModuleOrigin::Provider,
+        )
+        .unwrap();
+        let original = prepared.standalone().unwrap().unwrap();
+        // One binding creates closing. Normal and exceptional exits each bind cleanup.
+        assert_eq!(
+            original.1.matches(" = private constant %code_site").count(),
+            2
+        );
+        assert_eq!(original.1.matches("call i64 @imre_dyn_define(").count(), 3);
+        let closing = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let cleanup = &mut closing.body[0].as_try_stmt_mut().unwrap().finalbody[0];
+        let site = cleanup.start();
+        *cleanup = ast::StmtPass {
+            range: cleanup.range(),
+            node_index: Default::default(),
+        }
+        .into();
+        assert!(!prepared.linked_declarations().contains_key(&site));
+        assert!(prepared.standalone().unwrap().unwrap() == original);
+    }
+
+    #[test]
     fn nested_finally_after_return_only_emits_reachable_cleanup() {
         let source = concat!(
             "def wait(work, release, reacquire):\n",
@@ -3893,6 +3954,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             &def.body,
             crate::frontend::RegisteredScope::Function { is_async: false },
             true,
+            &|_| false,
         );
         let message = def.body[0]
             .as_assert_stmt()
