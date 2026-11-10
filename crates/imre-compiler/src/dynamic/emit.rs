@@ -2923,11 +2923,17 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     fn boxed_type_alias_values_emit_after_withdrawing_the_alias_statements() {
         use ast::visitor::transformer::{self, Transformer};
 
-        struct WithdrawAliases(std::cell::Cell<usize>);
-        impl Transformer for WithdrawAliases {
+        struct WithdrawAliases<'a> {
+            definitions: &'a HashMap<ruff_text_size::TextSize, TypeAliasDefinition>,
+            count: std::cell::Cell<usize>,
+        }
+        impl Transformer for WithdrawAliases<'_> {
             fn visit_stmt(&self, stmt: &mut ast::Stmt) {
                 if let ast::Stmt::TypeAlias(alias) = stmt {
-                    self.0.set(self.0.get() + 1);
+                    let definition = &self.definitions[&alias.start()];
+                    assert_eq!(definition.name, alias.name.as_name_expr().unwrap().id.as_str());
+                    assert!(definition.body.is_ok(), "{}", definition.name);
+                    self.count.set(self.count.get() + 1);
                     *stmt = ast::StmtPass {
                         range: alias.range(),
                         node_index: Default::default(),
@@ -2939,18 +2945,29 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             }
         }
 
+        let source = include_str!("../../../../tests/fixtures/boxed_type_alias_values.py");
+        let path = Path::new("boxed_type_alias_values.py");
         let mut prepared = PreparedBody::module(
             "boxed_type_alias_values",
-            Path::new("boxed_type_alias_values.py"),
-            include_str!("../../../../tests/fixtures/boxed_type_alias_values.py"),
+            path,
+            source,
             0,
             ModuleOrigin::Program(None),
         )
         .unwrap();
+        assert!(prepared.syntax.is_none());
         let original = prepared.standalone().unwrap().unwrap();
-        let withdraw = WithdrawAliases(Default::default());
-        withdraw.visit_body(prepared.syntax.as_mut().unwrap().to_mut());
-        assert_eq!(withdraw.0.get(), 4);
+
+        let parsed = ParsedModule::parse(path, source.into()).unwrap();
+        let mut body = module_source::into_body(parsed.parsed);
+        let withdraw = WithdrawAliases {
+            definitions: &prepared.source.type_aliases,
+            count: Default::default(),
+        };
+        withdraw.visit_body(&mut body);
+        assert_eq!(withdraw.count.get(), 4);
+        assert_eq!(withdraw.definitions.len(), 4);
+        prepared.syntax = Some(Cow::Owned(body));
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
     }
 
