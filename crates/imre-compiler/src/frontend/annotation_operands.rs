@@ -14,28 +14,9 @@ use super::{
 };
 use crate::ir::{Builtin, Expr, ExprKind, Type};
 
-pub(crate) enum PreparedAnnotation<R> {
-    String {
-        text: String,
-        body: Option<AnnotationBody<R>>,
-    },
-    Value(Expr),
-}
-
-impl<R> PreparedAnnotation<R> {
-    pub(super) fn operand(&self, site: TextSize) -> Expr {
-        match self {
-            Self::Value(value) => value.clone(),
-            Self::String { text, body } => Expr {
-                ty: Type::Str,
-                kind: if body.is_some() {
-                    ExprKind::Builtin(Builtin::BindAnnotationExpression(site), Vec::new())
-                } else {
-                    ExprKind::Str(text.clone())
-                },
-            },
-        }
-    }
+pub(crate) struct AnnotationOperands<R> {
+    pub(crate) values: HashMap<TextSize, Expr>,
+    pub(crate) children: HashMap<TextSize, AnnotationBody<R>>,
 }
 
 pub(crate) struct AnnotationBody<R> {
@@ -101,7 +82,7 @@ pub(crate) fn annotation_operands<R>(
     source: RegisteredSource<'_>,
     bundled: bool,
     prepare_child: impl Fn(&str, &Parsed<ast::ModExpression>) -> Option<AnnotationBody<R>>,
-) -> HashMap<TextSize, PreparedAnnotation<R>> {
+) -> AnnotationOperands<R> {
     #[derive(Clone, Copy)]
     enum Scope {
         Module,
@@ -110,7 +91,7 @@ pub(crate) fn annotation_operands<R>(
     }
 
     struct Strings<'a, R> {
-        sites: HashMap<TextSize, PreparedAnnotation<R>>,
+        operands: AnnotationOperands<R>,
         prepare_child: &'a PrepareChild<'a, R>,
         source: RegisteredSource<'a>,
         string_annotations: bool,
@@ -136,8 +117,7 @@ pub(crate) fn annotation_operands<R>(
                     })
                 };
                 if let Some(value) = value {
-                    self.sites
-                        .insert(expr.start(), PreparedAnnotation::Value(value));
+                    self.operands.values.insert(expr.start(), value);
                 }
                 return;
             };
@@ -146,8 +126,21 @@ pub(crate) fn annotation_operands<R>(
             } else {
                 annotation_expression(&text).and_then(|parsed| (self.prepare_child)(&text, &parsed))
             };
-            self.sites
-                .insert(expr.start(), PreparedAnnotation::String { text, body });
+            let site = expr.start();
+            let kind = match body {
+                Some(body) => {
+                    self.operands.children.insert(site, body);
+                    ExprKind::Builtin(Builtin::BindAnnotationExpression(site), Vec::new())
+                }
+                None => ExprKind::Str(text),
+            };
+            self.operands.values.insert(
+                site,
+                Expr {
+                    ty: Type::Str,
+                    kind,
+                },
+            );
         }
 
         fn nested(&mut self, stmts: &[ast::Stmt], scope: Scope) {
@@ -184,7 +177,10 @@ pub(crate) fn annotation_operands<R>(
     }
 
     let mut strings = Strings {
-        sites: HashMap::new(),
+        operands: AnnotationOperands {
+            values: HashMap::new(),
+            children: HashMap::new(),
+        },
         prepare_child: &prepare_child,
         source,
         string_annotations,
@@ -192,7 +188,7 @@ pub(crate) fn annotation_operands<R>(
         scope: Scope::Module,
     };
     strings.visit_body(stmts);
-    strings.sites
+    strings.operands
 }
 
 #[cfg(test)]
@@ -241,33 +237,21 @@ mod tests {
             false,
             test_annotation_body,
         );
-        assert_eq!(sites.len(), 4);
+        assert_eq!(sites.values.len(), 4);
         for (start, _) in text.match_indices("'list[int]'") {
-            let entry = &sites[&TextSize::try_from(start).unwrap()];
-            let PreparedAnnotation::String {
-                body:
-                    Some(AnnotationBody {
-                        code: AnnotationCode { range, .. },
-                        ..
-                    }),
-                ..
-            } = entry
-            else {
-                panic!("expected a checked function argument");
-            };
+            let range = sites.children[&TextSize::try_from(start).unwrap()]
+                .code
+                .range;
             assert_eq!(range.start().to_u32(), 0);
             assert_eq!(range.end().to_u32(), 9);
         }
         let site = |token| TextSize::try_from(text.find(token).unwrap()).unwrap();
-        assert!(matches!(
-            sites[&site("'(lambda")],
-            PreparedAnnotation::String { body: Some(_), .. }
-        ));
-        assert!(matches!(
-            sites[&site("'Name'")],
-            PreparedAnnotation::String { body: None, .. }
-        ));
-        assert!(!sites.contains_key(&site("'skip")));
+        assert!(sites.children.contains_key(&site("'(lambda")));
+        assert!(
+            matches!(&sites.values[&site("'Name'")].kind, ExprKind::Str(text) if text == "Name")
+        );
+        assert!(!sites.children.contains_key(&site("'Name'")));
+        assert!(!sites.values.contains_key(&site("'skip")));
     }
 
     #[test]
@@ -292,22 +276,11 @@ mod tests {
             test_annotation_body,
         );
         let offset = |s| TextSize::try_from(text.find(s).unwrap()).unwrap();
-        assert!(matches!(
-            sites[&offset("mark(1)")],
-            PreparedAnnotation::Value(_)
-        ));
-        assert!(matches!(
-            sites[&offset("token")],
-            PreparedAnnotation::Value(_)
-        ));
-        assert!(matches!(
-            sites[&offset("lambda")],
-            PreparedAnnotation::Value(_)
-        ));
-        let PreparedAnnotation::Value(Expr {
-            kind: ExprKind::Builtin(Builtin::ListGet, items),
-            ..
-        }) = &sites[&offset("*items")]
+        assert!(sites.children.is_empty());
+        for spelling in ["mark(1)", "token", "lambda"] {
+            assert!(sites.values.contains_key(&offset(spelling)));
+        }
+        let ExprKind::Builtin(Builtin::ListGet, items) = &sites.values[&offset("*items")].kind
         else {
             panic!("expected an unpacked annotation");
         };
@@ -356,19 +329,20 @@ after: K[L]
                 bundled,
                 test_annotation_body,
             );
-            assert_eq!(sites.len(), 5);
+            assert_eq!(sites.values.len(), 5);
+            assert_eq!(sites.children.len(), if bundled { 0 } else { 5 });
             for spelling in ["A[B]", "C[D]", "E[F]", "I[J]", "K[L]"] {
                 let location = site(spelling);
-                let value = sites[&location].operand(location);
+                let value = &sites.values[&location].kind;
                 if bundled {
-                    assert!(matches!(value.kind, ExprKind::Str(text) if text == spelling));
+                    assert!(matches!(value, ExprKind::Str(text) if text == spelling));
                 } else {
                     assert!(
-                        matches!(value.kind, ExprKind::Builtin(Builtin::BindAnnotationExpression(child), _) if child == location)
+                        matches!(value, ExprKind::Builtin(Builtin::BindAnnotationExpression(child), _) if *child == location)
                     );
                 }
             }
-            assert!(!sites.contains_key(&site("G[H]")));
+            assert!(!sites.values.contains_key(&site("G[H]")));
         }
     }
 }

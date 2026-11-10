@@ -564,10 +564,10 @@ pub(crate) struct ParameterAnnotations {
 }
 
 impl ParameterAnnotations {
-    fn prepare<R>(
+    fn prepare(
         def: &ast::StmtFunctionDef,
         source: values::RegisteredSource<'_>,
-        operands: &HashMap<TextSize, PreparedAnnotation<R>>,
+        operands: &mut HashMap<TextSize, Expr>,
     ) -> Option<Self> {
         let annotations = parameter_annotations(&def.parameters, def.returns.as_deref());
         if annotations.is_empty() {
@@ -589,7 +589,7 @@ impl ParameterAnnotations {
             if let Some(reference) = scalar_reference(expression) {
                 references.insert(name.to_owned(), reference);
             }
-            let value = operands.get(&site).map(|operand| operand.operand(site));
+            let value = operands.remove(&site);
             entries.push((
                 DeferredAnnotation::new(name.to_owned(), expression, value, &mut scope),
                 None,
@@ -751,24 +751,24 @@ pub(crate) struct RegisteredSites<'a> {
     pub(crate) parameter_annotations: HashMap<TextSize, ParameterAnnotations>,
 }
 
-pub(crate) fn registered_sites<'a, R>(
+pub(crate) fn registered_sites<'a>(
     body: &'a [ast::Stmt],
     names: &imre_ast::Names,
     source: values::RegisteredSource<'_>,
-    operands: &HashMap<TextSize, PreparedAnnotation<R>>,
+    operands: HashMap<TextSize, Expr>,
 ) -> RegisteredSites<'a> {
     use ast::statement_visitor::{StatementVisitor, walk_stmt};
-    struct Collector<'s, 'a, R> {
+    struct Collector<'s, 'a> {
         names: &'s imre_ast::Names,
         source: values::RegisteredSource<'s>,
-        operands: &'s HashMap<TextSize, PreparedAnnotation<R>>,
+        operands: HashMap<TextSize, Expr>,
         annotations: SourceScope<'s>,
         scope: RegisteredScope,
         in_unprepared_generic: bool,
         function: Option<TextSize>,
         output: RegisteredSites<'a>,
     }
-    impl<'a, R> StatementVisitor<'a> for Collector<'_, 'a, R> {
+    impl<'a> StatementVisitor<'a> for Collector<'_, 'a> {
         fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
             if let Some(import) = registered_import(stmt, self.names) {
                 self.output.operations.insert(stmt.range(), import);
@@ -805,7 +805,7 @@ pub(crate) fn registered_sites<'a, R>(
                 }
                 ast::Stmt::FunctionDef(def) => {
                     if let Some(provider) =
-                        ParameterAnnotations::prepare(def, self.source, self.operands)
+                        ParameterAnnotations::prepare(def, self.source, &mut self.operands)
                     {
                         self.output
                             .parameter_annotations
@@ -872,7 +872,11 @@ pub(crate) fn registered_sites<'a, R>(
                         let site = ann.annotation.start();
                         (
                             ir::NamespaceAnnotation::String { name },
-                            vec![self.operands[&site].operand(site)],
+                            vec![
+                                self.operands
+                                    .remove(&site)
+                                    .expect("prepared postponed annotation"),
+                            ],
                         )
                     } else {
                         let fields = if matches!(self.scope, RegisteredScope::Module) {
@@ -885,9 +889,7 @@ pub(crate) fn registered_sites<'a, R>(
                             DeferredAnnotation::new(
                                 name.clone(),
                                 &ann.annotation,
-                                self.operands
-                                    .get(&ann.annotation.start())
-                                    .map(|operand| operand.operand(ann.annotation.start())),
+                                self.operands.remove(&ann.annotation.start()),
                                 &mut self.annotations,
                             ),
                         );
@@ -3050,7 +3052,7 @@ mod tests {
             bundled,
             crate::frontend::annotation_operands::test_annotation_body,
         );
-        registered_sites(stmts, names, source, &strings)
+        registered_sites(stmts, names, source, strings.values)
     }
 
     pub(super) fn registered_suite(
@@ -3121,8 +3123,7 @@ mod tests {
         let mut body = module.parsed.syntax().body.clone();
         let names = imre_ast::lower(&mut body);
         let literals = values::ModuleSource::new(module);
-        let sites =
-            registered_sites::<()>(&body, &names, literals.context(source), &HashMap::new());
+        let sites = registered_sites(&body, &names, literals.context(source), HashMap::new());
         let [method, closure] = sites.functions.as_slice() else {
             panic!("expected the method and its lexical function");
         };
