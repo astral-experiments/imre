@@ -125,7 +125,8 @@ impl Logical {
             && operand.value.ty == Type::Bool
             && *result_type == Type::Bool
         {
-            join.incoming(code.body(), value);
+            let owned = code.fixed().own_operand(value.into_native());
+            join.incoming(code.body(), CheckedValue::owned(owned));
             code.body().branch(&truth, yes, no);
             return;
         }
