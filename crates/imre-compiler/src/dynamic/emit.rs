@@ -417,24 +417,19 @@ impl<'a> PreparedBody<'a, '_> {
             ModuleOrigin::Program(bodies) => bodies,
             _ => None,
         };
-        let (syntax, tokens, replacements, template_fields) = match &input {
+        let (syntax, tokens, replacements) = match &input {
             Input::Module(parsed) => (
                 parsed.syntax(),
                 parsed.tokens(),
                 check_parsed_source(path, source, parsed, keep_docstrings)?,
-                Cow::Owned(imre_ast::strings::template_fields(
-                    source,
-                    parsed.tokens(),
-                    parsed.syntax(),
-                )),
             ),
-            Input::Expression(syntax, tokens, fields) => (
+            Input::Expression(syntax, tokens) => (
                 syntax,
                 *tokens,
                 crate::frontend::literal_replacements(source, tokens),
-                Cow::Borrowed(*fields),
             ),
         };
+        let template_fields = imre_ast::strings::template_fields(source, tokens, syntax);
         let docs = if keep_docstrings && name == "collections" && bundled {
             crate::modules::doctest::sealed(crate::modules::IntrinsicModule::Collections)
         } else {
@@ -623,7 +618,10 @@ impl<'a> PreparedBody<'a, '_> {
             class_keywords,
             docs,
             has_templates,
-            strings,
+            strings: crate::frontend::PreparedStrings {
+                fields: template_fields,
+                ..strings
+            },
             replacements,
             method_imports,
             barry_as_flufl: imre_ast::future_import(&body, "barry_as_FLUFL"),
@@ -709,14 +707,13 @@ impl<'a> PreparedBody<'a, '_> {
             range: expression.range(),
             body: std::iter::once(stmt).collect(),
         };
-        let fields = imre_ast::strings::template_fields(text, parsed.tokens(), expression);
         PreparedBody::prepare(
             "",
             Path::new("<string>"),
             Cow::Owned(text.to_owned()),
             python_optimization,
             ModuleOrigin::Program(None),
-            Input::Expression(syntax, parsed.tokens(), &fields),
+            Input::Expression(syntax, parsed.tokens()),
             |prepared| {
                 let Some(ast::Stmt::Expr(statement)) =
                     prepared.syntax.as_deref().and_then(|body| body.first())
@@ -725,10 +722,7 @@ impl<'a> PreparedBody<'a, '_> {
                 };
                 let code = crate::frontend::AnnotationCode::prepare(
                     &statement.value,
-                    crate::frontend::RegisteredSource {
-                        template_fields: Some(&fields),
-                        ..prepared.source.registered_source()
-                    },
+                    prepared.source.registered_source(),
                 );
                 Ok(code.map(|code| crate::frontend::AnnotationBody {
                     code,
@@ -869,11 +863,7 @@ impl<'a> PreparedBody<'a, '_> {
 
 enum Input<'a> {
     Module(Cow<'a, ruff_python_parser::Parsed<ast::ModModule>>),
-    Expression(
-        ast::ModModule,
-        &'a ast::token::Tokens,
-        &'a HashMap<ruff_text_size::TextSize, imre_ast::strings::TemplateFieldText>,
-    ),
+    Expression(ast::ModModule, &'a ast::token::Tokens),
 }
 
 enum DefinitionName<'a> {
@@ -1132,7 +1122,7 @@ impl SourceInfo<'_> {
             text: &self.text,
             replacements: &self.replacements,
             has_templates: self.has_templates,
-            template_fields: None,
+            template_fields: Some(&self.strings.fields),
             lambdas: Some(&self.lambdas),
             generators: Some(&self.generators),
             method_imports: &self.method_imports,
@@ -1417,14 +1407,10 @@ mod tests {
     fn inject_residual_child_module(prepared: &mut PreparedBody) {
         use crate::frontend::{RegisteredScope, RegisteredSource, SuitePreparation};
 
-        let parsed = ruff_python_parser::parse_module(&prepared.source.text).unwrap();
-        let fields =
-            imre_ast::strings::template_fields(&prepared.source.text, parsed.tokens(), parsed.syntax());
         let body = prepared.syntax.as_deref().expect("retained child sites");
         let missing = HashMap::new();
         let source = RegisteredSource {
             lambdas: Some(&missing),
-            template_fields: Some(&fields),
             ..prepared.source.registered_source()
         };
         let (strings, generators) = crate::frontend::prepare_expression_sites(body, source);
@@ -1454,7 +1440,10 @@ mod tests {
         prepared.source.class_bodies = class_bodies;
         prepared.source.statement_sites = sites;
         prepared.source.nested_bodies.extend(nested);
-        prepared.source.strings = strings;
+        prepared.source.strings = crate::frontend::PreparedStrings {
+            fields: std::mem::take(&mut prepared.source.strings.fields),
+            ..strings
+        };
         prepared.source.logicals = logicals;
     }
 
@@ -1593,6 +1582,52 @@ mod tests {
         annotated.sort_unstable();
         assert_eq!(ordinary, ["first", "second"]);
         assert_eq!(annotated, ["publish", "successor_sum"]);
+    }
+
+    #[test]
+    fn detached_header_default_can_reuse_the_prepared_template_spelling() {
+        use crate::frontend::{RegisteredScope, inline_operand};
+
+        let source = "def read(rows=[t'{ (v) = !r}' for v in (1, 2)]) -> object:\n    return rows\n";
+        let path = Path::new("header.py");
+        let site = ruff_text_size::TextSize::default();
+        let mut initial =
+            PreparedBody::module("header", path, source, 0, ModuleOrigin::Program(None)).unwrap();
+        let FunctionBody::Suite(suite) = initial.source.function_bodies.remove(&site).unwrap().body
+        else {
+            panic!("expected a prepared function suite");
+        };
+        let bodies = HashMap::from([(site, suite.checked)]);
+        let module = PreparedBody::module(
+            "header", path, source, 0, ModuleOrigin::Program(Some(&bodies)),
+        )
+        .unwrap();
+        assert!(module.syntax.is_none());
+        assert!(module.source.initializer.as_ref().unwrap().fully_checked());
+        let header = module.source.function_header(site).unwrap();
+        assert!(header.body.is_empty());
+
+        let default = header.parameters.args[0].default.as_deref().unwrap();
+        let context = module.source.registered_source();
+        let spelling = context.template_fields.unwrap().values().next().unwrap();
+        assert_eq!(spelling.expression, " (v)");
+        assert_eq!(spelling.debug_prefix.as_deref(), Some(" (v) = "));
+        let operand = inline_operand(default, context, RegisteredScope::Module).unwrap();
+        assert!(operand.local_names.values().any(|binding| {
+            binding.name == "v" && binding.namespace.is_some()
+        }));
+        let mut captures = Vec::new();
+        crate::ir::walk_operand_expressions(&operand.value, &mut |expr| {
+            if let crate::ir::ExprKind::Builtin(
+                crate::ir::Builtin::RegisteredInterpolation { expression, conversion },
+                _,
+            ) = &expr.kind
+            {
+                captures.push((expression.as_str(), *conversion));
+            }
+        });
+        assert_eq!(captures, [(" (v)", Some('r'))]);
+        assert!(module.standalone().unwrap().is_some());
     }
 
     #[test]
