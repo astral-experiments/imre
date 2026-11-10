@@ -376,15 +376,7 @@ impl<'p> Function<'_, 'p> {
             }
             self.checkpoint(&stmt.range());
             self.simple_call = imre_ast::unhighlighted_call(stmt);
-            match stmt {
-                ast::Stmt::FunctionDef(v) => {
-                    let function = self.function_definition(v);
-                    self.bind(v.name.as_str(), &function);
-                }
-                _ => {
-                    self.unsupported(&format!("{:?}", ast::AnyNodeRef::from(stmt).kind()));
-                }
-            }
+            self.unsupported(&format!("{:?}", ast::AnyNodeRef::from(stmt).kind()));
         }
     }
 
@@ -408,13 +400,6 @@ impl<'p> Function<'_, 'p> {
         self.bind(class.name.as_str(), &value);
     }
 
-    fn function_parameter_scope(&mut self, outer: &str, params: &ast::TypeParams) -> String {
-        let params =
-            crate::frontend::registered_type_parameters(params, &self.source.private_names);
-        self.check_suspended_parameters(&params, self.current_range);
-        self.frame.checked_parameter_scope(outer, &params, false)
-    }
-
     fn check_suspended_parameters(
         &mut self,
         params: &[crate::ir::RegisteredTypeParameter],
@@ -426,100 +411,6 @@ impl<'p> Function<'_, 'p> {
             });
         }
     }
-
-    fn namespace_type_parameters<'a>(
-        &self,
-        function: &'a ast::StmtFunctionDef,
-    ) -> Option<&'a ast::TypeParams> {
-        function.type_params.as_deref().filter(|_| {
-            self.source
-                .namespace_operations
-                .contains_key(&function.name.range())
-        })
-    }
-
-    fn function_definition(&mut self, v: &ast::StmtFunctionDef) -> String {
-        let mut header: Vec<_> = v
-            .decorator_list
-            .iter()
-            .map(|d| self.expr(&d.expression))
-            .collect();
-        if self.callable_sites().prepare_ordinary_function(v.start()) {
-            // Residual decorators and defaults run in the enclosing scope, in source order.
-            for default in v
-                .parameters
-                .iter_non_variadic_params()
-                .filter_map(|p| p.default.as_deref())
-            {
-                header.push(self.with_source_range(default.range(), |code| code.expr(default)));
-            }
-            return self
-                .sites
-                .definition(&mut self.frame, v.start(), &header, None);
-        }
-        // A method's lazy annotations also need its defining class namespace.
-        let type_params =
-            if self.module || (self.class_locals.is_some() && !self.source.string_annotations) {
-                self.namespace_type_parameters(v)
-            } else {
-                crate::frontend::function_scope::boxed_function_type_params(
-                    v,
-                    self.source.string_annotations,
-                    !self.prefix.is_empty(),
-                    Some(&self.source.private_names),
-                )
-            };
-        let function = self.define(
-            v.decorator_list.first().map_or(v.start(), Ranged::start),
-            DefinitionName::Binding(&v.name),
-            Some(&v.parameters),
-            Some(v),
-            type_params,
-            self.source.function_body(v),
-        );
-        self.apply_decorators(&header, &v.decorator_list, function)
-    }
-
-    pub(super) fn define(
-        &mut self,
-        start: TextSize,
-        name: DefinitionName<'_>,
-        params: Option<&ast::Parameters>,
-        function: Option<&ast::StmtFunctionDef>,
-        type_params: Option<&ast::TypeParams>,
-        body: Body<'_>,
-    ) -> String {
-        let compiled = self.callable_sites().compile_definition(
-            start,
-            name,
-            params,
-            function,
-            type_params,
-            body,
-        );
-        let doc = compiled.doc(&mut self.frame);
-        let outer = self.scope.clone();
-        let scope = type_params
-            .map(|params| self.function_parameter_scope(&outer, params))
-            .unwrap_or(outer);
-        let operands = compiled.operands(&mut self.frame, &scope, doc);
-        if let Some(params) = params {
-            for arg in params.iter_non_variadic_params() {
-                if let Some(default) = &arg.default {
-                    let value = self.with_source_range(default.range(), |code| code.expr(default));
-                    operands.default(&mut self.frame, arg.parameter.name.as_str(), &value);
-                }
-            }
-        }
-        let function = compiled.instantiate(&mut self.frame, &scope, operands);
-        if type_params.is_some() {
-            let key = self.code_name(".type_params");
-            let params = self.op("lookup", &[&scope, &key]);
-            let key = self.code_name("__type_params__");
-            self.op("setattr", &[&function, &key, &params]);
-        }
-        function
-    }
 }
 
 impl CallableSites<'_, '_> {
@@ -530,21 +421,14 @@ impl CallableSites<'_, '_> {
         self.compile_definition(
             site,
             DefinitionName::Binding(&self.source.class_bodies[&site].name),
-            None,
-            None,
-            None,
             Body::Namespace,
         )
     }
 
-    /// Compile the body and its annotation provider with the declaring lexical scope.
     fn compile_definition(
         &mut self,
         start: TextSize,
         name: DefinitionName<'_>,
-        params: Option<&ast::Parameters>,
-        function: Option<&ast::StmtFunctionDef>,
-        type_params: Option<&ast::TypeParams>,
         body: Body<'_>,
     ) -> CompiledDefinition {
         let type_alias = matches!(name, DefinitionName::TypeAlias(_));
@@ -566,10 +450,6 @@ impl CallableSites<'_, '_> {
         } else {
             format!("{}{name}", self.prefix)
         };
-        // A generic declaration's immediate lexical parent is its type-parameter scope.
-        let generic = function.is_some_and(|f| f.type_params.is_some())
-            || type_alias && self.source.type_aliases[&start].parameters.is_some();
-        let nested = self.in_function || generic;
         let class_header = class.map(|class| class.range);
         let prefix = if let Some(class) = class {
             if self.declared_globals.contains(class.name.as_str()) {
@@ -583,80 +463,20 @@ impl CallableSites<'_, '_> {
         } else {
             format!("{qualname}.<locals>.")
         };
-        let named_scope = function.map(|def| self.source.scopes.function(def));
-        let declaration =
-            function.map(|def| &self.source.function_bodies[&def.start()].declaration);
-        let doc = if self.output.keep_docstrings {
-            declaration.and_then(|facts| {
-                facts
-                    .docstring
-                    .clone()
-                    .or_else(|| self.source.bundled_docstring(&qualname))
-            })
-        } else {
-            None
-        };
-        let generator_flags = if let Some(site) = generator {
+        let generator_flags = generator.map_or(0, |site| {
             if self.source.generators[&site].is_async {
                 code_flags::ASYNC_GENERATOR
             } else {
                 code_flags::GENERATOR
             }
-        } else {
-            named_scope.map_or(0, |scope| scope.suspension_flags)
-        };
-        let flags = match &body {
-            Body::Namespace => None,
-            _ => {
-                let mut flags = self.source.function_flags(
-                    params,
-                    nested,
-                    self.method_scope && class_header.is_none() && !generic && !type_alias,
-                );
-                if doc.is_some() {
-                    flags |= code_flags::HAS_DOCSTRING;
-                }
-                Some(flags | generator_flags)
-            }
-        };
-        let annotations = params.and_then(|p| self.source.parameter_annotations.get(&p.start()));
-        let provider = annotations.map(|annotations| {
-            let class = self
-                .class_locals
-                .filter(|_| !self.source.string_annotations);
-            let start = params.expect("annotated function parameters").start();
-            let reads = self.source.scopes.annotations.parameter_reads(start, class);
-            let mut metadata = json!({
-                "posonly": ["format"],
-                "code_flags": self.source.function_flags(None, nested, false),
-                "scope_reads": reads,
-                "scope_complete": true,
-                "scope_locals_complete": true,
-                "annotation_class": class.is_some(),
-            });
-            if !self.source.python_annotations && type_params.is_none() {
-                for (slot, reference) in &annotations.references {
-                    let root = reference.split('.').next().unwrap();
-                    if !class.is_some_and(|class| class.globals.contains(root)) {
-                        metadata["annotation_references"][slot] = json!(reference);
-                    }
-                }
-            }
-            let scope = class
-                .cloned()
-                .map_or(AnnotationScope::Plain, AnnotationScope::Method);
-            Box::new(self.source.annotation_provider(
-                self.output,
-                &annotations.body,
-                scope,
-                start,
-                metadata,
-                format!("{qualname}.__annotate__"),
-            ))
         });
         let mut signature = json!({});
-        if let Some(flags) = flags {
-            signature["code_flags"] = json!(flags);
+        if !matches!(body, Body::Namespace) {
+            let nested = self.in_function
+                || type_alias && self.source.type_aliases[&start].parameters.is_some();
+            let method = self.method_scope && class_header.is_none() && !type_alias;
+            let flags = self.source.function_flags(None, nested, method);
+            signature["code_flags"] = json!(flags | generator_flags);
         }
         if generator.is_some() {
             // The creating frame supplies the already-acquired iterator.
@@ -681,39 +501,17 @@ impl CallableSites<'_, '_> {
                 Some(&class.namespace)
             }
             _ if type_alias => Some(&scopes.aliases[&start]),
-            _ => named_scope
-                .map(|scope| &scope.lexical)
-                .or_else(|| generator.map(|site| &scopes.generators[&site])),
+            _ => generator.map(|site| &scopes.generators[&site]),
         };
         if let Some(facts) = scope_facts {
             facts.write_signature(&mut signature);
-            let callable = named_scope.is_some();
-            if callable && facts.captures_class {
-                signature["class_cell"] = json!(true);
-            }
-            if (callable || generator.is_some()) && self.method_scope && type_params.is_none() {
+            if generator.is_some() && self.method_scope {
                 signature["method_class_cell"] = json!(facts.captures_class);
             }
         } else {
             signature["scope_cellvars"] = serde_json::Value::Null;
             signature["scope_complete"] = json!(false);
             signature["scope_locals_complete"] = json!(true);
-        }
-        if let Some(entry) = function.and_then(|def| self.source.thread_entries.get(&def.start())) {
-            match entry {
-                imre_ast::ThreadEntry::Parameters { names, lock_only } => {
-                    signature["thread_parameters"] = json!(names);
-                    if *lock_only {
-                        signature["thread_worker_locks"] = json!(names);
-                    }
-                }
-                imre_ast::ThreadEntry::Captured(names) => {
-                    signature["thread_captured_locks"] = json!(names);
-                }
-                imre_ast::ThreadEntry::Bound(field) => {
-                    signature["thread_bound_lock_field"] = json!(field)
-                }
-            }
         }
         // A type alias thunk has an implicit default for its format parameter.
         if type_alias {
@@ -722,48 +520,11 @@ impl CallableSites<'_, '_> {
                 signature["annotation_class"] = json!(true);
             }
         }
-        let mut default_names = Vec::new();
         let in_function = self.in_function || !matches!(body, Body::Namespace);
-        // A generator call returns a suspended frame, before it yields or returns a value.
-        let scalar = |slot: &str| {
-            if self.source.python_annotations {
-                return None;
-            }
-            let name = annotations?.references.get(slot)?;
-            (!type_params.is_some_and(|params| params.iter().any(|p| p.name().as_str() == name)))
-                .then_some(name)
-        };
-        if matches!(entry, Entry::Compiled)
-            && let Some(ty) = scalar("return")
-        {
-            signature["return_type"] = json!(ty);
-        }
         let code = self
             .source
             .definition(self.output, prefix, body, start, in_function, entry);
-        if let Some(p) = params {
-            self.output
-                .interned_identifiers
-                .extend(p.iter().map(|p| p.name().to_string()));
-            default_names = crate::frontend::function_scope::parameter_layout(p, &mut signature);
-            for arg in p.iter_non_variadic_params() {
-                let name = arg.parameter.name.as_str();
-                if let Some(ty) = scalar(name) {
-                    signature["types"][name] = json!(ty);
-                    if ty == "float"
-                        && declaration.is_some_and(|facts| {
-                            facts.integer_sign_parameters.iter().any(|p| p == name)
-                        })
-                    {
-                        signature["integer_sign_parameters"][name] = json!(true);
-                    }
-                }
-            }
-        }
         CompiledDefinition {
-            doc,
-            provider,
-            default_names,
             class_header,
             type_alias,
             ..CompiledDefinition::new(
@@ -821,18 +582,6 @@ impl<'p> Function<'_, 'p> {
         );
         let function = compiled.bind_defaults(&mut self.frame, &environment, &[]);
         self.bind("__annotate_func__", &function);
-    }
-
-    fn apply_decorators(
-        &mut self,
-        decorators: &[String],
-        positions: &[ast::Decorator],
-        value: String,
-    ) -> String {
-        let lines = positions
-            .iter()
-            .map(|d| self.source.positions.line(d.expression.start()));
-        self.frame.decorate(decorators, lines, value)
     }
 
     fn physical_binding(&mut self, target: &'p crate::frontend::PhysicalBinding, value: &str) {

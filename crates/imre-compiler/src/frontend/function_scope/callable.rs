@@ -6,7 +6,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextSize};
 use serde_json::{Value, json};
 
-pub(crate) fn parameter_layout(parameters: &ast::Parameters, layout: &mut Value) -> Vec<String> {
+fn parameter_layout(parameters: &ast::Parameters, layout: &mut Value) -> Vec<String> {
     let mut defaults = Vec::new();
     for (group, args) in [
         ("posonly", &parameters.posonlyargs),
@@ -38,7 +38,7 @@ pub(crate) fn parameter_layout(parameters: &ast::Parameters, layout: &mut Value)
     defaults
 }
 
-pub(crate) struct OrdinaryFunction {
+pub(crate) struct NamedFunction {
     /// Original spelling used by Python function metadata.
     pub(crate) name: String,
     /// Lookup and assignment use the lowered private name in class scopes.
@@ -46,20 +46,20 @@ pub(crate) struct OrdinaryFunction {
     pub(crate) decorator_offsets: Vec<TextSize>,
     pub(crate) doc: Option<String>,
     pub(crate) metadata: CallableMetadata,
+    /// Source position shared with the prepared parameter annotation provider.
+    pub(crate) parameters: TextSize,
+    pub(crate) generic: bool,
+    pub(crate) type_params: Vec<crate::ir::RegisteredTypeParameter>,
+    pub(crate) integer_sign_parameters: Vec<String>,
 }
 
-impl OrdinaryFunction {
+impl NamedFunction {
     pub(super) fn prepare(
         def: &ast::StmtFunctionDef,
         names: &imre_ast::Names,
         lexical: &FunctionScope,
-        suspension_flags: u32,
-    ) -> Option<Self> {
-        (suspension_flags == 0
-            && def.type_params.is_none()
-            && def.returns.is_none()
-            && def.parameters.iter().all(|p| p.annotation().is_none()))
-        .then(|| Self {
+    ) -> Self {
+        Self {
             name: names.definition(&def.name).to_owned(),
             binding: def.name.to_string(),
             decorator_offsets: def
@@ -69,7 +69,11 @@ impl OrdinaryFunction {
                 .collect(),
             doc: crate::frontend::docstring(&def.body),
             metadata: CallableMetadata::new(Some(&def.parameters), lexical, false),
-        })
+            parameters: def.parameters.start(),
+            generic: def.type_params.is_some(),
+            type_params: Vec::new(),
+            integer_sign_parameters: Vec::new(),
+        }
     }
 }
 
@@ -112,16 +116,19 @@ impl CallableMetadata {
         }
     }
 
-    pub(crate) fn parameter_names(&self) -> impl Iterator<Item = &str> {
+    pub(crate) fn non_variadic_parameter_names(&self) -> impl Iterator<Item = &str> {
         ["posonly", "positional", "kwonly"]
             .into_iter()
             .flat_map(|group| self.layout[group].as_array().into_iter().flatten())
             .filter_map(serde_json::Value::as_str)
-            .chain(
-                ["varargs", "kwargs"]
-                    .into_iter()
-                    .filter_map(|group| self.layout[group].as_str()),
-            )
+    }
+
+    pub(crate) fn parameter_names(&self) -> impl Iterator<Item = &str> {
+        self.non_variadic_parameter_names().chain(
+            ["varargs", "kwargs"]
+                .into_iter()
+                .filter_map(|group| self.layout[group].as_str()),
+        )
     }
 
     pub(crate) fn signature(
@@ -168,7 +175,7 @@ mod tests {
         let facts = ScopeFacts::prepare(&body, &names, |_| {}, |_| {});
         let class = body[0].as_class_def_stmt().unwrap();
         let method = class.body[0].as_function_def_stmt().unwrap();
-        let ordinary = facts.function(method).ordinary.as_ref().unwrap();
+        let ordinary = &facts.function(method).header;
         assert_eq!(ordinary.name, "__method");
         assert_eq!(ordinary.binding, "_Owner__method");
         assert_eq!(ordinary.doc.as_deref(), Some("method doc"));
@@ -183,7 +190,7 @@ mod tests {
         assert_eq!(signature["class_cell"], true);
         assert_eq!(signature["method_class_cell"], true);
         let stream = facts.function(class.body[1].as_function_def_stmt().unwrap());
-        assert!(stream.ordinary.is_none());
+        assert_eq!(stream.header.name, "stream");
         assert_eq!(stream.suspension_flags, code_flags::ASYNC_GENERATOR);
     }
 }

@@ -3,13 +3,14 @@
 mod annotations;
 pub(crate) use annotations::ClassAnnotations;
 mod callable;
-pub(crate) use callable::{CallableMetadata, OrdinaryFunction, parameter_layout};
+pub(crate) use callable::{CallableMetadata, NamedFunction};
 mod class_metadata;
 pub(crate) mod classes;
 mod type_parameters;
 
 pub(crate) use type_parameters::{
-    TypeParameterScope, boxed_function_type_params, check_nonlocals, type_parameter_scope,
+    TypeParameterScope, boxed_function_type_params, check_nonlocals, function_parameter_header,
+    type_parameter_scope,
 };
 
 use ruff_python_ast as ast;
@@ -356,7 +357,7 @@ impl FunctionScope {
 }
 
 pub(crate) struct NamedFunctionScope {
-    pub(crate) ordinary: Option<OrdinaryFunction>,
+    pub(crate) header: NamedFunction,
     pub(crate) lexical: FunctionScope,
     pub(crate) suspension_flags: u32,
 }
@@ -375,6 +376,7 @@ pub(crate) struct ScopeFacts {
 }
 
 impl ScopeFacts {
+    #[cfg(test)]
     pub(crate) fn function(&self, def: &ast::StmtFunctionDef) -> &NamedFunctionScope {
         &self.functions[&def
             .decorator_list
@@ -436,13 +438,12 @@ impl<'a, A: FnMut(&'a ast::StmtTypeAlias), E: FnMut(&ast::Expr)> Visitor<'a>
                     (true, true) => ASYNC_GENERATOR,
                 };
                 let lexical = FunctionScope::function(def, strings);
-                let ordinary =
-                    OrdinaryFunction::prepare(def, self.names, &lexical, suspension_flags);
+                let header = NamedFunction::prepare(def, self.names, &lexical);
                 self.scopes.functions.insert(
                     start,
                     NamedFunctionScope {
                         lexical,
-                        ordinary,
+                        header,
                         suspension_flags,
                     },
                 );
