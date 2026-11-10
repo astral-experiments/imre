@@ -4,7 +4,7 @@ use super::super::sites::{
     Declaration,
 };
 use super::super::{
-    AnnotationScope, Body, DefinitionName, Entry, Function, RegisteredFrame, SourceInfo, SourceMap,
+    AnnotationScope, Body, DefinitionName, Function, RegisteredFrame, SourceInfo, SourceMap,
 };
 use super::CallableSites;
 use crate::frontend::function_scope::{ClassBindings, NamedFunction};
@@ -52,27 +52,9 @@ impl<'p> SourceMap<'p> {
             method_scope: frame.class_locals.is_some() && frame.annotation_values.is_none(),
         }
     }
-
-    pub(in crate::dynamic::emit) fn place_module_callables(
-        &self,
-        frame: &mut RegisteredFrame<'_, '_>,
-        sites: &mut CheckedSites,
-        required: &[RequiredSite],
-    ) {
-        let mut callables =
-            self.frame_callables(frame, sites, "", &self.scopes.module_globals, false);
-        for &site in required {
-            callables.place_site(site);
-        }
-    }
 }
 
 impl Function<'_, '_> {
-    pub(in crate::dynamic::emit) fn prepare_checked_value(&mut self, value: &Expr) {
-        let mut callables = self.callable_sites();
-        RequiredSite::visit_operand(value, &mut |site| callables.place_site(site));
-    }
-
     pub(in crate::dynamic::emit) fn callable_sites(&mut self) -> CallableSites<'_, '_> {
         self.source.frame_callables(
             &mut self.frame,
@@ -85,6 +67,10 @@ impl Function<'_, '_> {
 }
 
 impl CallableSites<'_, '_> {
+    pub(in crate::dynamic::emit) fn place_operand(&mut self, value: &Expr) {
+        RequiredSite::visit_operand(value, &mut |site| self.place_site(site));
+    }
+
     pub(in crate::dynamic::emit) fn place_statements(&mut self, statements: &[Statement]) {
         RequiredSite::visit(statements, &mut |site| self.place_site(site));
     }
@@ -214,17 +200,12 @@ impl CallableSites<'_, '_> {
         };
         let existing = cache.and_then(|cache| cache.borrow().get(&site).cloned());
         let code = existing.unwrap_or_else(|| {
-            let entry = match suspension {
-                0 => Entry::Compiled,
-                flags => Entry::Suspended(flags),
-            };
-            let code = source.definition(
+            let code = source.code(
                 self.output,
                 format!("{qualname}.<locals>."),
                 body,
-                site,
                 true,
-                entry,
+                Some((site, suspension)),
             );
             if let Some(cache) = cache {
                 cache.borrow_mut().insert(site, code.clone());
@@ -268,57 +249,35 @@ impl CallableSites<'_, '_> {
             .insert(start, (namespace, parameters, class.range));
     }
 
-    pub(super) fn place_definition(&mut self, start: TextSize) {
-        if let Some(class) = self.source.class_bodies.get(&start) {
-            self.place_class(start, class);
-        } else {
-            self.place_named_function(start);
-        }
-    }
-
-    fn place_class(&mut self, start: TextSize, class: &crate::frontend::RegisteredClass) {
-        if self.sites.definitions.contains_key(&start) {
-            return;
-        }
-        let definition = if let Some(header) = &class.header {
-            let name = format!("<generic parameters of {}>", class.name);
-            let body = Body::CheckedProvider(&header.body, AnnotationScope::Plain);
-            self.compile_definition(start, DefinitionName::ClassHeader(&name), body)
-        } else {
-            self.compile_class_namespace(start)
-        };
-        let declaration = Declaration {
-            definition,
-            decorator_lines: class
-                .decorator_offsets
-                .iter()
-                .map(|&offset| self.source.positions.line(offset))
-                .collect(),
-            type_params: None,
-        };
-        self.sites.definitions.insert(start, declaration);
-    }
-
-    fn place_named_function(&mut self, site: TextSize) {
+    pub(super) fn place_definition(&mut self, site: TextSize) {
         if self.sites.definitions.contains_key(&site) {
             return;
         }
         let source = self.source;
-        let header = &source.scopes.functions[&site];
-        let definition =
-            self.compile_callable(site, Callable::Named(header), source.function_body(site));
-        let decorator_lines = header
-            .decorator_offsets
-            .iter()
-            .map(|&offset| source.positions.line(offset))
-            .collect();
-        let type_params = (!header.type_params.is_empty())
-            .then(|| self.compile_type_parameters(&header.type_params, self.class_locals));
+        let (definition, decorator_offsets, type_params) = if let Some(class) =
+            source.class_bodies.get(&site)
+        {
+            let definition = if let Some(header) = &class.header {
+                let name = format!("<generic parameters of {}>", class.name);
+                let body = Body::CheckedProvider(&header.body, AnnotationScope::Plain);
+                self.compile_definition(site, DefinitionName::ClassHeader(&name), body)
+            } else {
+                self.compile_class_namespace(site)
+            };
+            (definition, &class.decorator_offsets, None)
+        } else {
+            let header = &source.scopes.functions[&site];
+            let definition =
+                self.compile_callable(site, Callable::Named(header), source.function_body(site));
+            let parameters = (!header.type_params.is_empty())
+                .then(|| self.compile_type_parameters(&header.type_params, self.class_locals));
+            (definition, &header.decorator_offsets, parameters)
+        };
         self.sites.definitions.insert(
             site,
             Declaration {
                 definition,
-                decorator_lines,
+                decorator_offsets: decorator_offsets.clone(),
                 type_params,
             },
         );
@@ -560,7 +519,9 @@ mod tests {
             module.source.module_start,
         );
         let mut sites = CheckedSites::default();
-        let required = &module.source.initializer_sites;
+        let body = &module.initializer().checked.function.body;
+        let mut required = Vec::new();
+        RequiredSite::visit(body, &mut |site| required.push(site));
         let [
             RequiredSite::Definition(read),
             RequiredSite::Lambda(first, _),
@@ -571,7 +532,15 @@ mod tests {
         else {
             panic!("expected the function, lambda, class, generator and final lambda");
         };
-        location.place_module_callables(&mut frame, &mut sites, required);
+        location
+            .frame_callables(
+                &mut frame,
+                &mut sites,
+                "",
+                &module.source.scopes.module_globals,
+                false,
+            )
+            .place_statements(body);
         assert_eq!(sites.definitions.len(), 2);
         assert_eq!(sites.lambdas.len(), 2);
         assert!(sites.generators.contains_key(generator));
@@ -586,7 +555,15 @@ mod tests {
             location.callable_code.borrow()[first]
         );
         let count = frame.output.count;
-        location.place_module_callables(&mut frame, &mut sites, required);
+        location
+            .frame_callables(
+                &mut frame,
+                &mut sites,
+                "",
+                &module.source.scopes.module_globals,
+                false,
+            )
+            .place_statements(body);
         assert_eq!(frame.output.count, count);
     }
 
@@ -622,7 +599,9 @@ mod tests {
                 module.source.module_start,
             );
             let mut sites = CheckedSites::default();
-            let required = &module.source.initializer_sites;
+            let body = &module.initializer().checked.function.body;
+            let mut required = Vec::new();
+            RequiredSite::visit(body, &mut |site| required.push(site));
             let [
                 RequiredSite::Definition(class),
                 RequiredSite::Alias(alias),
@@ -634,7 +613,15 @@ mod tests {
             assert_eq!(alias.to_u32(), 18);
             let first = frame.output.count;
             let symbol = |index: u32| format!("@code_site{}", first + index);
-            location.place_module_callables(&mut frame, &mut sites, required);
+            location
+                .frame_callables(
+                    &mut frame,
+                    &mut sites,
+                    "",
+                    &module.source.scopes.module_globals,
+                    false,
+                )
+                .place_statements(body);
             assert_eq!(sites.definitions[class].definition.code, symbol(0));
             assert_eq!(
                 sites.aliases[alias].as_ref().unwrap().definition.code,
@@ -642,7 +629,15 @@ mod tests {
             );
             assert_eq!(sites.lambdas[last].code, symbol(2));
             let count = frame.output.count;
-            location.place_module_callables(&mut frame, &mut sites, required);
+            location
+                .frame_callables(
+                    &mut frame,
+                    &mut sites,
+                    "",
+                    &module.source.scopes.module_globals,
+                    false,
+                )
+                .place_statements(body);
             assert_eq!(frame.output.count, count);
         }
     }

@@ -128,6 +128,10 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         unit: usize,
         start: TextSize,
     ) -> Self {
+        if native_suspension && !output.declarations.declared_suspension {
+            output.functions.push_str(suspension::ABI);
+            output.declarations.declared_suspension = true;
+        }
         let id = output.count;
         output.count += 1;
         Self {
@@ -169,7 +173,6 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         has_annotations: bool,
         string_annotations: bool,
         docstring: Option<&str>,
-        globals: &BTreeSet<String>,
     ) {
         if has_annotations {
             if string_annotations {
@@ -186,9 +189,6 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         {
             let value = self.text(doc);
             self.bind("__doc__", &value);
-        }
-        for name in globals {
-            self.declare_global(name);
         }
     }
 
@@ -208,7 +208,27 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         self.finish(true)
     }
 
-    pub(crate) fn finish(mut self, module: bool) -> String {
+    pub(crate) fn finish_callable(mut self, start: Option<TextSize>) -> String {
+        let entry = self.finish(false);
+        let Some(start) = start else { return entry };
+        // Python definitions keep distinct addresses even if LLVM merges their bodies.
+        let site = format!("@code_site{}", self.id);
+        let tag = if self.native_suspension {
+            permanent::NATIVE_SUSPENDED_BODY
+        } else {
+            0
+        };
+        writeln!(
+            self.output.constants,
+            "{site} = private constant %code_site {{ ptr {entry}, ptr {}, i32 {}, i32 {tag} }}",
+            self.positions.file,
+            self.positions.line(start)
+        )
+        .unwrap();
+        site
+    }
+
+    fn finish(&mut self, module: bool) -> String {
         let name = format!("@code{}", self.id);
         if !self.body.terminated {
             self.return_value("0");

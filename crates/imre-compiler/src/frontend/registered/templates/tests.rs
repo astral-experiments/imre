@@ -84,7 +84,7 @@ fn template_children_use_their_eager_bindings_after_source_is_dropped() {
     let positions = SourcePositions::new("", &file);
     let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
     frame.prepared_operand(&operand, &CheckedSites::default(), false);
-    frame.finish(false);
+    frame.finish_callable(None);
     let code = &output.functions;
     assert_eq!(
         code.matches("call i64 @imre_dyn_builtin_method_target(")
