@@ -3020,6 +3020,66 @@ mod tests {
     }
 
     #[test]
+    fn a_mixed_comparison_keeps_its_operators_and_only_the_residual_child() {
+        use crate::frontend::ExpressionSelection::Comparison;
+        use crate::frontend::SourceOperand::{Checked, Residual};
+
+        let text = concat!(
+            "good = left() < right()\n",
+            "result = first() < (lambda v: v)(middle()) <= last()\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            text,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        inject_residual_child_module(&mut prepared);
+        let original = prepared.standalone().unwrap();
+        let complete = &prepared.syntax.as_deref().unwrap()[0]
+            .as_assign_stmt()
+            .unwrap()
+            .value;
+        let sites = &prepared.source.statement_sites.expressions;
+        assert!(!matches!(sites.get(complete), Some(Comparison { .. })));
+        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
+        let Some(Comparison {
+            range,
+            ops,
+            operands,
+        }) = sites.get(value)
+        else {
+            panic!("expected a mixed comparison");
+        };
+        assert_eq!(*range, value.range());
+        assert_eq!(ops.as_ref(), [ast::CmpOp::Lt, ast::CmpOp::LtE]);
+        let [Checked(_), Residual(child), Checked(_)] = operands.as_ref() else {
+            panic!("only the middle operand requires source");
+        };
+        assert_eq!(&text[child.range()], "(lambda v: v)(middle())");
+
+        // Keep the lookup range and withdraw every child, including its source positions.
+        let cmp = value.as_compare_expr_mut().unwrap();
+        cmp.ops = Box::new([ast::CmpOp::Is]);
+        cmp.operands = Box::default();
+        assert_eq!(prepared.standalone().unwrap(), original);
+
+        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
+        let sites = &mut prepared.source.statement_sites.expressions;
+        let Some(Comparison { operands, .. }) = sites.get_mut(value) else {
+            unreachable!()
+        };
+        let Residual(child) = &mut operands[1] else {
+            unreachable!()
+        };
+        // Yield the original lambda object instead of invoking it on middle().
+        *child = child.as_call_expr().unwrap().func.clone();
+        assert_ne!(prepared.standalone().unwrap(), original);
+    }
+
+    #[test]
     fn a_physical_binary_keeps_its_operation_and_checked_input() {
         use crate::frontend::SourceOperand::{Checked, Residual};
 

@@ -39,7 +39,11 @@ pub(crate) enum Selection {
     Inputs(Box<PhysicalInputs>),
     /// Only the child remains physical. It runs under the suspension's operand mark.
     Suspension(ir::SuspendValue, Box<ast::Expr>),
-    Comparison(Vec<Option<CheckedChild>>),
+    Comparison {
+        range: TextRange,
+        ops: Box<[ast::CmpOp]>,
+        operands: Box<[LogicalOperand]>,
+    },
     Mixed {
         parts: Option<Box<[PreparedInput; 3]>>,
         branch: PreparedSteps,
@@ -98,26 +102,16 @@ impl PreparedInput {
             ),
         }
     }
-}
 
-pub(crate) struct CheckedChild {
-    value: ir::Expr,
-    requires_suspension: bool,
-}
-
-impl CheckedChild {
-    fn prepare(node: &ast::Expr, source: RegisteredSource<'_>) -> Option<Self> {
-        let ordinary = values::registered_value(node, source);
-        let requires_suspension = ordinary.is_none();
-        let value = ordinary.or_else(|| values::suspended_operand(node, source))?;
-        Some(Self {
-            value,
-            requires_suspension,
-        })
-    }
-
-    fn value(&self, suspended: bool) -> Option<&ir::Expr> {
-        (suspended || !self.requires_suspension).then_some(&self.value)
+    fn in_scope(self, suspended: bool) -> LogicalOperand {
+        match self {
+            Self::Checked(value) => SourceOperand::Checked(value),
+            Self::Residual(ResidualInput {
+                suspended: Some(value),
+                ..
+            }) if suspended => SourceOperand::Checked(value),
+            Self::Residual(input) => SourceOperand::Residual(input.expression),
+        }
     }
 }
 
@@ -233,6 +227,11 @@ impl ExpressionSites {
     }
 
     #[cfg(test)]
+    pub(crate) fn get_mut(&mut self, node: &ast::Expr) -> Option<&mut Selection> {
+        self.selected.get_mut(&site(node))
+    }
+
+    #[cfg(test)]
     pub(crate) fn replace_residual_input(&mut self, node: &ast::Expr, at: usize, value: ir::Expr) {
         let Some(
             Selection::Inputs(inputs)
@@ -293,19 +292,6 @@ impl ExpressionSites {
     }
 
     pub(crate) fn visit(&mut self, node: &ast::Expr, source: RegisteredSource<'_>) {
-        if let Some(cmp) = node.as_compare_expr() {
-            let inputs: Vec<_> = cmp
-                .operands
-                .iter()
-                .map(|child| CheckedChild::prepare(child, source))
-                .collect();
-            // Whole checked comparisons, including suspendable ones, keep their normal entry.
-            if inputs.iter().any(Option::is_none) {
-                self.selected
-                    .insert(site(node), Selection::Comparison(inputs));
-            }
-            return;
-        }
         if !Self::governs(node)
             || self
                 .covered
@@ -364,10 +350,6 @@ impl<'a> Visitor<'a> for PhysicalPreparation<'_, '_> {
         }
         let selected = self.sites.get(node);
         match selected {
-            Some(Selection::Comparison(_)) => {
-                visitor::walk_expr(self, node);
-                return;
-            }
             Some(
                 Selection::Mixed { parts: Some(_), .. }
                 | Selection::Mixed {
@@ -459,7 +441,21 @@ impl PhysicalPreparation<'_, '_> {
             self.sites.selected.insert(site(node), selected);
             return;
         }
-        let selected = if let Some((op, operands)) = values::binary_operands(node) {
+        let selected = if let ast::Expr::Compare(cmp) = node {
+            let operands = cmp
+                .operands
+                .iter()
+                .map(|child| {
+                    self.input(child, values::registered_value(child, source))
+                        .in_scope(self.suspended)
+                })
+                .collect();
+            Selection::Comparison {
+                range: cmp.range,
+                ops: cmp.ops.clone(),
+                operands,
+            }
+        } else if let Some((op, operands)) = values::binary_operands(node) {
             let operation = values::binary(
                 op,
                 ir::Expr::local(0, ir::Type::PythonObject),

@@ -82,38 +82,39 @@ impl Function<'_, '_> {
     }
 
     fn located_operand(&mut self, expr: &ast::Expr, condition: bool) -> String {
-        let physical = self.source.statement_sites.expressions.physical(expr);
-        let range = expr.range();
+        let sites = &self.source.statement_sites.expressions;
+        let selected = sites.get(expr);
+        let physical = sites.physical(expr);
+        let range = match selected {
+            Some(ExpressionSelection::Comparison { range, .. }) => *range,
+            _ => expr.range(),
+        };
         let position = physical.map_or(range.start(), |inputs| inputs.position);
         let previous = self.enter_expression(range, position);
-        let comparison = self
-            .source
-            .statement_sites
-            .expressions
-            .comparison(expr, self.native_suspension);
-        let value = if let Some((ops, inputs)) = comparison {
+        let value = if let Some(ExpressionSelection::Comparison { ops, operands, .. }) = selected {
             let result = ComparisonChain::emit_registered(
                 self,
                 ops,
                 condition,
                 |code| &mut code.frame,
-                inputs,
-                Self::source_operand,
+                operands.iter(),
+                |code, child| match child {
+                    SourceOperand::Checked(value) => code.registered_value(value),
+                    SourceOperand::Residual(expr) => code.expr(expr),
+                },
             );
             if condition {
                 result.into_condition()
             } else {
                 result.into_handle()
             }
-        } else if let Some(crate::frontend::ExpressionSelection::Suspension(kind, child)) =
-            self.source.statement_sites.expressions.get(expr)
-        {
+        } else if let Some(ExpressionSelection::Suspension(kind, child)) = selected {
             self.suspend_value(*kind, expr.range(), |code| code.expr(child))
         } else if let Some(inputs) = physical {
             self.physical_value(inputs)
         } else if let Some(ExpressionSelection::Mixed {
             value: Some(plan), ..
-        }) = self.source.statement_sites.expressions.get(expr)
+        }) = selected
         {
             let value = Logical::value(
                 &mut self.frame.body,
@@ -126,7 +127,7 @@ impl Function<'_, '_> {
                 .with_checked_frame(&self.sites, None, |mut frame| frame.materialize(&value))
         } else if let Some(ExpressionSelection::Mixed {
             parts: Some(parts), ..
-        }) = self.source.statement_sites.expressions.get(expr)
+        }) = selected
         {
             let [test, yes, no] = parts
                 .each_ref()
