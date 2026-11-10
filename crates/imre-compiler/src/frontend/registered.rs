@@ -1016,8 +1016,6 @@ pub(crate) enum SourceEffect {
     Match(TextRange, Box<patterns::SourceMatch>),
     /// Exception matchers and all control-flow children belong to this protected region.
     Try(Box<PreparedTry>),
-    /// The manager, binding and protected child are prepared together.
-    Context(Box<PreparedContext>),
     /// A loop whose checked lowering left one or more physical inputs or suites.
     For(Box<PreparedFor>),
 }
@@ -1039,6 +1037,15 @@ pub(crate) struct PreparedRegion {
 }
 
 impl PreparedRegion {
+    fn new(checked: RegisteredFunction) -> Self {
+        Self {
+            checked,
+            operands: Vec::new(),
+            suites: Vec::new(),
+            terminates: false,
+        }
+    }
+
     pub(crate) fn operand(&mut self, operand: PhysicalOperand, ty: Type) -> Expr {
         let index = self.operands.len();
         self.operands.push(operand);
@@ -1121,18 +1128,6 @@ pub(crate) struct PreparedHandler {
     pub(crate) matcher: Option<(TextRange, PhysicalOperand)>,
     pub(crate) name: Option<String>,
     pub(crate) body: RegisteredSuite,
-}
-
-pub(crate) struct PreparedContext {
-    pub(crate) range: TextRange,
-    pub(crate) inputs: Vec<ContextInput>,
-    pub(crate) body: RegisteredSuite,
-}
-
-pub(crate) struct ContextInput {
-    pub(crate) site: ir::ContextSite,
-    pub(crate) manager: PhysicalOperand,
-    pub(crate) target: Option<PhysicalBinding>,
 }
 
 fn for_pull(loop_: &ast::StmtFor) -> Option<ir::AsyncPull> {
@@ -1398,9 +1393,9 @@ impl<'a> SuitePreparation<'a> {
                             ast::Stmt::Try(protected) => Ok(SourceEffect::Try(Box::new(
                                 self.prepare_try(protected, kind, child_selection, suspended),
                             ))),
-                            ast::Stmt::With(with) => Ok(SourceEffect::Context(Box::new(
-                                self.prepare_context(with, kind, child_selection, suspended),
-                            ))),
+                            ast::Stmt::With(with) => {
+                                Ok(self.prepare_context(with, kind, child_selection, suspended))
+                            }
                             ast::Stmt::Match(branch) => self
                                 .prepare_match(branch, kind, suspended)
                                 .map(|site| SourceEffect::Match(branch.range(), Box::new(site))),
@@ -1569,12 +1564,7 @@ impl<'a> SuitePreparation<'a> {
 
     fn region(&self, kind: RegisteredScope) -> PreparedRegion {
         let scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
-        PreparedRegion {
-            checked: scope.finish(Vec::new()),
-            operands: Vec::new(),
-            suites: Vec::new(),
-            terminates: false,
-        }
+        PreparedRegion::new(scope.finish(Vec::new()))
     }
 
     fn prepare_if(
@@ -1674,28 +1664,72 @@ impl<'a> SuitePreparation<'a> {
         kind: RegisteredScope,
         selection: SuiteSelection,
         suspended: bool,
-    ) -> PreparedContext {
-        let inputs = stmt
+    ) -> SourceEffect {
+        let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
+        scope.report_child_refusals = true;
+        let bindings: Vec<_> = stmt
             .items
             .iter()
-            .enumerate()
-            .map(|(index, item)| {
-                let site = self.sites.contexts[&stmt.range()][index];
-                ContextInput {
-                    site,
-                    manager: self.physical_operand(&item.context_expr, kind, selection, suspended),
-                    target: item
-                        .optional_vars
-                        .as_ref()
-                        .map(|target| self.physical_binding(target, kind, false)),
-                }
+            .map(|item| {
+                item.optional_vars
+                    .as_deref()
+                    .map(|target| {
+                        scope.with_binding(target).map_err(|()| {
+                            scope.refusal.take().unwrap_or((
+                                target.range(),
+                                "cannot compile this assignment target ahead of time",
+                            ))
+                        })
+                    })
+                    .transpose()
             })
             .collect();
-        PreparedContext {
-            range: stmt.range(),
-            inputs,
-            body: self.physical_suite(&stmt.body, kind, selection, suspended),
+        let mut region = PreparedRegion::new(scope.finish(Vec::new()));
+        let mut managers = Vec::with_capacity(stmt.items.len());
+        let mut refused_binding = None;
+        for (index, (item, binding)) in stmt.items.iter().zip(bindings).enumerate() {
+            let manager = self.physical_operand(&item.context_expr, kind, selection, suspended);
+            let manager = region.operand(manager, Type::PythonObject);
+            let site = self.sites.contexts[&stmt.range()][index];
+            let manager = values::located(site.range, site.anchor, manager);
+            match binding {
+                Ok(binding) => managers.push((site, manager, binding)),
+                Err(fault) => {
+                    managers.push((site, manager, None));
+                    refused_binding = Some(fault);
+                    break;
+                }
+            }
         }
+        // A manager can itself contain a refused operand. Visit it before its binding.
+        let suite = if let Some(fault) = refused_binding {
+            self.refusal.get_or_insert(fault);
+            RegisteredSuite {
+                checked: self.region(kind).checked,
+                residual: vec![SuiteOperation {
+                    at: 0,
+                    effect: Err(fault),
+                }],
+                refusal: Some(fault),
+                falls_through: false,
+            }
+        } else {
+            self.physical_suite(&stmt.body, kind, selection, suspended)
+        };
+        let child = region.child(suite);
+        let body = managers
+            .into_iter()
+            .rev()
+            .fold(child, |body, (site, manager, binding)| {
+                vec![site.protect(manager, binding, body)]
+            });
+        region.checked.function.body.push(Statement::Expr(operation(
+            Builtin::RegisteredStatement(stmt.range(), None),
+            Type::None,
+            vec![],
+        )));
+        region.checked.function.body.extend(body);
+        SourceEffect::Region(Box::new(region))
     }
 
     fn prepare_while(
@@ -2952,12 +2986,7 @@ impl SourceScope<'_> {
             .map(|target| self.with_binding(target))
             .transpose()?;
         let body = self.with_items(rest, remaining, suite)?;
-        Ok(vec![Statement::With {
-            manager,
-            site: *input,
-            binding,
-            body,
-        }])
+        Ok(vec![input.protect(manager, binding, body)])
     }
 
     fn in_loop<T>(&mut self, kind: LoopScope, lower: impl FnOnce(&mut Self) -> T) -> T {

@@ -58,7 +58,6 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                 self.simple_call = None;
                 self.prepared_match(site);
             }
-            SourceEffect::Context(context) => self.prepared_context(context),
             SourceEffect::Try(region) => {
                 self.checkpoint(&region.range);
                 self.simple_call = None;
@@ -436,27 +435,6 @@ impl<'p> Function<'_, 'p> {
         self.callable_sites()
             .place_statements(&binding.function.body);
         self.frame.checked_binding(binding, &self.sites, initialize);
-    }
-
-    fn prepared_context(&mut self, context: &'p crate::frontend::PreparedContext) {
-        self.checkpoint(&context.range);
-        self.simple_call = None;
-        let inputs = &context.inputs;
-        self.with_contexts(
-            inputs.iter().map(|input| input.site),
-            |code, i| {
-                let previous = std::mem::replace(&mut code.current_range, inputs[i].site.range);
-                let manager = code.physical_operand(&inputs[i].manager);
-                code.current_range = previous;
-                manager
-            },
-            |code, i, value| {
-                if let Some(target) = &inputs[i].target {
-                    code.physical_binding(target, value);
-                }
-            },
-            |code| emit_prepared_suite(code, &context.body),
-        );
     }
 
     fn prepared_for(&mut self, region: &'p crate::frontend::PreparedFor) {

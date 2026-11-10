@@ -3277,6 +3277,22 @@ pub(crate) struct ContextSite {
     pub anchor: ruff_text_size::TextSize,
 }
 
+impl ContextSite {
+    pub(crate) fn protect(
+        self,
+        manager: Expr,
+        binding: Option<ContextBinding>,
+        body: Vec<Statement>,
+    ) -> Statement {
+        Statement::With {
+            manager,
+            site: self,
+            binding,
+            body,
+        }
+    }
+}
+
 /// The enter result stays live through this protected assignment, before the suite.
 #[derive(Clone)]
 pub(crate) struct ContextBinding {
