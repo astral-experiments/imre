@@ -516,7 +516,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             },
             ExprKind::Invoke { callable, args } => self.invoke(callable, args, expr.ty),
             ExprKind::Builtin(
-                op @ (Builtin::RegisteredCall(_) | Builtin::RegisteredAttribute { .. }),
+                op @ (Builtin::RegisteredCall(_)
+                | Builtin::RegisteredAttribute { .. }
+                | Builtin::RegisteredDeleteItem),
                 args,
             ) => self.python().object_operation(op, args),
             ExprKind::Builtin(Builtin::RegisteredUnary(op), args) => {

@@ -1,4 +1,5 @@
 use crate::frontend::function_scope::ClassBindings;
+use crate::frontend::{PhysicalOperand, SourceEffect};
 mod declarations;
 use super::sites::{CompiledDefinition, CompiledProvider};
 
@@ -142,15 +143,31 @@ impl<'p> Function<'_, 'p> {
     }
 
     pub(super) fn source_run(&mut self, suite: &'p [ast::Stmt], run: &crate::frontend::SourceRun) {
-        let statements = &suite[run.statements.clone()];
-        if let Some(slot) = run.assignment_input {
-            if self.start_statement() {
-                let assignment = statements[0].as_assign_stmt().expect("assignment RHS");
+        let Some(effect) = &run.effect else {
+            self.source_statements(&suite[run.statements.clone()]);
+            return;
+        };
+        if !self.start_statement() {
+            return;
+        }
+        match effect {
+            SourceEffect::AssignmentInput(slot) => {
+                let assignment = suite[run.statements.start]
+                    .as_assign_stmt()
+                    .expect("assignment RHS");
                 let value = self.expr(&assignment.value);
-                self.frame.store_private(slot, &value);
+                self.frame.store_private(*slot, &value);
             }
-        } else {
-            self.source_statements(statements);
+            SourceEffect::ObjectOperation(op, inputs) => {
+                let (receiver, args) = inputs.split_first().expect("object operation receiver");
+                self.object_operation(op, receiver, args.iter(), |code, input| match input {
+                    PhysicalOperand::Checked(value) => {
+                        code.prepare_checked_value(&value.value);
+                        code.frame.prepared_operand(value, &code.sites, false)
+                    }
+                    PhysicalOperand::Source(expr) => code.expr(expr),
+                });
+            }
         }
     }
 
@@ -304,32 +321,6 @@ impl<'p> Function<'_, 'p> {
                                 ast::Expr::Name(_) | ast::Expr::List(_) | ast::Expr::Tuple(_)
                             );
                         self.assign_target(target, &value, owned);
-                    }
-                }
-                ast::Stmt::Delete(v) => {
-                    for target in crate::frontend::delete_targets(v) {
-                        if let ast::Expr::Name(name) = target {
-                            self.frame.delete_name(name.id.as_str(), name.range());
-                            continue;
-                        }
-                        if let ast::Expr::Attribute(field) = target {
-                            self.attribute_operation(
-                                crate::ir::AttributeAction::Delete,
-                                field.attr.as_str(),
-                                field.range(),
-                                std::iter::once(field.value.as_ref()),
-                                |code, expr| code.expr(expr),
-                            );
-                            continue;
-                        }
-                        match self.place(target) {
-                            Some(Place::Item(obj, key)) => {
-                                self.delete_item(&obj, &key);
-                            }
-                            _ => {
-                                self.unsupported("deletion target");
-                            }
-                        }
                     }
                 }
                 ast::Stmt::AnnAssign(v) => {

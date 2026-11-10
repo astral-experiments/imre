@@ -1070,11 +1070,6 @@ impl Frame<'_, '_, '_> {
                 let right = self.evaluate_handle(right);
                 self.code.inplace(op, &left, &right)
             }
-            (Builtin::RegisteredDeleteItem, [base, key]) => {
-                let base = self.evaluate_handle(base);
-                let key = self.evaluate_handle(key);
-                self.code.delete_item(&base, &key)
-            }
             (Builtin::RegisteredSubscript(range, base_end), [base, key]) => {
                 let base = self.evaluate_handle(base);
                 let key = self.read_key(key);

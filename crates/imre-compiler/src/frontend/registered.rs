@@ -95,10 +95,18 @@ impl RegisteredOperand {
         source: values::RegisteredSource<'_>,
         kind: RegisteredScope,
     ) -> Option<Self> {
+        Self::prepare_with(source, kind, |scope| scope.operand(expr))
+    }
+
+    fn prepare_with(
+        source: values::RegisteredSource<'_>,
+        kind: RegisteredScope,
+        lower: impl FnOnce(&mut SourceScope<'_>) -> Option<Expr>,
+    ) -> Option<Self> {
         let operations = HashMap::new();
         let sites = StatementSites::default();
         let mut scope = SourceScope::new(kind, source, &operations, &sites);
-        let value = scope.operand(expr)?;
+        let value = lower(&mut scope)?;
         Some(Self::from_scope(value, scope))
     }
 
@@ -729,14 +737,25 @@ pub(crate) fn registered_sites<'a, R>(
 pub(crate) struct SourceRun {
     pub(crate) at: usize,
     pub(crate) statements: std::ops::Range<usize>,
-    /// For a single assignment, source supplies only the RHS to the following checked targets.
-    pub(crate) assignment_input: Option<usize>,
+    pub(crate) effect: Option<SourceEffect>,
+}
+
+pub(crate) enum SourceEffect {
+    /// Evaluate the RHS once for the following checked assignment targets.
+    AssignmentInput(usize),
+    /// Evaluate the operands at their place in the operation, in the current frame.
+    ObjectOperation(Box<Builtin>, Vec<PhysicalOperand>),
+}
+
+pub(crate) enum PhysicalOperand {
+    Checked(Box<RegisteredOperand>),
+    Source(Box<ast::Expr>),
 }
 
 impl SourceRun {
     fn record(runs: &mut Vec<Self>, source_index: usize, checked_offset: usize) {
         if let Some(run) = runs.last_mut()
-            && run.assignment_input.is_none()
+            && run.effect.is_none()
             && run.at == checked_offset
             && run.statements.end == source_index
         {
@@ -745,7 +764,7 @@ impl SourceRun {
             runs.push(Self {
                 at: checked_offset,
                 statements: source_index..source_index + 1,
-                assignment_input: None,
+                effect: None,
             });
         }
     }
@@ -1037,7 +1056,7 @@ impl<'a> SuitePreparation<'a> {
             let plan = self.selected_suite(stmts, kind, select, select);
             // An optimized-away assertion has no instructions and still owns its source slot.
             if !matches!(plan.residual.as_slice(), [run]
-                if run.assignment_input.is_none() && run.statements == (0..stmts.len()))
+                if run.effect.is_none() && run.statements == (0..stmts.len()))
             {
                 self.nested.insert(first.start(), plan);
             }
@@ -1068,7 +1087,7 @@ impl<'a> SuitePreparation<'a> {
             kind,
             select: child_selection,
         };
-        for run in &plan.residual {
+        for run in plan.residual.iter().filter(|run| run.effect.is_none()) {
             for stmt in &stmts[run.statements.clone()] {
                 if let ast::Stmt::With(with) = stmt {
                     let inputs = children
@@ -1148,12 +1167,39 @@ impl<'a> SuitePreparation<'a> {
                     residual.push(SourceRun {
                         at: body.len(),
                         statements: i..i + 1,
-                        assignment_input: Some(input),
+                        effect: Some(SourceEffect::AssignmentInput(input)),
                     });
                     body.extend(targets);
                     continue;
                 }
                 scope.truncate_locals(slots_before);
+            } else if let ast::Stmt::Delete(delete) = stmt {
+                // A missing operand keeps its place between the other targets' checked effects.
+                body.push(checkpoint(stmt));
+                for target in delete_targets(delete) {
+                    let (op, inputs) = deletion(target);
+                    let slots = scope.locals.len();
+                    if let Some(values) = inputs
+                        .clone()
+                        .map(|input| input.lower(&mut scope))
+                        .collect()
+                    {
+                        body.push(Statement::Expr(operation(op, Type::None, values)));
+                    } else {
+                        scope.truncate_locals(slots);
+                        residual.push(SourceRun {
+                            at: body.len(),
+                            statements: i..i + 1,
+                            effect: Some(SourceEffect::ObjectOperation(
+                                Box::new(op),
+                                inputs
+                                    .map(|input| input.physical(self.source, kind))
+                                    .collect(),
+                            )),
+                        });
+                    }
+                }
+                continue;
             }
             SourceRun::record(&mut residual, i, body.len());
         }
@@ -1200,18 +1246,22 @@ pub(super) fn attribute_statement(
     values: Vec<Expr>,
 ) -> Statement {
     Statement::Expr(operation(
-        Builtin::RegisteredAttribute {
-            action,
-            name: field.attr.to_string(),
-            range: field.range(),
-        },
+        attribute_opcode(action, field),
         Type::None,
         values,
     ))
 }
 
+fn attribute_opcode(action: ir::AttributeAction, field: &ast::ExprAttribute) -> Builtin {
+    Builtin::RegisteredAttribute {
+        action,
+        name: field.attr.to_string(),
+        range: field.range(),
+    }
+}
+
 /// Deletion groups evaluate their leaves from left to right without constructing a tuple or list.
-pub(crate) fn delete_targets(delete: &ast::StmtDelete) -> Vec<&ast::Expr> {
+fn delete_targets(delete: &ast::StmtDelete) -> Vec<&ast::Expr> {
     let mut remaining: Vec<_> = delete.targets.iter().rev().collect();
     let mut leaves = Vec::new();
     while let Some(target) = remaining.pop() {
@@ -1581,24 +1631,11 @@ impl statements::StatementLowering for SourceScope<'_> {
                 let body = delete_targets(delete)
                     .into_iter()
                     .map(|target| {
-                        if let Some(op) = registered_delete_name(target) {
-                            return Some(Statement::Expr(op));
-                        }
-                        if let Some(sub) = target.as_subscript_expr() {
-                            let receiver = self.ordinary_operand(&sub.value)?;
-                            let key = values::index_key(&sub.slice, &mut |e| {
-                                self.ordinary_operand(e).ok_or(())
-                            })
-                            .ok()?;
-                            return Some(Statement::Expr(delete_item(receiver, key)));
-                        }
-                        let field = target.as_attribute_expr()?;
-                        let receiver = self.ordinary_operand(&field.value)?;
-                        Some(attribute_statement(
-                            ir::AttributeAction::Delete,
-                            field,
-                            vec![receiver],
-                        ))
+                        let (op, inputs) = deletion(target);
+                        let values = inputs
+                            .map(|input| input.lower(self))
+                            .collect::<Option<_>>()?;
+                        Some(Statement::Expr(operation(op, Type::None, values)))
                     })
                     .collect::<Option<_>>()
                     .ok_or(())?;
@@ -1614,14 +1651,56 @@ impl statements::StatementLowering for SourceScope<'_> {
     }
 }
 
-/// Attribute and subscript targets retain their ordinary receiver evaluation.
-fn registered_delete_name(target: &ast::Expr) -> Option<Expr> {
-    let name = target.as_name_expr()?;
-    Some(operation(
-        Builtin::RegisteredDeleteName(name.id.to_string(), name.range()),
-        Type::None,
-        vec![],
-    ))
+#[derive(Clone, Copy)]
+enum TargetInput<'a> {
+    Receiver(&'a ast::Expr),
+    Index(&'a ast::Expr),
+}
+
+impl TargetInput<'_> {
+    fn lower(self, scope: &mut SourceScope<'_>) -> Option<Expr> {
+        match self {
+            Self::Receiver(expr) => scope.ordinary_operand(expr),
+            Self::Index(key) => {
+                values::index_key(key, &mut |expr| scope.ordinary_operand(expr).ok_or(())).ok()
+            }
+        }
+    }
+
+    fn physical(
+        self,
+        source: values::RegisteredSource<'_>,
+        kind: RegisteredScope,
+    ) -> PhysicalOperand {
+        if let Some(value) =
+            RegisteredOperand::prepare_with(source, kind, |scope| self.lower(scope))
+        {
+            PhysicalOperand::Checked(Box::new(value))
+        } else {
+            let (Self::Receiver(expr) | Self::Index(expr)) = self;
+            PhysicalOperand::Source(Box::new(expr.clone()))
+        }
+    }
+}
+
+fn deletion(target: &ast::Expr) -> (Builtin, impl Iterator<Item = TargetInput<'_>> + Clone) {
+    use TargetInput::{Index, Receiver};
+    let (op, inputs) = match target {
+        ast::Expr::Name(name) => (
+            Builtin::RegisteredDeleteName(name.id.to_string(), name.range()),
+            [None, None],
+        ),
+        ast::Expr::Attribute(field) => (
+            attribute_opcode(ir::AttributeAction::Delete, field),
+            [Some(Receiver(&field.value)), None],
+        ),
+        ast::Expr::Subscript(sub) => (
+            Builtin::RegisteredDeleteItem,
+            [Some(Receiver(&sub.value)), Some(Index(&sub.slice))],
+        ),
+        _ => unreachable!("validated deletion target"),
+    };
+    (op, inputs.into_iter().flatten())
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1836,7 +1915,7 @@ impl SourceScope<'_> {
         if stmt.is_delete_stmt()
             || stmt.is_raise_stmt()
             || self.sites.assertions.contains_key(&stmt.range())
-            || attribute_effects(stmt).is_some()
+            || attribute_write(stmt).is_some()
         {
             return self.statement(stmt, body);
         }
