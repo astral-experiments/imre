@@ -107,7 +107,7 @@ impl CheckedBody<'_, '_, '_, '_> {
         value: &Expr,
         clear: &[usize],
     ) -> CheckedValue {
-        let mark = match &mut self.0 {
+        let scope = match &mut self.0 {
             Entry::Native(e) => {
                 e.cleanups.push(Cleanup::Slots(clear.to_vec()));
                 None
@@ -128,8 +128,8 @@ impl CheckedBody<'_, '_, '_, '_> {
             e.cleanups.pop();
         }
         self.clear_iteration_slots(clear);
-        if let Some((mark, outer)) = mark {
-            self.python().finish_expression(&mark, outer, &result);
+        if let Some(scope) = scope {
+            self.python().finish_expression(scope, clear, &result);
         }
         result
     }

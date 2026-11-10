@@ -3863,7 +3863,14 @@ impl Context {
             return Ok(replaced);
         };
         let key = self.heap.code_name(name);
-        self.put_item(target, key, value)?;
+        if matches!(
+            self.heap.get(target),
+            Value::Dict(_) | Value::DefaultDict { .. }
+        ) {
+            self.store_binding_item(target, key, value)?;
+        } else {
+            self.put_item(target, key, value)?;
+        }
         Ok(replaced)
     }
 

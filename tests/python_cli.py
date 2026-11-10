@@ -3781,6 +3781,7 @@ def report(text):
 
         compare("-B", "-c", "from typing import Protocol as P; print(P.__name__)")
         compare("-B", fixtures / "typing_protocol_import.py")
+        compare("-B", fixtures / "boxed_list_finalization.py")
         compare(
             "-IB", "-c",
             "from datetime import datetime, timezone\n"

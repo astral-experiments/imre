@@ -235,6 +235,12 @@ pub(super) struct IterationState {
     in_expression: bool,
 }
 
+pub(super) struct ExpressionScope {
+    mark: String,
+    outer_expression: bool,
+    error_targets: (String, String),
+}
+
 /// The registered binder owns the scope, argument identities and frame.
 pub(crate) struct Frame<'f, 'a, 'p> {
     code: &'f mut RegisteredFrame<'a, 'p>,
@@ -466,20 +472,40 @@ impl Frame<'_, '_, '_> {
         let names = self.code.lit(1, names.join(" ").as_bytes());
         self.code.op("comprehension_scope", &[&parent, &names])
     }
-    pub(crate) fn start_expression(&mut self) -> (String, bool) {
-        (
-            self.temporary_mark(),
-            std::mem::replace(&mut self.code.iteration.in_expression, true),
-        )
+    pub(super) fn start_expression(&mut self) -> ExpressionScope {
+        ExpressionScope {
+            mark: self.temporary_mark(),
+            outer_expression: std::mem::replace(&mut self.code.iteration.in_expression, true),
+            error_targets: self.begin_operand_scope(),
+        }
     }
-    pub(crate) fn finish_expression(&mut self, mark: &str, outer: bool, result: &CheckedValue) {
-        self.code.iteration.in_expression = outer;
+    pub(super) fn finish_expression(
+        &mut self,
+        scope: ExpressionScope,
+        clear: &[usize],
+        result: &CheckedValue,
+    ) {
+        self.code.iteration.in_expression = scope.outer_expression;
+        let mark = scope.mark;
+        self.code.finish_unwind(scope.error_targets, |code| {
+            // A handler checkpoint republishes these slots. Forget the abandoned handles
+            // before releasing their roots, including when nested inside another expression.
+            for slot in clear {
+                if let Ok(index) = code.iteration.private_slots.binary_search(slot) {
+                    let physical = code.iteration.first_slot + index;
+                    code.line(&format!("store i64 0, ptr %ir_slot{physical}"));
+                }
+            }
+            code.line(&format!(
+                "call void @imre_dyn_unwind_display(ptr %ctx, i64 {mark})"
+            ));
+        });
         let handle = match result {
             CheckedValue::Handle { id, .. } => id.as_str(),
             CheckedValue::IntOrHandle { fallback, .. } => fallback.as_str(),
             CheckedValue::Native(..) => "0",
         };
-        self.code.keep_operands(mark, handle, "0");
+        self.code.keep_operands(&mark, handle, "0");
     }
     fn physical_slot(&self, slot: usize) -> usize {
         let frame = &self.code.iteration;

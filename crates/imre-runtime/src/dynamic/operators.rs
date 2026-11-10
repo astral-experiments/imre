@@ -6013,10 +6013,11 @@ impl Context {
     }
 
     pub(super) fn finalize_removed_dict_value(&mut self, removed: Id) {
-        if self.heap.tracks_finalizers()
+        let collect = self.heap.tracks_finalizers()
             && self.heap.could_own_finalizer(removed, true)
-            && self.heap.has_unbound_finalizer(NONE)
-        {
+            && self.heap.has_unbound_finalizer(NONE);
+        self.release_list_owner(removed);
+        if collect {
             self.collect_unreachable();
         }
     }
