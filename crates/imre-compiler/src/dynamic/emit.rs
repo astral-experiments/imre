@@ -451,6 +451,7 @@ impl<'a> PreparedBody<'a> {
             has_templates,
             method_imports: &method_imports,
             templates: None,
+            lambdas: None,
         };
         let strings = if has_interpolation {
             crate::frontend::prepare_strings(&body, values, &template_fields)
@@ -495,6 +496,10 @@ impl<'a> PreparedBody<'a> {
             |expr| logicals.visit(expr, values),
         );
         let lambdas = RegisteredLambda::collect(&body, values, std::mem::take(&mut scopes.lambdas));
+        let values = crate::frontend::RegisteredSource {
+            lambdas: Some(&lambdas),
+            ..values
+        };
         let mut namespace_annotations = HashMap::new();
         let annotation_operands = crate::frontend::annotation_operands(
             &body,
@@ -585,13 +590,13 @@ impl<'a> PreparedBody<'a> {
             annotation_operands,
             namespace_annotations,
             scopes,
-            lambdas,
             thread_entries,
             checked_deletions,
             logicals,
             statement_sites: prepare.sites,
             python_optimization,
             nested_bodies: prepare.nested,
+            lambdas,
             namespace_operations: operations,
             type_aliases,
             module_annotations,
@@ -875,6 +880,7 @@ impl SourceInfo<'_> {
             replacements: &self.replacements,
             has_templates: self.has_templates,
             templates: Some(&self.strings.templates),
+            lambdas: Some(&self.lambdas),
             method_imports: &self.method_imports,
             private_names: Some(&self.private_names),
         }
