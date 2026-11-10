@@ -1004,30 +1004,33 @@ impl RegisteredFrame<'_, '_> {
         // The format argument belongs to this callback, even if the class also defines it.
         let format = self.lookup("format");
         self.op("annotation_format", &[&format]);
-        let (globals, conditional) = match &self.annotation_scope {
+        let (local, result) = match &self.annotation_scope {
             AnnotationScope::Class {
                 globals,
                 conditional,
-            } => (globals.clone(), *conditional),
+            } => {
+                let globals = globals.clone();
+                if *conditional {
+                    self.annotation_active = Some(self.lookup("__conditional_annotations__"));
+                }
+                let dict = self.lookup("__classdict__");
+                let local = self.op("class_annotation_locals", &[&self.scope.clone(), &dict]);
+                for name in globals {
+                    let name = self.code_name(&name);
+                    self.op("declare_global", &[&local, &name]);
+                }
+                let result = self.op("dict", &[]);
+                (local, result)
+            }
             scope => {
                 if let AnnotationScope::Method(class) = scope {
                     self.class_locals = Some(class.clone());
                 }
-                self.annotation_values = Some(self.op("dict", &[]));
-                self.scope = self.op("annotation_scope", &[&self.scope.clone()]);
-                return;
+                let result = self.op("dict", &[]);
+                let local = self.op("annotation_scope", &[&self.scope.clone()]);
+                (local, result)
             }
         };
-        if conditional {
-            self.annotation_active = Some(self.lookup("__conditional_annotations__"));
-        }
-        let dict = self.lookup("__classdict__");
-        let local = self.op("class_annotation_locals", &[&self.scope.clone(), &dict]);
-        for name in globals {
-            let name = self.code_name(&name);
-            self.op("declare_global", &[&local, &name]);
-        }
-        let result = self.op("dict", &[]);
         self.live.extend([local.clone(), result.clone()]);
         self.scope = local;
         self.annotation_values = Some(result);
@@ -1202,10 +1205,8 @@ impl RegisteredFrame<'_, '_> {
             self.label(&yes);
             after
         });
+        self.checkpoint(range);
         let key = self.code_name(name);
-        if matches!(self.annotation_scope, AnnotationScope::Class { .. }) {
-            self.checkpoint(range);
-        }
         AnnotationTarget { key, after }
     }
 
