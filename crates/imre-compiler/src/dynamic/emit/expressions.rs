@@ -36,9 +36,12 @@ impl Function<'_, '_> {
             .defaults
             .iter()
             .enumerate()
-            .map(|(index, checked)| match checked {
-                Some(value) => self.registered_value(value),
-                None => self.expr(source_defaults[index]),
+            .map(|(index, operand)| match operand {
+                Some(value) => self.with_operand_source(value, |code| code.registered_value(value)),
+                None => {
+                    let operand = source_defaults[index];
+                    self.with_source_range(operand.range(), |code| code.expr(operand))
+                }
             })
             .collect::<Vec<_>>();
         let body = match &plan.body {
@@ -89,7 +92,7 @@ impl Function<'_, '_> {
             &self.source.method_imports,
             Some(&self.source.private_names),
         );
-        let previous = self.enter_expression(position);
+        let previous = self.enter_expression(expr.range(), position);
         // The display itself is covered even if an operand still needs the syntax adapter.
         let value = if let Some((items, display)) = crate::frontend::display_elements(expr) {
             self.sequence_display(items, display, None, ast_spread, Self::expr)
@@ -308,7 +311,7 @@ impl Function<'_, '_> {
             if let ast::Expr::Compare(cmp) = expr {
                 f.registered_region(expr, true).unwrap_or_else(|| {
                     f.with_expression_range(cmp.range(), |f| {
-                        let previous = f.enter_expression(cmp.start());
+                        let previous = f.enter_expression(cmp.range(), cmp.start());
                         let bit = f.source_comparison(cmp, true);
                         f.leave_expression(previous);
                         bit
@@ -316,7 +319,7 @@ impl Function<'_, '_> {
                 })
             } else {
                 let value = f.expr(expr);
-                f.truth(&value)
+                f.truth_at(&value, Some(expr.range()))
             }
         })
     }

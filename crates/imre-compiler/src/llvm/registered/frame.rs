@@ -51,6 +51,23 @@ impl<'a> SourcePositions<'a> {
     }
 }
 
+/// The location currently published by this emitter. Eager operands carry a full span.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SourcePosition {
+    Lines { statement: usize, expression: usize },
+    Expression(TextRange),
+    Implicit(TextRange),
+}
+
+impl SourcePosition {
+    pub(super) fn statement(line: usize) -> Self {
+        Self::Lines {
+            statement: line,
+            expression: line,
+        }
+    }
+}
+
 /// The registered calling convention supplies object handles, scoped roots and pending errors.
 pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) output: &'a mut Output,
@@ -82,7 +99,7 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     integer_unwinds: BTreeMap<(usize, String), (usize, String)>,
     pub(crate) caught: Vec<String>,
     pub(crate) simple_call: Option<TextRange>,
-    pub(crate) expression_line: usize,
+    pub(super) position: SourcePosition,
     pub(crate) native_suspension: bool,
 }
 
@@ -128,7 +145,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             integer_unwinds: BTreeMap::new(),
             caught: Vec::new(),
             simple_call: None,
-            expression_line: 0,
+            position: SourcePosition::statement(0),
             native_suspension,
         }
     }
@@ -210,28 +227,66 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         }
     }
 
-    pub(crate) fn enter_expression(&mut self, position: TextSize) -> Option<usize> {
-        let line = self.positions.line(position);
-        let previous = self.expression_line;
-        if previous == line {
-            return None;
+    fn replace_position(&mut self, position: SourcePosition) -> SourcePosition {
+        let previous = self.position;
+        if previous != position && !self.body.terminated {
+            match position {
+                SourcePosition::Implicit(range) => self.set_source_range(Some(range)),
+                SourcePosition::Expression(range) => {
+                    self.set_source_range(Some(range));
+                    // A full statement span is hidden in a traceback. Mark this instruction
+                    // as an expression so that its operand can be highlighted.
+                    self.publish_expression_line(self.positions.line(range.start()));
+                }
+                SourcePosition::Lines {
+                    statement,
+                    expression,
+                } => {
+                    if !matches!(previous, SourcePosition::Lines { .. }) {
+                        self.set_source_range(None);
+                    }
+                    if !matches!(previous, SourcePosition::Lines { statement: old, .. } if old == statement)
+                    {
+                        self.set_statement_line(statement);
+                    }
+                    if !matches!(self.position, SourcePosition::Lines { expression: old, .. } if old == expression)
+                    {
+                        self.publish_expression_line(expression);
+                    }
+                }
+            }
         }
-        self.expression_line = line;
+        self.position = position;
+        previous
+    }
+
+    fn publish_expression_line(&mut self, line: usize) {
         self.line(&format!(
             "call void @imre_dyn_expression_line(ptr %ctx, i32 {line})"
         ));
-        Some(previous)
     }
 
-    pub(crate) fn leave_expression(&mut self, previous: Option<usize>) {
-        if let Some(line) = previous {
-            self.expression_line = line;
-            if !self.body.terminated {
-                self.line(&format!(
-                    "call void @imre_dyn_expression_line(ptr %ctx, i32 {line})"
-                ));
+    pub(crate) fn enter_expression(&mut self, range: TextRange, start: TextSize) -> SourcePosition {
+        let line = self.positions.line(start);
+        let position = match self.position {
+            SourcePosition::Expression(_) | SourcePosition::Implicit(_) => {
+                let start = if self.positions.line(range.start()) == line {
+                    range.start()
+                } else {
+                    start
+                };
+                SourcePosition::Expression(TextRange::new(start, range.end()))
             }
-        }
+            SourcePosition::Lines { statement, .. } => SourcePosition::Lines {
+                statement,
+                expression: line,
+            },
+        };
+        self.replace_position(position)
+    }
+
+    pub(crate) fn leave_expression(&mut self, previous: SourcePosition) {
+        self.replace_position(previous);
     }
 
     pub(crate) fn name(&mut self, prefix: &str) -> String {
@@ -460,13 +515,13 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         &mut self,
         range: TextRange,
         anchor: TextSize,
-    ) -> (TextRange, Option<usize>) {
+    ) -> (TextRange, SourcePosition) {
         let previous = std::mem::replace(&mut self.current_range, range);
-        (previous, self.enter_expression(anchor))
+        (previous, self.enter_expression(range, anchor))
     }
 
-    pub(crate) fn leave_test(&mut self, (range, line): (TextRange, Option<usize>)) {
-        self.leave_expression(line);
+    pub(crate) fn leave_test(&mut self, (range, position): (TextRange, SourcePosition)) {
+        self.leave_expression(position);
         self.current_range = range;
     }
 
@@ -526,15 +581,13 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             let (end_line, end) = self.positions.line_and_column(range.end());
             (line == end_line).then_some([line, start, start, end])
         });
-        // The direct operation ABI carries one line. Preserve a continued expression
-        // on the active frame while Python's truth method runs.
-        let multiline = range.is_some() && span.is_none();
-        if multiline {
-            self.set_source_range(range);
-        }
+        // A truth callback may inspect the active operand or raise across a continued test.
+        let previous = range
+            .filter(|_| span.is_none() || matches!(self.position, SourcePosition::Expression(_)))
+            .map(|range| self.replace_position(SourcePosition::Expression(range)));
         let boolean = self.op_at("truth", &[value], span);
-        if multiline {
-            self.set_source_range(None);
+        if let Some(previous) = previous {
+            self.leave_expression(previous);
         }
         self.value(&format!("icmp eq i64 {boolean}, 2"))
     }
@@ -604,7 +657,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     pub(crate) fn checkpoint(&mut self, range: TextRange) {
         let (ptr, count) = self.live_handles();
         let line = self.positions.line(range.start());
-        self.expression_line = line;
+        self.position = SourcePosition::statement(line);
         self.line(&format!(
             "call void @imre_dyn_statement_with_exception(ptr %ctx, ptr {ptr}, i64 {count}, ptr {}, i32 {line}, i64 {})",
             self.positions.file, self.caught.last().map_or("0", String::as_str)
@@ -612,13 +665,19 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         self.check_error();
     }
 
+    pub(super) fn position_constant(&mut self, range: TextRange) -> String {
+        let (line, start) = self.positions.line_and_column(range.start());
+        let (end_line, end) = self.positions.line_and_column(range.end());
+        self.output.position([line, end_line, start, end])
+    }
+
     /// A live caller retains the full range even when traceback highlighting is suppressed.
     pub(crate) fn call_position(&mut self, range: TextRange) {
-        let (start_line, start_col) = self.positions.line_and_column(range.start());
-        let (end_line, end_col) = self.positions.line_and_column(range.end());
-        let position = self
-            .output
-            .position([start_line, end_line, start_col, end_col]);
+        let range = match self.position {
+            SourcePosition::Expression(active) if self.current_range == range => active,
+            _ => range,
+        };
+        let position = self.position_constant(range);
         self.line(&format!(
             "call void @imre_dyn_call_position(ptr %ctx, ptr {position})"
         ));
@@ -1063,6 +1122,21 @@ impl<'a> ArgumentPack<'a> {
 pub(crate) trait FrameEmitter<'a, 'p>:
     std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>> + Sized
 {
+    fn with_operand_source<T>(&mut self, expr: &ir::Expr, emit: impl FnOnce(&mut Self) -> T) -> T {
+        if let ir::ExprKind::Builtin(ir::Builtin::RegisteredLocation(range, _), _) = &expr.kind {
+            self.with_source_range(*range, emit)
+        } else {
+            emit(self)
+        }
+    }
+
+    fn with_source_range<T>(&mut self, range: TextRange, emit: impl FnOnce(&mut Self) -> T) -> T {
+        let previous = self.replace_position(SourcePosition::Expression(range));
+        let result = emit(self);
+        self.leave_expression(previous);
+        result
+    }
+
     fn test_with_temporaries(&mut self, test: impl FnOnce(&mut Self) -> String) -> String {
         let mark = self.temporary_mark();
         let condition = test(self);
@@ -1322,7 +1396,15 @@ pub(crate) trait FrameEmitter<'a, 'p>:
             RegisteredCallTarget::Method { name, attribute } => self.unwind_operands(&mark, |f| {
                 let receiver = evaluate(f, target);
                 let direct = matches!(call.arguments, RegisteredArguments::Positional);
-                let (callee, bound) = f.method_target(&receiver, name, *attribute, direct);
+                let (callee, bound) = if let SourcePosition::Expression(active) = f.position {
+                    let lookup =
+                        TextRange::new(active.start().max(attribute.start()), attribute.end());
+                    f.with_source_range(lookup, |f| {
+                        f.method_target(&receiver, name, lookup, direct)
+                    })
+                } else {
+                    f.method_target(&receiver, name, *attribute, direct)
+                };
                 f.keep_operands(&mark, &callee, bound.as_deref().unwrap_or("0"));
                 (callee, bound, attribute.end())
             }),
@@ -1648,7 +1730,6 @@ impl RegisteredFrame<'_, '_> {
     ) {
         let statement_line = self.positions.line(statement);
         self.set_statement_line(statement_line);
-        self.expression_line = statement_line;
         let name = self.text("AssertionError");
         let class = self.op("builtin", &[&name]);
         let error = match message {
@@ -1658,7 +1739,6 @@ impl RegisteredFrame<'_, '_> {
         let test_line = self.positions.line(test);
         if test_line != statement_line {
             self.set_statement_line(test_line);
-            self.expression_line = test_line;
         }
         self.raise(&error, None, false);
     }
@@ -1695,6 +1775,7 @@ impl RegisteredFrame<'_, '_> {
     }
 
     pub(crate) fn set_statement_line(&mut self, line: usize) {
+        self.position = SourcePosition::statement(line);
         if !self.output.declarations.declared_statement_line {
             self.output
                 .functions

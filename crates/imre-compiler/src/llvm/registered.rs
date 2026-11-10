@@ -329,6 +329,10 @@ impl Frame<'_, '_, '_> {
         CheckedBody::registered(self.reborrow()).test_operand(expr)
     }
 
+    fn evaluate_eager_handle(&mut self, expr: &Expr) -> String {
+        self.with_operand_source(expr, |code| code.evaluate_handle(expr))
+    }
+
     pub(crate) fn sequence(&mut self, values: &[Expr], display: DisplayKind) -> CheckedValue {
         CheckedValue::handle(self.checked_sequence(values, display, |code, operand| {
             code.evaluate_handle(operand)
@@ -794,7 +798,7 @@ impl Frame<'_, '_, '_> {
             }
             (Builtin::RegisteredLocation(range, position), [value]) => {
                 let previous_range = std::mem::replace(&mut self.code.current_range, *range);
-                let previous_line = self.code.enter_expression(*position);
+                let previous_line = self.code.enter_expression(*range, *position);
                 let value = self.evaluate(value);
                 self.code.leave_expression(previous_line);
                 self.code.current_range = previous_range;
@@ -808,7 +812,7 @@ impl Frame<'_, '_, '_> {
                     self.code.scope.clone()
                 };
                 let defaults = operands
-                    .map(|value| self.evaluate_handle(value))
+                    .map(|value| self.evaluate_eager_handle(value))
                     .collect::<Vec<_>>();
                 self.sites.bind_lambda(self.code, *site, &scope, &defaults)
             }
@@ -823,7 +827,7 @@ impl Frame<'_, '_, '_> {
                 };
                 let header = prefix
                     .iter()
-                    .map(|value| self.evaluate_handle(value))
+                    .map(|value| self.evaluate_eager_handle(value))
                     .collect::<Vec<_>>();
                 let class_arguments = arguments.map(|(layout, operands)| {
                     let mut pack = ArgumentPack::new(self.code, layout, None);

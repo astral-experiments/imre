@@ -276,6 +276,11 @@ pub(in crate::frontend) fn located(
     position: ruff_text_size::TextSize,
     value: Expr,
 ) -> Expr {
+    if matches!(&value.kind,
+        ExprKind::Builtin(Builtin::RegisteredLocation(existing, start), _) if (*existing, *start) == (range, position)
+    ) {
+        return value;
+    }
     super::operation(
         Builtin::RegisteredLocation(range, position),
         value.ty,
@@ -964,7 +969,10 @@ impl Checker<'_> {
                 return Ok(None);
             }
             let defaults = lambda_defaults(lambda)
-                .map(|default| self.expr(default))
+                .map(|default| {
+                    self.expr(default)
+                        .map(|value| source.located(default, value))
+                })
                 .collect::<Result<_, _>>()?;
             let mut value = lambda_binding(lambda, defaults);
             if let Some(slot) = self.namespace {
