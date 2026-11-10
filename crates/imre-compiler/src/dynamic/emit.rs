@@ -361,19 +361,6 @@ impl<'a> PreparedBody<'a, '_> {
             generators: Some(&generators),
             ..values
         };
-        let mut namespace_annotations = HashMap::new();
-        let annotation_operands = crate::frontend::annotation_operands(
-            &body,
-            private_names.string_annotations,
-            values,
-            bundled,
-            |text, parsed| Self::prepare_annotation(text, parsed, python_optimization),
-            &mut namespace_annotations,
-        );
-        let mut sites =
-            crate::frontend::registered_sites(&body, &private_names, values, &annotation_operands);
-        let declarations = source_declarations(&sites);
-        let mut operations = sites.operations;
         let mut aliases = Vec::new();
         let mut logicals = crate::frontend::ExpressionSites::default();
         let mut scopes = crate::frontend::function_scope::ScopeFacts::prepare(
@@ -388,6 +375,20 @@ impl<'a> PreparedBody<'a, '_> {
             lambdas: Some(&lambdas),
             ..values
         };
+        // Annotation providers use the completed lambda sites for this source unit.
+        let mut namespace_annotations = HashMap::new();
+        let annotation_operands = crate::frontend::annotation_operands(
+            &body,
+            private_names.string_annotations,
+            values,
+            bundled,
+            |text, parsed| Self::prepare_annotation(text, parsed, python_optimization),
+            &mut namespace_annotations,
+        );
+        let mut sites =
+            crate::frontend::registered_sites(&body, &private_names, values, &annotation_operands);
+        let declarations = source_declarations(&sites);
+        let mut operations = sites.operations;
         let mut type_aliases = HashMap::new();
         for alias in aliases {
             let Some(name) = alias.name.as_name_expr() else {
