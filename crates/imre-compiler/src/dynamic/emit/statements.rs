@@ -1,4 +1,4 @@
-use crate::frontend::{PhysicalOperand, SourceEffect};
+use crate::frontend::{BorrowedOperand, PhysicalOperand, SourceEffect, SourceOperand};
 mod declarations;
 use super::sites::{CheckedSites, CompiledDefinition};
 
@@ -30,6 +30,13 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
 
     fn emit_prepared(&mut self, suite: &'p crate::frontend::RegisteredSuite) {
         self.physical_suite(suite);
+    }
+
+    fn source_operand(&mut self, operand: BorrowedOperand<'_>) -> String {
+        match operand {
+            SourceOperand::Checked(value) => self.registered_value(value),
+            SourceOperand::Residual(input) => self.input_value(input),
+        }
     }
 }
 

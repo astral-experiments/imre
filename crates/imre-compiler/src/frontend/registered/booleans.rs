@@ -88,6 +88,10 @@ pub(crate) struct PhysicalInputs {
 pub(crate) type PreparedInput = SourceOperand<ir::Expr, OwnedExpression>;
 
 impl PhysicalInputs {
+    pub(crate) fn operand(&self, slot: usize) -> BorrowedOperand<'_> {
+        self.children[slot].operand()
+    }
+
     pub(crate) fn operands(&self) -> impl Iterator<Item = BorrowedOperand<'_>> {
         self.children.iter().map(|child| child.operand())
     }
