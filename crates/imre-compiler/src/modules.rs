@@ -5854,6 +5854,9 @@ impl<'a> Loader<'a> {
         name: &str,
         imports: Option<&[ast::Alias]>,
     ) -> Result<Option<IntrinsicModule>, String> {
+        if self.project_shadows_native_package(name) {
+            return Ok(None);
+        }
         if self.allow_imports
             && imre_ast::providers::is_native_fallback(name)
             && self.has_project_source(name)
@@ -6031,6 +6034,15 @@ impl<'a> Loader<'a> {
         Ok(module)
     }
 
+    /// Whether a physical application package or module owns this top-level import.
+    fn project_shadows_native_package(&mut self, name: &str) -> bool {
+        let root = name.split('.').next().unwrap_or(name);
+        self.allow_imports
+            && imre_ast::providers::is_native_package(root)
+            && !imre_ast::providers::is_frozen(root, || self.frozen_modules)
+            && self.has_project_source(root)
+    }
+
     /// Look for a source file on the project search path before using a bundled fallback.
     fn has_project_source(&mut self, name: &str) -> bool {
         let roots = std::iter::once(&self.root)
@@ -6154,6 +6166,7 @@ impl<'a> Loader<'a> {
             return Ok(id);
         }
         let bundled = match name {
+            _ if self.project_shadows_native_package(name) => None,
             _ if !self.frozen_modules
                 && imre_ast::providers::is_optional_frozen(name)
                 && self.has_project_source(name) =>
@@ -6340,10 +6353,11 @@ impl<'a> Loader<'a> {
             };
             Some(file)
         };
-        if (first == "quopri"
-            || imre_ast::providers::is_native_fallback(first)
-            || (!self.frozen_modules && imre_ast::providers::is_optional_frozen(first)))
-            && self.has_project_source(first)
+        if self.project_shadows_native_package(first)
+            || (first == "quopri"
+                || imre_ast::providers::is_native_fallback(first)
+                || (!self.frozen_modules && imre_ast::providers::is_optional_frozen(first)))
+                && self.has_project_source(first)
         {
             return Ok(None);
         }
@@ -7038,6 +7052,28 @@ mod native_tests {
             .unwrap();
             crate::check_file(&entry, Some(root)).unwrap();
         }
+    }
+
+    #[test]
+    fn a_local_package_owns_its_bundled_child_name() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().canonicalize().unwrap();
+        let package = root.join("email");
+        fs::create_dir(&package).unwrap();
+        fs::write(package.join("__init__.py"), "").unwrap();
+        let child = package.join("errors.py");
+        fs::write(&child, "value: int = 42\n").unwrap();
+        let entry = root.join("main.py");
+        fs::write(&entry, "from email.errors import value\nprint(value)\n").unwrap();
+
+        let graph = SourceGraph::load(&entry, Some(&root), &[]).unwrap();
+        let selected = graph
+            .modules
+            .iter()
+            .find(|module| module.name == "email.errors")
+            .unwrap();
+        assert_eq!(selected.path, child);
+        assert!(selected.is_program_source());
     }
 
     #[test]
