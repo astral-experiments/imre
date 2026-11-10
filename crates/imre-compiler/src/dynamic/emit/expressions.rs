@@ -223,17 +223,8 @@ impl Function<'_, '_> {
         }
         match expr {
             ast::Expr::TString(_) => self.unsupported("t-string expression spelling"),
-            ast::Expr::FString(_) => {
-                self.build_diagnostic("cannot compile this formatted string ahead of time")
-            }
-            ast::Expr::Generator(_) => {
-                self.build_diagnostic("cannot compile this generator expression ahead of time")
-            }
             ast::Expr::DictComp(display) if display.key.is_none() => {
                 self.unsupported("dict unpacking comprehension")
-            }
-            ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_) => {
-                self.build_diagnostic("cannot compile this comprehension ahead of time")
             }
             _ => self.unsupported(&format!("{:?}", ast::AnyNodeRef::from(expr).kind())),
         }
