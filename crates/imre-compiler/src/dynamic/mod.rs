@@ -754,9 +754,13 @@ pub(crate) fn compile(
     options: &CompileOptions,
     object_imports: bool,
     operation: Option<ObjectOperation>,
-    checked_graph: Option<&crate::modules::SourceGraph>,
+    mut project: Option<&mut crate::modules::SourceGraph>,
     layout: crate::BoxedLayout<'_>,
-    check: impl FnOnce(bool, Option<RegisteredSources<'_>>) -> Result<(), String>,
+    check: impl FnOnce(
+        Option<&mut crate::modules::SourceGraph>,
+        bool,
+        Option<RegisteredSources<'_>>,
+    ) -> Result<(), String>,
 ) -> Result<Option<UnitCompilation>, String> {
     let (path, module_root, source_entry) = match operand {
         crate::ProgramEntry::Source(_) => {
@@ -770,6 +774,7 @@ pub(crate) fn compile(
     let command = invocation.map(|i| &i.source);
     let module_entry = options.module_entry.as_deref();
     let in_memory = command.is_some() || module_entry.is_some();
+    let checked_graph = project.as_deref();
     let typed_graph = checked_graph.filter(|graph| !graph.has_checked_only_import);
     let file_entry = checked_graph.filter(|_| !in_memory);
     let (src, entry_identity) = if module_entry.is_some() {
@@ -810,40 +815,46 @@ pub(crate) fn compile(
     } else {
         SourceKind::File
     };
-    let module = match file_entry.and_then(|graph| ParsedModule::checked_entry(graph, path)) {
-        Some(module) => module,
-        None => match read_import_source(&src, kind) {
+    let modules = checked_graph.map_or(&[][..], |graph| graph.modules.as_slice());
+    let entry_file = file_entry.and_then(|graph| CheckedFile::entry(graph, path));
+    let mut file_source = None;
+    let mut first = if let Some(file) = entry_file {
+        let module = file.parsed(modules);
+        imports_from_body(
+            &module.text,
+            module_source::into_body(module.parsed),
+            None,
+            None,
+        )?
+    } else {
+        let module = match read_import_source(&src, kind) {
             Ok(ImportSource::Module(module)) => module,
             _ => return Ok(None),
-        },
-    };
-    // Discovery lowers names in its own body. Admission needs the original spellings and
-    // tokens, including for diagnostics on code that never reaches the emitter.
-    let (mut first, entry_source) = if in_memory {
-        (
+        };
+        if in_memory {
             imports_from_body(
                 &module.text,
                 module_source::into_body(module.parsed),
                 None,
                 None,
-            )?,
-            None,
-        )
-    } else {
-        let imports = imports_from_body(
-            &module.text,
-            module.parsed.syntax().body.clone(),
-            None,
-            None,
-        )?;
-        (imports, Some(module))
+            )?
+        } else {
+            let imports = imports_from_body(
+                &module.text,
+                module.parsed.syntax().body.clone(),
+                None,
+                None,
+            )?;
+            file_source = Some(module);
+            imports
+        }
     };
     if startup.is_none()
         && let Some(error) = first.invalid_executable.take()
     {
         // Preserve diagnostics owned by the original first-party graph before
         // reporting why this entry cannot supply an executable Python body.
-        check(false, None)?;
+        check(project, false, None)?;
         let source = crate::normalize_source(&src, SourceKind::File)?;
         let diagnostic = crate::frontend::phase::Diagnostic::at(
             &source,
@@ -1663,7 +1674,7 @@ pub(crate) fn compile(
                     let parsed = checked_package
                         .filter(|_| winner && kind == SourceKind::File)
                         .and_then(|(graph, id)| CheckedFile::select(graph, id));
-                    let imports = match parsed.map(CheckedFile::parsed) {
+                    let imports = match parsed.map(|file| file.parsed(modules)) {
                         Some(module) => imports_from_body(
                             &module.text,
                             module_source::into_body(module.parsed),
@@ -1998,6 +2009,7 @@ pub(crate) fn compile(
         })
     };
     check(
+        project.as_deref_mut(),
         entry_requests_objects || startup_provider,
         Some(RegisteredSources {
             root: &root,
@@ -2007,6 +2019,11 @@ pub(crate) fn compile(
             has_file_body: sdk_runpy.then_some(&has_file_body),
         }),
     )?;
+    let checked_graph = project.as_deref();
+    // The selected module IDs outlive the diagnostic borrow of the owning project.
+    registrations.modules = checked_graph.map_or(&[], |graph| graph.modules.as_slice());
+    let entry_source =
+        file_source.or_else(|| entry_file.map(|file| file.parsed(registrations.modules)));
     // A namespace portion has no initializer. Its registered origin is a directory
     // that must remain available for the scratch session to add its child modules.
     let namespace_portions: HashSet<_> = inputs.directories.iter().map(|(path, _)| path).collect();
@@ -2044,9 +2061,7 @@ pub(crate) fn compile(
     let (units, used_archive) = if checking {
         let mut entry = entry_source;
         for (unit, (_, path, source)) in sources.iter().chain(&builtins).enumerate() {
-            let parsed = entry
-                .take()
-                .or_else(|| registrations.checked_units.get(&unit)?.parsed());
+            let parsed = entry.take().or_else(|| registrations.parsed(unit));
             if !module_errors.contains_key(path) {
                 ParsedModule::check_file(path, source, parsed, keep_docstrings)?;
             }
