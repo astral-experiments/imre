@@ -174,7 +174,8 @@ impl Function<'_, '_> {
                     _,
                 ) = &operation.kind
                 {
-                    self.frame.bind(&self.source.type_aliases[site].name, &value);
+                    self.frame
+                        .bind(&self.source.type_aliases[site].name, &value);
                 }
                 continue;
             }
@@ -420,24 +421,12 @@ impl Function<'_, '_> {
                         self.unsupported("loop control outside a loop");
                     }
                 }
-                ast::Stmt::Try(v) => {
-                    if v.finalbody.is_empty() {
-                        self.try_except(v);
-                    } else {
-                        self.try_finally(v);
-                    }
-                }
+                ast::Stmt::Try(v) => self.protected_statement(v),
                 ast::Stmt::With(v) if !v.is_async || self.native_suspension => {
                     self.with(&v.items, &v.body, v.is_async);
                 }
                 ast::Stmt::Raise(v) => {
-                    let exc = if let Some(e) = &v.exc {
-                        self.expr(e)
-                    } else {
-                        self.caught.last().cloned().unwrap_or_else(|| "0".into())
-                    };
-                    let cause = v.cause.as_deref().map(|e| self.expr(e));
-                    self.raise(&exc, cause.as_deref(), v.exc.is_none());
+                    self.raise_operands(v.exc.as_deref(), v.cause.as_deref(), Self::expr);
                 }
                 ast::Stmt::Assert(v) => {
                     let pass = self.name("b");
@@ -457,31 +446,14 @@ impl Function<'_, '_> {
     }
 
     fn class_position(&mut self, class: Option<&ast::StmtClassDef>) {
-        if !self.output.declarations.declared_definition_position {
-            self.output
-                .functions
-                .push_str("declare void @imre_dyn_definition_position(ptr, ptr)\n");
-            self.output.declarations.declared_definition_position = true;
-        }
-        let position = class.map_or_else(
-            || "null".to_owned(),
-            |class| {
-                let index = self
-                    .source
-                    .class_keywords
-                    .partition_point(|&p| p < class.name.start());
-                let (line, start) = self
-                    .source
-                    .positions
-                    .line_and_column(self.source.class_keywords[index - 1]);
-                let (end_line, end) = self.source.positions.line_and_column(class.end());
-                self.expression_line = line;
-                self.output.position([line, end_line, start, end])
-            },
-        );
-        self.line(&format!(
-            "call void @imre_dyn_definition_position(ptr %ctx, ptr {position})"
-        ));
+        let range = class.map(|class| {
+            let index = self
+                .source
+                .class_keywords
+                .partition_point(|&p| p < class.name.start());
+            ruff_text_size::TextRange::new(self.source.class_keywords[index - 1], class.end())
+        });
+        self.frame.set_source_range(range);
     }
 
     pub(super) fn parameterized_class(&mut self, class: &ast::StmtClassDef) {
@@ -1229,198 +1201,100 @@ impl Function<'_, '_> {
         self.label(&done);
     }
 
-    fn try_except(&mut self, stmt: &ast::StmtTry) {
-        let handler = self.name("b");
-        let done = self.name("b");
-        let outer = std::mem::replace(&mut self.body.error_target, handler.clone());
-        self.statements(&stmt.body);
-        self.body.error_target = outer;
-        self.statements(&stmt.orelse);
-        self.jump(&done);
-        self.label(&handler);
-        let exc = self.op("take_error", &[]);
-        self.live.push(exc.clone());
-        self.caught.push(exc.clone());
-        if stmt.is_star {
-            self.except_star_handlers(&stmt.handlers, &exc, &done);
-        } else {
-            self.except_handlers(&stmt.handlers, &exc, &done);
-        }
-        self.caught.pop();
-        self.live.pop();
-        self.label(&done);
-    }
-
-    fn except_handlers(&mut self, handlers: &[ast::ExceptHandler], exc: &str, done: &str) {
-        for h in handlers {
-            let ast::ExceptHandler::ExceptHandler(h) = h;
-            let next = self.name("b");
-            if let Some(class) = &h.type_ {
-                self.checkpoint(class.as_ref());
-                let class = self.expr(class);
-                let matches = self.op("matches", &[exc, &class]);
-                let matches = self.value(&format!("icmp eq i64 {matches}, 2"));
-                let body = self.name("b");
-                self.branch(&matches, &body, &next);
-                self.label(&body);
-            }
-            if let Some(name) = &h.name {
-                self.bind(name.as_str(), exc);
-                let failed = self.name("b");
-                let outer = std::mem::replace(&mut self.body.error_target, failed.clone());
-                self.exits
-                    .push((Cleanup::ExceptionName(name.to_string()), outer.clone()));
-                self.statements(&h.body);
-                self.exits.pop();
-                self.body.error_target = outer;
-                if !self.body.terminated {
-                    self.clear_exception_name(name.as_str());
+    fn protected_suite(&mut self, stmt: &ast::StmtTry) {
+        crate::llvm::registered::handlers::protected(
+            self,
+            |code| code.statements(&stmt.body),
+            |code| code.statements(&stmt.orelse),
+            |code, exception, done| {
+                if stmt.is_star {
+                    crate::llvm::registered::handlers::groups(
+                        code,
+                        &stmt.handlers,
+                        exception,
+                        done,
+                        |code, ast::ExceptHandler::ExceptHandler(handler)| {
+                            let matcher =
+                                handler.type_.as_deref().expect("except* requires a type");
+                            code.checkpoint(handler);
+                            (
+                                code.expr(matcher),
+                                handler.name.as_ref().map(|name| name.as_str()),
+                                &handler.body,
+                            )
+                        },
+                        Self::statements,
+                    );
+                    return;
                 }
-                self.jump(done);
-                self.label(&failed);
-                let error = self.op("take_error", &[]);
-                self.clear_exception_name(name.as_str());
-                self.raise(&error, None, true);
-            } else {
-                self.statements(&h.body);
-                self.jump(done);
-            }
-            self.label(&next);
-        }
-        self.raise(exc, None, true);
-    }
-
-    fn except_star_handlers(&mut self, handlers: &[ast::ExceptHandler], exc: &str, done: &str) {
-        let raised = self.op("list", &[]);
-        self.live.push(raised.clone());
-        let roots = self.live.len();
-        let mut remainder = exc.to_owned();
-        let mut active = exc.to_owned();
-        for ast::ExceptHandler::ExceptHandler(handler) in handlers {
-            let matcher = handler.type_.as_deref().expect("except* requires a type");
-            self.live.extend([remainder.clone(), active.clone()]);
-            self.checkpoint(handler);
-            let matcher = self.expr(matcher);
-            let pair = self.op("except_star_split", &[&remainder, &matcher]);
-            let zero = self.integer(0);
-            let matched = self.op("get", &[&pair, &zero]);
-            let one = self.integer(1);
-            remainder = self.op("get", &[&pair, &one]);
-
-            let has_match = self.value(&format!("icmp ne i64 {matched}, 0"));
-            // Later match expressions see the last subgroup handled, even across an empty match.
-            active = self.value(&format!(
-                "select i1 {has_match}, i64 {matched}, i64 {active}"
-            ));
-            *self.caught.last_mut().unwrap() = active.clone();
-            self.live.truncate(roots);
-            self.live.extend([remainder.clone(), active.clone()]);
-
-            let body = self.name("b");
-            let failed = self.name("b");
-            let next = self.name("b");
-            self.branch(&has_match, &body, &next);
-            self.label(&body);
-            self.op("restore_caught", &[&matched]);
-            if let Some(name) = &handler.name {
-                self.bind(name.as_str(), &matched);
-            }
-            let outer = std::mem::replace(&mut self.body.error_target, failed.clone());
-            self.statements(&handler.body);
-            self.body.error_target = outer;
-            if !self.body.terminated
-                && let Some(name) = &handler.name
-            {
-                self.clear_star_target(name.as_str());
-            }
-            self.jump(&next);
-            self.label(&failed);
-            let error = self.op("take_error", &[]);
-            if let Some(name) = &handler.name {
-                self.clear_star_target(name.as_str());
-            }
-            self.op("append", &[&raised, &error]);
-            self.jump(&next);
-            self.label(&next);
-            self.live.truncate(roots);
-        }
-
-        self.op("append", &[&raised, &remainder]);
-        let merged = self.op("except_star_merge", &[exc, &raised]);
-        self.live.pop();
-        let enclosing = self
-            .caught
-            .iter()
-            .rev()
-            .nth(1)
-            .cloned()
-            .unwrap_or_else(|| "0".into());
-        self.op("restore_caught", &[&enclosing]);
-        let propagate = self.name("b");
-        let handled = self.value(&format!("icmp eq i64 {merged}, 0"));
-        self.branch(&handled, done, &propagate);
-        self.label(&propagate);
-        self.raise(&merged, None, true);
-    }
-
-    /// A custom namespace observes both the None store and the deletion, outside the arm body.
-    fn clear_star_target(&mut self, name: &str) {
-        self.bind(name, "0");
-        let key = self.code_name(name);
-        self.frame.op("delname", &[&self.scope.clone(), &key]);
-    }
-
-    /// Remove a handler's binding even if it was changed or deleted by its body.
-    fn clear_exception_name(&mut self, name: &str) {
-        let name = self.code_name(name);
-        self.frame.op("clearname", &[&self.scope.clone(), &name]);
-    }
-
-    /// Run the same cleanup for normal fallthrough, a pending exception and nonlocal exits.
-    fn try_finally(&mut self, stmt: &ast::StmtTry) {
-        let handler = self.name("b");
-        let done = self.name("b");
-        let outer = std::mem::replace(&mut self.body.error_target, handler.clone());
-        self.exits.push((
-            Cleanup::Finally {
-                body: stmt.finalbody.as_slice().into(),
-                loop_depth: self.loops.len(),
-                caught_depth: self.caught.len(),
+                for ast::ExceptHandler::ExceptHandler(handler) in &stmt.handlers {
+                    crate::llvm::registered::handlers::arm(
+                        code,
+                        exception,
+                        done,
+                        handler.name.as_ref().map(|name| name.as_str()),
+                        |code| {
+                            handler.type_.as_deref().map(|class| {
+                                code.checkpoint(class);
+                                code.expr(class)
+                            })
+                        },
+                        |code, cleanup| {
+                            if let Some((name, target)) = cleanup {
+                                code.exits
+                                    .push((Cleanup::ExceptionName(name.into()), target.into()));
+                            }
+                            code.statements(&handler.body);
+                            if cleanup.is_some() {
+                                code.exits.pop();
+                            }
+                        },
+                    );
+                }
+                code.raise(exception, None, true);
             },
-            outer.clone(),
-        ));
-        if stmt.handlers.is_empty() {
-            self.statements(&stmt.body);
-        } else {
-            self.try_except(stmt);
-        }
-        self.exits.pop();
-        self.body.error_target = outer;
-        if !self.body.terminated || self.module_annotation_sites.is_some() {
-            self.statements(&stmt.finalbody);
-            self.jump(&done);
-        }
+        );
+    }
 
-        self.label(&handler);
-        let exception = self.op("take_error", &[]);
-        self.live.push(exception.clone());
-        let enclosing = self.caught.last().cloned().unwrap_or_else(|| "0".into());
-        self.exits.push((
-            Cleanup::PendingValue {
-                value: exception.clone(),
-                enclosing_exception: Some(enclosing),
-            },
-            self.body.error_target.clone(),
-        ));
-        self.caught.push(exception.clone());
-        self.statements(&stmt.finalbody);
-        self.caught.pop();
-        self.exits.pop();
-        self.live.pop();
-        if !self.body.terminated {
-            self.raise(&exception, None, true);
+    fn protected_statement(&mut self, stmt: &ast::StmtTry) {
+        if stmt.finalbody.is_empty() {
+            self.protected_suite(stmt);
+            return;
         }
-        self.label(&done);
+        crate::llvm::registered::handlers::finalized(
+            self,
+            |code, enclosing| {
+                code.exits.push((
+                    Cleanup::Finally {
+                        body: stmt.finalbody.as_slice().into(),
+                        loop_depth: code.loops.len(),
+                        caught_depth: code.caught.len(),
+                    },
+                    enclosing.into(),
+                ));
+                if stmt.handlers.is_empty() {
+                    code.statements(&stmt.body);
+                } else {
+                    code.protected_suite(stmt);
+                }
+                code.exits.pop();
+            },
+            |code, pending| {
+                if let Some((value, enclosing)) = pending {
+                    code.exits.push((
+                        Cleanup::PendingValue {
+                            value: value.into(),
+                            enclosing_exception: Some(enclosing.into()),
+                        },
+                        code.body.error_target.clone(),
+                    ));
+                }
+                code.statements(&stmt.finalbody);
+                if pending.is_some() {
+                    code.exits.pop();
+                }
+            },
+        );
     }
 
     /// Collect discarded owners while retaining the operands needed after the transfer.
@@ -1497,16 +1371,14 @@ impl Function<'_, '_> {
     }
 
     fn exit_context(&mut self, context: &ContextExit, exception: Option<&str>) -> String {
+        if !context.is_async {
+            return self.frame.exit_sync(context, exception);
+        }
         let args = [
             context.callable.as_str(),
             exception.unwrap_or("0"),
             context.caught.as_str(),
         ];
-        if !context.is_async {
-            self.frame
-                .set_statement_line(self.source.positions.line(context.range.start()));
-            return self.op("exit_context", &args);
-        }
 
         // A pending return, outer managers and the body exception survive this await.
         // The exceptional exit also retains its callable through the truth test.
@@ -1515,10 +1387,10 @@ impl Function<'_, '_> {
         self.live.push(context.callable.clone());
         self.caught
             .push(exception.unwrap_or(&context.caught).into());
-        self.checkpoint(&context.range);
+        self.checkpoint(&context.site.range);
         self.caught.pop();
         self.live.truncate(outer_roots);
-        self.call_position(context.range);
+        self.call_position(context.site.range);
         let awaitable = self.op("async_exit_context", &args);
         let mark = if exception.is_some() {
             outer_roots + 2
@@ -1527,9 +1399,9 @@ impl Function<'_, '_> {
         }
         .to_string();
         self.keep_operands(&mark, &awaitable, "0");
-        let result = self.await_at(&awaitable, "2", context.range, &mark);
+        let result = self.await_at(&awaitable, "2", context.site.range, &mark);
         if let Some(exc) = exception {
-            self.call_position(context.range);
+            self.call_position(context.site.range);
             let suppress = self.op("truth", &[&result]);
             self.keep_operands(&outer_roots.to_string(), exc, &suppress);
             self.op("restore_caught", &[&context.caught]);
@@ -1545,72 +1417,47 @@ impl Function<'_, '_> {
             self.statements(body);
             return;
         };
-        let range = item.context_expr.range();
-        let acquire = |f: &mut Self, mark: Option<&str>| {
-            let manager = f.expr(&item.context_expr);
-            let mode = if is_async { "2" } else { "0" };
-            let lookup = |f: &mut Self, name| {
-                if is_async {
-                    f.call_position(range);
-                }
-                f.op(name, &[&manager, mode])
-            };
-            let exit = lookup(f, "lookup_exit");
-            let enter = lookup(f, "lookup_enter");
-            let above_exit = mark.map(|mark| f.keep_operands(mark, &exit, &enter));
-            if is_async {
-                f.call_position(range);
-            }
-            let mut value = f.invoke(&enter, &[]);
-            if let Some(mark) = &above_exit {
-                f.keep_operands(mark, &value, "0");
-                value = f.await_at(&value, "1", range, mark);
-            }
-            (exit, value, above_exit)
-        };
+        let site = crate::ir::ContextSite::new(&item.context_expr);
         let (exit, value, above_exit) = if is_async {
+            let range = site.range;
             let mark = self.temporary_mark();
-            self.unwind_operands(&mark, |f| acquire(f, Some(&mark)))
+            self.unwind_operands(&mark, |f| {
+                let manager = f.expr(&item.context_expr);
+                f.call_position(range);
+                let exit = f.op("lookup_exit", &[&manager, "2"]);
+                f.call_position(range);
+                let enter = f.op("lookup_enter", &[&manager, "2"]);
+                let above_exit = f.keep_operands(&mark, &exit, &enter);
+                f.call_position(range);
+                let value = f.invoke(&enter, &[]);
+                f.keep_operands(&above_exit, &value, "0");
+                let value = f.await_at(&value, "1", range, &above_exit);
+                (exit, value, Some(above_exit))
+            })
         } else {
-            acquire(self, None)
+            let manager = self.expr(&item.context_expr);
+            let (exit, value) = self.frame.enter_sync(&manager, site);
+            (exit, value, None)
         };
-        let handler = self.name("b");
-        let done = self.name("b");
-        let outer = std::mem::replace(&mut self.body.error_target, handler.clone());
-        let caught = self.caught.last().cloned().unwrap_or_else(|| "0".into());
-        let context = ContextExit {
-            range,
+        crate::llvm::registered::context::entered(
+            self,
+            site,
+            exit,
             is_async,
-            callable: exit.clone(),
-            caught,
-        };
-        self.exits
-            .push((Cleanup::With(context.clone()), outer.clone()));
-        self.live.push(exit);
-        if let Some(target) = &item.optional_vars {
-            self.assign(target, &value);
-        }
-        if let Some(mark) = above_exit {
-            // The assignment consumed the enter result before the next item is evaluated.
-            self.discard_truth(&mark);
-        }
-        self.with(rest, body, is_async);
-        self.live.pop();
-        self.exits.pop();
-        self.body.error_target = outer;
-        if !self.body.terminated {
-            self.exit_context(&context, None);
-            self.jump(&done);
-        }
-        self.label(&handler);
-        let exc = self.op("take_error", &[]);
-        let result = self.exit_context(&context, Some(&exc));
-        let suppress = self.truth(&result);
-        let propagate = self.name("b");
-        self.branch(&suppress, &done, &propagate);
-        self.label(&propagate);
-        self.raise(&exc, None, true);
-        self.label(&done);
+            |f, context, outer| {
+                f.exits
+                    .push((Cleanup::With(context.clone()), outer.to_owned()));
+                if let Some(target) = &item.optional_vars {
+                    f.assign(target, &value);
+                }
+                if let Some(mark) = above_exit {
+                    f.discard_truth(&mark);
+                }
+                f.with(rest, body, is_async);
+                f.exits.pop();
+            },
+            Self::exit_context,
+        );
     }
 }
 

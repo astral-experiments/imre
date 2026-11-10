@@ -20,7 +20,9 @@ impl Checker<'_> {
                 body: vec![Statement::Try {
                     body: vec![Statement::Assign(slot, rendered)],
                     handlers: vec![ir::ExceptHandler {
-                        kinds: vec![exception_kind("Exception").unwrap()],
+                        matcher: crate::ir::ExceptionMatcher::Categories(vec![
+                            exception_kind("Exception").unwrap(),
+                        ]),
                         name: None,
                         body: vec![Statement::Assign(slot, fallback)],
                     }],

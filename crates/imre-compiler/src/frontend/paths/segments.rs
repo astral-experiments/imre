@@ -217,7 +217,9 @@ impl Checker<'_> {
                     Statement::Try {
                         body: vec![Statement::Assign(result, protocol)],
                         handlers: vec![ir::ExceptHandler {
-                            kinds: vec![exception_kind("TypeError").unwrap()],
+                            matcher: crate::ir::ExceptionMatcher::Categories(vec![
+                                exception_kind("TypeError").unwrap(),
+                            ]),
                             name: None,
                             body: vec![Statement::Assign(failed, Expr::boolean(true))],
                         }],

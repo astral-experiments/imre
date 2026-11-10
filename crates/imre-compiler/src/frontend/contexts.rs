@@ -109,7 +109,7 @@ impl Checker<'_> {
             Statement::Try {
                 body: protected,
                 handlers: vec![ir::ExceptHandler {
-                    kinds: vec![0],
+                    matcher: crate::ir::ExceptionMatcher::Categories(vec![0]),
                     name: Some(exception),
                     body: vec![Statement::If(handled, vec![], vec![Statement::Raise(None)])],
                 }],

@@ -600,6 +600,17 @@ impl Expr {
         }
     }
 
+    /// Exception and cause are evaluated in source order before the registered raise ABI normalizes them.
+    pub(crate) fn explicit_cause(&self) -> Option<(&Self, &Self)> {
+        if let ExprKind::Builtin(Builtin::ExceptionWithCause, args) = &self.kind
+            && let [exception, cause] = args.as_slice()
+        {
+            Some((exception, cause))
+        } else {
+            None
+        }
+    }
+
     /// Read a local slot with its type at the use site.
     pub(crate) fn local(slot: usize, ty: Type) -> Self {
         Self {
@@ -3008,10 +3019,41 @@ impl InstanceType {
 
 #[derive(Clone)]
 pub(crate) struct ExceptHandler {
-    /// Empty for a bare handler; otherwise fixed builtin exception categories.
-    pub kinds: Vec<u32>,
+    pub matcher: ExceptionMatcher,
     pub name: Option<usize>,
     pub body: Vec<Statement>,
+}
+
+/// The physical context expression and the delimiter of a directly called or indexed manager.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ContextSite {
+    pub range: ruff_text_size::TextRange,
+    pub delimiter: Option<(ruff_text_size::TextSize, u8)>,
+}
+
+impl ContextSite {
+    pub(crate) fn new(manager: &ruff_python_ast::Expr) -> Self {
+        use ruff_text_size::Ranged;
+        let delimiter = match manager {
+            ruff_python_ast::Expr::Call(call) => Some((call.func.end(), b'(')),
+            ruff_python_ast::Expr::Subscript(index) => Some((index.value.end(), b'[')),
+            _ => None,
+        };
+        Self {
+            range: manager.range(),
+            delimiter,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) enum ExceptionMatcher {
+    /// Empty for a bare handler; otherwise fixed builtin exception categories.
+    Categories(Vec<u32>),
+    /// Evaluate the Python class only when a pending exception reaches this handler.
+    Object(ruff_text_size::TextRange, Box<Expr>),
+    /// Split and detach a subgroup while leaving unmatched exceptions for the next arm.
+    Subgroup(ruff_text_size::TextRange, Box<Expr>),
 }
 
 /// Selects the pull ABI for a cursor created by the compiler.
@@ -3079,6 +3121,13 @@ pub(crate) enum Statement {
     /// A compiler-owned iterator reached its end; unlike break, this runs else.
     Exhaust,
     Assert(Expr),
+    /// A successfully acquired exit protects the target binding and suite.
+    With {
+        manager: Expr,
+        site: ContextSite,
+        entered: Option<usize>,
+        body: Vec<Statement>,
+    },
     /// Handlers protect only `body`; `finalbody` runs for every exit reason.
     Try {
         body: Vec<Statement>,
@@ -3107,6 +3156,10 @@ macro_rules! statement_children {
                 ($expression)(a);
                 ($expression)(b);
             }
+            Statement::With { manager, body, .. } => {
+                ($expression)(manager);
+                ($suite)(body);
+            }
             Statement::Scope { body, .. } => ($suite)(body),
             Statement::If(test, yes, no) | Statement::While(test, yes, no) => {
                 ($expression)(test);
@@ -3129,7 +3182,12 @@ macro_rules! statement_children {
                 finalbody,
             } => {
                 ($suite)(body);
-                for ExceptHandler { body, .. } in handlers {
+                for ExceptHandler { matcher, body, .. } in handlers {
+                    if let ExceptionMatcher::Object(_, class)
+                    | ExceptionMatcher::Subgroup(_, class) = matcher
+                    {
+                        ($expression)(class);
+                    }
                     ($suite)(body);
                 }
                 ($suite)(orelse);
@@ -3479,6 +3537,10 @@ fn node_writes(node: Node<'_>, visit: &mut impl FnMut(usize, Option<&Expr>)) {
                 visit(slot, None);
             }
         }
+        Statement::With {
+            entered: Some(slot),
+            ..
+        } => visit(*slot, None),
         Statement::For {
             target,
             cursor,

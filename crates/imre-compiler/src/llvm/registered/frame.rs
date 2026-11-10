@@ -772,6 +772,29 @@ impl RegisteredFrame<'_, '_> {
 pub(crate) trait FrameEmitter<'a, 'p>:
     std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>> + Sized
 {
+    /// Raise through this activation's current handler, keeping the earlier operand
+    /// reachable while an arbitrary cause expression executes Python.
+    fn raise_operands<T>(
+        &mut self,
+        exception: Option<&T>,
+        cause: Option<&T>,
+        mut evaluate: impl FnMut(&mut Self, &T) -> String,
+    ) {
+        let Some(exception) = exception else {
+            let active = self.caught.last().cloned().unwrap_or_else(|| "0".into());
+            self.raise(&active, None, true);
+            return;
+        };
+        let value = evaluate(self, exception);
+        let cause = cause.map(|operand| {
+            self.live.push(value.clone());
+            let cause = evaluate(self, operand);
+            self.live.pop();
+            cause
+        });
+        self.raise(&value, cause.as_deref(), false);
+    }
+
     fn test_with_temporaries(&mut self, test: impl FnOnce(&mut Self) -> String) -> String {
         let mark = self.temporary_mark();
         let condition = test(self);
@@ -1485,6 +1508,15 @@ impl RegisteredFrame<'_, '_> {
 
 impl RegisteredFrame<'_, '_> {
     pub(crate) fn invoke(&mut self, callable: &str, values: &[&str]) -> String {
+        self.invoke_at(callable, values, None)
+    }
+
+    pub(crate) fn invoke_at(
+        &mut self,
+        callable: &str,
+        values: &[&str],
+        span: Option<[usize; 4]>,
+    ) -> String {
         let mark = self.temporary_mark();
         let (ptr, count) = self.handle_array(values);
         self.call_at(
@@ -1495,7 +1527,7 @@ impl RegisteredFrame<'_, '_> {
                 receiver_slot: false,
             },
             &mark,
-            None,
+            span,
         )
     }
 

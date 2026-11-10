@@ -2152,7 +2152,7 @@ impl Context {
             (HashState::XOF_CLASS, Value::Hash(state)) => state.lock().class_name() == name,
             (_, Value::Raised(error)) => {
                 matches!(self.heap.get(class), Value::Native(name) if name == "object")
-                    || self.raised_error_matches(error, class)
+                    || self.match_raised_class(error, class, Self::subclass)
             }
             #[cfg(target_os = "linux")]
             ("select.epoll", Value::Epoll(_)) => true,
@@ -2248,24 +2248,56 @@ impl Context {
             }
         }
     }
+    /// Every tuple member must be a real exception class, even after an earlier match.
+    pub(super) fn check_exception_classes(&self, classes: &[Id], base: Id) -> Result<()> {
+        if classes
+            .iter()
+            .all(|&class| self.is_type_object(class) && self.direct_subclass(class, base))
+        {
+            Ok(())
+        } else {
+            Err(Error::new(
+                "TypeError",
+                "catching classes that do not inherit from BaseException is not allowed",
+            ))
+        }
+    }
+
     pub(super) fn raised_error_matches(&self, error: &Error, class: Id) -> bool {
+        self.match_raised_class(error, class, Self::direct_subclass)
+    }
+
+    fn match_raised_class(
+        &self,
+        error: &Error,
+        class: Id,
+        subtype: fn(&Self, Id, Id) -> bool,
+    ) -> bool {
         match self.heap.get(class) {
-            Value::Tuple(classes) => classes.iter().any(|&c| self.raised_error_matches(error, c)),
-            _ if let Some(actual) = error.class() => self.subclass(actual, class),
+            Value::Tuple(classes) => classes
+                .iter()
+                .any(|&c| self.match_raised_class(error, c, subtype)),
+            _ if let Some(actual) = error.class() => subtype(self, actual, class),
             Value::Native(_) => {
                 let kind = error.kind.as_ref();
-                self.error_kind_matches(kind, class, self.builtins.get(kind).copied())
+                self.error_kind_matches(kind, class, self.builtins.get(kind).copied(), subtype)
             }
             // Native operations on intrinsic file objects belong to the first I/O module.
             Value::Class { .. } if error.kind == "UnsupportedOperation" => self
                 .builtins
                 .get("UnsupportedOperation")
-                .is_some_and(|&initial| self.subclass(initial, class)),
+                .is_some_and(|&initial| subtype(self, initial, class)),
             _ => false,
         }
     }
 
-    fn error_kind_matches(&self, kind: &str, class: Id, registered: Option<Id>) -> bool {
+    fn error_kind_matches(
+        &self,
+        kind: &str,
+        class: Id,
+        registered: Option<Id>,
+        subtype: fn(&Self, Id, Id) -> bool,
+    ) -> bool {
         if let Value::Native(parent) = self.heap.get(class)
             && let Some(result) = builtins::exception_subclass(kind, parent)
         {
@@ -2274,7 +2306,7 @@ impl Context {
         match self.heap.get(class) {
             Value::Tuple(classes) => classes
                 .iter()
-                .any(|&c| self.error_kind_matches(kind, c, registered)),
+                .any(|&c| self.error_kind_matches(kind, c, registered, subtype)),
             Value::Class { name, .. } | Value::Native(name) => {
                 kind == name
                     || name == "BaseException"
@@ -2282,7 +2314,7 @@ impl Context {
                     || (name == "ValueError"
                         && matches!(kind, "JSONDecodeError" | "binascii.Error"))
                     || (name == "OSError" && kind == "socket.gaierror")
-                    || registered.is_some_and(|actual| self.subclass(actual, class))
+                    || registered.is_some_and(|actual| subtype(self, actual, class))
             }
             _ => false,
         }

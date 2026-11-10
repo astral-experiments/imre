@@ -150,6 +150,12 @@ impl Analysis<'_> {
                     }
                     self.loop_body(None, body, orelse, state);
                 }
+                Statement::With { manager, body, .. } => {
+                    self.expression(manager, state);
+                    state.fill(None);
+                    self.block(body, state);
+                    state.fill(None);
+                }
                 Statement::Try {
                     body,
                     handlers,

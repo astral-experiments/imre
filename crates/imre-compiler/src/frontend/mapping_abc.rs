@@ -231,7 +231,9 @@ impl Checker<'_> {
         let attempt = Statement::Try {
             body: found,
             handlers: vec![ir::ExceptHandler {
-                kinds: vec![exception_kind("KeyError").unwrap()],
+                matcher: crate::ir::ExceptionMatcher::Categories(vec![
+                    exception_kind("KeyError").unwrap(),
+                ]),
                 name: None,
                 body: vec![Statement::Assign(result, missing)],
             }],

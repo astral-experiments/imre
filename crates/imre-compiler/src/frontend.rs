@@ -5762,6 +5762,10 @@ impl<'a> Checker<'a> {
             ast::Stmt::With(with_) if self.asynchronous => {
                 return self.async_with(&with_.items, &with_.body);
             }
+            ast::Stmt::Raise(raise) if self.registered.is_some() => {
+                let raised = registered::raised(raise, |value| self.expr(value))?;
+                return Ok((vec![raised], false));
+            }
             ast::Stmt::Raise(raise) => {
                 let mut value = raise
                     .exc
@@ -6409,7 +6413,7 @@ impl<'a> Checker<'a> {
                 self.merge_exit(&mut normal_exit);
             }
             handlers.push(ir::ExceptHandler {
-                kinds,
+                matcher: crate::ir::ExceptionMatcher::Categories(kinds),
                 name,
                 body: handler_body,
             });

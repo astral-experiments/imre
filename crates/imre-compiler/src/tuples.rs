@@ -241,6 +241,18 @@ fn inspect(
                 inspect(body, candidates, producers, &mut HashSet::new());
                 inspect(orelse, candidates, producers, fresh);
             }
+            Statement::With {
+                manager,
+                entered,
+                body,
+                ..
+            } => {
+                inspect_expression(manager, candidates, producers);
+                if let Some(slot) = entered {
+                    candidates[*slot].eligible = false;
+                }
+                inspect(body, candidates, producers, fresh);
+            }
             Statement::Scope { body, .. } => inspect(body, candidates, producers, fresh),
             Statement::Try {
                 body,

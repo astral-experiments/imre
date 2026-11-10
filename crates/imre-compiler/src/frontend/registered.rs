@@ -849,6 +849,22 @@ pub(crate) fn delete_item(receiver: Expr, key: Expr) -> Expr {
     )
 }
 
+pub(super) fn raised<E>(
+    raise: &ast::StmtRaise,
+    mut operand: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
+) -> StdResult<Statement, E> {
+    let exception = raise.exc.as_deref().map(&mut operand).transpose()?;
+    let value = match (exception, raise.cause.as_deref()) {
+        (Some(value), Some(cause)) => Some(operation(
+            Builtin::ExceptionWithCause,
+            Type::Exception,
+            vec![value, operand(cause)?],
+        )),
+        (value, _) => value,
+    };
+    Ok(Statement::Raise(value))
+}
+
 impl statements::StatementLowering for SourceScope<'_> {
     type Error = ();
 
@@ -966,6 +982,12 @@ impl statements::StatementLowering for SourceScope<'_> {
                 let name = alias.name.as_name_expr().ok_or(())?;
                 Ok((vec![self.store(name.id.as_str(), value)], true))
             }
+            ast::Stmt::Raise(raise) => Ok((
+                vec![raised(raise, |value| {
+                    self.ordinary_operand(value).ok_or(())
+                })?],
+                false,
+            )),
             ast::Stmt::ClassDef(class) if plain_class_header(class) => {
                 let decorators = class
                     .decorator_list
@@ -979,6 +1001,42 @@ impl statements::StatementLowering for SourceScope<'_> {
                     decorators,
                 );
                 Ok((vec![self.store(class.name.as_str(), value)], true))
+            }
+            ast::Stmt::Try(region) => {
+                let body = self.suite(&region.body)?;
+                let mut handlers = Vec::with_capacity(region.handlers.len());
+                for ast::ExceptHandler::ExceptHandler(handler) in &region.handlers {
+                    let matcher = match handler.type_.as_deref() {
+                        None => ir::ExceptionMatcher::Categories(Vec::new()),
+                        Some(class) => {
+                            let operand = Box::new(self.ordinary_operand(class).ok_or(())?);
+                            if region.is_star {
+                                ir::ExceptionMatcher::Subgroup(handler.range(), operand)
+                            } else {
+                                ir::ExceptionMatcher::Object(class.range(), operand)
+                            }
+                        }
+                    };
+                    handlers.push(ir::ExceptHandler {
+                        matcher,
+                        name: handler.name.as_ref().map(|name| self.slot(name.as_str())),
+                        body: self.suite(&handler.body)?,
+                    });
+                }
+                let orelse = self.suite(&region.orelse)?;
+                let finalbody = self.suite(&region.finalbody)?;
+                Ok((
+                    vec![Statement::Try {
+                        body,
+                        handlers,
+                        orelse,
+                        finalbody,
+                    }],
+                    true,
+                ))
+            }
+            ast::Stmt::With(stmt) if !stmt.is_async => {
+                Ok((self.with_items(&stmt.items, &stmt.body)?, true))
             }
             ast::Stmt::While(loop_) => {
                 let condition = self.ordinary_operand(&loop_.test).ok_or(())?;
@@ -1124,6 +1182,38 @@ impl SourceScope<'_> {
             self.statement(stmt, &mut body)?;
         }
         Ok(body)
+    }
+
+    fn with_items(
+        &mut self,
+        items: &[ast::WithItem],
+        suite: &[ast::Stmt],
+    ) -> StdResult<Vec<Statement>, ()> {
+        let Some((item, rest)) = items.split_first() else {
+            return self.suite(suite);
+        };
+        let manager = self.ordinary_operand(&item.context_expr).ok_or(())?;
+        let site = ir::ContextSite::new(&item.context_expr);
+        let mut body = Vec::new();
+        let entered = if let Some(target) = &item.optional_vars {
+            let slot = self.hidden(Type::PythonObject);
+            let binding =
+                unpacking::bind_targets(self, target, Expr::local(slot, Type::PythonObject), None)?;
+            body.push(Statement::Scope {
+                body: binding,
+                clear: vec![slot],
+            });
+            Some(slot)
+        } else {
+            None
+        };
+        body.extend(self.with_items(rest, suite)?);
+        Ok(vec![Statement::With {
+            manager,
+            site,
+            entered,
+            body,
+        }])
     }
 
     fn loop_body(&mut self, statements: &[ast::Stmt]) -> StdResult<Vec<Statement>, ()> {
@@ -1393,6 +1483,37 @@ mod tests {
         let optimized = prepare(false);
         assert!(optimized.fully_checked());
         assert!(optimized.checked.function.body.is_empty());
+    }
+
+    #[test]
+    fn prepared_raise_keeps_both_callback_operands_in_the_shared_body() {
+        let text = "def deliver(make, cause):\n    raise make() from cause()\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let definition = module.parsed.syntax().body[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let literals = values::ModuleSource::new(module);
+        let checked = registered_suite(
+            &definition.body,
+            RegisteredScope::Function { is_async: false },
+            literals.context(text),
+        )
+        .expect("the whole raise suite uses checked operations");
+        assert!(crate::llvm::registered::supports(&checked));
+        let Some(Statement::Raise(Some(value))) = checked.function.body.last() else {
+            panic!("expected a terminal raise");
+        };
+        let (exception, cause) = value.explicit_cause().unwrap();
+        for operand in [exception, cause] {
+            let mut calls = 0;
+            ir::walk_operand_expressions(operand, &mut |value| {
+                if matches!(value.kind, ExprKind::Builtin(Builtin::RegisteredCall(_), _)) {
+                    calls += 1;
+                }
+            });
+            assert_eq!(calls, 1);
+        }
     }
 
     #[test]
@@ -2125,6 +2246,130 @@ mod tests {
         ) if matches!(inputs.first().map(|value| &value.kind), Some(ExprKind::Local(id)) if id == slot)));
         assert!(matches!(&last.kind, ExprKind::Scope { value, clear, .. }
             if clear == &[*slot] && matches!(&value.kind, ExprKind::Local(id) if id == slot)));
+    }
+
+    #[test]
+    fn subgroup_and_context_target_share_the_prepared_body() {
+        let graph = SourceGraph::single(concat!(
+            "try:\n",
+            "    with resource as (left, right):\n",
+            "        send(left, right)\n",
+            "except* select() as group:\n",
+            "    send(group)\n",
+        ))
+        .unwrap();
+        let module = &graph.modules[graph.entry];
+        let checked = registered_suite(
+            &module.parsed.syntax().body,
+            RegisteredScope::Function { is_async: false },
+            values::ModuleSource::new(module).context(&module.source),
+        )
+        .expect("complete protected body");
+        let mut targets = 0;
+        let mut filters = 0;
+        ir::walk_statements(&checked.function.body, &mut |stmt| match stmt {
+            Statement::With {
+                entered: Some(slot),
+                body,
+                ..
+            } => {
+                assert!(matches!(&body[0], Statement::Scope { clear, .. } if clear == &[*slot]));
+                targets += 1;
+            }
+            Statement::Try { handlers, .. } => {
+                assert!(
+                    matches!(handlers.as_slice(), [handler] if matches!(handler.matcher, ir::ExceptionMatcher::Subgroup(..)))
+                );
+                filters += 1;
+            }
+            _ => {}
+        });
+        assert_eq!((targets, filters), (1, 1));
+    }
+
+    #[test]
+    fn loop_exit_through_finally_keeps_a_prepared_region() {
+        let source =
+            "for item in items:\n    try:\n        break\n    finally:\n        emit(item)\n";
+        let graph = SourceGraph::single(source).unwrap();
+        let module = &graph.modules[graph.entry];
+        let checked = registered_suite(
+            &module.parsed.syntax().body,
+            RegisteredScope::Function { is_async: false },
+            values::ModuleSource::new(module).context(&module.source),
+        )
+        .expect("complete registered loop");
+        let mut found = false;
+        ir::walk_statements(&checked.function.body, &mut |stmt| {
+            if let Statement::Try {
+                body,
+                handlers,
+                finalbody,
+                ..
+            } = stmt
+            {
+                assert!(handlers.is_empty() && !finalbody.is_empty());
+                assert!(matches!(body.last(), Some(Statement::Break)));
+                found = true;
+            }
+        });
+        assert!(found);
+    }
+
+    #[test]
+    fn named_handler_keeps_its_live_filter_and_original_binding() {
+        let text = "try:\n    run()\nexcept choose() as fault:\n    handle(fault)\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let checked = registered_suite(
+            &module.parsed.syntax().body,
+            RegisteredScope::Function { is_async: false },
+            values::ModuleSource::new(module).context(&module.source),
+        )
+        .expect("prepared live match");
+        let [_, Statement::Try { handlers, .. }] = checked.function.body.as_slice() else {
+            panic!("expected registered protected region");
+        };
+        let ir::ExceptionMatcher::Object(range, _) = &handlers[0].matcher else {
+            panic!("expected a Python object filter");
+        };
+        assert_eq!(&text[*range], "choose()");
+        assert_eq!(
+            checked.local_names[&handlers[0].name.unwrap()].name,
+            "fault"
+        );
+        assert!(crate::llvm::registered::supports(&checked));
+    }
+
+    #[test]
+    fn bare_handler_has_checked_body_and_distinct_else() {
+        let graph =
+            SourceGraph::single("try:\n    run()\nexcept:\n    failed()\nelse:\n    clean()\n")
+                .unwrap();
+        let module = &graph.modules[graph.entry];
+        let checked = registered_suite(
+            &module.parsed.syntax().body,
+            RegisteredScope::Function { is_async: false },
+            values::ModuleSource::new(module).context(&module.source),
+        )
+        .expect("complete registered try");
+        let [
+            _,
+            Statement::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            },
+        ] = checked.function.body.as_slice()
+        else {
+            panic!("expected one prepared protected region");
+        };
+        assert_eq!(
+            (body.len(), handlers[0].body.len(), orelse.len()),
+            (2, 2, 2)
+        );
+        assert!(finalbody.is_empty() && crate::llvm::registered::supports(&checked));
     }
 
     #[test]

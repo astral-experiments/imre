@@ -578,6 +578,13 @@ impl Analyzer {
                 }
                 return flow;
             }
+            Statement::With { manager, body, .. } => {
+                self.expression(manager, &mut state, record);
+                let unknown = State::unknown(state.0.len());
+                let mut flow = self.block(body, unknown.clone(), record);
+                flow.next = Some(unknown);
+                return flow;
+            }
             Statement::Try {
                 body,
                 handlers,
