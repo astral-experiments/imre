@@ -1,31 +1,143 @@
 //! Native structural matching on semantic operands in the live registered namespace.
 use super::{Frame, RegisteredFrame, sites::CheckedSites};
+use crate::frontend::{MatchGuard, SourceMatch};
 use crate::ir::{Expr, MatchCase, MatchPattern, MatchTest};
 use crate::llvm::operations::{CheckedBody, CheckedValue};
 use imre_ast::{SequencePatternItems, SequencePatternPlan};
 
-/// The matcher has already emitted pattern tests, bindings and cleanup when the
-/// owner fills a guard or body. These destinations contain only machine state.
-pub(crate) struct MatchBlocks {
-    pub(crate) done: String,
-    pub(crate) cases: Vec<CaseBlock>,
+/// Tests, captures and successor edges for one evaluation of a match subject.
+pub(crate) struct MatchRegions<'a> {
+    done: String,
+    cases: Vec<CaseBlock<'a>>,
+    index: usize,
+    guard_unwind: Option<String>,
 }
 
-pub(crate) struct CaseBlock {
-    pub(crate) body: String,
-    pub(crate) guard: Option<GuardBlock>,
+struct CaseBlock<'a> {
+    body: String,
+    guard: Option<GuardBlock<'a>>,
 }
 
-pub(crate) struct GuardBlock {
+struct GuardBlock<'a> {
+    test: MatchGuard<&'a Expr>,
     entry: String,
-    pub(crate) matched: String,
-    pub(crate) failed: String,
+    matched: String,
+    failed: String,
     unwind: String,
     subject: Option<String>,
 }
 
-impl GuardBlock {
-    pub(crate) fn enter(&self, frame: &mut RegisteredFrame<'_, '_>) -> String {
+pub(crate) enum MatchRegion<'a> {
+    ResidualGuard {
+        case: usize,
+        matched: &'a str,
+        failed: &'a str,
+    },
+    Body(usize),
+}
+
+pub(crate) enum MatchSubject<'a> {
+    Checked(&'a Expr),
+    Evaluated(String),
+}
+
+/// Both representations borrow their operands directly from their declaring case.
+enum MatchCases<'a> {
+    Checked(&'a [MatchCase]),
+    Physical(&'a SourceMatch),
+}
+
+struct CaseInput<'a> {
+    pattern: &'a MatchPattern,
+    slots: Option<&'a [usize]>,
+    guard: Option<MatchGuard<&'a Expr>>,
+}
+
+impl<'a> MatchCases<'a> {
+    fn len(&self) -> usize {
+        match self {
+            Self::Checked(cases) => cases.len(),
+            Self::Physical(site) => site.cases.len(),
+        }
+    }
+
+    fn get(&self, index: usize) -> CaseInput<'a> {
+        match self {
+            Self::Checked(cases) => {
+                let case = &cases[index];
+                CaseInput {
+                    pattern: &case.pattern,
+                    slots: Some(&case.captures),
+                    guard: case.guard.as_ref().map(MatchGuard::Checked),
+                }
+            }
+            Self::Physical(site) => {
+                let case = &site.cases[index];
+                CaseInput {
+                    pattern: &case.pattern,
+                    slots: None,
+                    guard: case.guard.as_ref().map(MatchGuard::as_ref),
+                }
+            }
+        }
+    }
+}
+
+impl MatchRegions<'_> {
+    /// Give the source owner a chance to register definitions in this guard.
+    pub(crate) fn pending_checked_guard(&self) -> Option<&Expr> {
+        if self.guard_unwind.is_some() {
+            return None;
+        }
+        match self.cases.get(self.index)?.guard.as_ref()?.test {
+            MatchGuard::Checked(test) => Some(test),
+            MatchGuard::Residual => None,
+        }
+    }
+
+    /// Resume on the same live frame after the owner filled the previous operand.
+    fn next(&mut self, code: &mut CheckedBody<'_, '_, '_, '_>) -> Option<MatchRegion<'_>> {
+        let index = self.index;
+        if let Some(outer) = self.guard_unwind.take() {
+            self.cases[index]
+                .guard
+                .as_ref()
+                .unwrap()
+                .leave(code.python().code, outer);
+        } else {
+            if index != 0 {
+                code.python().jump(&self.done);
+            }
+            let Some(case) = self.cases.get(index) else {
+                code.python().label(&self.done);
+                return None;
+            };
+            if let Some(guard) = &case.guard {
+                let outer = guard.enter(code.python().code);
+                match guard.test {
+                    MatchGuard::Checked(test) => {
+                        code.branch_condition(test, &guard.matched, &guard.failed);
+                        guard.leave(code.python().code, outer);
+                    }
+                    MatchGuard::Residual => {
+                        self.guard_unwind = Some(outer);
+                        return Some(MatchRegion::ResidualGuard {
+                            case: index,
+                            matched: &guard.matched,
+                            failed: &guard.failed,
+                        });
+                    }
+                }
+            }
+        }
+        code.python().label(&self.cases[index].body);
+        self.index += 1;
+        Some(MatchRegion::Body(index))
+    }
+}
+
+impl GuardBlock<'_> {
+    fn enter(&self, frame: &mut RegisteredFrame<'_, '_>) -> String {
         frame.label(&self.entry);
         if let Some(subject) = &self.subject {
             frame.live.push(subject.clone());
@@ -33,7 +145,7 @@ impl GuardBlock {
         std::mem::replace(&mut frame.body.error_target, self.unwind.clone())
     }
 
-    pub(crate) fn leave(&self, frame: &mut RegisteredFrame<'_, '_>, outer: String) {
+    fn leave(&self, frame: &mut RegisteredFrame<'_, '_>, outer: String) {
         if self.subject.is_some() {
             frame.live.pop();
         }
@@ -42,23 +154,26 @@ impl GuardBlock {
 }
 
 impl RegisteredFrame<'_, '_> {
-    pub(crate) fn match_blocks<'a>(
+    pub(crate) fn registered_match<'a>(
         &mut self,
-        subject: &str,
+        subject: MatchSubject<'_>,
         mark: &str,
-        cases: impl ExactSizeIterator<Item = (&'a MatchPattern, bool)> + DoubleEndedIterator + Clone,
-    ) -> MatchBlocks {
-        let sites = CheckedSites::default();
-        Frame {
-            code: self,
-            sites: &sites,
-            names: None,
-        }
-        .match_dispatch(
-            subject,
-            mark,
-            cases.map(|(pattern, guarded)| (pattern, None, guarded)),
-        )
+        site: &'a SourceMatch,
+        sites: &CheckedSites,
+    ) -> MatchRegions<'a> {
+        self.with_checked_frame(sites, None, |mut frame| {
+            frame.start_match(subject, mark, MatchCases::Physical(site))
+        })
+    }
+
+    pub(crate) fn next_match_region<'r>(
+        &mut self,
+        regions: &'r mut MatchRegions<'_>,
+        sites: &CheckedSites,
+    ) -> Option<MatchRegion<'r>> {
+        self.with_checked_frame(sites, None, |frame| {
+            regions.next(&mut CheckedBody::registered(frame))
+        })
     }
 
     fn pattern_check(&mut self, condition: &str, failed: &str) {
@@ -76,29 +191,17 @@ impl RegisteredFrame<'_, '_> {
 impl CheckedBody<'_, '_, '_, '_> {
     pub(crate) fn emit_prepared_match(&mut self, expr: &Expr, cases: &[MatchCase]) {
         let mark = self.python().temporary_mark();
-        let subject = self.python().pattern_value(expr);
-        let blocks = self.python().match_dispatch(
-            &subject,
+        let mut regions = self.python().start_match(
+            MatchSubject::Checked(expr),
             &mark,
-            cases.iter().map(|case| {
-                (
-                    &case.pattern,
-                    Some(case.captures.as_slice()),
-                    case.guard.is_some(),
-                )
-            }),
+            MatchCases::Checked(cases),
         );
-        for (case, block) in cases.iter().zip(&blocks.cases) {
-            if let (Some(test), Some(guard)) = (&case.guard, &block.guard) {
-                let outer = guard.enter(self.python().code);
-                self.branch_condition(test, &guard.matched, &guard.failed);
-                guard.leave(self.python().code, outer);
+        while let Some(region) = regions.next(self) {
+            match region {
+                MatchRegion::Body(case) => self.emit_block(&cases[case].body),
+                MatchRegion::ResidualGuard { .. } => unreachable!("checked match guard"),
             }
-            self.python().label(&block.body);
-            self.emit_block(&case.body);
-            self.python().jump(&blocks.done);
         }
-        self.python().label(&blocks.done);
     }
 }
 
@@ -123,24 +226,28 @@ impl Frame<'_, '_, '_> {
         f.pattern_check(&bit, failed);
     }
 
-    fn match_dispatch<'a>(
+    fn start_match<'a>(
         &mut self,
-        subject: &str,
+        subject: MatchSubject<'_>,
         mark: &str,
-        cases: impl ExactSizeIterator<Item = (&'a MatchPattern, Option<&'a [usize]>, bool)>
-        + DoubleEndedIterator
-        + Clone,
-    ) -> MatchBlocks {
+        cases: MatchCases<'a>,
+    ) -> MatchRegions<'a> {
+        let handle = match subject {
+            MatchSubject::Checked(expr) => self.pattern_value(expr),
+            MatchSubject::Evaluated(handle) => handle,
+        };
+        let subject = handle.as_str();
         let count = cases.len();
-        let default = count > 1
-            && cases
-                .clone()
-                .next_back()
-                .is_some_and(|(p, _, _)| matches!(p.test, MatchTest::Always));
+        let default = count > 1 && matches!(cases.get(count - 1).pattern.test, MatchTest::Always);
         let tested = count - usize::from(default);
         let done = self.name("b");
         let mut blocks = Vec::with_capacity(count);
-        for (index, (pattern, slots, guarded)) in cases.enumerate() {
+        for index in 0..count {
+            let CaseInput {
+                pattern,
+                slots,
+                guard,
+            } = cases.get(index);
             let again = index + 1 < tested;
             let next = self.name("b");
             let case_mark = if again {
@@ -177,12 +284,13 @@ impl Frame<'_, '_, '_> {
                 }
                 self.discard_truth(&case_mark);
             }
-            let guard = guarded.then(|| {
+            let guard = guard.map(|test| {
                 let entry = self.name("b");
                 let matched = self.name("b");
                 self.jump(&entry);
                 self.label(&matched);
                 GuardBlock {
+                    test,
                     entry,
                     matched,
                     failed: next.clone(),
@@ -202,9 +310,11 @@ impl Frame<'_, '_, '_> {
             blocks.push(CaseBlock { body, guard });
         }
         self.jump(&done);
-        MatchBlocks {
+        MatchRegions {
             done,
             cases: blocks,
+            index: 0,
+            guard_unwind: None,
         }
     }
 

@@ -128,48 +128,46 @@ impl Function<'_, '_> {
         }
     }
 
-    /// Fill the native matcher's out-of-line blocks from the enclosing residual suite.
-    fn match_fragments(&mut self, stmt: &ast::StmtMatch) {
-        let Some(plan) = self.source.statement_sites.matches.get(&stmt.range()) else {
-            self.unsupported("unsupported value in match pattern");
-            return;
-        };
+    /// Supply only the source operands requested by the registered matcher.
+    fn emit_match_inputs(&mut self, site: &crate::frontend::SourceMatch, source: &ast::StmtMatch) {
+        use crate::llvm::registered::patterns::{MatchRegion, MatchSubject};
+
         let mark = self.temporary_mark();
-        let subject = match &plan.subject {
-            Some(value) => self.registered_value(value),
-            None => self.expr(&stmt.subject),
-        };
-        let blocks = self.frame.match_blocks(
-            &subject,
-            &mark,
-            plan.cases.iter().map(|p| (&p.pattern, p.guard.is_some())),
-        );
-        for ((case, prepared), block) in stmt.cases.iter().zip(&plan.cases).zip(&blocks.cases) {
-            if let (Some(test), Some(guard)) = (&prepared.guard, &block.guard) {
-                let outer = guard.enter(&mut self.frame);
-                match test {
-                    crate::frontend::MatchGuard::Checked(value) => {
-                        self.prepare_checked_value(value);
-                        self.frame.registered_branch(
-                            value,
-                            &self.sites,
-                            &guard.matched,
-                            &guard.failed,
-                        );
-                    }
-                    crate::frontend::MatchGuard::Residual => self.branch_expr(
-                        case.guard.as_deref().unwrap(),
-                        &guard.matched,
-                        &guard.failed,
-                    ),
-                }
-                guard.leave(&mut self.frame, outer);
+        let subject = match &site.subject {
+            Some(expr) => {
+                self.prepare_checked_value(expr);
+                MatchSubject::Checked(expr)
             }
-            self.label(&block.body);
-            self.statements(&case.body);
-            self.jump(&blocks.done);
+            None => MatchSubject::Evaluated(self.expr(&source.subject)),
+        };
+        let mut regions = self
+            .frame
+            .registered_match(subject, &mark, site, &self.sites);
+        loop {
+            if let Some(test) = regions.pending_checked_guard() {
+                self.prepare_checked_value(test);
+            }
+            let Some(region) = self.frame.next_match_region(&mut regions, &self.sites) else {
+                break;
+            };
+            match region {
+                MatchRegion::ResidualGuard {
+                    case,
+                    matched,
+                    failed,
+                } => self.branch_expr(
+                    source.cases[case].guard.as_deref().unwrap(),
+                    matched,
+                    failed,
+                ),
+                MatchRegion::Body(case) => match &site.cases[case].body {
+                    Some(suite) => self.checked_runs(suite, |code, range| {
+                        code.source_statements(&source.cases[case].body[range]);
+                    }),
+                    None => self.source_statements(&source.cases[case].body),
+                },
+            }
         }
-        self.label(&blocks.done);
     }
 
     fn emit_value_statement(&mut self, output: crate::frontend::ValueStatement<'_>) {
@@ -204,6 +202,14 @@ impl Function<'_, '_> {
                 .map_or_else(|| stmt.range(), |assertion| assertion.test.range());
             self.checkpoint(&position);
             self.simple_call = imre_ast::unhighlighted_call(stmt);
+            if let Some(site) = self.source.statement_sites.matches.get(&stmt.range()) {
+                if let Some(site) = site {
+                    self.emit_match_inputs(site, stmt.as_match_stmt().unwrap());
+                } else {
+                    self.unsupported("unsupported value in match pattern");
+                }
+                continue;
+            }
             if let Some(output) = crate::frontend::value_statement(
                 stmt,
                 self.source.registered_source(),
@@ -374,7 +380,6 @@ impl Function<'_, '_> {
                     let class = self.apply_decorators(&decorators, &v.decorator_list, class);
                     self.bind(v.name.as_str(), &class);
                 }
-                ast::Stmt::Match(v) => self.match_fragments(v),
                 ast::Stmt::If(v) => self.conditional_fragments(v),
                 ast::Stmt::For(v) => {
                     let iter = self.iteration_cursor(&v.iter, v.is_async);

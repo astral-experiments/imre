@@ -7,15 +7,23 @@ pub(crate) struct SourceMatch {
     pub(crate) cases: Vec<SourceCase>,
 }
 
-pub(crate) enum MatchGuard {
-    Checked(Expr),
+pub(crate) enum MatchGuard<T = Expr> {
+    Checked(T),
     Residual,
 }
 
-pub(crate) struct SourceCase {
-    pub(crate) pattern: ir::MatchPattern,
-    pub(crate) guard: Option<MatchGuard>,
+impl<T> MatchGuard<T> {
+    pub(crate) fn as_ref(&self) -> MatchGuard<&T> {
+        match self {
+            Self::Checked(value) => MatchGuard::Checked(value),
+            Self::Residual => MatchGuard::Residual,
+        }
+    }
 }
+
+/// Source-owned frames bind captures by Python name. A suspended frame without a
+/// prepared suite keeps its body at the ordinary source boundary.
+pub(crate) type SourceCase = ir::MatchCase<MatchGuard, Option<RegisteredSuite>, ()>;
 
 impl SourceMatch {
     pub(super) fn prepare(
@@ -28,6 +36,8 @@ impl SourceMatch {
             .map(|case| {
                 Some(SourceCase {
                     pattern: prepare_pattern(&case.pattern, source)?,
+                    captures: (),
+                    body: None,
                     guard: case.guard.as_deref().map(|expr| {
                         match values::registered_value(expr, source) {
                             Some(value) => MatchGuard::Checked(value),
