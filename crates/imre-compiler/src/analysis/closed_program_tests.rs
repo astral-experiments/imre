@@ -19,6 +19,24 @@ fn registered_body_checks_its_declared_result() {
 }
 
 #[test]
+fn accepts_returned_local_function_with_capture() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    fs::write(
+        &entry,
+        concat!(
+            "from typing import Callable\n",
+            "def outer(x: int) -> Callable[[int], int]:\n",
+            "    def add(y: int) -> int:\n",
+            "        return x + y\n",
+            "    return add\n",
+        ),
+    )
+    .unwrap();
+    crate::check_file(&entry, None).unwrap();
+}
+
+#[test]
 fn closed_program_keeps_first_party_contracts_across_cached_edits() {
     let project = tempdir().unwrap();
     let entry = project.path().join("main.py");
