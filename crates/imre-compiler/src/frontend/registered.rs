@@ -893,7 +893,12 @@ pub(crate) enum SourceEffect {
     /// The enclosing loop supplies the destination and cleanup depth.
     LoopTransfer(TextRange, &'static Statement),
     /// A mixed loop needs its source suites. A literal false test runs only the else suite.
-    While(SourceGuard<Box<RegisteredOperand>>),
+    While(SourceGuard),
+    /// Each test and its child suite are prepared in their enclosing frame.
+    If {
+        range: TextRange,
+        arms: Vec<(Option<PhysicalOperand>, PhysicalSuite)>,
+    },
     /// Exception matchers and all control-flow children belong to this protected region.
     Try(Box<PreparedTry>),
     /// The manager, binding and protected child are prepared together.
@@ -942,7 +947,8 @@ impl PhysicalSuite {
             if !matches!(
                 run.effect,
                 Some(
-                    SourceEffect::For(_)
+                    SourceEffect::If { .. }
+                        | SourceEffect::For(_)
                         | SourceEffect::Context(_)
                         | SourceEffect::Try(_)
                         | SourceEffect::LoopTransfer(..)
@@ -1051,7 +1057,6 @@ impl AssertionSite {
 pub(crate) struct StatementSites {
     pub(crate) expressions: booleans::ExpressionSites,
     omit_assertions: bool,
-    pub(crate) ifs: HashMap<TextRange, SourceConditional>,
     pub(crate) matches: HashMap<TextRange, Option<patterns::SourceMatch>>,
     pub(crate) contexts: HashMap<TextRange, Vec<ir::ContextSite>>,
 }
@@ -1103,55 +1108,10 @@ fn iteration_protocol(
     }
 }
 
-/// Source sites for a statement which could not be lowered as a complete checked block.
-pub(crate) struct SourceConditional(Vec<SourceIfArm>);
-
-pub(crate) struct SourceIfArm {
-    clause: Option<usize>,
-    pub(crate) body_start: Option<TextSize>,
-    guard: Option<SourceGuard>,
-}
-
-pub(crate) enum SourceGuard<T = Expr> {
+pub(crate) enum SourceGuard {
     Literal(bool),
-    Checked(T),
+    Checked(Box<RegisteredOperand>),
     Residual,
-}
-
-impl SourceIfArm {
-    pub(crate) fn test<'a>(&self, source: &'a ast::StmtIf) -> &'a ast::Expr {
-        match self.clause {
-            Some(index) => source.elif_else_clauses[index]
-                .test
-                .as_ref()
-                .expect("conditional guard"),
-            None => &source.test,
-        }
-    }
-
-    pub(crate) fn body<'a>(&self, source: &'a ast::StmtIf) -> &'a [ast::Stmt] {
-        match self.clause {
-            Some(index) => &source.elif_else_clauses[index].body,
-            None => &source.body,
-        }
-    }
-}
-
-impl SourceConditional {
-    /// Dead literal arms in a suspended frame have no resume entry.
-    pub(crate) fn arms(
-        &self,
-        suspended: bool,
-    ) -> impl Iterator<Item = (Option<&SourceGuard>, &SourceIfArm)> {
-        self.0.iter().filter_map(move |arm| {
-            let test = match &arm.guard {
-                Some(SourceGuard::Literal(false)) if suspended => return None,
-                Some(SourceGuard::Literal(true)) if suspended => None,
-                guard => guard.as_ref(),
-            };
-            Some((test, arm))
-        })
-    }
 }
 
 fn if_clauses(branch: &ast::StmtIf) -> impl Iterator<Item = (Option<&ast::Expr>, &[ast::Stmt])> {
@@ -1190,25 +1150,6 @@ fn statement_sites(
                     stmt.range(),
                     patterns::SourceMatch::prepare(branch, self.source),
                 );
-            }
-            if let ast::Stmt::If(branch) = stmt {
-                let guard = |expr: &ast::Expr| {
-                    if let ast::Expr::BooleanLiteral(literal) = expr {
-                        SourceGuard::Literal(literal.value)
-                    } else {
-                        values::registered_value(expr, self.source)
-                            .map_or(SourceGuard::Residual, SourceGuard::Checked)
-                    }
-                };
-                let arms = if_clauses(branch)
-                    .enumerate()
-                    .map(|(index, (test, body))| SourceIfArm {
-                        clause: index.checked_sub(1),
-                        body_start: body.first().map(Ranged::start),
-                        guard: test.map(guard),
-                    })
-                    .collect();
-                self.sites.ifs.insert(stmt.range(), SourceConditional(arms));
             }
             walk_stmt(self, stmt);
         }
@@ -1444,7 +1385,8 @@ impl<'a> SuitePreparation<'a> {
                     }
                     None if !matches!(
                         stmt,
-                        ast::Stmt::Match(_)
+                        ast::Stmt::If(_)
+                            | ast::Stmt::Match(_)
                             | ast::Stmt::With(_)
                             | ast::Stmt::For(_)
                             | ast::Stmt::Try(_)
@@ -1466,6 +1408,18 @@ impl<'a> SuitePreparation<'a> {
             }
             for index in run.statements {
                 let stmt = &stmts[index];
+                if let ast::Stmt::If(branch) = stmt {
+                    let effect =
+                        children
+                            .prepare
+                            .prepare_if(branch, kind, child_selection, suspended);
+                    plan.residual.push(SourceRun {
+                        at: run.at,
+                        statements: index..index + 1,
+                        effect: Some(effect),
+                    });
+                    continue;
+                }
                 if let ast::Stmt::For(loop_) = stmt {
                     let region =
                         children
@@ -1617,6 +1571,37 @@ impl<'a> SuitePreparation<'a> {
             self.selected_suite(stmts, kind, selection, selection, suspended),
             stmts,
         )
+    }
+
+    fn prepare_if(
+        &mut self,
+        branch: &ast::StmtIf,
+        kind: RegisteredScope,
+        selection: SuiteSelection<'_>,
+        suspended: bool,
+    ) -> SourceEffect {
+        let mut arms = Vec::new();
+        for (test, suite) in if_clauses(branch) {
+            // A dead literal arm in a suspended frame has no resume entry.
+            let test = match test {
+                Some(ast::Expr::BooleanLiteral(literal)) if suspended => {
+                    if !literal.value {
+                        continue;
+                    }
+                    None
+                }
+                test => test.map(|expr| self.physical_operand(expr, kind, selection, suspended)),
+            };
+            let unconditional = test.is_none();
+            arms.push((test, self.physical_suite(suite, kind, selection, suspended)));
+            if unconditional {
+                break;
+            }
+        }
+        SourceEffect::If {
+            range: branch.range(),
+            arms,
+        }
     }
 
     fn prepare_try(
