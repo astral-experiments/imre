@@ -963,6 +963,15 @@ impl SourceMap<'_> {
             frame,
             source: self,
             in_function,
+            is_async: match body {
+                Body::GeneratorFunction(_, flags) => matches!(
+                    flags,
+                    imre_ast::code_flags::COROUTINE | imre_ast::code_flags::ASYNC_GENERATOR
+                ),
+                // Synchronous generator expressions use an ordinary compiled step.
+                Body::Generator(_) => native_suspension,
+                _ => false,
+            },
             module,
             declared_globals: Default::default(),
             prefix,
@@ -1083,6 +1092,7 @@ struct Function<'a, 'p> {
     prefix: String,
     declared_globals: std::collections::BTreeSet<String>,
     in_function: bool,
+    is_async: bool,
     module: bool,
     loops: Vec<LoopTarget>,
     exits: Vec<(Cleanup<'p>, String)>,

@@ -4,7 +4,7 @@ use ruff_text_size::Ranged;
 
 use super::FrameEmitter;
 use super::{Body, Function, permanent};
-use crate::frontend::{SourceOperand, prepare_boolean};
+use crate::frontend::{RegisteredScope, SourceOperand, prepare_boolean};
 use crate::ir::control::Context as BooleanContext;
 use crate::llvm::operations::branches::{Logical, LogicalOperand};
 use crate::llvm::operations::{CheckedValue, Choice, ComparisonChain, ValueJoin};
@@ -63,20 +63,9 @@ impl Function<'_, '_> {
             crate::frontend::suspended_operand(expr, source)
         } else {
             crate::frontend::registered_value(expr, source)
-        };
-        if let Some(value) = value {
-            self.prepare_checked_value(&value);
-            return Some(
-                self.frame
-                    .registered_expression(&value, &self.sites, condition),
-            );
-        }
-        let operand = crate::frontend::inline_operand(expr, source)?;
-        self.prepare_checked_value(&operand.value);
-        Some(
-            self.frame
-                .prepared_operand(&operand, &self.sites, condition),
-        )
+        }?;
+        self.prepare_checked_value(&value);
+        Some(self.frame.registered_expression(&value, &self.sites, condition))
     }
 
     pub(super) fn with_expression_range(
@@ -91,6 +80,21 @@ impl Function<'_, '_> {
     }
 
     pub(super) fn located_expr(&mut self, expr: &ast::Expr) -> String {
+        let kind = if self.class_locals.is_some() {
+            RegisteredScope::Class
+        } else if self.module {
+            RegisteredScope::Module
+        } else {
+            RegisteredScope::Function {
+                is_async: self.is_async,
+            }
+        };
+        if let Some(operand) =
+            crate::frontend::inline_operand(expr, self.source.registered_source(), kind)
+        {
+            self.prepare_checked_value(&operand.value);
+            return self.frame.prepared_operand(&operand, &self.sites, false);
+        }
         let position = imre_ast::expression_position(
             expr,
             &self.source.method_imports,
