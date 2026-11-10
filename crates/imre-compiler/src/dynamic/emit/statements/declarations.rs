@@ -145,6 +145,12 @@ impl CallableSites<'_, '_> {
         for (index, &site) in required.iter().enumerate() {
             match site {
                 RequiredSite::Lambda(site, scoped) => self.place_checked_lambda(site, scoped),
+                RequiredSite::AnnotationString(site) => {
+                    self.source
+                        .place_annotation_string(self.output, self.sites, site);
+                }
+                RequiredSite::AnnotationField(site) => self.place_annotation_field(site),
+                RequiredSite::Generator(site) => self.place_generator(site),
                 RequiredSite::Alias(site) => {
                     let alias = &self.source.type_aliases[&site];
                     if alias.parameters.is_some() || alias.body.is_err() {
@@ -161,6 +167,14 @@ impl CallableSites<'_, '_> {
             }
         }
         &[]
+    }
+
+    fn place_annotation_field(&mut self, site: TextSize) {
+        let field = &self.source.annotations[&site];
+        self.sites
+            .annotation_fields
+            .entry(site)
+            .or_insert_with(|| (field.name.clone(), field.range));
     }
 
     /// Python creates a fresh callable at each execution of the binding while the
@@ -437,6 +451,26 @@ impl CallableSites<'_, '_> {
 }
 
 impl CallableSites<'_, '_> {
+    fn place_generator(&mut self, site: TextRange) {
+        if self.sites.generators.contains_key(&site) {
+            return;
+        }
+        let body = &self.source.generators[&site];
+        let definition = self.compile_definition(
+            site.start(),
+            DefinitionName::Generator(site),
+            Body::Checked(&body.body, None),
+        );
+        let targets = self.source.scopes.comprehension_targets[&site].clone();
+        self.sites.generators.insert(
+            site,
+            CompiledGenerator {
+                definition,
+                targets,
+            },
+        );
+    }
+
     fn place_alias(&mut self, site: TextSize, outer_diagnostic: Option<String>) {
         let alias = &self.source.type_aliases[&site];
         let compiled = alias.body.as_ref().ok().map(|code| {
@@ -477,30 +511,10 @@ impl Function<'_, '_> {
         self.callable_sites().place_alias(site, outer_diagnostic);
     }
 
-    pub(in crate::dynamic::emit) fn prepare_generator(&mut self, site: TextRange) {
-        if self.sites.generators.contains_key(&site) {
-            return;
-        }
-        let body = &self.source.generators[&site];
-        let definition = self.callable_sites().compile_definition(
-            site.start(),
-            DefinitionName::Generator(site),
-            Body::Checked(&body.body, None),
-        );
-        let targets = self.source.scopes.comprehension_targets[&site].clone();
-        self.sites.generators.insert(
-            site,
-            CompiledGenerator {
-                definition,
-                targets,
-            },
-        );
-    }
-
     pub(in crate::dynamic::emit) fn prepare_site(&mut self, site: RequiredSite) {
         let start = match site {
             RequiredSite::Generator(site) => {
-                self.prepare_generator(site);
+                self.callable_sites().place_generator(site);
                 return;
             }
             RequiredSite::Alias(site) => {
@@ -517,11 +531,7 @@ impl Function<'_, '_> {
                 return;
             }
             RequiredSite::AnnotationField(site) => {
-                let decl = &self.source.annotations[&site];
-                self.sites
-                    .annotation_fields
-                    .entry(site)
-                    .or_insert_with(|| (decl.name.clone(), decl.range));
+                self.callable_sites().place_annotation_field(site);
                 return;
             }
             RequiredSite::ClassNamespace(start) => {
@@ -541,7 +551,7 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn checked_module_places_class_and_following_lambda() {
+    fn checked_module_places_class_generator_and_following_lambda() {
         use super::{CheckedSites, RequiredSite, SourceMap};
         use crate::dynamic::emit::SourcePositions;
 
@@ -549,6 +559,7 @@ mod tests {
             "def read[T](value, offset=1):\n    return value + offset\n",
             "first = lambda: read(3)\n",
             "class C: pass\n",
+            "stream = (x for x in ())\n",
             "last = lambda: 2\n",
         );
         let module = PreparedBody::module(
@@ -574,15 +585,17 @@ mod tests {
             RequiredSite::Definition(read),
             RequiredSite::Lambda(first, _),
             RequiredSite::Definition(class),
+            RequiredSite::Generator(generator),
             RequiredSite::Lambda(last, _),
         ] = required.as_slice()
         else {
-            panic!("expected the function, lambda, class and final lambda");
+            panic!("expected the function, lambda, class, generator and final lambda");
         };
         let rest = location.place_module_callables(&mut output, &mut sites, required);
         assert!(rest.is_empty());
         assert_eq!(sites.definitions.len(), 2);
         assert_eq!(sites.lambdas.len(), 2);
+        assert!(sites.generators.contains_key(generator));
         assert_eq!(sites.definitions[class].definition.qualname, "C");
         assert_eq!(
             sites.lambdas[last].code,

@@ -949,6 +949,17 @@ impl SourceMap<'_> {
         site
     }
 
+    fn diagnostic_at(&self, range: TextRange, reason: &str) -> String {
+        let (line, col) = self.positions.line_and_column(range.start());
+        let (end_line, end_col) = self.positions.line_and_column(range.end());
+        format!(
+            "{}:{line}:{}: {reason} (through {end_line}:{})",
+            self.path.display(),
+            col + 1,
+            end_col + 1
+        )
+    }
+
     fn emit_checked_body<'a, 'p>(
         &'p self,
         mut frame: RegisteredFrame<'a, 'p>,
@@ -1064,15 +1075,24 @@ impl SourceMap<'_> {
                 f.frame
             }
             Body::AnnotationProvider(provider, scope) => {
-                let mut f = source_function(frame, sites, prefix);
-                f.frame.annotation_scope = scope;
+                frame.annotation_scope = scope;
                 match provider {
-                    Ok(function) => f.checked_function(function),
+                    Ok(checked) => self.emit_checked_body(
+                        frame,
+                        sites,
+                        checked,
+                        &BTreeSet::new(),
+                        &prefix,
+                        in_function,
+                    ),
                     Err((range, reason)) => {
-                        f.with_expression_range(*range, |code| code.build_diagnostic(reason));
+                        frame
+                            .output
+                            .diagnostic
+                            .get_or_insert_with(|| self.diagnostic_at(*range, reason));
+                        frame
                     }
                 }
-                f.frame
             }
             Body::Operand(range, operand) => {
                 let mut f = source_function(frame, sites, prefix);
@@ -1131,33 +1151,17 @@ impl std::ops::DerefMut for Function<'_, '_> {
 }
 
 impl Function<'_, '_> {
-    fn checked_function(&mut self, function: &crate::frontend::RegisteredFunction) {
-        self.prepare_checked_sites(&function.function.body);
-        RegisteredFrame::checked_body(&mut self.frame, function, &self.sites);
-    }
-
     fn checkpoint(&mut self, node: &impl Ranged) {
         self.current_range = node.range();
         self.frame.checkpoint(node.range());
     }
 
     fn build_diagnostic(&mut self, reason: &str) -> String {
-        let (line, col) = self
-            .source
-            .positions
-            .line_and_column(self.current_range.start());
-        let (end_line, end_col) = self
-            .source
-            .positions
-            .line_and_column(self.current_range.end());
-        self.frame.output.diagnostic.get_or_insert_with(|| {
-            format!(
-                "{}:{line}:{}: {reason} (through {end_line}:{})",
-                self.source.path.display(),
-                col + 1,
-                end_col + 1
-            )
-        });
+        let range = self.frame.current_range;
+        self.frame
+            .output
+            .diagnostic
+            .get_or_insert_with(|| self.source.diagnostic_at(range, reason));
         "0".into()
     }
 
