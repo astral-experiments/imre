@@ -381,17 +381,21 @@ impl List {
 
 // An unallocated Vec never reads, writes, or frees this address. A real push
 // replaces it with an allocation, even if a later pop empties the list again.
-static SORTING_EMPTY: Int = Int(1);
+struct SortMarker<T>(T);
 
-fn sorting_empty_ints() -> Vec<Int> {
-    let marker = std::ptr::from_ref(&SORTING_EMPTY).cast_mut();
-    // SAFETY: a zero-capacity Vec only requires a nonnull pointer aligned for Int.
-    unsafe { Vec::from_raw_parts(marker, 0, 0) }
+impl<T> SortMarker<T> {
+    fn empty(&'static self) -> Vec<T> {
+        let marker = std::ptr::from_ref(&self.0).cast_mut();
+        // SAFETY: a zero-capacity Vec only requires a nonnull pointer aligned for T.
+        unsafe { Vec::from_raw_parts(marker, 0, 0) }
+    }
+
+    fn is_untouched(&self, values: &[T]) -> bool {
+        std::ptr::eq(values.as_ptr(), &self.0)
+    }
 }
 
-fn is_sorting_empty_ints(values: &[Int]) -> bool {
-    std::ptr::eq(values.as_ptr(), &SORTING_EMPTY)
-}
+static SORTING_EMPTY: SortMarker<Int> = SortMarker(Int(1));
 
 const MAX_REUSED_LIST_CAPACITY: usize = 32_768;
 const MAX_LIVE_RANGE_HINT_SLOTS: usize = 2 * MAX_REUSED_LIST_CAPACITY;
@@ -2026,8 +2030,9 @@ pub unsafe extern "C" fn imre_list_clear(list: *const List) {
     let list = unsafe { &*list };
     // SAFETY: no element is destroyed while the storage is borrowed.
     let previous = unsafe {
-        list.0
-            .with_mut(|values| (!is_sorting_empty_ints(values)).then(|| std::mem::take(values)))
+        list.0.with_mut(|values| {
+            (!SORTING_EMPTY.is_untouched(values)).then(|| std::mem::take(values))
+        })
     };
     if let Some(mut values) = previous {
         list.release_range_hint();
@@ -2727,7 +2732,7 @@ pub unsafe extern "C" fn imre_list_reserve_range(
             list.0.with_mut(|values| {
                 if !values.is_empty()
                     || values.capacity() >= capacity
-                    || is_sorting_empty_ints(values)
+                    || SORTING_EMPTY.is_untouched(values)
                 {
                     return Vec::new();
                 }

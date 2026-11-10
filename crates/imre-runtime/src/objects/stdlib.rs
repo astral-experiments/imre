@@ -264,7 +264,7 @@ unsafe fn key_order(keys: *const (), kind: u32, reverse: bool) -> Option<SmallVe
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_sort_detach(list: *const (), kind: u32) -> *const () {
     if kind == 2 {
-        let Ok(saved) = crate::try_new_list(crate::sorting_empty_ints()) else {
+        let Ok(saved) = crate::try_new_list(crate::SORTING_EMPTY.empty()) else {
             return super::Error::allocation().returning(std::ptr::null());
         };
         // SAFETY: the new owner is private and no callback runs during the swap.
@@ -404,7 +404,7 @@ pub unsafe extern "C" fn imre_list_extend_unhinted(list: *const (), kind: u32) {
         // SAFETY: only an unallocated empty marker is replaced.
         unsafe {
             (&*list.cast::<List>()).0.with_mut(|values| {
-                if crate::is_sorting_empty_ints(values) {
+                if crate::SORTING_EMPTY.is_untouched(values) {
                     *values = Vec::new();
                 }
             })
@@ -440,7 +440,7 @@ pub unsafe extern "C" fn imre_sort_restore(
         // SAFETY: the caller proves distinct handles and no reentrant access.
         unsafe {
             (&*list.cast::<List>()).0.with_mut(|current| {
-                let modified = !crate::is_sorting_empty_ints(current);
+                let modified = !crate::SORTING_EMPTY.is_untouched(current);
                 (&*saved.cast::<List>())
                     .0
                     .with_mut(|saved| std::mem::swap(current, saved));
@@ -1150,7 +1150,7 @@ mod tests {
             assert!(
                 (*target)
                     .0
-                    .with(|values| crate::is_sorting_empty_ints(values))
+                    .with(|values| crate::SORTING_EMPTY.is_untouched(values))
             );
             imre_sort_restore(target.cast(), 2, saved, 1);
             crate::imre_list_release(saved.cast());

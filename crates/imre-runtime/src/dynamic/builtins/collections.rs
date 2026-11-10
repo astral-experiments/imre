@@ -3,12 +3,23 @@ use super::super::value::{DictViewKind, NOT_IMPLEMENTED};
 use super::*;
 use num_traits::Signed;
 
+static SORTING_EMPTY: crate::SortMarker<Id> = crate::SortMarker(NONE);
+
+/// Clearing an already detached list leaves the active sort's marker intact.
+fn take_list_contents(items: &mut Vec<Id>) -> Vec<Id> {
+    if SORTING_EMPTY.is_untouched(items) {
+        Vec::new()
+    } else {
+        std::mem::take(items)
+    }
+}
+
 /// Clear container storage, then finalize any buffered writer whose last owner was removed.
 pub(in super::super) fn clear_container(ctx: &mut Context, receiver: Id) {
     let released = ctx.heap.has_unbound_finalizer(NONE) && ctx.heap.clear_owns_finalizer(receiver);
     match ctx.heap.get_mut(receiver) {
         Value::List(items) => {
-            for item in std::mem::take(items) {
+            for item in take_list_contents(items) {
                 ctx.heap.weak_edge_removed(item);
             }
         }
@@ -166,24 +177,18 @@ fn list_sort(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id
     };
     let count = live.len();
     ctx.heap.reserve_temporaries(count)?;
-    ctx.sorting_lists
-        .try_reserve(1)
-        .map_err(|_| crate::Error::memory_error())?;
     let Value::List(live) = ctx.heap.get_mut(receiver) else {
         unreachable!()
     };
-    let mut values = std::mem::take(live);
+    let mut values = std::mem::replace(live, SORTING_EMPTY.empty());
     for &value in &values {
         ctx.heap.keep(value);
     }
-    ctx.sorting_lists.push(receiver);
     let result = sort_list_items(ctx, &mut values, key, reverse);
-    ctx.sorting_lists.pop();
     let Value::List(live) = ctx.heap.get_mut(receiver) else {
         unreachable!()
     };
-    // An append allocates storage even if the callback subsequently pops the item.
-    let modified = live.capacity() != 0;
+    let modified = !SORTING_EMPTY.is_untouched(live);
     *live = values;
     result?;
     if modified {
@@ -1707,8 +1712,7 @@ pub(super) fn builtin_slot(
     let Value::List(items) = ctx.heap.get_mut(storage) else {
         unreachable!()
     };
-    let old = std::mem::take(items);
-    for item in old {
+    for item in take_list_contents(items) {
         ctx.heap.weak_edge_removed(item);
     }
     if let Some(&input) = rest.first() {
