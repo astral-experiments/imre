@@ -1189,6 +1189,26 @@ impl Context {
         self.store_dictionary_value(dict, key, value, hash, index, overwrite)
     }
 
+    /// A source binding drops the displaced dictionary value after the new value
+    /// is visible. A comparison during lookup can change which value it displaces.
+    pub(in super::super) fn store_binding_item(
+        &mut self,
+        dict: Id,
+        key: Id,
+        value: Id,
+    ) -> Result<()> {
+        self.heap.keep(value);
+        let (hash, index) = self.find_dictionary_key(dict, key, None)?;
+        let previous = index.map(|i| self.stored_entries(dict)[i].1);
+        self.store_dictionary_value(dict, key, value, hash, index, true)?;
+        if let Some(previous) = previous
+            && previous != value
+        {
+            self.release_list_owner(previous);
+        }
+        Ok(())
+    }
+
     pub(in super::super) fn set_ordered_dictionary_key(
         &mut self,
         dict: Id,

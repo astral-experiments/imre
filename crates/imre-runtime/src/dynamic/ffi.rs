@@ -1748,20 +1748,7 @@ pub(super) unsafe extern "C" fn imre_dyn_display_item(
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_unwind_display(ctx: *mut Context, mark: usize) {
     // SAFETY: the generated error edge is in the frame which established the mark.
-    let ctx = unsafe { &mut *ctx };
-    if (!ctx.heap.tracks_finalizers() && !ctx.heap.has_weak_values)
-        || ctx.can_skip_finalizer_sweep(mark)
-    {
-        ctx.discard_truth(mark);
-        return;
-    }
-    while ctx.heap.temporary_mark() > mark {
-        let index = ctx.heap.temporary_mark() - 1;
-        let (heap, roots) = ctx.heap_and_roots();
-        if !heap.expand_released_sequence(index, roots) {
-            ctx.discard_truth(index);
-        }
-    }
+    unsafe { &mut *ctx }.unwind_operands(mark);
 }
 
 /// Borrow a tagged integer from an exact Python int. Zero indicates another type.
@@ -3108,6 +3095,43 @@ impl Context {
         }
         self.dispatch_finalizer(generator);
         true
+    }
+
+    /// Release a removed list binding while its remaining items still own their references.
+    pub(super) fn release_list_owner(&mut self, owner: Id) {
+        if !self.heap.observes_released_roots()
+            || !matches!(self.heap.get(owner), Value::List(items) if !items.is_empty())
+            || (!self.heap.has_weak_values && !self.heap.could_own_finalizer(owner, false))
+        {
+            return;
+        }
+        let mark = self.heap.temporary_mark();
+        if self.can_skip_finalizer_sweep(mark) {
+            return;
+        }
+        self.heap.keep(owner);
+        let (heap, roots) = self.heap_and_roots();
+        if heap.expand_released_sequence(mark, roots) {
+            self.unwind_operands(mark);
+        } else {
+            self.heap.release_temporaries_since(mark);
+        }
+    }
+
+    /// Release expression operands from the stack top. A dead sequence transfers its
+    /// elements to the stack, keeping earlier siblings alive across Python callbacks.
+    fn unwind_operands(&mut self, mark: usize) {
+        if !self.heap.observes_released_roots() || self.can_skip_finalizer_sweep(mark) {
+            self.discard_truth(mark);
+            return;
+        }
+        while self.heap.temporary_mark() > mark {
+            let index = self.heap.temporary_mark() - 1;
+            let (heap, roots) = self.heap_and_roots();
+            if !heap.expand_released_sequence(index, roots) {
+                self.discard_truth(index);
+            }
+        }
     }
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.

@@ -2674,7 +2674,11 @@ impl Context {
 
     fn remove_binding(&mut self, scope: Id, name: &str, key: Id) -> Result<bool> {
         if let Some(&cell) = self.scope_data(scope).closure.cells.get(name) {
-            return Ok(self.heap.replace_cell(cell, None).is_some());
+            if let Some(previous) = self.heap.replace_cell(cell, None) {
+                self.release_list_owner(previous);
+                return Ok(true);
+            }
+            return Ok(false);
         }
         let frame = self.scope_data(scope);
         if let Some(locals) = frame.exec_locals.or(frame.class_body_mapping()) {
@@ -2702,12 +2706,15 @@ impl Context {
             .class_namespace
             .as_ref()
             .and_then(|class| class.dictionary);
-        // Deleting the class dictionary entry can collect the removed value.
+        // Mirror mutations can run Python. Their own removal releases the stored
+        // value, so never consult the old name slot after touching the dictionary.
         self.heap.weak_edge_removed(previous);
         if name != "__qualname__"
             && let Some(dictionary) = dictionary
         {
             self.delete_item(dictionary, key)?;
+        } else {
+            self.release_list_owner(previous);
         }
         Ok(true)
     }
@@ -2742,13 +2749,17 @@ impl Context {
 
     fn bind_local(&mut self, scope: Id, name: &str, value: Id) {
         if let Some(&cell) = self.scope_data(scope).closure.cells.get(name) {
-            self.heap.replace_cell(cell, Some(value));
+            if let Some(previous) = self.heap.replace_cell(cell, Some(value))
+                && previous != value
+            {
+                self.release_list_owner(previous);
+            }
             return;
         }
         if let Some(namespace) = self.scope_data(scope).binding_namespace(name) {
             let key = self.heap.code_name(name);
             let storage = self.dict_storage(namespace).expect("namespace dictionary");
-            self.put_item(storage, key, value)
+            self.store_binding_item(storage, key, value)
                 .expect("string key in namespace dictionary");
             return;
         }
@@ -2768,17 +2779,17 @@ impl Context {
             .class_namespace
             .as_ref()
             .and_then(|class| class.dictionary);
-        if let Some(dictionary) = dictionary
-            && (s.class_body.is_some() || name != "__qualname__")
-        {
-            let key = self.text(name);
-            self.put_item(dictionary, key, value)
-                .expect("class dictionary has string keys");
+        let mirror = dictionary.filter(|_| s.class_body.is_some() || name != "__qualname__");
+        let displaced = previous.filter(|&old| old != value);
+        if let Some(old) = displaced {
+            self.heap.weak_edge_removed(old);
         }
-        if let Some(previous) = previous
-            && previous != value
-        {
-            self.heap.weak_edge_removed(previous);
+        if let Some(dictionary) = mirror {
+            let key = self.text(name);
+            self.store_binding_item(dictionary, key, value)
+                .expect("class dictionary has string keys");
+        } else if let Some(old) = displaced {
+            self.release_list_owner(old);
         }
     }
     /// Describe a missing binding in the scope that owns it.
