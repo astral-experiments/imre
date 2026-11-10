@@ -6,7 +6,9 @@ mod class_metadata;
 pub(crate) mod classes;
 mod type_parameters;
 
-pub(crate) use type_parameters::{boxed_function_type_params, check_nonlocals};
+pub(crate) use type_parameters::{
+    TypeParameterScope, boxed_function_type_params, check_nonlocals, type_parameter_scope,
+};
 
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};

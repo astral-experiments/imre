@@ -804,9 +804,26 @@ fn collect_class(
                 }
                 if method.type_params.is_some() {
                     let postponed = imre_ast::future_annotations(&module.parsed.syntax().body);
-                    if crate::dynamic::function_type_params(method, postponed, true, None).is_some()
-                    {
-                        graph.needs_object_runtime.set(true);
+                    use crate::frontend::function_scope::{
+                        TypeParameterScope, type_parameter_scope,
+                    };
+                    match type_parameter_scope(method, postponed, true, None) {
+                        Some(TypeParameterScope::MethodClosure) => {
+                            let name = method.name.to_string();
+                            if !names.insert(name.clone()) {
+                                return Err(module.diagnostic(method, "duplicate class binding"));
+                            }
+                            class_bindings.insert(name);
+                            graph.class_layout_error.borrow_mut().get_or_insert_with(|| {
+                                module.diagnostic(method, "generic method requires a registered type-parameter scope")
+                                    .classified(Kind::ScopedClassLayout)
+                            });
+                            continue;
+                        }
+                        Some(TypeParameterScope::Function) if postponed => {
+                            graph.needs_object_runtime.set(true);
+                        }
+                        _ => {}
                     }
                     return Err(module.diagnostic(method, "method type parameters are unsupported"));
                 }
