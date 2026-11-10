@@ -456,16 +456,6 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             ExprKind::Dict { .. } if matches!(self.0, Entry::Registered(_)) => {
                 CheckedValue::handle(self.python().op("dict", &[]))
             }
-            ExprKind::Builtin(
-                op @ (Builtin::RegisteredIter
-                | Builtin::RegisteredNamespace(_)
-                | Builtin::RegisteredUnpack { .. }
-                | Builtin::Bool
-                | Builtin::Append
-                | Builtin::SetAdd
-                | Builtin::ListGet),
-                args,
-            ) if matches!(self.0, Entry::Registered(_)) => self.iteration_operation(op, args),
             ExprKind::Builtin(op, args) => match &mut self.0 {
                 Entry::Native(emitter) => CheckedValue::owned(emitter.builtin(op, args, expr.ty)),
                 Entry::Registered(frame) => frame.builtin(op, args),

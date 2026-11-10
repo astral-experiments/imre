@@ -127,11 +127,10 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
             }
             ExprKind::Conditional(..) => true,
             ExprKind::Dict { entries, .. } => entries.is_empty(),
-            ExprKind::Builtin(Builtin::Bool, args) => args.len() == 1,
-            ExprKind::Builtin(Builtin::Append | Builtin::SetAdd, args) => args.len() == 2,
-            ExprKind::Builtin(Builtin::RegisteredUnpack { .. }, args) => args.len() == 1,
-            ExprKind::Builtin(Builtin::ListGet, args) => args.len() == 2,
-            ExprKind::Builtin(Builtin::RegisteredNamespace(_), args) => args.len() <= 1,
+            ExprKind::Builtin(op, args) if let Some(iteration) = op.iteration_operands(args) => {
+                uses_python_protocol |= matches!(iteration, Ok(ir::IterationOperands::Iter(_)));
+                iteration.is_ok()
+            }
             ExprKind::Binary(..) => true,
             ExprKind::List(_) | ExprKind::Tuple(_) | ExprKind::Set { .. } => {
                 uses_python_protocol = true;
@@ -149,10 +148,6 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
             ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
                 uses_python_protocol = true;
                 operands.len() > usize::from(call.explicit_scope)
-            }
-            ExprKind::Builtin(Builtin::RegisteredIter, args) => {
-                uses_python_protocol = true;
-                args.len() == 1
             }
             ExprKind::Builtin(Builtin::RegisteredIndexConstant(_), args) => args.len() == 1,
             ExprKind::Builtin(Builtin::RegisteredSlice, args) => matches!(args.len(), 2 | 3),
@@ -742,6 +737,37 @@ impl Frame<'_, '_, '_> {
 
     pub(crate) fn builtin(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
         let handle = match (op, operands) {
+            (op, args) if let Some(iteration) = op.iteration_operands(args) => {
+                use ir::IterationOperands::*;
+                match iteration.expect("checked iteration operands") {
+                    Iter(value) => {
+                        let value = self.evaluate_handle(value);
+                        self.code.op("iter", &[&value])
+                    }
+                    Truth(value) => {
+                        let value = self.evaluate_handle(value);
+                        self.code.op("truth", &[&value])
+                    }
+                    Get([base, key]) => {
+                        let base = self.evaluate_handle(base);
+                        let key = self.evaluate_handle(key);
+                        self.code.op("get", &[&base, &key])
+                    }
+                    Insert([out, item]) => {
+                        let out = self.evaluate_handle(out);
+                        let item = self.evaluate_handle(item);
+                        self.code.op("append", &[&out, &item])
+                    }
+                    Unpack(value, count, star) => {
+                        let value = self.evaluate_handle(value);
+                        self.unpack(&value, count, star)
+                    }
+                    Namespace(names, parent) => {
+                        let parent = parent.map(|value| self.evaluate_handle(value));
+                        self.comprehension_scope(parent, names)
+                    }
+                }
+            }
             (Builtin::RegisteredContainsLiteral(negate), [needle, items @ ..]) => {
                 let needle = self.evaluate_handle(needle);
                 let items = items

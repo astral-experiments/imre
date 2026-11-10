@@ -79,44 +79,6 @@ impl CheckedBody<'_, '_, '_, '_> {
         self.body().start(&edges.done);
     }
 
-    pub(super) fn object_operand(&mut self, expr: &Expr) -> String {
-        let v = self.operand(expr);
-        self.python().materialize(&v)
-    }
-
-    pub(super) fn iteration_operation(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
-        let result = match (op, operands) {
-            (Builtin::RegisteredIter, [value]) => {
-                let value = self.object_operand(value);
-                self.python().op("iter", &[&value])
-            }
-            (Builtin::RegisteredUnpack { count, star }, [value]) => {
-                let value = self.object_operand(value);
-                self.python().unpack(&value, *count, *star)
-            }
-            (Builtin::RegisteredNamespace(names), args) => {
-                let parent = args.first().map(|v| self.object_operand(v));
-                self.python().comprehension_scope(parent, names)
-            }
-            (Builtin::ListGet, [base, index]) => {
-                let base = self.object_operand(base);
-                let key = self.object_operand(index);
-                self.python().op("get", &[&base, &key])
-            }
-            (Builtin::Bool, [value]) => {
-                let v = self.object_operand(value);
-                self.python().op("truth", &[&v])
-            }
-            (Builtin::Append | Builtin::SetAdd, [out, item]) => {
-                let out = self.object_operand(out);
-                let item = self.object_operand(item);
-                self.python().op("append", &[&out, &item])
-            }
-            _ => unreachable!("invalid checked iteration operands"),
-        };
-        CheckedValue::handle(result)
-    }
-
     pub(super) fn clear_iteration_slots(&mut self, slots: &[usize]) {
         match &mut self.0 {
             Entry::Native(e) => e.clear_slots(slots),
@@ -181,7 +143,12 @@ impl CheckedBody<'_, '_, '_, '_> {
                 let inner = self.object_condition(value);
                 return self.python().invert(&inner);
             }
-            ExprKind::Builtin(Builtin::Bool, args) => return self.object_condition(&args[0]),
+            ExprKind::Builtin(op, args)
+                if let Some(Ok(crate::ir::IterationOperands::Truth(value))) =
+                    op.iteration_operands(args) =>
+            {
+                return self.object_condition(value);
+            }
             _ => {}
         }
         let mark = self.python().temporary_mark();

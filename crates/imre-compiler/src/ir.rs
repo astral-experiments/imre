@@ -1186,6 +1186,47 @@ pub(crate) enum ModuleAnnotation {
     },
 }
 
+/// Borrow the operands consumed by registered iteration without changing their evaluation order.
+pub(crate) enum IterationOperands<'a> {
+    Iter(&'a Expr),
+    Truth(&'a Expr),
+    Get(&'a [Expr; 2]),
+    Insert(&'a [Expr; 2]),
+    Unpack(&'a Expr, usize, Option<usize>),
+    Namespace(&'a [String], Option<&'a Expr>),
+}
+
+impl Builtin {
+    pub(crate) fn iteration_operands<'a>(
+        &'a self,
+        args: &'a [Expr],
+    ) -> Option<Result<IterationOperands<'a>, &'static str>> {
+        use IterationOperands::*;
+        let one = || match args {
+            [value] => Ok(value),
+            _ => Err("registered iteration operation needs one operand"),
+        };
+        let two = || {
+            args.try_into()
+                .map_err(|_| "registered iteration operation needs two operands")
+        };
+        Some(match self {
+            Self::RegisteredIter => one().map(Iter),
+            Self::Bool => one().map(Truth),
+            Self::ListGet => two().map(Get),
+            Self::Append | Self::SetAdd => two().map(Insert),
+            Self::RegisteredUnpack { count, star } => {
+                one().map(|value| Unpack(value, *count, *star))
+            }
+            Self::RegisteredNamespace(names) => match args {
+                [] | [_] => Ok(Namespace(names, args.first())),
+                _ => Err("registered namespace takes at most one parent"),
+            },
+            _ => return None,
+        })
+    }
+}
+
 /// A call evaluates its callable or method receiver before the argument binder runs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RegisteredCall {
