@@ -3221,8 +3221,11 @@ impl SourceScope<'_> {
                 .lambda_binding(lambda)
                 .inspect_err(|&error| self.refusal = Some(error))
                 .ok()?;
-            // A generator expression retains its own clause cursors across an awaited default.
-            if self.loop_scope != LoopScope::Outside && !self.generator_expression {
+            // The pending result of an eager comprehension lives across its element defaults.
+            if self.comprehension.is_some()
+                && !self.generator_expression
+                && self.loop_scope != LoopScope::Outside
+            {
                 let mut suspends = false;
                 ir::walk_operand_expressions(&binding, &mut |child| {
                     suspends |= matches!(

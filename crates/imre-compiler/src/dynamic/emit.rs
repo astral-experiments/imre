@@ -1581,7 +1581,8 @@ mod tests {
         );
         let deletion = "        del sink[(yield 1)]";
         let manager = "        with manager((yield 1)): pass";
-        let mixed = "        selected = (lambda value=(yield 1): value)()";
+        let checked_lambda = "        selected = (lambda value=(yield 1): value)()";
+        let mixed = "        def hold[T](value=(yield 1)):\n            return value";
         let annotated = "        sink[0]: int = 1";
         let checked_default = "        def resume(answer=(yield 1)):\n            return answer";
         let checked = "        publish(x, y)";
@@ -1590,6 +1591,7 @@ mod tests {
         for (header, body, partial_pair) in [
             (pair_header, deletion, false),
             (pair_header, manager, false),
+            (pair_header, checked_lambda, false),
             (pair_header, mixed, true),
             (yielded_rows, checked, false),
             (pair_header, annotated, false),
@@ -1635,7 +1637,7 @@ mod tests {
             let plan = module.source.function_bodies[&ruff_text_size::TextSize::new(0)]
                 .suite()
                 .expect("prepared function suite");
-            if body == deletion || body == manager {
+            if body == deletion || body == manager || body == checked_lambda {
                 assert!(plan.fully_checked(), "{source}");
             }
             if body == annotated {
@@ -1705,6 +1707,10 @@ mod tests {
             ("with manager((yield 1)): pass", true),
             (
                 "for entry in rows: selected = (lambda value=(yield 1): value)()",
+                true,
+            ),
+            (
+                "for entry in rows:\n            def hold[T](value=(yield entry)):\n                return value",
                 false,
             ),
         ] {
@@ -3534,13 +3540,22 @@ mod tests {
             "\n            for entry in rows:\n",
             "                with manager(lambda value=(await key(entry)): value): pass",
         );
+        let protected = concat!(
+            "\n            with TemporaryDirectory() as directory:\n",
+            "                path = Path(directory)\n",
+            "                async with asyncio.TaskGroup() as group:\n",
+            "                    left = group.create_task(partner(path, 'left', 'right'))\n",
+            "                child = await asyncio.create_subprocess_exec('/bin/sh', '-c', 'exit 7', stdout=DEVNULL)\n",
+            "                assert await child.wait() == 7",
+        );
         for (body, physical) in [
             ("return item", false),
             ("raise await failure(item)", false),
             ("del table[await key(item)]", false),
             (selector, false),
             (manager, false),
-            (loop_default, true),
+            (loop_default, false),
+            (protected, true),
         ] {
             let source = format!(
                 "async def evaluate(seed):\n    match sink(await gate(), second=left() + table()[(lambda: seed)()]):\n        case prior if decline(prior): return prior\n        case item: {body}\nstate: int\n"
