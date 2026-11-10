@@ -1255,7 +1255,7 @@ impl Frame<'_, '_, '_> {
                     | ir::DefinitionSite::Function(_) => (header, None),
                 };
                 let count = self.code.parts().1.definitions[&site.start()]
-                    .decorator_lines
+                    .decorator_offsets
                     .len();
                 let (decorators, defaults) = prefix.split_at(count);
                 let decorators = self.decorator_operands(decorators, |code, value| {

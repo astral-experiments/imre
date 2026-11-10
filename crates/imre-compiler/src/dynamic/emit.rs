@@ -11,11 +11,10 @@ use ruff_text_size::{Ranged, TextRange, TextSize};
 use super::prepare::PreparedUnit;
 use crate::CodegenUnit;
 use crate::frontend::module_source::{self, ParsedModule};
-use crate::frontend::{RegisteredGenerator, RegisteredLambda, RequiredSite};
+use crate::frontend::{RegisteredGenerator, RegisteredLambda};
 use crate::llvm::ModuleLauncher;
 use crate::llvm::registered::{
-    ABI, AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourcePositions, permanent, sites,
-    suspension,
+    ABI, AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourcePositions, sites,
 };
 
 mod statements;
@@ -524,14 +523,6 @@ impl<'a> PreparedBody<'a> {
         }
         let initializer =
             (!expression).then(|| prepare.suite(&body, crate::frontend::RegisteredScope::Module));
-        let mut initializer_sites = Vec::new();
-        if let Some(suite) = &initializer
-            && suite.fully_checked()
-        {
-            RequiredSite::visit(&suite.checked.function.body, &mut |site| {
-                initializer_sites.push(site);
-            });
-        }
         let source = SourceInfo {
             annotation_children,
             scopes,
@@ -549,7 +540,6 @@ impl<'a> PreparedBody<'a> {
             function_bodies,
             class_bodies,
             initializer,
-            initializer_sites,
             bundled,
             path,
             // These CPython providers implement their own call semantics in Python.
@@ -650,24 +640,21 @@ impl<'a> PreparedBody<'a> {
             unit,
             positions: &positions,
         };
-        let mut sites = sites::CheckedSites::default();
+        let sites = sites::CheckedSites::default();
         frame.begin_module(
             self.source.scopes.module_annotations,
             self.source.string_annotations,
             self.docstring.as_deref(),
-            &self.source.scopes.module_globals,
         );
-        if initializer.fully_checked() {
-            location.place_module_callables(&mut frame, &mut sites, &self.source.initializer_sites);
-            frame.checked_body(&initializer.checked, &sites);
+        let globals = &self.source.scopes.module_globals;
+        let frame = if initializer.fully_checked() {
+            location.emit_checked_body(frame, sites, &initializer.checked, globals, "", false)
         } else {
             let mut function = location.function(frame, sites, String::new(), false);
-            function
-                .declared_globals
-                .clone_from(&self.source.scopes.module_globals);
+            function.declare_globals(globals);
             crate::llvm::registered::emit_prepared_suite(&mut function, initializer);
-            frame = function.frame;
-        }
+            function.frame
+        };
         let code =
             frame.finish_module(|frame, sites| location.define_module_annotations(frame, sites));
         match output.diagnostic.take() {
@@ -735,11 +722,6 @@ enum Body<'a> {
         &'a crate::frontend::RegisteredOperand,
         Option<crate::frontend::function_scope::ClassBindings>,
     ),
-}
-
-enum Entry {
-    Compiled,
-    Suspended(u32),
 }
 
 struct SourceMap<'a> {
@@ -815,8 +797,6 @@ struct SourceInfo<'a> {
     function_bodies: HashMap<ruff_text_size::TextSize, PreparedFunction<'a>>,
     class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredClass>,
     initializer: Option<crate::frontend::RegisteredSuite>,
-    // Module admission and each output layout use the same ordered site references.
-    initializer_sites: Vec<RequiredSite>,
     bundled: bool,
     path: &'a Path,
     python_annotations: bool,
@@ -894,38 +874,6 @@ impl SourceMap<'_> {
         }
     }
 
-    /// Distinct Python definitions keep distinct addresses even if LLVM merges their bodies.
-    fn definition(
-        &self,
-        output: &mut Output,
-        prefix: String,
-        body: Body<'_>,
-        start: ruff_text_size::TextSize,
-        in_function: bool,
-        entry: Entry,
-    ) -> String {
-        let site = format!("@code_site{}", output.count);
-        let suspended = matches!(entry, Entry::Suspended(_));
-        let tag = if suspended {
-            if !output.declarations.declared_suspension {
-                output.functions.push_str(suspension::ABI);
-                output.declarations.declared_suspension = true;
-            }
-            permanent::NATIVE_SUSPENDED_BODY
-        } else {
-            0
-        };
-        let entry = self.code(output, prefix, body, in_function, Some((start, entry)));
-        writeln!(
-            output.constants,
-            "{site} = private constant %code_site {{ ptr {entry}, ptr {}, i32 {}, i32 {tag} }}",
-            self.positions.file,
-            self.positions.line(start)
-        )
-        .unwrap();
-        site
-    }
-
     fn diagnostic_at(&self, range: TextRange, reason: &str) -> String {
         let (line, col) = self.positions.line_and_column(range.start());
         let (end_line, end_col) = self.positions.line_and_column(range.end());
@@ -961,12 +909,9 @@ impl SourceMap<'_> {
         prefix: String,
         body: Body<'_>,
         in_function: bool,
-        definition: Option<(ruff_text_size::TextSize, Entry)>,
+        definition: Option<(TextSize, u32)>,
     ) -> String {
-        let suspension = match definition {
-            Some((_, Entry::Suspended(flags))) => flags,
-            _ => 0,
-        };
+        let suspension = definition.map_or(0, |(_, flags)| flags);
         let start = definition.map(|(start, _)| start);
         let mut frame = RegisteredFrame::new(
             output,
@@ -1062,15 +1007,14 @@ impl SourceMap<'_> {
                     frame.use_class_annotation_names(class);
                 }
                 let globals = BTreeSet::new();
-                let mut callables =
-                    self.frame_callables(&mut frame, &mut sites, &prefix, &globals, in_function);
-                RequiredSite::visit_operand(&operand.value, &mut |site| callables.place_site(site));
+                self.frame_callables(&mut frame, &mut sites, &prefix, &globals, in_function)
+                    .place_operand(&operand.value);
                 let value = frame.prepared_operand(operand, &sites, false);
                 frame.return_value(&value);
                 frame
             }
         };
-        frame.finish(false)
+        frame.finish_callable(start)
     }
 }
 
@@ -1108,6 +1052,8 @@ impl Function<'_, '_> {
 mod tests {
     use super::super::prepare::ModuleSource;
     use super::*;
+    use crate::frontend::RequiredSite;
+    use crate::llvm::registered::permanent;
 
     fn emit_modules(
         (files, builtins, entry_source): (
@@ -1454,7 +1400,11 @@ mod tests {
         )
         .unwrap();
         assert!(prepared.syntax.is_none());
-        assert_eq!(prepared.source.initializer_sites.len(), 4);
+        let mut sites = 0;
+        RequiredSite::visit(&prepared.initializer().checked.function.body, &mut |_| {
+            sites += 1;
+        });
+        assert_eq!(sites, 4);
         assert_eq!(prepared.source.function_bodies.len(), 4);
 
         let (_, llvm) = prepared.standalone().unwrap();
@@ -2859,7 +2809,9 @@ mod tests {
         // The tuple used as a slice bound is evaluated as one operand.
         assert_eq!(tuples, 1);
         assert_eq!(discarded, 7);
-        assert!(module.source.initializer_sites.is_empty());
+        RequiredSite::visit(&module.initializer().checked.function.body, &mut |_| {
+            panic!("unexpected declaration site")
+        });
         assert!(module.syntax.is_none());
         let withdrawn = module.standalone().unwrap();
         assert!(withdrawn.1.contains("setup_module_annotations"));
@@ -2881,7 +2833,9 @@ mod tests {
         )
         .unwrap();
         assert!(module.syntax.is_none());
-        assert!(module.source.initializer_sites.is_empty());
+        RequiredSite::visit(&module.initializer().checked.function.body, &mut |_| {
+            panic!("unexpected declaration site")
+        });
         let (_, llvm) = module.standalone().unwrap();
         assert!(llvm.contains("mark_module_annotation"));
         assert!(llvm.contains("setup_module_annotations"));

@@ -17,7 +17,7 @@ fn emit_registered_body(source: &str, function: &crate::frontend::RegisteredFunc
     let positions = SourcePositions::new(source, &file);
     let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
     RegisteredFrame::checked_body(&mut frame, function, &CheckedSites::default());
-    frame.finish(false);
+    frame.finish_callable(None);
     output
 }
 
@@ -279,7 +279,7 @@ fn placed_multiplication_keeps_the_exact_integer_guard_and_python_protocol() {
         let positions = SourcePositions::new(&source, &file);
         let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
         frame.checked_body(&placed, &CheckedSites::default());
-        frame.finish(false);
+        frame.finish_callable(None);
         let star = output.data(b"*");
         let body = &output.functions;
         assert_eq!(

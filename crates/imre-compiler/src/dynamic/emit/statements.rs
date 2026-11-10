@@ -11,7 +11,7 @@ use imre_ast::code_flags;
 use ruff_text_size::TextSize;
 use serde_json::json;
 
-use super::{Body, DefinitionName, Entry, Function};
+use super::{Body, DefinitionName, Function};
 
 /// The enclosing lexical scope and the existing address table used to place checked callables.
 pub(in crate::dynamic::emit) struct CallableSites<'a, 'p> {
@@ -31,7 +31,7 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         operand: Option<&crate::ir::Expr>,
     ) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites) {
         if let Some(operand) = operand {
-            self.prepare_checked_value(operand);
+            self.callable_sites().place_operand(operand);
         }
         (&mut self.frame, &self.sites)
     }
@@ -154,13 +154,12 @@ impl SourceMap<'_> {
         // Class annotations already have an explicit class environment. A method's provider
         // instead captures the class namespace of the function it annotates.
         let annotation_scope = !matches!(&scope, AnnotationScope::Class { .. });
-        let code = self.definition(
+        let code = self.code(
             output,
             String::new(),
             Body::CheckedProvider(body, scope),
-            start,
             false,
-            Entry::Compiled,
+            Some((start, 0)),
         );
         CompiledDefinition::new(code, signature, "__annotate__", qualname, annotation_scope)
     }
@@ -258,9 +257,8 @@ impl<'p> Function<'_, 'p> {
                     failed,
                 } => match site.cases[case].guard.as_ref().expect("match guard") {
                     PhysicalOperand::Checked(operand) => {
-                        self.prepare_checked_value(&operand.value);
-                        self.frame
-                            .prepared_branch(operand, &self.sites, matched, failed);
+                        let (frame, sites) = self.frame_and_sites(Some(&operand.value));
+                        frame.prepared_branch(operand, sites, matched, failed);
                     }
                     PhysicalOperand::Residual(input) => {
                         self.branch_input(input.as_input(), matched, failed)
@@ -367,10 +365,6 @@ impl CallableSites<'_, '_> {
             // The creating frame supplies the already-acquired iterator.
             signature["positional"] = json!([".0"]);
         }
-        let entry = match generator_flags {
-            0 => Entry::Compiled,
-            flags => Entry::Suspended(flags),
-        };
         let scopes = &self.source.scopes;
         let scope_facts = match &body {
             Body::Namespace => {
@@ -405,9 +399,13 @@ impl CallableSites<'_, '_> {
             }
         }
         let in_function = self.in_function || !matches!(body, Body::Namespace);
-        let code = self
-            .source
-            .definition(self.output, prefix, body, start, in_function, entry);
+        let code = self.source.code(
+            self.output,
+            prefix,
+            body,
+            in_function,
+            Some((start, generator_flags)),
+        );
         CompiledDefinition {
             class_header,
             format_evaluator: evaluator_scope.is_some(),

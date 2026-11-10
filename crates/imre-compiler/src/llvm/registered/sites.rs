@@ -204,7 +204,7 @@ pub(crate) type CompiledTypeParameters =
 
 pub(crate) struct Declaration {
     pub(crate) definition: CompiledDefinition,
-    pub(crate) decorator_lines: Vec<usize>,
+    pub(crate) decorator_offsets: Vec<TextSize>,
     pub(crate) type_params: Option<CompiledTypeParameters>,
 }
 
@@ -264,7 +264,7 @@ impl CheckedSites {
     ) -> String {
         let Declaration {
             definition,
-            decorator_lines,
+            decorator_offsets,
             type_params,
         } = &self.definitions[&site];
         let scope = frame.scope.clone();
@@ -291,8 +291,8 @@ impl CheckedSites {
             }
             function
         };
-        for ((mark, decorator), &line) in decorators.iter().zip(decorator_lines).rev() {
-            frame.set_statement_line(line);
+        for ((mark, decorator), &offset) in decorators.iter().zip(decorator_offsets).rev() {
+            frame.set_statement_line(frame.positions.line(offset));
             value = frame.invoke_from_mark(decorator, &[&value], mark, None);
         }
         value
