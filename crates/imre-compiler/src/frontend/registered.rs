@@ -986,8 +986,6 @@ pub(crate) enum SourceEffect {
     },
     /// Consume this statement's value operands in the frame that owns them.
     Value(ValueStatement, Vec<PhysicalOperand>),
-    /// Evaluate and release each operand of an annotation without an assigned value.
-    Discard(Vec<PhysicalOperand>),
     /// The enclosing suite owns any source inputs on their test or failure edge.
     Assertion(Box<AssertionSite>),
     /// A refused operation retains its diagnostic and original source range.
@@ -1720,14 +1718,19 @@ impl<'a> SuitePreparation<'a> {
             {
                 body.push(checkpoint(stmt));
                 if let Some(inputs) = values::bare_target_operands(&ann.target) {
+                    let target = self.sites.expressions.discarded_target(
+                        &ann.target,
+                        inputs,
+                        self.source,
+                        kind,
+                        suspended,
+                    );
                     residual.push(PendingStatement {
                         at: body.len(),
                         source: stmt,
-                        effect: Some(SourceEffect::Discard(
-                            inputs
-                                .into_iter()
-                                .map(|expr| self.registered_operand(expr, kind, suspended))
-                                .collect(),
+                        effect: Some(SourceEffect::Value(
+                            ValueStatement::Expression,
+                            vec![PhysicalOperand::Residual(target)],
                         )),
                     });
                 }
@@ -2224,7 +2227,7 @@ impl statements::StatementLowering for SourceScope<'_> {
                 {
                     let operands = inputs
                         .into_iter()
-                        .map(|expr| self.operand(expr))
+                        .map(|expr| self.frame_value(expr))
                         .collect::<Option<_>>()
                         .ok_or(())?;
                     let effect = operation(Builtin::RegisteredDiscard, Type::None, operands);
