@@ -1,4 +1,4 @@
-use crate::frontend::{PhysicalOperand, SourceEffect};
+use crate::frontend::{PhysicalOperand, SourceEffect, SourceGuard};
 mod declarations;
 use super::sites::{CompiledDefinition, CompiledProvider};
 
@@ -152,6 +152,48 @@ impl<'p> Function<'_, 'p> {
             return;
         }
         match effect {
+            SourceEffect::While(condition) => {
+                let source = suite[run.statements.start]
+                    .as_while_stmt()
+                    .expect("prepared loop");
+                if matches!(condition, SourceGuard::Literal(false)) {
+                    self.statements(&source.orelse);
+                    return;
+                }
+                crate::llvm::operations::loop_region(
+                    self,
+                    |code| {
+                        code.flush_check();
+                        &mut code.frame.body
+                    },
+                    |code| code.name("b"),
+                    |code, edges| code.jump(&edges.step),
+                    |code, yes, no| match condition {
+                        SourceGuard::Literal(taken) => {
+                            code.branch(if *taken { "true" } else { "false" }, yes, no);
+                        }
+                        SourceGuard::Checked(operand) => {
+                            code.prepare_checked_value(&operand.value);
+                            let bit = code.test_with_temporaries(|code| {
+                                code.frame.prepared_operand(operand, &code.sites, true)
+                            });
+                            code.branch(&bit, yes, no);
+                        }
+                        SourceGuard::Residual => code.branch_expr(&source.test, yes, no),
+                    },
+                    |code, edges| {
+                        let depth = code.exits.len();
+                        code.loops.push(LoopTarget {
+                            step: (edges.step.clone(), depth),
+                            done: (edges.done.clone(), depth),
+                        });
+                        code.statements(&source.body);
+                        code.loops.pop();
+                    },
+                    (!source.orelse.is_empty())
+                        .then_some(|code: &mut Self| code.statements(&source.orelse)),
+                );
+            }
             SourceEffect::AssignmentInput(slot) => {
                 let assignment = suite[run.statements.start]
                     .as_assign_stmt()
@@ -250,7 +292,6 @@ impl<'p> Function<'_, 'p> {
             self.checkpoint(&position);
             self.simple_call = imre_ast::unhighlighted_call(stmt);
             if let Some(site) = self.source.statement_sites.ifs.get(&stmt.range()) {
-                use crate::frontend::SourceGuard;
                 let source = stmt.as_if_stmt().expect("prepared conditional");
                 let arms = site
                     .arms(self.native_suspension)
@@ -422,7 +463,7 @@ impl<'p> Function<'_, 'p> {
                         };
                         code.op(operation.runtime_op(), &[&value])
                     });
-                    self.loop_body(&v.body, &v.orelse, Some(&iter), |f, yes, no| {
+                    self.loop_body(&v.body, &v.orelse, &iter, |f, yes, no| {
                         f.frame.retained_loop_header(v.start());
                         f.enter_iteration(
                             &iter,
@@ -432,18 +473,6 @@ impl<'p> Function<'_, 'p> {
                             yes,
                             no,
                         );
-                    });
-                }
-                ast::Stmt::While(v) => {
-                    if self.native_suspension
-                        && matches!(&*v.test, ast::Expr::BooleanLiteral(lit) if !lit.value)
-                    {
-                        self.statements(&v.orelse);
-                        continue;
-                    }
-                    self.loop_body(&v.body, &v.orelse, None, |f, yes, no| {
-                        f.branch_expr(&v.test, yes, no);
-                        f.label(yes);
                     });
                 }
                 ast::Stmt::Break(_) | ast::Stmt::Continue(_) => {
@@ -1238,7 +1267,7 @@ impl<'p> Function<'_, 'p> {
         &mut self,
         body: &'p [ast::Stmt],
         otherwise: &'p [ast::Stmt],
-        iterator: Option<&str>,
+        cursor: &str,
         enter_body: impl FnOnce(&mut Self, &str, &str),
     ) {
         let step = self.name("b");
@@ -1246,18 +1275,16 @@ impl<'p> Function<'_, 'p> {
         let exhausted = self.name("b");
         let done = self.name("b");
         let done_depth = self.exits.len();
-        let cursor_unwind = iterator.map(|cursor| {
-            // Continue retains the cursor. Every transfer out of the loop releases its owner.
-            self.live.push(cursor.to_owned());
-            self.exits.push((
-                Cleanup::RetainedValue {
-                    value: cursor.to_owned(),
-                    enclosing_exception: None,
-                },
-                self.body.error_target.clone(),
-            ));
-            self.begin_operand_scope()
-        });
+        // Continue retains the cursor. Every transfer out of the loop releases its owner.
+        self.live.push(cursor.to_owned());
+        self.exits.push((
+            Cleanup::RetainedValue {
+                value: cursor.to_owned(),
+                enclosing_exception: None,
+            },
+            self.body.error_target.clone(),
+        ));
+        let cursor_unwind = self.begin_operand_scope();
         self.jump(&step);
         self.label(&step);
         enter_body(self, &body_label, &exhausted);
@@ -1269,12 +1296,10 @@ impl<'p> Function<'_, 'p> {
         self.loops.pop();
         self.jump(&step);
         self.label(&exhausted);
-        if let Some(edge) = cursor_unwind {
-            self.exits.pop();
-            self.live.pop();
-            self.finish_unwind(edge, |frame| frame.release_target(None));
-            self.release_target(None);
-        }
+        self.exits.pop();
+        self.live.pop();
+        self.finish_unwind(cursor_unwind, |frame| frame.release_target(None));
+        self.release_target(None);
         self.statements(otherwise);
         self.jump(&done);
         self.label(&done);

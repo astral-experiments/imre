@@ -3100,6 +3100,44 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
+    fn mixed_while_keeps_its_checked_guard_and_reads_its_physical_body() {
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            "while ready:\n    take(lambda: item)\nelse:\n    finish()\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        inject_residual_child_module(&mut prepared);
+        let plan = prepared.source.initializer.as_ref().unwrap();
+        assert!(matches!(
+            plan.residual.as_slice(),
+            [run] if matches!(run.effect.as_ref(), Some(
+                crate::frontend::SourceEffect::While(crate::frontend::SourceGuard::Checked(_))
+            ))
+        ));
+        let original = prepared.standalone().unwrap().unwrap();
+        fn statement(body: &mut [ast::Stmt]) -> &mut ast::StmtWhile {
+            body[0].as_while_stmt_mut().unwrap()
+        }
+        let loop_ = statement(prepared.syntax.as_mut().unwrap().to_mut());
+        *loop_.test = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+            range: loop_.test.range(),
+            node_index: Default::default(),
+        });
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+
+        let loop_ = statement(prepared.syntax.as_mut().unwrap().to_mut());
+        let child = &mut loop_.body[0];
+        *child = ast::Stmt::Pass(ast::StmtPass {
+            range: child.range(),
+            node_index: Default::default(),
+        });
+        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
     fn suspended_while_keeps_its_condition_and_suites_after_erasure() {
         let source = "def pump():\n    while (yield 'test'):\n        yield 'body'\n    else:\n        yield 'else'\n";
         let mut prepared = PreparedBody::module(

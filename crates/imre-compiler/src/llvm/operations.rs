@@ -3,7 +3,7 @@
 mod comparisons;
 pub(crate) use comparisons::ComparisonChain;
 mod iteration;
-pub(crate) use iteration::LoopEdges;
+pub(crate) use iteration::{LoopEdges, loop_region};
 pub(crate) mod branches;
 mod join;
 pub(crate) mod sequences;
