@@ -3373,14 +3373,14 @@ mod tests {
     }
 
     #[test]
-    fn a_physical_generic_owns_its_checked_match_after_source_erasure() {
+    fn a_checked_generic_emits_its_match_after_source_erasure() {
         let source = concat!(
             "def choose[T: int](value):\n",
             "    match subject(value):\n",
             "        case 17 as captured if allow(captured): record(captured)\n",
             "        case other: record(other)\n",
         );
-        let mut prepared = PreparedBody::module_with_syntax(
+        let mut prepared = PreparedBody::module(
             "example",
             Path::new("example.py"),
             source,
@@ -3388,24 +3388,13 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let definition = prepared.syntax.as_ref().unwrap()[0]
-            .as_function_def_stmt()
-            .unwrap();
-        let start = definition.start();
+        assert!(prepared.syntax.is_none());
+        let start = TextSize::new(0);
         let function = &prepared.source.function_bodies[&start];
-        assert!(!function.fully_checked());
-        let suite = function.suite().unwrap();
-        assert!(suite.fully_checked());
-        crate::verify::registered(suite.checked.region()).unwrap();
+        assert!(function.fully_checked());
+        crate::verify::registered(function.checked().region()).unwrap();
 
         let original = prepared.standalone().unwrap();
-        prepared.syntax.as_mut().unwrap().to_mut()[0]
-            .as_function_def_stmt_mut()
-            .unwrap()
-            .body
-            .clear();
-        assert_eq!(prepared.standalone().unwrap(), original);
-
         let suite = test_function_suite(&mut prepared.source, start);
         let cases = suite
             .checked
@@ -3423,6 +3412,8 @@ mod tests {
         assert_eq!(cases[0].pattern.names, ["captured"]);
         assert_eq!(cases[0].captures.len(), 1);
         assert_eq!(cases[1].pattern.names, ["other"]);
+        assert_eq!(cases[1].captures.len(), 1);
+        assert!(cases[1].guard.is_none());
         assert!(!cases[0].body.is_empty() && !cases[1].body.is_empty());
         assert!(cases[0].guard.take().is_some());
         assert_ne!(prepared.standalone().unwrap(), original);
@@ -5506,21 +5497,17 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert!(
-            prepared
-                .source
-                .class_bodies
-                .values()
-                .all(|class| class.body.fully_checked())
-        );
+        assert!(prepared.syntax.is_none());
+        assert!(prepared.source.function_bodies[&TextSize::new(0)].fully_checked());
+        let class = prepared.source.class_bodies.values().next().unwrap();
+        assert!(class.body.fully_checked());
+        prepared.standalone().unwrap();
+
         inject_residual_child_module(&mut prepared);
         let outer = prepared.syntax.as_ref().unwrap()[0]
             .as_function_def_stmt()
             .unwrap();
         let class = outer.body[0].as_class_def_stmt().unwrap();
-        let outer_body = &prepared.source.function_bodies[&outer.start()];
-        assert!(matches!(outer_body.body, FunctionBody::Suite(_)));
-        assert!(!outer_body.fully_checked());
         let class_start = class.start();
         let suite = &prepared.source.class_bodies[&class_start].body;
         crate::verify::registered(suite.checked.region()).unwrap();
