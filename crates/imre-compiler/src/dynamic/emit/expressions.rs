@@ -5,18 +5,13 @@ use ruff_text_size::Ranged;
 use super::FrameEmitter;
 use super::boolean::{Context as BooleanContext, Flow, Target};
 use super::{Body, Function, permanent};
-use crate::llvm::operations::{CheckedValue, ValueJoin};
+use crate::llvm::operations::{CheckedValue, ComparisonChain, ValueJoin};
 
 impl Function<'_, '_> {
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
         self.with_expression_range(expr.range(), |code| {
-            if let Some(value) =
-                crate::frontend::registered_value(expr, code.source.registered_source())
-            {
-                code.registered_value(&value)
-            } else {
-                code.located_expr(expr)
-            }
+            code.registered_region(expr, false)
+                .unwrap_or_else(|| code.located_expr(expr))
         })
     }
 
@@ -42,6 +37,17 @@ impl Function<'_, '_> {
         let definition = self.compile_lambda(site, body);
         let scope = self.scope.clone();
         definition.bind_defaults(&mut self.frame, &scope, &defaults)
+    }
+
+    fn registered_region(&mut self, expr: &ast::Expr, condition: bool) -> Option<String> {
+        let source = self.source.registered_source();
+        let value = if self.native_suspension {
+            crate::frontend::suspended_operand(expr, source)
+        } else {
+            crate::frontend::registered_value(expr, source)
+        }?;
+        let sites = self.prepare_checked_value(&value);
+        Some(self.frame.registered_expression(&value, &sites, condition))
     }
 
     pub(super) fn with_expression_range(
@@ -139,7 +145,7 @@ impl Function<'_, '_> {
                 self.op(v.op.as_str(), &[&left, &right])
             }
             ast::Expr::BoolOp(_) => self.boolean_value(expr),
-            ast::Expr::Compare(v) => self.compare_expr(v, BooleanContext::Value),
+            ast::Expr::Compare(v) => self.source_comparison(v, false),
             ast::Expr::If(v) => ValueJoin::select(
                 self,
                 |f| {
@@ -210,8 +216,15 @@ impl Function<'_, '_> {
 
     fn test_operand(&mut self, expr: &ast::Expr) -> String {
         self.test_with_temporaries(|f| {
-            if let ast::Expr::Compare(comparison) = expr {
-                f.compare_expr(comparison, BooleanContext::Condition)
+            if let ast::Expr::Compare(cmp) = expr {
+                f.registered_region(expr, true).unwrap_or_else(|| {
+                    f.with_expression_range(cmp.range(), |f| {
+                        let previous = f.enter_expression(cmp.start());
+                        let bit = f.source_comparison(cmp, true);
+                        f.leave_expression(previous);
+                        bit
+                    })
+                })
             } else {
                 let value = f.expr(expr);
                 f.truth(&value)
@@ -290,132 +303,26 @@ impl Function<'_, '_> {
     }
 
     /// A failed intermediate comparison returns its object in a value context and false in a branch.
-    fn compare_expr(&mut self, comparison: &ast::ExprCompare, context: BooleanContext) -> String {
-        if let [op] = comparison.ops.as_ref()
-            && !matches!(op, ast::CmpOp::Is | ast::CmpOp::IsNot)
-        {
-            let left = self.expr(&comparison.operands[0]);
-            let operand = &comparison.operands[1];
-            let value = if matches!(op, ast::CmpOp::In | ast::CmpOp::NotIn)
-                && let ast::Expr::Tuple(tuple) = operand
-                && tuple.elts.len() <= 8
-                && tuple.elts.iter().all(imre_ast::literal_tuple_element)
-            {
-                // Keep the entry-block scratch array bounded for large tuple displays.
-                let values: Vec<_> = tuple.elts.iter().map(|item| self.expr(item)).collect();
-                let (array, count) = self.handle_array(&values);
-                let negate = u32::from(*op == ast::CmpOp::NotIn);
-                self.checked(&format!(
-                    "call i64 @imre_dyn_contains_literal_tuple(ptr %ctx, i64 {left}, ptr {array}, i64 {count}, i32 {negate})"
-                ))
-            } else {
-                let right = self.expr(operand);
-                self.op(op.as_str(), &[&left, &right])
-            };
-            return if context == BooleanContext::Condition {
-                self.truth(&value)
-            } else {
-                value
-            };
+    /// Evaluate a residual operand only in the reached link, keeping its result rooted.
+    fn source_comparison(&mut self, cmp: &ast::ExprCompare, condition: bool) -> String {
+        if let Some((needle, items, negate)) = crate::frontend::literal_membership(cmp) {
+            let needle = self.expr(needle);
+            let items = items.iter().map(|item| self.expr(item)).collect::<Vec<_>>();
+            let value = self.contains_literal(&needle, &items, negate);
+            return if condition { self.truth(&value) } else { value };
         }
-        let mark = self.temporary_mark();
-        self.unwind_operands(&mark, |f| f.comparison_steps(comparison, context, &mark))
-    }
-
-    fn comparison_steps(
-        &mut self,
-        comparison: &ast::ExprCompare,
-        context: BooleanContext,
-        mark: &str,
-    ) -> String {
-        let mut left = self.expr(&comparison.operands[0]);
-        let done = self.name("b");
-        let mut incoming = Vec::new();
-        for (i, (op, operand)) in comparison
-            .ops
-            .iter()
-            .zip(&comparison.operands[1..])
-            .enumerate()
-        {
-            let last = i + 1 == comparison.ops.len();
-            let right_mark = self.temporary_mark();
-            let (right, value, predicate) = self.unwind_operands(&right_mark, |f| {
-                let right = f.expr(operand);
-                let predicate = match op {
-                    ast::CmpOp::Is => Some("eq"),
-                    ast::CmpOp::IsNot => Some("ne"),
-                    _ => None,
-                }
-                .map(|relation| f.value(&format!("icmp {relation} i64 {left}, {right}")));
-                let value = if let Some(bit) = &predicate {
-                    f.value(&format!(
-                        "select i1 {bit}, i64 {}, i64 {}",
-                        permanent::TRUE,
-                        permanent::FALSE
-                    ))
+        let mut chain = ComparisonChain::registered(&mut self.frame, &cmp.ops, condition);
+        for operand in &*cmp.operands {
+            let handle = self.expr(operand);
+            if let Some(result) = chain.push_handle(&mut self.frame, handle) {
+                return if condition {
+                    result.into_condition()
                 } else {
-                    f.op(op.as_str(), &[&left, &right])
+                    result.into_handle()
                 };
-                (right, value, predicate)
-            });
-            if last {
-                // The final operation consumes right before left. Identity
-                // produces an immortal boolean; a rich result may alias either.
-                for boundary in [right_mark.as_str(), mark] {
-                    if predicate.is_some() {
-                        self.discard_truth(boundary);
-                    } else {
-                        self.keep_operands(boundary, &value, "0");
-                    }
-                }
-                let result = if context == BooleanContext::Condition {
-                    predicate.unwrap_or_else(|| self.truth(&value))
-                } else {
-                    value
-                };
-                if incoming.is_empty() {
-                    return result;
-                }
-                incoming.push(format!("[ {result}, %{} ]", self.current_block()));
-                self.jump(&done);
-            } else {
-                let rich = predicate.is_none();
-                let middle_end = self.keep_operands(mark, &right, if rich { &value } else { "0" });
-                let truth = predicate
-                    .unwrap_or_else(|| self.unwind_operands(&middle_end, |f| f.truth(&value)));
-                if rich && context == BooleanContext::Condition {
-                    self.discard_truth(&middle_end);
-                }
-                let stop = self.name("b");
-                let next = self.name("b");
-                self.branch(&truth, &next, &stop);
-                self.label(&stop);
-                if rich && context == BooleanContext::Value {
-                    self.keep_operands(mark, &value, "0");
-                } else {
-                    self.discard_truth(mark);
-                }
-                let result = if context == BooleanContext::Condition {
-                    "false"
-                } else {
-                    &value
-                };
-                incoming.push(format!("[ {result}, %{} ]", self.current_block()));
-                self.jump(&done);
-                self.label(&next);
-                if rich && context == BooleanContext::Value {
-                    self.discard_truth(&middle_end);
-                }
             }
-            left = right;
         }
-        self.label(&done);
-        let ty = if context == BooleanContext::Condition {
-            "i1"
-        } else {
-            "i64"
-        };
-        self.value(&format!("phi {ty} {}", incoming.join(", ")))
+        unreachable!("a comparison has a final link")
     }
 
     /// A residual field keeps its whole template on the original literal-spec path.

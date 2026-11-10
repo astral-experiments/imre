@@ -1822,6 +1822,10 @@ pub(crate) enum Builtin {
     /// Resolve the code name in the live registered Python scope.
     RegisteredName(String),
     RegisteredUnary(ObjectUnary),
+    /// One fewer operator than operands. The middle operands of a chain are evaluated once.
+    RegisteredCompare(Vec<ruff_python_ast::CmpOp>),
+    /// The needle and a short constant tuple's elements, with optional negation.
+    RegisteredContainsLiteral(bool),
     /// Store evaluates the RHS before the receiver; in-place retains the receiver across the RHS.
     RegisteredAttribute {
         action: AttributeAction,

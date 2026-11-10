@@ -691,6 +691,8 @@ impl Builtin {
             | Self::RegisteredTypeAlias(_)
             | Self::RegisteredStatement(..)
             | Self::RegisteredName(_)
+            | Self::RegisteredCompare(_)
+            | Self::RegisteredContainsLiteral(_)
             | Self::RegisteredUnary(_)
             | Self::RegisteredAttribute { .. }
             | Self::RegisteredSpread

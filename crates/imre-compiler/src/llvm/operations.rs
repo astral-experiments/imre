@@ -1,5 +1,7 @@
 //! Emit checked operations using the storage and ownership of each operand.
 
+mod comparisons;
+pub(crate) use comparisons::ComparisonChain;
 mod iteration;
 pub(crate) use iteration::LoopEdges;
 mod join;
@@ -367,6 +369,12 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 }
                 Entry::Registered(frame) => frame.sequence(values, DisplayKind::Set),
             },
+            ExprKind::Compare(values, ops) => {
+                CheckedValue::owned(self.fixed().comparisons(values, ops))
+            }
+            ExprKind::Builtin(Builtin::RegisteredCompare(ops), values) => {
+                self.registered_comparisons(values, ops, false)
+            }
             ExprKind::Conditional(test, yes, no) => match &mut self.0 {
                 Entry::Native(emitter) => CheckedValue::owned(emitter.conditional(test, yes, no)),
                 Entry::Registered(frame) => frame.select(test, yes, no),

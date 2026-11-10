@@ -100,6 +100,10 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                 uses_python_protocol = true;
                 !scoped || !operands.is_empty()
             }
+            ExprKind::Builtin(Builtin::RegisteredCompare(ops), values) => {
+                !ops.is_empty() && values.len() == ops.len() + 1
+            }
+            ExprKind::Builtin(Builtin::RegisteredContainsLiteral(_), values) => !values.is_empty(),
             ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
                 uses_python_protocol = true;
                 operands.len() > usize::from(call.explicit_scope)
@@ -202,19 +206,79 @@ impl std::ops::DerefMut for Frame<'_, '_, '_> {
     }
 }
 
-impl Frame<'_, '_, '_> {
-    fn evaluate(&mut self, expr: &Expr) -> CheckedValue {
-        CheckedBody::registered(Frame {
+impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
+    pub(super) fn for_expression(
+        code: &'f mut RegisteredFrame<'a, 'p>,
+        sites: &'f CheckedSites,
+    ) -> Self {
+        Self {
+            code,
+            sites,
+            names: None,
+        }
+    }
+
+    pub(super) fn reborrow(&mut self) -> Frame<'_, 'a, 'p> {
+        Frame {
             code: self.code,
             sites: self.sites,
             names: self.names,
-        })
-        .emit_value(expr)
+        }
+    }
+}
+
+impl Frame<'_, '_, '_> {
+    fn evaluate(&mut self, expr: &Expr) -> CheckedValue {
+        CheckedBody::registered(self.reborrow()).emit_value(expr)
     }
 
     pub(crate) fn evaluate_handle(&mut self, expr: &Expr) -> String {
         let value = self.evaluate(expr);
         self.materialize(&value)
+    }
+
+    pub(crate) fn evaluate_test(&mut self, expr: &Expr) -> String {
+        let mut inner = expr;
+        while let ExprKind::Builtin(Builtin::RegisteredLocation(..), values) = &inner.kind {
+            inner = &values[0];
+        }
+        if !matches!(
+            inner.kind,
+            ExprKind::Builtin(
+                Builtin::RegisteredCompare(_) | Builtin::RegisteredUnary(ir::ObjectUnary::Not),
+                _
+            ) | ExprKind::Conditional(..)
+        ) {
+            let value = self.evaluate_handle(expr);
+            return self.code.truth(&value);
+        }
+        self.test_structure(expr)
+    }
+
+    fn test_structure(&mut self, expr: &Expr) -> String {
+        match &expr.kind {
+            ExprKind::Builtin(Builtin::RegisteredLocation(range, position), values) => {
+                let previous = std::mem::replace(&mut self.code.current_range, *range);
+                let line = self.code.enter_expression(*position);
+                let bit = self.test_structure(&values[0]);
+                self.code.leave_expression(line);
+                self.code.current_range = previous;
+                bit
+            }
+            ExprKind::Builtin(Builtin::RegisteredCompare(ops), values) => {
+                let mut body = CheckedBody::registered(self.reborrow());
+                body.registered_comparisons(values, ops, true)
+                    .into_condition()
+            }
+            ExprKind::Builtin(Builtin::RegisteredUnary(ir::ObjectUnary::Not), values) => {
+                let bit = self.evaluate_test(&values[0]);
+                self.code.value(&format!("xor i1 {bit}, true"))
+            }
+            ExprKind::Conditional(test, yes, no) => {
+                self.select_with(test, yes, no, true).into_condition()
+            }
+            _ => unreachable!("structured truth consumer"),
+        }
     }
 
     pub(crate) fn sequence(&mut self, values: &[Expr], display: DisplayKind) -> CheckedValue {
@@ -289,6 +353,50 @@ impl Frame<'_, '_, '_> {
     pub(crate) fn invert(&mut self, value: &str) -> String {
         self.code.value(&format!("xor i1 {value}, true"))
     }
+    pub(crate) fn compare_scope(&mut self) -> (String, (String, String)) {
+        (self.code.temporary_mark(), self.open_operand_unwind())
+    }
+    pub(crate) fn close_compare_scope(&mut self, edge: (String, String), mark: &str) {
+        self.close_unwind(edge, |f| f.discard_truth(mark));
+    }
+
+    pub(crate) fn comparison_truth(&mut self, value: &str, mark: Option<&str>) -> String {
+        if let Some(mark) = mark {
+            self.unwind_operands(mark, |f| f.truth(value))
+        } else {
+            self.truth(value)
+        }
+    }
+
+    pub(crate) fn rich_comparison(
+        &mut self,
+        op: ruff_python_ast::CmpOp,
+        left: &str,
+        right: &str,
+    ) -> (String, Option<String>) {
+        if matches!(
+            op,
+            ruff_python_ast::CmpOp::Is | ruff_python_ast::CmpOp::IsNot
+        ) {
+            let relation = if op == ruff_python_ast::CmpOp::Is {
+                "eq"
+            } else {
+                "ne"
+            };
+            let bit = self
+                .code
+                .value(&format!("icmp {relation} i64 {left}, {right}"));
+            let value = self.value(&format!(
+                "select i1 {bit}, i64 {}, i64 {}",
+                permanent::TRUE,
+                permanent::FALSE
+            ));
+            (value, Some(bit))
+        } else {
+            (self.code.op(op.as_str(), &[left, right]), None)
+        }
+    }
+
     pub(crate) fn target_mark(&mut self) -> Option<String> {
         self.code
             .iteration
@@ -537,24 +645,40 @@ impl Frame<'_, '_, '_> {
     }
 
     pub(crate) fn select(&mut self, test: &Expr, yes: &Expr, no: &Expr) -> CheckedValue {
+        self.select_with(test, yes, no, false)
+    }
+
+    fn select_with(&mut self, test: &Expr, yes: &Expr, no: &Expr, condition: bool) -> CheckedValue {
+        let arm = |frame: &mut Self, value: &Expr| {
+            if condition {
+                CheckedValue::condition(frame.evaluate_test(value))
+            } else {
+                frame.evaluate(value)
+            }
+        };
         crate::llvm::operations::ValueJoin::select(
             self,
             Self::body,
             |code, yes, no| {
-                let condition = code.test_with_temporaries(|code| {
-                    let handle = code.evaluate_handle(test);
-                    code.truth(&handle)
-                });
-                code.branch(&condition, yes, no);
+                let bit = code.test_with_temporaries(|code| code.evaluate_test(test));
+                code.branch(&bit, yes, no);
             },
-            |code| code.evaluate(yes),
-            |code| code.evaluate(no),
+            |code| arm(code, yes),
+            |code| arm(code, no),
         )
         .expect("value-producing registered conditional")
     }
 
     pub(crate) fn builtin(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
         let handle = match (op, operands) {
+            (Builtin::RegisteredContainsLiteral(negate), [needle, items @ ..]) => {
+                let needle = self.evaluate_handle(needle);
+                let items = items
+                    .iter()
+                    .map(|item| self.evaluate_handle(item))
+                    .collect::<Vec<_>>();
+                self.contains_literal(&needle, &items, *negate)
+            }
             (Builtin::RegisteredName(name), []) => self.code.lookup(name),
             (Builtin::RegisteredName(name), [scope]) => {
                 let scope = self.evaluate_handle(scope);
@@ -957,7 +1081,22 @@ impl RegisteredFrame<'_, '_> {
     }
 
     pub(crate) fn registered_value(&mut self, expression: &Expr, sites: &CheckedSites) -> String {
-        self.with_checked_frame(sites, |mut frame| frame.evaluate_handle(expression))
+        self.registered_expression(expression, sites, false)
+    }
+
+    pub(crate) fn registered_expression(
+        &mut self,
+        expression: &Expr,
+        sites: &CheckedSites,
+        condition: bool,
+    ) -> String {
+        self.with_checked_frame(sites, |mut frame| {
+            if condition {
+                frame.evaluate_test(expression)
+            } else {
+                frame.evaluate_handle(expression)
+            }
+        })
     }
 
     pub(crate) fn checked_block(

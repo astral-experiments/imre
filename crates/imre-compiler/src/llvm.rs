@@ -3209,7 +3209,7 @@ impl Emitter<'_, '_> {
             ExprKind::BooleanValue(and, left, right) => {
                 self.boolean_value(*and, left, right, expression.ty)
             }
-            ExprKind::Compare(values, ops) => self.comparisons(values, ops),
+            ExprKind::Compare(..) => unreachable!("checked comparison"),
             ExprKind::Call(id, args) => {
                 if let [arg] = args.values.as_slice()
                     && self.module.types.is_value_struct(arg.ty)
@@ -4531,36 +4531,10 @@ impl Emitter<'_, '_> {
         } else {
             Self::operand
         };
-        let end = self.label();
-        let mut incoming = Vec::new();
-        let mut left = operand(self, &values[0]);
-        for (i, &op) in ops.iter().enumerate() {
-            let right = operand(self, &values[i + 1]);
-            let test = self.compare(op, &left.value, &right.value);
-            self.release_operand(&left);
-            if i + 1 == ops.len() {
-                self.release_operand(&right);
-                incoming.push(format!("[ {}, %{} ]", test.operand, self.body.current));
-                self.jump(&end);
-            } else {
-                let (next, fail) = (self.label(), self.label());
-                self.branch(&test.operand, &next, &fail);
-                let temporaries = self.temporaries.clone();
-                self.start(&fail);
-                self.release_operand(&right);
-                incoming.push(format!("[ false, %{} ]", self.body.current));
-                self.jump(&end);
-                self.start(&next);
-                self.temporaries = temporaries;
-            }
-            left = right;
-        }
-        self.start(&end);
-        Value {
-            ty: Type::Bool,
-            operand: self.instruction(format!("phi i1 {}", incoming.join(", "))),
-            small_integer: false,
-        }
+        operations::CheckedBody::native(self)
+            .native_comparisons(values, ops, operand)
+            .into_native()
+            .value
     }
 
     /// Borrows a direct integer-list read under its local root. Callers prove the
@@ -4851,6 +4825,8 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredName(_)
             | Builtin::RegisteredUnary(_)
             | Builtin::Unrepresented
+            | Builtin::RegisteredCompare(_)
+            | Builtin::RegisteredContainsLiteral(_)
             | Builtin::RegisteredSubscript(..)
             | Builtin::RegisteredSpread
             | Builtin::RegisteredIndexConstant(_)
