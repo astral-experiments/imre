@@ -165,7 +165,7 @@ impl Function<'_, '_> {
             .expect("value-producing conditional")
             .into_handle()
         } else {
-            self.expr_inner(expr)
+            self.build_diagnostic("expression has no checked operand")
         };
         self.leave_expression(previous);
         value
@@ -196,18 +196,6 @@ impl Function<'_, '_> {
                 self.frame
                     .registered_with_inputs(&inputs.operation, &handles, &self.sites)
             }
-        }
-    }
-
-    fn expr_inner(&mut self, expr: &ast::Expr) -> String {
-        match expr {
-            ast::Expr::TString(_) => {
-                self.build_diagnostic("cannot compile this template ahead of time")
-            }
-            ast::Expr::DictComp(display) if display.key.is_none() => {
-                self.unsupported("dict unpacking comprehension")
-            }
-            _ => self.unsupported(&format!("{:?}", ast::AnyNodeRef::from(expr).kind())),
         }
     }
 
