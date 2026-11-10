@@ -18,7 +18,6 @@ mod boolean;
 mod comprehensions;
 mod expressions;
 mod patterns;
-mod retained;
 mod statements;
 mod strings;
 
@@ -33,7 +32,7 @@ pub(super) struct PhysicalFile {
 /// Snapshots and admission facts for the bodies selected by import resolution.
 #[derive(Default)]
 pub(super) struct RegisteredBodies<'a> {
-    pub(super) program_bodies: HashMap<usize, ProgramBodies<'a>>,
+    pub(super) program_bodies: HashMap<usize, &'a super::CheckedFunctions>,
     // Decoded installed files retain the fingerprint of their original loader bytes.
     pub(super) physical_files: HashMap<PathBuf, PhysicalFile>,
     pub(super) archive_members: HashMap<PathBuf, ([u8; 32], u32)>,
@@ -43,18 +42,9 @@ pub(super) struct RegisteredBodies<'a> {
     pub(super) python_providers: HashSet<usize>,
 }
 
-/// Each source slot can use the checked bodies owned by its selected physical file.
-#[derive(Clone, Copy, Default)]
-pub(super) struct ProgramBodies<'a> {
-    pub(super) checked: Option<&'a super::CheckedFunctions>,
-    pub(super) native:
-        Option<&'a HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredNative>>,
-    pub(super) sanitize: bool,
-}
-
 #[derive(Clone, Copy)]
 pub(super) enum ModuleOrigin<'a> {
-    Program(ProgramBodies<'a>),
+    Program(Option<&'a super::CheckedFunctions>),
     Provider,
     Bundled,
 }
@@ -132,7 +122,7 @@ impl RootCode {
     }
 
     fn finish(mut self) -> CodegenUnit {
-        self.output.native_prelude();
+        self.output.integer_prelude();
         self.main
             .push_str("  %status = call i32 @imre_dyn_finish(ptr %ctx)\n  ret i32 %status\n}\n");
         CodegenUnit {
@@ -197,7 +187,7 @@ pub(super) fn emit(
         } else if python_providers.contains(&unit) {
             ModuleOrigin::Provider
         } else {
-            ModuleOrigin::Program(program_bodies.get(&unit).copied().unwrap_or_default())
+            ModuleOrigin::Program(program_bodies.get(&unit).copied())
         };
         // Preserve the loader's digest while compiling its normalized source.
         let physical = physical_files.get(path).filter(|_| !builtin);
@@ -417,7 +407,7 @@ impl<'a> PreparedBody<'a> {
         let expression = matches!(&input, Input::Expression(..));
         let program_bodies = match origin {
             ModuleOrigin::Program(bodies) => bodies,
-            _ => ProgramBodies::default(),
+            _ => None,
         };
         let (syntax, tokens) = match &input {
             Input::Module(p) => (p.parsed.syntax(), p.parsed.tokens()),
@@ -547,9 +537,7 @@ impl<'a> PreparedBody<'a> {
                 match site {
                     DefinitionSite::Function(def)
                         if def.type_params.is_none()
-                            && !program_bodies
-                                .checked
-                                .is_some_and(|sites| sites.contains_key(&start)) =>
+                            && !program_bodies.is_some_and(|sites| sites.contains_key(&start)) =>
                     {
                         let kind = crate::frontend::RegisteredScope::Function {
                             is_async: def.is_async,
@@ -591,10 +579,7 @@ impl<'a> PreparedBody<'a> {
         for (def, entry) in sites.workers {
             let start = def.start();
             thread_entries.insert(start, entry);
-            if !program_bodies
-                .checked
-                .is_some_and(|bodies| bodies.contains_key(&start))
-            {
+            if !program_bodies.is_some_and(|bodies| bodies.contains_key(&start)) {
                 // A method or a target nested inside a class may have no prepared body yet.
                 function_bodies.entry(start).or_insert_with(|| {
                     prepare.suite(
@@ -664,7 +649,7 @@ impl<'a> PreparedBody<'a> {
             Path::new("<string>"),
             Cow::Owned(text.to_owned()),
             python_optimization,
-            ModuleOrigin::Program(ProgramBodies::default()),
+            ModuleOrigin::Program(None),
             Input::Expression(syntax, parsed.tokens()),
         )?;
         let Some(ast::Stmt::Expr(statement)) = prepared.body.pop() else {
@@ -718,7 +703,7 @@ impl<'a> PreparedBody<'a> {
         let filename = self.source.path.as_os_str().as_encoded_bytes();
         let file = output.data(filename);
         let entry = self.emit(&mut output, 0, &file)?;
-        output.native_prelude();
+        output.integer_prelude();
         let mut ir = format!("{ABI}\n{}\n{}", output.constants, output.functions);
         let mut hash = blake3::Hasher::new();
         for field in [
@@ -870,7 +855,7 @@ struct SourceInfo<'a> {
     function_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
     class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
     initializer: Option<crate::frontend::RegisteredSuite>,
-    program_bodies: ProgramBodies<'a>,
+    program_bodies: Option<&'a super::CheckedFunctions>,
     bundled: bool,
     path: &'a Path,
     python_annotations: bool,
@@ -975,7 +960,7 @@ impl SourceMap<'_> {
         let start = definition.map(|(start, _)| start);
         let checked = start
             .filter(|_| matches!(body, Body::Statements(_)))
-            .and_then(|key| self.program_bodies.checked?.get(&key));
+            .and_then(|key| self.program_bodies?.get(&key));
         let mut frame = RegisteredFrame::new(
             output,
             &self.positions,
@@ -1052,11 +1037,6 @@ impl SourceMap<'_> {
             f.prepare_checked_sites(&checked.function.body);
             RegisteredFrame::checked_body(&mut f.frame, checked, &f.sites);
             return f.frame.finish(false);
-        }
-        if matches!(body, Body::Statements(_))
-            && let Some(native) = start.and_then(|key| self.program_bodies.native?.get(&key))
-        {
-            f.select_native(native);
         }
         match body {
             Body::Namespace(stmts)
@@ -1239,7 +1219,7 @@ mod tests {
             Path::new("query.py"),
             r#"query = t"SELECT {client.lookup(*args, key=request.name, **options)!s:>{width}}""#,
             0,
-            ModuleOrigin::Program(ProgramBodies::default()),
+            ModuleOrigin::Program(None),
         )
         .unwrap();
         assert!(
@@ -1296,9 +1276,9 @@ mod tests {
             "query",
             Path::new("query.py"),
             "first = t'{client.lookup(*args)}'
-second = t'{client.lookup(*args)}{v * 2}'",
+second = t'{client.lookup(*args)}{v ** 2}'",
             0,
-            ModuleOrigin::Program(ProgramBodies::default()),
+            ModuleOrigin::Program(None),
         )
         .unwrap();
         let checked: Vec<_> = prepared
@@ -1354,7 +1334,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
                 Path::new("worker.py"),
                 source,
                 0,
-                ModuleOrigin::Program(ProgramBodies::default()),
+                ModuleOrigin::Program(None),
             )
             .unwrap();
             let start = |declaration| {
@@ -1387,7 +1367,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
              type Completer = Callable[[str, int], str | None]\n\
              type PlatformTripleKey = tuple[str, str, str]\n",
             0,
-            ModuleOrigin::Program(ProgramBodies::default()),
+            ModuleOrigin::Program(None),
         )
         .unwrap();
         for alias in prepared
@@ -1423,7 +1403,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
             Path::new("model.py"),
             "type PublicRow[T] = payload[T]\n",
             0,
-            ModuleOrigin::Program(ProgramBodies::default()),
+            ModuleOrigin::Program(None),
         )
         .unwrap();
         assert!(
@@ -1485,7 +1465,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
             Path::new("editor.py"),
             "type Factory = lambda item: t'{item}'\n",
             0,
-            ModuleOrigin::Program(ProgramBodies::default()),
+            ModuleOrigin::Program(None),
         )
         .unwrap();
         let alias = &prepared.source.type_aliases[&prepared.body[0].start()];
@@ -1511,7 +1491,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
             Path::new("editor.py"),
             "type CharBuffer = list[str]\n",
             0,
-            ModuleOrigin::Program(ProgramBodies::default()),
+            ModuleOrigin::Program(None),
         )
         .unwrap();
         let initializer = prepared.source.initializer.as_ref().unwrap();
@@ -1561,7 +1541,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
             Path::new("sample.py"),
             source,
             0,
-            ModuleOrigin::Program(ProgramBodies::default()),
+            ModuleOrigin::Program(None),
         )
         .unwrap()
         .standalone()
@@ -1588,7 +1568,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
                 if bundled {
                     ModuleOrigin::Bundled
                 } else {
-                    ModuleOrigin::Program(ProgramBodies::default())
+                    ModuleOrigin::Program(None)
                 },
             )
             .unwrap();
@@ -1893,7 +1873,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
             Path::new("remove.py"),
             source,
             0,
-            ModuleOrigin::Program(ProgramBodies::default()),
+            ModuleOrigin::Program(None),
         )
         .unwrap();
         let admitted = prepared.body[0].range();

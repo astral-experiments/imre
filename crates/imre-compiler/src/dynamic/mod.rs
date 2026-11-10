@@ -1951,7 +1951,6 @@ pub(crate) fn compile(
                 .is_none_or(|(root, _)| root == Path::new(bundled_root)));
     // Borrow the winners once discovery has finished growing the emitter's source table.
     let checked_functions = checked_graph.map(|graph| graph.registered_functions());
-    let native_functions = checked_graph.map(|graph| graph.native_functions.borrow());
     let selected_sources: Vec<_> = selected_sources
         .into_iter()
         .enumerate()
@@ -1959,19 +1958,12 @@ pub(crate) fn compile(
             let application = !registrations.python_providers.contains(&id);
             if application && let (Some(graph), Some(module_id)) = (checked_graph, module) {
                 let checked = &graph.modules[module_id];
-                if checked.original_source() == sources[id].2 {
-                    registrations.program_bodies.insert(
-                        id,
-                        emit::ProgramBodies {
-                            checked: checked_functions
-                                .as_ref()
-                                .and_then(|all| all.get(&module_id)),
-                            native: native_functions
-                                .as_ref()
-                                .and_then(|all| all.get(&module_id)),
-                            sanitize: options.address_sanitizer,
-                        },
-                    );
+                if checked.original_source() == sources[id].2
+                    && let Some(functions) = checked_functions
+                        .as_ref()
+                        .and_then(|all| all.get(&module_id))
+                {
+                    registrations.program_bodies.insert(id, functions);
                 }
             }
             // Emit the selected application's signature. Preserve the existing checker

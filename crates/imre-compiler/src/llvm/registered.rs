@@ -9,7 +9,7 @@ pub(crate) mod sites;
 pub(crate) mod suspension;
 use crate::frontend::RegisteredFunction;
 use crate::ir::DisplayKind;
-use crate::ir::{self, Builtin, Expr, ExprKind, Statement, Type};
+use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Statement, Type};
 use crate::llvm::body::FunctionBody;
 pub(crate) use abi::{ABI, CallArguments, Output, permanent};
 use abi::{GUARDED_LIT, GUARDED_NAMED_OP, NAMED_OP};
@@ -204,7 +204,14 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
             _ => false,
         };
     });
-    supported && uses_python_protocol
+    // Only an unresolved signature needs a Python operation to establish its
+    // calling convention. Solved functions already have an ordinary checked caller.
+    let has_live_parameter = checked
+        .function
+        .params
+        .iter()
+        .any(|slot| checked.function.locals[*slot] == Type::PythonObject);
+    supported && (!has_live_parameter || uses_python_protocol)
 }
 
 fn suspends(body: &[Statement]) -> bool {
@@ -569,6 +576,13 @@ impl Frame<'_, '_, '_> {
     pub(crate) fn pull_item(&mut self, cursor: &str, key: usize) {
         let item = self.code.op("next", &[cursor]);
         self.store_private(key, &item);
+    }
+    pub(crate) fn declare_integer_arithmetic(&mut self, op: Binary) {
+        match op {
+            Binary::Add => self.code.output.declarations.checked_integer_add = true,
+            Binary::Multiply => self.code.output.declarations.checked_integer_multiply = true,
+            _ => unreachable!("expected checked integer operation"),
+        }
     }
 
     pub(crate) fn integer(&mut self, text: &str, integer: Option<i64>) -> CheckedValue {
@@ -944,7 +958,7 @@ impl Frame<'_, '_, '_> {
                 if let Some(slot) = owner {
                     return self.code.move_integer(*slot, word);
                 }
-                self.code.declare_integer_arithmetic();
+                // A native producer registered the integer ABI before creating this value.
                 if !small {
                     self.code
                         .line(&format!("call void @imre_int_retain(i64 {word})"));
@@ -1069,10 +1083,6 @@ impl RegisteredFrame<'_, '_> {
         self.checked(&format!(
             "call i64 @imre_dyn_take_int(ptr %ctx, i64 {word})"
         ))
-    }
-
-    pub(crate) fn declare_integer_arithmetic(&mut self) {
-        self.output.declarations.checked_integer_arithmetic = true;
     }
 }
 

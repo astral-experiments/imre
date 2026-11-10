@@ -1362,6 +1362,58 @@ print("result", call(b=2, a=1))
     }
 
     #[test]
+    fn registered_reduction_specializes_multiply_in_its_python_frame() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("paired.py");
+        std::fs::write(
+            &path,
+            include_str!("../../../tests/fixtures/registered_reduction_callback.py"),
+        )
+        .unwrap();
+        let ir = super::compile_file(&path, None, &CompileOptions::default())
+            .unwrap()
+            .llvm_ir;
+        let constant = |suffix: &str| {
+            ir.lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(" = private unnamed_addr constant ")?;
+                    value.ends_with(suffix).then_some(name)
+                })
+                .unwrap()
+        };
+        let file = constant(r#"paired.py\00""#);
+        let body_at = |line| {
+            let location = format!("ptr {file}, i32 {line}, i64 0)");
+            let mut definitions = ir
+                .split("\ndefine internal i64 @code")
+                .skip(1)
+                .filter_map(|entry| entry.split_once("\n}").map(|(body, _)| body))
+                .filter(|body| body.contains(&location));
+            let definition = definitions
+                .next()
+                .expect("statement in registered function");
+            assert!(definitions.next().is_none(), "duplicate statement body");
+            definition
+        };
+        let reduction = body_at(2);
+        assert_eq!(reduction.matches("call i64 @int_mul(").count(), 1);
+        assert!(reduction.contains("call i64 @imre_dyn_exact_int_word("));
+        let multiply = constant(r#"c"*\00""#);
+        assert!(reduction.contains(&format!(
+            "call i64 @imre_dyn_op_at(ptr %ctx, ptr {multiply},"
+        )));
+
+        let publish = body_at(7);
+        assert_eq!(publish.matches("call i64 @int_add(").count(), 1);
+        assert_eq!(
+            publish
+                .matches("call i64 @imre_dyn_positional_call_at(")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn a_registered_integer_subclass_can_supply_its_compiled_callback() {
         let root = tempfile::tempdir().unwrap();
         let entry = root.path().join("app.py");

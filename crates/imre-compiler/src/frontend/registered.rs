@@ -169,9 +169,6 @@ pub(super) fn capture(
     globals: &ModuleValues,
     retain_live_parameters: bool,
 ) {
-    if retain_live_parameters {
-        graph.clear_registered_functions();
-    }
     let mut sources = HashMap::new();
     let mut checks = SourceChecks::default();
     for (&owner, signature) in signatures {
@@ -185,30 +182,52 @@ pub(super) fn capture(
         else {
             continue;
         };
-        // The owning definition may already have closed this body and its private helpers.
+        // Recovery may follow an owning definition that has already checked this site.
         if graph
-            .native_functions
-            .borrow()
+            .registered_functions()
             .get(&id)
             .is_some_and(|bodies| bodies.contains_key(&function.start()))
         {
             continue;
         }
-        let helpers = Helpers::new(inference.len());
-        let checker = || Checker::new(graph, id, signatures, classes, types, &helpers, globals);
-        let Some(signature) = inference.registered_signature(signature) else {
-            if let Some(signature) = inference.checked_signature(signature) {
-                retained::capture(checker(), function, &signature, inference.len(), false);
+        let (signature, solved) = if let Some(signature) = inference.registered_signature(signature) {
+            if !retain_live_parameters {
+                continue;
             }
+            (signature, false)
+        } else if let Some(mut signature) = inference.checked_signature(signature)
+            && signature.params.iter().all(|p| p.ty != Type::PythonObject)
+        {
+            // The fixed-layout checker owns the source return contract. The Python
+            // activation returns a handle, including the result of an open call.
+            signature.returns = Type::PythonObject;
+            (signature, true)
+        } else {
             continue;
         };
-        if !retain_live_parameters {
-            continue;
-        }
+        let helpers = Helpers::new(inference.len());
+        // A solved definition reads names from the Python namespace. Its trial
+        // must not establish a native caller or consume a missing binding.
+        let private = solved.then(ModuleValues::default);
+        let checker = Checker::new(
+            graph,
+            id,
+            signatures,
+            classes,
+            types,
+            &helpers,
+            private.as_ref().unwrap_or(globals),
+        );
         let literals = sources
             .entry(id)
             .or_insert_with(|| values::ModuleSource::new(module));
-        if let Ok(body) = lower_definition(checker(), function, &signature, literals)
+        let lower = || lower_definition(checker, function, &signature, literals).ok();
+        let body = if solved {
+            graph.try_registered_body(id, lower)
+        } else {
+            lower()
+        };
+        if let Some(body) = body
             && checks.accepts(graph, id, function)
         {
             graph.register_function(id, function.start(), body);
@@ -1858,7 +1877,14 @@ mod tests {
             .join("../../tests/fixtures/registered_imported_callback");
         let entry = project.join("callable_effect.py");
         let mut graph = SourceGraph::load(&entry, Some(&project), &[]).unwrap();
-        let result = crate::checked_lower_with(&mut graph, None, false).unwrap();
+        let (result, lowered) = caller_cache::observe_lowerings(|| {
+            crate::checked_lower_with(&mut graph, None, false).unwrap()
+        });
+        assert_eq!(
+            lowered.iter().filter(|name| *name == "publish").count(),
+            1,
+            "{lowered:?}"
+        );
         if let crate::CheckedProgram::Runtime(reason) = result {
             panic!("{reason}");
         }
@@ -1876,6 +1902,192 @@ mod tests {
             _ => {}
         });
         assert_eq!((adds, callbacks), (1, 1));
+    }
+
+    #[test]
+    fn recovery_reuses_the_solved_body_and_lowers_the_missing_callback() {
+        let graph = SourceGraph::single(concat!(
+            "def square(n: int) -> int:\n    return n * n\n",
+            "def publish(send) -> None:\n    send(1)\n",
+        ))
+        .unwrap();
+        let module = graph.entry;
+        let definitions = &graph.modules[module].parsed.syntax().body;
+        let types = Types::default();
+        let classes = ClassInfo::new(&graph, &types).unwrap();
+        let inference = inference::Inference::default();
+        let mut signatures = HashMap::new();
+        for (statement, definition) in definitions.iter().enumerate() {
+            let signature = signature(
+                definition.as_function_def_stmt().unwrap(),
+                &graph,
+                keyword_forwarding::Defaults::local(module),
+                &classes.declarations,
+                &types,
+                None,
+                &inference,
+            )
+            .unwrap();
+            signatures.insert(DefinitionId { module, statement }, signature);
+        }
+        let globals = ModuleValues::default();
+        let capture_bodies = |live| {
+            caller_cache::observe_lowerings(|| {
+                capture(
+                    &graph,
+                    &signatures,
+                    &classes,
+                    &types,
+                    &inference,
+                    &globals,
+                    live,
+                )
+            })
+            .1
+        };
+
+        assert_eq!(capture_bodies(false), ["square"]);
+        assert!(graph.registered_functions()[&module].contains_key(&definitions[0].start()));
+        assert_eq!(capture_bodies(true), ["publish"]);
+        let bodies = graph.registered_functions();
+        assert!(
+            definitions
+                .iter()
+                .all(|def| bodies[&module].contains_key(&def.start()))
+        );
+    }
+
+    #[test]
+    fn solved_reduction_keeps_the_registered_loop_and_python_calls() {
+        let graph = SourceGraph::single(concat!(
+            "def send_result(x: int, sink):\n    sink(x)\n",
+            "def reduction(s: str) -> int:\n",
+            "    values = list(map(int, s))\n",
+            "    return sum([n * (n + 1) for n in values])\n",
+        ))
+        .unwrap();
+        let (result, lowered) = caller_cache::observe_lowerings(|| super::super::lower(&graph));
+        assert!(result.is_err());
+        assert_eq!(
+            lowered.iter().filter(|name| *name == "reduction").count(),
+            1,
+            "{lowered:?}"
+        );
+        let registered = graph.registered_functions();
+        let site = graph.modules[graph.entry].parsed.syntax().body[1].start();
+        let body = &registered[&graph.entry][&site].function.body;
+        let mut calls = 0;
+        let mut multiplies = 0;
+        let mut advances = 0;
+        ir::walk_expressions(body, &mut |expr| match &expr.kind {
+            ExprKind::Binary(Binary::Multiply, ..) => multiplies += 1,
+            ExprKind::Builtin(Builtin::RegisteredCall(_), _) => calls += 1,
+            _ => {}
+        });
+        ir::walk_statements(body, &mut |stmt| {
+            if matches!(stmt, Statement::IterNext { .. }) {
+                advances += 1;
+            }
+        });
+        assert_eq!((calls, multiplies, advances), (3, 1, 1));
+    }
+
+    #[test]
+    fn imported_reduction_and_callback_lower_once_at_their_owning_definitions() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = concat!(
+            "def reduction(s: str) -> int:\n",
+            "    values = list(map(int, s))\n",
+            "    return sum([n * (n + 1) for n in values])\n",
+            include_str!("../../../../tests/fixtures/registered_imported_callback/publish.py"),
+        );
+        std::fs::write(dir.path().join("publish.py"), source).unwrap();
+        let entry = dir.path().join("app.py");
+        let caller = concat!(
+            "from publish import reduction\n",
+            include_str!(
+                "../../../../tests/fixtures/registered_imported_callback/callable_effect.py"
+            ),
+            "\nprint(reduction(input()))\n",
+        );
+        std::fs::write(&entry, caller).unwrap();
+        let mut graph = SourceGraph::load(&entry, Some(dir.path()), &[]).unwrap();
+        let (result, lowered) = caller_cache::observe_lowerings(|| {
+            crate::checked_lower_with(&mut graph, None, false).unwrap()
+        });
+        if let crate::CheckedProgram::Runtime(reason) = result {
+            panic!("{reason}");
+        }
+        let provider = graph.python_file("publish").unwrap();
+        let registered = graph.registered_functions();
+        for stmt in &graph.modules[provider].parsed.syntax().body[..2] {
+            let name = stmt.as_function_def_stmt().unwrap().name.as_str();
+            assert!(registered[&provider].contains_key(&stmt.start()), "{name}");
+            assert_eq!(
+                lowered.iter().filter(|n| *n == name).count(),
+                1,
+                "{name}: {lowered:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn representation_failure_keeps_its_original_diagnostic() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("app.py");
+        std::fs::write(
+            &main,
+            concat!(
+                "import types\n",
+                "def bump(x: int) -> int:\n    return x + 1\n",
+                "Active = types.new_class('Active')\n",
+                "print(bump(7))\n",
+            ),
+        )
+        .unwrap();
+        let graph = SourceGraph::load(&main, None, &[]).unwrap();
+        let Err(report) = super::super::lower(&graph) else {
+            panic!("a registered class factory is required")
+        };
+        assert!(
+            report.contains("types.new_class requires native Python object operations"),
+            "{report}"
+        );
+    }
+
+    #[test]
+    fn solved_scalar_arithmetic_uses_the_registered_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("__main__.py");
+        std::fs::write(
+            &main,
+            "def bump(x: int) -> int:\n    return x + 1\n\nprint(bump(7))\n",
+        )
+        .unwrap();
+        let options = crate::CompileOptions {
+            path_entry: true,
+            module_entry: Some("__main__".to_owned()),
+            ..crate::CompileOptions::default()
+        };
+        let ir = crate::compile_file(dir.path(), None, &options)
+            .unwrap()
+            .llvm_ir;
+        let file = ir
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(" = private unnamed_addr constant ")?;
+                value.ends_with(r#"__main__.py\00""#).then_some(name)
+            })
+            .unwrap();
+        let statement = format!("ptr {file}, i32 2, i64 0)");
+        let bump = ir
+            .split("\ndefine internal i64 @code")
+            .skip(1)
+            .filter_map(|code| code.split_once("\n}").map(|(body, _)| body))
+            .find(|body| body.contains(&statement))
+            .unwrap();
+        assert!(bump.contains("call i64 @int_add("));
+        assert!(bump.contains("call i64 @imre_dyn_exact_int_word("));
     }
 
     #[test]

@@ -380,6 +380,12 @@ pub(super) struct Inference {
     widened: Cell<bool>,
 }
 
+pub(super) struct Solution {
+    pub(super) registered_parameters: HashMap<usize, Diagnostic>,
+    /// Definitions checked to completion with the final input and return types.
+    pub(super) checked_bodies: HashSet<usize>,
+}
+
 impl Inference {
     pub fn register(
         &self,
@@ -696,13 +702,15 @@ impl Inference {
         signatures: &mut HashMap<DefinitionId, Signature>,
         classes: &mut ClassInfo,
         types: &Types,
-    ) -> std::result::Result<HashMap<usize, Diagnostic>, Diagnostic> {
+    ) -> std::result::Result<Solution, Diagnostic> {
         let mut registered = HashMap::new();
+        let mut checked_bodies = HashSet::new();
         loop {
             let widened = self.widened.replace(false);
             if !widened && !self.unresolved() {
                 break;
             }
+            checked_bodies.clear();
             if widened {
                 self.revisit_checked_returns();
             }
@@ -782,6 +790,7 @@ impl Inference {
                 checker.method_context(signature.method);
                 checker.generator_item = classes.producer_items.get(&signature.id).copied();
                 checker.inferred_returns = infer_return.then(Vec::new);
+                let mut checked_return = false;
                 let result = (|| {
                     for (parameter, signature) in
                         closed_calls::parameters(&function.parameters).zip(&signature.params)
@@ -825,6 +834,8 @@ impl Inference {
                         self.pending.borrow_mut()[signature.id].returns = Some(ty);
                         self.revision.set(self.revision.get() + 1);
                     }
+                    checked_return =
+                        !infer_return && (!falls_through || signature.returns == Type::None);
                     Ok::<_, Failure>(())
                 })();
                 if let Err(diagnostic) = checker.finish_region(result) {
@@ -850,8 +861,14 @@ impl Inference {
                             ReturnDiscovery::Waiting(callee);
                     }
                     errors.push((*module, diagnostic));
-                } else if retrying {
-                    self.pending.borrow_mut()[signature.id].discovery = ReturnDiscovery::Checked;
+                } else {
+                    if checked_return {
+                        checked_bodies.insert(signature.id);
+                    }
+                    if retrying {
+                        self.pending.borrow_mut()[signature.id].discovery =
+                            ReturnDiscovery::Checked;
+                    }
                 }
             }
             let module = &graph.modules[graph.entry];
@@ -955,6 +972,8 @@ impl Inference {
                     return Err(unresolved);
                 }
                 unreachable!("an unresolved signature has a missing parameter or return");
+            } else {
+                checked_bodies.clear();
             }
         }
         for (_, _, signature) in definitions.iter_mut() {
@@ -968,7 +987,10 @@ impl Inference {
                 self.update(signature);
             }
         }
-        Ok(registered)
+        Ok(Solution {
+            registered_parameters: registered,
+            checked_bodies,
+        })
     }
 }
 
