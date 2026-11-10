@@ -584,28 +584,14 @@ impl ParameterAnnotations {
             if let Some(reference) = scalar_reference(expression) {
                 references.insert(name.to_owned(), reference);
             }
-            let value = operands
-                .get(&site)
-                .map(|operand| operand.operand(site))
-                .or_else(|| {
-                    let start = scope.locals.len();
-                    let value =
-                        super::annotation_operands::checked_annotation_value(expression, |input| {
-                            scope.operand(input)
-                        });
-                    if value.is_none() {
-                        scope.truncate_locals(start);
-                    }
-                    value
-                });
+            let value = operands.get(&site).map(|operand| operand.operand(site));
             sites.insert(
                 site,
-                DeferredAnnotation::new(name.to_owned(), expression, value, source),
+                DeferredAnnotation::new(name.to_owned(), expression, value, &mut scope),
             );
             entries.push(ir::AnnotationOccurrence { site, index: None });
         }
-        let mut body = DeferredAnnotation::prepare_body(sites, &entries);
-        (body.checked.function.locals, body.checked.local_names) = scope.bindings();
+        let body = DeferredAnnotation::prepare_body(sites, &entries, scope.bindings());
         Some(Self {
             entries,
             body,
@@ -628,10 +614,12 @@ fn scalar_reference(expr: &ast::Expr) -> Option<String> {
     }
 }
 
+pub(crate) type RegisteredBindings = (Vec<Type>, HashMap<usize, LocalBinding>);
+
 pub(crate) enum AnnotationValue {
     Checked(Expr),
     Input {
-        operand: PhysicalOperand,
+        source: Box<ast::Expr>,
         unpack: Option<Box<Expr>>,
     },
 }
@@ -641,8 +629,18 @@ impl DeferredAnnotation {
         name: String,
         expression: &ast::Expr,
         checked: Option<Expr>,
-        source: values::RegisteredSource<'_>,
+        scope: &mut SourceScope<'_>,
     ) -> Self {
+        let checked = checked.or_else(|| {
+            let start = scope.locals.len();
+            let value = super::annotation_operands::checked_annotation_value(expression, |input| {
+                scope.operand(input)
+            });
+            if value.is_none() {
+                scope.truncate_locals(start);
+            }
+            value
+        });
         let value = checked.map_or_else(
             || {
                 let (input, unpack) = match expression {
@@ -654,16 +652,10 @@ impl DeferredAnnotation {
                     ),
                     _ => (expression, None),
                 };
-                let operand = RegisteredOperand::prepare(
-                    input,
-                    source,
-                    RegisteredScope::Function { is_async: false },
-                )
-                .map_or_else(
-                    || PhysicalOperand::Source(Box::new(input.clone())),
-                    |value| PhysicalOperand::Checked(Box::new(value)),
-                );
-                AnnotationValue::Input { operand, unpack }
+                AnnotationValue::Input {
+                    source: Box::new(input.clone()),
+                    unpack,
+                }
             },
             AnnotationValue::Checked,
         );
@@ -678,6 +670,7 @@ impl DeferredAnnotation {
     pub(crate) fn prepare_body(
         sites: &HashMap<TextSize, Self>,
         entries: &[ir::AnnotationOccurrence],
+        (locals, local_names): RegisteredBindings,
     ) -> RegisteredSuite {
         let mut residual = Vec::new();
         let mut body = vec![Statement::Expr(operation(
@@ -711,10 +704,10 @@ impl DeferredAnnotation {
                 function: ir::Function {
                     params: vec![],
                     returns: Type::PythonObject,
-                    locals: vec![],
+                    locals,
                     body,
                 },
-                local_names: HashMap::new(),
+                local_names,
             },
             residual,
         }
@@ -760,7 +753,16 @@ pub(crate) struct RegisteredSites<'a> {
     pub(crate) functions: Vec<FunctionSite<'a>>,
     pub(crate) classes: Vec<ClassSite<'a>>,
     pub(crate) annotations: HashMap<TextSize, DeferredAnnotation>,
+    pub(crate) annotation_bindings: HashMap<Option<TextSize>, RegisteredBindings>,
     pub(crate) parameter_annotations: HashMap<TextSize, ParameterAnnotations>,
+}
+
+impl RegisteredSites<'_> {
+    fn finish_annotations(&mut self, owner: Option<TextSize>, scope: SourceScope<'_>) {
+        if !scope.locals.is_empty() {
+            self.annotation_bindings.insert(owner, scope.bindings());
+        }
+    }
 }
 
 pub(crate) fn registered_sites<'a, R>(
@@ -774,6 +776,7 @@ pub(crate) fn registered_sites<'a, R>(
         names: &'s imre_ast::Names,
         source: values::RegisteredSource<'s>,
         operands: &'s HashMap<TextSize, PreparedAnnotation<R>>,
+        annotations: SourceScope<'s>,
         scope: RegisteredScope,
         in_unprepared_generic: bool,
         function: Option<TextSize>,
@@ -796,10 +799,19 @@ pub(crate) fn registered_sites<'a, R>(
                             .map(|params| registered_type_parameters(params, self.names)),
                     });
                     let outer = std::mem::replace(&mut self.scope, RegisteredScope::Class);
+                    let child = SourceScope::new(
+                        self.annotations.kind,
+                        self.source,
+                        self.annotations.operations,
+                        self.annotations.sites,
+                    );
+                    let outer_annotations = std::mem::replace(&mut self.annotations, child);
                     let function = self.function.take();
                     walk_stmt(self, stmt);
                     self.function = function;
                     self.scope = outer;
+                    let child = std::mem::replace(&mut self.annotations, outer_annotations);
+                    self.output.finish_annotations(Some(class.start()), child);
                 }
                 ast::Stmt::FunctionDef(def) => {
                     if let Some(provider) = ParameterAnnotations::prepare(
@@ -884,7 +896,7 @@ pub(crate) fn registered_sites<'a, R>(
                                 self.operands
                                     .get(&ann.annotation.start())
                                     .map(|operand| operand.operand(ann.annotation.start())),
-                                self.source,
+                                &mut self.annotations,
                             ),
                         );
                         (
@@ -908,16 +920,25 @@ pub(crate) fn registered_sites<'a, R>(
             }
         }
     }
+    let operations = HashMap::new();
+    let statements = StatementSites::default();
     let mut sites = Collector {
         names,
         source,
         operands,
+        annotations: SourceScope::new(
+            RegisteredScope::Function { is_async: false },
+            source,
+            &operations,
+            &statements,
+        ),
         scope: RegisteredScope::Module,
         in_unprepared_generic: false,
         function: None,
         output: RegisteredSites::default(),
     };
     sites.visit_body(body);
+    sites.output.finish_annotations(None, sites.annotations);
     sites.output
 }
 
@@ -2670,7 +2691,7 @@ impl<'a> SourceScope<'a> {
         }
     }
 
-    fn bindings(self) -> (Vec<Type>, HashMap<usize, LocalBinding>) {
+    fn bindings(self) -> RegisteredBindings {
         let names = self
             .names
             .into_iter()
@@ -3519,14 +3540,16 @@ mod tests {
 
     #[test]
     fn annotation_callback_numbers_physical_occurrences_and_keeps_unsupported_values_late() {
-        let text = "first: int\nsecond: list[int]\ncomplex: dict[str, int]\nforward: 'list[int]'\nprepared: (lambda: int)()\ndeferred: next(t for t in (int,))\nquoted: '(lambda: Child)()'\n";
+        let text = "first: int\nsecond: list[int]\ncomplex: dict[str, int]\nforward: 'list[int]'\nprepared: (lambda: int)()\ndeferred: next(t for t in (int,))\nquoted: '(lambda: Child)()'\nscoped: [item for item in items]\n";
         let graph = SourceGraph::single(text).unwrap();
         let module = &graph.modules[graph.entry];
         let stmts = &module.parsed.syntax().body;
         let literals = values::ModuleSource::new(module);
         let source = literals.context(text);
-        let prepared = |bundled| prepared_sites(stmts, source, bundled).annotations;
-        let sites = prepared(false);
+        let prepared = |bundled| prepared_sites(stmts, source, bundled);
+        let mut module = prepared(false);
+        let sites = module.annotations;
+        let bindings = module.annotation_bindings.remove(&None).unwrap();
         let callback = |occurrences: &[usize]| {
             let entries: Vec<_> = occurrences
                 .iter()
@@ -3536,8 +3559,12 @@ mod tests {
                     index: Some(index),
                 })
                 .collect();
-            DeferredAnnotation::prepare_body(&sites, &entries)
+            DeferredAnnotation::prepare_body(&sites, &entries, bindings.clone())
         };
+        let scoped = callback(&[7, 0, 7]);
+        assert!(scoped.fully_checked());
+        assert!(!scoped.checked.region().private_slots().is_empty());
+        crate::verify::registered(scoped.checked.region()).unwrap();
         let whole = callback(&[0, 1, 0]);
         assert!(whole.fully_checked());
         let checked = &whole.checked;
@@ -3580,7 +3607,7 @@ mod tests {
             numbered,
             [(Some(0), "first"), (Some(1), "second"), (Some(2), "first")]
         );
-        let bundled_sites = prepared(true);
+        let bundled_sites = prepared(true).annotations;
         let quoted_site = stmts[3].start();
         assert!(
             matches!(&sites[&quoted_site].value, AnnotationValue::Checked(Expr { kind: ExprKind::Builtin(Builtin::BindAnnotationExpression(site), _), .. }) if *site == stmts[3].as_ann_assign_stmt().unwrap().annotation.start())

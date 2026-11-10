@@ -49,7 +49,11 @@ impl SourceMap<'_> {
             })
             .to_string(),
         );
-        let body = crate::frontend::DeferredAnnotation::prepare_body(&self.annotations, &entries);
+        let body = crate::frontend::DeferredAnnotation::prepare_body(
+            &self.annotations,
+            &entries,
+            self.module_annotation_bindings.clone(),
+        );
         let code = self.definition(
             frame.output,
             String::new(),
@@ -866,13 +870,13 @@ impl<'p> Function<'_, 'p> {
 
     pub(super) fn insert_annotation_input(&mut self, occurrence: crate::ir::AnnotationOccurrence) {
         let field = &self.source.annotations[&occurrence.site];
-        let crate::frontend::AnnotationValue::Input { operand, unpack } = &field.value else {
+        let crate::frontend::AnnotationValue::Input { source, unpack } = &field.value else {
             unreachable!("checked annotation outside its prepared run")
         };
         let target = self
             .frame
             .annotation_target(occurrence.index, &field.name, field.range);
-        let value = self.physical_operand(operand);
+        let value = self.expr(source);
         let value = match unpack {
             Some(unpack) => self
                 .frame

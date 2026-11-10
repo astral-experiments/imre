@@ -107,11 +107,13 @@ impl ClassAnnotations {
     pub(crate) fn prepare_body(
         &mut self,
         annotations: &HashMap<TextSize, crate::frontend::DeferredAnnotation>,
+        bindings: crate::frontend::RegisteredBindings,
     ) {
         if !self.sites.is_empty() {
             self.body = Some(Box::new(crate::frontend::DeferredAnnotation::prepare_body(
                 annotations,
                 &self.sites,
+                bindings,
             )));
         }
     }

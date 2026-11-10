@@ -370,7 +370,7 @@ impl<'a> PreparedBody<'a, '_> {
             |text, parsed| Self::prepare_annotation(text, parsed, python_optimization),
             &mut namespace_annotations,
         );
-        let sites =
+        let mut sites =
             crate::frontend::registered_sites(&body, &private_names, values, &annotation_operands);
         let declarations = source_declarations(&sites);
         let mut operations = sites.operations;
@@ -428,10 +428,7 @@ impl<'a> PreparedBody<'a, '_> {
             });
         }
         for annotation in sites.annotations.values() {
-            if let crate::frontend::AnnotationValue::Input {
-                operand: crate::frontend::PhysicalOperand::Source(value),
-                ..
-            } = &annotation.value
+            if let crate::frontend::AnnotationValue::Input { source: value, .. } = &annotation.value
             {
                 prepare.sites.expressions.prepare_input(
                     value,
@@ -451,7 +448,13 @@ impl<'a> PreparedBody<'a, '_> {
                 .get_mut(start)
                 .expect("registered class scope")
                 .annotations
-                .prepare_body(&sites.annotations);
+                .prepare_body(
+                    &sites.annotations,
+                    sites
+                        .annotation_bindings
+                        .remove(&Some(*start))
+                        .unwrap_or_default(),
+                );
         }
         let mut thread_entries = HashMap::new();
         // The collector visits a definition before its children. Prepare the children first
@@ -520,6 +523,7 @@ impl<'a> PreparedBody<'a, '_> {
             namespace_operations: operations,
             type_aliases,
             annotations: sites.annotations,
+            module_annotation_bindings: sites.annotation_bindings.remove(&None).unwrap_or_default(),
             parameter_annotations: sites.parameter_annotations,
             function_bodies,
             class_bodies,
@@ -957,6 +961,7 @@ struct SourceInfo<'a> {
     statement_sites: crate::frontend::StatementSites,
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
     annotations: HashMap<ruff_text_size::TextSize, crate::frontend::DeferredAnnotation>,
+    module_annotation_bindings: crate::frontend::RegisteredBindings,
     parameter_annotations: HashMap<ruff_text_size::TextSize, crate::frontend::ParameterAnnotations>,
     nested_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
     function_bodies: HashMap<ruff_text_size::TextSize, PreparedFunction<'a>>,
@@ -1453,7 +1458,7 @@ mod tests {
         let mut prepared = PreparedBody::module(
             "example",
             Path::new("example.py"),
-            "class Row:\n    first: int\n    second: str\n",
+            "class Row:\n    first: [item for item in types]\n    second: str\n",
             0,
             ModuleOrigin::Program(None),
         )
@@ -1487,6 +1492,8 @@ mod tests {
             .as_mut()
             .unwrap();
         assert!(provider.fully_checked());
+        assert!(!provider.checked.region().private_slots().is_empty());
+        crate::verify::registered(provider.checked.region()).unwrap();
         let mut operands = provider.checked.function.body.iter_mut().filter_map(|stmt| {
             if let Statement::Expr(crate::ir::Expr {
                 kind: ExprKind::Builtin(Builtin::RegisteredAnnotationInsert(occurrence), inputs), ..
