@@ -116,9 +116,10 @@ mod registered;
 mod retained;
 pub(crate) use registered::type_alias::type_alias_body;
 pub(crate) use registered::values::{
-    RegisteredSource, ValueStatement, display_elements, lambda_defaults, literal_replacements,
-    packed_arguments, push_codepoints, registered_arguments, registered_constant_key,
-    registered_index_key, registered_string, registered_value, value_statement,
+    RegisteredSource, ValueStatement, display_elements, lambda_defaults, literal_membership,
+    literal_replacements, packed_arguments, push_codepoints, registered_arguments,
+    registered_constant_key, registered_index_key, registered_string, registered_value,
+    suspended_operand, value_statement,
 };
 pub(crate) use registered::{
     AnnotationValue, DeferredModuleAnnotation, RegisteredFunction, RegisteredLambda,

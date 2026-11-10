@@ -185,8 +185,7 @@ impl CheckedBody<'_, '_, '_, '_> {
             _ => {}
         }
         let mark = self.python().temporary_mark();
-        let value = self.object_operand(expr);
-        let condition = self.python().truth(&value);
+        let condition = self.python().evaluate_test(expr);
         self.python().discard_truth(&mark);
         condition
     }

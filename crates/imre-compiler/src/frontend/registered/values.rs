@@ -530,6 +530,23 @@ fn display_operands<E>(
         .collect()
 }
 
+/// Test membership without allocating the small constant tuple at runtime.
+pub(crate) fn literal_membership(
+    cmp: &ast::ExprCompare,
+) -> Option<(&ast::Expr, &[ast::Expr], bool)> {
+    let [op @ (ast::CmpOp::In | ast::CmpOp::NotIn)] = cmp.ops.as_ref() else {
+        return None;
+    };
+    let [needle, ast::Expr::Tuple(items)] = cmp.operands.as_ref() else {
+        return None;
+    };
+    (items.elts.len() <= 8 && items.elts.iter().all(imre_ast::literal_tuple_element)).then_some((
+        needle,
+        &items.elts,
+        *op == ast::CmpOp::NotIn,
+    ))
+}
+
 /// Select one registered-frame operation before requesting its operands in source order.
 pub(super) fn operation<E>(
     node: &ast::Expr,
@@ -577,6 +594,22 @@ pub(super) fn operation<E>(
         }));
     }
     let kind = match node {
+        ast::Expr::Compare(cmp) => {
+            if let Some((needle, items, negate)) = literal_membership(cmp) {
+                let values = std::iter::once(needle)
+                    .chain(items)
+                    .map(&mut child)
+                    .collect::<StdResult<Vec<_>, _>>()?;
+                ExprKind::Builtin(Builtin::RegisteredContainsLiteral(negate), values)
+            } else {
+                let values = cmp
+                    .operands
+                    .iter()
+                    .map(&mut child)
+                    .collect::<StdResult<Vec<_>, _>>()?;
+                ExprKind::Builtin(Builtin::RegisteredCompare(cmp.ops.to_vec()), values)
+            }
+        }
         ast::Expr::If(branch) => ExprKind::Conditional(
             Box::new(child(&branch.test)?),
             Box::new(child(&branch.body)?),
@@ -684,6 +717,7 @@ pub(super) fn checked_binding(
 pub(super) enum Region {
     /// Residual expressions encounter a prepared lambda binding at the source site.
     Residual,
+    SuspendedOperand,
     Suite,
     /// Suspensions within a lambda's body or defaults use the enclosing native activation.
     Lambda,
@@ -695,10 +729,12 @@ impl Region {
             return index_key(node, &mut |child| self.operand(child, source).ok_or(())).ok();
         }
         let value = match node {
-            ast::Expr::Lambda(lambda) if !matches!(self, Self::Residual) => {
+            ast::Expr::Lambda(lambda)
+                if !matches!(self, Self::Residual | Self::SuspendedOperand) =>
+            {
                 checked_binding(lambda, source)?
             }
-            node if matches!(self, Self::Lambda)
+            node if matches!(self, Self::Lambda | Self::SuspendedOperand)
                 && let Some((kind, value)) = ir::SuspendValue::operand(node) =>
             {
                 let value = match value {
@@ -751,6 +787,10 @@ pub(crate) fn value_statement<'a>(
             }),
         _ => return None,
     })
+}
+
+pub(crate) fn suspended_operand(node: &ast::Expr, source: RegisteredSource<'_>) -> Option<Expr> {
+    Region::SuspendedOperand.operand(node, source)
 }
 
 /// Build a complete expression region; an unsupported child keeps its original lowering.
@@ -856,6 +896,24 @@ impl Checker<'_> {
             .map(|&slot| self.local(slot));
         let graph = self.graph;
         let owner = self.module;
+        if let ast::Expr::Compare(cmp) = node {
+            // Preserve the existing checker for every link between concrete operands.
+            let opaque = cmp.operands.iter().map(|operand| {
+                let receiver = match operand {
+                    ast::Expr::Call(call) => source.call(call).1,
+                    ast::Expr::Attribute(field) => field.value.as_ref(),
+                    _ => operand,
+                };
+                graph.session.is_dynamic_receiver(owner, receiver)
+            });
+            let mut previous = None;
+            for dynamic in opaque {
+                if previous == Some(false) && !dynamic {
+                    return Ok(None);
+                }
+                previous = Some(dynamic);
+            }
+        }
         let Some(mut value) = operation(
             node,
             source,

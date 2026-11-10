@@ -776,6 +776,12 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         condition
     }
 
+    fn contains_literal(&mut self, value: &str, items: &[String], negate: bool) -> String {
+        let (array, count) = self.handle_array(items);
+        let negate = u32::from(negate);
+        self.checked(&format!("call i64 @imre_dyn_contains_literal_tuple(ptr %ctx, i64 {value}, ptr {array}, i64 {count}, i32 {negate})"))
+    }
+
     fn unwind_operands<T>(&mut self, mark: &str, body: impl FnOnce(&mut Self) -> T) -> T {
         self.unwind_with(|f| f.discard_truth(mark), body)
     }
@@ -1303,9 +1309,19 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         release: impl FnOnce(&mut Self),
         body: impl FnOnce(&mut Self) -> T,
     ) -> T {
+        let edge = self.open_operand_unwind();
+        let result = body(self);
+        self.close_unwind(edge, release);
+        result
+    }
+
+    fn open_operand_unwind(&mut self) -> (String, String) {
         let failed = self.name("b");
         let outer = std::mem::replace(&mut self.body.error_target, failed.clone());
-        let result = body(self);
+        (failed, outer)
+    }
+
+    fn close_unwind(&mut self, (failed, outer): (String, String), release: impl FnOnce(&mut Self)) {
         let ready = self.name("b");
         self.jump(&ready);
         self.label(&failed);
@@ -1313,7 +1329,6 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         self.jump(&outer);
         self.label(&ready);
         self.body.error_target = outer;
-        result
     }
 
     fn checked_sequence(
