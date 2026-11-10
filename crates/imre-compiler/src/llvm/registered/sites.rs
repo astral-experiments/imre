@@ -214,19 +214,13 @@ pub(crate) struct CheckedSites {
 }
 
 impl CheckedSites {
-    pub(crate) fn visit_operand(
-        value: &Expr,
-        visit: &mut impl FnMut(RequiredSite),
-    ) {
+    pub(crate) fn visit_operand(value: &Expr, visit: &mut impl FnMut(RequiredSite)) {
         ir::walk_operand_expressions(value, &mut |expr| visit_expression_site(expr, visit));
     }
 
     /// A block stops emitting after a transfer. Unreachable declaration bodies must
     /// not compile (or raise diagnostics) merely because their identity is in the IR.
-    pub(crate) fn visit(
-        statements: &[Statement],
-        visit: &mut impl FnMut(RequiredSite),
-    ) -> bool {
+    pub(crate) fn visit(statements: &[Statement], visit: &mut impl FnMut(RequiredSite)) -> bool {
         for stmt in statements {
             match stmt {
                 Statement::If(test, yes, no) => {

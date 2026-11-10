@@ -1035,7 +1035,10 @@ fn iteration_protocol(
     pull: Option<ir::AsyncPull>,
 ) -> (ir::IteratorOp, ir::IterNextKind) {
     match pull {
-        Some(pull) => (ir::IteratorOp::Async(iterable), ir::IterNextKind::Async(pull)),
+        Some(pull) => (
+            ir::IteratorOp::Async(iterable),
+            ir::IterNextKind::Async(pull),
+        ),
         None => (ir::IteratorOp::Loop, ir::IterNextKind::Generic),
     }
 }
@@ -1220,7 +1223,12 @@ impl<'a> SuitePreparation<'a> {
                         let expr = &decorator.expression;
                         let operand = RegisteredOperand::prepare(expr, self.source, site.enclosing);
                         if operand.is_none() {
-                            self.sites.expressions.prepare_input(expr, self.source, site.enclosing, suspended);
+                            self.sites.expressions.prepare_input(
+                                expr,
+                                self.source,
+                                site.enclosing,
+                                suspended,
+                            );
                         }
                         operand
                     })
@@ -1237,9 +1245,15 @@ impl<'a> SuitePreparation<'a> {
                         .map_or_else(Default::default, |args| {
                             let operands = registered_arguments(args)
                                 .map(|expr| {
-                                    let operand = RegisteredOperand::prepare(expr, self.source, bases_scope);
+                                    let operand =
+                                        RegisteredOperand::prepare(expr, self.source, bases_scope);
                                     if operand.is_none() {
-                                        self.sites.expressions.prepare_input(expr, self.source, bases_scope, suspended && site.parameters.is_none());
+                                        self.sites.expressions.prepare_input(
+                                            expr,
+                                            self.source,
+                                            bases_scope,
+                                            suspended && site.parameters.is_none(),
+                                        );
                                     }
                                     operand
                                 })
@@ -1280,11 +1294,22 @@ impl<'a> SuitePreparation<'a> {
 
     /// Keep the enclosing physical frame's entry and cleanup. Its complete target effects
     /// share one slot layout per suite, including when another statement must run from source.
-    pub(crate) fn physical_body(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope, suspended: bool) {
+    pub(crate) fn physical_body(
+        &mut self,
+        stmts: &[ast::Stmt],
+        kind: RegisteredScope,
+        suspended: bool,
+    ) {
         self.nested_suite(stmts, kind, SuiteSelection::Physical, suspended);
     }
 
-    fn nested_suite(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope, select: SuiteSelection, suspended: bool) {
+    fn nested_suite(
+        &mut self,
+        stmts: &[ast::Stmt],
+        kind: RegisteredScope,
+        select: SuiteSelection,
+        suspended: bool,
+    ) {
         if let Some(first) = stmts.first() {
             let plan = self.selected_suite(stmts, kind, select, select, suspended);
             // An optimized-away assertion has no instructions and still owns its source slot.
@@ -1314,7 +1339,8 @@ impl<'a> SuitePreparation<'a> {
         }
         impl<'a> StatementVisitor<'a> for Children<'_, '_> {
             fn visit_body(&mut self, stmts: &'a [ast::Stmt]) {
-                self.prepare.nested_suite(stmts, self.kind, self.select, self.suspended);
+                self.prepare
+                    .nested_suite(stmts, self.kind, self.select, self.suspended);
             }
         }
         let mut children = Children {
@@ -1345,7 +1371,11 @@ impl<'a> SuitePreparation<'a> {
                             sites.prepare_input(&loop_.test, source, kind, suspended);
                         }
                     }
-                    None if !matches!(stmt, ast::Stmt::Match(_) | ast::Stmt::With(_) | ast::Stmt::For(_)) => {
+                    None if !matches!(
+                        stmt,
+                        ast::Stmt::Match(_) | ast::Stmt::With(_) | ast::Stmt::For(_)
+                    ) =>
+                    {
                         sites.prepare_inputs(stmt, source, kind, suspended);
                     }
                     _ => {}
@@ -1363,7 +1393,10 @@ impl<'a> SuitePreparation<'a> {
             for index in run.statements {
                 let stmt = &stmts[index];
                 if let ast::Stmt::For(loop_) = stmt {
-                    let region = children.prepare.prepare_for(loop_, kind, child_selection, suspended);
+                    let region =
+                        children
+                            .prepare
+                            .prepare_for(loop_, kind, child_selection, suspended);
                     plan.residual.push(SourceRun {
                         at: run.at,
                         statements: index..index + 1,
@@ -1389,7 +1422,10 @@ impl<'a> SuitePreparation<'a> {
                         input.manager = region.operand(&item.context_expr, children.prepare.source);
                         if input.manager.is_none() {
                             children.prepare.sites.expressions.prepare_input(
-                                &item.context_expr, children.prepare.source, kind, suspended,
+                                &item.context_expr,
+                                children.prepare.source,
+                                kind,
+                                suspended,
                             );
                         }
                         if let Some(target) = &item.optional_vars {
@@ -1397,7 +1433,10 @@ impl<'a> SuitePreparation<'a> {
                                 ContextTarget::prepare(target, children.prepare.source, kind);
                             if matches!(input.target, ContextTarget::Residual) {
                                 children.prepare.sites.expressions.prepare_input(
-                                    target, children.prepare.source, kind, suspended,
+                                    target,
+                                    children.prepare.source,
+                                    kind,
+                                    suspended,
                                 );
                             }
                         }
@@ -1411,21 +1450,36 @@ impl<'a> SuitePreparation<'a> {
                         .get_mut(&branch.range())
                         .and_then(Option::take)
                 {
-                    site.subject = RegisteredOperand::prepare_with(
-                        children.prepare.source,
-                        kind,
-                        |scope| scope.frame_value(&branch.subject),
-                    );
+                    site.subject =
+                        RegisteredOperand::prepare_with(children.prepare.source, kind, |scope| {
+                            scope.frame_value(&branch.subject)
+                        });
                     if site.subject.is_none() {
-                        children.prepare.sites.expressions.prepare_input(&branch.subject, children.prepare.source, kind, suspended);
+                        children.prepare.sites.expressions.prepare_input(
+                            &branch.subject,
+                            children.prepare.source,
+                            kind,
+                            suspended,
+                        );
                     }
                     for (case, input) in site.cases.iter_mut().zip(&branch.cases) {
                         if matches!(case.guard, Some(patterns::MatchGuard::Residual))
                             && let Some(guard) = &input.guard
                         {
-                            children.prepare.sites.expressions.prepare_input(guard, children.prepare.source, kind, suspended);
+                            children.prepare.sites.expressions.prepare_input(
+                                guard,
+                                children.prepare.source,
+                                kind,
+                                suspended,
+                            );
                         }
-                        case.body = Some(children.prepare.selected_suite(&input.body, kind, SuiteSelection::All, SuiteSelection::All, suspended));
+                        case.body = Some(children.prepare.selected_suite(
+                            &input.body,
+                            kind,
+                            SuiteSelection::All,
+                            SuiteSelection::All,
+                            suspended,
+                        ));
                     }
                     children
                         .prepare
@@ -1450,31 +1504,37 @@ impl<'a> SuitePreparation<'a> {
         selection: SuiteSelection,
         suspended: bool,
     ) -> PreparedFor {
-        let iterable = RegisteredOperand::prepare_with(self.source, kind, |scope| {
-            match (kind, selection) {
+        let iterable =
+            RegisteredOperand::prepare_with(self.source, kind, |scope| match (kind, selection) {
                 (RegisteredScope::Function { .. }, SuiteSelection::Physical) => {
                     scope.operand(&loop_.iter)
                 }
                 _ => scope.ordinary_operand(&loop_.iter),
-            }
-        });
+            });
         let iterable = match iterable {
             Some(operand) => PhysicalOperand::Checked(Box::new(operand)),
             None => {
-                self.sites.expressions.prepare_input(&loop_.iter, self.source, kind, suspended);
+                self.sites
+                    .expressions
+                    .prepare_input(&loop_.iter, self.source, kind, suspended);
                 PhysicalOperand::Source(loop_.iter.clone())
-            },
+            }
         };
         let target = match checked_binding(&loop_.target, self.source, kind) {
             Some((entered, binding)) => LoopBinding::Checked { entered, binding },
             None => {
-                self.sites.expressions.prepare_input(&loop_.target, self.source, kind, suspended);
+                self.sites
+                    .expressions
+                    .prepare_input(&loop_.target, self.source, kind, suspended);
                 LoopBinding::Source(loop_.target.clone())
-            },
+            }
         };
         let (acquire, pull) = iteration_protocol(loop_.iter.range(), for_pull(loop_));
         let mut suite = |stmts: &[ast::Stmt]| {
-            LoopSuite::new(self.selected_suite(stmts, kind, selection, selection, suspended), stmts)
+            LoopSuite::new(
+                self.selected_suite(stmts, kind, selection, selection, suspended),
+                stmts,
+            )
         };
         PreparedFor {
             range: loop_.range(),
@@ -1853,7 +1913,9 @@ impl statements::StatementLowering for SourceScope<'_> {
     }
 
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> StdResult<statements::Block, ()> {
-        let input = self.iteration_input(&loop_.iter, for_pull(loop_)).ok_or(())?;
+        let input = self
+            .iteration_input(&loop_.iter, for_pull(loop_))
+            .ok_or(())?;
         let (binding, body) =
             self.iteration_body(&loop_.target, &input, |scope| scope.suite(&loop_.body))?;
         let otherwise = self.suite(&loop_.orelse)?;
@@ -1968,7 +2030,8 @@ impl statements::StatementLowering for SourceScope<'_> {
             )),
             ast::Stmt::While(loop_) => {
                 let condition = self.while_condition(&loop_.test).ok_or(())?;
-                let body = if matches!(&*loop_.test, ast::Expr::BooleanLiteral(value) if !value.value) {
+                let body = if matches!(&*loop_.test, ast::Expr::BooleanLiteral(value) if !value.value)
+                {
                     Vec::new()
                 } else {
                     self.in_loop(LoopScope::While, |scope| scope.suite(&loop_.body))?
@@ -2121,11 +2184,16 @@ pub(crate) fn inline_operand(
                 value
             });
             operand.map(Some).ok_or_else(|| {
-                refusal.unwrap_or_else(|| (expr.range(), if is_dict {
-                    "cannot compile this dictionary display ahead of time"
-                } else {
-                    "cannot compile this assignment expression ahead of time"
-                }))
+                refusal.unwrap_or_else(|| {
+                    (
+                        expr.range(),
+                        if is_dict {
+                            "cannot compile this dictionary display ahead of time"
+                        } else {
+                            "cannot compile this assignment expression ahead of time"
+                        },
+                    )
+                })
             })
         }
         ast::Expr::ListComp(_)
@@ -2288,9 +2356,7 @@ impl SourceScope<'_> {
         targets: &[ast::Expr],
         value: Expr,
     ) -> StdResult<Vec<Statement>, ()> {
-        self.with_assignment_operands(|scope| {
-            unpacking::bind_assignment(scope, targets, value)
-        })
+        self.with_assignment_operands(|scope| unpacking::bind_assignment(scope, targets, value))
     }
 
     fn with_assignment_operands<T>(&mut self, lower: impl FnOnce(&mut Self) -> T) -> T {
@@ -2537,7 +2603,11 @@ impl SourceScope<'_> {
     ) -> Option<pipelines::Prepared> {
         let value = self.ordinary_operand(iterable)?;
         let (acquire, kind) = iteration_protocol(iterable.range(), pull);
-        let cursor = operation(Builtin::RegisteredIter(acquire), Type::PythonObject, vec![value]);
+        let cursor = operation(
+            Builtin::RegisteredIter(acquire),
+            Type::PythonObject,
+            vec![value],
+        );
         Some(pipelines::Prepared::pull_cursor(
             cursor,
             Type::PythonObject,
@@ -2583,12 +2653,17 @@ impl SourceScope<'_> {
     }
 
     fn lower_operand(&mut self, expr: &ast::Expr, whole: bool) -> Option<Expr> {
-        if expr.is_dict_expr() && let Some(suspended) = self.named_suspension.take() {
+        if expr.is_dict_expr()
+            && let Some(suspended) = self.named_suspension.take()
+        {
             // A dictionary owns its own diagnostic, including inside a Named RHS.
             let value = self.checked_operand(expr, whole);
             self.named_suspension = Some(suspended);
             if value.is_none() {
-                self.refusal.get_or_insert((expr.range(), "cannot compile this dictionary display ahead of time"));
+                self.refusal.get_or_insert((
+                    expr.range(),
+                    "cannot compile this dictionary display ahead of time",
+                ));
             }
             return value;
         }
@@ -2620,8 +2695,7 @@ impl SourceScope<'_> {
             && !matches!(
                 (kind, is_async),
                 (ir::SuspendValue::Await, false) | (ir::SuspendValue::Delegate, true)
-            )
-        {
+            ) {
             self.suspend_operand(kind, value, expr.range())?
         } else if let ast::Expr::TString(template) = expr {
             match self.with_suspending_operands(|scope| {
@@ -2636,7 +2710,9 @@ impl SourceScope<'_> {
             }) {
                 Ok(value) => value,
                 Err(reason) => {
-                    if self.named_suspension == Some(true) && let Some(reason) = reason {
+                    if self.named_suspension == Some(true)
+                        && let Some(reason) = reason
+                    {
                         self.refusal = Some((expr.range(), reason));
                     }
                     return None;
@@ -2649,10 +2725,16 @@ impl SourceScope<'_> {
                 })
             })
             .ok()?
-        } else if matches!(expr, ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_)) {
+        } else if matches!(
+            expr,
+            ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_)
+        ) {
             let value = self.eager_comprehension(expr);
             if value.is_none() {
-                self.refusal = Some((expr.range(), "cannot compile this comprehension ahead of time"));
+                self.refusal = Some((
+                    expr.range(),
+                    "cannot compile this comprehension ahead of time",
+                ));
             }
             value?
         } else if (self.comprehension.is_some() || self.generator_expression)
@@ -2663,15 +2745,16 @@ impl SourceScope<'_> {
         } else if let ast::Expr::Lambda(lambda) = expr {
             if !values::has_checked_lambda_body(lambda, self.source) {
                 if self.named_suspension.is_some() {
-                    self.refusal = Some((expr.range(), "cannot compile this lambda body ahead of time"));
+                    self.refusal = Some((
+                        expr.range(),
+                        "cannot compile this lambda body ahead of time",
+                    ));
                 }
                 return None;
             }
             let binding = self.lambda_binding(lambda)?;
             // A generator expression retains its own clause cursors across an awaited default.
-            if self.loop_scope != LoopScope::Outside
-                && !self.generator_expression
-            {
+            if self.loop_scope != LoopScope::Outside && !self.generator_expression {
                 let mut suspends = false;
                 ir::walk_operand_expressions(&binding, &mut |child| {
                     suspends |= matches!(
@@ -3378,12 +3461,24 @@ mod tests {
             let text = format!("{prefix}def run(value):\n    return {expr}\n");
             let graph = SourceGraph::single(&text).unwrap();
             let module = &graph.modules[graph.entry];
-            let def = module.parsed.syntax().body[0].as_function_def_stmt().unwrap();
-            let expr = def.body[0].as_return_stmt().unwrap().value.as_deref().unwrap();
+            let def = module.parsed.syntax().body[0]
+                .as_function_def_stmt()
+                .unwrap();
+            let expr = def.body[0]
+                .as_return_stmt()
+                .unwrap()
+                .value
+                .as_deref()
+                .unwrap();
             let literals = values::ModuleSource::new(module);
-            inline_operand(expr, literals.context(&text), RegisteredScope::Function { is_async }, true)
-                .ok()
-                .flatten()
+            inline_operand(
+                expr,
+                literals.context(&text),
+                RegisteredScope::Function { is_async },
+                true,
+            )
+            .ok()
+            .flatten()
         };
         let operand = prepare("(saved := (inner := await value))", true).unwrap();
         crate::verify::registered(operand.region()).unwrap();
@@ -3395,7 +3490,12 @@ mod tests {
         )
         .unwrap();
         crate::verify::registered(operand.region()).unwrap();
-        assert!(operand.local_names.values().any(|local| local.name == "bound"));
+        assert!(
+            operand
+                .local_names
+                .values()
+                .any(|local| local.name == "bound")
+        );
     }
 
     #[test]
@@ -3449,22 +3549,42 @@ mod tests {
         let literals = values::ModuleSource::new(module);
         let source = literals.context(text);
         let prepare = |is_async, suspended| {
-            inline_operand(value, source, RegisteredScope::Function { is_async }, suspended)
+            inline_operand(
+                value,
+                source,
+                RegisteredScope::Function { is_async },
+                suspended,
+            )
         };
         assert!(prepare(false, true).is_err());
         assert!(prepare(true, false).is_err());
         let operand = prepare(true, true).unwrap().unwrap();
         crate::verify::registered(operand.region()).unwrap();
-        assert!(operand.local_names.values().any(|binding| binding.name == "saved"));
+        assert!(
+            operand
+                .local_names
+                .values()
+                .any(|binding| binding.name == "saved")
+        );
         let mut awaits = Vec::new();
         ir::walk_operand_expressions(&operand.value, &mut |value| {
-            if let ExprKind::Builtin(Builtin::RegisteredSuspend(ir::SuspendValue::Await, range), _) =
-                &value.kind
+            if let ExprKind::Builtin(
+                Builtin::RegisteredSuspend(ir::SuspendValue::Await, range),
+                _,
+            ) = &value.kind
             {
                 awaits.push(&text[*range]);
             }
         });
-        assert_eq!(awaits, ["await first", "await second", "await nested", "await mapping"]);
+        assert_eq!(
+            awaits,
+            [
+                "await first",
+                "await second",
+                "await nested",
+                "await mapping"
+            ]
+        );
     }
 
     #[test]
@@ -3472,8 +3592,15 @@ mod tests {
         let text = "def gather():\n    return [value for value in ((yield from rows) or ())]\n";
         let graph = SourceGraph::single(text).unwrap();
         let module = &graph.modules[graph.entry];
-        let function = module.parsed.syntax().body[0].as_function_def_stmt().unwrap();
-        let expr = function.body[0].as_return_stmt().unwrap().value.as_deref().unwrap();
+        let function = module.parsed.syntax().body[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let expr = function.body[0]
+            .as_return_stmt()
+            .unwrap()
+            .value
+            .as_deref()
+            .unwrap();
         let literals = values::ModuleSource::new(module);
         let source = literals.context(text);
         let prepare = |kind, suspended| inline_operand(expr, source, kind, suspended).unwrap();
@@ -3672,7 +3799,9 @@ mod tests {
         let mut advances = 0;
         ir::walk_expressions(body, &mut |expr| match &expr.kind {
             ExprKind::Binary(Binary::Multiply, ..) => multiplies += 1,
-            ExprKind::Builtin(Builtin::RegisteredCall(_), _) | ExprKind::Invoke { .. } => calls += 1,
+            ExprKind::Builtin(Builtin::RegisteredCall(_), _) | ExprKind::Invoke { .. } => {
+                calls += 1
+            }
             _ => {}
         });
         ir::walk_statements(body, &mut |stmt| {
@@ -3891,9 +4020,10 @@ mod tests {
             }
             ExprKind::Builtin(Builtin::RegisteredCall(site), _) => {
                 let kind = match (&site.target, &site.arguments) {
-                    (ir::RegisteredCallTarget::Method { .. }, ir::RegisteredArguments::Positional) => {
-                        "method"
-                    }
+                    (
+                        ir::RegisteredCallTarget::Method { .. },
+                        ir::RegisteredArguments::Positional,
+                    ) => "method",
                     (_, ir::RegisteredArguments::Packed(_)) => "packed",
                     _ => panic!("unexpected registered call"),
                 };
@@ -3998,7 +4128,10 @@ mod tests {
                 };
                 assert!(matches!(
                     operands.as_slice(),
-                    [Expr { kind: ExprKind::Builtin(Builtin::RegisteredSubscript(..), _), .. }]
+                    [Expr {
+                        kind: ExprKind::Builtin(Builtin::RegisteredSubscript(..), _),
+                        ..
+                    }]
                 ));
                 assert_eq!(args.values.len(), 1);
                 assert_eq!(args.order, [0]);
@@ -4085,11 +4218,14 @@ mod tests {
                 operations.push((op.protocol(), left.ty, right.ty, expr.ty));
             }
         });
-        assert_eq!(operations, [
-            ("*", Type::Int, Type::Int, Type::Int),
-            ("+", Type::Int, Type::Bool, Type::Int),
-            ("**", Type::Int, Type::Bool, Type::Int),
-        ]);
+        assert_eq!(
+            operations,
+            [
+                ("*", Type::Int, Type::Int, Type::Int),
+                ("+", Type::Int, Type::Bool, Type::Int),
+                ("**", Type::Int, Type::Bool, Type::Int),
+            ]
+        );
     }
 
     #[test]

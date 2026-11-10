@@ -375,7 +375,10 @@ pub(in crate::frontend) fn fixed_positional_arguments(call: &ast::ExprCall) -> b
 fn bound_call(call: ir::RegisteredCall, target: Expr, mut arguments: Vec<Expr>) -> Expr {
     if target.ty == Type::PythonObject
         && matches!(call.arguments, ir::RegisteredArguments::Positional)
-        && let ir::RegisteredCallTarget::Callable { end, suspended_name } = call.target
+        && let ir::RegisteredCallTarget::Callable {
+            end,
+            suspended_name,
+        } = call.target
     {
         return positional_invoke(call.range, end, suspended_name, target, arguments);
     }
@@ -656,7 +659,11 @@ pub(super) fn index_operands<'a>(
         Some((index, receiver)) => subscript(index, receiver, value, source.text),
         None => value,
     };
-    Some(IndexOperands { value, inputs, split_slice })
+    Some(IndexOperands {
+        value,
+        inputs,
+        split_slice,
+    })
 }
 
 pub(super) fn collection_item<E>(
@@ -788,7 +795,9 @@ pub(super) fn operation<E>(
     }
     let kind = match node {
         ast::Expr::Generator(generator)
-            if source.generators.is_some_and(|sites| sites.contains_key(&generator.range())) =>
+            if source
+                .generators
+                .is_some_and(|sites| sites.contains_key(&generator.range())) =>
         {
             let outer = imre_ast::comprehension::outer_clause(&generator.generators);
             let acquire = if outer.is_async {
@@ -841,7 +850,9 @@ pub(super) fn operation<E>(
         }
         ast::Expr::NumberLiteral(lit) => number_literal(&lit.value, false),
         ast::Expr::StringLiteral(lit) => {
-            return Ok(Some(source.string(lit.value.iter().map(FStringLiteral::Adjacent))));
+            return Ok(Some(
+                source.string(lit.value.iter().map(FStringLiteral::Adjacent)),
+            ));
         }
         ast::Expr::BytesLiteral(lit) => ExprKind::Bytes(lit.value.bytes().collect()),
         ast::Expr::BooleanLiteral(lit) => ExprKind::Bool(lit.value),
@@ -949,11 +960,14 @@ impl Region {
             return index_key(node, &mut |child| self.operand(child, source).ok_or(())).ok();
         }
         let value = match node {
-            ast::Expr::TString(template) => {
-                source.template(template, false, |child| self.operand(child, source)).ok()?
-            }
+            ast::Expr::TString(template) => source
+                .template(template, false, |child| self.operand(child, source))
+                .ok()?,
             ast::Expr::FString(value) if matches!(self, Self::Suite | Self::Lambda) => {
-                fstrings::registered_fstring(value, source, |child| self.operand(child, source).ok_or(())).ok()?
+                fstrings::registered_fstring(value, source, |child| {
+                    self.operand(child, source).ok_or(())
+                })
+                .ok()?
             }
             ast::Expr::Lambda(lambda)
                 if !matches!(self, Self::Residual | Self::SuspendedOperand) =>
@@ -1033,7 +1047,12 @@ pub(crate) fn suspended_operand(node: &ast::Expr, source: RegisteredSource<'_>) 
 pub(super) fn in_namespace(value: &mut Expr, namespace: Expr) {
     match &mut value.kind {
         ExprKind::Invoke {
-            args: ir::CallArgs { python_site: Some(site), .. }, ..
+            args:
+                ir::CallArgs {
+                    python_site: Some(site),
+                    ..
+                },
+            ..
         } => site.scope = Some(Box::new(namespace)),
         ExprKind::Builtin(Builtin::RegisteredCall(call), args) => {
             args.insert(0, namespace);

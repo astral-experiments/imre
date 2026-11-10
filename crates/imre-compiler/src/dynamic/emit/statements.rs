@@ -751,21 +751,29 @@ impl<'p> Function<'_, 'p> {
         let declaration = function
             .and_then(|def| self.source.checked_function_header(def.start()))
             .map(|header| match header {
-                CheckedHeader::Declaration { docstring, integer_sign_parameters, .. } => {
-                    (docstring, integer_sign_parameters)
+                CheckedHeader::Declaration {
+                    docstring,
+                    integer_sign_parameters,
+                    ..
+                } => (docstring, integer_sign_parameters),
+                CheckedHeader::Ordinary => {
+                    unreachable!("ordinary header uses its callable metadata")
                 }
-                CheckedHeader::Ordinary => unreachable!("ordinary header uses its callable metadata"),
             });
         let doc = if !self.output.keep_docstrings {
             None
         } else if let Some((docstring, _)) = declaration {
-            docstring.clone().or_else(|| self.source.bundled_docstring(&qualname))
+            docstring
+                .clone()
+                .or_else(|| self.source.bundled_docstring(&qualname))
         } else {
             statements.and_then(|stmts| self.source.docstring(&qualname, stmts))
         };
         let generator_flags = match (&body, generator) {
             (Body::Function(_, flags), _) => *flags,
-            (_, Some(site)) if self.source.generators[&site].is_async => code_flags::ASYNC_GENERATOR,
+            (_, Some(site)) if self.source.generators[&site].is_async => {
+                code_flags::ASYNC_GENERATOR
+            }
             (_, Some(_)) => code_flags::GENERATOR,
             _ => named_scope.map_or(0, |scope| scope.suspension_flags),
         };
@@ -854,7 +862,8 @@ impl<'p> Function<'_, 'p> {
                 Some(&class.namespace)
             }
             _ if type_alias => Some(&scopes.aliases[&start]),
-            _ => named_scope.map(|scope| &scope.lexical)
+            _ => named_scope
+                .map(|scope| &scope.lexical)
                 .or_else(|| generator.map(|site| &scopes.generators[&site])),
         };
         if let Some(facts) = scope_facts {
@@ -913,7 +922,13 @@ impl<'p> Function<'_, 'p> {
         }
         let globals = named_scope.map(|scope| scope.lexical.globals());
         let code = self.source.definition(
-            self.frame.output, prefix, body, start, in_function, entry, globals,
+            self.frame.output,
+            prefix,
+            body,
+            start,
+            in_function,
+            entry,
+            globals,
         );
         if let Some(p) = params {
             self.output

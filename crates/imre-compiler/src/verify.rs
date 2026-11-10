@@ -68,9 +68,7 @@ pub(crate) fn module(module: &Module) -> Result<(), String> {
 /// Registered frames resolve slots by their original Python names and can carry either a
 /// checked native scalar or a Python handle as a display operand. They have no native
 /// container layout table. Validate this handoff before the emitter indexes its operands.
-pub(crate) fn registered(
-    frame: crate::frontend::RegisteredRegion<'_>,
-) -> Result<(), String> {
+pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result<(), String> {
     let private = frame.private_slots();
     let local = |slot: usize| {
         require(
@@ -854,7 +852,11 @@ mod tests {
             let mut frame = prepare.complete(body, scope).unwrap().checked;
             registered(frame.region()).unwrap();
             frame.local_names.clear();
-            assert!(registered(frame.region()).unwrap_err().contains("frame slot"));
+            assert!(
+                registered(frame.region())
+                    .unwrap_err()
+                    .contains("frame slot")
+            );
         }
     }
 

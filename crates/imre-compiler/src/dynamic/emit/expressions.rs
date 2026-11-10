@@ -4,8 +4,7 @@ use ruff_text_size::Ranged;
 use super::FrameEmitter;
 use super::{Function, permanent};
 use crate::frontend::{
-    LambdaBinding, LambdaDefault, PreparedTemplate, SourceOperand, TemplateField,
-    prepare_boolean,
+    LambdaBinding, LambdaDefault, PreparedTemplate, SourceOperand, TemplateField, prepare_boolean,
 };
 use crate::ir::control::Context as BooleanContext;
 use crate::llvm::operations::branches::{Logical, LogicalEmitter, LogicalInput};
@@ -85,7 +84,10 @@ impl Function<'_, '_> {
         let selected = self.source.statement_sites.expressions.get(expr);
         if let Some(ExpressionSelection::Checked(value)) = selected {
             self.prepare_checked_value(value);
-            return Some(self.frame.registered_expression(value, &self.sites, condition));
+            return Some(
+                self.frame
+                    .registered_expression(value, &self.sites, condition),
+            );
         }
         if let Some(ExpressionSelection::Refused(range, reason)) = selected {
             return Some(self.with_expression_range(*range, |code| code.build_diagnostic(reason)));
@@ -125,7 +127,8 @@ impl Function<'_, '_> {
         let previous = self.enter_expression(expr.range(), position);
         let comparison = self
             .source
-            .statement_sites.expressions
+            .statement_sites
+            .expressions
             .comparison(expr, self.native_suspension);
         let value = if let Some((ops, inputs)) = comparison {
             let result = ComparisonChain::emit_registered(
@@ -144,21 +147,21 @@ impl Function<'_, '_> {
         } else if let Some((items, display)) = crate::frontend::display_elements(expr) {
             self.sequence_display(items, display, None, ast_spread, Self::expr)
         } else if let Some(inputs) = self.source.statement_sites.expressions.physical(expr) {
-            let handles = inputs.operands(expr, self.native_suspension)
+            let handles = inputs
+                .operands(expr, self.native_suspension)
                 .map(|child| self.source_operand(child))
                 .collect::<Vec<_>>();
-            self.frame.registered_with_inputs(&inputs.operation, &handles, &self.sites)
-        } else if let Some((edges, inputs)) = self
-            .source
-            .statement_sites.expressions
-            .value(expr)
-        {
+            self.frame
+                .registered_with_inputs(&inputs.operation, &handles, &self.sites)
+        } else if let Some((edges, inputs)) = self.source.statement_sites.expressions.value(expr) {
             let value = Logical::value(&mut self.frame.body, edges, crate::ir::Type::PythonObject)
                 .emit(self, &inputs)
                 .expect("a selected operand reaches the join");
             self.frame
                 .with_checked_frame(&self.sites, None, |mut frame| frame.materialize(&value))
-        } else if let Some([test, yes, no]) = self.source.statement_sites.expressions.conditional(expr) {
+        } else if let Some([test, yes, no]) =
+            self.source.statement_sites.expressions.conditional(expr)
+        {
             ValueJoin::select(
                 self,
                 |code| {
@@ -238,9 +241,10 @@ impl Function<'_, '_> {
                     self.prepare_checked_value(&operand.value);
                     self.frame.prepared_operand(operand, &self.sites, false)
                 }
-                LambdaBinding::Residual { operation, defaults } => {
-                    self.source_lambda(lambda, operation, defaults)
-                }
+                LambdaBinding::Residual {
+                    operation,
+                    defaults,
+                } => self.source_lambda(lambda, operation, defaults),
             },
             ast::Expr::TString(_) => self.unsupported("t-string expression spelling"),
             ast::Expr::FString(_) => {
@@ -297,7 +301,6 @@ impl Function<'_, '_> {
             }
         })
     }
-
 }
 
 fn ast_spread(element: &ast::Expr) -> Option<&ast::Expr> {

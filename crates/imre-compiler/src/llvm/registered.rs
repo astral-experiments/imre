@@ -8,9 +8,7 @@ pub(crate) mod patterns;
 mod sequences;
 pub(crate) mod sites;
 pub(crate) mod suspension;
-use crate::frontend::{
-    LocalBinding, RegisteredFunction, RegisteredOperand, RegisteredRegion,
-};
+use crate::frontend::{LocalBinding, RegisteredFunction, RegisteredOperand, RegisteredRegion};
 use crate::ir::DisplayKind;
 use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Statement, Type};
 use crate::llvm::body::FunctionBody;
@@ -83,7 +81,9 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                     }
                     Statement::Clear(slot) => private.contains(slot),
                     Statement::If(..) => true,
-                    Statement::Match(_, cases) => cases.iter().flat_map(|case| &case.captures).all(has_slot),
+                    Statement::Match(_, cases) => {
+                        cases.iter().flat_map(|case| &case.captures).all(has_slot)
+                    }
                     Statement::IterNext {
                         kind: ir::IterNextKind::Generic | ir::IterNextKind::Async(_),
                         iterator,
@@ -414,7 +414,9 @@ impl Frame<'_, '_, '_> {
     /// Retain the original RHS across a replaced owner's finalizer.
     pub(crate) fn bind_expression(&mut self, slot: usize, mark: &str, handle: &str) {
         let (scope, name) = self.assignment_name(slot);
-        let replaced = self.code.op("assign_named_target", &[&scope, &name, handle]);
+        let replaced = self
+            .code
+            .op("assign_named_target", &[&scope, &name, handle]);
         self.code.release_replaced(&replaced, Some((mark, handle)));
     }
 
@@ -777,13 +779,12 @@ impl Frame<'_, '_, '_> {
                 use ir::IterationOperands::*;
                 match iteration.expect("checked iteration operands") {
                     Iter(value, op) => match op {
-                        ir::IteratorOp::Get(range) | ir::IteratorOp::Async(range) => {
-                            self.iteration_result(|frame| {
+                        ir::IteratorOp::Get(range) | ir::IteratorOp::Async(range) => self
+                            .iteration_result(|frame| {
                                 let value = frame.evaluate_handle(value);
                                 frame.call_position(range);
                                 frame.op(op.runtime_op(), &[&value])
-                            })
-                        }
+                            }),
                         ir::IteratorOp::Loop | ir::IteratorOp::LoopCursor => {
                             let value = self.evaluate_handle(value);
                             self.code.op(op.runtime_op(), &[&value])
@@ -914,7 +915,9 @@ impl Frame<'_, '_, '_> {
                 self.unwind_operands(&mark, |frame| {
                     let cursor = frame.evaluate_handle(cursor);
                     frame.keep_operands(&mark, &cursor, "0");
-                    let result = frame.sites.bind_generator(frame.code, *site, &scope, &cursor);
+                    let result = frame
+                        .sites
+                        .bind_generator(frame.code, *site, &scope, &cursor);
                     frame.keep_operands(&mark, &result, "0");
                     result
                 })

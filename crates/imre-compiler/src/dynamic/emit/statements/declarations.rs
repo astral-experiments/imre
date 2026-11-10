@@ -1,7 +1,7 @@
 //! Resolve declaration and annotation code sites before emitting the checked block.
 use super::super::sites::{
-    AnnotationString, CheckedSites, CompiledAlias, CompiledDefinition, CompiledGenerator, Declaration,
-    RequiredSite,
+    AnnotationString, CheckedSites, CompiledAlias, CompiledDefinition, CompiledGenerator,
+    Declaration, RequiredSite,
 };
 use super::super::{Body, DefinitionName, DefinitionSite, Entry, Function, SourceInfo};
 use crate::frontend::PreparedAnnotation;
@@ -89,8 +89,11 @@ impl Function<'_, '_> {
         if self.sites.lambdas.contains_key(&site) {
             return;
         }
-        let definition =
-            self.compile_callable(site, Callable::Lambda { comprehension }, Body::Checked(body));
+        let definition = self.compile_callable(
+            site,
+            Callable::Lambda { comprehension },
+            Body::Checked(body),
+        );
         self.sites.lambdas.insert(site, definition);
     }
 
@@ -253,7 +256,10 @@ impl Function<'_, '_> {
         let targets = self.source.scopes.comprehension_targets[&site].clone();
         self.sites.generators.insert(
             site,
-            CompiledGenerator { definition, targets },
+            CompiledGenerator {
+                definition,
+                targets,
+            },
         );
     }
 
@@ -271,7 +277,10 @@ impl Function<'_, '_> {
                 return;
             }
             RequiredSite::Lambda(site, scoped) => {
-                let body = self.source.lambdas[&site].body.as_ref().expect("checked lambda body");
+                let body = self.source.lambdas[&site]
+                    .body
+                    .as_ref()
+                    .expect("checked lambda body");
                 self.place_lambda(site, body, scoped);
                 return;
             }

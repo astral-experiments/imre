@@ -425,9 +425,8 @@ pub(crate) fn check_native_syntax<'a>(
             };
             let session = &graph.session;
             let file = session.files[id];
-            (graph.modules[id].path == *path
-                && session.matches_parser_input(id, &input.text))
-            .then_some((session, file))
+            (graph.modules[id].path == *path && session.matches_parser_input(id, &input.text))
+                .then_some((session, file))
         });
         let (session, file) = if let Some(cached) = cached {
             cached

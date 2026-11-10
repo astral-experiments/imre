@@ -124,28 +124,28 @@ mod registered;
 pub(crate) use registered::booleans::{
     ExpressionSites, Selection as ExpressionSelection, SourceOperand, prepare_boolean,
 };
+#[cfg(test)]
+pub(crate) use registered::inline_operand;
 pub(crate) use registered::patterns::{MatchGuard, SourceMatch};
 pub(crate) use registered::type_alias_body;
 #[cfg(test)]
 pub(crate) use registered::values::registered_value;
-#[cfg(test)]
-pub(crate) use registered::inline_operand;
 pub(crate) use registered::values::{
-    RegisteredSource, ValueStatement, display_elements,
-    literal_replacements, module_literal_replacements, packed_arguments,
-    push_codepoints, registered_argument_at, registered_arguments, registered_index_key,
-    value_statement,
+    RegisteredSource, ValueStatement, display_elements, literal_replacements,
+    module_literal_replacements, packed_arguments, push_codepoints, registered_argument_at,
+    registered_arguments, registered_index_key, value_statement,
 };
 pub(crate) use registered::{
-    AnnotationValue, AssertionSite, DeferredAnnotation, ParameterAnnotations, PhysicalOperand, PreparedStrings, RegisteredFunction,
-    RegisteredGenerator, RegisteredLambda, RegisteredScope, RegisteredSites, RegisteredSuite,
-    SourceEffect, SourceRun, StatementSites, SuitePreparation, annotation_expression, attribute_write,
-    registered_sites, registered_type_alias, registered_type_parameters,
+    AnnotationValue, AssertionSite, DeferredAnnotation, ParameterAnnotations, PhysicalOperand,
+    PreparedStrings, RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope,
+    RegisteredSites, RegisteredSuite, SourceEffect, SourceRun, StatementSites, SuitePreparation,
+    annotation_expression, attribute_write, registered_sites, registered_type_alias,
+    registered_type_parameters,
 };
 pub(crate) use registered::{ContextTarget, LoopBinding, LoopSuite, PreparedFor, SourceGuard};
 pub(crate) use registered::{
-    LambdaBinding, LambdaDefault, LocalBinding, PreparedTemplate, RegisteredClass, RegisteredOperand,
-    RegisteredRegion, TemplateField,
+    LambdaBinding, LambdaDefault, LocalBinding, PreparedTemplate, RegisteredClass,
+    RegisteredOperand, RegisteredRegion, TemplateField,
 };
 mod sequences;
 mod shutil;
@@ -6787,7 +6787,8 @@ impl<'a> Checker<'a> {
         let ty = if left.ty == Type::PythonObject || right.ty == Type::PythonObject {
             Type::PythonObject
         } else {
-            self.binary_operands(binary, left.clone(), right.clone())?.ty
+            self.binary_operands(binary, left.clone(), right.clone())?
+                .ty
         };
         Ok(Expr {
             ty,

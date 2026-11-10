@@ -640,7 +640,10 @@ impl Expr {
                     && site.suspended_name.is_none_or(|name| {
                         site.range.contains_range(name) && name.end() == site.callee_end
                     })
-                    && site.scope.as_ref().is_none_or(|scope| scope.ty == Type::PythonObject)
+                    && site
+                        .scope
+                        .as_ref()
+                        .is_none_or(|scope| scope.ty == Type::PythonObject)
             })
             && args.order.iter().copied().eq(0..args.values.len())
     }
@@ -652,7 +655,9 @@ impl Expr {
         let ExprKind::Builtin(Builtin::RegisteredLocation(range, _), parts) = &self.kind else {
             return false;
         };
-        let [local] = parts.as_slice() else { return false };
+        let [local] = parts.as_slice() else {
+            return false;
+        };
         matches!(self.ty, Type::Callable(_))
             && local.ty == self.ty
             && matches!(local.kind, ExprKind::Local(_))
@@ -3897,9 +3902,17 @@ macro_rules! expression_children {
             }
             ExprKind::Invoke {
                 callable,
-                args: CallArgs { python_site, values, .. },
+                args:
+                    CallArgs {
+                        python_site,
+                        values,
+                        ..
+                    },
             } => {
-                if let Some(InvokeSite { scope: Some(scope), .. }) = python_site {
+                if let Some(InvokeSite {
+                    scope: Some(scope), ..
+                }) = python_site
+                {
                     $visit(scope);
                 }
                 $visit(callable);

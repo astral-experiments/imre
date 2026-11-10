@@ -187,7 +187,9 @@ impl CheckedBody<'_, '_, '_, '_> {
     pub(crate) fn emit_prepared_match(&mut self, expr: &Expr, cases: &[MatchCase]) {
         let mark = self.python().temporary_mark();
         let subject = self.python().pattern_value(expr);
-        let mut regions = self.python().start_match(&subject, &mark, MatchCases::Checked(cases));
+        let mut regions = self
+            .python()
+            .start_match(&subject, &mark, MatchCases::Checked(cases));
         while let Some(region) = regions.next(self) {
             match region {
                 MatchRegion::Body(case) => self.emit_block(&cases[case].body),
