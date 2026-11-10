@@ -2,7 +2,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
 use super::FrameEmitter;
-use super::{Function, permanent};
+use super::Function;
 use crate::frontend::{PreparedTemplate, SourceOperand, TemplateField, prepare_boolean};
 use crate::ir::control::Context as BooleanContext;
 use crate::llvm::operations::branches::{Logical, LogicalEmitter, LogicalInput};
@@ -120,6 +120,10 @@ impl Function<'_, '_> {
             } else {
                 result.into_handle()
             }
+        } else if let Some(crate::frontend::ExpressionSelection::Suspension(kind, child)) =
+            self.source.statement_sites.expressions.get(expr)
+        {
+            self.suspend_value(*kind, expr.range(), |code| code.expr(child))
         } else if let Some(inputs) = physical {
             self.physical_value(expr, inputs)
         } else if let Some((edges, inputs)) = self.source.statement_sites.expressions.value(expr) {
@@ -212,13 +216,6 @@ impl Function<'_, '_> {
                     }
                 };
                 ControlFlow::Continue(value)
-            });
-        }
-        if self.native_suspension
-            && let Some((kind, value)) = crate::ir::SuspendValue::operand(expr)
-        {
-            return self.suspend_value(kind, expr.range(), |code| {
-                value.map_or_else(|| permanent::NONE.to_string(), |value| code.expr(value))
             });
         }
         match expr {

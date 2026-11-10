@@ -42,6 +42,8 @@ pub(crate) enum Selection {
     Operand(Box<super::RegisteredOperand>),
     Refused(TextRange, &'static str),
     Inputs(Box<PhysicalInputs>),
+    /// Only the child remains physical. It runs under the suspension's operand mark.
+    Suspension(ir::SuspendValue, Box<ast::Expr>),
     Comparison(Vec<Option<CheckedChild>>),
     Mixed {
         parts: Option<Box<[Option<ir::Expr>; 3]>>,
@@ -417,6 +419,22 @@ impl<'a> Visitor<'a> for PhysicalPreparation<'_, '_> {
                 return;
             }
             Ok(None) => {}
+        }
+        if self.suspended
+            && let Some((kind, Some(child))) = ir::SuspendValue::operand(node)
+        {
+            let selected =
+                match super::RegisteredOperand::prepare_with(self.source, self.scope, |scope| {
+                    scope.with_suspending_operands(|scope| scope.operand(node))
+                }) {
+                    Some(operand) => Selection::Operand(Box::new(operand)),
+                    None => {
+                        self.visit_expr(child);
+                        Selection::Suspension(kind, Box::new(child.clone()))
+                    }
+                };
+            self.sites.selected.insert(site(node), selected);
+            return;
         }
         // The lambda site owns the complete binding or its build diagnostic.
         if node.is_lambda_expr() {
