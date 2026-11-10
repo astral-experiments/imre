@@ -3408,9 +3408,17 @@ pub(crate) fn contains_loop(body: &[Statement]) -> bool {
     found
 }
 
+/// Walk one expression with the same parent and nested-scope information as a suite.
+pub(crate) fn walk_operand_nodes<'a>(
+    value: &'a Expr,
+    visit: &mut impl FnMut(Node<'a>, Option<&'a Expr>),
+) {
+    walk_expression(value, None, visit);
+}
+
 /// Visits an operand and its nested expressions, including eager scope bodies.
 pub(crate) fn walk_operand_expressions<'a>(value: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
-    walk_expression(value, None, &mut |node, _| {
+    walk_operand_nodes(value, &mut |node, _| {
         if let Node::Expression(expression) = node {
             visit(expression);
         }

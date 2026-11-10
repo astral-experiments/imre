@@ -9,6 +9,21 @@ pub(super) struct Namespace {
     pub(super) targets: HashMap<String, usize>,
 }
 
+/// Give a checked display its own compiler-owned slots in the enclosing Python activation.
+/// The IR remains an expression even when surrounding source statements are residual.
+pub(crate) fn eager_operand(
+    expr: &ast::Expr,
+    source: values::RegisteredSource<'_>,
+) -> Option<RegisteredOperand> {
+    if !matches!(
+        expr,
+        ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_)
+    ) {
+        return None;
+    }
+    RegisteredOperand::prepare(expr, source, RegisteredScope::Function { is_async: false })
+}
+
 impl SourceScope<'_> {
     pub(super) fn eager_comprehension(&mut self, expression: &ast::Expr) -> Option<Expr> {
         let plan = Plan::from_expr(expression)?;

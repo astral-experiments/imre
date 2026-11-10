@@ -56,9 +56,20 @@ impl Function<'_, '_> {
             crate::frontend::suspended_operand(expr, source)
         } else {
             crate::frontend::registered_value(expr, source)
-        }?;
-        self.prepare_checked_value(&value);
-        Some(self.frame.registered_expression(&value, &self.sites, condition))
+        };
+        if let Some(value) = value {
+            self.prepare_checked_value(&value);
+            return Some(
+                self.frame
+                    .registered_expression(&value, &self.sites, condition),
+            );
+        }
+        let operand = crate::frontend::eager_operand(expr, source)?;
+        self.prepare_checked_value(&operand.value);
+        Some(
+            self.frame
+                .prepared_operand(&operand, &self.sites, condition),
+        )
     }
 
     pub(super) fn with_expression_range(
