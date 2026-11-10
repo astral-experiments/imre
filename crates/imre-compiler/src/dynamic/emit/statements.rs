@@ -68,9 +68,6 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
             SourceEffect::Region(region) => {
                 crate::llvm::registered::Frame::emit_region(self, region)
             }
-            SourceEffect::Refused(range, reason) => {
-                self.refuse_at(*range, reason);
-            }
             SourceEffect::Value(statement, inputs) => {
                 return Some((statement, inputs));
             }

@@ -362,12 +362,19 @@ pub(crate) fn emit_prepared_suite<'a, 'p>(
     let mut offset = 0;
     for step in &suite.residual {
         frame.checked_statements(&body[offset..step.at]);
-        if frame.next_statement()
-            && let Some((statement, inputs)) = frame.code.prepared_owner().emit_effect(&step.effect)
-        {
-            frame.emit_with_operands(statement, inputs);
-        }
         offset = step.at;
+        if !frame.next_statement() {
+            continue;
+        }
+        let owner = frame.code.prepared_owner();
+        match &step.effect {
+            Ok(effect) => {
+                if let Some((statement, inputs)) = owner.emit_effect(effect) {
+                    frame.emit_with_operands(statement, inputs);
+                }
+            }
+            Err((range, reason)) => owner.refuse_at(*range, reason),
+        }
     }
     frame.checked_statements(&body[offset..]);
     frame.restore_checked_slots(enclosing);
