@@ -94,17 +94,9 @@ impl Function<'_, '_> {
 
     fn located_operand(&mut self, expr: &ast::Expr, condition: bool) -> String {
         let physical = self.source.statement_sites.expressions.physical(expr);
-        let position = physical.map_or_else(
-            || {
-                imre_ast::expression_position(
-                    expr,
-                    &self.source.method_imports,
-                    Some(&self.source.private_names),
-                )
-            },
-            |inputs| inputs.position,
-        );
-        let previous = self.enter_expression(expr.range(), position);
+        let range = expr.range();
+        let position = physical.map_or(range.start(), |inputs| inputs.position);
+        let previous = self.enter_expression(range, position);
         let comparison = self
             .source
             .statement_sites
