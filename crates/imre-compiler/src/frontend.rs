@@ -4584,7 +4584,10 @@ impl<'a> Checker<'a> {
             };
             let cursor = Expr {
                 ty: Type::PythonObject,
-                kind: ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::Loop), vec![value]),
+                kind: ExprKind::Builtin(
+                    Builtin::RegisteredIter(ir::IteratorOp::Loop(expression.range())),
+                    vec![value],
+                ),
             };
             return Ok(Iteration::Prepared(self.prepare_cursor(cursor, element)));
         }

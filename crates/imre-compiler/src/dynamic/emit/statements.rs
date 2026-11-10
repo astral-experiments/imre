@@ -605,12 +605,8 @@ impl<'p> Function<'_, 'p> {
     fn prepared_for(&mut self, region: &'p crate::frontend::PreparedFor) {
         self.checkpoint(&region.range);
         self.simple_call = None;
-        let cursor = self.iteration_result(|code| {
-            let value = code.physical_operand(&region.iterable);
-            if code.native_suspension {
-                code.call_position(region.iterable_range);
-            }
-            code.op(region.acquire.runtime_op(), &[&value])
+        let cursor = self.acquire_iterator(region.acquire, |code| {
+            code.physical_operand(&region.iterable)
         });
 
         let guarded = match &region.target {

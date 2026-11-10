@@ -1623,7 +1623,7 @@ mod tests {
         let pair_header = "def f(rows):\n    for x, y in rows:";
         for (header, body, guarded) in [
             (pair_header, mixed, true),
-            ("def f():\n    for x, y in (yield 'rows'):", checked, true),
+            ("def f():\n    for x, y in (yield 'rows'):", checked, false),
             (pair_header, annotated, false),
             (pair_header, checked, false),
             (pair_header, checked_default, false),
@@ -1658,7 +1658,7 @@ mod tests {
                 let crate::frontend::SourceEffect::For(region) = &run.effect else {
                     panic!("expected a prepared for in {source}");
                 };
-                assert!(matches!(region.acquire, crate::ir::IteratorOp::Loop));
+                assert!(matches!(region.acquire, crate::ir::IteratorOp::Loop(_)));
                 let crate::frontend::PhysicalBinding::Checked {
                     entered,
                     binding,
