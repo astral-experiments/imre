@@ -92,6 +92,14 @@ pub(crate) fn registered(
         }
         result = match node {
             ir::Node::Statement(Statement::Assign(slot, _)) => local(*slot),
+            ir::Node::Statement(Statement::With {
+                binding: Some(binding),
+                ..
+            }) => require(
+                frame.locals.get(binding.entered) == Some(&Type::PythonObject)
+                    && private.contains(&binding.entered),
+                "context binding needs a private entered-value slot",
+            ),
             ir::Node::Statement(Statement::IterNext {
                 kind: ir::IterNextKind::Async(_),
                 iterator,
@@ -329,9 +337,10 @@ impl Verifier<'_> {
             Statement::Assign(slot, value) => same(value.ty, self.local(*slot)?),
             Statement::Move(target, source) => same(self.local(*source)?, self.local(*target)?),
             Statement::Clear(slot) => self.local(*slot).map(|_| ()),
-            Statement::With { entered, body, .. } => {
-                if let Some(slot) = entered {
-                    same(self.local(*slot)?, Type::PythonObject)?;
+            Statement::With { binding, body, .. } => {
+                if let Some(binding) = binding {
+                    same(self.local(binding.entered)?, Type::PythonObject)?;
+                    self.block(&binding.body)?;
                 }
                 self.block(body)
             }

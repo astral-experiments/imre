@@ -253,13 +253,14 @@ fn inspect(
             }
             Statement::With {
                 manager,
-                entered,
+                binding,
                 body,
                 ..
             } => {
                 inspect_expression(manager, candidates, producers);
-                if let Some(slot) = entered {
-                    candidates[*slot].eligible = false;
+                if let Some(binding) = binding {
+                    candidates[binding.entered].eligible = false;
+                    inspect(&binding.body, candidates, producers, fresh);
                 }
                 inspect(body, candidates, producers, fresh);
             }

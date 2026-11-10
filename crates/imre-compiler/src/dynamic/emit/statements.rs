@@ -1428,17 +1428,7 @@ impl<'p> Function<'_, 'p> {
             let (cleanup, outer) = &region;
             let previous = std::mem::replace(&mut self.body.error_target, outer.clone());
             match cleanup {
-                Cleanup::With(context) => {
-                    if context.is_async {
-                        let slot = self
-                            .live
-                            .iter()
-                            .rposition(|v| v == &context.callable)
-                            .unwrap();
-                        discarded.push((slot, self.live.remove(slot)));
-                    }
-                    self.exit_context(context, None);
-                }
+                Cleanup::With(context) => self.leave_context(context, &mut discarded),
                 Cleanup::ExceptionName(name) => self.clear_exception_name(name),
                 Cleanup::RetainedValue {
                     value,
@@ -1492,7 +1482,6 @@ impl<'p> Function<'_, 'p> {
         let inputs = &self.source.statement_sites.contexts[&source.range()];
         self.with_contexts(
             inputs.iter().map(|input| input.site),
-            source.is_async,
             |code, i| match &inputs[i].manager {
                 Some(manager) => code.with_expression_range(inputs[i].site.range, |code| {
                     code.registered_value(manager)

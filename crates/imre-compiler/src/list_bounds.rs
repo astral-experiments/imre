@@ -163,9 +163,17 @@ impl Analysis<'_> {
                     }
                     self.loop_body(None, body, orelse, state);
                 }
-                Statement::With { manager, body, .. } => {
+                Statement::With {
+                    manager,
+                    binding,
+                    body,
+                    ..
+                } => {
                     self.expression(manager, state);
                     state.fill(None);
+                    if let Some(binding) = binding {
+                        self.block(&mut binding.body, state);
+                    }
                     self.block(body, state);
                     state.fill(None);
                 }

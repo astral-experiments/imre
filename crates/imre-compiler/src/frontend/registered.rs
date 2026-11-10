@@ -843,10 +843,9 @@ impl ContextTarget {
         let operations = HashMap::new();
         let sites = StatementSites::default();
         let mut scope = SourceScope::new(kind, source, &operations, &sites);
-        let Ok((entered, binding)) = scope.with_binding(target) else {
+        let Ok(ir::ContextBinding { entered, body }) = scope.with_binding(target) else {
             return Self::Residual;
         };
-        let body = vec![binding];
         if PhysicalRegion::Fallthrough.accepts(&body) {
             Self::Checked {
                 entered,
@@ -898,7 +897,7 @@ fn statement_sites(
                     .items
                     .iter()
                     .map(|item| ContextInput {
-                        site: context_site(self.source.text, &item.context_expr),
+                        site: context_site(self.source.text, &item.context_expr, with.is_async),
                         manager: None,
                         target: if item.optional_vars.is_some() {
                             ContextTarget::Residual
@@ -1276,7 +1275,7 @@ fn delete_targets(delete: &ast::StmtDelete) -> Vec<&ast::Expr> {
 
 /// Resolve the implicit manager protocol's source anchor while its syntax and
 /// original source text are available. LLVM only converts accepted offsets to columns.
-fn context_site(source: &str, manager: &ast::Expr) -> ir::ContextSite {
+fn context_site(source: &str, manager: &ast::Expr, is_async: bool) -> ir::ContextSite {
     let range = manager.range();
     let delimiter = match manager {
         ast::Expr::Call(call) => Some((call.func.end(), b'(')),
@@ -1293,7 +1292,11 @@ fn context_site(source: &str, manager: &ast::Expr) -> ir::ContextSite {
             )
         })
         .map_or(range.start(), |offset| TextSize::try_from(offset).unwrap());
-    ir::ContextSite { range, anchor }
+    ir::ContextSite {
+        is_async,
+        range,
+        anchor,
+    }
 }
 
 pub(crate) fn attribute_write(stmt: &ast::Stmt) -> Option<AttributeEffect<'_>> {
@@ -1595,7 +1598,7 @@ impl statements::StatementLowering for SourceScope<'_> {
                     true,
                 ))
             }
-            ast::Stmt::With(stmt) if !stmt.is_async => Ok((
+            ast::Stmt::With(stmt) if !stmt.is_async || self.async_iteration() => Ok((
                 self.with_items(&stmt.items, &self.sites.contexts[&stmt.range()], &stmt.body)?,
                 true,
             )),
@@ -1874,6 +1877,10 @@ impl PhysicalRegion {
                 kind: ir::IterNextKind::Async(_),
                 ..
             })
+            | ir::Node::Statement(Statement::With {
+                site: ir::ContextSite { is_async: true, .. },
+                ..
+            })
             | ir::Node::Expression(Expr {
                 kind: ExprKind::Builtin(Builtin::RegisteredSuspend(..), _),
                 ..
@@ -1962,17 +1969,17 @@ impl SourceScope<'_> {
         self.block(stmts).map(|(body, _)| body)
     }
 
-    fn with_binding(&mut self, target: &ast::Expr) -> StdResult<(usize, Statement), ()> {
+    fn with_binding(&mut self, target: &ast::Expr) -> StdResult<ir::ContextBinding, ()> {
         let slot = self.hidden(Type::PythonObject);
         let body =
             unpacking::bind_targets(self, target, Expr::local(slot, Type::PythonObject), None)?;
-        Ok((
-            slot,
-            Statement::Scope {
+        Ok(ir::ContextBinding {
+            entered: slot,
+            body: vec![Statement::Scope {
                 body,
                 clear: vec![slot],
-            },
-        ))
+            }],
+        })
     }
 
     fn with_items(
@@ -1986,19 +1993,16 @@ impl SourceScope<'_> {
         };
         let manager = self.ordinary_operand(&item.context_expr).ok_or(())?;
         let (input, remaining) = inputs.split_first().expect("with input");
-        let mut body = Vec::new();
-        let entered = if let Some(target) = &item.optional_vars {
-            let (slot, binding) = self.with_binding(target)?;
-            body.push(binding);
-            Some(slot)
-        } else {
-            None
-        };
-        body.extend(self.with_items(rest, remaining, suite)?);
+        let binding = item
+            .optional_vars
+            .as_ref()
+            .map(|target| self.with_binding(target))
+            .transpose()?;
+        let body = self.with_items(rest, remaining, suite)?;
         Ok(vec![Statement::With {
             manager,
             site: input.site,
-            entered,
+            binding,
             body,
         }])
     }
@@ -3720,11 +3724,12 @@ mod tests {
         let mut filters = 0;
         ir::walk_statements(&checked.function.body, &mut |stmt| match stmt {
             Statement::With {
-                entered: Some(slot),
-                body,
+                binding: Some(binding),
                 ..
             } => {
-                assert!(matches!(&body[0], Statement::Scope { clear, .. } if clear == &[*slot]));
+                assert!(
+                    matches!(binding.body.as_slice(), [Statement::Scope { clear, .. }] if clear == &[binding.entered])
+                );
                 targets += 1;
             }
             Statement::Try { handlers, .. } => {

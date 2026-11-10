@@ -519,7 +519,12 @@ impl Analyzer {
         self.block(&function.body, State::unknown(function.locals.len()), true);
     }
 
-    fn block(&mut self, statements: &[Statement], state: State, record: bool) -> Flow {
+    fn block<'s>(
+        &mut self,
+        statements: impl IntoIterator<Item = &'s Statement>,
+        state: State,
+        record: bool,
+    ) -> Flow {
         let mut flow = Flow::next(state);
         for statement in statements {
             let Some(state) = flow.next.take() else { break };
@@ -589,10 +594,16 @@ impl Analyzer {
                 }
                 return flow;
             }
-            Statement::With { manager, body, .. } => {
+            Statement::With {
+                manager,
+                binding,
+                body,
+                ..
+            } => {
                 self.expression(manager, &mut state, record);
                 let unknown = State::unknown(state.0.len());
-                let mut flow = self.block(body, unknown.clone(), record);
+                let protected = binding.iter().flat_map(|binding| &binding.body).chain(body);
+                let mut flow = self.block(protected, unknown.clone(), record);
                 flow.next = Some(unknown);
                 return flow;
             }

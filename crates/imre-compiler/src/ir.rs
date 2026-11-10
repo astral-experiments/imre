@@ -3188,11 +3188,19 @@ pub(crate) struct ExceptHandler {
     pub body: Vec<Statement>,
 }
 
-/// The context expression's full range and its single-line traceback anchor.
+/// The manager protocol and the context expression's traceback position.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ContextSite {
+    pub is_async: bool,
     pub range: ruff_text_size::TextRange,
     pub anchor: ruff_text_size::TextSize,
+}
+
+/// The enter result stays live through this protected assignment, before the suite.
+#[derive(Clone)]
+pub(crate) struct ContextBinding {
+    pub entered: usize,
+    pub body: Vec<Statement>,
 }
 
 #[derive(Clone)]
@@ -3314,7 +3322,7 @@ pub(crate) enum Statement {
     With {
         manager: Expr,
         site: ContextSite,
-        entered: Option<usize>,
+        binding: Option<ContextBinding>,
         body: Vec<Statement>,
     },
     /// Handlers protect only `body`; `finalbody` runs for every exit reason.
@@ -3379,8 +3387,16 @@ macro_rules! statement_children {
                 ($expression)(a);
                 ($expression)(b);
             }
-            Statement::With { manager, body, .. } => {
+            Statement::With {
+                manager,
+                binding,
+                body,
+                ..
+            } => {
                 ($expression)(manager);
+                if let Some(ContextBinding { body, .. }) = binding {
+                    ($suite)(body);
+                }
                 ($suite)(body);
             }
             Statement::Scope { body, .. } => ($suite)(body),
@@ -3797,9 +3813,9 @@ fn node_writes(node: Node<'_>, visit: &mut impl FnMut(usize, Option<&Expr>)) {
             }
         }
         Statement::With {
-            entered: Some(slot),
+            binding: Some(binding),
             ..
-        } => visit(*slot, None),
+        } => visit(binding.entered, None),
         Statement::For {
             target,
             cursor,

@@ -675,8 +675,9 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     }
 
     /// Pass consecutive private roots in place. Mixed or discontiguous roots need a snapshot.
-    fn live_handles(&mut self) -> (String, usize) {
-        if self.live.is_empty()
+    fn live_handles(&mut self, trailing: &[&str]) -> (String, usize) {
+        if trailing.is_empty()
+            && self.live.is_empty()
             && let Some(first) = self.live_slots.first()
             && self
                 .live_slots
@@ -706,16 +707,23 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             }
             copied += len;
         }
-        let count = prefix + copied;
-        self.max_live = self.max_live.max(count);
-        (if count == 0 { "null" } else { "%live" }.to_owned(), count)
+        let (ptr, count) = self.write_handles_at(prefix + copied, trailing);
+        (ptr.to_owned(), count)
     }
 
     /// Copy evaluated handles into reusable storage in this activation's entry block.
     pub(crate) fn handle_array(&mut self, values: &[impl AsRef<str>]) -> (&'static str, usize) {
-        let count = values.len();
+        self.write_handles_at(0, values)
+    }
+
+    fn write_handles_at(
+        &mut self,
+        offset: usize,
+        values: &[impl AsRef<str>],
+    ) -> (&'static str, usize) {
+        let count = offset + values.len();
         self.max_live = self.max_live.max(count);
-        for (i, value) in values.iter().enumerate() {
+        for (i, value) in (offset..).zip(values) {
             let value = value.as_ref();
             let ptr = self.value(&format!("getelementptr i64, ptr %live, i64 {i}"));
             self.line(&format!("store i64 {value}, ptr {ptr}"));
@@ -724,7 +732,12 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     }
 
     pub(crate) fn checkpoint(&mut self, range: TextRange) {
-        let (ptr, count) = self.live_handles();
+        self.checkpoint_with_roots(range, &[]);
+    }
+
+    /// Place temporary operands after all outer frame roots, including private slots.
+    pub(super) fn checkpoint_with_roots(&mut self, range: TextRange, trailing: &[&str]) {
+        let (ptr, count) = self.live_handles(trailing);
         let line = self.positions.line(range.start());
         self.position = SourcePosition::statement(line);
         self.line(&format!(
@@ -857,7 +870,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         if let Some((mark, value)) = expression {
             self.line(&format!("call void @imre_dyn_named_assignment(ptr %ctx, i64 {mark}, i64 {value}, i64 {replaced})"));
         } else {
-            let (ptr, count) = self.live_handles();
+            let (ptr, count) = self.live_handles(&[]);
             self.line(&format!("call void @imre_dyn_assignment_target(ptr %ctx, ptr {ptr}, i64 {count}, i64 {replaced})"));
         }
     }

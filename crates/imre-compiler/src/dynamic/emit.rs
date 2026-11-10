@@ -1358,19 +1358,21 @@ mod tests {
         assert!(!residual(index), "for entry in entries still uses source");
         let last = main.body.last().unwrap().as_try_stmt().unwrap();
         assert!(last.body[0].as_with_stmt().unwrap().is_async);
-        assert!(residual(main.body.len() - 1));
+        let task_group = main.body.len() - 1;
+        assert!(!residual(task_group), "async TaskGroup still uses source");
 
         let before = module.standalone().unwrap().unwrap();
-        // Keep the indices of physical siblings while withdrawing the entire loop.
-        let slot = &mut module.syntax.as_mut().unwrap().to_mut()[definition]
+        let body = &mut module.syntax.as_mut().unwrap().to_mut()[definition]
             .as_function_def_stmt_mut()
             .unwrap()
-            .body[index];
-        *slot = ast::StmtPass {
-            node_index: Default::default(),
-            range: slot.range(),
+            .body;
+        for i in [index, task_group] {
+            body[i] = ast::StmtPass {
+                node_index: Default::default(),
+                range: body[i].range(),
+            }
+            .into();
         }
-        .into();
         assert!(module.standalone().unwrap().unwrap() == before);
     }
 
@@ -1667,6 +1669,32 @@ mod tests {
         assert!(matches!(&inputs[0].target, ContextTarget::Absent));
         assert!(matches!(&inputs[1].target, ContextTarget::Checked { .. }));
         context.items.clear();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
+    fn async_with_owns_its_checked_binding_and_return() {
+        let mut prepared = PreparedBody::module(
+            "program",
+            Path::new("program.py"),
+            "async def use(manager):\n    async with manager as value:\n        return value\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let original = prepared.standalone().unwrap().unwrap();
+        let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let suite = &prepared.source.function_bodies[&function.start()];
+        assert!(suite.fully_checked());
+        assert!(suite.checked.function.body.iter().any(|statement| matches!(
+            statement,
+            crate::ir::Statement::With { binding: Some(_), site, .. } if site.is_async
+        )));
+        let context = function.body[0].as_with_stmt_mut().unwrap();
+        context.items.clear();
+        context.body.clear();
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
     }
 
