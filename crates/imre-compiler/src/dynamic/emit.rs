@@ -699,17 +699,21 @@ impl<'a> PreparedBody<'a, '_> {
             &self.source.scopes.module_globals,
         );
         let module_function = |frame, sites| {
-            let mut function = location.function(frame, String::new(), false, true);
-            function.sites = sites;
+            let mut function = location.function(frame, sites, String::new(), false, true);
             function
                 .declared_globals
                 .clone_from(&self.source.scopes.module_globals);
             function
         };
         if suite.fully_checked() {
-            if !self.source.initializer_sites.is_empty() {
+            let remaining = location.place_module_callables(
+                frame.output,
+                &mut sites,
+                &self.source.initializer_sites,
+            );
+            if !remaining.is_empty() {
                 let mut function = module_function(frame, sites);
-                for &site in &self.source.initializer_sites {
+                for &site in remaining {
                     function.prepare_site(site);
                 }
                 (frame, sites) = (function.frame, function.sites);
@@ -1043,12 +1047,13 @@ impl SourceMap<'_> {
     fn function<'a, 'p>(
         &'p self,
         frame: RegisteredFrame<'a, 'p>,
+        sites: sites::CheckedSites,
         prefix: String,
         in_function: bool,
         module: bool,
     ) -> Function<'a, 'p> {
         Function {
-            sites: sites::CheckedSites::default(),
+            sites,
             frame,
             source: self,
             in_function,
@@ -1124,7 +1129,13 @@ impl SourceMap<'_> {
             Body::Function(..) => start.and_then(|key| self.function_bodies.get(&key)?.suite()),
             _ => None,
         };
-        let mut f = self.function(frame, prefix, in_function, false);
+        let mut f = self.function(
+            frame,
+            sites::CheckedSites::default(),
+            prefix,
+            in_function,
+            false,
+        );
         f.is_async = matches!(
             suspension,
             imre_ast::code_flags::COROUTINE | imre_ast::code_flags::ASYNC_GENERATOR
