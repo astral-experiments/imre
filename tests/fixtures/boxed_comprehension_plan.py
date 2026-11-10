@@ -20,6 +20,9 @@ def synchronous():
 
     callbacks = [lambda: x for x in (1, 2, 3)]
     print("closure", [call() for call in callbacks], x)
+    templates = [t"{x}" for x in ("one", "two")]
+    assert [template.interpolations[0].value for template in templates] == ["one", "two"]
+
     print("set", sorted({x for x, y in [(2, 0), (1, 1), (2, 2)] if y}))
 
     events.clear()

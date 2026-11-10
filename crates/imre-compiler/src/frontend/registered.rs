@@ -2,6 +2,7 @@
 
 use super::*;
 
+mod eager;
 mod lambdas;
 pub(crate) use lambdas::RegisteredLambda;
 mod templates;
@@ -666,6 +667,8 @@ impl<'a> SuitePreparation<'a> {
             source: self.source,
             assertions: &self.assertions,
             names: HashMap::new(),
+            namespaces: HashMap::new(),
+            comprehension: None,
             locals: Vec::new(),
             loop_depth: 0,
         };
@@ -678,6 +681,7 @@ impl<'a> SuitePreparation<'a> {
                 if scope.locals.len() != slots_before {
                     scope.locals.truncate(slots_before);
                     scope.names.retain(|_, slot| *slot < slots_before);
+                    scope.namespaces.retain(|slot, _| *slot < slots_before);
                 }
                 SourceRun::record(&mut residual, i, body.len());
             }
@@ -703,6 +707,7 @@ impl<'a> SuitePreparation<'a> {
                             },
                         )
                     })
+                    .chain(scope.namespaces)
                     .collect(),
             },
             residual,
@@ -1050,6 +1055,8 @@ struct SourceScope<'a> {
     operations: &'a HashMap<TextRange, Expr>,
     source: values::RegisteredSource<'a>,
     names: HashMap<String, usize>,
+    namespaces: HashMap<usize, LocalBinding>,
+    comprehension: Option<eager::Namespace>,
     locals: Vec<Type>,
     loop_depth: usize,
 }
@@ -1142,6 +1149,13 @@ impl SourceScope<'_> {
     }
 
     fn store(&mut self, name: &str, value: Expr) -> Statement {
+        if let Some(slot) = self
+            .comprehension
+            .as_ref()
+            .and_then(|scope| scope.targets.get(name))
+        {
+            return Statement::Assign(*slot, value);
+        }
         let slot = self.slot(name);
         if matches!(self.kind, RegisteredScope::Module) {
             Statement::Expr(operation(Builtin::GlobalSet(slot), Type::None, vec![value]))
@@ -1151,8 +1165,16 @@ impl SourceScope<'_> {
     }
 
     fn ordinary_operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
-        let value = if let ast::Expr::Lambda(lambda) = expr {
-            let binding = values::checked_binding(lambda, self.source)?;
+        let mut value = if matches!(
+            expr,
+            ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_)
+        ) {
+            self.eager_comprehension(expr)?
+        } else if let ast::Expr::Lambda(lambda) = expr {
+            values::checked_binding(lambda, self.source)?;
+            let binding =
+                values::lambda_binding(lambda, |default| self.ordinary_operand(default).ok_or(()))
+                    .ok()?;
             if self.loop_depth != 0 {
                 // A default may suspend while its surrounding iteration cursor is live.
                 let mut suspends = false;
@@ -1184,6 +1206,13 @@ impl SourceScope<'_> {
             )
             .ok()??
         };
+        if let Some(scope) = &self.comprehension {
+            values::in_namespace(
+                expr,
+                &mut value,
+                Expr::local(scope.slot, Type::PythonObject),
+            );
+        }
         Some(self.source.located(expr, value))
     }
 
@@ -2082,8 +2111,11 @@ mod tests {
         let [_, Statement::Scope { body, clear }] = checked.function.body.as_slice() else {
             panic!("expected a checked assignment chain")
         };
-        let [Statement::Assign(slot, _), Statement::Expr(store), Statement::SetItem(_, _, last)] =
-            body.as_slice()
+        let [
+            Statement::Assign(slot, _),
+            Statement::Expr(store),
+            Statement::SetItem(_, _, last),
+        ] = body.as_slice()
         else {
             panic!("expected one RHS followed by the two target stores")
         };
