@@ -646,7 +646,6 @@ impl<'a> PreparedBody<'a> {
         let mut frame =
             RegisteredFrame::new(output, &positions, false, unit, self.source.module_start);
         let initializer = self.initializer();
-        let suite = initializer;
         let location = SourceMap {
             info: &self.source,
             callable_code: Default::default(),
@@ -665,29 +664,14 @@ impl<'a> PreparedBody<'a> {
             self.docstring.as_deref(),
             &self.source.scopes.module_globals,
         );
-        let module_function = |frame, sites| {
+        if initializer.fully_checked() {
+            location.place_module_callables(&mut frame, &mut sites, &self.source.initializer_sites);
+            frame.checked_body(&initializer.checked, &sites);
+        } else {
             let mut function = location.function(frame, sites, String::new(), false);
             function
                 .declared_globals
                 .clone_from(&self.source.scopes.module_globals);
-            function
-        };
-        if suite.fully_checked() {
-            let remaining = location.place_module_callables(
-                frame.output,
-                &mut sites,
-                &self.source.initializer_sites,
-            );
-            if !remaining.is_empty() {
-                let mut function = module_function(frame, sites);
-                for &site in remaining {
-                    function.prepare_site(site);
-                }
-                (frame, sites) = (function.frame, function.sites);
-            }
-            frame.checked_body(&suite.checked, &sites);
-        } else {
-            let mut function = module_function(frame, sites);
             function.physical_suite(initializer);
             frame = function.frame;
         }
@@ -977,19 +961,11 @@ impl SourceMap<'_> {
         for name in globals {
             frame.declare_global(name);
         }
-        let mut required = Vec::new();
-        sites::CheckedSites::visit(&checked.function.body, &mut |site| required.push(site));
-        let remaining = self
-            .frame_callables(&mut frame, &mut sites, prefix, globals, in_function)
-            .place_callables(&required);
-        if !remaining.is_empty() {
-            let mut f = self.function(frame, sites, prefix.to_owned(), in_function);
-            f.declared_globals.clone_from(globals);
-            for &site in remaining {
-                f.prepare_site(site);
-            }
-            (frame, sites) = (f.frame, f.sites);
-        }
+        let mut callables =
+            self.frame_callables(&mut frame, &mut sites, prefix, globals, in_function);
+        sites::CheckedSites::visit(&checked.function.body, &mut |site| {
+            callables.place_site(site)
+        });
         frame.checked_body(checked, &sites);
         frame
     }
@@ -1168,16 +1144,6 @@ impl Function<'_, '_> {
             .diagnostic
             .get_or_insert_with(|| self.source.diagnostic_at(range, reason));
         "0".into()
-    }
-
-    fn unsupported(&mut self, what: &str) -> String {
-        if self.native_suspension {
-            return self.build_diagnostic(&format!(
-                "unsupported {what} in a compiled suspended function"
-            ));
-        }
-        let what = self.text(what);
-        self.op("unsupported", &[&what])
     }
 }
 
