@@ -1,10 +1,12 @@
 //! Resolve declaration and annotation code sites before emitting the checked block.
-use super::super::sites::{AnnotationString, CompiledAlias, CompiledDefinition, Declaration};
+use super::super::sites::{
+    AnnotationString, CompiledAlias, CompiledDefinition, CompiledGenerator, Declaration,
+};
 use super::super::{AliasValue, Body, DefinitionName, DefinitionSite, Entry, Function, SourceInfo};
 use crate::frontend::{AnnotationCode, PreparedAnnotation};
 use crate::ir::{self, Builtin, Expr, ExprKind, Statement};
 use ruff_python_ast as ast;
-use ruff_text_size::{Ranged, TextSize};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 
 impl SourceInfo<'_> {
     pub(super) fn function_body<'s>(&self, def: &'s ast::StmtFunctionDef) -> Body<'s> {
@@ -172,7 +174,31 @@ impl Function<'_, '_> {
         }
     }
 
+    pub(in crate::dynamic::emit) fn prepare_generator(&mut self, site: TextRange) {
+        if self.sites.generators.contains_key(&site) {
+            return;
+        }
+        let body = &self.source.generators[&site].body;
+        let definition = self.compile_definition(
+            site.start(),
+            DefinitionName::Plain("<genexpr>"),
+            None,
+            None,
+            None,
+            Body::CheckedGenerator(site, body),
+        );
+        let targets = self.source.scopes.comprehension_targets[&site].clone();
+        self.sites.generators.insert(
+            site,
+            CompiledGenerator { definition, targets },
+        );
+    }
+
     fn prepare_site(&mut self, expression: &Expr) {
+        if let ExprKind::Builtin(Builtin::RegisteredGenerator(site, _), _) = &expression.kind {
+            self.prepare_generator(*site);
+            return;
+        }
         if let ExprKind::Builtin(Builtin::RegisteredTypeAlias(site), _) = &expression.kind {
             if !self.sites.aliases.contains_key(site) {
                 let body = self.source.type_aliases[site]
@@ -265,7 +291,7 @@ mod tests {
 
     #[test]
     fn forward_annotations_bind_the_compiled_child_and_preserve_residual_expressions() {
-        let source = "checked: 'select(Child)'\nclosure: '(lambda: Child)()'\nresidual: '(x for x in Child)'\ninvalid: 'Child['\n";
+        let source = "checked: 'select(Child)'\nclosure: '(lambda: Child)()'\ngenerator: '(x for x in Child)'\nresidual: 'resolve([Child for _ in (0,)])'\ninvalid: 'Child['\n";
         let body = PreparedBody::module(
             "example",
             Path::new("example.py"),
@@ -290,8 +316,14 @@ mod tests {
             crate::frontend::AnnotationCode::Checked(_)
         ));
         assert!(closure.scope.lambdas[&1.into()].body.is_some());
+        let generator = child("'(x for");
         assert!(matches!(
-            child("'(x for").code,
+            generator.code,
+            crate::frontend::AnnotationCode::Checked(_)
+        ));
+        assert_eq!(generator.scope.generators.len(), 1);
+        assert!(matches!(
+            child("'resolve(").code,
             crate::frontend::AnnotationCode::Residual(_)
         ));
         let mut output = Output::default();
@@ -303,7 +335,7 @@ mod tests {
             .filter(|line| line.contains("call void @imre_dyn_bind_expression("))
             .map(|line| line.rsplit_once("ptr ").unwrap().1.trim_end_matches(')'))
             .collect();
-        assert_eq!(children.len(), 3);
+        assert_eq!(children.len(), 4);
         assert_ne!(children[0], children[1]);
         for child in children {
             assert_eq!(

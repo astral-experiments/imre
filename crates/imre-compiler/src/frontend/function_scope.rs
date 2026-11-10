@@ -10,7 +10,7 @@ pub(crate) use type_parameters::{boxed_function_type_params, check_nonlocals};
 
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
-use ruff_text_size::{Ranged, TextSize};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 use serde_json::json;
 use std::collections::{BTreeSet, HashMap};
 
@@ -362,8 +362,8 @@ pub(crate) struct ScopeFacts {
     pub(crate) functions: HashMap<TextSize, NamedFunctionScope>,
     pub(crate) lambdas: HashMap<TextSize, FunctionScope>,
     pub(crate) aliases: HashMap<TextSize, FunctionScope>,
-    pub(crate) generators: HashMap<TextSize, FunctionScope>,
-    pub(crate) comprehension_targets: HashMap<TextSize, String>,
+    pub(crate) generators: HashMap<TextRange, FunctionScope>,
+    pub(crate) comprehension_targets: HashMap<TextRange, String>,
     pub(crate) classes: HashMap<TextSize, classes::ClassScope>,
     pub(crate) annotations: annotations::AnnotationScopes,
     pub(crate) module_globals: BTreeSet<String>,
@@ -502,7 +502,7 @@ impl<'a, A: FnMut(&ast::StmtTypeAlias), E: FnMut(&ast::Expr)> Visitor<'a> for Co
         } else if let Some(plan) = imre_ast::comprehension::Plan::from_expr(expr) {
             let targets: indexmap::IndexSet<String> = plan.collect_target_names();
             self.scopes.comprehension_targets.insert(
-                expr.start(),
+                expr.range(),
                 targets
                     .iter()
                     .map(String::as_str)
@@ -514,7 +514,7 @@ impl<'a, A: FnMut(&ast::StmtTypeAlias), E: FnMut(&ast::Expr)> Visitor<'a> for Co
                 let captures_class = names.reads.contains("__class__");
                 names.locals.insert(".0".into());
                 self.scopes.generators.insert(
-                    expr.start(),
+                    expr.range(),
                     FunctionScope::new(names, None, captures_class),
                 );
             }

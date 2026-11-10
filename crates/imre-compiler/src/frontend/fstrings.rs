@@ -247,6 +247,7 @@ mod tests {
         };
         let source = RegisteredSource {
             template_fields: None,
+            generators: None,
             lambdas: None,
             text,
             replacements: &literal_replacements(text, module.parsed.tokens()),

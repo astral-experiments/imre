@@ -153,6 +153,10 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                 uses_python_protocol = true;
                 !scoped || !operands.is_empty()
             }
+            ExprKind::Builtin(Builtin::RegisteredGenerator(_, scoped), operands) => {
+                uses_python_protocol = true;
+                ir::generator_operands(*scoped, operands).is_ok()
+            }
             ExprKind::Builtin(Builtin::RegisteredCompare(ops), values) => {
                 !ops.is_empty() && values.len() == ops.len() + 1
             }
@@ -942,6 +946,21 @@ impl Frame<'_, '_, '_> {
                     .map(|value| self.evaluate_eager_handle(value))
                     .collect::<Vec<_>>();
                 self.sites.bind_lambda(self.code, *site, &scope, &defaults)
+            }
+            (Builtin::RegisteredGenerator(site, scoped), operands) => {
+                let (scope, cursor) =
+                    ir::generator_operands(*scoped, operands).expect("checked generator operands");
+                let scope = scope
+                    .map(|scope| self.evaluate_handle(scope))
+                    .unwrap_or_else(|| self.code.scope.clone());
+                let mark = self.temporary_mark();
+                self.unwind_operands(&mark, |frame| {
+                    let cursor = frame.evaluate_handle(cursor);
+                    frame.keep_operands(&mark, &cursor, "0");
+                    let result = frame.sites.bind_generator(frame.code, *site, &scope, &cursor);
+                    frame.keep_operands(&mark, &result, "0");
+                    result
+                })
             }
             (Builtin::RegisteredDefinition(site), header) => {
                 let (prefix, arguments) = match site {

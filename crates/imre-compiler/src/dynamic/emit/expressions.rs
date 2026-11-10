@@ -238,6 +238,11 @@ impl Function<'_, '_> {
                     code.format_join(&mark, parts)
                 })
             }
+            ast::Expr::Generator(generator)
+                if self.source.generators.contains_key(&generator.range()) =>
+            {
+                self.prepared_generator(generator)
+            }
             expr if let Some(plan) = imre_ast::comprehension::Plan::from_expr(expr) => {
                 self.comprehension(expr, plan)
             }

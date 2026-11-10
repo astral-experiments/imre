@@ -1267,6 +1267,18 @@ impl Builtin {
     }
 }
 
+/// A generator binding consumes its acquired cursor in the defining scope.
+pub(crate) fn generator_operands(
+    scoped: bool,
+    args: &[Expr],
+) -> Result<(Option<&Expr>, &Expr), &'static str> {
+    match (scoped, args) {
+        (true, [scope, cursor]) => Ok((Some(scope), cursor)),
+        (false, [cursor]) => Ok((None, cursor)),
+        _ => Err("registered generator needs its outer cursor and any explicit scope"),
+    }
+}
+
 /// A call evaluates its callable or method receiver before the argument binder runs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RegisteredCall {
@@ -1953,6 +1965,9 @@ pub(crate) enum Builtin {
     /// Bind the prepared lambda at this site. An explicit lexical scope, when present,
     /// precedes the default values in Python parameter order.
     RegisteredLambda(ruff_text_size::TextSize, bool),
+    /// Instantiate a prepared generator child. Its acquired outer cursor follows any
+    /// explicit comprehension scope in the operands.
+    RegisteredGenerator(ruff_text_size::TextRange, bool),
     /// Construct a lazy alias whose value callable was checked at this declaration site.
     RegisteredTypeAlias(ruff_text_size::TextSize),
     RegisteredImport(NamespaceImport),

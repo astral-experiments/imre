@@ -209,6 +209,7 @@ pub(super) fn test_annotation_body(
         replacements: &HashMap::new(),
         has_templates: false,
         template_fields: None,
+        generators: None,
         lambdas: None,
         method_imports: &Default::default(),
         private_names: None,
@@ -234,6 +235,7 @@ mod tests {
             method_imports: &Default::default(),
             private_names: None,
             template_fields: None,
+            generators: None,
             lambdas: None,
         };
         let mut namespace_annotations = HashMap::new();
@@ -295,6 +297,7 @@ mod tests {
             method_imports: &Default::default(),
             private_names: None,
             template_fields: None,
+            generators: None,
             lambdas: None,
         };
         let sites = annotation_operands(
@@ -357,6 +360,7 @@ after: K[L]
             method_imports: &Default::default(),
             private_names: None,
             template_fields: None,
+            generators: None,
             lambdas: None,
         };
         let mut groups = HashMap::new();

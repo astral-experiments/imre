@@ -113,6 +113,11 @@ impl CompiledDefinition {
     }
 }
 
+pub(crate) struct CompiledGenerator {
+    pub(crate) definition: CompiledDefinition,
+    pub(crate) targets: String,
+}
+
 pub(crate) struct CompiledAlias {
     pub(crate) definition: CompiledDefinition,
     pub(crate) parameters: Option<Vec<RegisteredTypeParameter>>,
@@ -151,6 +156,7 @@ pub(crate) struct CheckedSites {
     pub(crate) annotation_strings: HashMap<TextSize, AnnotationString>,
     pub(crate) definitions: HashMap<TextSize, Declaration>,
     pub(crate) lambdas: HashMap<TextSize, CompiledDefinition>,
+    pub(crate) generators: HashMap<TextRange, CompiledGenerator>,
     pub(crate) aliases: HashMap<TextSize, CompiledAlias>,
     pub(crate) annotation_fields: HashMap<TextSize, (String, TextRange)>,
 }
@@ -167,6 +173,19 @@ impl CheckedSites {
             frame.bind_annotation_expression(&text, code);
         }
         text
+    }
+
+    pub(crate) fn bind_generator(
+        &self,
+        frame: &mut RegisteredFrame<'_, '_>,
+        site: TextRange,
+        scope: &str,
+        cursor: &str,
+    ) -> String {
+        let child = &self.generators[&site];
+        let function = child.definition.bind_defaults(frame, scope, &[]);
+        let targets = frame.text(&child.targets);
+        frame.op("generator", &[&function, cursor, &targets])
     }
 
     pub(crate) fn bind_lambda(

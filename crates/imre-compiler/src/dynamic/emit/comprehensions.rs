@@ -9,6 +9,18 @@ use ruff_text_size::Ranged;
 use super::{Body, DefinitionName, Function};
 
 impl Function<'_, '_> {
+    /// The child may be checked even when the enclosing iterator expression is residual.
+    pub(super) fn prepared_generator(&mut self, generator: &ast::ExprGenerator) -> String {
+        self.iteration_result(|f| {
+            let outer = imre_ast::comprehension::outer_clause(&generator.generators);
+            let cursor = f.iteration_cursor(&outer.iter, false);
+            let site = generator.range();
+            f.prepare_generator(site);
+            let scope = f.scope.clone();
+            f.sites.bind_generator(&mut f.frame, site, &scope, &cursor)
+        })
+    }
+
     pub(super) fn comprehension(&mut self, expr: &ast::Expr, plan: Plan<'_>) -> String {
         self.iteration_result(|f| f.emit_comprehension(expr, plan))
     }
@@ -32,7 +44,7 @@ impl Function<'_, '_> {
         };
         let targets = self
             .frame
-            .text(&self.source.scopes.comprehension_targets[&expr.start()]);
+            .text(&self.source.scopes.comprehension_targets[&expr.range()]);
         if let ast::Expr::Generator(generator) = expr {
             let function = self.define(
                 generator.start(),
@@ -40,7 +52,7 @@ impl Function<'_, '_> {
                 None,
                 None,
                 None,
-                Body::Generator(&plan),
+                Body::Generator(generator.range(), &plan),
             );
             return self.op("generator", &[&function, &iterator, &targets]);
         }
