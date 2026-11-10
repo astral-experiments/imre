@@ -77,7 +77,13 @@ pub(super) fn construct(
             let number = match storage.map(|id| ctx.heap.get(id)) {
                 None => crate::Int::from(0),
                 Some(Value::Str(s)) if value == storage => {
-                    crate::integer_text::parse_radix(s, radix as u32)?
+                    if base.is_none()
+                        && let Some(digit) = crate::integer_text::single_decimal_digit(s)
+                    {
+                        crate::Int::from(i64::from(digit))
+                    } else {
+                        crate::integer_text::parse_radix(s, radix as u32)?
+                    }
                 }
                 Some(Value::Str(_) | Value::SurrogateStr(_)) => {
                     parse_integer_string(ctx, value.unwrap(), radix as u32)?
