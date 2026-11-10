@@ -911,7 +911,6 @@ impl SourceMap<'_> {
             frame,
             source: self,
             in_function,
-            is_async: false,
             declared_globals: Default::default(),
             prefix,
             exits: Vec::new(),
@@ -950,6 +949,35 @@ impl SourceMap<'_> {
         site
     }
 
+    fn emit_checked_body<'a, 'p>(
+        &'p self,
+        mut frame: RegisteredFrame<'a, 'p>,
+        mut sites: sites::CheckedSites,
+        checked: &crate::frontend::RegisteredFunction,
+        globals: &BTreeSet<String>,
+        prefix: &str,
+        in_function: bool,
+    ) -> RegisteredFrame<'a, 'p> {
+        for name in globals {
+            frame.declare_global(name);
+        }
+        let mut required = Vec::new();
+        sites::CheckedSites::visit(&checked.function.body, &mut |site| required.push(site));
+        let remaining = self
+            .frame_callables(&mut frame, &mut sites, prefix, globals, in_function)
+            .place_callables(&required);
+        if !remaining.is_empty() {
+            let mut f = self.function(frame, sites, prefix.to_owned(), in_function);
+            f.declared_globals.clone_from(globals);
+            for &site in remaining {
+                f.prepare_site(site);
+            }
+            (frame, sites) = (f.frame, f.sites);
+        }
+        frame.checked_body(checked, &sites);
+        frame
+    }
+
     fn code(
         &self,
         output: &mut Output,
@@ -971,63 +999,62 @@ impl SourceMap<'_> {
             self.module_start,
         );
         frame.async_generator = suspension == imre_ast::code_flags::ASYNC_GENERATOR;
-        let source_function = |frame, sites, prefix| {
-            let mut f = self.function(frame, sites, prefix, in_function);
-            f.is_async = matches!(
-                suspension,
-                imre_ast::code_flags::COROUTINE | imre_ast::code_flags::ASYNC_GENERATOR
-            );
-            f
-        };
+        let source_function =
+            |frame, sites, prefix| self.function(frame, sites, prefix, in_function);
         let mut sites = sites::CheckedSites::default();
         let frame = match body {
-            Body::Checked(checked, globals) => {
-                let empty = BTreeSet::new();
-                let globals = globals.unwrap_or(&empty);
-                for name in globals {
-                    frame.declare_global(name);
-                }
-                let mut required = Vec::new();
-                sites::CheckedSites::visit(&checked.function.body, &mut |site| required.push(site));
-                let remaining = self
-                    .frame_callables(&mut frame, &mut sites, &prefix, globals, in_function)
-                    .place_callables(&required);
-                if !remaining.is_empty() {
-                    let mut f = source_function(frame, sites, prefix);
-                    f.declared_globals.clone_from(globals);
-                    for &site in remaining {
-                        f.prepare_site(site);
-                    }
-                    (frame, sites) = (f.frame, f.sites);
-                }
-                frame.checked_body(checked, &sites);
-                frame
-            }
+            Body::Checked(checked, globals) => self.emit_checked_body(
+                frame,
+                sites,
+                checked,
+                globals.unwrap_or(&BTreeSet::new()),
+                &prefix,
+                in_function,
+            ),
             Body::Namespace => {
                 let site = start.expect("class definition");
-                frame.class_locals = Some(self.scopes.classes[&site].bindings.clone());
+                let class = &self.scopes.classes[&site];
+                let prepared = &self.class_bodies[&site];
+                frame.class_locals = Some(class.bindings.clone());
                 if let Some(entries) = self.namespace_annotations.get(&start) {
                     for &site in entries {
                         self.place_annotation_string(frame.output, &mut sites, site);
                     }
                 }
-                let mut f = source_function(frame, sites, prefix);
-                let prepared = &self.class_bodies[&site];
-                if f.output.keep_docstrings
+                if frame.output.keep_docstrings
                     && let Some(doc) = prepared.doc.as_deref().or_else(|| {
                         self.docs
                             .as_ref()?
-                            .object_docstring(f.prefix.trim_end_matches('.'))
+                            .object_docstring(prefix.trim_end_matches('.'))
                     })
                 {
-                    let value = f.text(doc);
-                    f.bind("__doc__", &value);
+                    let value = frame.text(doc);
+                    frame.bind("__doc__", &value);
                 }
-                let class = &self.scopes.classes[&site];
-                f.declare_globals(&class.bindings.globals);
-                f.physical_suite(&prepared.body);
-                f.finish_class_annotations(&class.annotations, &class.bindings.globals);
-                f.frame
+                let globals = &class.bindings.globals;
+                let mut frame = if prepared.body.fully_checked() {
+                    self.emit_checked_body(
+                        frame,
+                        sites,
+                        &prepared.body.checked,
+                        globals,
+                        &prefix,
+                        in_function,
+                    )
+                } else {
+                    let mut f = source_function(frame, sites, prefix.clone());
+                    f.declare_globals(globals);
+                    f.physical_suite(&prepared.body);
+                    f.frame
+                };
+                self.finish_class_annotations(
+                    &mut frame,
+                    &prefix,
+                    in_function,
+                    &class.annotations,
+                    globals,
+                );
+                frame
             }
             Body::Suite(suite) => {
                 let mut f = source_function(frame, sites, prefix);
@@ -1086,7 +1113,6 @@ struct Function<'a, 'p> {
     prefix: String,
     declared_globals: std::collections::BTreeSet<String>,
     in_function: bool,
-    is_async: bool,
     exits: Vec<crate::llvm::registered::context::Region<&'p crate::frontend::RegisteredSuite>>,
 }
 
