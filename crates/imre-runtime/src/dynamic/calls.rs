@@ -5472,10 +5472,10 @@ impl Context {
                 if matches!(name, "__base__" | "__bases__" | "__mro__")
                     && (builtins::CORE_RUNTIME_TYPES.contains(&class.as_str())
                         || class == defaultdict::CLASS
-                        || (name != "__base__" && builtins::is_exported_type(class))) =>
+                        || builtins::is_exported_type(class)) =>
             {
                 if name == "__base__" {
-                    return Ok(self.builtin(Self::native_base(class).unwrap_or("object")));
+                    return Ok(self.base_lineage(obj, true).get(1).copied().unwrap_or(NONE));
                 }
                 return Ok(self.builtin_hierarchy_tuple(obj, name));
             }

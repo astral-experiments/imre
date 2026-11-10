@@ -452,6 +452,9 @@ def check_subclass_hooks():
     class Rebound(Custom):
         pass
     assert events[-1] == "rebound"
+    assert object.__base__ is None
+    assert bool.__base__ is int
+    assert ExceptionGroup.__base__ is BaseExceptionGroup
     assert object.__init_subclass__.__self__ is object
     assert (2).__init_subclass__.__self__ is int
     try:
