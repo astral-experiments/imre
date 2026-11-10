@@ -376,6 +376,8 @@ impl Pending {
 #[derive(Default)]
 pub(super) struct Inference {
     pending: RefCell<Vec<Pending>>,
+    /// Physical first-party definitions still awaiting a recoverable checked body.
+    pub(super) pending_bodies: RefCell<Option<Vec<DefinitionId>>>,
     revision: Cell<usize>,
     widened: Cell<bool>,
 }
@@ -979,9 +981,15 @@ impl Inference {
         for (_, _, signature) in definitions.iter_mut() {
             self.update(signature);
         }
-        for signature in signatures.values_mut() {
+        let mut pending_bodies = Vec::new();
+        for (&owner, signature) in signatures.iter_mut() {
             self.update(signature);
+            // The ordinary definition pass owns registered argument frames.
+            if !signature.registered_frame() && graph.modules[owner.module].is_program_source() {
+                pending_bodies.push(owner);
+            }
         }
+        self.pending_bodies.replace(Some(pending_bodies));
         for methods in classes.methods.iter_mut().chain(&mut classes.setters) {
             for signature in methods.values_mut() {
                 self.update(signature);
