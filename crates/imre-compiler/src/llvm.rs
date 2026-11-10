@@ -332,6 +332,7 @@ enum Completion {
 #[derive(Debug)]
 pub(crate) struct Unsupported(pub(crate) &'static str);
 
+#[cfg(test)]
 pub(crate) fn emit(
     module: &Module,
     ranges: &RangeFacts<'_>,

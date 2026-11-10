@@ -746,9 +746,8 @@ pub(crate) struct RegisteredSources<'a> {
 }
 
 pub(crate) fn compile(
-    (path, module_root, mut filesystem, wheel_records): (
-        &Path,
-        Option<&Path>,
+    (operand, mut filesystem, wheel_records): (
+        crate::ProgramEntry<'_>,
         crate::watch::FileSystem<'_>,
         &mut crate::installed_wheels::WheelRecords,
     ),
@@ -759,6 +758,12 @@ pub(crate) fn compile(
     layout: crate::BoxedLayout<'_>,
     check: impl FnOnce(bool, Option<RegisteredSources<'_>>) -> Result<(), String>,
 ) -> Result<Option<UnitCompilation>, String> {
+    let (path, module_root, source_entry) = match operand {
+        crate::ProgramEntry::Source(_) => {
+            (Path::new(crate::modules::MEMORY_SOURCE_PATH), None, true)
+        }
+        crate::ProgramEntry::File(path, root) => (path, root, false),
+    };
     let invocation = options.command.as_ref();
     let startup = options.python_startup();
     let frozen_modules = startup.is_none_or(|(flags, _)| flags.frozen_modules);
@@ -774,7 +779,7 @@ pub(crate) fn compile(
     } else if let Some(graph) = file_entry {
         (
             graph.modules[graph.entry].original_source().to_owned(),
-            Some(graph.inputs.files[graph.entry].1.clone()),
+            (!source_entry).then(|| graph.inputs.files[graph.entry].1.clone()),
         )
     } else {
         // A direct .pyc operand already received its bytecode diagnostic from the script loader.
@@ -963,7 +968,11 @@ pub(crate) fn compile(
     first
         .names
         .extend(registered_imports.targets.into_iter().map(|name| (0, name)));
-    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+    let cwd = if source_entry {
+        PathBuf::from("/")
+    } else {
+        std::env::current_dir().map_err(|e| e.to_string())?
+    };
     let isolated = startup.is_some_and(|(flags, _)| flags.isolated);
     let entry = cwd.join(path);
     let root = if let Some(root) = module_root {
@@ -989,7 +998,8 @@ pub(crate) fn compile(
         // CPython preserves the directory spelling, including symlinks, and searches
         // an explicitly requested entry even when isolated startup omits the cwd.
         initial.push(entry.clone());
-    } else if !safe_path {
+    } else if !source_entry && !safe_path {
+        // The in-memory graph has a diagnostic filename, but no project import root.
         initial.push(root.clone());
     }
     // site removes duplicate startup paths before Python prepends path[0].
@@ -1018,6 +1028,7 @@ pub(crate) fn compile(
     let explicit_roots: Vec<_> = first
         .explicit_roots
         .iter()
+        .filter(|_| !source_entry)
         .map(|path| cwd.join(path))
         .collect();
     roots.extend(explicit_roots.iter().cloned());
@@ -1906,7 +1917,7 @@ pub(crate) fn compile(
         "bundled_root":bundled_root,
         "stdlib_fallback":stdlib_fallback,
         "stdlib_members":include_str!(concat!(env!("OUT_DIR"), "/imre-stdlib-members.txt")),
-        "sitecustomize":options.sitecustomize || options.stdlib_sitecustomize,"user_site_pth":options.user_site_pth,"after_user_site":after_user_site,"path0":options.path_entry || !safe_path,
+        "sitecustomize":options.sitecustomize || options.stdlib_sitecustomize,"user_site_pth":options.user_site_pth,"after_user_site":after_user_site,"path0":path0_len != 0,
         "bundle_entry":bundle_entry,
         "module_docs":{"json": keep_docstrings.then_some(include_str!("../../stdlib/docstrings/json.txt"))},
         "python_version":crate::PYTHON_VERSION.to_string(),

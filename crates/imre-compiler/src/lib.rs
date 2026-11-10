@@ -204,12 +204,21 @@ impl CompileOptions {
     }
 }
 
+/// The isolated source origin has a diagnostic filename but no filesystem search root.
+#[derive(Clone, Copy)]
+enum ProgramEntry<'a> {
+    Source(&'a str),
+    File(&'a Path, Option<&'a Path>),
+}
+
 /// Checks source syntax, ty diagnostics, and Imre's exact type contract.
 pub fn check(source: &str) -> Result<(), String> {
-    let mut graph = modules::SourceGraph::single(source)?;
-    graph.session.explicit_check = true;
-    let (module, _) = checked_lower(&mut graph)?.into_native()?;
-    verify_after(&module, "lowering")
+    check_with(
+        ProgramEntry::Source(source),
+        &CompileOptions::default(),
+        None,
+        Default::default(),
+    )
 }
 
 /// Compiles a checked module to LLVM IR; the resulting executable uses no CPython.
@@ -217,14 +226,14 @@ pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String>
     if options.entry_profile.is_some() {
         return Err("an entry profile requires a source file and its module name".to_owned());
     }
-    let (mut module, _) = checked_lower(&mut modules::SourceGraph::single_with_mode(
-        source,
-        options.reachable_only,
-    )?)?
-    .into_native()?;
-    specialize(&mut module)?;
-    let ranges = ranges::analyze(&module);
-    llvm::emit(&module, &ranges, options.address_sanitizer).map_err(|error| error.0.to_owned())
+    let options = CompileOptions {
+        target_os: options.target_os,
+        reachable_only: options.reachable_only,
+        address_sanitizer: options.address_sanitizer,
+        ..Default::default()
+    };
+    compile_with_layout(ProgramEntry::Source(source), &options, BoxedLayout::Whole)
+        .map(|product| product.into_whole().llvm_ir)
 }
 
 /// The generated IR and every source file that must be protected from output writes.
@@ -316,12 +325,26 @@ fn check_file_with(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
+    cache: Option<&mut IncrementalCompiler>,
+    filesystem: watch::FileSystem<'_>,
+) -> Result<(), String> {
+    check_with(
+        ProgramEntry::File(path, module_root),
+        options,
+        cache,
+        filesystem,
+    )
+}
+
+fn check_with(
+    entry: ProgramEntry<'_>,
+    options: &CompileOptions,
     mut cache: Option<&mut IncrementalCompiler>,
     filesystem: watch::FileSystem<'_>,
 ) -> Result<(), String> {
     object_fallback(
         BoxedLayout::Check,
-        (path, module_root),
+        entry,
         options,
         filesystem,
         |graph, call_error| {
@@ -385,7 +408,7 @@ enum BoxedLayout<'a> {
 /// Uses the boxed backend when the checked graph requires Python object operations.
 fn object_fallback(
     layout: BoxedLayout<'_>,
-    (path, module_root): (&Path, Option<&Path>),
+    entry: ProgramEntry<'_>,
     options: &CompileOptions,
     mut filesystem: watch::FileSystem<'_>,
     mut lower: impl FnMut(
@@ -412,8 +435,11 @@ fn object_fallback(
                 "--include-module requires a runtime module loader; this entry is fully typed"
                     .into(),
             )
-        } else if checking {
-            Ok(UnitCompilation::default())
+        } else if checking || matches!(entry, ProgramEntry::Source(_)) {
+            Ok(UnitCompilation {
+                units,
+                ..Default::default()
+            })
         } else {
             Ok(UnitCompilation::native(
                 graph,
@@ -435,13 +461,20 @@ fn object_fallback(
     let mut import_failure = None;
     let mut site_probes = modules::SiteProbes::default();
     let mut deferred_native = None;
-    let (mut refusal, graph) = match options.load_graph(
-        path,
-        module_root,
-        filesystem.reborrow(),
-        &mut import_failure,
-        &mut site_probes,
-    ) {
+    let loaded = match entry {
+        ProgramEntry::Source(source) => Ok(Some(modules::SourceGraph::single_with_mode(
+            source,
+            options.reachable_only,
+        )?)),
+        ProgramEntry::File(path, module_root) => options.load_graph(
+            path,
+            module_root,
+            filesystem.reborrow(),
+            &mut import_failure,
+            &mut site_probes,
+        ),
+    };
+    let (mut refusal, graph) = match loaded {
         Ok(Some(mut graph)) => {
             graph.registered_startup = boxed_startup;
             site_probes.record(&mut graph.inputs);
@@ -693,12 +726,7 @@ fn object_fallback(
         Ok(())
     };
     match dynamic::compile(
-        (
-            path,
-            module_root,
-            filesystem,
-            &mut site_probes.wheel_records,
-        ),
+        (entry, filesystem, &mut site_probes.wheel_records),
         options,
         object_imports,
         operation
@@ -721,8 +749,12 @@ pub fn compile_file(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<Compilation, String> {
-    compile_file_with_layout(path, module_root, options, BoxedLayout::Whole)
-        .map(UnitCompilation::into_whole)
+    compile_with_layout(
+        ProgramEntry::File(path, module_root),
+        options,
+        BoxedLayout::Whole,
+    )
+    .map(UnitCompilation::into_whole)
 }
 
 /// Preserves the whole-program IR and returns independent boxed initializers for native codegen.
@@ -732,9 +764,8 @@ pub fn compile_file_with_boxed_units(
     options: &CompileOptions,
 ) -> Result<(Compilation, Vec<CodegenUnit>), String> {
     let mut units = Vec::new();
-    let compilation = compile_file_with_layout(
-        path,
-        module_root,
+    let compilation = compile_with_layout(
+        ProgramEntry::File(path, module_root),
         options,
         BoxedLayout::WholeWithUnits(&mut units),
     )?;
@@ -747,13 +778,16 @@ pub fn compile_file_for_thin_lto(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<UnitCompilation, String> {
-    compile_file_with_layout(path, module_root, options, BoxedLayout::Split)
+    compile_with_layout(
+        ProgramEntry::File(path, module_root),
+        options,
+        BoxedLayout::Split,
+    )
 }
 
 /// Resolves and checks the source graph once for the requested boxed outputs.
-fn compile_file_with_layout(
-    path: &Path,
-    module_root: Option<&Path>,
+fn compile_with_layout(
+    entry: ProgramEntry<'_>,
     options: &CompileOptions,
     layout: BoxedLayout<'_>,
 ) -> Result<UnitCompilation, String> {
@@ -767,7 +801,7 @@ fn compile_file_with_layout(
     };
     object_fallback(
         layout,
-        (path, module_root),
+        entry,
         options,
         Default::default(),
         |graph, call_error| checked_lower_with(graph, None, call_error),
@@ -930,7 +964,7 @@ fn compile_file_units_with(
     };
     object_fallback(
         BoxedLayout::Split,
-        (path, module_root),
+        ProgramEntry::File(path, module_root),
         options,
         Default::default(),
         |graph, call_error| checked_lower_with(graph, cache.as_deref_mut(), call_error),
@@ -947,6 +981,7 @@ pub(crate) enum CheckedProgram {
     Runtime(LoweringDiagnostic),
 }
 
+#[cfg(test)]
 impl CheckedProgram {
     fn into_native(self) -> Result<CheckedIr, String> {
         match self {
@@ -979,17 +1014,10 @@ fn required_object_diagnostic(
     )
 }
 
+#[cfg(test)]
 fn checked_lower(graph: &mut modules::SourceGraph) -> Result<CheckedProgram, String> {
     let call_error = initializer_call_error(graph, false);
-    let program = checked_lower_with(graph, None, call_error.as_ref())?;
-    if let CheckedProgram::Native(ir) = &program
-        && let Some(error) = required_object_diagnostic(graph, &ir.0)
-        && matches!(error.kind, LoweringKind::Ordinary | LoweringKind::Object)
-    {
-        // Report the original operand when the in-memory entry cannot link its object operation.
-        return Ok(CheckedProgram::Runtime(error));
-    }
-    Ok(program)
+    checked_lower_with(graph, None, call_error.as_ref())
 }
 
 fn initializer_call_error(
@@ -1601,7 +1629,7 @@ print("result", call(b=2, a=1))
             let options = CompileOptions::default();
             let ordinary = super::object_fallback(
                 super::BoxedLayout::Check,
-                (&path, None),
+                super::ProgramEntry::File(&path, None),
                 &options,
                 Default::default(),
                 |graph, call_error| {
@@ -1637,7 +1665,7 @@ print("result", call(b=2, a=1))
         let mut passes = 0;
         let result = super::object_fallback(
             super::BoxedLayout::Check,
-            (&path, None),
+            super::ProgramEntry::File(&path, None),
             &CompileOptions::default(),
             Default::default(),
             |graph, call_error| {
@@ -1673,7 +1701,7 @@ print("result", call(b=2, a=1))
         let mut passes = Vec::new();
         let result = super::object_fallback(
             super::BoxedLayout::Check,
-            (&path, None),
+            super::ProgramEntry::File(&path, None),
             &options,
             Default::default(),
             |graph, call_error| {

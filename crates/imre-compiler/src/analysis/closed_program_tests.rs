@@ -383,7 +383,11 @@ fn retained_native_candidate_registers_its_original_source_owner() {
     fs::write(&external, replacement).unwrap();
     assert!(!graph.inputs.fresh());
     let compilation = crate::dynamic::compile(
-        (&entry, None, Default::default(), &mut Default::default()),
+        (
+            crate::ProgramEntry::File(&entry, None),
+            Default::default(),
+            &mut Default::default(),
+        ),
         &options,
         true,
         Some(crate::dynamic::ObjectOperation::CheckedEntry),
@@ -418,7 +422,11 @@ fn retained_native_candidate_registers_its_original_source_owner() {
     fs::create_dir(&package).unwrap();
     fs::write(package.join("__init__.py"), replacement).unwrap();
     let error = crate::dynamic::compile(
-        (&entry, None, Default::default(), &mut Default::default()),
+        (
+            crate::ProgramEntry::File(&entry, None),
+            Default::default(),
+            &mut Default::default(),
+        ),
         &options,
         true,
         Some(crate::dynamic::ObjectOperation::CheckedEntry),

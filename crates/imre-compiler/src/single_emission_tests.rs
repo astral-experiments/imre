@@ -18,7 +18,7 @@ fn bound_wrapper_emits_native_only_if_registration_declines() {
         let native_calls = Cell::new(0);
         let compilation = object_fallback(
             BoxedLayout::Whole,
-            (&path, None),
+            ProgramEntry::File(&path, None),
             &CompileOptions::default(),
             Default::default(),
             |graph, call_error| {
