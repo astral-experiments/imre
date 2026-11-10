@@ -3036,7 +3036,9 @@ impl SourceScope<'_> {
                         }
                         // The dictionary retains earlier operands while a key, value or spread suspends.
                         ast::Expr::Dict(_) => self.operand(child),
-                        ast::Expr::Set(_) | ast::Expr::Subscript(_) if child.is_await_expr() => {
+                        ast::Expr::Call(_) | ast::Expr::Set(_) | ast::Expr::Subscript(_)
+                            if child.is_await_expr() =>
+                        {
                             self.operand(child)
                         }
                         _ => self.ordinary_operand(child),
@@ -5074,9 +5076,13 @@ mod tests {
 
     #[test]
     fn awaited_calls_retain_the_checked_loop_cursor() {
-        let source =
-            "async def visit(rows, call):\n    for row in rows:\n        await call(row)\n";
-        assert_cursor_suspensions(source, &["await call(row)"]);
+        let source = concat!(
+            "async def visit(rows, call, results):\n",
+            "    for row in rows:\n",
+            "        await call(row)\n",
+            "        results.append(await row.value())\n",
+        );
+        assert_cursor_suspensions(source, &["await call(row)", "await row.value()"]);
     }
 
     #[test]
