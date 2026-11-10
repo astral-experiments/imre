@@ -178,6 +178,53 @@ mod tests {
     }
 
     #[test]
+    fn nested_async_child_awaits_a_lambda_default_in_its_own_frame() {
+        let graph = SourceGraph::single(
+            "async def make(rows, tags):\n    return ((lambda tag=tag, *, value=await fetch(x): (tag, value) async for x in rows) for tag in tags)\n",
+        )
+        .unwrap();
+        let module = &graph.modules[graph.entry];
+        let literals = values::ModuleSource::new(module);
+        let (_, sites) = prepare_expression_sites(
+            &module.parsed.syntax().body,
+            literals.context(&module.source),
+        );
+        assert_eq!(sites.len(), 2);
+        let (inner, child) = sites.iter().find(|(_, child)| child.is_async).unwrap();
+        let parent = sites.values().find(|child| !child.is_async).unwrap();
+        let mut references = Vec::new();
+        ir::walk_expressions(&parent.body.function.body, &mut |expr| {
+            if let ExprKind::Builtin(Builtin::RegisteredGenerator(range, _), _) = &expr.kind {
+                references.push(range);
+            }
+        });
+        assert_eq!(references, [inner]);
+
+        let mut bindings = Vec::new();
+        ir::walk_expressions(&child.body.function.body, &mut |expr| {
+            if let ExprKind::Builtin(Builtin::RegisteredLambda(_, false), defaults) = &expr.kind {
+                bindings.push(defaults.as_slice());
+            }
+        });
+        let [[first, second]] = bindings.as_slice() else {
+            panic!("expected one lambda with two defaults");
+        };
+        let mut operands = Vec::new();
+        for default in [first, second] {
+            ir::walk_operand_expressions(default, &mut |expr| match &expr.kind {
+                ExprKind::Builtin(Builtin::RegisteredName(name), _) if name == "tag" => {
+                    operands.push("tag");
+                }
+                ExprKind::Builtin(Builtin::RegisteredSuspend(ir::SuspendValue::Await, _), _) => {
+                    operands.push("await");
+                }
+                _ => {}
+            });
+        }
+        assert_eq!(operands, ["tag", "await"]);
+    }
+
+    #[test]
     fn nested_generators_starting_at_one_offset_reference_distinct_children() {
         let graph = SourceGraph::single("list((y for y in x) for x in rows)\n").unwrap();
         let module = &graph.modules[graph.entry];
