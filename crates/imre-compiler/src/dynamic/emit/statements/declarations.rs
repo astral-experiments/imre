@@ -554,7 +554,7 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert!(module.initializer().plan.fully_checked());
+        assert!(module.initializer().fully_checked());
         let mut output = Output::default();
         let file = output.data(b"children.py");
         let location = SourceMap {
@@ -608,8 +608,7 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert!(module.initializer().plan.fully_checked());
-        assert!(module.initializer().sources.is_empty());
+        assert!(module.initializer().fully_checked());
         let original = module.standalone().unwrap();
         assert!(module.syntax.take().is_some());
         assert_eq!(module.standalone().unwrap(), original);
@@ -633,7 +632,7 @@ mod tests {
             0,
             ModuleOrigin::Bundled,
             |module| {
-                let initializer = &module.initializer().plan;
+                let initializer = module.initializer();
                 assert!(initializer.fully_checked());
                 let mut bindings = 0;
                 crate::ir::walk_expressions(&initializer.checked.function.body, &mut |value| {

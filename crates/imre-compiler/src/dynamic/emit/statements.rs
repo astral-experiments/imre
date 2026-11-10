@@ -5,8 +5,7 @@ use super::sites::{CheckedSites, CompiledDefinition};
 use super::{AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourceMap};
 use crate::llvm::registered::context::{ContextEmitter, ContextRegion};
 use imre_ast::code_flags;
-use ruff_python_ast as ast;
-use ruff_text_size::{Ranged, TextRange, TextSize};
+use ruff_text_size::{TextRange, TextSize};
 use serde_json::json;
 
 use super::{Body, Cleanup, DefinitionName, Entry, Function};
@@ -160,11 +159,7 @@ impl<'p> Function<'_, 'p> {
         self.frame.registered_value(value, &self.sites)
     }
 
-    pub(super) fn checked_runs(
-        &mut self,
-        prepared: &'p crate::frontend::RegisteredSuite,
-        mut emit_source: impl FnMut(&mut Self, &'p crate::frontend::SourceRun),
-    ) {
+    pub(super) fn physical_suite(&mut self, prepared: &'p crate::frontend::RegisteredSuite) {
         let Some(enclosing) = self.frame.enter_checked_slots(prepared.checked.region()) else {
             return;
         };
@@ -174,7 +169,7 @@ impl<'p> Function<'_, 'p> {
             if offset < run.at && self.start_statement() {
                 self.checked_block(&body[offset..run.at], &prepared.checked);
             }
-            emit_source(self, run);
+            self.emit_effect(&run.effect);
             offset = run.at;
         }
         if offset < body.len() && self.start_statement() {
@@ -183,15 +178,7 @@ impl<'p> Function<'_, 'p> {
         self.frame.restore_checked_slots(enclosing);
     }
 
-    pub(super) fn source_run(
-        &mut self,
-        suite: &'p [ast::Stmt],
-        run: &'p crate::frontend::SourceRun,
-    ) {
-        let Some(effect) = &run.effect else {
-            self.source_statements(&suite[run.statements.clone()]);
-            return;
-        };
+    fn emit_effect(&mut self, effect: &'p SourceEffect) {
         if !self.start_statement() {
             return;
         }
@@ -231,7 +218,7 @@ impl<'p> Function<'_, 'p> {
                 );
             }
             SourceEffect::While(region) => self.prepared_while(region),
-            SourceEffect::RefusedOperand(range, reason) => {
+            SourceEffect::Refused(range, reason) => {
                 self.with_expression_range(*range, |code| code.build_diagnostic(reason));
             }
             SourceEffect::Value(output, inputs) => match output {
@@ -362,17 +349,6 @@ impl<'p> Function<'_, 'p> {
                 },
                 MatchRegion::Body(case) => self.physical_suite(&site.cases[case].body),
             }
-        }
-    }
-
-    pub(super) fn source_statements(&mut self, suite: &'p [ast::Stmt]) {
-        for stmt in suite {
-            if !self.start_statement() {
-                break;
-            }
-            self.checkpoint(&stmt.range());
-            self.simple_call = imre_ast::unhighlighted_call(stmt);
-            self.unsupported(&format!("{:?}", ast::AnyNodeRef::from(stmt).kind()));
         }
     }
 
@@ -747,12 +723,6 @@ impl<'p> Function<'_, 'p> {
                 }
             }),
         );
-    }
-
-    pub(super) fn physical_suite(&mut self, suite: &'p crate::frontend::PhysicalSuite) {
-        self.checked_runs(&suite.plan, |code, run| {
-            code.source_run(&suite.sources, run)
-        });
     }
 
     fn protected_suite(&mut self, region: &'p crate::frontend::PreparedTry) {

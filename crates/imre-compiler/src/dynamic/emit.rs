@@ -504,7 +504,7 @@ impl<'a> PreparedBody<'a> {
             };
             let checked_entry = match &body {
                 FunctionBody::Program(_) => true,
-                FunctionBody::Suite(suite) => site.prepare_entry && suite.plan.fully_checked(),
+                FunctionBody::Suite(suite) => site.prepare_entry && suite.fully_checked(),
             };
             function_bodies.insert(
                 start,
@@ -531,7 +531,7 @@ impl<'a> PreparedBody<'a> {
             parameter_annotations: sites.parameter_annotations,
             function_bodies,
             class_bodies,
-            initializer: initializer.map(|plan| crate::frontend::PhysicalSuite::new(plan, &body)),
+            initializer,
             initializer_sites,
             bundled,
             path,
@@ -610,7 +610,7 @@ impl<'a> PreparedBody<'a> {
         .flatten()
     }
 
-    fn initializer(&self) -> &crate::frontend::PhysicalSuite {
+    fn initializer(&self) -> &crate::frontend::RegisteredSuite {
         self.source
             .initializer
             .as_ref()
@@ -630,7 +630,7 @@ impl<'a> PreparedBody<'a> {
         let mut frame =
             RegisteredFrame::new(output, &positions, false, unit, self.source.module_start);
         let initializer = self.initializer();
-        let suite = &initializer.plan;
+        let suite = initializer;
         let location = SourceMap {
             info: &self.source,
             callable_code: Default::default(),
@@ -734,7 +734,7 @@ enum ReturnOperand<'a> {
 
 enum Body<'a> {
     Namespace,
-    Suite(&'a crate::frontend::PhysicalSuite),
+    Suite(&'a crate::frontend::RegisteredSuite),
     AnnotationProvider(&'a crate::frontend::AnnotationProvider, AnnotationScope),
     /// Named bodies carry their lexical global declarations into the checked frame.
     Checked(
@@ -775,7 +775,7 @@ struct TypeAliasDefinition {
 /// Graph analysis owns program entries; physical preparation owns the other function suites.
 enum FunctionBody<'a> {
     Program(&'a crate::frontend::RegisteredFunction),
-    Suite(crate::frontend::PhysicalSuite),
+    Suite(crate::frontend::RegisteredSuite),
 }
 
 struct PreparedFunction<'a> {
@@ -793,14 +793,14 @@ impl PreparedFunction<'_> {
     fn suite(&self) -> Option<&crate::frontend::RegisteredSuite> {
         match &self.body {
             FunctionBody::Program(_) => None,
-            FunctionBody::Suite(suite) => Some(&suite.plan),
+            FunctionBody::Suite(suite) => Some(suite),
         }
     }
 
     fn checked(&self) -> &crate::frontend::RegisteredFunction {
         match &self.body {
             FunctionBody::Program(checked) => checked,
-            FunctionBody::Suite(suite) => &suite.plan.checked,
+            FunctionBody::Suite(suite) => &suite.checked,
         }
     }
 }
@@ -825,7 +825,7 @@ struct SourceInfo<'a> {
     parameter_annotations: HashMap<ruff_text_size::TextSize, crate::frontend::ParameterAnnotations>,
     function_bodies: HashMap<ruff_text_size::TextSize, PreparedFunction<'a>>,
     class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredClass>,
-    initializer: Option<crate::frontend::PhysicalSuite>,
+    initializer: Option<crate::frontend::RegisteredSuite>,
     // Module admission and each output layout use the same ordered site references.
     initializer_sites: Vec<sites::RequiredSite>,
     bundled: bool,
@@ -1061,7 +1061,7 @@ struct Function<'a, 'p> {
     exits: Vec<(Cleanup<'p>, String)>,
 }
 
-/// The syntax walker adds Python scopes and cleanup to the registered frame operations.
+/// A prepared suite adds its lexical scope and pending exits to the registered frame.
 impl<'a, 'p> std::ops::Deref for Function<'a, 'p> {
     type Target = RegisteredFrame<'a, 'p>;
     fn deref(&self) -> &Self::Target {
@@ -1085,7 +1085,7 @@ enum Cleanup<'p> {
         enclosing_exception: Option<String>,
     },
     Finally {
-        body: &'p crate::frontend::PhysicalSuite,
+        body: &'p crate::frontend::RegisteredSuite,
         loop_depth: usize,
         caught_depth: usize,
     },
@@ -1179,7 +1179,7 @@ mod tests {
             prepared.source.scopes.functions[&start].suspension_flags != 0
         });
         let sites = suites.sites;
-        prepared.source.initializer = Some(crate::frontend::PhysicalSuite::new(initializer, body));
+        prepared.source.initializer = Some(initializer);
         prepared.source.class_bodies = class_bodies;
         prepared.source.statement_sites = sites;
     }
@@ -1187,7 +1187,7 @@ mod tests {
     fn install_test_function_body(
         source: &mut SourceInfo<'_>,
         def: &ast::StmtFunctionDef,
-        body: crate::frontend::PhysicalSuite,
+        body: crate::frontend::RegisteredSuite,
     ) {
         let function = source.function_bodies.get_mut(&def.start()).unwrap();
         function.body = FunctionBody::Suite(body);
@@ -1197,7 +1197,7 @@ mod tests {
     fn test_function_suite<'s>(
         source: &'s mut SourceInfo<'_>,
         start: TextSize,
-    ) -> &'s mut crate::frontend::PhysicalSuite {
+    ) -> &'s mut crate::frontend::RegisteredSuite {
         match &mut source.function_bodies.get_mut(&start).unwrap().body {
             FunctionBody::Suite(suite) => suite,
             FunctionBody::Program(_) => panic!("expected the physical suite of a named function"),
@@ -1208,7 +1208,7 @@ mod tests {
         let [run] = suite.residual.as_mut_slice() else {
             panic!("expected one mixed statement");
         };
-        let Some(crate::frontend::SourceEffect::Value(_, inputs)) = &mut run.effect else {
+        let crate::frontend::SourceEffect::Value(_, inputs) = &mut run.effect else {
             panic!("expected a value operand");
         };
         let [crate::frontend::PhysicalOperand::Source(value)] = &mut inputs[..] else {
@@ -1218,7 +1218,7 @@ mod tests {
     }
 
     fn replace_residual_input(prepared: &mut PreparedBody<'_>, index: usize) {
-        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         prepared
             .source
             .statement_sites
@@ -1353,13 +1353,12 @@ mod tests {
         .unwrap();
         inject_residual_child_module(&mut module);
 
-        assert!(module.initializer().sources.is_empty());
-        let plan = &module.initializer().plan;
+        let plan = module.initializer();
         let inputs: Vec<_> = plan
             .residual
             .iter()
             .map(|run| {
-                let Some(SourceEffect::Value(ValueStatement::Store(_), input)) = &run.effect else {
+                let SourceEffect::Value(ValueStatement::Store(_), input) = &run.effect else {
                     panic!("expected a mixed header operand");
                 };
                 matches!(input.as_slice(), [PhysicalOperand::Checked(_)])
@@ -1389,7 +1388,7 @@ mod tests {
             0,
             ModuleOrigin::Program(None),
             |mut module| {
-                let initializer = &module.initializer().plan;
+                let initializer = module.initializer();
                 let mut headers = Vec::new();
                 for suite in std::iter::once(initializer).chain(
                     module
@@ -1520,7 +1519,7 @@ mod tests {
         else {
             panic!("expected a prepared function suite");
         };
-        let bodies = HashMap::from([(site, suite.plan.checked)]);
+        let bodies = HashMap::from([(site, suite.checked)]);
         let module = PreparedBody::module(
             "header",
             path,
@@ -1530,7 +1529,7 @@ mod tests {
         )
         .unwrap();
         assert!(module.syntax.is_none());
-        let initializer = &module.initializer().plan;
+        let initializer = module.initializer();
         assert!(initializer.fully_checked());
         assert_eq!(
             module.source.scopes.functions[&site]
@@ -1657,7 +1656,7 @@ mod tests {
                 let [run] = plan.residual.as_slice() else {
                     panic!("expected one mixed loop in {source}");
                 };
-                let Some(crate::frontend::SourceEffect::For(region)) = &run.effect else {
+                let crate::frontend::SourceEffect::For(region) = &run.effect else {
                     panic!("expected a prepared for in {source}");
                 };
                 assert!(matches!(region.acquire, crate::ir::IteratorOp::Loop));
@@ -1699,9 +1698,8 @@ mod tests {
         .unwrap();
         inject_residual_child_module(&mut module);
         let initializer = module.source.initializer.as_mut().unwrap();
-        assert!(!initializer.plan.fully_checked());
-        assert!(initializer.sources.is_empty());
-        let call = residual_value_mut(&mut initializer.plan).clone();
+        assert!(!initializer.fully_checked());
+        let call = residual_value_mut(initializer).clone();
         let before = module.standalone().unwrap();
         module.syntax = None;
         assert_eq!(module.standalone().unwrap(), before);
@@ -1743,8 +1741,7 @@ mod tests {
         assert_eq!(module.standalone().unwrap(), before);
 
         let suite = test_function_suite(&mut module.source, start);
-        let Some(crate::ir::Statement::Return(result)) =
-            suite.plan.checked.function.body.last_mut()
+        let Some(crate::ir::Statement::Return(result)) = suite.checked.function.body.last_mut()
         else {
             panic!("expected the checked return after the nested declaration");
         };
@@ -1797,11 +1794,11 @@ mod tests {
         );
         module.source.statement_sites = physical.sites;
         install_test_function_body(&mut module.source, def, body);
-        let plan = &test_function_suite(&mut module.source, start).plan;
+        let plan = test_function_suite(&mut module.source, start);
         let [run] = plan.residual.as_slice() else {
             panic!("expected a mixed for")
         };
-        let Some(crate::frontend::SourceEffect::For(region)) = &run.effect else {
+        let crate::frontend::SourceEffect::For(region) = &run.effect else {
             panic!("missing prepared loop");
         };
         assert!(matches!(
@@ -1812,7 +1809,7 @@ mod tests {
             region.target,
             crate::frontend::PhysicalBinding::Checked { .. }
         ));
-        assert!(!region.body.plan.fully_checked());
+        assert!(!region.body.fully_checked());
         let original = module.standalone().unwrap();
         let def = module.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
@@ -1928,29 +1925,28 @@ mod tests {
         }
         assert_eq!(module.standalone().unwrap(), original);
 
-        let plan = &mut test_function_suite(&mut module.source, function_start).plan;
+        let plan = test_function_suite(&mut module.source, function_start);
         let [run] = plan.residual.as_mut_slice() else {
             panic!("expected one mixed while in the function");
         };
-        let Some(SourceEffect::While(region)) = &mut run.effect else {
+        let SourceEffect::While(region) = &mut run.effect else {
             panic!("expected the prepared while");
         };
-        let suite = &mut region.body.plan;
-        let Some(SourceEffect::LoopTransfer(site, crate::ir::Statement::Break)) =
+        let suite = &mut region.body;
+        let SourceEffect::LoopTransfer(site, crate::ir::Statement::Break) =
             &suite.residual.last().unwrap().effect
         else {
             panic!("expected break at the end of the while body");
         };
         assert_eq!(*site, stop_range);
-        let Some(SourceEffect::If { range, arms }) = &mut suite.residual[0].effect else {
+        let SourceEffect::If { range, arms } = &mut suite.residual[0].effect else {
             panic!("expected the if at the start of the while body");
         };
         assert_eq!(*range, branch_range);
         let [(Some(_), arm)] = arms.as_mut_slice() else {
             panic!("expected one guarded arm");
         };
-        let Some(SourceEffect::LoopTransfer(site, op)) =
-            &mut arm.plan.residual.last_mut().unwrap().effect
+        let SourceEffect::LoopTransfer(site, op) = &mut arm.residual.last_mut().unwrap().effect
         else {
             panic!("expected continue at the end of the if arm");
         };
@@ -1991,12 +1987,16 @@ mod tests {
                     .is_some_and(|name| name.id.as_str() == "entry")
             })
             .unwrap();
-        let residual = |i| suite.residual.iter().any(|run| run.statements.contains(&i));
-        assert!(!residual(index), "for entry in entries still uses source");
+        assert!(!suite.residual.iter().any(|run| matches!(
+            &run.effect, crate::frontend::SourceEffect::For(region)
+                if region.range == main.body[index].range()
+        )));
         let last = main.body.last().unwrap().as_try_stmt().unwrap();
         assert!(last.body[0].as_with_stmt().unwrap().is_async);
         let task_group = main.body.len() - 1;
-        assert!(!residual(task_group), "async TaskGroup still uses source");
+        assert!(!suite.residual.iter().any(|run| matches!(
+            &run.effect, crate::frontend::SourceEffect::Try(region) if region.range == last.range()
+        )));
 
         let before = module.standalone().unwrap();
         let body = &mut module.syntax.as_mut().unwrap().to_mut()[definition]
@@ -2112,7 +2112,7 @@ mod tests {
         let site = def.body[0].start();
         let plan = module.source.function_bodies[&def.start()].suite().unwrap();
         assert!(plan.residual.iter().any(|run| matches!(
-            run.effect, Some(crate::frontend::SourceEffect::Class(class)) if class == site
+            run.effect, crate::frontend::SourceEffect::Class(class) if class == site
         )));
         let expected = module.standalone().unwrap();
         def.body[0] = ast::StmtPass {
@@ -2146,7 +2146,7 @@ mod tests {
                     if matches!(class.name.as_str(), "SupportsAbs" | "SupportsRound") {
                         let start = class.start();
                         protocols.push((class.name.to_string(), start));
-                        assert!(typing.source.class_bodies[&start].body.plan.fully_checked());
+                        assert!(typing.source.class_bodies[&start].body.fully_checked());
                         *stmt = ast::StmtPass {
                             node_index: Default::default(),
                             range: class.range(),
@@ -2162,7 +2162,7 @@ mod tests {
                     ["SupportsAbs", "SupportsRound"]
                 );
                 let mut bindings = Vec::new();
-                let initializer = &typing.source.initializer.as_ref().unwrap().plan;
+                let initializer = typing.source.initializer.as_ref().unwrap();
                 crate::ir::walk_expressions(&initializer.checked.function.body, &mut |expr| {
                     if let ExprKind::Builtin(
                         Builtin::RegisteredDefinition(crate::ir::DefinitionSite::Class {
@@ -2202,7 +2202,7 @@ mod tests {
         let class = source.find("class _IdentityCallable(Protocol):").unwrap();
         let method = class + source[class..].find("def __call__[T]").unwrap();
         let start = |offset: usize| ruff_text_size::TextSize::try_from(offset).unwrap();
-        let body = &module.source.class_bodies[&start(class)].body.plan;
+        let body = &module.source.class_bodies[&start(class)].body;
         assert!(body.fully_checked());
         let mut bindings = Vec::new();
         crate::ir::walk_expressions(&body.checked.function.body, &mut |value| {
@@ -2237,7 +2237,6 @@ mod tests {
             .initializer
             .as_ref()
             .unwrap()
-            .plan
             .checked
             .function
             .body;
@@ -2664,7 +2663,7 @@ mod tests {
         let source = "owner.field: Unused\nvalues[(left, right):stop:step, (one, two)]: Unused\n";
         let mut module =
             PreparedBody::module("targets", path, source, 0, ModuleOrigin::Program(None)).unwrap();
-        let suite = &module.initializer().plan;
+        let suite = module.initializer();
         assert!(suite.fully_checked());
         let mut reads = Vec::new();
         let mut discarded = 0;
@@ -2734,7 +2733,7 @@ mod tests {
         .unwrap();
         let before = module.standalone().unwrap();
         assert!(module.syntax.is_none());
-        let suite = &mut module.source.initializer.as_mut().unwrap().plan;
+        let suite = module.source.initializer.as_mut().unwrap();
         assert!(suite.fully_checked());
         let mut stored = 0;
         crate::ir::rewrite_statements(&mut suite.checked.function.body, &mut |statement| {
@@ -2770,7 +2769,7 @@ mod tests {
             .suite()
             .unwrap();
         let Some(SourceEffect::Value(ValueStatement::Raise, inputs)) =
-            plan.residual.iter().find_map(|run| run.effect.as_ref())
+            plan.residual.first().map(|run| &run.effect)
         else {
             panic!("expected a physical exception and cause")
         };
@@ -2824,7 +2823,7 @@ mod tests {
                 .is_none()
         );
         let sites = &prepared.source.statement_sites.expressions;
-        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         assert!(matches!(
             sites
                 .physical(value)
@@ -2861,7 +2860,7 @@ mod tests {
         );
         assert_eq!(prepared.standalone().unwrap(), original);
 
-        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let key = value
             .as_subscript_expr_mut()
             .unwrap()
@@ -2912,7 +2911,7 @@ mod tests {
             .value;
         let sites = &prepared.source.statement_sites.expressions;
         assert!(!matches!(sites.get(complete), Some(Comparison { .. })));
-        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let Some(Comparison {
             range,
             ops,
@@ -2934,7 +2933,7 @@ mod tests {
         cmp.operands = Box::default();
         assert_eq!(prepared.standalone().unwrap(), original);
 
-        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let sites = &mut prepared.source.statement_sites.expressions;
         let Some(Comparison { operands, .. }) = sites.get_mut(value) else {
             unreachable!()
@@ -2979,7 +2978,7 @@ mod tests {
                 .get(checked)
                 .is_none()
         );
-        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let inputs = prepared
             .source
             .statement_sites
@@ -2995,7 +2994,7 @@ mod tests {
         erase(&mut binary.right);
         assert_eq!(prepared.standalone().unwrap(), original);
 
-        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let binary = value.as_bin_op_expr_mut().unwrap();
         erase(&mut binary.left.as_call_expr_mut().unwrap().func);
         assert_eq!(prepared.standalone().unwrap(), original);
@@ -3017,7 +3016,7 @@ mod tests {
         .unwrap();
         inject_residual_child_module(&mut prepared);
         let original = prepared.standalone().unwrap();
-        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let inputs = prepared
             .source
             .statement_sites
@@ -3046,7 +3045,7 @@ mod tests {
         erase(&mut call.arguments.keywords[1].value);
         assert_eq!(prepared.standalone().unwrap(), original);
 
-        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let call = value.as_call_expr_mut().unwrap();
         let residual = &mut call.arguments.keywords[0].value;
         erase(&mut residual.as_call_expr_mut().unwrap().func);
@@ -3090,18 +3089,17 @@ mod tests {
         prepared.source.statement_sites = physical.sites;
         let position = function.start();
         install_test_function_body(&mut prepared.source, function, body);
-        let suite = &test_function_suite(&mut prepared.source, position).plan;
+        let suite = test_function_suite(&mut prepared.source, position);
         let [run] = suite.residual.as_slice() else {
             panic!("expected a mixed context")
         };
-        let Some(crate::frontend::SourceEffect::Context(context)) = &run.effect else {
+        let crate::frontend::SourceEffect::Context(context) = &run.effect else {
             panic!("expected a prepared context")
         };
         assert!(
             matches!(context.inputs.as_slice(), [input] if matches!(input.manager, crate::frontend::PhysicalOperand::Checked(_))
             && matches!(input.target, Some(crate::frontend::PhysicalBinding::Checked { .. })))
         );
-        assert!(context.body.sources.is_empty());
         let original = prepared.standalone().unwrap();
 
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
@@ -3115,15 +3113,14 @@ mod tests {
         assert_eq!(prepared.standalone().unwrap(), original);
 
         // The expression statement owns the one call that still needs its lambda child.
-        let suite = &mut test_function_suite(&mut prepared.source, position).plan;
-        let Some(crate::frontend::SourceEffect::Context(context)) = &mut suite.residual[0].effect
-        else {
+        let suite = test_function_suite(&mut prepared.source, position);
+        let crate::frontend::SourceEffect::Context(context) = &mut suite.residual[0].effect else {
             panic!("expected the mixed context");
         };
-        let Some(crate::frontend::SourceEffect::Value(
+        let crate::frontend::SourceEffect::Value(
             crate::frontend::ValueStatement::Expression,
             inputs,
-        )) = &mut context.body.plan.residual[0].effect
+        ) = &mut context.body.residual[0].effect
         else {
             panic!("expected a prepared expression statement");
         };
@@ -3203,7 +3200,7 @@ mod tests {
         inject_residual_child_module(&mut prepared);
 
         let original = prepared.standalone().unwrap();
-        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let Some(ExpressionSelection::Mixed {
             parts: Some(parts), ..
         }) = prepared.source.statement_sites.expressions.get(value)
@@ -3252,7 +3249,7 @@ mod tests {
         .unwrap();
         inject_residual_child_module(&mut prepared);
         let original = prepared.standalone().unwrap();
-        let choice = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan)
+        let choice = residual_value_mut(prepared.source.initializer.as_mut().unwrap())
             .as_if_expr_mut()
             .unwrap();
         assert!(matches!(
@@ -3294,7 +3291,7 @@ mod tests {
         let suite = prepared.source.function_bodies[&def.start()]
             .suite()
             .unwrap();
-        let Some(SourceEffect::If { arms, .. }) = &suite.residual[0].effect else {
+        let SourceEffect::If { arms, .. } = &suite.residual[0].effect else {
             panic!("expected a mixed if");
         };
         assert!(matches!(
@@ -3315,13 +3312,13 @@ mod tests {
 
     #[test]
     fn mixed_if_owns_its_guards_and_residual_arm_after_source_erasure() {
-        use crate::frontend::{PhysicalOperand, PhysicalSuite, SourceEffect};
+        use crate::frontend::{PhysicalOperand, RegisteredSuite, SourceEffect};
 
         fn middle_arm<'a>(
             prepared: &'a mut PreparedBody<'_>,
-        ) -> &'a mut (Option<PhysicalOperand>, PhysicalSuite) {
-            let initializer = &mut prepared.source.initializer.as_mut().unwrap().plan;
-            let Some(SourceEffect::If { arms, .. }) = &mut initializer.residual[0].effect else {
+        ) -> &'a mut (Option<PhysicalOperand>, RegisteredSuite) {
+            let initializer = prepared.source.initializer.as_mut().unwrap();
+            let SourceEffect::If { arms, .. } = &mut initializer.residual[0].effect else {
                 unreachable!()
             };
             &mut arms[1]
@@ -3345,10 +3342,10 @@ mod tests {
         .unwrap();
 
         inject_residual_child_module(&mut prepared);
-        let [run] = prepared.initializer().plan.residual.as_slice() else {
+        let [run] = prepared.initializer().residual.as_slice() else {
             panic!("expected only the mixed if");
         };
-        let Some(SourceEffect::If { arms, .. }) = &run.effect else {
+        let SourceEffect::If { arms, .. } = &run.effect else {
             panic!("expected a prepared if");
         };
         let [
@@ -3359,9 +3356,8 @@ mod tests {
         else {
             panic!("expected a checked guard, a residual guard, and an else");
         };
-        assert!(first.plan.fully_checked() && last.plan.fully_checked());
-        assert!(arms.iter().all(|(_, arm)| arm.sources.is_empty()));
-        assert!(!middle.plan.fully_checked());
+        assert!(first.fully_checked() && last.fully_checked());
+        assert!(!middle.fully_checked());
         let original = prepared.standalone().unwrap();
         prepared.syntax.as_mut().unwrap().to_mut().clear();
         assert_eq!(prepared.standalone().unwrap(), original);
@@ -3386,10 +3382,10 @@ mod tests {
         middle_arm(&mut prepared).0 = saved;
         assert_eq!(prepared.standalone().unwrap(), original);
 
-        let [run] = middle_arm(&mut prepared).1.plan.residual.as_mut_slice() else {
+        let [run] = middle_arm(&mut prepared).1.residual.as_mut_slice() else {
             panic!("expected the middle arm to retain only the call");
         };
-        let Some(SourceEffect::Value(_, inputs)) = &mut run.effect else {
+        let SourceEffect::Value(_, inputs) = &mut run.effect else {
             panic!("expected an expression statement");
         };
         let [operand @ PhysicalOperand::Source(_)] = inputs.as_mut_slice() else {
@@ -3431,9 +3427,8 @@ mod tests {
             });
             assert_eq!(prepared.standalone().unwrap(), original);
             if physical {
-                let suite = &mut test_function_suite(&mut prepared.source, start).plan;
-                let Some(crate::frontend::SourceEffect::Match(_, site)) =
-                    &mut suite.residual[0].effect
+                let suite = test_function_suite(&mut prepared.source, start);
+                let crate::frontend::SourceEffect::Match(_, site) = &mut suite.residual[0].effect
                 else {
                     panic!("expected a mixed match")
                 };
@@ -3470,14 +3465,13 @@ mod tests {
             out.functions
         }
         inject_residual_child_module(&mut prepared);
-        assert!(!prepared.initializer().plan.fully_checked());
+        assert!(!prepared.initializer().fully_checked());
         let original = emit(&prepared);
         let ast::Stmt::Match(branch) = &mut prepared.syntax.as_mut().unwrap().to_mut()[0] else {
             panic!("expected match")
         };
-        let suite = &prepared.source.initializer.as_ref().unwrap().plan;
-        let Some(crate::frontend::SourceEffect::Match(_, site)) = &suite.residual[0].effect
-        else {
+        let suite = prepared.source.initializer.as_ref().unwrap();
+        let crate::frontend::SourceEffect::Match(_, site) = &suite.residual[0].effect else {
             panic!("expected a mixed match")
         };
         assert!(matches!(
@@ -3489,8 +3483,8 @@ mod tests {
             site.cases[0].guard,
             Some(crate::frontend::PhysicalOperand::Checked(_))
         ));
-        assert!(site.cases[0].body.plan.fully_checked());
-        let mixed = &site.cases[1].body.plan;
+        assert!(site.cases[0].body.fully_checked());
+        let mixed = &site.cases[1].body;
         assert_eq!(mixed.residual.len(), 1);
         assert!(
             mixed.residual[0].at > 0 && mixed.residual[0].at < mixed.checked.function.body.len()
@@ -3602,7 +3596,7 @@ mod tests {
             1
         );
         inject_residual_child_module(&mut prepared);
-        assert!(!prepared.initializer().plan.fully_checked());
+        assert!(!prepared.initializer().fully_checked());
         let emit = |prepared: &PreparedBody<'_>| {
             let mut output = Output::default();
             let file = output.data(b"field.py");
@@ -3713,7 +3707,7 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert!(prepared.initializer().plan.fully_checked());
+        assert!(prepared.initializer().fully_checked());
         assert!(prepared.syntax.is_none());
         prepared.source.statement_sites.expressions = Default::default();
 
@@ -3765,7 +3759,7 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let initializer = &prepared.initializer().plan;
+        let initializer = prepared.initializer();
         assert!(initializer.fully_checked());
         assert_eq!(prepared.source.generators.len(), 1);
         let (site, generator) = prepared.source.generators.iter().next().unwrap();
@@ -3878,7 +3872,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         inject_residual_child_module(&mut prepared);
         let sites = &prepared.source.statement_sites.expressions;
         assert_eq!(sites.templates().count(), 2);
-        assert!(!prepared.initializer().plan.fully_checked());
+        assert!(!prepared.initializer().fully_checked());
     }
 
     #[test]
@@ -4063,7 +4057,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert!(prepared.initializer().plan.fully_checked());
+        assert!(prepared.initializer().fully_checked());
         assert!(prepared.syntax.is_none());
 
         let mut output = Output::default();
@@ -4149,7 +4143,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let initializer = &prepared.initializer().plan;
+        let initializer = prepared.initializer();
         assert!(initializer.fully_checked());
         let [_, Statement::Expr(binding)] = initializer.checked.function.body.as_slice() else {
             panic!("expected one declaration after the statement marker");
@@ -4293,22 +4287,21 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         install_test_function_body(&mut module.source, function, body);
 
         let [run] = test_function_suite(&mut module.source, function_start)
-            .plan
             .residual
             .as_slice()
         else {
             panic!("expected a single mixed try");
         };
-        let Some(SourceEffect::Try(region)) = &run.effect else {
+        let SourceEffect::Try(region) = &run.effect else {
             panic!("expected a prepared try")
         };
         assert!(matches!(
             region.handlers[0].matcher,
             Some((_, PhysicalOperand::Source(_)))
         ));
-        assert!(!region.body.plan.fully_checked());
-        assert!(region.otherwise.plan.fully_checked());
-        assert!(!region.finalbody.as_ref().unwrap().plan.fully_checked());
+        assert!(!region.body.fully_checked());
+        assert!(region.otherwise.fully_checked());
+        assert!(!region.finalbody.as_ref().unwrap().fully_checked());
         let original = module.standalone().unwrap();
         let function = module.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
@@ -4321,10 +4314,8 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         .into();
         assert_eq!(module.standalone().unwrap(), original);
 
-        let run = &mut test_function_suite(&mut module.source, function_start)
-            .plan
-            .residual[0];
-        let Some(SourceEffect::Try(region)) = &mut run.effect else {
+        let run = &mut test_function_suite(&mut module.source, function_start).residual[0];
+        let SourceEffect::Try(region) = &mut run.effect else {
             unreachable!()
         };
         region.handlers[0].name = None;
@@ -4469,7 +4460,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let plan = &prepared.initializer().plan;
+        let plan = prepared.initializer();
         assert!(plan.fully_checked());
         assert!(matches!(
             plan.checked.function.body.as_slice(),
@@ -4555,11 +4546,10 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             module.source.statement_sites = physical.sites;
             install_test_function_body(&mut module.source, def, body);
             let suite = test_function_suite(&mut module.source, function);
-            assert!(suite.sources.is_empty());
-            let [run] = suite.plan.residual.as_slice() else {
+            let [run] = suite.residual.as_slice() else {
                 panic!("expected one mixed assertion")
             };
-            let Some(SourceEffect::Assertion(site)) = &run.effect else {
+            let SourceEffect::Assertion(site) = &run.effect else {
                 panic!("expected a prepared assertion")
             };
             assert_eq!(site.statement, start);
@@ -4603,10 +4593,8 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 function: TextSize,
                 external_test: bool,
             ) -> &'a mut ast::Expr {
-                let run = &mut test_function_suite(&mut module.source, function)
-                    .plan
-                    .residual[0];
-                let Some(SourceEffect::Assertion(site)) = &mut run.effect else {
+                let run = &mut test_function_suite(&mut module.source, function).residual[0];
+                let SourceEffect::Assertion(site) = &mut run.effect else {
                     unreachable!()
                 };
                 let input = if external_test {
@@ -4640,13 +4628,12 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 .initializer
                 .as_mut()
                 .unwrap()
-                .plan
                 .residual
                 .as_mut_slice()
             else {
                 panic!("expected one residual statement");
             };
-            let Some(SourceEffect::While(region)) = &mut run.effect else {
+            let SourceEffect::While(region) = &mut run.effect else {
                 panic!("expected the prepared while");
             };
             region
@@ -4672,10 +4659,10 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             let otherwise = region(&mut module).otherwise.take().unwrap();
             assert!(module.standalone().unwrap() != original);
             region(&mut module).otherwise = Some(otherwise);
-            let residual = std::mem::take(&mut region(&mut module).body.plan.residual);
+            let residual = std::mem::take(&mut region(&mut module).body.residual);
             assert!(!residual.is_empty());
             assert!(module.standalone().unwrap() != original);
-            region(&mut module).body.plan.residual = residual;
+            region(&mut module).body.residual = residual;
             match &mut region(&mut module).condition {
                 WhileGuard::Operand(PhysicalOperand::Checked(operand)) if checked => {
                     operand.value = crate::ir::Expr::integer(0);
@@ -4712,8 +4699,8 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         def.body.clear();
         assert_eq!(module.standalone().unwrap_err(), expected);
 
-        let plan = &mut test_function_suite(&mut module.source, start).plan;
-        let Some(SourceEffect::While(region)) = &mut plan.residual[0].effect else {
+        let plan = test_function_suite(&mut module.source, start);
+        let SourceEffect::While(region) = &mut plan.residual[0].effect else {
             panic!("expected the prepared while");
         };
         assert!(
@@ -5165,7 +5152,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         .unwrap();
         inject_residual_child_module(&mut prepared);
         let original = prepared.standalone().unwrap();
-        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let sites = &prepared.source.statement_sites.expressions;
         let inputs = sites.physical(value).unwrap();
         let parts = inputs.operands(false).collect::<Vec<_>>();
@@ -5195,7 +5182,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         });
         value.as_dict_expr_mut().unwrap().items.clear();
         assert_eq!(prepared.standalone().unwrap(), original);
-        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let call = value.as_call_expr_mut().unwrap().arguments.args[0]
             .as_call_expr_mut()
             .unwrap();
@@ -5473,7 +5460,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 .source
                 .class_bodies
                 .values()
-                .all(|class| class.body.plan.fully_checked())
+                .all(|class| class.body.fully_checked())
         );
         inject_residual_child_module(&mut prepared);
         let outer = prepared.syntax.as_ref().unwrap()[0]
@@ -5484,29 +5471,18 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert!(matches!(outer_body.body, FunctionBody::Suite(_)));
         assert!(!outer_body.fully_checked());
         let class_start = class.start();
-        let suite = &prepared.source.class_bodies[&class_start].body.plan;
+        let suite = &prepared.source.class_bodies[&class_start].body;
         crate::verify::registered(suite.checked.region()).unwrap();
         assert!(!suite.checked.region().private_slots().is_empty());
         let [rhs, attribute] = suite.residual.as_slice() else {
             panic!("expected a residual RHS followed by a mixed attribute store");
         };
-        assert!(rhs.statements.is_empty());
         assert!(matches!(
             rhs.effect,
-            Some(crate::frontend::SourceEffect::Value(
-                crate::frontend::ValueStatement::Store(_),
-                _
-            ))
+            crate::frontend::SourceEffect::Value(crate::frontend::ValueStatement::Store(_), _)
         ));
-        assert!(attribute.statements.is_empty());
-        assert!(
-            prepared.source.class_bodies[&class_start]
-                .body
-                .sources
-                .is_empty()
-        );
         assert!(matches!(&attribute.effect,
-            Some(crate::frontend::SourceEffect::ObjectOperation(op, inputs))
+            crate::frontend::SourceEffect::ObjectOperation(op, inputs)
             if matches!(op.as_ref(), crate::ir::Builtin::RegisteredAttribute {
                 action: crate::ir::AttributeAction::Store, ..
             }) && inputs.len() == 2
@@ -5534,8 +5510,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert_eq!(emit(&prepared), before);
 
         let class = prepared.source.class_bodies.get_mut(&class_start).unwrap();
-        let Some(crate::frontend::SourceEffect::Value(_, inputs)) =
-            &mut class.body.plan.residual[0].effect
+        let crate::frontend::SourceEffect::Value(_, inputs) = &mut class.body.residual[0].effect
         else {
             panic!("expected the retained assignment value");
         };
@@ -5567,23 +5542,21 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .as_try_stmt_mut()
             .unwrap();
         let branch = protected.finalbody[0].as_match_stmt_mut().unwrap();
-        let suite = &prepared.source.initializer.as_ref().unwrap().plan;
-        let Some(crate::frontend::SourceEffect::Try(region)) = &suite.residual[0].effect else {
+        let suite = prepared.source.initializer.as_ref().unwrap();
+        let crate::frontend::SourceEffect::Try(region) = &suite.residual[0].effect else {
             panic!("expected a mixed try")
         };
-        let finalbody = &region.finalbody.as_ref().unwrap().plan;
-        let Some(crate::frontend::SourceEffect::Match(_, site)) =
-            &finalbody.residual[0].effect
-        else {
+        let finalbody = &region.finalbody.as_ref().unwrap();
+        let crate::frontend::SourceEffect::Match(_, site) = &finalbody.residual[0].effect else {
             panic!("expected a mixed match in finally")
         };
-        let suite = &site.cases[0].body.plan;
+        let suite = &site.cases[0].body;
         let [run] = suite.residual.as_slice() else {
             panic!("expected one external deletion operand");
         };
         assert!(matches!(
             run.effect,
-            Some(crate::frontend::SourceEffect::ObjectOperation(..))
+            crate::frontend::SourceEffect::ObjectOperation(..)
         ));
         assert!(run.at > 0 && run.at < suite.checked.function.body.len());
         branch.cases[0].body[0]
@@ -5608,7 +5581,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert!(prepared.initializer().plan.fully_checked());
+        assert!(prepared.initializer().fully_checked());
         inject_residual_child_module(&mut prepared);
         let targets = &prepared.syntax.as_ref().unwrap()[1]
             .as_delete_stmt()
@@ -5616,15 +5589,13 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .targets;
         let key_range = targets[1].as_subscript_expr().unwrap().slice.range();
         let initializer = prepared.initializer();
-        assert!(initializer.sources.is_empty());
-        let suite = &initializer.plan;
+        let suite = initializer;
         crate::verify::registered(suite.checked.region()).unwrap();
         let [gap] = suite.residual.as_slice() else {
             panic!("only the target with the injected key needs a source input");
         };
-        assert!(gap.statements.is_empty());
         assert_eq!(gap.at, suite.checked.function.body.len());
-        let Some(crate::frontend::SourceEffect::ObjectOperation(op, operands)) = &gap.effect else {
+        let crate::frontend::SourceEffect::ObjectOperation(op, operands) = &gap.effect else {
             panic!("expected a prepared item deletion");
         };
         assert!(matches!(
@@ -5688,8 +5659,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let suite = prepared.source.function_bodies[&evaluate.start()]
             .suite()
             .unwrap();
-        let Some(SourceEffect::Value(ValueStatement::Raise, inputs)) = &suite.residual[0].effect
-        else {
+        let SourceEffect::Value(ValueStatement::Raise, inputs) = &suite.residual[0].effect else {
             panic!("expected a physical raise");
         };
         assert!(matches!(inputs.as_slice(), [PhysicalOperand::Checked(_)]));
@@ -5729,7 +5699,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let original = prepared.standalone().unwrap();
 
         let sites = &prepared.source.statement_sites.expressions;
-        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let inputs = sites.physical(value).unwrap();
         assert!(matches!(
             inputs.operands(false).collect::<Vec<_>>().as_slice(),
@@ -5748,7 +5718,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         tuple.as_tuple_expr_mut().unwrap().elts.clear();
         assert_eq!(prepared.standalone().unwrap(), original);
 
-        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let residual = &mut value.as_call_expr_mut().unwrap().arguments.args[1];
         let callee = &mut residual.as_call_expr_mut().unwrap().func;
         **callee = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
