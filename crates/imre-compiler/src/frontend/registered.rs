@@ -1083,8 +1083,7 @@ impl<'a> SuitePreparation<'a> {
                     Expr::local(input, Type::PythonObject),
                     input,
                 );
-                if let Ok(targets) = unpacking::bind_assignment(&mut scope, &assign.targets, value)
-                {
+                if let Ok(targets) = scope.assignment_targets(assign, value) {
                     body.push(checkpoint(stmt));
                     residual.push(SourceRun {
                         at: body.len(),
@@ -1271,6 +1270,9 @@ impl statements::StatementLowering for SourceScope<'_> {
     type Error = ();
 
     fn attribute_statements(&mut self, stmt: &ast::Stmt) -> StdResult<Option<Vec<Statement>>, ()> {
+        if stmt.is_assign_stmt() {
+            return Ok(None);
+        }
         let Some(effect) = attribute_write(stmt) else {
             return Ok(None);
         };
@@ -1287,12 +1289,8 @@ impl statements::StatementLowering for SourceScope<'_> {
     }
 
     fn assignment(&mut self, assign: &ast::StmtAssign) -> StdResult<Vec<Statement>, ()> {
-        let value = match assign.targets.as_slice() {
-            [ast::Expr::Name(_)] => self.operand(&assign.value),
-            _ => self.ordinary_operand(&assign.value),
-        }
-        .ok_or(())?;
-        unpacking::bind_assignment(self, &assign.targets, value)
+        let value = self.operand(&assign.value).ok_or(())?;
+        self.assignment_targets(assign, value)
     }
 
     fn branch(&mut self, branch: &ast::StmtIf) -> StdResult<statements::Block, ()> {
@@ -1705,6 +1703,21 @@ impl<'a> SourceScope<'a> {
 }
 
 impl SourceScope<'_> {
+    fn assignment_targets(
+        &mut self,
+        assign: &ast::StmtAssign,
+        value: Expr,
+    ) -> StdResult<Vec<Statement>, ()> {
+        let bind = |scope: &mut Self| unpacking::bind_assignment(scope, &assign.targets, value);
+        if self.loop_scope == LoopScope::WithCursor
+            && matches!(self.kind, RegisteredScope::Function { is_async: true })
+        {
+            return bind(self);
+        }
+        // A receiver or key runs in the assigning frame, after the binder captures its value.
+        self.with_suspending_operands(bind)
+    }
+
     fn physical_statement(
         &mut self,
         stmt: &ast::Stmt,

@@ -2740,6 +2740,29 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
+    fn suspended_assignment_emits_after_its_targets_are_erased() {
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            concat!(
+                "def assign(sink):\n",
+                "    whole = [(yield 'owner').field, (part, sink[(yield 'key')])] = rhs()\n",
+                "    yield whole\n",
+            ),
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let before = prepared.standalone().unwrap().unwrap();
+        let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        assert!(prepared.source.function_bodies[&def.start()].fully_checked());
+        def.body[0].as_assign_stmt_mut().unwrap().targets.clear();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+    }
+
+    #[test]
     fn annotated_class_interleaves_checked_targets_with_physical_statements() {
         let source = concat!(
             "def outer[T]():\n",
