@@ -329,6 +329,12 @@ impl CheckedBody<'_, '_, '_, '_> {
     }
 
     pub(crate) fn branch_condition(&mut self, expr: &Expr, yes: &str, no: &str) {
+        if let Entry::Registered(frame) = &mut self.0
+            && let Some(bit) = frame.bound_condition(expr)
+        {
+            self.body().branch(&bit, yes, no);
+            return;
+        }
         let (edges, inputs) = edges(expr, Context::Condition, Depth::All);
         Logical::branch(self.body(), edges, yes, no).emit(self, &inputs);
     }

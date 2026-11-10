@@ -65,22 +65,7 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                 self.prepared_try(region);
             }
             SourceEffect::For(region) => self.prepared_for(region),
-            SourceEffect::If { range, arms } => {
-                self.checkpoint(range);
-                self.simple_call = None;
-                crate::llvm::operations::choose(
-                    self,
-                    |code| {
-                        code.flush_check();
-                        &mut code.frame.body
-                    },
-                    arms.iter().map(|(test, suite)| (test.as_ref(), suite)),
-                    Self::branch_physical_operand,
-                    |code, suite| emit_prepared_suite(code, suite),
-                    true,
-                );
-            }
-            SourceEffect::While(region) => self.prepared_while(region),
+            SourceEffect::Region(region) => crate::llvm::registered::Frame::emit_region(self, region),
             SourceEffect::Refused(range, reason) => {
                 self.refuse_at(*range, reason);
             }
@@ -244,14 +229,8 @@ impl<'p> Function<'_, 'p> {
     }
 
     fn branch_physical_operand(&mut self, test: &PhysicalOperand, yes: &str, no: &str) {
-        match test {
-            PhysicalOperand::Checked(operand) => {
-                self.prepare_checked_value(&operand.value);
-                let bit = self.frame.prepared_test(operand, &self.sites);
-                self.branch(&bit, yes, no);
-            }
-            PhysicalOperand::Residual(input) => self.branch_input(input.as_input(), yes, no),
-        }
+        let bit = crate::llvm::registered::prepared_condition(self, test);
+        self.branch(&bit, yes, no);
     }
 
     fn branch_input(&mut self, input: ExpressionInput<'_>, yes: &str, no: &str) {
@@ -487,41 +466,6 @@ impl<'p> Function<'_, 'p> {
                 }
             },
             |code| emit_prepared_suite(code, &context.body),
-        );
-    }
-
-    fn prepared_while(&mut self, region: &'p crate::frontend::PreparedWhile) {
-        use crate::frontend::WhileGuard;
-        if matches!(region.condition, WhileGuard::Literal(false)) {
-            if let Some(otherwise) = &region.otherwise {
-                emit_prepared_suite(self, otherwise);
-            }
-            return;
-        }
-        crate::llvm::operations::loop_region(
-            self,
-            |code| {
-                code.flush_check();
-                &mut code.frame.body
-            },
-            |code| code.name("b"),
-            |code, edges| code.jump(&edges.step),
-            |code, yes, no| match &region.condition {
-                WhileGuard::Literal(taken) => {
-                    code.branch(if *taken { "true" } else { "false" }, yes, no);
-                }
-                WhileGuard::Operand(test) => code.branch_physical_operand(test, yes, no),
-            },
-            |code, edges, ()| {
-                let depth = code.regions.len();
-                code.push_loop(edges.clone(), depth, depth);
-                emit_prepared_suite(code, &region.body);
-                code.loops.pop();
-            },
-            region
-                .otherwise
-                .as_ref()
-                .map(|otherwise| |code: &mut Self| emit_prepared_suite(code, otherwise)),
         );
     }
 

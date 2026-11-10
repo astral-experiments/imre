@@ -2067,6 +2067,8 @@ pub(crate) enum Builtin {
     FaultLine(u32),
     /// An original statement checkpoint and its optional call without a separate highlight.
     RegisteredStatement(ruff_text_size::TextRange, Option<ruff_text_size::TextRange>),
+    /// Emit the ordered child suite bound at this index in a prepared control region.
+    RegisteredSuite(usize),
     /// Evaluate each operand for its effects and release it before evaluating the next.
     RegisteredDiscard,
     /// The source position in effect while this registered operand is evaluated.
