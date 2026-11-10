@@ -1,4 +1,4 @@
-use crate::frontend::{PhysicalOperand, SourceEffect, SourceGuard};
+use crate::frontend::{PhysicalOperand, SourceEffect};
 mod declarations;
 use super::sites::{CompiledDefinition, CompiledProvider};
 
@@ -238,39 +238,7 @@ impl<'p> Function<'_, 'p> {
                     true,
                 );
             }
-            SourceEffect::While(condition) => {
-                let source = suite[run.statements.start]
-                    .as_while_stmt()
-                    .expect("prepared loop");
-                if matches!(condition, SourceGuard::Literal(false)) {
-                    self.statements(&source.orelse);
-                    return;
-                }
-                crate::llvm::operations::loop_region(
-                    self,
-                    |code| {
-                        code.flush_check();
-                        &mut code.frame.body
-                    },
-                    |code| code.name("b"),
-                    |code, edges| code.jump(&edges.step),
-                    |code, yes, no| match condition {
-                        SourceGuard::Literal(taken) => {
-                            code.branch(if *taken { "true" } else { "false" }, yes, no);
-                        }
-                        SourceGuard::Checked(operand) => code.branch_operand(operand, yes, no),
-                        SourceGuard::Residual => code.branch_expr(&source.test, yes, no),
-                    },
-                    |code, edges, ()| {
-                        let depth = code.exits.len();
-                        code.push_loop(edges.clone(), depth, depth);
-                        code.statements(&source.body);
-                        code.loops.pop();
-                    },
-                    (!source.orelse.is_empty())
-                        .then_some(|code: &mut Self| code.statements(&source.orelse)),
-                );
-            }
+            SourceEffect::While(region) => self.prepared_while(region),
             SourceEffect::RefusedTargetOperand(range, reason) => {
                 self.with_expression_range(*range, |code| code.build_diagnostic(reason));
             }
@@ -916,6 +884,46 @@ impl<'p> Function<'_, 'p> {
                 }
             },
             |code| code.physical_suite(&context.body),
+        );
+    }
+
+    fn prepared_while(&mut self, region: &'p crate::frontend::PreparedWhile) {
+        use crate::frontend::WhileGuard;
+        if matches!(region.condition, WhileGuard::Literal(false)) {
+            if let Some(otherwise) = &region.otherwise {
+                self.physical_suite(otherwise);
+            }
+            return;
+        }
+        crate::llvm::operations::loop_region(
+            self,
+            |code| {
+                code.flush_check();
+                &mut code.frame.body
+            },
+            |code| code.name("b"),
+            |code, edges| code.jump(&edges.step),
+            |code, yes, no| match &region.condition {
+                WhileGuard::Literal(taken) => {
+                    code.branch(if *taken { "true" } else { "false" }, yes, no);
+                }
+                WhileGuard::Operand(PhysicalOperand::Checked(operand)) => {
+                    code.branch_operand(operand, yes, no);
+                }
+                WhileGuard::Operand(PhysicalOperand::Source(test)) => {
+                    code.branch_expr(test, yes, no)
+                }
+            },
+            |code, edges, ()| {
+                let depth = code.exits.len();
+                code.push_loop(edges.clone(), depth, depth);
+                code.physical_suite(&region.body);
+                code.loops.pop();
+            },
+            region
+                .otherwise
+                .as_ref()
+                .map(|otherwise| |code: &mut Self| code.physical_suite(otherwise)),
         );
     }
 

@@ -146,7 +146,8 @@ pub(crate) use registered::{
 };
 pub(crate) use registered::{LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion};
 pub(crate) use registered::{
-    PhysicalBinding, PhysicalSuite, PreparedContext, PreparedFor, PreparedTry, SourceGuard,
+    PhysicalBinding, PhysicalSuite, PreparedContext, PreparedFor, PreparedTry, PreparedWhile,
+    WhileGuard,
 };
 pub(crate) use unpacking::PairBinding;
 mod sequences;

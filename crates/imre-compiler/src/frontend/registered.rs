@@ -973,8 +973,8 @@ pub(crate) enum SourceEffect {
     ObjectOperation(Box<Builtin>, Vec<PhysicalOperand>),
     /// The enclosing loop supplies the destination and cleanup depth.
     LoopTransfer(TextRange, &'static Statement),
-    /// A mixed loop needs its source suites. A literal false test runs only the else suite.
-    While(SourceGuard),
+    /// Re-evaluate the guard in the enclosing frame on each trip through the loop.
+    While(Box<PreparedWhile>),
     /// Each test and its child suite are prepared in their enclosing frame.
     If {
         range: TextRange,
@@ -996,6 +996,17 @@ fn loop_transfer(stmt: &ast::Stmt) -> Option<&'static Statement> {
         ast::Stmt::Continue(_) => Some(&Statement::Continue),
         _ => None,
     }
+}
+
+pub(crate) struct PreparedWhile {
+    pub(crate) condition: WhileGuard,
+    pub(crate) body: PhysicalSuite,
+    pub(crate) otherwise: Option<PhysicalSuite>,
+}
+
+pub(crate) enum WhileGuard {
+    Literal(bool),
+    Operand(PhysicalOperand),
 }
 
 pub(crate) struct PreparedFor {
@@ -1032,6 +1043,7 @@ impl PhysicalSuite {
                 run.effect,
                 Some(
                     SourceEffect::Class(_)
+                        | SourceEffect::While(_)
                         | SourceEffect::If { .. }
                         | SourceEffect::For(_)
                         | SourceEffect::Match(..)
@@ -1191,12 +1203,6 @@ fn iteration_protocol(
         ),
         None => (ir::IteratorOp::Loop, ir::IterNextKind::Generic),
     }
-}
-
-pub(crate) enum SourceGuard {
-    Literal(bool),
-    Checked(Box<RegisteredOperand>),
-    Residual,
 }
 
 fn if_clauses(branch: &ast::StmtIf) -> impl Iterator<Item = (Option<&ast::Expr>, &[ast::Stmt])> {
@@ -1479,17 +1485,13 @@ impl<'a> SuitePreparation<'a> {
                             sites.prepare_input(message, source, kind, suspended);
                         }
                     }
-                    Some(SourceEffect::While(SourceGuard::Residual)) => {
-                        if let ast::Stmt::While(loop_) = stmt {
-                            sites.prepare_input(&loop_.test, source, kind, suspended);
-                        }
-                    }
                     None if !matches!(
                         stmt,
                         ast::Stmt::If(_)
                             | ast::Stmt::Match(_)
                             | ast::Stmt::With(_)
                             | ast::Stmt::For(_)
+                            | ast::Stmt::While(_)
                             | ast::Stmt::Try(_)
                     ) =>
                     {
@@ -1501,9 +1503,6 @@ impl<'a> SuitePreparation<'a> {
         }
         for run in std::mem::take(&mut plan.residual) {
             if run.effect.is_some() {
-                if matches!(run.effect, Some(SourceEffect::While(_))) {
-                    walk_stmt(&mut children, &stmts[run.statements.start]);
-                }
                 plan.residual.push(run);
                 continue;
             }
@@ -1518,6 +1517,18 @@ impl<'a> SuitePreparation<'a> {
                         at: run.at,
                         statements: index..index + 1,
                         effect: Some(effect),
+                    });
+                    continue;
+                }
+                if let ast::Stmt::While(loop_) = stmt {
+                    let region =
+                        children
+                            .prepare
+                            .prepare_while(loop_, kind, child_selection, suspended);
+                    plan.residual.push(SourceRun {
+                        at: run.at,
+                        statements: index..index + 1,
+                        effect: Some(SourceEffect::While(Box::new(region))),
                     });
                     continue;
                 }
@@ -1773,6 +1784,27 @@ impl<'a> SuitePreparation<'a> {
         }
     }
 
+    fn prepare_while(
+        &mut self,
+        loop_: &ast::StmtWhile,
+        kind: RegisteredScope,
+        selection: SuiteSelection<'_>,
+        suspended: bool,
+    ) -> PreparedWhile {
+        let condition = match loop_.test.as_ref() {
+            ast::Expr::BooleanLiteral(literal) => WhileGuard::Literal(literal.value),
+            test => WhileGuard::Operand(
+                self.owned_operand(test, kind, suspended, |scope| scope.condition_operand(test)),
+            ),
+        };
+        PreparedWhile {
+            condition,
+            body: self.physical_suite(&loop_.body, kind, selection, suspended),
+            otherwise: (!loop_.orelse.is_empty())
+                .then(|| self.physical_suite(&loop_.orelse, kind, selection, suspended)),
+        }
+    }
+
     fn prepare_for(
         &mut self,
         loop_: &ast::StmtFor,
@@ -2009,23 +2041,8 @@ impl<'a> SuitePreparation<'a> {
                 }
                 continue;
             }
-            if let ast::Stmt::While(loop_) = stmt {
-                let condition = match &*loop_.test {
-                    ast::Expr::BooleanLiteral(value) => SourceGuard::Literal(value.value),
-                    test => RegisteredOperand::prepare_with(self.source, kind, |scope| {
-                        scope.condition_operand(test)
-                    })
-                    .map_or(SourceGuard::Residual, |operand| {
-                        SourceGuard::Checked(Box::new(operand))
-                    }),
-                };
+            if matches!(stmt, ast::Stmt::While(_)) {
                 body.push(checkpoint(stmt));
-                residual.push(SourceRun {
-                    at: body.len(),
-                    statements: i..i + 1,
-                    effect: Some(SourceEffect::While(condition)),
-                });
-                continue;
             }
             SourceRun::record(&mut residual, i, body.len());
         }

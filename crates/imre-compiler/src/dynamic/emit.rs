@@ -1990,6 +1990,7 @@ mod tests {
         let function = module.syntax.as_ref().unwrap()[0]
             .as_function_def_stmt()
             .unwrap();
+        let function_start = function.start();
         // Keep both suites mixed by withholding only the callback descriptors.
         let missing = HashMap::new();
         let source = RegisteredSource {
@@ -2032,11 +2033,14 @@ mod tests {
         }
         assert_eq!(module.standalone().unwrap(), original);
 
-        let suite = module
-            .source
-            .nested_bodies
-            .get_mut(&branch_range.start())
-            .unwrap();
+        let plan = &mut test_function_suite(&mut module.source, function_start).plan;
+        let [run] = plan.residual.as_mut_slice() else {
+            panic!("expected one mixed while in the function");
+        };
+        let Some(SourceEffect::While(region)) = &mut run.effect else {
+            panic!("expected the prepared while");
+        };
+        let suite = &mut region.body.plan;
         let Some(SourceEffect::LoopTransfer(site, crate::ir::Statement::Break)) =
             &suite.residual.last().unwrap().effect
         else {
@@ -3465,17 +3469,9 @@ mod tests {
             });
             assert_eq!(prepared.standalone().unwrap(), original);
             if physical {
-                let FunctionBody::Suite(suite) = &mut prepared
-                    .source
-                    .function_bodies
-                    .get_mut(&start)
-                    .unwrap()
-                    .body
-                else {
-                    panic!("expected a prepared function suite")
-                };
+                let suite = &mut test_function_suite(&mut prepared.source, start).plan;
                 let Some(crate::frontend::SourceEffect::Match(_, Some(site))) =
-                    &mut suite.plan.residual[0].effect
+                    &mut suite.residual[0].effect
                 else {
                     panic!("expected a mixed match")
                 };
@@ -4604,57 +4600,117 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
-    fn mixed_while_keeps_its_checked_guard_and_reads_its_physical_body() {
-        let mut prepared = PreparedBody::module(
-            "example",
-            Path::new("example.py"),
-            "while ready:\n    consume((lambda v: v)(item))\nelse:\n    finish()\n",
+    fn mixed_while_owns_its_guard_body_and_else_after_source_erasure() {
+        use crate::frontend::{PhysicalOperand, PreparedWhile, SourceEffect, WhileGuard};
+
+        fn region<'a>(module: &'a mut PreparedBody) -> &'a mut PreparedWhile {
+            let [run] = module
+                .source
+                .initializer
+                .as_mut()
+                .unwrap()
+                .residual
+                .as_mut_slice()
+            else {
+                panic!("expected one residual statement");
+            };
+            let Some(SourceEffect::While(region)) = &mut run.effect else {
+                panic!("expected the prepared while");
+            };
+            region
+        }
+
+        for (guard, checked) in [("ready", true), ("(lambda: ready)()", false)] {
+            let source = format!(
+                "while {guard}:\n    consume((lambda v: v)(item))\nelse:\n    finish()\n"
+            );
+            let mut module = PreparedBody::module(
+                "example",
+                Path::new("example.py"),
+                &source,
+                0,
+                ModuleOrigin::Program(None),
+            )
+            .unwrap();
+            // Leave the body's callable and, when present, the guard's callable at placement.
+            inject_residual_child_module(&mut module);
+            let original = module.standalone().unwrap();
+            module.syntax.as_mut().unwrap().to_mut().clear();
+            assert!(module.standalone().unwrap() == original);
+
+            let otherwise = region(&mut module).otherwise.take().unwrap();
+            assert!(module.standalone().unwrap() != original);
+            region(&mut module).otherwise = Some(otherwise);
+            let residual = std::mem::take(&mut region(&mut module).body.plan.residual);
+            assert!(!residual.is_empty());
+            assert!(module.standalone().unwrap() != original);
+            region(&mut module).body.plan.residual = residual;
+            match &mut region(&mut module).condition {
+                WhileGuard::Operand(PhysicalOperand::Checked(operand)) if checked => {
+                    operand.value = crate::ir::Expr::integer(0);
+                }
+                WhileGuard::Operand(PhysicalOperand::Source(test)) if !checked => {
+                    *test = test.as_call_expr().unwrap().func.clone();
+                }
+                _ => panic!("unexpected guard for {guard}"),
+            }
+            assert!(module.standalone().unwrap() != original);
+        }
+    }
+
+    #[test]
+    fn mixed_while_preserves_its_residual_guard_diagnostic_after_erasure() {
+        use crate::frontend::{PhysicalOperand, SourceEffect, WhileGuard};
+
+        let source = "async def probe():\n    while [lambda v=await get(x): v for x in [0]]:\n        yield 'body'\n        break\n";
+        let mut module = PreparedBody::module(
+            "guard",
+            Path::new("guard.py"),
+            source,
             0,
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        inject_residual_child_module(&mut prepared);
-        let plan = prepared.source.initializer.as_ref().unwrap();
-        assert!(matches!(
-            plan.residual.as_slice(),
-            [run] if matches!(run.effect.as_ref(), Some(
-                crate::frontend::SourceEffect::While(crate::frontend::SourceGuard::Checked(_))
-            ))
-        ));
-        let original = prepared.standalone().unwrap();
-        fn statement(body: &mut [ast::Stmt]) -> &mut ast::StmtWhile {
-            body[0].as_while_stmt_mut().unwrap()
-        }
-        let loop_ = statement(prepared.syntax.as_mut().unwrap().to_mut());
-        *loop_.test = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
-            range: loop_.test.range(),
-            node_index: Default::default(),
-        });
-        assert_eq!(prepared.standalone().unwrap(), original);
+        let expected =
+            "guard.py:2:11: cannot compile this comprehension ahead of time (through 2:50)";
+        assert_eq!(module.standalone().unwrap_err(), expected);
+        let def = module.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let start = def.start();
+        def.body.clear();
+        assert_eq!(module.standalone().unwrap_err(), expected);
 
-        let loop_ = statement(prepared.syntax.as_mut().unwrap().to_mut());
-        let child = &mut loop_.body[0];
-        let child_start = child.start();
-        *child = ast::Stmt::Pass(ast::StmtPass {
-            range: child.range(),
-            node_index: Default::default(),
-        });
-        assert_eq!(prepared.standalone().unwrap(), original);
-        let value = residual_value_mut(prepared.source.nested_bodies.get_mut(&child_start).unwrap());
-        let site = value.clone();
-        let call = value.as_call_expr_mut().unwrap();
-        let inner = call.arguments.args[0].as_call_expr_mut().unwrap();
-        *inner.func = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
-            range: inner.func.range(),
-            node_index: Default::default(),
-        });
-        assert_eq!(prepared.standalone().unwrap(), original);
-        prepared.source.statement_sites.expressions.replace_residual_input(
-            &site,
-            1,
-            crate::ir::Expr::none(),
+        let plan = &mut test_function_suite(&mut module.source, start).plan;
+        let Some(SourceEffect::While(region)) = &mut plan.residual[0].effect else {
+            panic!("expected the prepared while");
+        };
+        assert!(
+            matches!(&region.condition, WhileGuard::Operand(PhysicalOperand::Source(test)) if test.is_list_comp_expr())
         );
-        assert_ne!(prepared.standalone().unwrap(), original);
+        region.condition = WhileGuard::Literal(false);
+        assert!(module.standalone().is_ok());
+    }
+
+    #[test]
+    fn yield_in_a_false_while_still_declares_a_generator() {
+        let module = PreparedBody::module(
+            "idle",
+            Path::new("idle.py"),
+            "def idle():\n    while False:\n        yield 'unreached yield'\n    else:\n        return 'finished'\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let (_, llvm) = module.standalone().unwrap();
+        let suspended = format!(", i32 {} }}", permanent::NATIVE_SUSPENDED_BODY);
+        assert!(
+            llvm.lines()
+                .any(|line| line.contains(" = private constant %code_site")
+                    && line.ends_with(&suspended))
+        );
+        assert!(llvm.contains("finished"));
+        assert!(!llvm.contains("unreached yield"));
     }
 
     #[test]
