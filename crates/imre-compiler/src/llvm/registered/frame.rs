@@ -11,6 +11,7 @@ use crate::ir;
 use crate::ir::{Builtin, Constant, DisplayKind, Expr};
 use crate::llvm::body::FunctionBody;
 use crate::llvm::operations::{CheckedValue, LoopEdges};
+use indexmap::IndexSet;
 use ruff_text_size::{TextRange, TextSize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -107,7 +108,7 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     // A caught error abandons this expression's intermediates and preserves enclosing owners.
     integer_unwinds: BTreeMap<(usize, String), (usize, String)>,
     /// Private roots whose lexical scope exits at an existing error landing block.
-    pub(super) scope_unwinds: BTreeMap<String, BTreeSet<usize>>,
+    pub(super) scope_unwinds: BTreeMap<String, IndexSet<usize>>,
     pub(crate) caught: Vec<String>,
     pub(crate) simple_call: Option<TextRange>,
     pub(super) position: SourcePosition,
@@ -416,14 +417,34 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         }
     }
 
-    pub(crate) fn label(&mut self, label: &str) {
+    fn start_label(&mut self, label: &str) -> IndexSet<usize> {
         self.flush_check();
         self.body.start(label);
-        if let Some(slots) = self.scope_unwinds.remove(label) {
-            for slot in slots {
-                self.line(&format!("store i64 0, ptr %ir_slot{slot}"));
-            }
+        self.scope_unwinds.remove(label).unwrap_or_default()
+    }
+
+    pub(crate) fn label(&mut self, label: &str) {
+        for slot in self.start_label(label) {
+            self.line(&format!("store i64 0, ptr %ir_slot{slot}"));
         }
+    }
+
+    /// Retain the exception and exit callable while unwinding abandoned evaluation
+    /// operands, then the private values of the lexical scopes being left.
+    pub(super) fn take_context_error(&mut self, label: &str, callable: &str) -> String {
+        let slots = self.start_label(label);
+        let mut retiring = Vec::with_capacity(slots.len());
+        for slot in slots {
+            retiring.push(self.value(&format!("load i64, ptr %ir_slot{slot}")));
+            self.line(&format!("store i64 0, ptr %ir_slot{slot}"));
+        }
+        let exception = self.op("take_error", &[]);
+        let (_, retained) = self.live_handles(&[&exception, callable]);
+        let (ptr, count) = self.write_handles_at(retained, &retiring);
+        self.line(&format!(
+            "call void @imre_dyn_unwind_frame(ptr %ctx, ptr {ptr}, i64 {count}, i64 {retained})"
+        ));
+        exception
     }
 
     pub(crate) fn branch(&mut self, condition: &str, yes: &str, no: &str) {

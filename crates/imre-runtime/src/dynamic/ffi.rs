@@ -2946,6 +2946,25 @@ unsafe fn live_handles<'a>(live: *const Id, len: usize) -> &'a [Id] {
     }
 }
 
+/// Unwind a failed statement after its exception has been taken for a context exit.
+///
+/// # Safety
+/// Generated code supplies the active frame's surviving roots, including the
+/// exception and exit callable, then its abandoned operands from bottom to top.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_unwind_frame(
+    ctx: *mut Context,
+    live: *const Id,
+    len: usize,
+    retained: usize,
+) {
+    // SAFETY: the caller owns the context and provides len initialized handles.
+    let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
+    debug_assert!(retained <= len && ctx.pending.is_none());
+    ctx.heap.prepend_temporaries(live);
+    ctx.unwind_operands(retained);
+}
+
 /// Finish one target before the next target can observe a replaced writer.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_assignment_target(

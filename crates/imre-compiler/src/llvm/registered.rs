@@ -600,7 +600,9 @@ impl Frame<'_, '_, '_> {
             .scope_unwinds
             .entry(frame.body.error_target.clone())
             .or_default();
-        for slot in clear {
+        // Stack bottom first: an inner scope unwinds before its parent, and
+        // each scope consumes its pending slots in the declared clear order.
+        for slot in clear.iter().rev() {
             if let Ok(index) = frame.iteration.private_slots.binary_search(slot) {
                 slots.insert(frame.iteration.first_slot + index);
             }

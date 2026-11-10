@@ -178,8 +178,7 @@ impl RegisteredFrame<'_, '_> {
             self.exit_context(&region, None);
             self.jump(&region.done);
         }
-        self.label(&region.error);
-        let exception = self.op("take_error", &[]);
+        let exception = self.take_context_error(&region.error, &region.callable);
         let result = self.exit_context(&region, Some(&exception));
         let suppress = self.truth(&result);
         let propagate = self.name("b");
