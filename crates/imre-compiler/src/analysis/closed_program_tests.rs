@@ -691,6 +691,11 @@ fn initializer_calls_use_original_bindings_and_all_arguments() {
             "{caller}"
         );
     }
+    let compiled = "def consume():\n    exec(compile(input(), 'own.py', 'exec'))\n";
+    let caller = "import scores\nscores.consume()\n";
+    assert!(check(caller, compiled).unwrap().contains("scores.py:2:10"));
+    assert!(check("import scores\n", compiled).is_none());
+    assert!(check(caller, &format!("__builtins__ = 0\n{compiled}")).is_none());
     let generator = "def rows():\n    yield eval(input())\n";
     let caller = "from scores import rows\nfor value in rows(): pass\n";
     let message = check(caller, generator).unwrap();
