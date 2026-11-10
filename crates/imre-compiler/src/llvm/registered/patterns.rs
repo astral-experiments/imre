@@ -179,7 +179,7 @@ impl Frame<'_, '_, '_> {
     fn pattern_value(&mut self, expr: &Expr) -> String {
         let outer = self.expression_integer_start;
         self.expression_integer_start = Some(outer.unwrap_or(self.integer_owners));
-        let result = self.evaluate_handle(expr);
+        let result = self.evaluate_eager_handle(expr);
         self.expression_integer_start = outer;
         result
     }

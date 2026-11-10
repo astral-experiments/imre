@@ -55,6 +55,35 @@ pub enum PatternMessage {
     DuplicateInteger(BigInt),
 }
 
+/// Ruff retains interpolated strings as value-pattern expressions. Python only
+/// accepts literal constants (including foldable complex numbers) and dotted names.
+pub fn value_pattern_error(value: &ast::Expr, source: &str) -> Option<&'static str> {
+    let valid = match value {
+        ast::Expr::Attribute(_)
+        | ast::Expr::NumberLiteral(_)
+        | ast::Expr::StringLiteral(_)
+        | ast::Expr::BytesLiteral(_) => true,
+        ast::Expr::UnaryOp(op) => {
+            matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
+                && op.operand.is_number_literal_expr()
+        }
+        ast::Expr::BinOp(bin) => {
+            let real = match bin.left.as_ref() {
+                ast::Expr::UnaryOp(op) if op.op == ast::UnaryOp::UAdd => op.operand.as_ref(),
+                other => other,
+            };
+            matches!(bin.op, ast::Operator::Add | ast::Operator::Sub)
+                && mapping_keys::real_part(real, source).is_some()
+                && matches!(
+                    bin.right.as_number_literal_expr().map(|n| &n.value),
+                    Some(ast::Number::Complex { .. })
+                )
+        }
+        _ => false,
+    };
+    (!valid).then_some("patterns may only match literals and attribute lookups")
+}
+
 fn duplicate_key(value: impl std::fmt::Display) -> String {
     format!("mapping pattern checks duplicate key ({value})")
 }
@@ -265,9 +294,14 @@ impl<'a> CapturePlan<'a, '_> {
                     self.collect(child, true, names)?;
                 }
             }
-            ast::Pattern::MatchValue(_)
-            | ast::Pattern::MatchSingleton(_)
-            | ast::Pattern::MatchStar(_) => {}
+            ast::Pattern::MatchValue(value) => {
+                if let Some(source) = self.source
+                    && let Some(reason) = value_pattern_error(&value.value, source)
+                {
+                    return Err((value.value.range(), reason.to_owned().into()));
+                }
+            }
+            ast::Pattern::MatchSingleton(_) | ast::Pattern::MatchStar(_) => {}
         }
         if let Some(id) = capture_name(pattern) {
             let spelling = self
@@ -582,6 +616,31 @@ mod tests {
             reason.checked(),
             "wildcard makes remaining patterns unreachable"
         );
+    }
+
+    #[test]
+    fn string_interpolations_are_invalid_value_patterns_even_without_fields() {
+        for (pattern, invalid) in [
+            ("f'plain'", Some("f'plain'")),
+            ("t'{side()}'", Some("t'{side()}'")),
+            ("{'key': [f'{side()}']}", Some("f'{side()}'")),
+            ("names.Row(field=t'plain')", Some("t'plain'")),
+            ("[-1-2j, b'a' b'b', 'key', names.deep.kind]", None),
+        ] {
+            let text = format!("match subject:\n case {pattern}: pass\n");
+            let parsed = ruff_python_parser::parse_module(&text).unwrap();
+            let error = BindingErrors::check(&parsed.syntax().body, &text).pattern;
+            if let Some(invalid) = invalid {
+                let (range, reason) = error.expect("expected an invalid value pattern");
+                assert_eq!(&text[range], invalid);
+                assert_eq!(
+                    reason.checked(),
+                    "patterns may only match literals and attribute lookups"
+                );
+            } else {
+                assert!(error.is_none());
+            }
+        }
     }
 
     #[test]

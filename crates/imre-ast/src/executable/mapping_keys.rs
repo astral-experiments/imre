@@ -33,6 +33,15 @@ pub(super) fn check(mapping: &ast::PatternMatchMapping, source: &str) -> Result<
     Ok(())
 }
 
+/// The real component must be convertible when Python folds a complex pattern.
+pub(super) fn real_part(expr: &ast::Expr, source: &str) -> Option<f64> {
+    match Literal::from_expr(expr, source)? {
+        Literal::Int(i) => i.to_f64().filter(|f| f.is_finite()),
+        Literal::Float(f) => Some(f),
+        _ => None,
+    }
+}
+
 enum Literal<'a> {
     None,
     Bool(bool),
@@ -97,11 +106,7 @@ impl<'a> Literal<'a> {
             }
             ast::Expr::BinOp(b) => {
                 // The only binary form in the grammar is a signed real +/- an imaginary literal.
-                let real = match Self::from_expr(&b.left, source)? {
-                    Self::Int(i) => i.to_f64().filter(|f| f.is_finite())?,
-                    Self::Float(f) => f,
-                    _ => return None,
-                };
+                let real = real_part(&b.left, source)?;
                 let Self::Complex(r, i) = Self::from_expr(&b.right, source)? else {
                     return None;
                 };
