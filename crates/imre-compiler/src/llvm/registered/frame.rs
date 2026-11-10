@@ -672,6 +672,13 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         ));
     }
 
+    /// Pop owned operands from the top, including the elements of a last-owned sequence.
+    pub(super) fn release_owned_operands(&mut self, mark: &str) {
+        self.line(&format!(
+            "call void @imre_dyn_unwind_display(ptr %ctx, i64 {mark})"
+        ));
+    }
+
     /// Keep just the live stack operands when Python may observe their release.
     pub(crate) fn keep_operands(&mut self, mark: &str, first: &str, second: &str) -> String {
         self.value(&format!(
@@ -1627,9 +1634,16 @@ pub(crate) trait FrameEmitter<'a, 'p>:
     ) -> String {
         match op {
             Builtin::RegisteredDeleteItem => {
+                let mark = self.temporary_mark();
+                let targets = self.begin_operand_scope();
                 let receiver = evaluate(self, target);
+                let key_mark = self.keep_operands(&mark, &receiver, "0");
                 let key = evaluate(self, args.next().expect("indexed deletion key"));
-                self.delete_item(&receiver, &key)
+                self.keep_operands(&key_mark, &key, "0");
+                let result = self.delete_item(&receiver, &key);
+                self.finish_unwind(targets, |frame| frame.release_owned_operands(&mark));
+                self.release_owned_operands(&mark);
+                result
             }
             Builtin::RegisteredCall(call) => self.call_value(call, target, args, evaluate),
             Builtin::RegisteredAttribute {
@@ -1931,11 +1945,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
     ) -> String {
         let tuple = display == DisplayKind::Tuple;
         let mark = self.temporary_mark();
-        let unwind = |code: &mut RegisteredFrame<'a, 'p>| {
-            code.line(&format!(
-                "call void @imre_dyn_unwind_display(ptr %ctx, i64 {mark})"
-            ));
-        };
+        let unwind = |code: &mut RegisteredFrame<'a, 'p>| code.release_owned_operands(&mark);
         self.unwind_with(unwind, |code| {
             let initial = |code: &mut Self, values: Vec<String>, complete| {
                 let slot = if complete { slot } else { None };

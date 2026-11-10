@@ -4685,6 +4685,7 @@ for name in ("md4", "ripemd160"):
             "boxed_attribute_deletion.py",
             "boxed_mixed_delete.py",
             "boxed_delete_eager_key.py",
+            "boxed_delete_operand_lifetime.py",
             "boxed_recursion.py",
             "boxed_function_defaults.py",
             "boxed_reprlib.py",

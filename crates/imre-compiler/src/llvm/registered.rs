@@ -555,9 +555,7 @@ impl Frame<'_, '_, '_> {
                     code.line(&format!("store i64 0, ptr %ir_slot{physical}"));
                 }
             }
-            code.line(&format!(
-                "call void @imre_dyn_unwind_display(ptr %ctx, i64 {mark})"
-            ));
+            code.release_owned_operands(&mark);
         });
         let handle = match result {
             CheckedValue::Handle { id, .. } => id.as_str(),
