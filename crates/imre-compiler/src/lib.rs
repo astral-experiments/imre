@@ -490,7 +490,6 @@ fn object_fallback(
             .is_some_and(|(flags, _)| flags.tracemalloc > 0);
     let mut import_failure = None;
     let mut site_probes = modules::SiteProbes::default();
-    let mut deferred_native = None;
     let loaded = match entry {
         ProgramEntry::Source(source) => Ok(Some(modules::SourceGraph::single_with_mode(
             source,
@@ -529,19 +528,16 @@ fn object_fallback(
                             owners.push(owners[original]);
                         }
                         let reason = match llvm::analyze_program(module, &mut fixed.frame_sources) {
-                            Ok(program)
-                                if program.prefer_objects && options.entry_profile.is_none() =>
-                            {
-                                // Registration can preserve the Python exception locations. Keep the
-                                // checked native representation until registration decides admission.
-                                deferred_native = Some((fixed, program));
-                                "Imre: native bound wrapper links use checked exception locations"
-                            }
                             Ok(program) => match native(&graph, fixed.into_ir(&graph), program) {
                                 Ok(units) => return native_result(graph, units),
                                 Err(refusal) => refusal.0,
                             },
-                            Err(refusal) => refusal.0,
+                            Err(refusal) => {
+                                // A callable without a fixed representation can still use the
+                                // verified bodies of its siblings if its source is registered.
+                                fixed.register_definitions(&graph);
+                                refusal.0
+                            }
                         };
                         LoweringDiagnostic::plain(reason.to_owned())
                             .classified(LoweringKind::Object)
@@ -553,7 +549,6 @@ fn object_fallback(
                 if graph.set_layout_hint.get() != modules::SetLayoutHint::Applied {
                     break Some(error);
                 }
-                deferred_native = None;
                 graph.retry_without_set_layout(&baseline);
             };
             (refusal, Some(graph))
@@ -588,29 +583,20 @@ fn object_fallback(
     };
     // A newly found checked provider can lower normally. If lowering fails, its
     // dependencies alone do not admit the caller to the object importer.
-    let fallback = |graph, deferred: Option<(Box<FixedProgram>, llvm::NativeProgram)>| {
-        match (graph, deferred, kind) {
-            (Some(graph), Some((fixed, program)), _) => {
-                let units = native(&graph, fixed.into_ir(&graph), program)
-                    .map_err(|error| error.0.to_owned())?;
-                native_result(graph, units)
+    let fallback = |graph: Option<modules::SourceGraph>| {
+        if let (Some(graph), LoweringKind::ExecutionOperand(id)) = (graph, kind)
+            && graph.modules[id].is_program_source()
+        {
+            // Native lowering can fail before the file has a runtime registration.
+            // Check its existing contracts before diagnosing the failed call's source.
+            if let Some(contract) = &graph.source_contract {
+                contract.clone()?;
             }
-            (Some(graph), None, LoweringKind::ExecutionOperand(id))
-                if graph.modules[id].is_program_source() =>
-            {
-                // Native lowering can fail before the file has a runtime registration.
-                // Check its existing contracts before diagnosing the failed call's source.
-                if let Some(contract) = &graph.source_contract {
-                    contract.clone()?;
-                }
-                graph.session.check_execution_escapes(std::iter::once((
-                    id,
-                    graph.modules[id].path.as_path(),
-                )))?;
-                Err(refusal_message())
-            }
-            _ => Err(refusal_message()),
+            graph
+                .session
+                .check_execution_escapes(std::iter::once((id, graph.modules[id].path.as_path())))?;
         }
+        Err(refusal_message())
     };
     let mut checked_graph = graph;
     let graph = checked_graph
@@ -625,7 +611,7 @@ fn object_fallback(
                 ) || g.imports_struct_decorator()
             }))
     {
-        return fallback(checked_graph, deferred_native);
+        return fallback(checked_graph);
     }
     let operation = graph.as_ref().and_then(|g| {
         if checked_entry {
@@ -721,14 +707,6 @@ fn object_fallback(
     let check = |mut checked_graph: Option<&mut modules::SourceGraph>,
                  entry_requests_objects,
                  registered: Option<dynamic::RegisteredSources<'_>>| {
-        // Admission commits to the Python ABI. Keep only bodies with a valid frame
-        // map and release the deferred native program before checking its providers.
-        if registered.is_some()
-            && let (Some(graph), Some((fixed, _))) =
-                (checked_graph.as_deref(), deferred_native.take())
-        {
-            fixed.register_definitions(graph);
-        }
         check_returns(checked_graph.as_deref_mut(), entry_requests_objects)?;
         if let Some(registered) = registered {
             analysis::check_registered_project(
@@ -794,7 +772,7 @@ fn object_fallback(
             });
             Ok(result)
         }
-        None => fallback(checked_graph, deferred_native),
+        None => fallback(checked_graph),
     }
 }
 

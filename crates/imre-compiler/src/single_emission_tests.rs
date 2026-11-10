@@ -164,17 +164,14 @@ fn suspended_assignment_refusal_precedes_llvm_emission() {
 }
 
 #[test]
-fn bound_wrapper_emits_native_only_if_registration_declines() {
+fn bound_wrapper_emits_once_with_its_fixed_callable_layout() {
     let project = tempfile::tempdir().unwrap();
     let path = project.path().join("wrapper.py");
     let wrapper = include_str!("../../../tests/fixtures/callables/bound_methods.py");
 
-    for (source, registered) in [
-        (wrapper.to_owned(), false),
-        (
-            format!("import sys\n{wrapper}\nprint(sys.version_info.major)\n"),
-            true,
-        ),
+    for source in [
+        wrapper.to_owned(),
+        format!("import sys\n{wrapper}\nprint(sys.version_info.major)\n"),
     ] {
         std::fs::write(&path, source).unwrap();
         let native_calls = Cell::new(0);
@@ -190,10 +187,11 @@ fn bound_wrapper_emits_native_only_if_registration_declines() {
                 Ok(checked)
             },
             |_, (module, _), program| {
-                assert!(program.prefer_objects);
                 native_calls.set(native_calls.get() + 1);
                 let ranges = ranges::analyze(&module);
                 let llvm_ir = llvm::emit_file(&module, &ranges, false, program)?;
+                assert!(llvm_ir.contains("call ptr @imre_function_set_wrapped("));
+                assert!(llvm_ir.contains("call ptr @imre_function_get_wrapped("));
                 Ok(vec![CodegenUnit {
                     name: "__main__".into(),
                     llvm_ir,
@@ -201,11 +199,8 @@ fn bound_wrapper_emits_native_only_if_registration_declines() {
             },
         )
         .unwrap();
-        assert_eq!(native_calls.get(), usize::from(!registered));
-        assert_eq!(
-            compilation.into_built().source_inputs.boxed_imports,
-            registered
-        );
+        assert_eq!(native_calls.get(), 1);
+        assert!(!compilation.into_built().source_inputs.boxed_imports);
     }
 }
 

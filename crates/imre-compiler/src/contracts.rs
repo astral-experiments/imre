@@ -81,7 +81,7 @@ impl Builtin {
             Self::FunctionWrappedSet => Contract::new(false, Unknown),
             Self::MarkCoroutine(_) => Contract::new(false, Unknown),
             Self::IsCoroutineFunction => Contract::new(false, PreservesOwners),
-            Self::FunctionWrappedGet => Contract::new(true, PreservesLists),
+            Self::FunctionWrappedGet(_) => Contract::new(true, PreservesLists),
             Self::Repr => Contract::new(true, Unknown),
             Self::DefaultRecordRepr => Contract::new(true, PreservesLists),
             Self::Str
@@ -1133,7 +1133,7 @@ impl Builtin {
             Self::MarkCoroutine(_) => {
                 matches!(result, Type::Callable(_)) && signature(&[result], result)
             }
-            Self::FunctionWrappedGet => {
+            Self::FunctionWrappedGet(_) => {
                 matches!(result, Type::Callable(_)) && signature(&[result], result)
             }
             Self::WrapperAttributes(fields) => {

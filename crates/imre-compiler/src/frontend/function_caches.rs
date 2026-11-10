@@ -436,8 +436,12 @@ impl Checker<'_> {
         })
     }
 
-    pub(super) fn wrapped_function(&self, receiver: &Expr, name: &str) -> Option<Expr> {
-        if name != "__wrapped__" || !matches!(receiver.ty, Type::Callable(_)) {
+    pub(super) fn wrapped_function(
+        &mut self,
+        receiver: &Expr,
+        attribute: &ast::ExprAttribute,
+    ) -> Option<Expr> {
+        if attribute.attr.as_str() != "__wrapped__" || !matches!(receiver.ty, Type::Callable(_)) {
             return None;
         }
         Some(
@@ -445,8 +449,16 @@ impl Checker<'_> {
                 context_field(receiver.clone(), layout, 0, layout.callable)
             } else {
                 self.wrapper_link.set(true);
+                // A load spanning lines is positioned at the attribute name.
+                let range = if self.source_line(attribute.start())
+                    == self.source_line(attribute.attr.start())
+                {
+                    attribute.range()
+                } else {
+                    attribute.attr.range()
+                };
                 builtin(
-                    Builtin::FunctionWrappedGet,
+                    Builtin::FunctionWrappedGet(self.fixed_origin(range, None)),
                     receiver.ty,
                     vec![receiver.clone()],
                 )

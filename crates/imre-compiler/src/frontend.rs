@@ -703,8 +703,8 @@ fn lower_graph(
     let inference = inference::Inference::default();
     let mut definitions = Vec::new();
     let mut callable_definitions = Vec::new();
-    // Native wrapper links can prefer registered frames only when a bound
-    // callable has a Type::Class receiver. Without classes no definition transfers.
+    // A source method needs its original binder and operand sites if its
+    // callable layout requires a registered frame.
     let can_transfer_frames = !classes.declarations.definitions.is_empty();
     for (module_id, module) in graph.modules.iter().enumerate() {
         if !module.executable.is_empty() {
@@ -1230,8 +1230,8 @@ fn lower_graph(
         {
             continue;
         }
-        // A prior checked wrapper link can make a bound method enter a Python
-        // frame. Native analysis still selects the program after specialization.
+        // A bound wrapper with an unknown owner may need the method's Python
+        // frame. Keep the operand sites until its specialized layout is known.
         checker.fixed_sites = (!needs_registered_entry
             && (signature.method.is_none() || has_wrapper_link)
             && signature.physical_frame)
@@ -3995,7 +3995,7 @@ impl<'a> Checker<'a> {
                     return coerce(self, value, expected, expression);
                 }
                 let receiver = Self::weak_target(self.expr(&attribute.value)?);
-                if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
+                if let Some(wrapped) = self.wrapped_function(&receiver, attribute) {
                     return self.coerce(wrapped, expected, expression);
                 }
                 if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
@@ -9511,7 +9511,7 @@ impl<'a> Checker<'a> {
                 if let Type::ForwardRef(layout) = receiver.ty {
                     return self.forward_ref_attribute(layout, receiver, attribute);
                 }
-                if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
+                if let Some(wrapped) = self.wrapped_function(&receiver, attribute) {
                     return Ok(wrapped);
                 }
                 if let Some(field) = self.partial_attribute(&receiver, attribute.attr.as_str()) {
@@ -12034,7 +12034,7 @@ impl<'a> Checker<'a> {
             if let Some(layout) = self.types.dispatcher(receiver.ty) {
                 return self.single_dispatch_method(call, attribute, receiver, layout);
             }
-            if let Some(wrapped) = self.wrapped_function(&receiver, attribute.attr.as_str()) {
+            if let Some(wrapped) = self.wrapped_function(&receiver, attribute) {
                 return self.invoke(call, wrapped);
             }
             if attribute.attr.as_str() == "func"
