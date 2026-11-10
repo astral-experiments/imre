@@ -163,12 +163,20 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         } else {
             format!("  %live = alloca [{} x i64]\n", self.max_live)
         };
-        for slot in 0..self.private_slot_count {
+        let count = self.private_slot_count;
+        if count != 0 {
             writeln!(
                 entry,
-                "  %ir_slot{slot} = alloca i64\n  store i64 0, ptr %ir_slot{slot}"
+                "  %ir_slot0 = alloca [{count} x i64]\n  store [{count} x i64] zeroinitializer, ptr %ir_slot0"
             )
             .unwrap();
+            for slot in 1..count {
+                writeln!(
+                    entry,
+                    "  %ir_slot{slot} = getelementptr i64, ptr %ir_slot0, i64 {slot}"
+                )
+                .unwrap();
+            }
         }
         for slot in 0..self.integer_owners {
             writeln!(
@@ -666,14 +674,24 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         Some([line, col, col + (split - start), col + (end - start)])
     }
 
-    /// Store the handles that must survive the next statement or assignment target.
-    fn live_handles(&mut self) -> (&'static str, usize) {
+    /// Pass consecutive private roots in place. Mixed or discontiguous roots need a snapshot.
+    fn live_handles(&mut self) -> (String, usize) {
+        if self.live.is_empty()
+            && let Some(first) = self.live_slots.first()
+            && self
+                .live_slots
+                .windows(2)
+                .all(|pair| pair[1] == pair[0] + 1)
+        {
+            return (format!("%ir_slot{first}"), self.live_slots.len());
+        }
         let mut live = self.live.clone();
         for i in 0..self.live_slots.len() {
             let slot = self.live_slots[i];
             live.push(self.value(&format!("load i64, ptr %ir_slot{slot}")));
         }
-        self.handle_array(&live)
+        let (ptr, count) = self.handle_array(&live);
+        (ptr.to_owned(), count)
     }
 
     /// Copy evaluated handles into reusable storage in this activation's entry block.

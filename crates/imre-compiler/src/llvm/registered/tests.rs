@@ -94,16 +94,42 @@ fn captured_unpack_roots_its_private_slot_in_the_function_frame() {
         emit_captured_body("def post(row, book, read):\n    book[0], book[read()] = row\n");
     let body = &output.functions;
     let (before_checkpoint, _) = body
-        .split_once("call void @imre_dyn_statement_with_exception(ptr %ctx, ptr %live,")
+        .split_once("call void @imre_dyn_statement_with_exception(ptr %ctx, ptr %ir_slot0,")
         .unwrap();
-    assert_eq!(body.matches("%ir_slot0 = alloca i64").count(), 1);
-    assert!(before_checkpoint.contains("store i64 0, ptr %ir_slot0"));
-    assert!(before_checkpoint.contains("load i64, ptr %ir_slot0"));
+    assert_eq!(body.matches("%ir_slot0 = alloca [").count(), 1);
+    assert!(before_checkpoint.contains("zeroinitializer, ptr %ir_slot0"));
+    assert!(!before_checkpoint.contains("load i64, ptr %ir_slot0"));
     assert_eq!(
         body.matches("call i64 @imre_dyn_positional_call_at(")
             .count(),
         1
     );
+}
+
+#[test]
+fn checkpoints_preserve_the_selected_roots_of_nested_regions() {
+    let mut output = Output::default();
+    let file = output.data(b"nested.py");
+    let positions = SourcePositions::new("", &file);
+    let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
+    frame.live_slots = vec![2, 3];
+    frame.checkpoint(Default::default());
+    assert!(frame.body.code.contains("ptr %ir_slot2, i64 2,"));
+
+    frame.body.code.clear();
+    frame.live_slots = vec![0, 3];
+    frame.checkpoint(Default::default());
+    assert!(frame.body.code.contains("ptr %live, i64 2,"));
+    assert!(frame.body.code.contains("load i64, ptr %ir_slot0"));
+    assert!(frame.body.code.contains("load i64, ptr %ir_slot3"));
+    assert!(!frame.body.code.contains("%ir_slot2"));
+
+    frame.body.code.clear();
+    frame.live_slots = vec![2, 3];
+    frame.live.push("%exception".into());
+    frame.checkpoint(Default::default());
+    assert!(frame.body.code.contains("store i64 %exception,"));
+    assert!(frame.body.code.contains("ptr %live, i64 3,"));
 }
 
 #[test]
