@@ -151,6 +151,7 @@ pub(crate) use registered::{
 pub(crate) use registered::{
     PhysicalBinding, PhysicalSuite, PreparedContext, PreparedFor, PreparedTry, SourceGuard,
 };
+pub(crate) use unpacking::PairBinding;
 mod sequences;
 mod shutil;
 mod sign_parameters;

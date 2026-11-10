@@ -1416,26 +1416,49 @@ impl RegisteredFrame<'_, '_> {
         result
     }
 
+    /// Initialize the inputs before running the target stores with their checked cleanup.
     pub(crate) fn checked_binding(
         &mut self,
         checked: &RegisteredFunction,
-        entered: usize,
-        value: &str,
         sites: &CheckedSites,
+        bind: impl FnOnce(&mut Self),
     ) {
         let Some(enclosing) = self.enter_checked_slots(checked.region()) else {
             return;
         };
-        let mut frame = Frame {
-            code: self,
-            names: Some(&checked.local_names),
-            sites,
-            fixed_sites: None,
-            inputs: &[],
-        };
-        frame.store_private(entered, value);
-        CheckedBody::registered(frame).emit_block(&checked.function.body);
+        bind(self);
+        self.checked_block(&checked.function.body, checked, sites);
         self.restore_checked_slots(enclosing);
+    }
+
+    /// A direct pull roots both projections in the same slots as ordinary unpacking.
+    pub(crate) fn bind_item_pair(
+        &mut self,
+        cursor: &str,
+        plain_items: &str,
+        entered: usize,
+        pair: &crate::frontend::PairBinding,
+    ) {
+        let direct = self.name("b");
+        let ordinary = self.name("b");
+        let bind = self.name("b");
+        self.branch(plain_items, &direct, &ordinary);
+
+        self.label(&direct);
+        let key = self.value("load i64, ptr %live");
+        let slot = self.value("getelementptr i64, ptr %live, i64 1");
+        let value = self.value(&format!("load i64, ptr {slot}"));
+        self.store_private(pair.items[0], &key);
+        self.store_private(pair.items[1], &value);
+        self.store_private(pair.ordinary, &permanent::FALSE.to_string());
+        self.jump(&bind);
+
+        self.label(&ordinary);
+        let row = self.iteration_item(cursor, None);
+        self.store_private(entered, &row);
+        self.store_private(pair.ordinary, &permanent::TRUE.to_string());
+        self.jump(&bind);
+        self.label(&bind);
     }
 
     pub(crate) fn checked_block(

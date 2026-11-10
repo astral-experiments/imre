@@ -181,8 +181,24 @@ pub(super) fn bind_targets<B: PatternBinder>(
     value: Expr,
     stable: Option<usize>,
 ) -> StdResult<Vec<Statement>, B::Error> {
+    bind_input(binder, target, value, stable, false).map(|(body, _)| body)
+}
+
+/// Private slots shared by the ordinary row snapshot and a direct dictionary-items pull.
+pub(crate) struct PairBinding {
+    pub(crate) ordinary: usize,
+    pub(crate) items: [usize; 2],
+}
+
+pub(super) fn bind_input<B: PatternBinder>(
+    binder: &mut B,
+    target: &ast::Expr,
+    value: Expr,
+    stable: Option<usize>,
+    pair_pull: bool,
+) -> StdResult<(Vec<Statement>, Option<PairBinding>), B::Error> {
     let Some(targets) = pattern_elements(target) else {
-        return Ok(vec![binder.pattern_store(target, value)?]);
+        return Ok((vec![binder.pattern_store(target, value)?], None));
     };
     let mut stars = targets
         .iter()
@@ -195,10 +211,30 @@ pub(super) fn bind_targets<B: PatternBinder>(
     let PatternSnapshot {
         root,
         mut body,
-        clear,
+        mut clear,
         items,
     } = binder.pattern_snapshot(target, targets, star, value, stable)?;
     body.push(Statement::Clear(root));
+    let pair = if pair_pull
+        && star.is_none()
+        && let &[first, second] = items.as_slice()
+    {
+        let ordinary = binder.pattern_hidden(Type::Bool);
+        clear.push(ordinary);
+        // A direct pull initializes both projected items before the common target stores.
+        let from_row = builtin(
+            Type::Bool,
+            Builtin::RegisteredCompare(vec![ast::CmpOp::Is]),
+            vec![binder.pattern_local(ordinary), Expr::boolean(true)],
+        );
+        body = vec![Statement::If(from_row, body, Vec::new())];
+        Some(PairBinding {
+            ordinary,
+            items: [first, second],
+        })
+    } else {
+        None
+    };
     for (target, item) in targets.iter().zip(items) {
         let target = if let ast::Expr::Starred(starred) = target {
             &starred.value
@@ -208,7 +244,7 @@ pub(super) fn bind_targets<B: PatternBinder>(
         let value = take_pattern_temporary(binder.pattern_local(item), item);
         body.extend(bind_targets(binder, target, value, None)?);
     }
-    Ok(vec![Statement::Scope { body, clear }])
+    Ok((vec![Statement::Scope { body, clear }], pair))
 }
 
 impl Checker<'_> {

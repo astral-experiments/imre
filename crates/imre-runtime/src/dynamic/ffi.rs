@@ -1527,6 +1527,30 @@ fn snapshot_pair(ctx: &mut Context, value: Id, items: &mut [Id; 2]) -> Result<Id
     }
 }
 
+/// Query the acquired cursor without advancing it or invoking Python.
+///
+/// # Safety
+/// Generated code supplies the active context and a live loop cursor.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_plain_items_cursor(ctx: *const Context, iter: Id) -> bool {
+    // SAFETY: the generated caller keeps the context and cursor live for this query.
+    plain_items_cursor(unsafe { &*ctx }, iter).is_some()
+}
+
+fn plain_items_cursor(ctx: &Context, iter: Id) -> Option<(Id, DictIterator)> {
+    let Value::LoopIterator {
+        source,
+        peeked: None,
+    } = *ctx.heap.get(iter)
+    else {
+        return None;
+    };
+    let Value::DictIterator(cursor) = *ctx.heap.get(source) else {
+        return None;
+    };
+    cursor.is_plain_items().then_some((source, cursor))
+}
+
 /// Advance a compiled loop whose target unpacks exactly two items.
 ///
 /// # Safety
@@ -1549,13 +1573,7 @@ pub(super) unsafe extern "C" fn imre_dyn_next_pair(
 
 /// Read dictionary entries directly, keeping both values alive across target assignment.
 fn next_loop_pair(ctx: &mut Context, iter: Id, items: &mut [Id; 2], has_else: bool) -> Result<Id> {
-    let more = if let Value::LoopIterator {
-        source,
-        peeked: None,
-    } = *ctx.heap.get(iter)
-        && let Value::DictIterator(cursor) = *ctx.heap.get(source)
-        && cursor.is_plain_items()
-    {
+    let more = if let Some((source, cursor)) = plain_items_cursor(ctx, iter) {
         if let Some(pair) = cursor.next_entry_pair(ctx, source)? {
             ctx.heap.reserve_temporaries(2)?;
             for value in pair {
