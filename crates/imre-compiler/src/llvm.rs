@@ -967,7 +967,14 @@ impl Emitter<'_, '_> {
     }
 
     fn call(&mut self, name: &str, returns: Type, args: &[&Value]) -> Value {
-        self.call_with_effect(name, returns, args, runtime_call_may_raise(name), false)
+        self.call_with_effect(
+            &format!("@{name}"),
+            None,
+            returns,
+            args,
+            runtime_call_may_raise(name),
+            false,
+        )
     }
 
     /// Uses only the final IR's conservative callee summary. Argument evaluation
@@ -981,7 +988,8 @@ impl Emitter<'_, '_> {
     ) -> Value {
         let name = self.output.function_ref(function);
         self.call_with_effect(
-            &name,
+            &format!("@{name}"),
+            None,
             returns,
             args,
             self.effects.may_raise(function),
@@ -992,7 +1000,7 @@ impl Emitter<'_, '_> {
     /// Captures in source order, preserving earlier owners across later argument
     /// effects and errors. Parameter reordering happens only after this step.
     fn call_operands(&mut self, args: &CallArgs) -> Vec<Operand> {
-        args.values.iter().map(|arg| self.operand(arg)).collect()
+        args.capture(|arg| self.operand(arg))
     }
 
     /// Once every argument is evaluated, the callee takes an owner of each
@@ -1012,19 +1020,24 @@ impl Emitter<'_, '_> {
 
     fn call_with_effect(
         &mut self,
-        name: &str,
+        target: &str,
+        context: Option<&str>,
         returns: Type,
         args: &[&Value],
         may_raise: bool,
         inline: bool,
     ) -> Value {
-        let args = args
-            .iter()
-            .map(|value| format!("{} {}", value.ty.llvm(), value.operand))
+        let args = context
+            .into_iter()
+            .map(|context| format!("ptr {context}"))
+            .chain(
+                args.iter()
+                    .map(|value| format!("{} {}", value.ty.llvm(), value.operand)),
+            )
             .collect::<Vec<_>>()
             .join(", ");
         let attribute = if inline { " alwaysinline" } else { "" };
-        let instruction = format!("call {} @{name}({args}){attribute}", returns.llvm());
+        let instruction = format!("call {} {target}({args}){attribute}", returns.llvm());
         let operand = if may_raise {
             self.checked_instruction(instruction)
         } else {
@@ -3257,22 +3270,8 @@ impl Emitter<'_, '_> {
                         args.exhaustive_enum_match,
                     );
                 }
-                let mut values = self.call_operands(args);
-                self.transfer_call_operands(&mut values);
-                let result = self.user_call(
-                    *id,
-                    expression.ty,
-                    &args
-                        .order
-                        .iter()
-                        .map(|&index| &values[index].value)
-                        .collect::<Vec<_>>(),
-                    args.exhaustive_enum_match,
-                );
-                for arg in &values {
-                    self.release_operand(arg);
-                }
-                result
+                let values = self.call_operands(args);
+                self.native_call(callables::NativeCallTarget::Function(*id), args, values, expression.ty)
             }
             ExprKind::Callable { function, receiver } => {
                 self.callable_value(expression.ty, *function, receiver.as_deref())
@@ -6303,7 +6302,8 @@ impl Emitter<'_, '_> {
                 self.output
                     .local_helper("imre_tagged_modpow", include_str!("llvm/tagged_modpow.ll"));
                 self.call_with_effect(
-                    "imre_tagged_modpow",
+                    "@imre_tagged_modpow",
+                    None,
                     Type::Int,
                     &[&args[0].value, &args[1].value, &args[2].value],
                     true,
@@ -7711,7 +7711,8 @@ impl Emitter<'_, '_> {
                     include_str!("llvm/tagged_sumprod.ll"),
                 );
                 self.call_with_effect(
-                    "imre_tagged_sumprod",
+                    "@imre_tagged_sumprod",
+                    None,
                     Type::Int,
                     &[&args[0].value, &args[1].value],
                     true,

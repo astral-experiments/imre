@@ -687,6 +687,10 @@ impl Verifier<'_> {
                 same(native_result, callee.returns)
             }
             ExprKind::Invoke { callable, args } => {
+                require(
+                    args.python_site.is_none(),
+                    "fixed invocation cannot use a Python call site",
+                )?;
                 let (params, returns) = types
                     .signature(callable.ty)
                     .ok_or("indirect call needs a callable")?;
@@ -1010,6 +1014,15 @@ mod tests {
         };
         module.entry.body = vec![invoke(CallArgs::positional(vec![Expr::integer(1)]))];
         super::module(&module).unwrap();
+        let mut frame_args = CallArgs::positional(vec![Expr::integer(1)]);
+        frame_args.python_site = Some(ir::InvokeSite {
+            range: ruff_text_size::TextRange::new(0.into(), 4.into()),
+            callee_end: 1.into(),
+            suspended_name: None,
+            scope: None,
+        });
+        module.entry.body = vec![invoke(frame_args)];
+        reject(&module, "fixed invocation cannot use a Python call site");
         module.entry.body = vec![invoke(CallArgs::positional(Vec::new()))];
         reject(&module, "argument count");
         module.functions[0].locals[0] = Type::Float;
