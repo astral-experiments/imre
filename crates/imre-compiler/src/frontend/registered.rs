@@ -790,11 +790,15 @@ impl ModuleAnnotations {
     }
 }
 
+pub(crate) enum DeclarationSite<'a> {
+    Function(FunctionSite<'a>),
+    Class(&'a ast::StmtClassDef),
+}
+
 #[derive(Default)]
 pub(crate) struct RegisteredSites<'a> {
     pub(crate) operations: HashMap<TextRange, Expr>,
-    pub(crate) functions: Vec<FunctionSite<'a>>,
-    pub(crate) classes: Vec<&'a ast::StmtClassDef>,
+    pub(crate) declarations: Vec<DeclarationSite<'a>>,
     pub(crate) module_annotations: ModuleAnnotations,
     pub(crate) class_annotations: HashMap<TextSize, DeferredAnnotation>,
     pub(crate) class_annotation_bindings: HashMap<TextSize, RegisteredBindings>,
@@ -824,7 +828,7 @@ pub(crate) fn registered_sites<'a>(
             }
             match stmt {
                 ast::Stmt::ClassDef(class) => {
-                    self.output.classes.push(class);
+                    self.output.declarations.push(DeclarationSite::Class(class));
                     let outer = std::mem::replace(&mut self.scope, RegisteredScope::Class);
                     let child = SourceScope::new(
                         self.annotations.kind,
@@ -866,16 +870,18 @@ pub(crate) fn registered_sites<'a>(
                         && (self.in_unprepared_generic || def.type_params.is_some());
                     let thread_entry = imre_ast::thread_entry(def);
                     let worker = thread_entry.is_some();
-                    self.output.functions.push(FunctionSite {
-                        def,
-                        parameters: parameters.map(|params| {
-                            registered_type_parameters(params, self.names, |rhs| {
-                                ParameterEvaluator::prepare(rhs, self.source, None)
-                            })
-                        }),
-                        prepare_entry: !unprepared || worker,
-                        thread_entry,
-                    });
+                    self.output
+                        .declarations
+                        .push(DeclarationSite::Function(FunctionSite {
+                            def,
+                            parameters: parameters.map(|params| {
+                                registered_type_parameters(params, self.names, |rhs| {
+                                    ParameterEvaluator::prepare(rhs, self.source, None)
+                                })
+                            }),
+                            prepare_entry: !unprepared || worker,
+                            thread_entry,
+                        }));
                     if worker {
                         // A proven worker contains no nested declarations or namespace effects.
                         return;
@@ -980,6 +986,14 @@ struct PendingStatement<'s> {
     effect: Option<SourceEffect>,
 }
 
+/// Lowering already knows whether each checked statement has a normal successor.
+struct LoweredSuite<'s> {
+    checked: RegisteredFunction,
+    pending: Vec<PendingStatement<'s>>,
+    /// End of the first checked statement without an outgoing normal edge.
+    checked_exit: Option<usize>,
+}
+
 pub(crate) enum ValueStatement {
     /// Retain the RHS once for the checked assignment targets that follow.
     Store(usize),
@@ -1063,7 +1077,11 @@ pub(crate) enum PhysicalBinding {
 pub(crate) type PhysicalOperand =
     booleans::SourceOperand<Box<RegisteredOperand>, booleans::OwnedExpression>;
 
+pub(crate) type OperandRefusal = (TextRange, &'static str);
+
 pub(crate) struct RegisteredSuite {
+    pub(crate) refusal: Option<OperandRefusal>,
+    falls_through: bool,
     pub(crate) checked: RegisteredFunction,
     pub(crate) residual: Vec<SuiteOperation>,
 }
@@ -1192,6 +1210,8 @@ enum SuiteSelection {
 pub(crate) struct SuitePreparation<'a> {
     operations: &'a HashMap<TextRange, Expr>,
     source: values::RegisteredSource<'a>,
+    pub(crate) declaration_refusals: HashMap<TextSize, OperandRefusal>,
+    refusal: Option<OperandRefusal>,
     pub(crate) sites: StatementSites,
 }
 
@@ -1206,9 +1226,12 @@ impl<'a> SuitePreparation<'a> {
             operations,
             source,
             sites: statement_sites(body, source, assertions_enabled),
+            declaration_refusals: HashMap::new(),
+            refusal: None,
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn class_suites(
         &mut self,
         classes: Vec<&ast::StmtClassDef>,
@@ -1218,65 +1241,81 @@ impl<'a> SuitePreparation<'a> {
     ) -> HashMap<TextSize, RegisteredClass> {
         classes
             .into_iter()
-            .map(|class| {
-                let start = class.start();
-                let header = class.type_params.as_deref().map(|params| {
-                    let parameters = TypeParameterValues::prepare(
-                        params,
-                        names,
-                        self.source,
-                        scopes.classes[&start].enclosing_class,
-                        scopes,
-                    );
-                    let mut scope = SourceScope::new(
-                        RegisteredScope::Function { is_async: false },
-                        self.source,
-                        self.operations,
-                        &self.sites,
-                    );
-                    scope.report_child_refusals = true;
-                    let args = class
-                        .arguments
-                        .as_deref()
-                        .into_iter()
-                        .flat_map(imre_ast::argument_values)
-                        .map(|expr| {
-                            scope.refusal = None;
-                            scope.operand(expr).ok_or_else(|| {
-                                scope
-                                    .refusal
-                                    .unwrap_or((expr.range(), "expression has no checked operand"))
-                            })
-                        })
-                        .collect::<StdResult<Vec<_>, _>>();
-                    let body = args.map(|args| {
-                        let value = operation(
-                            Builtin::RegisteredClassNamespace(start, class_argument_layout(class)),
-                            Type::PythonObject,
-                            args,
-                        );
-                        scope.finish(RegisteredFunction::returning(class.name.range(), value))
-                    });
-                    ClassHeader { parameters, body }
-                });
-                let keyword = class_keywords.partition_point(|&p| p < class.name.start()) - 1;
-                let range = TextRange::new(class_keywords[keyword], class.end());
-                let body = self.suite(&class.body, RegisteredScope::Class);
-                let class = RegisteredClass {
-                    name: class.name.clone(),
-                    range,
-                    doc: docstring(&class.body),
-                    decorator_offsets: class
-                        .decorator_list
-                        .iter()
-                        .map(|d| d.expression.start())
-                        .collect(),
-                    body,
-                    header,
-                };
-                (start, class)
-            })
+            .rev()
+            .map(|class| self.class_suite(class, class_keywords, names, scopes))
             .collect()
+    }
+
+    pub(crate) fn class_suite(
+        &mut self,
+        class: &ast::StmtClassDef,
+        class_keywords: &[TextSize],
+        names: &imre_ast::Names,
+        scopes: &super::function_scope::ScopeFacts,
+    ) -> (TextSize, RegisteredClass) {
+        let start = class.start();
+        let header = class.type_params.as_deref().map(|params| {
+            let parameters = TypeParameterValues::prepare(
+                params,
+                names,
+                self.source,
+                scopes.classes[&start].enclosing_class,
+                scopes,
+            );
+            let mut scope = SourceScope::new(
+                RegisteredScope::Function { is_async: false },
+                self.source,
+                self.operations,
+                &self.sites,
+            );
+            scope.report_child_refusals = true;
+            let args = class
+                .arguments
+                .as_deref()
+                .into_iter()
+                .flat_map(imre_ast::argument_values)
+                .map(|expr| {
+                    scope.refusal = None;
+                    scope.operand(expr).ok_or_else(|| {
+                        scope
+                            .refusal
+                            .unwrap_or((expr.range(), "expression has no checked operand"))
+                    })
+                })
+                .collect::<StdResult<Vec<_>, _>>();
+            let body = args.map(|args| {
+                let value = operation(
+                    Builtin::RegisteredClassNamespace(start, class_argument_layout(class)),
+                    Type::PythonObject,
+                    args,
+                );
+                scope.finish(RegisteredFunction::returning(class.name.range(), value))
+            });
+            ClassHeader { parameters, body }
+        });
+        let keyword = class_keywords.partition_point(|&p| p < class.name.start()) - 1;
+        let range = TextRange::new(class_keywords[keyword], class.end());
+        let body = self.suite(&class.body, RegisteredScope::Class);
+        if let Some(refusal) = header
+            .as_ref()
+            .and_then(|header| header.body.as_ref().err().copied())
+            .or(body.refusal)
+        {
+            self.declaration_refusals.insert(start, refusal);
+        }
+        let class = RegisteredClass {
+            name: class.name.clone(),
+            range,
+            doc: docstring(&class.body),
+            decorator_offsets: class
+                .decorator_list
+                .iter()
+                .map(|d| d.expression.start())
+                .collect(),
+            body,
+            header,
+        };
+        (start, class)
     }
 
     pub(crate) fn suite(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope) -> RegisteredSuite {
@@ -1322,9 +1361,24 @@ impl<'a> SuitePreparation<'a> {
         child_selection: SuiteSelection,
         suspended: bool,
     ) -> RegisteredSuite {
-        let (checked, pending) = self.lower(stmts, kind, select, suspended);
+        let LoweredSuite {
+            checked,
+            pending,
+            checked_exit,
+        } = self.lower(stmts, kind, select, suspended);
+        let enclosing = self.refusal.take();
         let mut residual = Vec::with_capacity(pending.len());
+        let mut offset = 0;
+        let mut live = true;
         for run in pending {
+            if live {
+                self.refusal = self.refusal.or_else(|| {
+                    self.checked_declaration_refusal(&checked.function.body[offset..run.at])
+                });
+                live = checked_exit.is_none_or(|exit| run.at < exit);
+            }
+            offset = run.at;
+            let preceding = self.refusal.take();
             let effect =
                 match (run.effect, run.source) {
                     (Some(effect), _) => effect,
@@ -1357,9 +1411,76 @@ impl<'a> SuitePreparation<'a> {
                         "cannot compile this statement ahead of time",
                     ),
                 };
+            let selected = match &effect {
+                SourceEffect::ObjectOperation(_, inputs) | SourceEffect::Value(_, inputs) => {
+                    inputs.iter().find_map(PhysicalOperand::refusal)
+                }
+                SourceEffect::Assertion(site) => site
+                    .test
+                    .refusal()
+                    .or_else(|| site.message.as_ref()?.refusal()),
+                SourceEffect::Refused(range, reason) => Some((*range, *reason)),
+                SourceEffect::Class { site, inputs, .. } => inputs
+                    .iter()
+                    .find_map(PhysicalOperand::refusal)
+                    .or_else(|| self.declaration_refusals.get(site).copied()),
+                _ => None,
+            };
+            let operation = self.refusal.take().or(selected);
+            self.refusal = preceding.or(operation.filter(|_| live));
+            live &= match &effect {
+                SourceEffect::Value(ValueStatement::Raise | ValueStatement::Return, _) => false,
+                SourceEffect::Try(region) => try_continues(
+                    region.body.falls_through,
+                    !region.handlers.is_empty(),
+                    region
+                        .finalbody
+                        .as_ref()
+                        .is_none_or(|suite| suite.falls_through),
+                ),
+                SourceEffect::While(region)
+                    if matches!(region.condition, WhileGuard::Literal(false)) =>
+                {
+                    region
+                        .otherwise
+                        .as_ref()
+                        .is_none_or(|suite| suite.falls_through)
+                }
+                _ => true,
+            };
             residual.push(SuiteOperation { at: run.at, effect });
         }
-        RegisteredSuite { checked, residual }
+        if live {
+            self.refusal = self
+                .refusal
+                .or_else(|| self.checked_declaration_refusal(&checked.function.body[offset..]));
+        }
+        let falls_through = live && checked_exit.is_none();
+        let refusal = std::mem::replace(&mut self.refusal, enclosing);
+        RegisteredSuite {
+            checked,
+            residual,
+            refusal,
+            falls_through,
+        }
+    }
+
+    pub(crate) fn checked_declaration_refusal(
+        &self,
+        block: &[Statement],
+    ) -> Option<OperandRefusal> {
+        if self.declaration_refusals.is_empty() {
+            return None;
+        }
+        let mut refusal = None;
+        RequiredSite::visit(block, &mut |site| {
+            if refusal.is_none()
+                && let RequiredSite::Definition(start) | RequiredSite::ClassNamespace(start) = site
+            {
+                refusal = self.declaration_refusals.get(&start).copied();
+            }
+        });
+        refusal
     }
 
     fn physical_operand(
@@ -1383,7 +1504,9 @@ impl<'a> SuitePreparation<'a> {
         lower: impl FnOnce(&mut SourceScope<'_>) -> Option<Expr>,
     ) -> PhysicalOperand {
         let operand = RegisteredOperand::prepare_with(self.source, kind, lower);
-        self.retain_operand(expr, kind, suspended, operand)
+        let input = self.retain_operand(expr, kind, suspended, operand);
+        self.refusal = self.refusal.or_else(|| input.refusal());
+        input
     }
 
     fn registered_operand(
@@ -1415,7 +1538,7 @@ impl<'a> SuitePreparation<'a> {
     }
 
     fn physical_binding(
-        &self,
+        &mut self,
         target: &ast::Expr,
         kind: RegisteredScope,
         pair_pull: bool,
@@ -1433,6 +1556,7 @@ impl<'a> SuitePreparation<'a> {
                     target.range(),
                     "cannot compile this assignment target ahead of time",
                 ));
+                self.refusal.get_or_insert((range, reason));
                 PhysicalBinding::Refused(range, reason)
             }
         }
@@ -1445,7 +1569,9 @@ impl<'a> SuitePreparation<'a> {
         selection: SuiteSelection,
         suspended: bool,
     ) -> RegisteredSuite {
-        self.selected_suite(stmts, kind, selection, selection, suspended)
+        let child = self.selected_suite(stmts, kind, selection, selection, suspended);
+        self.refusal = self.refusal.or(child.refusal);
+        child
     }
 
     fn prepare_if(
@@ -1466,10 +1592,9 @@ impl<'a> SuitePreparation<'a> {
                     None
                 }
                 Some(expr) if suspended => {
-                    let operand = RegisteredOperand::prepare_with(self.source, kind, |scope| {
+                    Some(self.owned_operand(expr, kind, suspended, |scope| {
                         scope.condition_operand(expr)
-                    });
-                    Some(self.retain_operand(expr, kind, suspended, operand))
+                    }))
                 }
                 test => test.map(|expr| self.physical_operand(expr, kind, selection, suspended)),
             };
@@ -1492,7 +1617,14 @@ impl<'a> SuitePreparation<'a> {
         selection: SuiteSelection,
         suspended: bool,
     ) -> PreparedTry {
+        // Check and build report the first refusal from the body, entered else
+        // suite, handlers and finally suite in preparation order.
         let body = self.physical_suite(&stmt.body, kind, selection, suspended);
+        // A skipped else still owns its lexical sites for module annotation placement.
+        let otherwise = self.selected_suite(&stmt.orelse, kind, selection, selection, suspended);
+        if body.falls_through {
+            self.refusal = self.refusal.or(otherwise.refusal);
+        }
         let handlers = stmt
             .handlers
             .iter()
@@ -1520,7 +1652,7 @@ impl<'a> SuitePreparation<'a> {
             is_star: stmt.is_star,
             body,
             handlers,
-            otherwise: self.physical_suite(&stmt.orelse, kind, selection, suspended),
+            otherwise,
             finalbody: (!stmt.finalbody.is_empty())
                 .then(|| self.physical_suite(&stmt.finalbody, kind, selection, suspended)),
         }
@@ -1569,9 +1701,15 @@ impl<'a> SuitePreparation<'a> {
                 self.owned_operand(test, kind, suspended, |scope| scope.condition_operand(test)),
             ),
         };
+        // A disabled loop has no body entry, including in a suspended frame.
+        let body = if matches!(condition, WhileGuard::Literal(false)) {
+            &[][..]
+        } else {
+            &loop_.body
+        };
         PreparedWhile {
             condition,
-            body: self.physical_suite(&loop_.body, kind, selection, suspended),
+            body: self.physical_suite(body, kind, selection, suspended),
             otherwise: (!loop_.orelse.is_empty())
                 .then(|| self.physical_suite(&loop_.orelse, kind, selection, suspended)),
         }
@@ -1605,10 +1743,11 @@ impl<'a> SuitePreparation<'a> {
         kind: RegisteredScope,
         select: SuiteSelection,
         suspended: bool,
-    ) -> (RegisteredFunction, Vec<PendingStatement<'s>>) {
+    ) -> LoweredSuite<'s> {
         let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
         let mut body = Vec::new();
         let mut residual = Vec::new();
+        let mut checked_exit = None;
         let frame_value = |expr: &ast::Expr| {
             let checked = RegisteredOperand::prepare_with(self.source, kind, |scope| {
                 if suspended {
@@ -1628,6 +1767,7 @@ impl<'a> SuitePreparation<'a> {
         for stmt in stmts {
             if let Some(transfer) = loop_transfer(stmt) {
                 body.extend([checkpoint(stmt), transfer]);
+                checked_exit.get_or_insert(body.len());
                 continue;
             }
             let slots_before = scope.locals.len();
@@ -1636,7 +1776,10 @@ impl<'a> SuitePreparation<'a> {
                 SuiteSelection::All => scope.statement(stmt, &mut body),
                 SuiteSelection::Physical => scope.physical_statement(stmt, &mut body),
             };
-            if lowered.is_ok() {
+            if let Ok(continues) = lowered {
+                if !continues {
+                    checked_exit.get_or_insert(body.len());
+                }
                 continue;
             }
             scope.truncate_locals(slots_before);
@@ -1880,7 +2023,11 @@ impl<'a> SuitePreparation<'a> {
                 effect: None,
             });
         }
-        (scope.finish(body), residual)
+        LoweredSuite {
+            checked: scope.finish(body),
+            pending: residual,
+            checked_exit,
+        }
     }
 
     pub(crate) fn complete(
@@ -1888,12 +2035,20 @@ impl<'a> SuitePreparation<'a> {
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
     ) -> Option<RegisteredSuite> {
-        let (checked, pending) = self.lower(stmts, kind, SuiteSelection::All, false);
-        pending.is_empty().then_some(RegisteredSuite {
-            checked,
+        let lowered = self.lower(stmts, kind, SuiteSelection::All, false);
+        lowered.pending.is_empty().then(|| RegisteredSuite {
+            falls_through: lowered.checked_exit.is_none(),
+            refusal: None,
+            checked: lowered.checked,
             residual: Vec::new(),
         })
     }
+}
+
+/// Registered handler dispatch places a join after all arms, including the exceptional
+/// entry. A terminating final suite closes that edge as well as the body's normal edge.
+fn try_continues(body: bool, has_handlers: bool, finalbody: bool) -> bool {
+    (body || has_handlers) && finalbody
 }
 
 /// A target's Python expression inputs in evaluation order. The receiver is evaluated
@@ -2194,7 +2349,7 @@ impl statements::StatementLowering for SourceScope<'_> {
                 Ok((vec![binding], true))
             }
             ast::Stmt::Try(region) => {
-                let body = self.suite(&region.body)?;
+                let (body, body_continues) = self.block(&region.body)?;
                 let mut handlers = Vec::with_capacity(region.handlers.len());
                 for ast::ExceptHandler::ExceptHandler(handler) in &region.handlers {
                     let matcher = match handler.type_.as_deref() {
@@ -2215,7 +2370,9 @@ impl statements::StatementLowering for SourceScope<'_> {
                     });
                 }
                 let orelse = self.suite(&region.orelse)?;
-                let finalbody = self.suite(&region.finalbody)?;
+                let (finalbody, final_continues) = self.block(&region.finalbody)?;
+                let continues =
+                    try_continues(body_continues, !handlers.is_empty(), final_continues);
                 Ok((
                     vec![Statement::Try {
                         body,
@@ -2223,7 +2380,7 @@ impl statements::StatementLowering for SourceScope<'_> {
                         orelse,
                         finalbody,
                     }],
-                    true,
+                    continues,
                 ))
             }
             ast::Stmt::With(stmt) if !stmt.is_async || self.async_iteration() => Ok((
@@ -2773,7 +2930,6 @@ impl SourceScope<'_> {
 
     fn match_statement(&mut self, branch: &ast::StmtMatch) -> StdResult<statements::Block, ()> {
         let mut cases = Vec::with_capacity(branch.cases.len());
-        let mut falls = false;
         let mut exhaustive = false;
         let patterns = patterns::prepare_patterns(branch, self.source).map_err(|_| ())?;
         for (case, pattern) in branch.cases.iter().zip(patterns) {
@@ -2787,18 +2943,18 @@ impl SourceScope<'_> {
                 .map(|value| self.condition_operand(value).map(truth).ok_or(()))
                 .transpose()?;
             exhaustive = guard.is_none() && case.pattern.is_irrefutable();
-            let (body, continues) = self.block(&case.body)?;
+            let body = self.suite(&case.body)?;
             cases.push(ir::MatchCase {
                 pattern,
                 captures,
                 guard,
                 body,
             });
-            falls |= continues;
         }
         // Only a complete match owns its subject in this suite's slot layout.
         let subject = self.frame_value(&branch.subject).ok_or(())?;
-        Ok((vec![Statement::Match(subject, cases)], falls || !exhaustive))
+        // Registered match placement retains the join after the last case.
+        Ok((vec![Statement::Match(subject, cases)], true))
     }
 
     fn block(&mut self, stmts: &[ast::Stmt]) -> StdResult<statements::Block, ()> {
@@ -3191,7 +3347,12 @@ mod tests {
         let names = imre_ast::lower(&mut body);
         let literals = values::ModuleSource::new(module);
         let sites = registered_sites(&body, &names, literals.context(source), HashMap::new());
-        let [method, closure] = sites.functions.as_slice() else {
+        let [
+            DeclarationSite::Class(_),
+            DeclarationSite::Function(method),
+            DeclarationSite::Function(closure),
+        ] = sites.declarations.as_slice()
+        else {
             panic!("expected the method and its lexical function");
         };
         assert!(method.prepare_entry && closure.prepare_entry);

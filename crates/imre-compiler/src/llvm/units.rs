@@ -21,6 +21,8 @@ pub(super) struct Output {
 
 impl Output {
     pub fn new(functions: &[usize], count: usize, entry: usize, split: bool) -> Self {
+        #[cfg(test)]
+        crate::single_emission_tests::record_llvm_start();
         let mut next = vec![0; count];
         let functions = functions
             .iter()

@@ -60,6 +60,7 @@ pub const IMPLEMENTATION_NAME: &str = "imre";
 pub const NATIVE_ARCHIVE_EXTENSION: &str = imre_ast::NATIVE_ARCHIVE_EXTENSIONS[1];
 
 /// Startup choices made before a native Python command executes.
+#[cfg_attr(test, derive(Default))]
 #[derive(Clone, serde::Serialize)]
 pub struct CommandFlags {
     pub isolated: bool,
@@ -350,7 +351,7 @@ fn check_with(
     filesystem: watch::FileSystem<'_>,
 ) -> Result<(), String> {
     object_fallback(
-        BoxedLayout::Check,
+        CompilationMode::Check,
         entry,
         options,
         filesystem,
@@ -407,15 +408,33 @@ fn bytecode_script_error(path: &Path, bytes: &[u8]) -> Option<&'static str> {
 
 /// Selects the LLVM outputs for a resolved boxed program.
 enum BoxedLayout<'a> {
-    Check,
     Whole,
     Split,
     WholeWithUnits(&'a mut Vec<CodegenUnit>),
 }
 
+enum CompilationMode<'a> {
+    Check,
+    Build(BoxedLayout<'a>),
+}
+
+enum CompilationResult {
+    Checked(SourceInputs),
+    Built(UnitCompilation),
+}
+
+impl CompilationResult {
+    fn into_built(self) -> UnitCompilation {
+        match self {
+            Self::Built(compilation) => compilation,
+            Self::Checked(_) => unreachable!("build requested a code generation layout"),
+        }
+    }
+}
+
 /// Uses the boxed backend when the checked graph requires Python object operations.
 fn object_fallback(
-    layout: BoxedLayout<'_>,
+    mode: CompilationMode<'_>,
     entry: ProgramEntry<'_>,
     options: &CompileOptions,
     mut filesystem: watch::FileSystem<'_>,
@@ -429,7 +448,7 @@ fn object_fallback(
         CheckedIr,
         llvm::NativeProgram,
     ) -> Result<Vec<CodegenUnit>, llvm::Unsupported>,
-) -> Result<UnitCompilation, String> {
+) -> Result<CompilationResult, String> {
     for name in &options.include_modules {
         if !modules::valid_module_operand(name) {
             return Err(format!(
@@ -437,25 +456,27 @@ fn object_fallback(
             ));
         }
     }
-    let checking = matches!(layout, BoxedLayout::Check);
-    let native_result = |graph, units| {
-        if !options.include_modules.is_empty() {
+    let native_includes = || {
+        if options.include_modules.is_empty() {
+            Ok(())
+        } else {
             Err(
                 "--include-module requires a runtime module loader; this entry is fully typed"
-                    .into(),
+                    .to_owned(),
             )
-        } else if checking || matches!(entry, ProgramEntry::Source(_)) {
-            Ok(UnitCompilation {
+        }
+    };
+    let native_result = |graph, units| {
+        native_includes()?;
+        let compilation = if matches!(entry, ProgramEntry::Source(_)) {
+            UnitCompilation {
                 units,
                 ..Default::default()
-            })
+            }
         } else {
-            Ok(UnitCompilation::native(
-                graph,
-                units,
-                options.entry_profile.as_deref(),
-            ))
-        }
+            UnitCompilation::native(graph, units, options.entry_profile.as_deref())
+        };
+        Ok(CompilationResult::Built(compilation))
     };
     let checked_file = options.python_startup().is_none();
     // A Python module launch enters through the runtime registration. Other callers
@@ -499,9 +520,10 @@ fn object_fallback(
                     CheckedProgram::Registered(reason) => break reason,
                     CheckedProgram::Native(mut fixed) => {
                         let (module, owners) = &mut fixed.ir;
-                        if checking {
+                        if matches!(mode, CompilationMode::Check) {
                             verify_after(module, "lowering")?;
-                            return native_result(graph, Vec::new());
+                            native_includes()?;
+                            return Ok(CompilationResult::Checked(graph.inputs));
                         }
                         for original in specialize(module)? {
                             owners.push(owners[original]);
@@ -761,13 +783,16 @@ fn object_fallback(
         object_imports,
         operation
             .or(ordered_command_import.then_some(dynamic::ObjectOperation::OrderedCommandImport)),
-        checked_graph.as_mut(),
-        layout,
+        &mut checked_graph,
+        mode,
         check,
     )? {
-        Some(mut compilation) => {
-            site_probes.record(&mut compilation.source_inputs);
-            Ok(compilation)
+        Some(mut result) => {
+            site_probes.record(match &mut result {
+                CompilationResult::Checked(inputs) => inputs,
+                CompilationResult::Built(compilation) => &mut compilation.source_inputs,
+            });
+            Ok(result)
         }
         None => fallback(checked_graph, deferred_native),
     }
@@ -830,7 +855,7 @@ fn compile_with_layout(
         }])
     };
     object_fallback(
-        layout,
+        CompilationMode::Build(layout),
         entry,
         options,
         Default::default(),
@@ -838,6 +863,7 @@ fn compile_with_layout(
         |graph, call_error| checked_lower_with(graph, None, call_error),
         typed,
     )
+    .map(CompilationResult::into_built)
 }
 
 pub struct CodegenUnit {
@@ -994,7 +1020,7 @@ fn compile_file_units_with(
         )
     };
     object_fallback(
-        BoxedLayout::Split,
+        CompilationMode::Build(BoxedLayout::Split),
         ProgramEntry::File(path, module_root),
         options,
         Default::default(),
@@ -1002,6 +1028,7 @@ fn compile_file_units_with(
         |graph, call_error| checked_lower_with(graph, cache.as_deref_mut(), call_error),
         typed,
     )
+    .map(CompilationResult::into_built)
 }
 
 type CheckedIr = (ir::Module, Vec<modules::ModuleId>);
@@ -1710,7 +1737,7 @@ print("result", call(b=2, a=1))
             std::fs::write(&path, format!("{INFERRED_SET_GATHER}{usage}")).unwrap();
             let options = CompileOptions::default();
             let ordinary = super::object_fallback(
-                super::BoxedLayout::Check,
+                super::CompilationMode::Check,
                 super::ProgramEntry::File(&path, None),
                 &options,
                 Default::default(),
@@ -1747,7 +1774,7 @@ print("result", call(b=2, a=1))
         std::fs::write(&path, source).unwrap();
         let mut passes = 0;
         let result = super::object_fallback(
-            super::BoxedLayout::Check,
+            super::CompilationMode::Check,
             super::ProgramEntry::File(&path, None),
             &CompileOptions::default(),
             Default::default(),
@@ -1784,7 +1811,7 @@ print("result", call(b=2, a=1))
         let expected = super::check_file(&path, None);
         let mut passes = Vec::new();
         let result = super::object_fallback(
-            super::BoxedLayout::Check,
+            super::CompilationMode::Check,
             super::ProgramEntry::File(&path, None),
             &options,
             Default::default(),

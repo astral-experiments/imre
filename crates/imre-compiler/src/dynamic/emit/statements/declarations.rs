@@ -1,14 +1,14 @@
 //! Resolve declaration and annotation code sites before emitting the checked block.
 use super::super::sites::{
     CheckedSites, CompiledAlias, CompiledDefinition, CompiledGenerator, CompiledTypeParameters,
-    Declaration, RequiredSite,
+    Declaration,
 };
 use super::super::{
     AnnotationScope, Body, DefinitionName, Entry, Function, RegisteredFrame, SourceInfo, SourceMap,
 };
 use super::CallableSites;
-use crate::frontend::ParameterEvaluator;
 use crate::frontend::function_scope::{ClassBindings, NamedFunction};
+use crate::frontend::{ParameterEvaluator, RequiredSite};
 use crate::ir::{Expr, RegisteredTypeParameter, Statement};
 use ruff_text_size::{TextRange, TextSize};
 use serde_json::json;
@@ -70,7 +70,7 @@ impl<'p> SourceMap<'p> {
 impl Function<'_, '_> {
     pub(in crate::dynamic::emit) fn prepare_checked_value(&mut self, value: &Expr) {
         let mut callables = self.callable_sites();
-        CheckedSites::visit_operand(value, &mut |site| callables.place_site(site));
+        RequiredSite::visit_operand(value, &mut |site| callables.place_site(site));
     }
 
     pub(in crate::dynamic::emit) fn callable_sites(&mut self) -> CallableSites<'_, '_> {
@@ -86,7 +86,7 @@ impl Function<'_, '_> {
 
 impl CallableSites<'_, '_> {
     pub(in crate::dynamic::emit) fn place_statements(&mut self, statements: &[Statement]) {
-        CheckedSites::visit(statements, &mut |site| self.place_site(site));
+        RequiredSite::visit(statements, &mut |site| self.place_site(site));
     }
 
     fn place_annotation_string(&mut self, site: TextSize) {

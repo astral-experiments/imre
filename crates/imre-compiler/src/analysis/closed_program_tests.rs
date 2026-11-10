@@ -404,8 +404,8 @@ fn retained_native_candidate_registers_its_original_source_owner() {
         &options,
         true,
         Some(crate::dynamic::ObjectOperation::CheckedEntry),
-        Some(&mut graph),
-        crate::BoxedLayout::Check,
+        &mut Some(graph),
+        crate::CompilationMode::Check,
         |_, _, sources| {
             let sources = sources.unwrap();
             for (name, id) in [("helper", helper_id), ("external", external_id)] {
@@ -418,7 +418,10 @@ fn retained_native_candidate_registers_its_original_source_owner() {
     )
     .unwrap()
     .unwrap();
-    assert!(compilation.source_inputs.files.contains(&(
+    let crate::CompilationResult::Checked(inputs) = compilation else {
+        panic!("expected checked inputs");
+    };
+    assert!(inputs.files.contains(&(
         vendor.join("external.py"),
         external,
         blake3::hash(original.as_bytes()).to_hex().to_string(),
@@ -443,8 +446,8 @@ fn retained_native_candidate_registers_its_original_source_owner() {
         &options,
         true,
         Some(crate::dynamic::ObjectOperation::CheckedEntry),
-        Some(&mut graph),
-        crate::BoxedLayout::Check,
+        &mut Some(next),
+        crate::CompilationMode::Check,
         |_, _, _| panic!("a different import kind reached object admission"),
     )
     .err()

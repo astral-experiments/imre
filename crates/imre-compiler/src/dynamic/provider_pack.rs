@@ -9,20 +9,20 @@ use super::{
     runtime_sources,
 };
 
+use crate::frontend::module_source::ParsedModule;
+
 const STDLIB_NAMES: &str = include_str!("../../../imre-runtime/native/stdlib-module-names.txt");
 
 pub(crate) fn write(directory: &Path) -> Result<(), String> {
     fs::create_dir_all(directory).map_err(|err| err.to_string())?;
     let write_module = |name: &str, file: &str, source: &str| -> io::Result<()> {
         let path = Path::new("<imre stdlib>").join(file);
-        match emit::PreparedBody::with_module(
-            name,
-            &path,
-            source,
-            0,
-            emit::ModuleOrigin::Bundled,
-            |body| body.standalone(),
-        ) {
+        let compiled = ParsedModule::parse(&path, source.into())
+            .and_then(|module| {
+                emit::PreparedBody::from_parsed(name, &path, module, 0, emit::ModuleOrigin::Bundled)
+            })
+            .and_then(|body| body.standalone());
+        match compiled {
             Ok((symbol, ir)) => fs::write(directory.join(format!("{symbol}.ll")), ir),
             Err(reason) => {
                 // The ordinary compiler still diagnoses a module it cannot lower when selected.
