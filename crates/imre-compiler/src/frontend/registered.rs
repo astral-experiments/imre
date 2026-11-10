@@ -937,8 +937,8 @@ pub(crate) enum SourceEffect {
     Discard(Vec<PhysicalOperand>),
     /// The enclosing suite owns any source inputs on their test or failure edge.
     Assertion(Box<AssertionSite>),
-    /// A target operand that failed to prepare retains its original diagnostic site.
-    RefusedTargetOperand(TextRange, &'static str),
+    /// A refused operand retains its diagnostic and its original source range.
+    RefusedOperand(TextRange, &'static str),
     /// Evaluate the operands at their place in the operation, in the current frame.
     ObjectOperation(Box<Builtin>, Vec<PhysicalOperand>),
     /// The enclosing loop supplies the destination and cleanup depth.
@@ -951,7 +951,7 @@ pub(crate) enum SourceEffect {
         arms: Vec<(Option<PhysicalOperand>, PhysicalSuite)>,
     },
     /// Patterns, guards and case suites belong to the same evaluation of the subject.
-    Match(TextRange, Option<Box<patterns::SourceMatch>>),
+    Match(TextRange, Box<patterns::SourceMatch>),
     /// Exception matchers and all control-flow children belong to this protected region.
     Try(Box<PreparedTry>),
     /// The manager, binding and protected child are prepared together.
@@ -1024,7 +1024,7 @@ impl PhysicalSuite {
                         | SourceEffect::ObjectOperation(..)
                         | SourceEffect::Discard(_)
                         | SourceEffect::Value(..)
-                        | SourceEffect::RefusedTargetOperand(..)
+                        | SourceEffect::RefusedOperand(..)
                 )
             ) {
                 sources.extend_from_slice(&stmts[run.statements.clone()]);
@@ -1418,11 +1418,14 @@ impl<'a> SuitePreparation<'a> {
                     continue;
                 }
                 if let ast::Stmt::Match(branch) = stmt {
-                    let site = self.prepare_match(branch, kind, suspended);
+                    let effect = match self.prepare_match(branch, kind, suspended) {
+                        Ok(site) => SourceEffect::Match(branch.range(), Box::new(site)),
+                        Err((range, reason)) => SourceEffect::RefusedOperand(range, reason),
+                    };
                     plan.residual.push(SourceRun {
                         at: run.at,
                         statements: index..index + 1,
-                        effect: Some(SourceEffect::Match(branch.range(), site.map(Box::new))),
+                        effect: Some(effect),
                     });
                     continue;
                 }
@@ -1879,10 +1882,7 @@ impl<'a> SuitePreparation<'a> {
                             stmt.range(),
                             "cannot compile this assignment target ahead of time",
                         ));
-                        (
-                            SourceEffect::RefusedTargetOperand(range, reason),
-                            Vec::new(),
-                        )
+                        (SourceEffect::RefusedOperand(range, reason), Vec::new())
                     }
                 };
                 body.push(checkpoint(stmt));
@@ -2843,7 +2843,7 @@ impl SourceScope<'_> {
         let mut cases = Vec::with_capacity(branch.cases.len());
         let mut falls = false;
         let mut exhaustive = false;
-        let patterns = patterns::prepare_patterns(branch, self.source).ok_or(())?;
+        let patterns = patterns::prepare_patterns(branch, self.source).map_err(|_| ())?;
         for (case, pattern) in branch.cases.iter().zip(patterns) {
             if exhaustive {
                 return Err(());

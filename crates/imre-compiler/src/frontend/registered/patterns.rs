@@ -2,6 +2,8 @@
 use super::*;
 use ir::MatchTest;
 
+type PatternResult<T> = std::result::Result<T, (TextRange, &'static str)>;
+
 pub(crate) struct SourceMatch {
     pub(crate) subject: PhysicalOperand,
     pub(crate) cases: Vec<ir::MatchCase<PhysicalOperand, PhysicalSuite, ()>>,
@@ -13,7 +15,7 @@ impl SuitePreparation<'_> {
         branch: &ast::StmtMatch,
         kind: RegisteredScope,
         suspended: bool,
-    ) -> Option<SourceMatch> {
+    ) -> PatternResult<SourceMatch> {
         let patterns = prepare_patterns(branch, self.source)?;
         let operand = |prepare: &mut Self, expr: &ast::Expr| {
             prepare.owned_operand(expr, kind, suspended, |scope| scope.frame_value(expr))
@@ -29,14 +31,14 @@ impl SuitePreparation<'_> {
                 body: self.physical_suite(&case.body, kind, SuiteSelection::All, suspended),
             })
             .collect();
-        Some(SourceMatch { subject, cases })
+        Ok(SourceMatch { subject, cases })
     }
 }
 
 pub(super) fn prepare_patterns(
     branch: &ast::StmtMatch,
     source: values::RegisteredSource<'_>,
-) -> Option<Vec<ir::MatchPattern>> {
+) -> PatternResult<Vec<ir::MatchPattern>> {
     branch
         .cases
         .iter()
@@ -47,7 +49,7 @@ pub(super) fn prepare_patterns(
 fn prepare_pattern(
     pattern: &ast::Pattern,
     source: values::RegisteredSource<'_>,
-) -> Option<ir::MatchPattern> {
+) -> PatternResult<ir::MatchPattern> {
     struct Builder<'a> {
         captures: Vec<String>,
         source: values::RegisteredSource<'a>,
@@ -60,39 +62,73 @@ fn prepare_pattern(
             name.to_string()
         }
 
-        fn operand(&self, node: &ast::Expr) -> Option<Expr> {
-            match node {
-                ast::Expr::UnaryOp(unary) if unary.op == ast::UnaryOp::USub => {
-                    Some(self.source.located(node, negative_literal(&unary.operand)?))
+        fn operand(
+            &self,
+            node: &ast::Expr,
+            reason: &'static str,
+        ) -> PatternResult<Expr> {
+            let invalid = (node.range(), reason);
+            let kind = match node {
+                ast::Expr::Name(name) => {
+                    return Ok(self.source.located(node, values::name_binding(&name.id)));
+                }
+                ast::Expr::Attribute(field) => {
+                    return Ok(values::loaded_attribute(
+                        field,
+                        self.operand(&field.value, reason)?,
+                    ));
+                }
+                ast::Expr::StringLiteral(lit) => {
+                    let value = self
+                        .source
+                        .string(lit.value.iter().map(FStringLiteral::Adjacent));
+                    return Ok(self.source.located(node, value));
+                }
+                ast::Expr::BytesLiteral(lit) => ExprKind::Bytes(lit.value.bytes().collect()),
+                ast::Expr::NoneLiteral(_) => ExprKind::None,
+                ast::Expr::BooleanLiteral(lit) => ExprKind::Bool(lit.value),
+                ast::Expr::NumberLiteral(lit) => values::number_literal(&lit.value, false),
+                ast::Expr::UnaryOp(op)
+                    if matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub) =>
+                {
+                    let number = op.operand.as_number_literal_expr().ok_or(invalid)?;
+                    values::number_literal(&number.value, op.op == ast::UnaryOp::USub)
                 }
                 ast::Expr::BinOp(bin)
                     if matches!(bin.op, ast::Operator::Add | ast::Operator::Sub) =>
                 {
-                    // Python's complex literal pattern is a signed real plus or minus an
-                    // imaginary literal. Adding its signed imaginary part keeps the exact
-                    // integer-to-complex conversion in the shared binary operation.
-                    let left = self.operand(&bin.left)?;
-                    let right = if bin.op == ast::Operator::Sub {
-                        self.source
-                            .located(&bin.right, negative_literal(&bin.right)?)
-                    } else {
-                        self.operand(&bin.right)?
-                    };
-                    Some(self.source.located(
-                        node,
+                    let left = self.operand(&bin.left, reason)?;
+                    let imag = bin.right.as_number_literal_expr().ok_or(invalid)?;
+                    let right = self.source.located(
+                        &bin.right,
                         Expr {
                             ty: Type::PythonObject,
-                            kind: ExprKind::Binary(Binary::Add, Box::new(left), Box::new(right)),
+                            kind: values::number_literal(&imag.value, bin.op == ast::Operator::Sub),
                         },
-                    ))
+                    );
+                    ExprKind::Binary(Binary::Add, Box::new(left), Box::new(right))
                 }
-                _ => values::registered_value(node, self.source),
-            }
+                _ => return Err(invalid),
+            };
+            Ok(self.source.located(
+                node,
+                Expr {
+                    ty: Type::PythonObject,
+                    kind,
+                },
+            ))
         }
 
-        fn lower(&mut self, node: &ast::Pattern) -> Option<MatchTest> {
-            Some(match node {
-                ast::Pattern::MatchValue(p) => MatchTest::Equal(self.operand(&p.value)?),
+        fn lower(&mut self, node: &ast::Pattern) -> PatternResult<MatchTest> {
+            Ok(match node {
+                ast::Pattern::MatchValue(p) => {
+                    if let Some(reason) =
+                        imre_ast::executable::value_pattern_error(&p.value, self.source.text)
+                    {
+                        return Err((p.value.range(), reason));
+                    }
+                    MatchTest::Equal(self.operand(&p.value, "patterns may only match literals and attribute lookups")?)
+                }
                 ast::Pattern::MatchSingleton(p) => MatchTest::Singleton(match p.value {
                     ast::Singleton::None => None,
                     ast::Singleton::True => Some(true),
@@ -118,37 +154,40 @@ fn prepare_pattern(
                     p.patterns
                         .iter()
                         .map(|child| self.lower(child))
-                        .collect::<Option<_>>()?,
+                        .collect::<PatternResult<_>>()?,
                 ),
                 ast::Pattern::MatchSequence(p) => MatchTest::Sequence(
                     imre_ast::sequence_pattern_plan(&p.patterns),
                     p.patterns
                         .iter()
                         .map(|child| self.lower(child))
-                        .collect::<Option<_>>()?,
+                        .collect::<PatternResult<_>>()?,
                 ),
                 ast::Pattern::MatchMapping(p) => MatchTest::Mapping(
                     p.keys
                         .iter()
                         .zip(&p.patterns)
-                        .map(|(key, item)| Some((self.operand(key)?, self.lower(item)?)))
-                        .collect::<Option<_>>()?,
+                        .map(|(key, item)| {
+                            let value = self.operand(key, "mapping pattern keys may only match literals and attribute lookups")?;
+                            Ok((value, self.lower(item)?))
+                        })
+                        .collect::<PatternResult<_>>()?,
                     p.rest.as_ref().map(|id| self.capture(id)),
                 ),
                 ast::Pattern::MatchClass(p) => MatchTest::Class {
-                    class: self.operand(&p.cls)?,
+                    class: self.operand(&p.cls, "expected a class name in match pattern")?,
                     positional: p
                         .arguments
                         .patterns
                         .iter()
                         .map(|child| self.lower(child))
-                        .collect::<Option<_>>()?,
+                        .collect::<PatternResult<_>>()?,
                     keywords: p
                         .arguments
                         .keywords
                         .iter()
-                        .map(|kw| Some((kw.attr.to_string(), self.lower(&kw.pattern)?)))
-                        .collect::<Option<_>>()?,
+                        .map(|kw| Ok((kw.attr.to_string(), self.lower(&kw.pattern)?)))
+                        .collect::<PatternResult<_>>()?,
                 },
             })
         }
@@ -157,17 +196,9 @@ fn prepare_pattern(
         captures: Vec::new(),
         source,
     };
-    Some(ir::MatchPattern {
+    Ok(ir::MatchPattern {
         test: builder.lower(pattern)?,
         names: builder.captures,
-    })
-}
-
-fn negative_literal(node: &ast::Expr) -> Option<Expr> {
-    let number = &node.as_number_literal_expr()?.value;
-    Some(Expr {
-        ty: Type::PythonObject,
-        kind: values::number_literal(number, true),
     })
 }
 

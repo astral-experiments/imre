@@ -3432,7 +3432,7 @@ mod tests {
             assert_eq!(prepared.standalone().unwrap(), original);
             if physical {
                 let suite = &mut test_function_suite(&mut prepared.source, start).plan;
-                let Some(crate::frontend::SourceEffect::Match(_, Some(site))) =
+                let Some(crate::frontend::SourceEffect::Match(_, site)) =
                     &mut suite.residual[0].effect
                 else {
                     panic!("expected a mixed match")
@@ -3476,7 +3476,7 @@ mod tests {
             panic!("expected match")
         };
         let suite = &prepared.source.initializer.as_ref().unwrap().plan;
-        let Some(crate::frontend::SourceEffect::Match(_, Some(site))) = &suite.residual[0].effect
+        let Some(crate::frontend::SourceEffect::Match(_, site)) = &suite.residual[0].effect
         else {
             panic!("expected a mixed match")
         };
@@ -5572,7 +5572,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             panic!("expected a mixed try")
         };
         let finalbody = &region.finalbody.as_ref().unwrap().plan;
-        let Some(crate::frontend::SourceEffect::Match(_, Some(site))) =
+        let Some(crate::frontend::SourceEffect::Match(_, site)) =
             &finalbody.residual[0].effect
         else {
             panic!("expected a mixed match in finally")

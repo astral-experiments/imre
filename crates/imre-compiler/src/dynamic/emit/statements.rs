@@ -206,11 +206,7 @@ impl<'p> Function<'_, 'p> {
             SourceEffect::Match(range, site) => {
                 self.checkpoint(range);
                 self.simple_call = None;
-                if let Some(site) = site {
-                    self.prepared_match(site);
-                } else {
-                    self.unsupported("unsupported value in match pattern");
-                }
+                self.prepared_match(site);
             }
             SourceEffect::Context(context) => self.prepared_context(context),
             SourceEffect::Try(region) => {
@@ -235,7 +231,7 @@ impl<'p> Function<'_, 'p> {
                 );
             }
             SourceEffect::While(region) => self.prepared_while(region),
-            SourceEffect::RefusedTargetOperand(range, reason) => {
+            SourceEffect::RefusedOperand(range, reason) => {
                 self.with_expression_range(*range, |code| code.build_diagnostic(reason));
             }
             SourceEffect::Value(output, inputs) => match output {
