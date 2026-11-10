@@ -47,9 +47,31 @@ impl Session {
         has_file_body: &dyn Fn(&str) -> bool,
     ) -> Result<(), String> {
         let file = self.files[module];
+        let program = self.db.program_file(file);
+        let model = SemanticModel::new(&self.db, program);
+        let index = ty_python_core::semantic_index(&self.db, program);
+        // Only ask for expression types when an import or the builtin namespace
+        // can supply the vendored runpy module or one of its functions.
+        if !index.scope_ids().any(|scope| {
+            let scope = scope.file_scope_id(&self.db);
+            let places = index.place_table(scope);
+            places.symbol_by_name("__import__").is_some()
+                || places.symbol_by_name("__builtins__").is_some()
+                || index
+                    .use_def_map(scope)
+                    .definitions_with_usage()
+                    .any(|(_, definition, _)| definition.kind(&self.db).is_import())
+        }) && model.resolve_module(Some("__builtins__"), 0).is_none()
+            && model.resolve_module(Some("builtins"), 0).is_some_and(|m| {
+                m.file(&self.db)
+                    .is_some_and(|f| f.path(&self.db).is_vendored_path())
+            })
+        {
+            return Ok(());
+        }
         let parsed = self.parsed(file);
         let mut check = Calls {
-            model: SemanticModel::new(&self.db, self.db.program_file(file)),
+            model,
             has_file_body,
             replaced: false,
             calls: Vec::new(),

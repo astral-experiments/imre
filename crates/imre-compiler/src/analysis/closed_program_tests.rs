@@ -1088,3 +1088,31 @@ print(Factory().get() is None)
         "{error}"
     );
 }
+
+#[test]
+fn run_path_can_enter_through_implicit_builtins() {
+    let project = tempdir().unwrap();
+    let root = project.path();
+    let sources = [
+        (
+            "__main__".into(),
+            root.join("app.py"),
+            "run_path(input())\n".into(),
+        ),
+        (
+            "__builtins__".into(),
+            root.join("__builtins__.pyi"),
+            "from runpy import run_path as run_path\n".into(),
+        ),
+    ];
+    let error = super::check_registered_project(
+        root,
+        &[],
+        sources.iter().map(|s| RegisteredSource::new(s, true, None)),
+        Some(&|_| false),
+        None,
+        None,
+    )
+    .unwrap_err();
+    assert!(error.contains("open executable filename"), "{error}");
+}
