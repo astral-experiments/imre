@@ -3721,7 +3721,9 @@ impl Context {
         let positions = slice_positions(start, end, step);
         let full_forward = start == 0 && step == 1 && count == len;
         let result = match self.heap.get(obj) {
-            Value::Str(_) | Value::SurrogateStr(_) if receiver == obj && full_forward => {
+            Value::Str(_) | Value::SurrogateStr(_) | Value::Tuple(_)
+                if receiver == obj && full_forward =>
+            {
                 return Ok(obj);
             }
             Value::SurrogateStr(points) => {
