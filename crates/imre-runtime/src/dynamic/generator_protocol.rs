@@ -450,7 +450,9 @@ impl Context {
             ));
         };
         let mut error = error.clone();
-        error.tracing().instance = Some(instance);
+        let trace = error.tracing();
+        trace.instance = Some(instance);
+        trace.generator_input = true;
         Ok(error)
     }
 

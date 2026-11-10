@@ -182,10 +182,23 @@ impl Context {
         };
         *running = true;
         self.heap.disarm_finalizer(owner);
+        let mut external_throw = matches!(input, GeneratorInput::Throw { .. });
         let result = loop {
-            let arg = if let Some(mark) = state.delegate_root {
+            let mut arg = if let Some(mark) = state.delegate_root {
                 let iter = *self.heap.temporary_root(mark);
-                let result = match self.advance_delegate(iter, input) {
+                // throw/close forwards to a suspended delegate before the
+                // delegating handler becomes active again.
+                let handled = external_throw.then(|| {
+                    let inherited = self.heap.caught_exception(NONE);
+                    let handled = self.heap.replace_active(inherited);
+                    self.heap.keep(handled);
+                    handled
+                });
+                let result = self.advance_delegate(iter, input);
+                if let Some(handled) = handled {
+                    self.heap.replace_active(handled);
+                }
+                let result = match result {
                     Ok(DelegateOutcome::Yield(value)) => {
                         return self.park_native(
                             generator,
@@ -217,6 +230,10 @@ impl Context {
                     GeneratorInput::Throw { error, .. } => Err(error),
                 }
             };
+            if external_throw && let Err(error) = &mut arg {
+                self.chain_generator_input(error);
+            }
+            external_throw = false;
             let (iterator, mark) = match state.resume(self, arg) {
                 Ok(Step::Yield(value, mark)) => {
                     return self.park_native(generator, owner, &saved, state, mark, Ok(value));

@@ -591,3 +591,55 @@ def current():
         source = [[0], [1], [2]]
         targets = ClearingTargets(source)
         print(next(assigning_cleared_values(source, targets, use_starred)))
+
+    throw_contexts()
+
+
+def throw_contexts():
+    local = LookupError("delegating frame")
+    seed = LookupError("delegate")
+    replacement = ValueError("replacement")
+
+    def child():
+        try:
+            raise seed
+        except LookupError:
+            try:
+                yield
+            except KeyError:
+                pass
+            raise replacement
+
+    def parent():
+        try:
+            raise local
+        except LookupError:
+            yield from child()
+
+    try:
+        raise RuntimeError("caller")
+    except RuntimeError:
+        for previous in (None, seed):
+            injected = KeyError("injected")
+            injected.__context__ = previous
+            stream = (lambda: (yield))()
+            next(stream)
+            try:
+                stream.throw(injected)
+            except KeyError as exc:
+                assert exc is injected and exc.__context__ is previous
+            else:
+                raise AssertionError("lost injected exception")
+
+        for send in (False, True):
+            stream = parent()
+            next(stream)
+            try:
+                if send:
+                    next(stream)
+                else:
+                    stream.throw(KeyError("injected"))
+            except ValueError as exc:
+                assert exc is replacement and exc.__context__ is (seed if send else local)
+            else:
+                raise AssertionError("lost delegate exception")
