@@ -125,6 +125,16 @@ pub(crate) fn charmap_provider_path(name: &str, boxed: bool) -> Option<&'static 
     })
 }
 
+fn bundled_package(name: &str) -> bool {
+    bundled_runtime_source(name).is_some_and(|(file, _)| file.ends_with("/__init__.py"))
+}
+
+fn sealed_package_child(name: &str) -> bool {
+    name.rsplit_once('.').is_some_and(|(parent, _)| {
+        IntrinsicModule::named(parent).is_some() && bundled_package(parent)
+    })
+}
+
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
@@ -2819,6 +2829,8 @@ pub(crate) struct SourceModule {
     /// Physical text when newline normalization changed the source for analysis.
     original_source: Option<Box<str>>,
     pub(crate) bundled: bool,
+    /// The registered source initializer publishes this module's live attributes.
+    pub(crate) registered_namespace: bool,
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) bindings: HashMap<String, Binding>,
     type_bindings: HashMap<String, Binding>,
@@ -3599,8 +3611,10 @@ impl SourceGraph {
     }
 
     pub(crate) fn includes(&self, definition: DefinitionId) -> bool {
-        self.required_definitions(definition.module)
-            .is_none_or(|r| r.definitions.contains(&definition))
+        !self.modules[definition.module].registered_namespace
+            && self
+                .required_definitions(definition.module)
+                .is_none_or(|r| r.definitions.contains(&definition))
     }
 
     pub(crate) fn inherits_class_method(&self, class: DefinitionId, name: &str) -> bool {
@@ -4799,6 +4813,7 @@ impl<'a> Loader<'a> {
             source,
             original_source,
             bundled: false,
+            registered_namespace: false,
             parsed,
             is_package,
             search_roots: SearchRoots::Single(0),
@@ -5489,6 +5504,38 @@ impl<'a> Loader<'a> {
         Ok(binding)
     }
 
+    /// A resolved import still needs its initializer when the module was prepared earlier.
+    fn import_namespace(&mut self, importer: ModuleId, origin: TextRange, target: ModuleId) {
+        let module = &self.modules[target];
+        if module.registered_namespace {
+            self.runtime_initializer.get_or_insert_with(|| {
+                self.modules[importer].error(
+                    &origin,
+                    &format!("{} requires runtime import initialization", module.name),
+                )
+            });
+        }
+    }
+
+    fn package_child(
+        &mut self,
+        parent: ModuleId,
+        member: &str,
+        source_exports: bool,
+    ) -> Result<Binding, String> {
+        let name = format!("{}.{member}", self.modules[parent].name);
+        if let Some(&child) = self.by_name.get(&name)
+            && self.loading.contains(&child)
+            && self.partial_source(child)
+            && !self.modules[parent].bindings.contains_key("__getattr__")
+        {
+            // A fromlist can find the loading child before its parent publishes it.
+            self.ordered_imports = true;
+            return Ok(Binding::Module(child));
+        }
+        self.load_source(&name, source_exports).map(Binding::Module)
+    }
+
     fn import(&mut self, id: ModuleId, index: usize, statement: &ast::Stmt) -> Result<(), String> {
         match statement {
             ast::Stmt::Import(import) => {
@@ -5649,7 +5696,29 @@ impl<'a> Loader<'a> {
                         } else if module == IntrinsicModule::Sys && alias.name.as_str() == "pycache_prefix" {
                             return Err("from-importing mutable sys.pycache_prefix is unsupported; use qualified access".into());
                         } else {
-                            stdlib_symbol(&self.modules, module, alias.name.as_str())
+                            let member = alias.name.as_str();
+                            if let Some(binding) = stdlib_symbol(&self.modules, module, member) {
+                                Some(binding)
+                            } else if bundled_package(&name)
+                                && bundled_runtime_source(&format!("{name}.{member}")).is_some()
+                            {
+                                let parent = self.load_module(&name)?;
+                                let binding = match self.modules[parent].export(member) {
+                                    Some(binding) => binding,
+                                    None => self.package_child(parent, member, true)?,
+                                };
+                                if let Binding::Module(child) = binding {
+                                    self.import_namespace(id, statement.range(), child);
+                                }
+                                Some(binding)
+                            } else if sealed_package_child(&name) && bundled_runtime_source(&name).is_some()
+                            {
+                                let provider = self.load_source(&name, true)?;
+                                self.import_namespace(id, statement.range(), provider);
+                                self.modules[provider].export(member)
+                            } else {
+                                None
+                            }
                         }
                         .filter(|binding| {
                             self.reachable_only
@@ -5801,18 +5870,7 @@ impl<'a> Loader<'a> {
                     {
                         Binding::ConditionalValue
                     } else if self.modules[target].is_package {
-                        let child_name = format!("{name}.{}", alias.name);
-                        if let Some(&child) = self.by_name.get(&child_name)
-                            && self.loading.contains(&child)
-                            && self.partial_source(child)
-                            && !self.modules[target].bindings.contains_key("__getattr__")
-                        {
-                            // A fromlist can find the loading child before its parent publishes it.
-                            self.ordered_imports = true;
-                            Binding::Module(child)
-                        } else {
-                            Binding::Module(self.load_module(&child_name)?)
-                        }
+                        self.package_child(target, alias.name.as_str(), false)?
                     } else if self.modules[target].is_bundled("http.client")
                         || self.modules[target].is_bundled("dis")
                         || self.modules[target].is_bundled("xml.etree.ElementTree")
@@ -6142,6 +6200,12 @@ impl<'a> Loader<'a> {
     }
 
     fn load_module(&mut self, name: &str) -> Result<ModuleId, String> {
+        self.load_source(name, false)
+    }
+
+    /// An unresolved sealed from-import may ask the selected bundled file for its exports.
+    /// Ordinary module loads keep their checked definitions.
+    fn load_source(&mut self, name: &str, source_exports: bool) -> Result<ModuleId, String> {
         if name == FRACTION_CLASS {
             return Err("the private Fraction implementation is not an importable module".into());
         }
@@ -6170,6 +6234,7 @@ impl<'a> Loader<'a> {
             }
             return Ok(id);
         }
+        let mut registered_namespace = false;
         let bundled = match name {
             _ if self.project_shadows_native_package(name) => None,
             _ if !self.frozen_modules
@@ -6266,7 +6331,10 @@ impl<'a> Loader<'a> {
             "http.client" => Some(("http/client.py", include_str!("../stdlib/http/client.py"))),
             // The checked socketserver provides the synchronous server and handler bases.
             "http.server" => bundled_source!("http/server.py"),
-            _ => bundled_runtime_source(name),
+            _ => {
+                registered_namespace = source_exports;
+                bundled_runtime_source(name)
+            }
         };
         if let Some((filename, source)) = bundled {
             self.reject_stdlib_shadow(name)?;
@@ -6301,7 +6369,21 @@ impl<'a> Loader<'a> {
             self.modules[id].bundled = true;
             // codeop sets compiler flags on Python instances.
             self.needs_object_imports |= name == "codeop";
-            self.scan(id)?;
+            if registered_namespace {
+                let binding = Binding::Intrinsic(Intrinsic::ScopedObjectExport(filename));
+                self.modules[id].registered_namespace = true;
+                self.loading.remove(&id);
+                // Query the checked source namespace. Its dependencies and initialization
+                // effects belong to the ordinary registered import at the caller's site.
+                self.modules[id].bindings.extend(
+                    self.session
+                        .bound_module_names(id)
+                        .into_iter()
+                        .map(|name| (name, binding)),
+                );
+            } else {
+                self.scan(id)?;
+            }
             self.bind_child(name, id, parent)?;
             return Ok(id);
         }
@@ -7029,6 +7111,59 @@ fn conditional_export_name(statement: &ast::Stmt) -> Option<&str> {
 mod native_tests {
     use super::SourceGraph;
     use std::fs;
+
+    #[test]
+    fn ordinary_dotted_import_keeps_its_checked_source() {
+        let mut loader = super::Loader::new(
+            std::path::PathBuf::from("/"),
+            &[],
+            &[],
+            None,
+            super::FileSystem::default(),
+        )
+        .unwrap();
+        let child = loader.load_module("email.encoders").unwrap();
+        assert!(!loader.modules[child].registered_namespace);
+    }
+
+    #[test]
+    fn only_the_importing_initializer_needs_the_registered_namespace() {
+        use super::{FileSystem, Loader, MEMORY_SOURCE_PATH, PathBuf};
+
+        for (prefix, imported) in [("", false), ("from email import errors\n", true)] {
+            let filename = PathBuf::from(MEMORY_SOURCE_PATH);
+            let mut loader =
+                Loader::new(PathBuf::from("/"), &[], &[], None, FileSystem::default()).unwrap();
+            loader.allow_imports = false;
+            let source =
+                format!("{prefix}def score(x: int) -> int: return x * 3\nprint(score(14))\n");
+            let entry = loader
+                .add(
+                    filename.clone(),
+                    filename.clone(),
+                    "__main__".into(),
+                    false,
+                    &source,
+                )
+                .unwrap();
+            // Both graphs contain the same prepared child. Only one initializer imports it.
+            let child = loader.load_source("email.errors", true).unwrap();
+            assert!(loader.modules[child].registered_namespace);
+            loader.scan(entry).unwrap();
+            let mut graph = loader.finish(entry, filename, false, None).unwrap();
+            let program = crate::frontend::lower_with_caller_cache(&mut graph, None).unwrap();
+            assert!(match program {
+                crate::CheckedProgram::Registered(Some(reason)) => {
+                    imported
+                        && reason
+                            .to_string()
+                            .contains("email.errors requires runtime import initialization")
+                }
+                crate::CheckedProgram::Native(_) => !imported,
+                _ => false,
+            });
+        }
+    }
 
     #[test]
     fn later_package_imports_are_visible_with_a_separate_type_declaration() {

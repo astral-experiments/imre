@@ -1051,6 +1051,17 @@ impl Session {
         untyped_generator_local(index, function).is_some()
     }
 
+    pub(crate) fn bound_module_names(&self, module: usize) -> Vec<String> {
+        let index =
+            ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
+        index
+            .place_table(ty_python_core::scope::FileScopeId::global())
+            .symbols()
+            .filter(|symbol| symbol.is_bound())
+            .map(|symbol| symbol.name().to_string())
+            .collect()
+    }
+
     fn sole_binding(
         &self,
         module: usize,
