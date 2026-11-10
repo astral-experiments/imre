@@ -506,7 +506,7 @@ fn object_fallback(
                                 deferred_native = Some((fixed, program));
                                 "Imre: native bound wrapper links use checked exception locations"
                             }
-                            Ok(program) => match native(&graph, fixed.into_ir(), program) {
+                            Ok(program) => match native(&graph, fixed.into_ir(&graph), program) {
                                 Ok(units) => return native_result(graph, units),
                                 Err(refusal) => refusal.0,
                             },
@@ -560,8 +560,8 @@ fn object_fallback(
     let fallback = |graph, deferred: Option<(Box<FixedProgram>, llvm::NativeProgram)>| {
         match (graph, deferred, kind) {
             (Some(graph), Some((fixed, program)), _) => {
-                let units =
-                    native(&graph, fixed.into_ir(), program).map_err(|error| error.0.to_owned())?;
+                let units = native(&graph, fixed.into_ir(&graph), program)
+                    .map_err(|error| error.0.to_owned())?;
                 native_result(graph, units)
             }
             (Some(graph), None, LoweringKind::ExecutionOperand(id))
@@ -981,11 +981,17 @@ pub(crate) struct FixedProgram {
     ir: CheckedIr,
     /// Original binder and operation sites indexed by checked function ID.
     frame_sources: FixedFrameSources,
+    uses_builtin_module_names: bool,
 }
 
 impl FixedProgram {
     /// Native emission consumes the checked module and releases pending Python frame maps.
-    fn into_ir(self) -> CheckedIr {
+    fn into_ir(mut self, graph: &modules::SourceGraph) -> CheckedIr {
+        // The registered launcher inventories its own winning providers. Only a
+        // committed native entry needs the fixed graph's built-in module list.
+        if self.uses_builtin_module_names {
+            self.ir.0.builtin_module_sources = Some(dynamic::builtin_inventory_sources(graph));
+        }
         self.ir
     }
 
@@ -1024,9 +1030,9 @@ pub(crate) enum CheckedProgram {
 
 #[cfg(test)]
 impl CheckedProgram {
-    fn into_native(self) -> Result<CheckedIr, String> {
+    fn into_native(self, graph: &modules::SourceGraph) -> Result<CheckedIr, String> {
         match self {
-            Self::Native(fixed) => Ok(fixed.into_ir()),
+            Self::Native(fixed) => Ok(fixed.into_ir(graph)),
             Self::Runtime(reason) => Err(reason.to_string()),
             Self::Registered(Some(reason)) => Err(reason.to_string()),
             Self::Registered(None) => Err("the checked program requires a registered entry".into()),
