@@ -560,8 +560,8 @@ fn object_fallback(
     let fallback = |graph, deferred: Option<(Box<FixedProgram>, llvm::NativeProgram)>| {
         match (graph, deferred, kind) {
             (Some(graph), Some((fixed, program)), _) => {
-                let units = native(&graph, fixed.into_ir(), program)
-                    .map_err(|error| error.0.to_owned())?;
+                let units =
+                    native(&graph, fixed.into_ir(), program).map_err(|error| error.0.to_owned())?;
                 native_result(graph, units)
             }
             (Some(graph), None, LoweringKind::ExecutionOperand(id))
@@ -572,9 +572,10 @@ fn object_fallback(
                 if let Some(contract) = &graph.source_contract {
                     contract.clone()?;
                 }
-                graph
-                    .session
-                    .check_execution_escapes(std::iter::once((id, graph.modules[id].path.as_path())))?;
+                graph.session.check_execution_escapes(std::iter::once((
+                    id,
+                    graph.modules[id].path.as_path(),
+                )))?;
                 Err(refusal_message())
             }
             _ => Err(refusal_message()),
@@ -1003,7 +1004,11 @@ impl FixedProgram {
             {
                 continue;
             }
-            graph.register_function(owner, start, frontend::place_fixed_function(function, source));
+            graph.register_function(
+                owner,
+                start,
+                frontend::place_fixed_function(function, source),
+            );
         }
     }
 }
