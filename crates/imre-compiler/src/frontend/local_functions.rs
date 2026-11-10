@@ -692,6 +692,7 @@ impl Checker<'_> {
             self.helpers,
             self.globals,
         );
+        helper.frame = LexicalFrame::Named(definition.name.id.clone());
         helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
         helper.returns = signature.returns;

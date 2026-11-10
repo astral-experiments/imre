@@ -688,7 +688,7 @@ impl Verifier<'_> {
             }
             ExprKind::Invoke { callable, args } => {
                 require(
-                    args.python_site.is_none(),
+                    args.site.python().is_none(),
                     "fixed invocation cannot use a Python call site",
                 )?;
                 let (params, returns) = types
@@ -942,7 +942,7 @@ mod tests {
             body: Vec::new(),
         });
         let mut args = CallArgs {
-            python_site: None,
+            site: ir::CallSite::None,
             exhaustive_enum_match: false,
             values: vec![
                 Expr {
@@ -1019,7 +1019,7 @@ mod tests {
         module.entry.body = vec![invoke(CallArgs::positional(vec![Expr::integer(1)]))];
         super::module(&module).unwrap();
         let mut frame_args = CallArgs::positional(vec![Expr::integer(1)]);
-        frame_args.python_site = Some(ir::InvokeSite {
+        frame_args.site = ir::CallSite::Python(ir::InvokeSite {
             range: ruff_text_size::TextRange::new(0.into(), 4.into()),
             callee_end: 1.into(),
             suspended_name: None,

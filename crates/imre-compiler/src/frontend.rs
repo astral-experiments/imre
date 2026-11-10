@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::result::Result as StdResult;
+use std::sync::Arc;
 
 pub(crate) use imre_ast::exceptions::builtin_id as exception_kind;
 use ruff_python_ast as ast;
@@ -1664,6 +1665,7 @@ fn lower_function(
     let module = &checker.graph.modules[checker.module];
     let classes = checker.classes;
     let types = checker.types;
+    checker.frame = LexicalFrame::Named(definition.name.id.clone());
     checker.positional_pack = definition
         .parameters
         .vararg
@@ -2858,7 +2860,15 @@ struct CalledDefinition {
     entry_site: Option<(TextSize, ruff_text_size::TextRange)>,
 }
 
+/// Materialize the physical filename only when a checked operation needs a traceback.
+enum LexicalFrame {
+    Named(ast::name::Name),
+    Positioned(Arc<ir::FixedFrame>),
+}
+
 struct Checker<'a> {
+    frame: LexicalFrame,
+    unhighlighted_call: Option<TextRange>,
     wrapper_link: std::cell::Cell<bool>,
     fixed_sites: Option<fixed_body_source::SourceSites>,
     observed_definition: Option<Box<CalledDefinition>>,
@@ -2950,6 +2960,8 @@ impl<'a> Checker<'a> {
         globals: &'a ModuleValues,
     ) -> Self {
         Self {
+            frame: LexicalFrame::Named(ast::name::Name::new_static("<module>")),
+            unhighlighted_call: None,
             wrapper_link: Default::default(),
             fixed_sites: None,
             observed_definition: None,
@@ -5451,7 +5463,12 @@ impl<'a> Checker<'a> {
             }
         }
         let entry = self.ordinary_entry();
+        let enclosing = std::mem::replace(
+            &mut self.unhighlighted_call,
+            imre_ast::unhighlighted_call(statement),
+        );
         let result = self.lower_statement(statement);
+        self.unhighlighted_call = enclosing;
         if let Err(error) = &result {
             // A boxed operation in a checked source file must not hide a bad call in
             // another function, whether this operation is deferred or stops lowering.
@@ -6368,15 +6385,60 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn exception_origin(&self, exception: Expr, site: &impl Ranged) -> Expr {
-        if self.graph.command_startup.is_none() && !self.graph.handled_tracebacks {
-            return exception;
+    fn fixed_frame(&mut self) -> Arc<ir::FixedFrame> {
+        match &self.frame {
+            LexicalFrame::Positioned(frame) => Arc::clone(frame),
+            LexicalFrame::Named(name) => {
+                let frame = Arc::new(ir::FixedFrame {
+                    filename: self.source_filename(),
+                    function: name.clone(),
+                });
+                self.frame = LexicalFrame::Positioned(Arc::clone(&frame));
+                frame
+            }
         }
+    }
+
+    fn fixed_origin(&mut self, range: TextRange, callee_end: Option<TextSize>) -> ir::FixedOrigin {
+        let (line, line_start) =
+            self.graph
+                .session
+                .source_line_start(self.module, self.source, range.start());
+        let span = self.source.get(range.to_std_range()).and_then(|text| {
+            if self.unhighlighted_call == Some(range) || text.contains('\n') {
+                return None;
+            }
+            let start = range.start() - line_start;
+            let split = match callee_end {
+                Some(prefix) => {
+                    imre_ast::traceback_delimiter(
+                        self.source.as_bytes(),
+                        prefix.to_usize(),
+                        range.end().to_usize(),
+                        b'(',
+                    )? - line_start.to_usize()
+                }
+                None => start.to_usize(),
+            };
+            Some([
+                start.to_u32(),
+                u32::try_from(split).ok()?,
+                (range.end() - line_start).to_u32(),
+            ])
+        });
+        ir::FixedOrigin {
+            frame: self.fixed_frame(),
+            line,
+            span,
+        }
+    }
+
+    fn exception_origin(&mut self, exception: Expr, site: &impl Ranged) -> Expr {
         Expr {
             ty: Type::Exception,
             kind: ExprKind::Builtin(
-                Builtin::ExceptionOrigin(self.source_line(site.start()).into()),
-                vec![exception, unpacking::string(self.source_filename())],
+                Builtin::ExceptionOrigin(self.fixed_origin(site.range(), None)),
+                vec![exception],
             ),
         }
     }
@@ -7389,7 +7451,17 @@ impl<'a> Checker<'a> {
             ast::Expr::Name(name) if self.class_lexical.contains(name.id.as_str()) => {
                 Ok(self.local(self.names[name.id.as_str()]))
             }
-            ast::Expr::Call(call) => self.call(call),
+            ast::Expr::Call(call) => {
+                let mut result = self.call(call)?;
+                if let ExprKind::Call(_, args) | ExprKind::Invoke { args, .. } = &mut result.kind
+                    // A conversion can return an unchanged, already positioned operand.
+                    && matches!(args.site, ir::CallSite::None)
+                {
+                    args.site =
+                        ir::CallSite::Fixed(self.fixed_origin(call.range(), Some(call.func.end())));
+                }
+                Ok(result)
+            }
             ast::Expr::BinOp(binary) => self.binary_operation(binary),
             _ => self.non_call_expr(expression),
         }

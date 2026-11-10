@@ -33,7 +33,7 @@ impl Checker<'_> {
                 ir::CallArgs {
                     values,
                     order: vec![0],
-                    python_site: None,
+                    site: ir::CallSite::None,
                     exhaustive_enum_match: false,
                 },
             ));

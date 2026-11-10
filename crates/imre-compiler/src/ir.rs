@@ -633,7 +633,7 @@ impl Expr {
             return false;
         };
         self.ty == Type::PythonObject
-            && args.python_site.as_ref().is_some_and(|site| {
+            && args.site.python().is_some_and(|site| {
                 callable.registered_invoke_target(site)
                     && site.range.start() < site.callee_end
                     && site.callee_end < site.range.end()
@@ -874,13 +874,51 @@ pub(crate) struct InvokeSite {
     pub scope: Option<Box<Expr>>,
 }
 
+/// Immutable code identity shared by the positioned operations in one fixed activation.
+pub(crate) struct FixedFrame {
+    pub filename: String,
+    pub function: ruff_python_ast::name::Name,
+}
+
+#[derive(Clone)]
+pub(crate) struct FixedOrigin {
+    pub frame: std::sync::Arc<FixedFrame>,
+    pub line: u32,
+    /// Byte columns for a single source line: start, delimiter and end.
+    pub span: Option<[u32; 3]>,
+}
+
+/// The checked position belongs to the call's fixed or Python invocation path.
+#[derive(Clone)]
+pub(crate) enum CallSite {
+    None,
+    Fixed(FixedOrigin),
+    Python(InvokeSite),
+}
+
+impl CallSite {
+    pub(crate) fn fixed(&self) -> Option<&FixedOrigin> {
+        match self {
+            Self::Fixed(site) => Some(site),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn python(&self) -> Option<&InvokeSite> {
+        match self {
+            Self::Python(site) => Some(site),
+            _ => None,
+        }
+    }
+}
+
 /// Values are evaluated and rooted in source order. `order` is a permutation of
 /// their indices that supplies the native call's parameter order without
 /// reevaluation. Methods include their receiver first; constructors omit the
 /// implicit receiver, which is allocated only after these values are evaluated.
 #[derive(Clone)]
 pub(crate) struct CallArgs {
-    pub python_site: Option<InvokeSite>,
+    pub site: CallSite,
     /// The callee's nominal tag feeds a complete member dispatch at this site.
     pub exhaustive_enum_match: bool,
     pub values: Vec<Expr>,
@@ -891,7 +929,7 @@ impl CallArgs {
     /// Uses the existing positional order for calls that need no argument binding.
     pub(crate) fn positional(values: Vec<Expr>) -> Self {
         Self {
-            python_site: None,
+            site: CallSite::None,
             exhaustive_enum_match: false,
             order: (0..values.len()).collect(),
             values,
@@ -2355,7 +2393,7 @@ pub(crate) enum Builtin {
     /// Attaches an explicit cause to a fresh, unescaped builtin exception.
     ExceptionWithCause,
     /// Record the source location of a raised Python exception.
-    ExceptionOrigin(u64),
+    ExceptionOrigin(FixedOrigin),
     ExceptionCause,
     ActiveException,
     ExceptionSuppressContext,
@@ -3901,16 +3939,11 @@ macro_rules! expression_children {
             }
             ExprKind::Invoke {
                 callable,
-                args:
-                    CallArgs {
-                        python_site,
-                        values,
-                        ..
-                    },
+                args: CallArgs { site, values, .. },
             } => {
-                if let Some(InvokeSite {
+                if let CallSite::Python(InvokeSite {
                     scope: Some(scope), ..
-                }) = python_site
+                }) = site
                 {
                     $visit(scope);
                 }

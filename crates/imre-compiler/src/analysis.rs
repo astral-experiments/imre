@@ -970,6 +970,18 @@ impl Session {
             .get() as u32
     }
 
+    /// The physical line and its starting byte offset in the checked source.
+    pub(crate) fn source_line_start(
+        &self,
+        module: usize,
+        source: &str,
+        offset: TextSize,
+    ) -> (u32, TextSize) {
+        let index = ruff_db::source::line_index(&self.db, self.files[module]);
+        let line = index.line_index(offset);
+        (line.get() as u32, index.line_start(line, source))
+    }
+
     /// Refresh the semantic AST after a source rewrite that preserves byte offsets.
     pub(crate) fn replace_source(
         &mut self,

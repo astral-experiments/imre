@@ -375,20 +375,39 @@ fn captured_frames(
     Ok(())
 }
 
-/// Explicit native raises retain their physical file and line on the exception.
+/// Native raises and calls retain their checked source sites on the escaping exception.
 pub(crate) fn write_raise_origins(
-    origins: &[(crate::StrOwner, u64)],
+    origins: &[crate::objects::exceptions::RaiseOrigin],
     out: &mut impl std::io::Write,
 ) {
-    let frames = origins.iter().rev().map(|(file, line)| {
-        let file = file.as_str();
+    use crate::objects::exceptions::RaiseOrigin;
+    let frames = origins.iter().rev().map(|origin| {
+        let (file, name, line, span) = match origin {
+            RaiseOrigin::Line(file, line) => (file.as_str(), None, i128::from(*line), None),
+            RaiseOrigin::Frame {
+                file,
+                name,
+                line,
+                span,
+            } => (
+                *file,
+                Some(*name),
+                i128::from(*line),
+                span.map(|[start, split, end]| TracebackSpan {
+                    end_line: *line,
+                    start,
+                    anchor: TracebackAnchor::Column(split),
+                    end,
+                }),
+            ),
+        };
         FrameLine {
             file: TraceText::Scalar(Cow::Borrowed(file)),
             path: (!(file.starts_with('<') && file.ends_with('>'))).then(|| Path::new(file)),
             embedded_source: None,
-            name: None,
-            line: i128::from(*line),
-            span: None,
+            name,
+            line,
+            span,
         }
     });
     render_frame_lines(frames, |line| {

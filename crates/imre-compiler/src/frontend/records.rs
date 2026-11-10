@@ -2195,7 +2195,7 @@ impl Checker<'_> {
                 args: ir::CallArgs {
                     values,
                     order,
-                    python_site: None,
+                    site: ir::CallSite::None,
                     exhaustive_enum_match: false,
                 },
             },

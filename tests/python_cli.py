@@ -891,7 +891,7 @@ def check_raise_site_allocation(imre, root, run):
     subprocess.run(["cc", "-c", fixture, "-o", wrapper], check=True)
     flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_exception_with_origin,--wrap=malloc",
+        "-C", "link-arg=-Wl,--wrap=imre_exception_at_frame,--wrap=malloc",
     ])
     source = "try:\n    raise ValueError('original')\nexcept ValueError as error:\n    print(error)\nprint('later')"
     for ordinal in (0, 1, 2):

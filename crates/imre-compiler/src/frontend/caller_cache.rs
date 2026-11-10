@@ -68,6 +68,12 @@ impl Revision {
                     hash.update(&(start - previous).to_le_bytes());
                     hash.update(&module.source.as_bytes()[previous..start]);
                     hash.update(&[tag]);
+                    // A wider default shifts traceback columns in a one-line suite.
+                    if function.body.first().is_some_and(|first| {
+                        !module.source[end..first.start().to_usize()].contains('\n')
+                    }) {
+                        hash.update(&(end - start).to_le_bytes());
+                    }
                     has_defaults = true;
                     previous = end;
                 }
