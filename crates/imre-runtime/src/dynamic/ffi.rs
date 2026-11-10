@@ -2452,8 +2452,8 @@ impl Context {
         Some(freevars)
     }
 
-    /// A method captures __class__ from its class and other names from the enclosing function.
-    pub(super) fn method_freevars<'a>(
+    /// Include the explicit or implicit __class__ read once in the sorted closure layout.
+    fn freevars_with_class_cell<'a>(
         &self,
         enclosing: Option<Id>,
         reads: impl Iterator<Item = &'a str>,
@@ -2489,6 +2489,9 @@ impl Context {
                 if !frame.closure.declared_complete {
                     return None;
                 }
+                if name == "__class__" && frame.class_cell.is_some() {
+                    return Some(true);
+                }
             }
             scope = parent;
         }
@@ -2512,6 +2515,12 @@ impl Context {
                     unreachable!()
                 };
                 frame.closure.cells.insert(name.to_owned(), cell);
+                return cell;
+            }
+            if frame.class_body.is_none()
+                && name == "__class__"
+                && let Some(cell) = frame.class_cell
+            {
                 return cell;
             }
             cursor = frame.parent.expect("free variable has enclosing scope");
@@ -2573,9 +2582,11 @@ impl Context {
             } else {
                 owner.parent
             };
-            self.method_freevars(enclosing, reads, captures_class)
+            self.freevars_with_class_cell(enclosing, reads, captures_class)
         } else if metadata.class_cell == true {
-            None
+            // A nested function can read __class__ through super(), or resolve it as a global.
+            self.is_enclosing_freevar(lexical, "__class__")
+                .and_then(|captures| self.freevars_with_class_cell(Some(lexical), reads, captures))
         } else {
             self.enclosing_freevars(lexical, reads)
         }
@@ -2633,7 +2644,7 @@ impl Context {
         let owner = self.scope_data(scope);
         // A borrowed method only owns its defining class if its code captures __class__.
         let code_data = self.code_object(code);
-        let class_cell = owner.class_cell.filter(|_| {
+        let mut class_cell = owner.class_cell.filter(|_| {
             !code_data.closure_supported
                 || code_data.freevars.iter().any(|name| name == "__class__")
         });
@@ -2719,7 +2730,11 @@ impl Context {
                 cells.push(class_cell.expect("class scope"));
                 continue;
             }
-            cells.push(self.capture_free_cell(scope, name));
+            let cell = self.capture_free_cell(scope, name);
+            if name == "__class__" {
+                class_cell = Some(cell);
+            }
+            cells.push(cell);
         }
         let scope = if self.code_object(code).closure_supported {
             let mut globals = scope;
