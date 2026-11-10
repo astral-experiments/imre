@@ -547,12 +547,13 @@ pub(crate) fn annotation_expression(
 pub(crate) struct DeferredAnnotation {
     pub(crate) range: TextRange,
     pub(crate) name: String,
-    pub(crate) value: AnnotationValue,
+    pub(crate) value: StdResult<Expr, (TextRange, &'static str)>,
 }
 
+pub(crate) type AnnotationProvider = StdResult<RegisteredFunction, (TextRange, &'static str)>;
+
 pub(crate) struct ParameterAnnotations {
-    pub(crate) entries: Vec<ir::AnnotationOccurrence>,
-    pub(crate) body: RegisteredSuite,
+    pub(crate) body: AnnotationProvider,
     pub(crate) references: HashMap<String, String>,
 }
 
@@ -591,11 +592,7 @@ impl ParameterAnnotations {
             entries.push(ir::AnnotationOccurrence { site, index: None });
         }
         let body = DeferredAnnotation::prepare_body(sites, &entries, scope.bindings());
-        Some(Self {
-            entries,
-            body,
-            references,
-        })
+        Some(Self { body, references })
     }
 }
 
@@ -615,14 +612,6 @@ fn scalar_reference(expr: &ast::Expr) -> Option<String> {
 
 pub(crate) type RegisteredBindings = (Vec<Type>, HashMap<usize, LocalBinding>);
 
-pub(crate) enum AnnotationValue {
-    Checked(Expr),
-    Input {
-        source: Box<ast::Expr>,
-        unpack: Option<Box<Expr>>,
-    },
-}
-
 impl DeferredAnnotation {
     fn new(
         name: String,
@@ -630,34 +619,23 @@ impl DeferredAnnotation {
         checked: Option<Expr>,
         scope: &mut SourceScope<'_>,
     ) -> Self {
-        let checked = checked.or_else(|| {
-            let start = scope.locals.len();
-            let value = super::annotation_operands::checked_annotation_value(expression, |input| {
-                scope.operand(input)
-            });
-            if value.is_none() {
-                scope.truncate_locals(start);
+        let value = match checked {
+            Some(value) => Ok(value),
+            None => {
+                let start = scope.locals.len();
+                scope.refusal = None;
+                super::annotation_operands::checked_annotation_value(expression, |input| {
+                    scope.operand(input)
+                })
+                .ok_or_else(|| {
+                    scope.truncate_locals(start);
+                    scope.refusal.take().unwrap_or((
+                        expression.range(),
+                        "annotation expression cannot be compiled ahead of time",
+                    ))
+                })
             }
-            value
-        });
-        let value = checked.map_or_else(
-            || {
-                let (input, unpack) = match expression {
-                    ast::Expr::Starred(starred) => (
-                        starred.value.as_ref(),
-                        Some(Box::new(super::annotation_operands::unpack_annotation(
-                            Expr::local(0, Type::PythonObject),
-                        ))),
-                    ),
-                    _ => (expression, None),
-                };
-                AnnotationValue::Input {
-                    source: Box::new(input.clone()),
-                    unpack,
-                }
-            },
-            AnnotationValue::Checked,
-        );
+        };
         Self {
             name,
             range: expression.range(),
@@ -670,21 +648,14 @@ impl DeferredAnnotation {
         sites: &HashMap<TextSize, Self>,
         entries: &[ir::AnnotationOccurrence],
         (locals, local_names): RegisteredBindings,
-    ) -> RegisteredSuite {
-        let mut residual = Vec::new();
+    ) -> AnnotationProvider {
         let mut body = vec![Statement::Expr(operation(
             Builtin::RegisteredAnnotationStart,
             Type::None,
             vec![],
         ))];
-        for (index, occurrence) in entries.iter().enumerate() {
-            let value = match &sites[&occurrence.site].value {
-                AnnotationValue::Checked(value) => value.clone(),
-                AnnotationValue::Input { .. } => {
-                    SourceRun::record(&mut residual, index, body.len());
-                    continue;
-                }
-            };
+        for occurrence in entries {
+            let value = sites[&occurrence.site].value.clone()?;
             body.push(Statement::Expr(operation(
                 Builtin::RegisteredAnnotationInsert(*occurrence),
                 Type::None,
@@ -696,20 +667,17 @@ impl DeferredAnnotation {
             Type::PythonObject,
             vec![],
         )));
-        RegisteredSuite {
-            checked: RegisteredFunction {
-                fixed_sites: Vec::new(),
-                fixed_fields: None,
-                function: ir::Function {
-                    params: vec![],
-                    returns: Type::PythonObject,
-                    locals,
-                    body,
-                },
-                local_names,
+        Ok(RegisteredFunction {
+            fixed_sites: Vec::new(),
+            fixed_fields: None,
+            function: ir::Function {
+                params: vec![],
+                returns: Type::PythonObject,
+                locals,
+                body,
             },
-            residual,
-        }
+            local_names,
+        })
     }
 }
 
@@ -3425,17 +3393,25 @@ mod tests {
         );
         let def = stmts[0].as_function_def_stmt().unwrap();
         let provider = &sites.parameter_annotations[&def.parameters.start()];
-        assert!(provider.body.fully_checked());
-        let fields: Vec<_> = provider
-            .entries
+        let body = &provider.body.as_ref().unwrap().function.body;
+        let fields: Vec<_> = body
             .iter()
-            .map(|entry| &sites.annotations[&entry.site])
+            .filter_map(|statement| {
+                let Statement::Expr(Expr {
+                    kind: ExprKind::Builtin(Builtin::RegisteredAnnotationInsert(site), _),
+                    ..
+                }) = statement
+                else {
+                    return None;
+                };
+                Some(&sites.annotations[&site.site])
+            })
             .collect();
         let names: Vec<_> = fields.iter().map(|field| field.name.as_str()).collect();
         assert_eq!(names, ["b", "a", "args", "c", "kw", "return"]);
         assert!(matches!(
             &fields[0].value,
-            AnnotationValue::Checked(Expr {
+            Ok(Expr {
                 kind: ExprKind::Builtin(Builtin::BindAnnotationExpression(site), _), ..
             }) if *site == fields[0].range.start()
         ));
@@ -3445,7 +3421,7 @@ mod tests {
     }
 
     #[test]
-    fn annotation_callback_numbers_physical_occurrences_and_keeps_unsupported_values_late() {
+    fn annotation_callback_numbers_physical_occurrences_and_preserves_a_lowering_error() {
         let text = "first: int\nsecond: list[int]\ncomplex: dict[str, int]\nforward: 'list[int]'\nprepared: (lambda: int)()\ndeferred: next(t for t in (int,))\nquoted: '(lambda: Child)()'\nscoped: [item for item in items]\n";
         let graph = SourceGraph::single(text).unwrap();
         let module = &graph.modules[graph.entry];
@@ -3467,13 +3443,10 @@ mod tests {
                 .collect();
             DeferredAnnotation::prepare_body(&sites, &entries, bindings.clone())
         };
-        let scoped = callback(&[7, 0, 7]);
-        assert!(scoped.fully_checked());
-        assert!(!scoped.checked.region().private_slots().is_empty());
-        crate::verify::registered(scoped.checked.region()).unwrap();
-        let whole = callback(&[0, 1, 0]);
-        assert!(whole.fully_checked());
-        let checked = &whole.checked;
+        let scoped = callback(&[7, 0, 7]).unwrap();
+        assert!(!scoped.region().private_slots().is_empty());
+        crate::verify::registered(scoped.region()).unwrap();
+        let checked = callback(&[0, 1, 0]).unwrap();
         let [
             Statement::Expr(start),
             members @ ..,
@@ -3516,41 +3489,29 @@ mod tests {
         let bundled_sites = prepared(true).annotations;
         let quoted_site = stmts[3].start();
         assert!(
-            matches!(&sites[&quoted_site].value, AnnotationValue::Checked(Expr { kind: ExprKind::Builtin(Builtin::BindAnnotationExpression(site), _), .. }) if *site == stmts[3].as_ann_assign_stmt().unwrap().annotation.start())
+            matches!(&sites[&quoted_site].value, Ok(Expr { kind: ExprKind::Builtin(Builtin::BindAnnotationExpression(site), _), .. }) if *site == stmts[3].as_ann_assign_stmt().unwrap().annotation.start())
         );
         assert!(
-            matches!(&bundled_sites[&quoted_site].value, AnnotationValue::Checked(Expr {kind: ExprKind::Str(text), ..}) if text == "list[int]")
+            matches!(&bundled_sites[&quoted_site].value, Ok(Expr {kind: ExprKind::Str(text), ..}) if text == "list[int]")
         );
-        let forward = callback(&[3]);
-        assert!(forward.fully_checked());
-        assert!(matches!(&forward.checked.function.body[1],
+        let forward = callback(&[3]).unwrap();
+        assert!(matches!(&forward.function.body[1],
             Statement::Expr(Expr { kind: ExprKind::Builtin(
                 Builtin::RegisteredAnnotationInsert(ir::AnnotationOccurrence { index: Some(0), .. }), values), .. })
                 if matches!(values.as_slice(), [Expr { kind: ExprKind::Builtin(
                     Builtin::BindAnnotationExpression(site), _), .. }] if *site == stmts[3].as_ann_assign_stmt().unwrap().annotation.start())));
-        {
-            assert!(matches!(
-                sites[&stmts[2].start()].value,
-                AnnotationValue::Checked(_)
-            ));
-            assert!(matches!(
-                sites[&stmts[4].start()].value,
-                AnnotationValue::Checked(_)
-            ));
-            let unavailable = &sites[&stmts[5].start()];
-            assert!(matches!(unavailable.value, AnnotationValue::Input { .. }));
-            assert!(matches!(
-                sites[&stmts[6].start()].value,
-                AnnotationValue::Checked(_)
-            ));
-            let mixed = callback(&[0, 5, 1]);
-            let [gap] = mixed.residual.as_slice() else {
-                panic!("expected one unprepared operand")
-            };
-            assert_eq!(gap.at, 2);
-            assert_eq!(gap.statements, 1..2);
-            assert_eq!(mixed.checked.function.body.len(), 4);
+        for slot in [2, 4, 6] {
+            assert!(sites[&stmts[slot].start()].value.is_ok());
         }
+        // This fixture omits the generator registry. Keep that exact operand error.
+        let field = &sites[&stmts[5].start()];
+        let error = field.value.as_ref().err().unwrap();
+        assert!(field.range.contains_range(error.0));
+        assert!(!error.1.is_empty());
+        let Err(provider_error) = callback(&[0, 5, 1]) else {
+            panic!("a missing generator body must prevent the provider from compiling");
+        };
+        assert_eq!(provider_error, *error);
     }
 
     #[test]

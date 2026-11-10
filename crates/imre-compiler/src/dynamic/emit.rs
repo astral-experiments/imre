@@ -431,17 +431,6 @@ impl<'a> PreparedBody<'a, '_> {
                 initializer_sites.push(site);
             });
         }
-        for annotation in sites.annotations.values() {
-            if let crate::frontend::AnnotationValue::Input { source: value, .. } = &annotation.value
-            {
-                prepare.sites.expressions.prepare_input(
-                    value,
-                    values,
-                    crate::frontend::RegisteredScope::Function { is_async: false },
-                    false,
-                );
-            }
-        }
         let mut function_bodies = HashMap::new();
         let class_bodies = prepare.class_suites(sites.classes, &class_keywords, |start| {
             scopes.functions[&start].suspension_flags != 0
@@ -797,11 +786,7 @@ enum ReturnOperand<'a> {
 enum Body<'a> {
     Namespace,
     Suite(&'a crate::frontend::PhysicalSuite),
-    AnnotationProvider(
-        &'a crate::frontend::RegisteredSuite,
-        &'a [crate::ir::AnnotationOccurrence],
-        AnnotationScope,
-    ),
+    AnnotationProvider(&'a crate::frontend::AnnotationProvider, AnnotationScope),
     /// Named bodies carry their lexical global declarations into the checked frame.
     Checked(
         &'a crate::frontend::RegisteredFunction,
@@ -1187,13 +1172,14 @@ impl SourceMap<'_> {
                 f.declare_globals(globals);
                 f.physical_suite(suite);
             }
-            Body::AnnotationProvider(plan, entries, scope) => {
+            Body::AnnotationProvider(provider, scope) => {
                 f.frame.annotation_scope = scope;
-                f.prepared_function(plan, |code, run| {
-                    for index in run.statements.clone() {
-                        code.insert_annotation_input(entries[index]);
+                match provider {
+                    Ok(function) => f.checked_function(function),
+                    Err((range, reason)) => {
+                        f.with_expression_range(*range, |code| code.build_diagnostic(reason));
                     }
-                });
+                }
             }
             Body::Operand(range, operand) => {
                 f.checkpoint(&range);
@@ -1410,7 +1396,6 @@ mod tests {
 
     #[test]
     fn starred_annotation_retains_the_scoped_input_and_its_unpack() {
-        use crate::frontend::AnnotationValue;
         use crate::ir::{Builtin, Expr, ExprKind, Statement};
 
         let source = "def f(*items: *[row for row in rows()]): pass\n";
@@ -1424,7 +1409,7 @@ mod tests {
         .unwrap();
         let before = prepared.standalone().unwrap();
         let field = prepared.source.annotations.values_mut().next().unwrap();
-        field.value = AnnotationValue::Checked(Expr::none());
+        field.value = Ok(Expr::none());
         assert_eq!(prepared.standalone().unwrap(), before);
 
         let provider = prepared
@@ -1433,8 +1418,7 @@ mod tests {
             .values_mut()
             .next()
             .unwrap();
-        assert!(provider.body.fully_checked());
-        let checked = &mut provider.body.checked;
+        let checked = provider.body.as_mut().unwrap();
         assert!(!checked.region().private_slots().is_empty());
         crate::verify::registered(checked.region()).unwrap();
         let [
@@ -1464,7 +1448,6 @@ mod tests {
 
     #[test]
     fn a_class_keeps_the_annotation_body_prepared_from_its_declarations() {
-        use crate::frontend::AnnotationValue;
         use crate::ir::{Builtin, ExprKind, Statement};
 
         let mut prepared = PreparedBody::module(
@@ -1485,12 +1468,11 @@ mod tests {
             panic!("expected the class annotations in declaration order");
         };
         let (first, second) = (first.site, second.site);
-        let AnnotationValue::Checked(second) = &prepared.source.annotations[&second].value else {
+        let Ok(second) = &prepared.source.annotations[&second].value else {
             panic!("expected a checked annotation");
         };
         let second = second.clone();
-        prepared.source.annotations.get_mut(&first).unwrap().value =
-            AnnotationValue::Checked(second.clone());
+        prepared.source.annotations.get_mut(&first).unwrap().value = Ok(second.clone());
         assert_eq!(prepared.standalone().unwrap(), original);
 
         let provider = prepared
@@ -1503,13 +1485,16 @@ mod tests {
             .body
             .as_mut()
             .unwrap();
-        assert!(provider.fully_checked());
-        assert!(!provider.checked.region().private_slots().is_empty());
-        crate::verify::registered(provider.checked.region()).unwrap();
-        let mut operands = provider.checked.function.body.iter_mut().filter_map(|stmt| {
+        let provider = provider.as_mut().as_mut().unwrap();
+        assert!(!provider.region().private_slots().is_empty());
+        crate::verify::registered(provider.region()).unwrap();
+        let mut operands = provider.function.body.iter_mut().filter_map(|stmt| {
             if let Statement::Expr(crate::ir::Expr {
-                kind: ExprKind::Builtin(Builtin::RegisteredAnnotationInsert(occurrence), inputs), ..
-            }) = stmt && occurrence.site == first {
+                kind: ExprKind::Builtin(Builtin::RegisteredAnnotationInsert(occurrence), inputs),
+                ..
+            }) = stmt
+                && occurrence.site == first
+            {
                 Some(inputs)
             } else {
                 None
@@ -3611,9 +3596,9 @@ mod tests {
             .values()
             .next()
             .unwrap();
-        assert!(provider.body.fully_checked());
-        assert_eq!(provider.entries.len(), 2);
-        assert!(!provider.body.checked.local_names.is_empty());
+        let body = provider.body.as_ref().unwrap();
+        assert_eq!(body.function.body.len(), 4); // start, two fields, return
+        assert!(!body.local_names.is_empty());
         let original = prepared.standalone().unwrap();
         let class = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_class_def_stmt_mut()

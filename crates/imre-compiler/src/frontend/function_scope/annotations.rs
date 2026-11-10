@@ -97,7 +97,7 @@ impl AnnotationScopes {
 #[derive(Default)]
 pub(crate) struct ClassAnnotations {
     pub(crate) sites: Vec<AnnotationOccurrence>,
-    pub(crate) body: Option<Box<crate::frontend::RegisteredSuite>>,
+    pub(crate) body: Option<Box<crate::frontend::AnnotationProvider>>,
     pub(crate) reads: BTreeSet<String>,
     pub(crate) incomplete: bool,
 }
