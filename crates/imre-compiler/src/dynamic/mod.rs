@@ -12,7 +12,7 @@ use ruff_python_ast::name::UnqualifiedName;
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
 
-use crate::frontend::module_source::ParsedModule;
+use crate::frontend::module_source::{self, ParsedModule};
 use crate::{CompileOptions, SourceInputs, SourceKind, UnitCompilation};
 
 /// Only a winning file can add a first-party frozen override while walking SDK dependencies.
@@ -569,7 +569,7 @@ fn read_import_source(source: &str, kind: SourceKind) -> Result<ImportSource<'_>
     crate::analysis::check_form_feeds(&normalized, parsed.tokens())?;
     Ok(ImportSource::Module(ParsedModule {
         text: normalized,
-        parsed,
+        parsed: std::borrow::Cow::Owned(parsed),
     }))
 }
 
@@ -593,7 +593,7 @@ fn scan_imports(
     }
     imports_from_body(
         &module.text,
-        module.parsed.into_syntax().body,
+        module_source::into_body(module.parsed),
         getter,
         file_alternative.map(|(path, _)| path),
     )
@@ -634,7 +634,7 @@ fn imports_from_body(
     // The optional file must satisfy the emitter's checks before registration.
     // Use its discovery tree for both checking and collecting the lowered imports.
     let checked_names = file_alternative
-        .map(|path| crate::frontend::module_source::lower(path, normalized, &mut body))
+        .map(|path| module_source::lower(path, normalized, &mut body))
         .transpose()?;
     if let Some(mut diagnostic) = error {
         // Discovery records the error. Only selection as the checked entry diagnoses it here.
@@ -852,14 +852,23 @@ pub(crate) fn compile(
     } else {
         SourceKind::File
     };
-    let Ok(ImportSource::Module(module)) = read_import_source(&src, kind) else {
-        return Ok(None);
+    let module = match file_entry.and_then(|graph| ParsedModule::checked_entry(graph, path)) {
+        Some(module) => module,
+        None => match read_import_source(&src, kind) {
+            Ok(ImportSource::Module(module)) => module,
+            _ => return Ok(None),
+        },
     };
     // Discovery lowers names in its own body. Admission needs the original spellings and
     // tokens, including for diagnostics on code that never reaches the emitter.
     let (mut first, entry_source) = if in_memory {
         (
-            imports_from_body(&module.text, module.parsed.into_syntax().body, None, None)?,
+            imports_from_body(
+                &module.text,
+                module_source::into_body(module.parsed),
+                None,
+                None,
+            )?,
             None,
         )
     } else {
