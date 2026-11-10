@@ -6,7 +6,7 @@ mod declarations;
 use super::sites::{CheckedSites, CompiledDefinition};
 
 use super::{AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourceMap};
-use crate::llvm::registered::context::{Finally, Region, RegionEmitter};
+use crate::llvm::registered::context::{Finally, RegionEmitter};
 use imre_ast::code_flags;
 use ruff_text_size::TextSize;
 use serde_json::json;
@@ -55,7 +55,6 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                 self.simple_call = None;
                 self.prepared_match(site);
             }
-            SourceEffect::For(region) => self.prepared_for(region),
             SourceEffect::Region(region) => {
                 crate::llvm::registered::Frame::emit_region(self, region)
             }
@@ -381,113 +380,5 @@ impl CallableSites<'_, '_> {
                 class_header.is_some() || evaluator_scope.is_some(),
             )
         }
-    }
-}
-
-impl<'p> Function<'_, 'p> {
-    fn physical_binding(&mut self, target: &'p crate::frontend::PhysicalBinding, value: &str) {
-        use crate::frontend::PhysicalBinding;
-        match target {
-            PhysicalBinding::Checked {
-                entered, binding, ..
-            } => {
-                self.initialize_binding(binding, |frame| frame.store_private(*entered, value));
-            }
-            PhysicalBinding::Refused(range, reason) => {
-                self.refuse_at(*range, reason);
-            }
-        }
-    }
-
-    fn initialize_binding(
-        &mut self,
-        binding: &'p crate::frontend::RegisteredFunction,
-        initialize: impl FnOnce(&mut super::RegisteredFrame<'_, 'p>),
-    ) {
-        self.callable_sites()
-            .place_statements(&binding.function.body);
-        self.frame.checked_binding(binding, &self.sites, initialize);
-    }
-
-    fn prepared_for(&mut self, region: &'p crate::frontend::PreparedFor) {
-        self.checkpoint(&region.range);
-        self.simple_call = None;
-        let cursor = self.acquire_iterator(region.acquire, |code| {
-            code.physical_operand(&region.iterable)
-        });
-
-        let guarded = match &region.target {
-            crate::frontend::PhysicalBinding::Checked {
-                entered,
-                binding,
-                pair: Some(pair),
-            } => {
-                let plain = self.plain_items_cursor(&cursor);
-                Some((binding, *entered, pair, plain))
-            }
-            _ => None,
-        };
-        let enclosing = self.regions.len();
-        self.live.push(cursor.clone());
-        let outer = self.body.error_target.clone();
-        self.regions.push(Region::Pending {
-            value: cursor.clone(),
-            enclosing: None,
-            outer,
-        });
-        let unwind = self.begin_operand_scope();
-
-        crate::llvm::operations::loop_region(
-            self,
-            |code| {
-                code.flush_check();
-                &mut code.frame.body
-            },
-            |code| code.name("b"),
-            |code, edges| code.jump(&edges.step),
-            |code, item, exhausted| {
-                let row = if let Some((_, _, _, plain)) = &guarded {
-                    code.frame.pull_item_pair(
-                        &cursor,
-                        region.range.start(),
-                        region.otherwise.is_some(),
-                        plain,
-                        exhausted,
-                    )
-                } else {
-                    code.frame.pull_item(
-                        &cursor,
-                        region.pull,
-                        region.range.start(),
-                        region.otherwise.is_some(),
-                        exhausted,
-                    )
-                };
-                code.jump(item);
-                row
-            },
-            |code, edges, row| {
-                if let Some((binding, entered, pair, plain)) = &guarded {
-                    code.initialize_binding(binding, |frame| {
-                        frame.bind_item_pair(&row, plain, *entered, pair)
-                    });
-                } else {
-                    code.physical_binding(&region.target, &row);
-                }
-                code.push_loop(edges.clone(), code.regions.len(), enclosing);
-                emit_prepared_suite(code, &region.body);
-                code.loops.pop();
-            },
-            // Even a loop without an else must release the cursor on exhaustion.
-            Some(|code: &mut Self| {
-                code.regions.pop();
-                code.live.pop();
-                code.finish_unwind(unwind, |frame| frame.release_target(None));
-                code.release_target(None);
-                if let Some(otherwise) = &region.otherwise {
-                    emit_prepared_suite(code, otherwise);
-                }
-            }),
-        );
     }
 }

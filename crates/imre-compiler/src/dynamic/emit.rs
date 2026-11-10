@@ -1633,30 +1633,43 @@ mod tests {
                 let [run] = plan.residual.as_slice() else {
                     panic!("expected one mixed loop in {source}");
                 };
-                let Ok(crate::frontend::SourceEffect::For(region)) = &run.effect else {
-                    panic!("expected a prepared for in {source}");
+                let Ok(crate::frontend::SourceEffect::Region(region)) = &run.effect else {
+                    panic!("expected a registered loop in {source}");
                 };
-                assert!(matches!(region.acquire, crate::ir::IteratorOp::Loop(_)));
-                let crate::frontend::PhysicalBinding::Checked {
-                    entered,
-                    binding,
-                    pair: Some(pair),
-                } = &region.target
-                else {
-                    panic!("expected checked pair inputs");
-                };
-                let owners = binding.region().private_slots();
-                let slots = [*entered, pair.items[0], pair.items[1], pair.ordinary];
-                for (index, slot) in slots.iter().enumerate() {
-                    assert!(owners.contains(slot) && !slots[..index].contains(slot));
-                }
+                let owners = region.checked.region().private_slots();
+                let mut projected = 0;
+                crate::ir::walk_statements(&region.checked.function.body, &mut |stmt| {
+                    if let crate::ir::Statement::IterNext {
+                        iterator,
+                        key,
+                        ready,
+                        value: Some(other),
+                        ..
+                    } = stmt
+                    {
+                        let slots = [*iterator, *key, *other, *ready];
+                        for (index, slot) in slots.iter().enumerate() {
+                            assert!(owners.contains(slot) && !slots[..index].contains(slot));
+                        }
+                        projected += 1;
+                    }
+                });
+                assert_eq!(projected, 1, "{source}");
             }
             let (_, llvm) = module.standalone().unwrap();
             let test = "call i1 @imre_dyn_plain_items_cursor(";
             let pull = "call i64 @imre_dyn_next_pair(";
             let projects_pair = header == pair_header || header == yielded_rows;
-            assert_eq!(llvm.matches(test).count(), usize::from(projects_pair), "{source}");
-            assert_eq!(llvm.matches(pull).count(), usize::from(projects_pair), "{source}");
+            assert_eq!(
+                llvm.matches(test).count(),
+                usize::from(projects_pair),
+                "{source}"
+            );
+            assert_eq!(
+                llvm.matches(pull).count(),
+                usize::from(projects_pair),
+                "{source}"
+            );
             if projects_pair {
                 assert!(llvm.find(test).unwrap() < llvm.find(pull).unwrap());
                 let ordinary = "call i32 @imre_dyn_list_cursor_pull(";
@@ -1792,18 +1805,21 @@ mod tests {
         let [run] = plan.residual.as_slice() else {
             panic!("expected a mixed for")
         };
-        let Ok(crate::frontend::SourceEffect::For(region)) = &run.effect else {
-            panic!("missing prepared loop");
+        let Ok(crate::frontend::SourceEffect::Region(region)) = &run.effect else {
+            panic!("missing registered loop");
         };
         assert!(matches!(
-            region.iterable,
-            crate::frontend::PhysicalOperand::Checked(_)
+            region.operands.as_slice(),
+            [crate::frontend::PhysicalOperand::Checked(_)]
         ));
-        assert!(matches!(
-            region.target,
-            crate::frontend::PhysicalBinding::Checked { .. }
-        ));
-        assert!(!region.body.fully_checked());
+        let mut pulls = 0;
+        crate::ir::walk_statements(&region.checked.function.body, &mut |stmt| {
+            if matches!(stmt, crate::ir::Statement::IterNext { .. }) {
+                pulls += 1;
+            }
+        });
+        assert_eq!(pulls, 1);
+        assert!(!region.suites[0].fully_checked());
         let original = module.standalone().unwrap();
         let def = module.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
@@ -1987,7 +2003,8 @@ mod tests {
             panic!("expected the if at the start of the while body");
         };
         use crate::ir::{Builtin, ExprKind, Statement};
-        let [Statement::Expr(mark), Statement::If(..)] = branch.checked.function.body.as_slice() else {
+        let [Statement::Expr(mark), Statement::If(..)] = branch.checked.function.body.as_slice()
+        else {
             panic!("expected the checkpoint and checked conditional");
         };
         assert!(matches!(&mark.kind,
@@ -2031,8 +2048,11 @@ mod tests {
             })
             .unwrap();
         assert!(!suite.residual.iter().any(|run| matches!(
-            &run.effect, Ok(crate::frontend::SourceEffect::For(region))
-                if region.range == main.body[index].range()
+            &run.effect, Ok(crate::frontend::SourceEffect::Region(region))
+                if matches!(region.checked.function.body.first(),
+                    Some(crate::ir::Statement::Expr(crate::ir::Expr {
+                        kind: crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredStatement(range, _), _), ..
+                    })) if *range == main.body[index].range())
         )));
         let last = main.body.last().unwrap().as_try_stmt().unwrap();
         assert!(last.body[0].as_with_stmt().unwrap().is_async);
@@ -4971,7 +4991,9 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             assert!(module.standalone().unwrap() == original);
 
             fn else_block(region: &mut PreparedRegion) -> &mut Vec<Statement> {
-                let [Statement::While(_, _, otherwise)] = region.checked.function.body.as_mut_slice() else {
+                let [Statement::While(_, _, otherwise)] =
+                    region.checked.function.body.as_mut_slice()
+                else {
                     panic!("expected checked While with its ordered suites");
                 };
                 otherwise
@@ -5029,7 +5051,9 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert!(
             matches!(region.operands.as_slice(), [PhysicalOperand::Residual(test)] if test.range == guard_range)
         );
-        let [crate::ir::Statement::While(condition, _, _)] = region.checked.function.body.as_mut_slice() else {
+        let [crate::ir::Statement::While(condition, _, _)] =
+            region.checked.function.body.as_mut_slice()
+        else {
             panic!("expected the checked loop");
         };
         *condition = crate::ir::Expr::boolean(false);

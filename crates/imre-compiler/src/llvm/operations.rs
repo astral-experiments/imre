@@ -2,7 +2,7 @@
 
 mod comparisons;
 mod iteration;
-pub(crate) use iteration::{LoopEdges, loop_region};
+pub(crate) use iteration::LoopEdges;
 pub(crate) mod branches;
 mod join;
 pub(crate) mod sequences;

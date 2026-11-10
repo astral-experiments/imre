@@ -1219,35 +1219,6 @@ impl RegisteredFrame<'_, '_> {
         self.branch_on_item(&more, available, exhausted);
     }
 
-    /// A plain dictionary-items cursor fills the two target slots directly.
-    /// Every other cursor supplies its ordinary Python row to the same binding.
-    pub(crate) fn pull_item_pair(
-        &mut self,
-        cursor: &str,
-        header: TextSize,
-        has_else: bool,
-        plain_items: &str,
-        exhausted: &str,
-    ) -> String {
-        let pair = self.name("b");
-        let direct = self.name("b");
-        let ordinary = self.name("b");
-        let joined = self.name("b");
-        self.branch(plain_items, &pair, &ordinary);
-
-        self.label(&pair);
-        self.next_item_pair(cursor, header, has_else, &direct, exhausted);
-        self.label(&direct);
-        self.jump(&joined);
-
-        self.label(&ordinary);
-        let row = self.sync_item(cursor, header, has_else, exhausted);
-        let previous = self.current_block().to_owned();
-        self.jump(&joined);
-        self.label(&joined);
-        self.value(&format!("phi i64 [ 0, %{direct} ], [ {row}, %{previous} ]"))
-    }
-
     fn branch_on_item(&mut self, more: &str, item: &str, exhausted: &str) {
         let ready = self.value(&format!("icmp eq i64 {more}, {}", permanent::TRUE));
         self.branch(&ready, item, exhausted);
