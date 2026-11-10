@@ -22,7 +22,7 @@ use phase::{Diagnostic, Failure, Kind, Result};
 mod annotation_operands;
 mod annotations;
 pub(crate) use annotation_operands::{
-    AnnotationBody, AnnotationCode, PreparedAnnotation, annotation_operands,
+    AnnotationBody, AnnotationCode, AnnotationOperands, annotation_operands,
 };
 pub(crate) use annotations::{parameter_annotations, spelling as annotation_spelling};
 pub(crate) use function_scope::ClassAnnotations;
