@@ -41,16 +41,16 @@ impl Function<'_, '_> {
         emit_source: impl FnMut(&mut Self, std::ops::Range<usize>),
     ) {
         if prepared.fully_checked() {
-            let sites = self.prepare_checked_sites(&prepared.checked.function.body);
-            super::RegisteredFrame::checked_body(&mut self.frame, &prepared.checked, &sites);
+            self.prepare_checked_sites(&prepared.checked.function.body);
+            super::RegisteredFrame::checked_body(&mut self.frame, &prepared.checked, &self.sites);
         } else {
             self.checked_runs(prepared, emit_source);
         }
     }
 
     fn checked_statement(&mut self, statement: &Statement) {
-        let sites = self.prepare_checked_sites(std::slice::from_ref(statement));
-        self.frame.checked_statement(statement, &sites);
+        self.prepare_checked_sites(std::slice::from_ref(statement));
+        self.frame.checked_statement(statement, &self.sites);
     }
 
     fn checked_block(
@@ -58,13 +58,13 @@ impl Function<'_, '_> {
         statements: &[crate::ir::Statement],
         checked: &crate::frontend::RegisteredFunction,
     ) {
-        let sites = self.prepare_checked_sites(statements);
+        self.prepare_checked_sites(statements);
         if self.exits.is_empty() {
-            self.frame.checked_block(statements, checked, &sites);
+            self.frame.checked_block(statements, checked, &self.sites);
             return;
         }
         self.cleanup_returns = Some(Vec::new());
-        self.frame.checked_block(statements, checked, &sites);
+        self.frame.checked_block(statements, checked, &self.sites);
         let returns = self.cleanup_returns.take().expect("active cleanup region");
         if returns.is_empty() {
             return;
@@ -86,8 +86,8 @@ impl Function<'_, '_> {
     }
 
     pub(super) fn registered_value(&mut self, value: &crate::ir::Expr) -> String {
-        let sites = self.prepare_checked_value(value);
-        self.frame.registered_value(value, &sites)
+        self.prepare_checked_value(value);
+        self.frame.registered_value(value, &self.sites)
     }
 
     pub(super) fn checked_runs(
@@ -291,9 +291,7 @@ impl Function<'_, '_> {
                             let offset = v.start().to_u32();
                             self.frame.checked(&format!("call i64 @imre_dyn_mark_class_annotation(ptr %ctx, i64 {}, i64 {key}, i32 {offset})", self.scope));
                         } else {
-                            let value = self.annotation_text(
-                                &crate::frontend::annotation_spelling(&v.annotation),
-                            );
+                            let value = self.annotation_string(v.annotation.start());
                             self.frame
                                 .op("annotate", &[&self.scope.clone(), &key, &value]);
                         }
@@ -908,7 +906,7 @@ impl Function<'_, '_> {
             unreachable!("checked annotation outside its prepared run")
         };
         self.insert_annotation(Some(index), &entry.name, |code| {
-            code.source_annotation_value(expression)
+            code.annotation_value(expression)
         });
     }
 
@@ -919,34 +917,29 @@ impl Function<'_, '_> {
     ) {
         self.begin_annotations(class);
         for &(name, expression) in entries {
-            self.insert_annotation(None, name, |code| code.source_annotation_value(expression));
+            self.insert_annotation(None, name, |code| code.annotation_value(expression));
         }
         let values = self.take_annotation_result();
         self.return_value(&values);
     }
 
-    fn source_annotation_value(&mut self, expression: &ast::Expr) -> String {
-        if self.source.string_annotations {
-            self.annotation_text(&crate::frontend::annotation_spelling(expression))
-        } else if let ast::Expr::Starred(starred) = expression {
-            let value = self.expr(&starred.value);
-            let count = self.integer(1);
-            let items = self.op("unpack", &[&value, &count, "0"]);
-            let index = self.integer(0);
-            self.op("get", &[&items, &index])
-        } else {
-            self.annotation_value(expression)
-        }
-    }
-
     fn annotation_value(&mut self, expression: &ast::Expr) -> String {
-        if let ast::Expr::StringLiteral(literal) = expression
-            && !self.source.has_templates
-            && self.source.replacements.is_empty()
-        {
-            self.annotation_text(literal.value.to_str())
-        } else {
-            self.expr(expression)
+        match self.source.annotation_operands.get(&expression.start()) {
+            Some(crate::frontend::PreparedAnnotation::String { .. }) => {
+                self.annotation_string(expression.start())
+            }
+            Some(crate::frontend::PreparedAnnotation::Value(value)) => self.registered_value(value),
+            None => {
+                if let ast::Expr::Starred(starred) = expression {
+                    let value = self.expr(&starred.value);
+                    let count = self.integer(1);
+                    let items = self.op("unpack", &[&value, &count, "0"]);
+                    let index = self.integer(0);
+                    self.op("get", &[&items, &index])
+                } else {
+                    self.expr(expression)
+                }
+            }
         }
     }
 

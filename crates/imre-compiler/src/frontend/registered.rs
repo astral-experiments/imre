@@ -40,7 +40,7 @@ pub(crate) struct RegisteredFunction {
 }
 
 impl RegisteredFunction {
-    fn expression(range: TextRange, value: Expr) -> Self {
+    pub(super) fn expression(range: TextRange, value: Expr) -> Self {
         Self::expression_with_prologue(range, value, None)
     }
 
@@ -340,53 +340,14 @@ pub(crate) fn registered_sites<'a>(
 }
 
 pub(crate) struct DeferredModuleAnnotation {
+    pub(crate) site: TextSize,
     pub(crate) name: String,
     pub(crate) value: AnnotationValue,
 }
 
 pub(crate) enum AnnotationValue {
     Checked(Expr),
-    Bound(Box<AnnotationChild>),
     Source(ast::Expr),
-}
-
-pub(crate) struct AnnotationChild {
-    pub(crate) id: ir::AnnotationCodeId,
-    pub(crate) text: String,
-    pub(crate) body: RegisteredFunction,
-}
-
-impl AnnotationChild {
-    fn new(
-        id: ir::AnnotationCodeId,
-        text: &str,
-        parsed: &ruff_python_parser::Parsed<ast::ModExpression>,
-    ) -> Option<Self> {
-        let expression = &parsed.syntax().body;
-        let tokens = parsed.tokens();
-        let replacements = values::literal_replacements(text, tokens);
-        let has_templates = tokens
-            .iter()
-            .any(|token| token.kind() == ast::token::TokenKind::TStringStart);
-        // An eval expression has its own source positions and looks up names in
-        // the namespace supplied by its eventual caller.
-        let source = values::RegisteredSource {
-            text,
-            replacements: &replacements,
-            has_templates,
-            method_imports: &Default::default(),
-            private_names: None,
-            templates: None,
-        };
-        // A quoted expression owns no lambda sites. Residual operand lowering leaves
-        // a nested lambda with the source annotation that prepares its definition.
-        let value = values::registered_value(expression, source)?;
-        Some(Self {
-            id,
-            text: text.to_owned(),
-            body: RegisteredFunction::expression(expression.range(), value),
-        })
-    }
 }
 
 /// Only compound, valid strings outside the bundled library get a separately bound
@@ -401,39 +362,38 @@ pub(crate) fn annotation_expression(
 }
 
 impl DeferredModuleAnnotation {
-    fn new(
-        id: ir::AnnotationCodeId,
+    fn new<R>(
         name: String,
         expression: &ast::Expr,
-        source: values::RegisteredSource<'_>,
-        bundled: bool,
+        operands: &HashMap<TextSize, PreparedAnnotation<R>>,
     ) -> Self {
-        let value = if let ast::Expr::StringLiteral(literal) = expression
-            && !source.has_templates
-            && source.replacements.is_empty()
-        {
-            let text = literal.value.to_str();
-            if !bundled && let Some(parsed) = annotation_expression(text) {
-                AnnotationChild::new(id, text, &parsed).map_or_else(
-                    || AnnotationValue::Source(expression.clone()),
-                    |child| AnnotationValue::Bound(Box::new(child)),
-                )
-            } else {
-                // annotation_text returns an unpositioned normal str on this path.
-                AnnotationValue::Checked(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Str(text.to_owned()),
-                })
+        let checked = match operands.get(&expression.start()) {
+            Some(PreparedAnnotation::Value(value)) => Some(value.clone()),
+            Some(PreparedAnnotation::String { text, body }) => {
+                match body.as_ref().map(|body| &body.code) {
+                    Some(AnnotationCode::Checked(_)) => Some(operation(
+                        Builtin::BindAnnotationExpression(expression.start()),
+                        Type::Str,
+                        vec![],
+                    )),
+                    Some(AnnotationCode::Residual(_)) => None,
+                    None => Some(Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Str(text.clone()),
+                    }),
+                }
             }
-        } else {
-            values::Region::Suite
-                .operand(expression, source)
-                .map_or_else(
-                    || AnnotationValue::Source(expression.clone()),
-                    AnnotationValue::Checked,
-                )
+            None => None,
         };
-        Self { name, value }
+        let value = checked.map_or_else(
+            || AnnotationValue::Source(expression.clone()),
+            AnnotationValue::Checked,
+        );
+        Self {
+            name,
+            site: expression.start(),
+            value,
+        }
     }
 
     /// Number already-checked operands in physical marker order, including repeated finally edges.
@@ -447,14 +407,6 @@ impl DeferredModuleAnnotation {
         for (index, entry) in entries.iter().enumerate() {
             let value = match &entry.value {
                 AnnotationValue::Checked(value) => value.clone(),
-                AnnotationValue::Bound(child) => operation(
-                    Builtin::BindAnnotationExpression(child.id),
-                    Type::Str,
-                    vec![Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Str(child.text.clone()),
-                    }],
-                ),
                 AnnotationValue::Source(_) => {
                     SourceRun::record(&mut residual, index, body.len());
                     continue;
@@ -490,22 +442,20 @@ impl DeferredModuleAnnotation {
 }
 
 /// Prepare module markers and the delayed operands of their native annotation callback.
-pub(crate) fn module_annotations(
+pub(crate) fn module_annotations<R>(
     body: &[ast::Stmt],
     string_annotations: bool,
     operations: &mut HashMap<TextRange, Expr>,
-    source: values::RegisteredSource<'_>,
-    bundled: bool,
+    operands: &HashMap<TextSize, PreparedAnnotation<R>>,
 ) -> HashMap<TextSize, DeferredModuleAnnotation> {
     use ast::statement_visitor::{StatementVisitor, walk_stmt};
-    struct Annotations<'a> {
+    struct Annotations<'a, R> {
         string_annotations: bool,
         operations: &'a mut HashMap<TextRange, Expr>,
         deferred: HashMap<TextSize, DeferredModuleAnnotation>,
-        source: values::RegisteredSource<'a>,
-        bundled: bool,
+        operands: &'a HashMap<TextSize, PreparedAnnotation<R>>,
     }
-    impl<'a> StatementVisitor<'a> for Annotations<'_> {
+    impl<'a, R> StatementVisitor<'a> for Annotations<'_, R> {
         fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
             match stmt {
                 ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => {}
@@ -515,20 +465,14 @@ pub(crate) fn module_annotations(
                     {
                         let name = name.id.to_string();
                         let annotation = if self.string_annotations {
-                            let spelling = super::annotation_spelling(&ann.annotation);
-                            if !self.bundled && annotation_expression(&spelling).is_some() {
-                                // The source statement still binds an evaluable string to its native code.
-                                return;
+                            ir::ModuleAnnotation::String {
+                                name,
+                                site: ann.annotation.start(),
                             }
-                            ir::ModuleAnnotation::String { name, spelling }
                         } else {
-                            let site = DeferredModuleAnnotation::new(
-                                ir::AnnotationCodeId(self.deferred.len()),
-                                name.clone(),
-                                &ann.annotation,
-                                self.source,
-                                self.bundled,
-                            );
+                            let site =
+                                DeferredModuleAnnotation::new(name, &ann.annotation, self.operands);
+                            let name = site.name.clone();
                             self.deferred.insert(ann.start(), site);
                             ir::ModuleAnnotation::Deferred {
                                 site: ann.start(),
@@ -553,8 +497,7 @@ pub(crate) fn module_annotations(
         string_annotations,
         operations,
         deferred: HashMap::new(),
-        source,
-        bundled,
+        operands,
     };
     annotations.visit_body(body);
     annotations.deferred
@@ -1283,6 +1226,24 @@ impl ir::SuspendValue {
 mod tests {
     use super::*;
 
+    fn prepared_annotations(
+        stmts: &[ast::Stmt],
+        string_annotations: bool,
+        operations: &mut HashMap<TextRange, Expr>,
+        source: values::RegisteredSource<'_>,
+        bundled: bool,
+    ) -> HashMap<TextSize, DeferredModuleAnnotation> {
+        let strings = annotation_operands(
+            stmts,
+            string_annotations,
+            source,
+            bundled,
+            crate::frontend::annotation_operands::test_annotation_body,
+            &mut HashMap::new(),
+        );
+        module_annotations(stmts, string_annotations, operations, &strings)
+    }
+
     fn registered_suite(
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
@@ -1292,7 +1253,7 @@ mod tests {
         let names = source.private_names.unwrap_or(&default_names);
         let mut operations = registered_sites(stmts, names).operations;
         if matches!(kind, RegisteredScope::Module) {
-            module_annotations(
+            prepared_annotations(
                 stmts,
                 names.string_annotations,
                 &mut operations,
@@ -1406,7 +1367,7 @@ mod tests {
         let stmts = &module.parsed.syntax().body;
         let literals = values::ModuleSource::new(module);
         let source = literals.context(text);
-        let sites = module_annotations(stmts, false, &mut HashMap::new(), source, false);
+        let sites = prepared_annotations(stmts, false, &mut HashMap::new(), source, false);
         let first = &sites[&stmts[0].start()];
         let second = &sites[&stmts[1].start()];
         let whole = DeferredModuleAnnotation::prepare_body(&[first, second, first]);
@@ -1448,22 +1409,23 @@ mod tests {
                 })
                 .collect();
         assert_eq!(numbered, [(0, "first"), (1, "second"), (2, "first")]);
-        let bundled_sites = module_annotations(stmts, false, &mut HashMap::new(), source, true);
+        let bundled_sites = prepared_annotations(stmts, false, &mut HashMap::new(), source, true);
         let quoted_site = stmts[3].start();
-        assert!(
-            matches!(&sites[&quoted_site].value, AnnotationValue::Bound(child) if child.text == "list[int]")
-        );
-        assert!(
-            matches!(&bundled_sites[&quoted_site].value, AnnotationValue::Checked(Expr {kind: ExprKind::Str(text), ..}) if text == "list[int]")
-        );
+        let ast::Stmt::AnnAssign(declaration) = &stmts[3] else {
+            unreachable!()
+        };
+        let annotation_site = declaration.annotation.start();
+        assert!(matches!(
+            &sites[&quoted_site].value,
+            AnnotationValue::Checked(Expr { kind: ExprKind::Builtin(Builtin::BindAnnotationExpression(site), args), .. })
+                if *site == annotation_site && args.is_empty()
+        ));
+        assert!(matches!(
+            &bundled_sites[&quoted_site].value,
+            AnnotationValue::Checked(Expr {kind: ExprKind::Str(text), ..}) if text == "list[int]"
+        ));
         let forward = DeferredModuleAnnotation::prepare_body(&[&sites[&quoted_site]]);
         assert!(forward.fully_checked());
-        assert!(matches!(&forward.checked.function.body[1],
-            Statement::Expr(Expr { kind: ExprKind::Builtin(
-                Builtin::RegisteredAnnotationInsert { index: 0, .. }, values), .. })
-                if matches!(values.as_slice(), [Expr { kind: ExprKind::Builtin(
-                    Builtin::BindAnnotationExpression(id), args), .. }] if *id == ir::AnnotationCodeId(3) &&
-                    matches!(args.as_slice(), [Expr { kind: ExprKind::Str(text), .. }] if text == "list[int]"))));
         {
             assert!(matches!(
                 sites[&stmts[2].start()].value,
@@ -1477,7 +1439,7 @@ mod tests {
             assert!(matches!(unavailable.value, AnnotationValue::Source(_)));
             assert!(matches!(
                 sites[&stmts[6].start()].value,
-                AnnotationValue::Source(_)
+                AnnotationValue::Checked(_)
             ));
             let mixed = DeferredModuleAnnotation::prepare_body(&[first, unavailable, second]);
             let [gap] = mixed.residual.as_slice() else {
@@ -1509,7 +1471,7 @@ mod tests {
             method_imports: &imports,
         };
         let annotations =
-            module_annotations(&stmts, names.string_annotations, &mut ops, source, false);
+            prepared_annotations(&stmts, names.string_annotations, &mut ops, source, false);
         assert_eq!(annotations.len(), 2);
         let mut prepare = SuitePreparation::new(&ops, source, &stmts, true);
         let plan = prepare.suite(&stmts, RegisteredScope::Module);

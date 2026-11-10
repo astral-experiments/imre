@@ -775,15 +775,12 @@ impl Frame<'_, '_, '_> {
                 self.insert_annotation(Some(*index), name, |code| code.evaluate_handle(value));
                 "0".to_owned()
             }
-            (Builtin::BindAnnotationExpression(id), [text]) => {
-                let text = self.evaluate_handle(text);
-                let child = self.code.annotation_children[id].clone();
-                self.code.bind_annotation_expression(&text, &child);
-                text
+            (Builtin::BindAnnotationExpression(site), []) => {
+                self.sites.annotation_string(self.code, *site)
             }
             (Builtin::RegisteredAnnotationResult, []) => self.code.take_annotation_result(),
             (Builtin::RegisteredModuleAnnotation(annotation), []) => {
-                self.code.module_annotation(annotation);
+                self.code.module_annotation(annotation, self.sites);
                 "0".to_owned()
             }
             (Builtin::RegisteredDeleteName(name, range), []) => {

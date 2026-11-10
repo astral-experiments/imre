@@ -143,14 +143,33 @@ pub(crate) struct Declaration {
 
 /// Only compiled identities, physical decorator positions, and literal operands cross
 /// from source preparation to the ordinary frame.
+pub(crate) struct AnnotationString {
+    pub(crate) text: String,
+    pub(crate) code: Option<String>,
+}
+
 #[derive(Default)]
 pub(crate) struct CheckedSites {
+    pub(crate) annotation_strings: HashMap<TextSize, AnnotationString>,
     pub(crate) definitions: HashMap<TextSize, Declaration>,
     pub(crate) lambdas: HashMap<TextSize, CompiledDefinition>,
     pub(crate) aliases: HashMap<TextSize, CompiledAlias>,
 }
 
 impl CheckedSites {
+    pub(crate) fn annotation_string(
+        &self,
+        frame: &mut RegisteredFrame<'_, '_>,
+        site: TextSize,
+    ) -> String {
+        let value = &self.annotation_strings[&site];
+        let text = frame.text(&value.text);
+        if let Some(code) = &value.code {
+            frame.bind_annotation_expression(&text, code);
+        }
+        text
+    }
+
     pub(crate) fn bind_lambda(
         &self,
         frame: &mut RegisteredFrame<'_, '_>,
@@ -213,7 +232,11 @@ impl RegisteredFrame<'_, '_> {
         self.op(op, &[outer, &names])
     }
 
-    pub(crate) fn module_annotation(&mut self, annotation: &ModuleAnnotation) {
+    pub(crate) fn module_annotation(
+        &mut self,
+        annotation: &ModuleAnnotation,
+        checked: &CheckedSites,
+    ) {
         match annotation {
             ModuleAnnotation::Deferred { site, name } => {
                 self.code_name(name);
@@ -227,9 +250,9 @@ impl RegisteredFrame<'_, '_> {
                 let index = self.integer(index);
                 self.op("mark_module_annotation", &[&self.scope.clone(), &index]);
             }
-            ModuleAnnotation::String { name, spelling } => {
+            ModuleAnnotation::String { name, site } => {
                 let name = self.code_name(name);
-                let value = self.text(spelling);
+                let value = checked.annotation_string(self, *site);
                 self.op("annotate", &[&self.scope.clone(), &name, &value]);
             }
         }

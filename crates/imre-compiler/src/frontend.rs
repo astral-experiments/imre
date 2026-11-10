@@ -18,7 +18,11 @@ pub(crate) mod phase;
 // Terminal-only validation and the graph driver use the standard Result.
 use phase::{Diagnostic, Failure, Kind, Result};
 
+mod annotation_operands;
 mod annotations;
+pub(crate) use annotation_operands::{
+    AnnotationBody, AnnotationCode, PreparedAnnotation, annotation_operands,
+};
 pub(crate) use annotations::{parameter_annotations, spelling as annotation_spelling};
 mod argparse;
 mod ascii;

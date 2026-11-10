@@ -1128,13 +1128,9 @@ pub(crate) enum ModuleAnnotation {
     },
     String {
         name: String,
-        spelling: String,
+        site: ruff_text_size::TextSize,
     },
 }
-
-/// A checked expression function in the module's annotation provider.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct AnnotationCodeId(pub(crate) usize);
 
 /// A call evaluates its callable or method receiver before the argument binder runs.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1814,7 +1810,7 @@ pub(crate) enum Builtin {
         name: String,
     },
     /// Bind the string operand to a checked child function in this provider.
-    BindAnnotationExpression(AnnotationCodeId),
+    BindAnnotationExpression(ruff_text_size::TextSize),
     RegisteredAnnotationResult,
     /// Delete one current-scope binding, reporting a missing name at its source target.
     RegisteredDeleteName(String, ruff_text_size::TextRange),

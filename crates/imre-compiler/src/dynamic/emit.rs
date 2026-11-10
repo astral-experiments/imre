@@ -1,5 +1,6 @@
 //! Emit native functions and control flow for closed modules using boxed Python values.
 
+use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -381,7 +382,6 @@ pub(super) struct PreparedBody<'a> {
     name: &'a str,
     body: ast::Suite,
     source: SourceInfo<'a>,
-    expression: bool,
 }
 
 impl<'a> PreparedBody<'a> {
@@ -392,54 +392,32 @@ impl<'a> PreparedBody<'a> {
         python_optimization: i32,
         origin: ModuleOrigin<'a>,
     ) -> Result<Self, String> {
-        Self::new(
+        Self::prepare(
             name,
             path,
-            source,
+            Cow::Borrowed(source),
             python_optimization,
-            SourceBody::Module(origin),
+            origin,
+            Input::Module(parse_source(path, source, python_optimization < 2)?),
         )
     }
 
-    fn new(
+    fn prepare(
         name: &'a str,
         path: &'a Path,
-        source: &'a str,
+        text: Cow<'a, str>,
         python_optimization: i32,
-        kind: SourceBody<'a>,
+        origin: ModuleOrigin<'a>,
+        input: Input<'_>,
     ) -> Result<Self, String> {
         let keep_docstrings = python_optimization < 2;
-        let bundled = matches!(kind, SourceBody::Module(ModuleOrigin::Bundled));
-        let provider = matches!(kind, SourceBody::Module(ModuleOrigin::Provider));
-        let expression = matches!(&kind, SourceBody::Expression(_));
-        let program_bodies = match kind {
-            SourceBody::Module(ModuleOrigin::Program(bodies)) => bodies,
+        let source = text.as_ref();
+        let bundled = matches!(origin, ModuleOrigin::Bundled);
+        let provider = matches!(origin, ModuleOrigin::Provider);
+        let expression = matches!(&input, Input::Expression(..));
+        let program_bodies = match origin {
+            ModuleOrigin::Program(bodies) => bodies,
             _ => ProgramBodies::default(),
-        };
-        // The expression grammar supplies its own checked syntax and tokens.
-        // Both inputs below then use the same name lowering and native code entry.
-        enum Input<'a> {
-            Module(ParsedSource),
-            Expression(ast::ModModule, &'a ast::token::Tokens),
-        }
-        let input = match kind {
-            SourceBody::Module(_) => Input::Module(parse_source(path, source, keep_docstrings)?),
-            SourceBody::Expression(parsed) => {
-                let expression = parsed.syntax();
-                let stmt = ast::Stmt::Expr(ast::StmtExpr {
-                    node_index: Default::default(),
-                    range: expression.body.range(),
-                    value: expression.body.clone(),
-                });
-                Input::Expression(
-                    ast::ModModule {
-                        node_index: Default::default(),
-                        range: expression.range(),
-                        body: std::iter::once(stmt).collect(),
-                    },
-                    parsed.tokens(),
-                )
-            }
         };
         let (syntax, tokens) = match &input {
             Input::Module(p) => (p.parsed.syntax(), p.parsed.tokens()),
@@ -535,12 +513,20 @@ impl<'a> PreparedBody<'a> {
                 );
             });
         let lambdas = RegisteredLambda::collect(&body, values, std::mem::take(&mut scopes.lambdas));
+        let mut namespace_annotations = HashMap::new();
+        let annotation_operands = crate::frontend::annotation_operands(
+            &body,
+            private_names.string_annotations,
+            values,
+            bundled,
+            |text, parsed| Self::prepare_annotation(text, parsed, python_optimization).ok(),
+            &mut namespace_annotations,
+        );
         let module_annotations = crate::frontend::module_annotations(
             &body,
             private_names.string_annotations,
             &mut operations,
-            values,
-            bundled,
+            &annotation_operands,
         );
         let mut prepare = crate::frontend::SuitePreparation::new(
             &operations,
@@ -606,6 +592,8 @@ impl<'a> PreparedBody<'a> {
             }
         }
         let source = SourceInfo {
+            annotation_operands,
+            namespace_annotations,
             scopes,
             lambdas,
             thread_entries,
@@ -635,13 +623,46 @@ impl<'a> PreparedBody<'a> {
             barry_as_flufl: imre_ast::future_import(&body, "barry_as_FLUFL"),
             string_annotations: private_names.string_annotations,
             private_names,
-            text: source,
+            text,
         };
-        Ok(Self {
-            name,
-            body,
-            source,
-            expression,
+        Ok(Self { name, body, source })
+    }
+
+    /// Prepare the decoded expression and its lexical definitions in their own source unit.
+    fn prepare_annotation(
+        text: &str,
+        parsed: &ruff_python_parser::Parsed<ast::ModExpression>,
+        python_optimization: i32,
+    ) -> Result<crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>, String> {
+        let expression = parsed.syntax();
+        let stmt = ast::Stmt::Expr(ast::StmtExpr {
+            node_index: Default::default(),
+            range: expression.body.range(),
+            value: expression.body.clone(),
+        });
+        let syntax = ast::ModModule {
+            node_index: Default::default(),
+            range: expression.range(),
+            body: std::iter::once(stmt).collect(),
+        };
+        let mut prepared = PreparedBody::prepare(
+            "",
+            Path::new("<string>"),
+            Cow::Owned(text.to_owned()),
+            python_optimization,
+            ModuleOrigin::Program(ProgramBodies::default()),
+            Input::Expression(syntax, parsed.tokens()),
+        )?;
+        let Some(ast::Stmt::Expr(statement)) = prepared.body.pop() else {
+            unreachable!("single decoded expression")
+        };
+        let code = crate::frontend::AnnotationCode::prepare(
+            statement.value,
+            prepared.source.registered_source(),
+        );
+        Ok(crate::frontend::AnnotationBody {
+            code,
+            scope: Box::new(prepared.source),
         })
     }
 
@@ -657,19 +678,17 @@ impl<'a> PreparedBody<'a> {
         let location = SourceMap {
             info: &self.source,
             lambda_code: Default::default(),
-            definitions: (!self.expression).then(|| definition_sites(&self.body)),
+            definitions: Some(definition_sites(&self.body)),
             unit,
-            positions: SourcePositions::new(self.source.text, &code_file),
+            positions: SourcePositions::new(&self.source.text, &code_file),
         };
-        let suite = if self.expression {
-            let [ast::Stmt::Expr(statement)] = self.body.as_slice() else {
-                return Err("expected an annotation expression".into());
-            };
-            Body::Expression(&statement.value)
-        } else {
-            Body::Namespace(&self.body)
-        };
-        let code = location.code(output, String::new(), suite, false, None);
+        let code = location.code(
+            output,
+            String::new(),
+            Body::Namespace(&self.body),
+            false,
+            None,
+        );
         match output.diagnostic.take() {
             Some(diagnostic) => Err(diagnostic),
             None => Ok(code),
@@ -705,9 +724,9 @@ impl<'a> PreparedBody<'a> {
     }
 }
 
-enum SourceBody<'a> {
-    Module(ModuleOrigin<'a>),
-    Expression(&'a ruff_python_parser::Parsed<ast::ModExpression>),
+enum Input<'a> {
+    Module(ParsedSource),
+    Expression(ast::ModModule, &'a ast::token::Tokens),
 }
 
 enum DefinitionName<'a> {
@@ -818,6 +837,11 @@ struct TypeAliasDefinition {
 }
 
 struct SourceInfo<'a> {
+    annotation_operands: HashMap<
+        ruff_text_size::TextSize,
+        crate::frontend::PreparedAnnotation<Box<SourceInfo<'static>>>,
+    >,
+    namespace_annotations: HashMap<Option<ruff_text_size::TextSize>, Vec<ruff_text_size::TextSize>>,
     scopes: crate::frontend::function_scope::ScopeFacts,
     thread_entries: HashMap<ruff_text_size::TextSize, imre_ast::ThreadEntry>,
     lambdas: HashMap<ruff_text_size::TextSize, RegisteredLambda>,
@@ -846,13 +870,13 @@ struct SourceInfo<'a> {
     method_imports: std::collections::BTreeSet<String>,
     string_annotations: bool,
     barry_as_flufl: bool,
-    text: &'a str,
+    text: Cow<'a, str>,
 }
 
 impl SourceInfo<'_> {
     fn registered_source(&self) -> crate::frontend::RegisteredSource<'_> {
         crate::frontend::RegisteredSource {
-            text: self.text,
+            text: &self.text,
             replacements: &self.replacements,
             has_templates: self.has_templates,
             templates: Some(&self.templates),
@@ -969,6 +993,7 @@ impl SourceMap<'_> {
             _ => None,
         };
         let mut f = Function {
+            sites: sites::CheckedSites::default(),
             prepare_nested_suites: prepared.is_some_and(|plan| !plan.fully_checked()),
             frame,
             source: self,
@@ -980,12 +1005,37 @@ impl SourceMap<'_> {
             loops: Vec::new(),
             exits: Vec::new(),
         };
+        match &body {
+            Body::Annotations(entries, _) => {
+                for (_, expression) in entries {
+                    f.place_annotation_string(expression.start());
+                }
+            }
+            Body::ClassAnnotations(entries, _) => {
+                for entry in entries {
+                    f.place_annotation_string(entry.expression.start());
+                }
+            }
+            Body::ModuleAnnotations(_, entries) => {
+                for entry in *entries {
+                    f.place_annotation_string(entry.site);
+                }
+            }
+            Body::Namespace(_) => {
+                if let Some(entries) = self.namespace_annotations.get(&start) {
+                    for site in entries {
+                        f.place_annotation_string(*site);
+                    }
+                }
+            }
+            _ => {}
+        }
         if let Some(checked) = checked {
             for name in self.scopes.functions[&start.expect("checked function")].globals() {
                 f.frame.declare_global(name);
             }
-            let sites = f.prepare_checked_sites(&checked.function.body);
-            RegisteredFrame::checked_body(&mut f.frame, checked, &sites);
+            f.prepare_checked_sites(&checked.function.body);
+            RegisteredFrame::checked_body(&mut f.frame, checked, &f.sites);
             return f.frame.finish(false);
         }
         if matches!(body, Body::Statements(_))
@@ -1043,7 +1093,6 @@ impl SourceMap<'_> {
             Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
             Body::Annotations(entries, class) => f.annotations(&entries, class),
             Body::ModuleAnnotations(plan, entries) => {
-                f.prepare_annotation_children(entries);
                 f.prepared_function(plan, |code, run| {
                     for index in run {
                         code.unprepared_annotation(index, entries[index]);
@@ -1051,8 +1100,8 @@ impl SourceMap<'_> {
                 });
             }
             Body::CheckedExpression(checked) | Body::AliasEvaluator(AliasValue::Checked(checked)) => {
-                let sites = f.prepare_checked_sites(&checked.function.body);
-                RegisteredFrame::checked_body(&mut f.frame, checked, &sites);
+                f.prepare_checked_sites(&checked.function.body);
+                RegisteredFrame::checked_body(&mut f.frame, checked, &f.sites);
             }
             Body::Generator(plan) => f.generator_step(plan),
             Body::AliasEvaluator(AliasValue::Residual(expr)) => {
@@ -1073,6 +1122,7 @@ impl SourceMap<'_> {
 }
 
 struct Function<'a, 'p> {
+    sites: sites::CheckedSites,
     prepare_nested_suites: bool,
     frame: RegisteredFrame<'a, 'p>,
     source: &'p SourceMap<'p>,
@@ -1135,47 +1185,8 @@ impl Function<'_, '_> {
         self.frame.checkpoint(node.range());
     }
 
-    /// An annotation's text is still a normal str. Retain its native expression
-    /// separately so a later evaluation can supply a new globals/locals pair.
-    fn annotation_text(&mut self, value: &str) -> String {
-        let code = if self.source.bundled {
-            None
-        } else {
-            crate::frontend::annotation_expression(value)
-                .and_then(|parsed| self.compile_source_annotation(value, &parsed))
-        };
-        let text = self.frame.text(value);
-        if let Some(code) = code {
-            self.frame.bind_annotation_expression(&text, &code);
-        }
-        text
-    }
-
-    fn compile_source_annotation(
-        &mut self,
-        value: &str,
-        parsed: &ruff_python_parser::Parsed<ast::ModExpression>,
-    ) -> Option<String> {
-        let unit = self.source.unit;
-        let python_optimization = self.source.python_optimization;
-        self.output.try_native_body(|output| {
-            let file = output.data(b"<string>");
-            match PreparedBody::new(
-                "",
-                Path::new("<string>"),
-                value,
-                python_optimization,
-                SourceBody::Expression(parsed),
-            )
-            .and_then(|body| body.emit(output, unit, &file))
-            {
-                Ok(code) => code,
-                Err(err) => {
-                    output.diagnostic = Some(err);
-                    String::new()
-                }
-            }
-        })
+    fn annotation_string(&mut self, site: ruff_text_size::TextSize) -> String {
+        self.sites.annotation_string(&mut self.frame, site)
     }
 
     fn unsupported(&mut self, what: &str) -> String {

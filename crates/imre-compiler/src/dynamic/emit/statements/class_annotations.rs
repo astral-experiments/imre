@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub(in crate::dynamic::emit) struct Site {
     name: String,
-    expression: ast::Expr,
+    pub(in crate::dynamic::emit) expression: ast::Expr,
     conditional: Option<usize>,
 }
 
