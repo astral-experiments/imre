@@ -304,6 +304,7 @@ pub(crate) struct Frame<'f, 'a, 'p> {
     code: &'f mut RegisteredFrame<'a, 'p>,
     sites: &'f CheckedSites,
     names: Option<&'f HashMap<usize, LocalBinding>>,
+    inputs: &'f [String],
 }
 
 impl<'a, 'p> std::ops::Deref for Frame<'_, 'a, 'p> {
@@ -340,6 +341,7 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
             code,
             sites,
             names: None,
+            inputs: &[],
         }
     }
 
@@ -348,6 +350,7 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
             code: self.code,
             sites: self.sites,
             names: self.names,
+            inputs: self.inputs,
         }
     }
 }
@@ -404,6 +407,9 @@ impl Frame<'_, '_, '_> {
     }
 
     pub(crate) fn lookup_local(&mut self, slot: usize) -> String {
+        if !self.inputs.is_empty() {
+            return self.inputs[slot].clone();
+        }
         if self
             .code
             .iteration
@@ -1324,6 +1330,7 @@ impl RegisteredFrame<'_, '_> {
             code: self,
             names,
             sites,
+            inputs: &[],
         });
         self.expression_integer_start = outer;
         result
@@ -1366,6 +1373,19 @@ impl RegisteredFrame<'_, '_> {
 
     pub(crate) fn registered_value(&mut self, expression: &Expr, sites: &CheckedSites) -> String {
         self.registered_expression(expression, sites, false)
+    }
+
+    /// Bind frame-rooted SSA handles to the positional slots of one checked expression.
+    /// The caller has already evaluated all inputs in their Python order.
+    pub(crate) fn registered_with_inputs(
+        &mut self,
+        expression: &Expr,
+        inputs: &[String],
+        sites: &CheckedSites,
+    ) -> String {
+        self.with_checked_frame(sites, None, |frame| {
+            Frame { inputs, ..frame }.evaluate_handle(expression)
+        })
     }
 
     pub(crate) fn registered_expression(
@@ -1418,6 +1438,7 @@ impl RegisteredFrame<'_, '_> {
             code: self,
             names: Some(&checked.local_names),
             sites,
+            inputs: &[],
         })
         .emit_block(statements);
     }
@@ -1430,6 +1451,7 @@ impl RegisteredFrame<'_, '_> {
             code: self,
             names: Some(&checked.local_names),
             sites,
+            inputs: &[],
         })
         .emit_function(&checked.function);
         self.restore_checked_slots(enclosing);

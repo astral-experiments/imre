@@ -434,35 +434,11 @@ pub(in crate::frontend) fn index_key<E>(
 ) -> StdResult<Expr, E> {
     use ir::Constant as C;
     let (value, constant) = match node {
-        ast::Expr::Slice(slice) => {
-            let mut bounds = Vec::with_capacity(3);
-            let mut literal = true;
-            for bound in [&slice.lower, &slice.upper, &slice.step] {
-                bounds.push(match bound.as_deref() {
-                    Some(bound) => {
-                        literal &= bound.is_literal_expr();
-                        index_key(bound, operand)?
-                    }
-                    None => Expr::none(),
-                });
-            }
-            let constant = literal
-                .then(|| {
-                    Some(C::Slice(Box::new([
-                        ir::Constant::from_expr(&bounds[0])?,
-                        ir::Constant::from_expr(&bounds[1])?,
-                        ir::Constant::from_expr(&bounds[2])?,
-                    ])))
-                })
-                .flatten();
-            if slice.step.is_none() {
-                bounds.pop();
-            }
-            (
-                super::operation(Builtin::RegisteredSlice, Type::PythonObject, bounds),
-                constant,
-            )
-        }
+        ast::Expr::Slice(slice) => slice_key(slice, |bound| {
+            let value = index_key(bound, operand)?;
+            let constant = literal_bound(bound, Some(&value));
+            Ok((value, constant))
+        })?,
         ast::Expr::Tuple(tuple) => {
             let values = tuple
                 .elts
@@ -514,6 +490,11 @@ pub(in crate::frontend) fn index_key<E>(
             (value, Some(key))
         }
     };
+    Ok(located_key(node, value, constant))
+}
+
+fn located_key(node: &ast::Expr, value: Expr, constant: Option<ir::Constant>) -> Expr {
+    use ir::Constant as C;
     let value = if let Some(key) = constant {
         // Permanent singleton handles already have their Python identity.
         match key {
@@ -527,24 +508,100 @@ pub(in crate::frontend) fn index_key<E>(
     } else {
         value
     };
-    Ok(located(node.range(), node.start(), value))
+    located(node.range(), node.start(), value)
 }
 
-/// Retain the same checked key when the subscript receiver or its containing statement is residual.
-pub(crate) fn registered_constant_key(
-    node: &ast::Expr,
-    source: RegisteredSource<'_>,
-) -> Option<(ir::Constant, Expr)> {
-    let value = index_key(node, &mut |e| registered_value(e, source).ok_or(())).ok()?;
-    match &value.kind {
-        ExprKind::Builtin(Builtin::RegisteredLocation(..), args) => match &args[0].kind {
-            ExprKind::Builtin(Builtin::RegisteredIndexConstant(key), _) => {
-                Some((key.clone(), value))
-            }
-            _ => None,
-        },
-        _ => None,
+fn literal_bound(bound: &ast::Expr, value: Option<&Expr>) -> Option<ir::Constant> {
+    if bound.is_literal_expr() {
+        ir::Constant::from_expr(value?)
+    } else {
+        None
     }
+}
+
+fn slice_key<'a, E>(
+    slice: &'a ast::ExprSlice,
+    mut operand: impl FnMut(&'a ast::Expr) -> StdResult<(Expr, Option<ir::Constant>), E>,
+) -> StdResult<(Expr, Option<ir::Constant>), E> {
+    use ir::Constant as C;
+    let mut bounds = Vec::with_capacity(3);
+    let mut constants = Some([C::None, C::None, C::None]);
+    for (i, bound) in [&slice.lower, &slice.upper, &slice.step]
+        .into_iter()
+        .enumerate()
+    {
+        if let Some(bound) = bound {
+            let (value, constant) = operand(bound)?;
+            bounds.push(value);
+            constants = constants.and_then(|mut keys| {
+                keys[i] = constant?;
+                Some(keys)
+            });
+        } else if i < 2 {
+            bounds.push(Expr::none());
+        }
+    }
+    Ok((
+        super::operation(Builtin::RegisteredSlice, Type::PythonObject, bounds),
+        constants.map(|keys| C::Slice(Box::new(keys))),
+    ))
+}
+
+/// Only the input producers may need the enclosing source adapter. The operation
+/// itself uses ordinary checked IR with positional inputs, independent of Python locals.
+pub(crate) struct IndexOperands<'a> {
+    pub(crate) value: Expr,
+    pub(crate) inputs: Vec<super::booleans::SourceOperand<'a>>,
+}
+
+pub(crate) fn index_operands<'a>(
+    node: &'a ast::Expr,
+    source: RegisteredSource<'_>,
+) -> Option<IndexOperands<'a>> {
+    use super::booleans::SourceOperand;
+    let mut inputs = Vec::new();
+    let mut input = |expr: &'a ast::Expr, value: Option<Expr>| {
+        let slot = inputs.len();
+        inputs.push(match value {
+            Some(value) => SourceOperand::Checked(std::borrow::Cow::Owned(value)),
+            None => SourceOperand::Residual(expr),
+        });
+        Expr::local(slot, Type::PythonObject)
+    };
+    let (read, key) = match node {
+        ast::Expr::Subscript(index) => {
+            let receiver = input(&index.value, registered_value(&index.value, source));
+            (Some((index, receiver)), index.slice.as_ref())
+        }
+        ast::Expr::Slice(_) => (None, node),
+        _ => return None,
+    };
+    // A complete object key keeps its ordinary cache and construction boundary.
+    // A two-bound read uses the checked slice shape directly in read_item.
+    let slice = key.as_slice_expr();
+    let fused = read.is_some() && slice.is_some_and(|slice| slice.step.is_none());
+    let checked = if fused {
+        None
+    } else {
+        registered_index_key(key, source)
+    };
+    let value = if let Some(checked) = checked {
+        input(key, Some(checked))
+    } else if let Some(slice) = slice {
+        let Ok((value, constant)) = slice_key(slice, |bound| {
+            let value = registered_index_key(bound, source);
+            let constant = literal_bound(bound, value.as_ref());
+            Ok::<_, std::convert::Infallible>((input(bound, value), constant))
+        });
+        located_key(key, value, constant)
+    } else {
+        input(key, None)
+    };
+    let value = match read {
+        Some((index, receiver)) => subscript(index, receiver, value, source.text),
+        None => value,
+    };
+    Some(IndexOperands { value, inputs })
 }
 
 fn display_operands<E>(
@@ -1340,7 +1397,36 @@ mod index_constant_tests {
         let module = ModuleSource::new(entry);
         let expr = &entry.parsed.syntax().body[0].as_expr_stmt().unwrap().value;
         let key = &expr.as_subscript_expr().unwrap().slice;
-        registered_constant_key(key, module.context(source)).map(|(key, _)| key)
+        ir::Constant::from_expr(&registered_index_key(key, module.context(source))?)
+    }
+
+    #[test]
+    fn residual_bound_is_an_input_to_a_checked_slice_read() {
+        let source = "owner()[1000:next(i for i in items):1001]";
+        let graph = SourceGraph::single(source).unwrap();
+        let entry = &graph.modules[graph.entry];
+        let module = ModuleSource::new(entry);
+        let expr = &entry.parsed.syntax().body[0].as_expr_stmt().unwrap().value;
+        let plan = index_operands(expr, module.context(source)).unwrap();
+        let mut residual = Vec::new();
+        for input in &plan.inputs {
+            if let super::booleans::SourceOperand::Residual(child) = input {
+                residual.push(&source[child.range()]);
+            }
+        }
+        assert_eq!(residual, ["next(i for i in items)"]);
+        assert_eq!(plan.inputs.len(), 4);
+        let mut slots = Vec::new();
+        ir::walk_operand_expressions(&plan.value, &mut |operand| {
+            if let ExprKind::Local(slot) = operand.kind {
+                slots.push(slot);
+            }
+        });
+        assert_eq!(slots, [0, 1, 2, 3]);
+        assert!(matches!(
+            plan.value.kind,
+            ExprKind::Builtin(Builtin::RegisteredSubscript(..), _)
+        ));
     }
 
     #[test]
