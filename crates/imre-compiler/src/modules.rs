@@ -575,9 +575,17 @@ pub(crate) enum Binding {
     /// A class defined by the runtime arm of a TYPE_CHECKING guard.
     RuntimeClass,
     Value(DefinitionId),
+    /// The value captured by one named from-import of a mutable module binding.
+    ImportedValue(DefinitionId, usize),
     TypeAlias(ModuleId, usize),
     IntrinsicModule(IntrinsicModule),
     Intrinsic(Intrinsic),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum ImportSnapshot {
+    Intrinsic(Intrinsic),
+    Values(Vec<DefinitionId>),
 }
 
 /// Sealed namespaces expose only compiler-known symbols, never module values.
@@ -2851,8 +2859,8 @@ pub(crate) struct SourceModule {
     pub(crate) optional_imports: HashMap<TextRange, Vec<String>>,
     /// First assignment of each module value that needs a rebindable cell.
     pub(crate) rebound_values: HashSet<usize>,
-    /// Mutable intrinsic exports read at the source from-import, keyed by statement.
-    pub(crate) snapshots: HashMap<usize, Intrinsic>,
+    /// Mutable exports read at the source from-import, keyed by statement.
+    pub(crate) snapshots: HashMap<usize, ImportSnapshot>,
     /// Executable entry statements, or inactive main guards that still require checking.
     pub(crate) executable: Vec<usize>,
     pub(crate) is_package: bool,
@@ -4476,6 +4484,7 @@ fn resolve_binding(
                 | Binding::ConditionalValue
                 | Binding::RuntimeClass
                 | Binding::Value(_)
+                | Binding::ImportedValue(_, _)
                 | Binding::TypeAlias(..)
                 | Binding::Intrinsic(_) => None,
             }
@@ -4973,6 +4982,7 @@ impl<'a> Loader<'a> {
     fn scan(&mut self, id: ModuleId) -> Result<(), String> {
         let is_entry = self.is_entry(id);
         let parsed = self.modules[id].parsed.clone();
+        let global_writes = self.session.nested_global_writes(id, parsed.tokens());
         let mut imports = Vec::new();
         for stmt in &parsed.syntax().body {
             match stmt {
@@ -5327,6 +5337,9 @@ impl<'a> Loader<'a> {
                                 }),
                                 statement,
                             )?;
+                            if global_writes.contains(name) {
+                                self.modules[id].rebound_values.insert(index);
+                            }
                         }
                         if entry_global {
                             self.modules[id].entry_globals.push(index);
@@ -5717,7 +5730,9 @@ impl<'a> Loader<'a> {
                             if symbol == Intrinsic::BuiltinsLast {
                                 self.checked_builtin_imports.push((id, alias.range()));
                             }
-                            self.modules[id].snapshots.insert(index, symbol);
+                            self.modules[id]
+                                .snapshots
+                                .insert(index, ImportSnapshot::Intrinsic(symbol));
                             Binding::Value(DefinitionId {
                                 module: id,
                                 statement: index,
@@ -5793,7 +5808,9 @@ impl<'a> Loader<'a> {
                                     self.ordered_imports |= ready;
                                     ready
                                 }
-                                Binding::Value(def) => package && self.initialized(def),
+                                Binding::Value(def) | Binding::ImportedValue(def, _) => {
+                                    package && self.initialized(def)
+                                }
                                 Binding::TypeAlias(owner, index)
                                     if let TypeAlias::Declaration(statement) =
                                         self.modules[owner].aliases[index] =>
@@ -5846,6 +5863,30 @@ impl<'a> Loader<'a> {
                     {
                         self.partial_value_imports.insert(def);
                     }
+                    let binding = if let Binding::Value(def) = binding
+                        && self.modules[def.module]
+                            .rebound_values
+                            .contains(&def.statement)
+                    {
+                        let ImportSnapshot::Values(values) = self.modules[id]
+                            .snapshots
+                            .entry(index)
+                            .or_insert_with(|| ImportSnapshot::Values(Vec::new()))
+                        else {
+                            unreachable!("a from-import has a single source module")
+                        };
+                        let member = values.len();
+                        values.push(def);
+                        Binding::ImportedValue(
+                            DefinitionId {
+                                module: id,
+                                statement: index,
+                            },
+                            member,
+                        )
+                    } else {
+                        binding
+                    };
                     if binding == Binding::Intrinsic(Intrinsic::SOCKETSERVER_CLASS) {
                         self.checked_builtin_imports.push((id, alias.range()));
                     }
@@ -7034,15 +7075,16 @@ fn native_declaration(statement: &ast::Stmt) -> bool {
 
 /// A single named assignment can initialize or replace a module value.
 pub(crate) fn value_name(statement: &ast::Stmt) -> Option<&str> {
-    let target = match statement {
-        ast::Stmt::Assign(assignment) if assignment.targets.len() == 1 => &assignment.targets[0],
-        ast::Stmt::AnnAssign(assignment) => &assignment.target,
-        _ => return None,
-    };
-    if let ast::Expr::Name(name) = target {
-        Some(name.id.as_str())
-    } else {
-        None
+    Some(value_target(statement)?.as_name_expr()?.id.as_str())
+}
+
+pub(crate) fn value_target(statement: &ast::Stmt) -> Option<&ast::Expr> {
+    match statement {
+        ast::Stmt::Assign(assignment) if assignment.targets.len() == 1 => {
+            Some(&assignment.targets[0])
+        }
+        ast::Stmt::AnnAssign(assignment) => Some(&assignment.target),
+        _ => None,
     }
 }
 

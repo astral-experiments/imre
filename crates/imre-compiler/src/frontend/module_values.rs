@@ -18,7 +18,7 @@ pub(super) struct ModuleValues {
     /// A concrete source read supplies the registered function's ordinary Python binding.
     pub(super) missing_bindings: RefCell<std::collections::BTreeMap<usize, Diagnostic>>,
     pub(super) class_data: RefCell<class_data::Storage>,
-    definitions: RefCell<HashMap<DefinitionId, (usize, Type)>>,
+    definitions: RefCell<HashMap<(DefinitionId, usize), (usize, Type)>>,
     class_slots: RefCell<HashMap<(DefinitionId, usize), usize>>,
     pub(super) unittest_skips: RefCell<HashMap<(DefinitionId, usize), (usize, usize)>>,
     literal_tuples: RefCell<HashMap<ClassLiteral, usize>>,
@@ -126,25 +126,37 @@ impl ModuleValues {
     }
 
     /// Resolves storage only after the defining initializer has been checked.
-    pub(super) fn read(&self, definition: DefinitionId) -> Result<Option<(usize, Type)>, String> {
+    fn read(
+        &self,
+        definition: DefinitionId,
+        member: usize,
+    ) -> Result<Option<(usize, Type)>, String> {
         if let Some(wait) = self.waiting.borrow().get(&definition) {
             return Err(wait.clone());
         }
-        Ok(self.get(definition))
+        Ok(self
+            .definitions
+            .borrow()
+            .get(&(definition, member))
+            .copied())
     }
 
     pub fn get(&self, definition: DefinitionId) -> Option<(usize, Type)> {
-        self.definitions.borrow().get(&definition).copied()
+        self.definitions.borrow().get(&(definition, 0)).copied()
     }
 
     fn insert(&self, definition: DefinitionId, ty: Type) -> usize {
+        self.insert_member(definition, 0, ty)
+    }
+
+    fn insert_member(&self, definition: DefinitionId, member: usize, ty: Type) -> usize {
         let mut types = self.types.borrow_mut();
         let slot = types.len();
         types.push(ty);
         assert!(
             self.definitions
                 .borrow_mut()
-                .insert(definition, (slot, ty))
+                .insert((definition, member), (slot, ty))
                 .is_none()
         );
         slot
@@ -202,6 +214,36 @@ impl Checkpoint {
 }
 
 impl Checker<'_> {
+    pub(super) fn read_module_value(
+        &self,
+        definition: DefinitionId,
+        member: Option<usize>,
+        at: &impl Ranged,
+    ) -> Result<Expr, String> {
+        let (slot, ty) = self
+            .globals
+            .read(definition, member.unwrap_or(0))?
+            .ok_or_else(|| {
+                error(
+                    self.source,
+                    at,
+                    "module value is not initialized on this path",
+                )
+            })?;
+        let storage = self.globals.slot_value(slot);
+        if member.is_none()
+            && self.graph.modules[definition.module]
+                .rebound_values
+                .contains(&definition.statement)
+        {
+            return Ok(Expr {
+                ty: self.types.element(ty).expect("module cell"),
+                kind: ExprKind::Builtin(Builtin::ListGet, vec![storage, Expr::integer(0)]),
+            });
+        }
+        Ok(storage)
+    }
+
     /// Execute assignments in the class namespace at the definition's source position.
     /// A class local is visible to later initializers, but inherited names are not.
     fn initialize_class_values(
@@ -414,12 +456,33 @@ impl Checker<'_> {
         &mut self,
         statement: &ast::Stmt,
         definition: DefinitionId,
-    ) -> Result<Statement, String> {
+        body: &mut Vec<Statement>,
+    ) -> Result<(), String> {
+        use crate::modules::ImportSnapshot;
+        let snapshot = self.graph.modules[self.module]
+            .snapshots
+            .get(&definition.statement);
+        if let Some(ImportSnapshot::Values(sources)) = snapshot {
+            // Read every source before allocating slots: inference can retry a pending initializer.
+            let values = sources
+                .iter()
+                .map(|&source| self.read_module_value(source, None, statement))
+                .collect::<Result<Vec<_>, _>>()?;
+            for (member, value) in values.into_iter().enumerate() {
+                let slot = self.globals.insert_member(definition, member, value.ty);
+                body.push(Statement::Expr(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![value]),
+                }));
+            }
+            return Ok(());
+        }
         let rebound = self.graph.modules[self.module].rebound_target(self.module, statement);
         if let Some(first) = rebound
             && first != definition
         {
-            return self.replace_global(first, statement);
+            body.push(self.replace_global(first, statement)?);
+            return Ok(());
         }
         let parser = if rebound.is_some() {
             None
@@ -429,13 +492,10 @@ impl Checker<'_> {
         let exact_parser = parser.is_some();
         let value = if let Some((_, value)) = parser {
             value
+        } else if let Some(ImportSnapshot::Intrinsic(symbol)) = snapshot {
+            self.import_sys_value(*symbol)
         } else {
-            match statement {
-                ast::Stmt::ImportFrom(_) => self.import_sys_value(
-                    self.graph.modules[self.module].snapshots[&definition.statement],
-                ),
-                _ => self.module_assignment(statement)?,
-            }
+            self.module_assignment(statement)?
         };
         // A native frozenset predicate captures only its already-initialized immutable set.
         let frozen_predicate = matches!(&value.kind, ExprKind::Callable { receiver: Some(set), .. }
@@ -474,10 +534,11 @@ impl Checker<'_> {
         if let Some(groups) = self.globals.regex_groups(&value) {
             self.globals.regex_globals.borrow_mut().insert(slot, groups);
         }
-        Ok(Statement::Expr(Expr {
+        body.push(Statement::Expr(Expr {
             ty: Type::None,
             kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![value]),
-        }))
+        }));
+        Ok(())
     }
 }
 
@@ -695,20 +756,25 @@ impl Initialization {
             if module.snapshots.contains_key(&index)
                 || crate::modules::value_name(statement).is_some()
             {
-                match checker.initialize_global(statement, definition) {
-                    Ok(value) => {
-                        if checker.graph.registered_startup
+                let captured = match module.snapshots.get(&index) {
+                    Some(crate::modules::ImportSnapshot::Values(sources)) => Some(sources),
+                    _ => None,
+                };
+                match checker.initialize_global(statement, definition, &mut body) {
+                    Ok(()) => {
+                        if captured.is_none()
+                            && checker.graph.registered_startup
                             && checker.module == checker.graph.entry
                             && checker.inference.is_none()
                             && checker.module_namespace.is_unexposed()
                             && checker.unrepresented.borrow().is_none()
                             && checker.graph.deferred_object_error.borrow().is_none()
                             && matches!(
-                                &value,
-                                Statement::Expr(Expr {
+                                &body[start..],
+                                [Statement::Expr(Expr {
                                     kind: ExprKind::Builtin(Builtin::GlobalSet(_), _),
                                     ..
-                                })
+                                })]
                             )
                         {
                             checker
@@ -717,7 +783,6 @@ impl Initialization {
                                 .borrow_mut()
                                 .insert(index);
                         }
-                        body.push(value);
                     }
 
                     Err(wait @ Failure::PendingSignature { .. }) => {
@@ -737,7 +802,9 @@ impl Initialization {
                             } else {
                                 Type::PythonObject
                             };
-                            checker.globals.insert(definition, ty);
+                            for member in 0..captured.map_or(1, Vec::len) {
+                                checker.globals.insert_member(definition, member, ty);
+                            }
                         }
                     }
                     Err(error) if checker.defer_object_error(&error) => continue,

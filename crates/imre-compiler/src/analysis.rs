@@ -1122,6 +1122,41 @@ impl Session {
             .collect()
     }
 
+    /// Only an assignment through an explicit global can replace the module's binding.
+    pub(crate) fn nested_global_writes(
+        &self,
+        module: usize,
+        tokens: &Tokens,
+    ) -> std::collections::HashSet<String> {
+        if !tokens.iter().any(|token| token.kind() == TokenKind::Global) {
+            return Default::default();
+        }
+        let index =
+            ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
+        index
+            .scope_ids()
+            .map(|scope| scope.file_scope_id(&self.db))
+            .filter(|scope| !scope.is_global())
+            .flat_map(|scope| index.place_table(scope).symbols())
+            .filter(|symbol| symbol.is_global() && symbol.is_bound())
+            .map(|symbol| symbol.name().to_string())
+            .collect()
+    }
+
+    pub(crate) fn explicitly_global(&self, module: usize, target: &Expr) -> bool {
+        let Expr::Name(name) = target else {
+            return false;
+        };
+        let index =
+            ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
+        index.try_expression_scope_id(target).is_some_and(|scope| {
+            let table = index.place_table(scope);
+            table
+                .symbol_id(name.id.as_str())
+                .is_some_and(|id| table.symbol(id).is_global())
+        })
+    }
+
     fn sole_binding(
         &self,
         module: usize,
