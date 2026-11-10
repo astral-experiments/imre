@@ -232,17 +232,6 @@ impl Function<'_, '_> {
             });
         }
         match expr {
-            ast::Expr::Named(v) => {
-                let ast::Expr::Name(target) = &*v.target else {
-                    return self.unsupported("assignment expression target");
-                };
-                let mark = self.temporary_mark();
-                let value = self.expr(&v.value);
-                let name = self.code_name(target.id.as_str());
-                let scope = self.scope.clone();
-                self.assign_expression_name(&scope, &name, &value, &mark);
-                value
-            }
             ast::Expr::Lambda(lambda) => match &self.source.lambdas[&lambda.start()].binding {
                 LambdaBinding::Inline(value) => self.registered_value(value),
                 LambdaBinding::Operand(operand) => {

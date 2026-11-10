@@ -131,16 +131,29 @@ impl RegisteredSource<'_> {
         template: &ast::ExprTString,
         in_function: bool,
         mut operand: impl FnMut(&ast::Expr) -> Option<Expr>,
-    ) -> Option<Expr> {
-        let fields = self.template_fields?;
-        let segments = template_segments(template, self, fields)?;
+    ) -> StdResult<Expr, Option<&'static str>> {
+        let fields = self.template_fields.ok_or(None)?;
+        let segments = template_segments(template, self, fields).ok_or(None)?;
         let mut captures = Vec::new();
+        let mut residual_error = None;
         for field in template
             .value
             .iter()
             .flat_map(|part| part.elements.interpolations())
         {
-            captures.push(self.interpolation(field, &mut operand)?);
+            // A residual field checks its spelling and format before evaluating its value.
+            residual_error = residual_error.or_else(|| {
+                match imre_ast::strings::template_format_spec(field).err()? {
+                    "debug t-string interpolation" => Some(
+                        "unsupported debug t-string interpolation in a compiled suspended function",
+                    ),
+                    "nested t-string format spec" => Some(
+                        "unsupported nested t-string format spec in a compiled suspended function",
+                    ),
+                    _ => None,
+                }
+            });
+            captures.push(self.interpolation(field, &mut operand).ok_or(residual_error)?);
         }
         let value = object(Builtin::RegisteredTemplate(segments), captures);
         if !in_function {
@@ -153,10 +166,10 @@ impl RegisteredSource<'_> {
                 );
             });
             if suspends {
-                return None;
+                return Err(None);
             }
         }
-        Some(value)
+        Ok(value)
     }
 
     fn interpolation(
