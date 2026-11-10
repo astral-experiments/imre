@@ -941,6 +941,7 @@ pub(crate) enum PhysicalBinding {
     Checked {
         entered: usize,
         binding: Box<RegisteredFunction>,
+        pair: Option<unpacking::PairBinding>,
     },
     Refused(TextRange, &'static str),
 }
@@ -1578,13 +1579,15 @@ impl<'a> SuitePreparation<'a> {
         target: &ast::Expr,
         kind: RegisteredScope,
         suspended: bool,
+        pair_pull: bool,
     ) -> PhysicalBinding {
         let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
         scope.diagnostic_suspension = Some(suspended);
-        match scope.with_binding(target) {
-            Ok(ir::ContextBinding { entered, body }) => PhysicalBinding::Checked {
+        match scope.input_binding(target, pair_pull) {
+            Ok((ir::ContextBinding { entered, body }, pair)) => PhysicalBinding::Checked {
                 entered,
                 binding: Box::new(scope.finish(body)),
+                pair,
             },
             Err(()) => {
                 let (range, reason) = scope.refusal.unwrap_or((
@@ -1700,7 +1703,7 @@ impl<'a> SuitePreparation<'a> {
                     target: item
                         .optional_vars
                         .as_ref()
-                        .map(|target| self.physical_binding(target, kind, suspended)),
+                        .map(|target| self.physical_binding(target, kind, suspended, false)),
                 }
             })
             .collect();
@@ -1719,8 +1722,13 @@ impl<'a> SuitePreparation<'a> {
         suspended: bool,
     ) -> PreparedFor {
         let iterable = self.physical_operand(&loop_.iter, kind, selection, suspended);
-        let target = self.physical_binding(&loop_.target, kind, suspended);
         let (acquire, pull) = iteration_protocol(loop_.iter.range(), for_pull(loop_));
+        let target = self.physical_binding(
+            &loop_.target,
+            kind,
+            suspended,
+            pull == ir::IterNextKind::Generic,
+        );
         PreparedFor {
             range: loop_.range(),
             iterable_range: loop_.iter.range(),
@@ -2810,7 +2818,11 @@ impl SourceScope<'_> {
         self.block(stmts).map(|(body, _)| body)
     }
 
-    fn with_binding(&mut self, target: &ast::Expr) -> StdResult<ir::ContextBinding, ()> {
+    fn input_binding(
+        &mut self,
+        target: &ast::Expr,
+        pair_pull: bool,
+    ) -> StdResult<(ir::ContextBinding, Option<unpacking::PairBinding>), ()> {
         let slot = self.hidden(Type::PythonObject);
         let value = Expr::local(slot, Type::PythonObject);
         // Unpacking consumes the container before any individual target can suspend.
@@ -2819,14 +2831,22 @@ impl SourceScope<'_> {
         } else {
             value
         };
-        let body = self.assignment_targets(std::slice::from_ref(target), value)?;
-        Ok(ir::ContextBinding {
+        let (body, pair) = self.with_binding_operands(|scope| {
+            unpacking::bind_input(scope, target, value, None, pair_pull)
+        })?;
+        let binding = ir::ContextBinding {
             entered: slot,
             body: vec![Statement::Scope {
                 body,
                 clear: vec![slot],
             }],
-        })
+        };
+        Ok((binding, pair))
+    }
+
+    fn with_binding(&mut self, target: &ast::Expr) -> StdResult<ir::ContextBinding, ()> {
+        self.input_binding(target, false)
+            .map(|(binding, _)| binding)
     }
 
     fn with_items(

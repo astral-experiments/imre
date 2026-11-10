@@ -916,15 +916,24 @@ impl<'p> Function<'_, 'p> {
     fn physical_binding(&mut self, target: &'p crate::frontend::PhysicalBinding, value: &str) {
         use crate::frontend::PhysicalBinding;
         match target {
-            PhysicalBinding::Checked { entered, binding } => {
-                self.prepare_checked_sites(&binding.function.body);
-                self.frame
-                    .checked_binding(binding, *entered, value, &self.sites);
+            PhysicalBinding::Checked {
+                entered, binding, ..
+            } => {
+                self.initialize_binding(binding, |frame| frame.store_private(*entered, value));
             }
             PhysicalBinding::Refused(range, reason) => {
                 self.with_expression_range(*range, |code| code.build_diagnostic(reason));
             }
         }
+    }
+
+    fn initialize_binding(
+        &mut self,
+        binding: &'p crate::frontend::RegisteredFunction,
+        initialize: impl FnOnce(&mut super::RegisteredFrame<'_, 'p>),
+    ) {
+        self.prepare_checked_sites(&binding.function.body);
+        self.frame.checked_binding(binding, &self.sites, initialize);
     }
 
     fn prepared_context(&mut self, context: &'p crate::frontend::PreparedContext) {
@@ -958,6 +967,19 @@ impl<'p> Function<'_, 'p> {
             code.op(region.acquire.runtime_op(), &[&value])
         });
 
+        let guarded = match &region.target {
+            crate::frontend::PhysicalBinding::Checked {
+                entered,
+                binding,
+                pair: Some(pair),
+            } => {
+                let plain = self.value(&format!(
+                    "call i1 @imre_dyn_plain_items_cursor(ptr %ctx, i64 {cursor})"
+                ));
+                Some((binding, *entered, pair, plain))
+            }
+            _ => None,
+        };
         let enclosing = self.exits.len();
         self.live.push(cursor.clone());
         self.exits.push((
@@ -978,18 +1000,36 @@ impl<'p> Function<'_, 'p> {
             |code| code.name("b"),
             |code, edges| code.jump(&edges.step),
             |code, item, exhausted| {
-                code.frame.iteration_edge(
-                    &cursor,
-                    region.pull,
-                    region.range.start(),
-                    region.otherwise.is_some(),
-                    item,
-                    exhausted,
-                )
+                if let Some((_, _, _, plain)) = &guarded {
+                    code.frame.sync_iteration_edge(
+                        &cursor,
+                        region.range.start(),
+                        region.otherwise.is_some(),
+                        Some(plain),
+                        item,
+                        exhausted,
+                    );
+                    None
+                } else {
+                    code.frame.iteration_edge(
+                        &cursor,
+                        region.pull,
+                        region.range.start(),
+                        region.otherwise.is_some(),
+                        item,
+                        exhausted,
+                    )
+                }
             },
             |code, edges, pulled| {
-                let item = code.frame.iteration_item(&cursor, pulled);
-                code.physical_binding(&region.target, &item);
+                if let Some((binding, entered, pair, plain)) = &guarded {
+                    code.initialize_binding(binding, |frame| {
+                        frame.bind_item_pair(&cursor, plain, *entered, pair)
+                    });
+                } else {
+                    let item = code.frame.iteration_item(&cursor, pulled);
+                    code.physical_binding(&region.target, &item);
+                }
                 code.push_loop(edges.clone(), code.exits.len(), enclosing);
                 code.physical_suite(&region.body);
                 code.loops.pop();

@@ -1653,6 +1653,75 @@ mod tests {
     }
 
     #[test]
+    fn only_mixed_fixed_pair_loops_test_the_acquired_cursor() {
+        // An annotated subscript store leaves a physical child in the loop body.
+        let mixed = "        sink[0]: int = 1";
+        let checked_default = "        def resume(answer=(yield 1)):\n            return answer";
+        let checked = "        publish(x, y)";
+        let pair_header = "def f(rows):\n    for x, y in rows:";
+        for (header, body, guarded) in [
+            (pair_header, mixed, true),
+            (pair_header, checked, false),
+            (pair_header, checked_default, false),
+            ("def f(table):\n    for x in table.items():", mixed, false),
+            ("def f(rows):\n    for x, *ys in rows:", mixed, false),
+            ("def f(manager):\n    with manager as (x, y):", mixed, false),
+            (
+                "async def f(rows):\n    async for x, y in rows:",
+                checked,
+                false,
+            ),
+        ] {
+            let source = format!("{header}\n{body}\n");
+            let module = PreparedBody::module(
+                "example",
+                Path::new("example.py"),
+                &source,
+                0,
+                ModuleOrigin::Program(None),
+            )
+            .unwrap();
+            if guarded {
+                let def = module.syntax.as_ref().unwrap()[0]
+                    .as_function_def_stmt()
+                    .unwrap();
+                let plan = module
+                    .source
+                    .function_bodies
+                    .get(&def.start())
+                    .and_then(|entry| entry.suite())
+                    .or_else(|| module.source.nested_bodies.get(&def.body[0].start()))
+                    .unwrap();
+                let Some(crate::frontend::SourceEffect::For(region)) = &plan.residual[0].effect
+                else {
+                    panic!("expected prepared for");
+                };
+                let crate::frontend::PhysicalBinding::Checked {
+                    entered,
+                    binding,
+                    pair: Some(pair),
+                } = &region.target
+                else {
+                    panic!("expected checked pair inputs");
+                };
+                let owners = binding.region().private_slots();
+                let slots = [*entered, pair.items[0], pair.items[1], pair.ordinary];
+                for (index, slot) in slots.iter().enumerate() {
+                    assert!(owners.contains(slot) && !slots[..index].contains(slot));
+                }
+            }
+            let (_, llvm) = module.standalone().unwrap().unwrap();
+            let test = "call i1 @imre_dyn_plain_items_cursor(";
+            let pull = "call i64 @imre_dyn_next_pair(";
+            assert_eq!(llvm.matches(test).count(), usize::from(guarded), "{source}");
+            assert_eq!(llvm.matches(pull).count(), usize::from(guarded), "{source}");
+            if guarded {
+                assert!(llvm.find(test).unwrap() < llvm.find(pull).unwrap());
+            }
+        }
+    }
+
+    #[test]
     fn mixed_for_emits_after_its_source_statement_is_erased() {
         let source = concat!(
             "def capture(rows):\n",

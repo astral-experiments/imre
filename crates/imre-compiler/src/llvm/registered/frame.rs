@@ -1073,15 +1073,45 @@ impl RegisteredFrame<'_, '_> {
     ) -> Option<String> {
         match kind {
             ir::IterNextKind::Generic => {
-                self.retained_loop_header(header);
-                let more = self.op(if has_else { "more_else" } else { "more" }, &[cursor]);
-                let ready = self.value(&format!("icmp eq i64 {more}, {}", permanent::TRUE));
-                self.branch(&ready, item, exhausted);
+                self.sync_iteration_edge(cursor, header, has_else, None, item, exhausted);
                 None
             }
             ir::IterNextKind::Async(pull) => Some(self.async_pull(cursor, pull, item, exhausted)),
             _ => unreachable!("registered iterator kind"),
         }
+    }
+
+    /// A plain dictionary-items cursor can deliver two handles in the scratch slots.
+    /// Other cursors buffer a single row for the ordinary target binding.
+    pub(crate) fn sync_iteration_edge(
+        &mut self,
+        cursor: &str,
+        header: TextSize,
+        has_else: bool,
+        plain_items: Option<&str>,
+        item: &str,
+        exhausted: &str,
+    ) {
+        self.retained_loop_header(header);
+        if let Some(plain_items) = plain_items {
+            let pair = self.name("b");
+            let ordinary = self.name("b");
+            self.branch(plain_items, &pair, &ordinary);
+            self.label(&pair);
+            self.max_live = self.max_live.max(2);
+            let more = self.checked(&format!(
+                "call i64 @imre_dyn_next_pair(ptr %ctx, i64 {cursor}, ptr %live, i1 {has_else})"
+            ));
+            self.branch_on_item(&more, item, exhausted);
+            self.label(&ordinary);
+        }
+        let more = self.op(if has_else { "more_else" } else { "more" }, &[cursor]);
+        self.branch_on_item(&more, item, exhausted);
+    }
+
+    fn branch_on_item(&mut self, more: &str, item: &str, exhausted: &str) {
+        let ready = self.value(&format!("icmp eq i64 {more}, {}", permanent::TRUE));
+        self.branch(&ready, item, exhausted);
     }
 
     pub(crate) fn iteration_item(&mut self, cursor: &str, pulled: Option<String>) -> String {
