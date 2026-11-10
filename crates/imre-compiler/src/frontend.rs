@@ -145,7 +145,7 @@ pub(crate) use registered::{
     place_fixed_function, registered_sites, registered_type_alias,
 };
 pub(crate) use registered::{LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion};
-pub(crate) use registered::{PhysicalBinding, PreparedFor, PreparedRegion, PreparedTry};
+pub(crate) use registered::{PhysicalBinding, PreparedFor, PreparedRegion};
 #[cfg(test)]
 pub(crate) use registered::{StatementSites, booleans::OwnedExpression};
 pub(crate) use required_sites::RequiredSite;

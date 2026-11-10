@@ -2037,8 +2037,12 @@ mod tests {
         let last = main.body.last().unwrap().as_try_stmt().unwrap();
         assert!(last.body[0].as_with_stmt().unwrap().is_async);
         let task_group = main.body.len() - 1;
-        assert!(!suite.residual.iter().any(|run| matches!(
-            &run.effect, Ok(crate::frontend::SourceEffect::Try(region)) if region.range == last.range()
+        assert!(suite.checked.function.body.windows(2).any(|ops| matches!(
+            ops,
+            [crate::ir::Statement::Expr(site), crate::ir::Statement::Try { .. }]
+                if matches!(site.kind, crate::ir::ExprKind::Builtin(
+                    crate::ir::Builtin::RegisteredStatement(range, _), _
+                ) if range == last.range())
         )));
 
         let before = module.standalone().unwrap();
@@ -4511,16 +4515,45 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         else {
             panic!("expected a single mixed try");
         };
-        let Ok(SourceEffect::Try(region)) = &run.effect else {
-            panic!("expected a prepared try")
+        let Ok(SourceEffect::Region(region)) = &run.effect else {
+            panic!("expected a registered try with prepared children")
         };
+        let [
+            _,
+            crate::ir::Statement::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            },
+        ] = &region.checked.function.body[..]
+        else {
+            panic!("expected a checked try")
+        };
+        let child = |body: &[crate::ir::Statement]| region.child_suite(body).unwrap();
+        let crate::ir::ExceptionMatcher::Object(site, class) = &handlers[0].matcher else {
+            panic!("expected a prepared exception selector")
+        };
+        let crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredLocation(range, _), args) =
+            &class.kind
+        else {
+            panic!("expected a located selector")
+        };
+        assert_eq!(site, range);
         assert!(matches!(
-            region.handlers[0].matcher,
-            Some((_, PhysicalOperand::Residual(_)))
+            args.as_slice(),
+            [crate::ir::Expr {
+                kind: crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredInput(0), _),
+                ..
+            }]
         ));
-        assert!(!region.body.fully_checked());
-        assert!(region.otherwise.fully_checked());
-        assert!(!region.finalbody.as_ref().unwrap().fully_checked());
+        assert!(matches!(
+            &region.operands[..],
+            [PhysicalOperand::Residual(_)]
+        ));
+        assert!(!child(body).fully_checked());
+        assert!(child(orelse).fully_checked());
+        assert!(!child(finalbody).fully_checked());
         let original = module.standalone().unwrap();
         let function = module.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
@@ -4534,10 +4567,14 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert_eq!(module.standalone().unwrap(), original);
 
         let run = &mut test_function_suite(&mut module.source, function_start).residual[0];
-        let Ok(SourceEffect::Try(region)) = &mut run.effect else {
+        let Ok(SourceEffect::Region(region)) = &mut run.effect else {
             unreachable!()
         };
-        region.handlers[0].name = None;
+        let [_, crate::ir::Statement::Try { handlers, .. }] = &mut region.checked.function.body[..]
+        else {
+            unreachable!()
+        };
+        handlers[0].name = None;
         assert_ne!(module.standalone().unwrap(), original);
     }
 
@@ -5756,10 +5793,14 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .unwrap();
         let branch = protected.finalbody[0].as_match_stmt_mut().unwrap();
         let suite = prepared.source.initializer.as_ref().unwrap();
-        let Ok(crate::frontend::SourceEffect::Try(region)) = &suite.residual[0].effect else {
-            panic!("expected a mixed try")
+        let Ok(crate::frontend::SourceEffect::Region(region)) = &suite.residual[0].effect else {
+            panic!("expected a registered try with prepared children")
         };
-        let finalbody = &region.finalbody.as_ref().unwrap();
+        let [_, crate::ir::Statement::Try { finalbody, .. }] = &region.checked.function.body[..]
+        else {
+            panic!("expected a checked try")
+        };
+        let finalbody = region.child_suite(finalbody).unwrap();
         let Ok(crate::frontend::SourceEffect::Match(_, site)) = &finalbody.residual[0].effect
         else {
             panic!("expected a mixed match in finally")
