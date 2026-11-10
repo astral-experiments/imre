@@ -1,9 +1,11 @@
 //! Resolve first-class execution operations using the declarations of their operands.
 
 use super::{Session, is_stdlib_function_type};
+use crate::frontend::phase::Diagnostic;
 use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
 use ruff_python_ast::{Expr, ExprCall, Stmt, StmtFunctionDef};
 use ruff_text_size::{Ranged, TextRange};
+use std::{collections::HashMap, path::Path};
 use ty_python_core::definition::{DefinitionKind, FunctionDefinitionKind};
 use ty_python_semantic::types::{Type, TypeDefinition};
 use ty_python_semantic::{Db, HasType, SemanticModel};
@@ -72,13 +74,25 @@ fn text_operand(model: &SemanticModel<'_>, operand: &Expr) -> bool {
     }
 }
 
+#[derive(Clone)]
+pub(super) struct ExecutionRequirement {
+    builtin: ExecutionIntrinsic,
+    pub(super) report: Diagnostic,
+}
+
+pub(super) type FunctionImports = HashMap<TextRange, (usize, ExecutionRequirement)>;
+pub(super) type CapturedImports = HashMap<usize, FunctionImports>;
+
 struct Escape<'a, 'db> {
     model: &'a SemanticModel<'db>,
     parsed: &'a ruff_db::parsed::ParsedModuleRef,
     entered: std::collections::HashSet<TextRange>,
     session: &'db Session,
     module: usize,
-    first: Option<(TextRange, String)>,
+    path: &'a Path,
+    first: Option<ExecutionRequirement>,
+    captured: FunctionImports,
+    unreachable: Vec<TextRange>,
 }
 
 impl<'ast> Escape<'ast, '_> {
@@ -128,6 +142,166 @@ impl<'ast> Escape<'ast, '_> {
         }
         let node = function.node(self.parsed);
         node.decorator_list.is_empty().then_some(node)
+    }
+
+    fn required(
+        &self,
+        builtin: ExecutionIntrinsic,
+        range: TextRange,
+        message: String,
+    ) -> ExecutionRequirement {
+        let source =
+            ruff_db::source::source_text(&self.session.db, self.session.files[self.module]);
+        ExecutionRequirement {
+            builtin,
+            report: Diagnostic::at(source.as_str(), &range, message).with_path(self.path),
+        }
+    }
+
+    fn forget_builtin(&mut self, name: &str) {
+        self.captured
+            .retain(|_, (_, requirement)| requirement.builtin.name() != name);
+    }
+
+    fn has_live_import(&self, expression: &Expr) -> bool {
+        !self.captured.is_empty()
+            && !self
+                .unreachable
+                .iter()
+                .any(|range| range.contains_range(expression.range()))
+    }
+
+    fn captured_target(&self, call: &ExprCall) -> Option<ExecutionRequirement> {
+        let name = call.func.as_name_expr()?;
+        let db = self.model.db();
+        let binding = self
+            .session
+            .reaching_binding(self.module, &call.func)
+            .or_else(|| {
+                // Free names in a helper use its module's global binding.
+                let index = ty_python_core::semantic_index(db, self.model.program_file());
+                let scope = ty_python_core::FileScopeId::global();
+                let symbol = index.place_table(scope).symbol_id(name.id.as_str())?;
+                let mut definitions = index
+                    .use_def_map(scope)
+                    .end_of_scope_symbol_bindings(symbol);
+                let binding = definitions.next()?.binding.definition()?;
+                definitions.next().is_none().then_some(binding)
+            })?;
+        if binding.file(db) != self.model.file() {
+            return None;
+        }
+        let DefinitionKind::ImportFrom(import) = binding.kind(db) else {
+            return None;
+        };
+        let alias = import.alias(self.parsed);
+        let (owner, requirement) = self.captured.get(&alias.range())?;
+        let (file, declaration) = self.declared_function(&call.func)?;
+        let syntax = self.session.parsed(file);
+        let function = declaration.node(&syntax);
+        if self.session.files[*owner] != file || function.name.as_str() != alias.name.as_str() {
+            return None;
+        }
+        crate::frontend::fixed_call_arguments(call, &function.parameters)?;
+        call.arguments
+            .iter_source_order()
+            .all(|arg| self.argument_can_return(arg.value()))
+            .then(|| requirement.clone())
+    }
+
+    fn argument_can_return(&self, expression: &Expr) -> bool {
+        if expression.inferred_type(self.model) == Some(Type::Never) {
+            return false;
+        }
+        let Some(function) = expression
+            .as_call_expr()
+            .and_then(|call| self.local_function(&call.func))
+        else {
+            return true;
+        };
+        let index = ty_python_core::semantic_index(self.model.db(), self.model.program_file());
+        let Some(scope) =
+            index.try_node_scope(ty_python_core::scope::NodeWithScopeRef::Function(function))
+        else {
+            return false;
+        };
+        function.is_async || scope.is_generator_function(index)
+            || index.use_def_map(scope).end_of_scope_reachability() != ty_python_core::reachability_constraints::ScopedReachabilityConstraintId::ALWAYS_FALSE
+            || function.body.iter().any(|s| s.is_return_stmt() && !self.unreachable.iter().any(|r| r.contains_range(s.range())))
+    }
+
+    fn source_module_is(&self, value: &Expr, name: &str) -> bool {
+        let db = self.model.db();
+        matches!(value.inferred_type(self.model), Some(Type::ModuleLiteral(m)) if m.module(db).name(db).as_str() == name && m.module(db).file(db).is_some_and(|f| f.path(db).is_vendored_path()))
+    }
+
+    fn exposes_captured_namespace(&self, value: &Expr) -> bool {
+        let db = self.model.db();
+        if let Expr::Attribute(attr) = value {
+            let ty = attr.value.inferred_type(self.model);
+            let known_frame = || {
+                ty.and_then(|t| t.definition(db, &self.model.program_environment()))
+                .is_some_and(|definition| matches!(definition, TypeDefinition::StaticClass(class) if class.name(db).as_deref()==Some("FrameType") && class.file(db).path(db).is_vendored_path()))
+            };
+            match attr.attr.as_str() {
+                "__globals__" if matches!(ty, Some(Type::FunctionLiteral(_))) => return true,
+                "f_globals" | "f_locals" if known_frame() => return true,
+                "modules" if self.source_module_is(&attr.value, "sys") => return true,
+                "__dict__" if self.source_module_is(&attr.value, "builtins") => return true,
+                _ => {}
+            }
+        }
+        matches!(value.inferred_type(self.model), Some(Type::ModuleLiteral(m))
+            if m.module(db).file(db) == Some(self.model.file()) || m.module(db).name(db).as_str() == "__main__")
+    }
+
+    fn update_captured_calls(&mut self, call: &ExprCall) {
+        let Some(ty @ (Type::FunctionLiteral(_) | Type::ClassLiteral(_))) =
+            call.func.inferred_type(self.model)
+        else {
+            self.captured.clear();
+            return;
+        };
+        if ["globals", "locals", "vars"]
+            .into_iter()
+            .any(|name| is_stdlib_function_type(self.model, ty, "builtins", name))
+        {
+            self.captured.clear();
+            return;
+        }
+        if ["setattr", "delattr"]
+            .into_iter()
+            .any(|name| is_stdlib_function_type(self.model, ty, "builtins", name))
+            && call
+                .arguments
+                .args
+                .first()
+                .is_some_and(|target| self.source_module_is(target, "builtins"))
+        {
+            if let Some(name) = call
+                .arguments
+                .args
+                .get(1)
+                .and_then(Expr::as_string_literal_expr)
+            {
+                self.forget_builtin(name.value.to_str());
+            } else {
+                self.captured.clear();
+            }
+            return;
+        }
+        if let Some((file, declaration)) = self.declared_function(&call.func)
+            && file != self.model.file()
+        {
+            let parsed = self.session.parsed(file);
+            let function = declaration.node(&parsed);
+            if !function.is_async
+                && !imre_ast::code_flags::is_generator(&function.body)
+                && !super::initializer_calls::passive_function(function)
+            {
+                self.captured.clear();
+            }
+        }
     }
 
     fn compiled_function(&self, value: &'ast Expr) -> bool {
@@ -272,6 +446,16 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
             return;
         }
         let Expr::Call(call) = expression else {
+            if self.has_live_import(expression) {
+                if self.exposes_captured_namespace(expression) {
+                    self.captured.clear();
+                } else if let Expr::Attribute(attr) = expression
+                    && attr.ctx != ruff_python_ast::ExprContext::Load
+                    && self.source_module_is(&attr.value, "builtins")
+                {
+                    self.forget_builtin(attr.attr.as_str());
+                }
+            }
             if let Expr::Attribute(attribute) = expression
                 && text_operand(self.model, expression)
                 && ExecutionIntrinsic::possible(self.model, &attribute.value).is_some()
@@ -281,7 +465,8 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
                 return;
             }
             if let Some(intrinsic) = ExecutionIntrinsic::possible(self.model, expression) {
-                self.first = Some((expression.range(), intrinsic.escape_message()));
+                self.first =
+                    Some(self.required(intrinsic, expression.range(), intrinsic.escape_message()));
                 return;
             }
             if let Expr::Lambda(lambda) = expression {
@@ -297,6 +482,9 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
             }
             return;
         };
+        // Python selects the callable before its argument expressions can rebind that name.
+        let live_import = self.has_live_import(expression);
+        let capture = live_import.then(|| self.captured_target(call)).flatten();
         let intrinsic = ExecutionIntrinsic::possible(self.model, &call.func);
         if intrinsic.is_some() {
             // The builtin is the selected consumer here. Its operands still run
@@ -314,14 +502,21 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
             && let Some(operand) = call.arguments.args.first()
             && !self.has_executable_entry(operand)
         {
-            self.first = Some((
-                operand.range(),
+            self.first = Some(self.required(
+                intrinsic, operand.range(),
                 format!(
                     "this call may select builtins.{} without a linked body for its source. Define the handlers as Python functions and select one by name, or declare the finite modules with --include-module.",
                     intrinsic.name()
                 ),
             ));
             return;
+        }
+        if self.first.is_none() && capture.is_some() {
+            self.first = capture;
+            return;
+        }
+        if live_import {
+            self.update_captured_calls(call);
         }
         if self.first.is_none()
             && let Some(Expr::Lambda(lambda)) = self.assigned_value(&call.func)
@@ -345,7 +540,7 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
 impl Session {
     fn execution_visitor<'ast, 'db>(
         &'db self,
-        module: usize,
+        (module, path): (usize, &'ast Path),
         parsed: &'ast ruff_db::parsed::ParsedModuleRef,
         model: &'ast SemanticModel<'db>,
     ) -> Escape<'ast, 'db> {
@@ -355,7 +550,10 @@ impl Session {
             entered: Default::default(),
             session: self,
             module,
+            path,
             first: None,
+            captured: Default::default(),
+            unreachable: Vec::new(),
         }
     }
 
@@ -363,18 +561,18 @@ impl Session {
     /// to register. Resolve both callables before any later initializer contract is checked.
     pub(super) fn external_source_execution<'ast, 'db>(
         &'db self,
-        module: usize,
+        source: (usize, &'ast Path),
         parsed: &'ast ruff_db::parsed::ParsedModuleRef,
         model: &'ast SemanticModel<'db>,
         value: &'ast Expr,
-    ) -> Option<(TextRange, String)> {
+    ) -> Option<Diagnostic> {
         let call = value.as_call_expr()?;
         ExecutionIntrinsic::resolve(model, &call.func)?;
         let operand = call.arguments.args.first()?;
-        let source = operand.as_call_expr()?;
-        if !source.arguments.keywords.is_empty()
-            || source.arguments.args.len() > 1
-            || !source
+        let input = operand.as_call_expr()?;
+        if !input.arguments.keywords.is_empty()
+            || input.arguments.args.len() > 1
+            || !input
                 .arguments
                 .args
                 .iter()
@@ -395,27 +593,22 @@ impl Session {
                 return None;
             }
         }
-        if !is_stdlib_function_type(
-            model,
-            source.func.inferred_type(model)?,
-            "builtins",
-            "input",
-        ) {
+        if !is_stdlib_function_type(model, input.func.inferred_type(model)?, "builtins", "input") {
             return None;
         }
-        let mut check = self.execution_visitor(module, parsed, model);
+        let mut check = self.execution_visitor(source, parsed, model);
         check.visit_expr(value);
-        check.first
+        check.first.map(|requirement| requirement.report)
     }
 
     pub(super) fn generator_execution_error<'ast, 'db>(
         &'db self,
-        module: usize,
+        source: (usize, &'ast Path),
         parsed: &'ast ruff_db::parsed::ParsedModuleRef,
         model: &'ast SemanticModel<'db>,
         function: &'ast StmtFunctionDef,
-    ) -> Option<(TextRange, String)> {
-        let mut visitor = self.execution_visitor(module, parsed, model);
+    ) -> Option<ExecutionRequirement> {
+        let mut visitor = self.execution_visitor(source, parsed, model);
         visitor.visit_body(&function.body);
         visitor.first
     }
@@ -423,6 +616,14 @@ impl Session {
     pub(crate) fn check_execution_escapes<'a>(
         &self,
         sources: impl Iterator<Item = (usize, &'a std::path::Path)>,
+    ) -> Result<(), String> {
+        self.check_execution_with_imports(sources, CapturedImports::default())
+    }
+
+    pub(super) fn check_execution_with_imports<'a>(
+        &self,
+        sources: impl Iterator<Item = (usize, &'a Path)>,
+        mut captures: CapturedImports,
     ) -> Result<(), String> {
         for (index, path) in sources {
             let file = self.files[index];
@@ -432,15 +633,20 @@ impl Session {
             let source = self.db.program_file(file);
             let parsed = self.parsed(file);
             let model = SemanticModel::new(&self.db, source);
-            let mut visitor = self.execution_visitor(index, &parsed, &model);
+            let mut visitor = self.execution_visitor((index, path), &parsed, &model);
+            if let Some(imports) = captures.remove(&index)
+                && !imports.is_empty()
+            {
+                visitor.captured = imports;
+                visitor.unreachable =
+                    ty_python_semantic::types::ide_support::unreachable_ranges(&self.db, source)
+                        .iter()
+                        .map(|unreachable| unreachable.range)
+                        .collect();
+            }
             visitor.visit_body(&parsed.syntax().body);
-            if let Some((range, reason)) = visitor.first {
-                let text = ruff_db::source::source_text(&self.db, file);
-                return Err(
-                    crate::frontend::phase::Diagnostic::at(text.as_str(), &range, reason)
-                        .with_path(path)
-                        .to_string(),
-                );
+            if let Some(error) = visitor.first {
+                return Err(error.report.to_string());
             }
         }
         Ok(())
