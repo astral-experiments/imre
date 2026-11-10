@@ -2680,7 +2680,7 @@ mod tests {
             matches!(context.inputs.as_slice(), [input] if matches!(input.manager, crate::frontend::PhysicalOperand::Checked(_))
             && matches!(input.target, Some(crate::frontend::PhysicalBinding::Checked { .. })))
         );
-        assert_eq!(context.body.sources.len(), 1);
+        assert!(context.body.sources.is_empty());
         let original = prepared.standalone().unwrap().unwrap();
 
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
@@ -2693,18 +2693,23 @@ mod tests {
         .into();
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
 
-        // The source block retains just the operation that needs its lambda child.
+        // The expression statement owns the one call that still needs its lambda child.
         let suite = prepared.source.nested_bodies.get_mut(&position).unwrap();
         let Some(crate::frontend::SourceEffect::Context(context)) = &mut suite.residual[0].effect
         else {
             panic!("expected the mixed context");
         };
-        let child = &mut context.body.sources[0];
-        *child = ast::StmtPass {
-            range: child.range(),
-            node_index: Default::default(),
-        }
-        .into();
+        let Some(crate::frontend::SourceEffect::Value(
+            crate::frontend::ValueStatement::Expression,
+            inputs,
+        )) = &mut context.body.plan.residual[0].effect
+        else {
+            panic!("expected a prepared expression statement");
+        };
+        let [crate::frontend::PhysicalOperand::Source(call)] = inputs.as_mut_slice() else {
+            panic!("expected the residual call");
+        };
+        call.as_call_expr_mut().unwrap().arguments.args = Default::default();
         assert_ne!(prepared.standalone().unwrap().unwrap(), original);
     }
 
