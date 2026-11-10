@@ -184,6 +184,32 @@ def current():
     constrained = TypeVar("C", int, str)
     assert constrained.evaluate_constraints(Format.VALUE) is constrained.__constraints__
 
+    class Box[T: int = bool]:
+        pass
+
+    type Alias[U: int = bool] = U
+    t, = Box.__type_params__
+    u, = Alias.__type_params__
+    assert t.__bound__ is u.__bound__ is int
+    assert t.__default__ is u.__default__ is bool
+    assert Alias.__value__ is u
+
+    def unbounded[T]():
+        type Alias[U: T] = U
+        return Alias
+
+    def bounded[T: int]():
+        type Alias[U: T] = U
+        return Alias
+
+    for make in (unbounded, bounded):
+        param, = make.__type_params__
+        assert make.__code__.co_freevars == ("T",)
+        assert make.__closure__[0].cell_contents is param
+        alias = make()
+        assert alias.__value__ is alias.__type_params__[0]
+        assert alias.__value__.__bound__ is param
+
     from typing import Generic
 
     required = TypeVar("U")

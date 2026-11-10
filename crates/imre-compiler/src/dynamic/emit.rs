@@ -399,10 +399,11 @@ impl<'a> PreparedBody<'a> {
         };
         let mut aliases = Vec::new();
         let mut logicals = crate::frontend::ExpressionSites::default();
-        let mut scopes =
-            crate::frontend::function_scope::ScopeFacts::prepare(&body, &private_names, |alias| {
-                aliases.push(alias)
-            });
+        let mut scopes = crate::frontend::function_scope::ScopeFacts::prepare(
+            &body,
+            &private_names,
+            |alias, class| aliases.push((alias, class)),
+        );
         let lambdas = RegisteredLambda::collect(&body, values, &mut scopes, &mut logicals);
         let values = crate::frontend::RegisteredSource {
             lambdas: Some(&lambdas),
@@ -423,7 +424,7 @@ impl<'a> PreparedBody<'a> {
             crate::frontend::registered_sites(&body, &private_names, values, annotation_values);
         let mut operations = sites.operations;
         let mut type_aliases = HashMap::new();
-        for alias in aliases {
+        for (alias, class) in aliases {
             let Some(name) = alias.name.as_name_expr() else {
                 continue;
             };
@@ -434,12 +435,17 @@ impl<'a> PreparedBody<'a> {
             type_aliases.insert(
                 alias.start(),
                 TypeAliasDefinition {
-                    range: alias.range(),
                     name: private_names.source_name(name.start(), &name.id).to_owned(),
                     body: crate::frontend::type_alias_body(&alias.value, values)
                         .ok_or(alias.value.range()),
                     parameters: alias.type_params.as_deref().map(|params| {
-                        crate::frontend::registered_type_parameters(params, &private_names, |_| ())
+                        crate::frontend::TypeParameterValues::prepare(
+                            params,
+                            &private_names,
+                            values,
+                            class,
+                            &scopes,
+                        )
                     }),
                 },
             );
@@ -462,7 +468,8 @@ impl<'a> PreparedBody<'a> {
             });
         }
         let mut function_bodies = HashMap::new();
-        let class_bodies = prepare.class_suites(sites.classes, &class_keywords);
+        let class_bodies =
+            prepare.class_suites(sites.classes, &class_keywords, &private_names, &scopes);
         for start in class_bodies.keys() {
             scopes
                 .classes
@@ -756,10 +763,9 @@ impl<'a> std::ops::Deref for SourceMap<'a> {
 }
 
 struct TypeAliasDefinition {
-    range: ruff_text_size::TextRange,
     name: String,
     body: Result<crate::frontend::AnnotationCode, TextRange>,
-    parameters: Option<Vec<crate::ir::RegisteredTypeParameter>>,
+    parameters: Option<crate::frontend::TypeParameterValues>,
 }
 
 /// Graph analysis owns program entries; physical preparation owns the other function suites.
@@ -1152,7 +1158,12 @@ mod tests {
             SuitePreparation::new(&prepared.source.namespace_operations, source, body, true);
         suites.sites.expressions = logicals;
         let initializer = suites.suite(body, RegisteredScope::Module);
-        let class_bodies = suites.class_suites(classes, &prepared.source.class_keywords);
+        let class_bodies = suites.class_suites(
+            classes,
+            &prepared.source.class_keywords,
+            &prepared.source.private_names,
+            &prepared.source.scopes,
+        );
         let sites = suites.sites;
         prepared.source.initializer = Some(initializer);
         prepared.source.class_bodies = class_bodies;
@@ -2294,7 +2305,7 @@ mod tests {
                 .unwrap();
             let owner = &typing.source.class_bodies[&class.decorator_list[0].start()];
             let header = owner.header.as_ref().unwrap();
-            assert_eq!(header.parameters[0].name, "T");
+            assert_eq!(header.parameters.declarations[0].name, "T");
             let header = header.body.as_ref().unwrap();
             let mut arguments = Vec::new();
             crate::ir::walk_expressions(&header.function.body, &mut |expr| {

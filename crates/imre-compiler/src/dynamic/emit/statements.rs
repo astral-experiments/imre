@@ -19,7 +19,6 @@ pub(in crate::dynamic::emit) struct CallableSites<'a, 'p> {
     prefix: &'a str,
     declared_globals: &'a std::collections::BTreeSet<String>,
     in_function: bool,
-    native_suspension: bool,
     method_scope: bool,
     class_locals: Option<&'a crate::frontend::function_scope::ClassBindings>,
 }

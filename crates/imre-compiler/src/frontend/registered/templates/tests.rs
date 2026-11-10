@@ -174,7 +174,7 @@ fn template_default_and_body_suspend_in_their_defining_frames() {
         let mut body = parsed.into_syntax().body;
         let names = imre_ast::lower(&mut body);
         let mut scopes =
-            crate::frontend::function_scope::ScopeFacts::prepare(&body, &names, |_| {});
+            crate::frontend::function_scope::ScopeFacts::prepare(&body, &names, |_, _| {});
         RegisteredLambda::collect(&body, source, &mut scopes, &mut templates);
         templates
     };
@@ -262,7 +262,7 @@ fn unavailable_template_child_is_reported_at_its_own_range() {
         let mut scopes = crate::frontend::function_scope::ScopeFacts::prepare(
             &module.body,
             &Default::default(),
-            |_| {},
+            |_, _| {},
         );
         let mut sites = ExpressionSites::default();
         RegisteredLambda::collect(
