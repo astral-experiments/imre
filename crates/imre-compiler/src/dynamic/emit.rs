@@ -3482,12 +3482,18 @@ mod tests {
     #[test]
     fn checked_and_physical_matches_own_their_suspended_subject() {
         let selector = "\n            try:\n                raise LookupError(item)\n            except (await Select(item)):\n                return item";
+        let manager = "\n            with manager(await key(item)): pass";
+        let loop_default = concat!(
+            "\n            for entry in rows:\n",
+            "                with manager(lambda value=(await key(entry)): value): pass",
+        );
         for (body, physical) in [
             ("return item", false),
             ("raise await failure(item)", false),
             ("del table[await key(item)]", false),
             (selector, false),
-            ("\n            with manager(await key(item)): pass", true),
+            (manager, false),
+            (loop_default, true),
         ] {
             let source = format!(
                 "async def evaluate(seed):\n    match sink(await gate(), second=left() + table()[(lambda: seed)()]):\n        case prior if decline(prior): return prior\n        case item: {body}\nstate: int\n"
@@ -3514,21 +3520,28 @@ mod tests {
             function.body.clear();
             assert_eq!(prepared.standalone().unwrap(), original);
             let suite = test_function_suite(&mut prepared.source, start);
-            if body == selector {
+            if body == selector || body == manager {
                 let [_, crate::ir::Statement::Match(_, cases), ..] =
                     &mut suite.checked.function.body[..]
                 else {
                     panic!("expected a checked match")
                 };
-                let [_, crate::ir::Statement::Try { handlers, .. }] = &mut cases[1].body[..] else {
-                    panic!("expected a checked try in the capture case")
-                };
-                let crate::ir::ExceptionMatcher::Object(range, operand) = &mut handlers[0].matcher
-                else {
-                    panic!("expected an exception-class operand")
-                };
-                assert_eq!(&source[*range], "await Select(item)");
-                **operand = crate::ir::Expr::none();
+                match &mut cases[1].body[..] {
+                    [_, crate::ir::Statement::Try { handlers, .. }] if body == selector => {
+                        let crate::ir::ExceptionMatcher::Object(range, operand) =
+                            &mut handlers[0].matcher
+                        else {
+                            panic!("expected an exception-class operand")
+                        };
+                        assert_eq!(&source[*range], "await Select(item)");
+                        **operand = crate::ir::Expr::none();
+                    }
+                    [_, crate::ir::Statement::With { manager, site, .. }] => {
+                        assert_eq!(&source[site.range], "manager(await key(item))");
+                        *manager = crate::ir::Expr::none();
+                    }
+                    _ => panic!("expected the checked capture-case operation"),
+                }
                 assert_ne!(prepared.standalone().unwrap(), original);
             } else if physical {
                 let crate::frontend::SourceEffect::Match(_, site) = &mut suite.residual[0].effect
