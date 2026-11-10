@@ -65,13 +65,14 @@ impl AnnotationCode {
 type PrepareChild<'a, R> =
     dyn Fn(&str, &Parsed<ast::ModExpression>) -> Option<AnnotationBody<R>> + 'a;
 
-fn checked_annotation_value(expr: &ast::Expr, source: RegisteredSource<'_>) -> Option<Expr> {
-    let ast::Expr::Starred(starred) = expr else {
-        return Region::Suite.operand(expr, source);
-    };
-    Some(unpack_annotation(
-        Region::Suite.operand(&starred.value, source)?,
-    ))
+pub(super) fn checked_annotation_value(
+    expr: &ast::Expr,
+    mut operand: impl FnMut(&ast::Expr) -> Option<Expr>,
+) -> Option<Expr> {
+    match expr {
+        ast::Expr::Starred(starred) => operand(&starred.value).map(unpack_annotation),
+        _ => operand(expr),
+    }
 }
 
 /// A starred annotation must yield exactly one type.
@@ -132,7 +133,9 @@ pub(crate) fn annotation_operands<R>(
                 let value = if module {
                     Region::Suite.operand(expr, self.source)
                 } else {
-                    checked_annotation_value(expr, self.source)
+                    checked_annotation_value(expr, |input| {
+                        Region::Suite.operand(input, self.source)
+                    })
                 };
                 if let Some(value) = value {
                     self.sites

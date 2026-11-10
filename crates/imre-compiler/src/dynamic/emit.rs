@@ -1393,7 +1393,9 @@ mod tests {
 
     #[test]
     fn starred_annotation_retains_the_scoped_input_and_its_unpack() {
-        use crate::frontend::{AnnotationValue, PhysicalOperand};
+        use crate::frontend::AnnotationValue;
+        use crate::ir::{Builtin, Expr, ExprKind, Statement};
+
         let source = "def f(*items: *[row for row in rows()]): pass\n";
         let mut prepared = PreparedBody::module(
             "example",
@@ -1404,21 +1406,42 @@ mod tests {
         )
         .unwrap();
         let before = prepared.standalone().unwrap();
-        let field = prepared
+        let field = prepared.source.annotations.values_mut().next().unwrap();
+        field.value = AnnotationValue::Checked(Expr::none());
+        assert_eq!(prepared.standalone().unwrap(), before);
+
+        let provider = prepared
             .source
-            .annotations
+            .parameter_annotations
             .values_mut()
-            .find(|field| field.name == "items")
+            .next()
             .unwrap();
-        let AnnotationValue::Input {
-            operand: PhysicalOperand::Checked(input),
-            unpack: Some(unpack),
-        } = &mut field.value
+        assert!(provider.body.fully_checked());
+        let checked = &mut provider.body.checked;
+        assert!(!checked.region().private_slots().is_empty());
+        crate::verify::registered(checked.region()).unwrap();
+        let [
+            _,
+            Statement::Expr(Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredAnnotationInsert(_), fields),
+                ..
+            }),
+            _,
+        ] = checked.function.body.as_mut_slice()
         else {
-            panic!("expected the starred annotation's checked comprehension and unpack");
+            panic!("expected one annotation insertion");
         };
-        crate::verify::registered(input.region()).unwrap();
-        **unpack = crate::ir::Expr::local(0, crate::ir::Type::PythonObject);
+        let [value] = fields.as_mut_slice() else {
+            panic!("expected one annotation value");
+        };
+        let ExprKind::Builtin(Builtin::ListGet, items) = &value.kind else {
+            panic!("expected the value from the checked unpack");
+        };
+        assert!(matches!(
+            items[0].kind,
+            ExprKind::Builtin(Builtin::RegisteredUnpack { count: 1, .. }, _)
+        ));
+        *value = Expr::none();
         assert_ne!(prepared.standalone().unwrap(), before);
     }
 

@@ -588,14 +588,11 @@ impl ParameterAnnotations {
                 .get(&site)
                 .map(|operand| operand.operand(site))
                 .or_else(|| {
-                    if !matches!(
-                        expression,
-                        ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_)
-                    ) {
-                        return None;
-                    }
                     let start = scope.locals.len();
-                    let value = scope.operand(expression);
+                    let value =
+                        super::annotation_operands::checked_annotation_value(expression, |input| {
+                            scope.operand(input)
+                        });
                     if value.is_none() {
                         scope.truncate_locals(start);
                     }
