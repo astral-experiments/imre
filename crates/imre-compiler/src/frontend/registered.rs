@@ -668,11 +668,15 @@ pub(crate) fn registered_sites<'a, R>(
 pub(crate) struct SourceRun {
     pub(crate) at: usize,
     pub(crate) statements: std::ops::Range<usize>,
+    /// For a single assignment, source supplies only the RHS to the following checked targets.
+    pub(crate) assignment_input: Option<usize>,
 }
 
 impl SourceRun {
     fn record(runs: &mut Vec<Self>, source_index: usize, checked_offset: usize) {
         if let Some(run) = runs.last_mut()
+            && run.assignment_input.is_none()
+            && run.at == checked_offset
             && run.statements.end == source_index
         {
             run.statements.end += 1;
@@ -680,6 +684,7 @@ impl SourceRun {
             runs.push(Self {
                 at: checked_offset,
                 statements: source_index..source_index + 1,
+                assignment_input: None,
             });
         }
     }
@@ -869,7 +874,9 @@ impl<'a> SuitePreparation<'a> {
         if let Some(first) = stmts.first() {
             let plan = self.selected_suite(stmts, kind, select);
             // An optimized-away assertion has no instructions and still owns its source slot.
-            if !matches!(plan.residual.as_slice(), [run] if run.statements == (0..stmts.len())) {
+            if !matches!(plan.residual.as_slice(), [run]
+                if run.assignment_input.is_none() && run.statements == (0..stmts.len()))
+            {
                 self.nested.insert(first.start(), plan);
             }
         }
@@ -942,15 +949,30 @@ impl<'a> SuitePreparation<'a> {
                 SuiteSelection::All => scope.statement(stmt, &mut body),
                 SuiteSelection::Physical => scope.physical_statement(stmt, &mut body),
             };
-            if lowered.is_err() {
-                // A partially lowered target can allocate slots before a later operand fails.
-                if scope.locals.len() != slots_before {
-                    scope.locals.truncate(slots_before);
-                    scope.names.retain(|_, slot| *slot < slots_before);
-                    scope.namespaces.retain(|slot, _| *slot < slots_before);
-                }
-                SourceRun::record(&mut residual, i, body.len());
+            if lowered.is_ok() {
+                continue;
             }
+            scope.truncate_locals(slots_before);
+            if let ast::Stmt::Assign(assign) = stmt {
+                let input = scope.hidden(Type::PythonObject);
+                let value = unpacking::take_pattern_temporary(
+                    Expr::local(input, Type::PythonObject),
+                    input,
+                );
+                if let Ok(targets) = unpacking::bind_assignment(&mut scope, &assign.targets, value)
+                {
+                    body.push(checkpoint(stmt));
+                    residual.push(SourceRun {
+                        at: body.len(),
+                        statements: i..i + 1,
+                        assignment_input: Some(input),
+                    });
+                    body.extend(targets);
+                    continue;
+                }
+                scope.truncate_locals(slots_before);
+            }
+            SourceRun::record(&mut residual, i, body.len());
         }
         RegisteredSuite {
             checked: scope.finish(body),
@@ -1524,6 +1546,15 @@ impl<'a> SourceScope<'a> {
             .chain(self.namespaces)
             .collect();
         (self.locals, names)
+    }
+
+    /// Discard bindings allocated by operands before a later operand failed to lower.
+    fn truncate_locals(&mut self, len: usize) {
+        if self.locals.len() != len {
+            self.locals.truncate(len);
+            self.names.retain(|_, slot| *slot < len);
+            self.namespaces.retain(|slot, _| *slot < len);
+        }
     }
 
     fn finish(self, body: Vec<Statement>) -> RegisteredFunction {

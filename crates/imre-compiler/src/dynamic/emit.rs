@@ -1039,7 +1039,7 @@ impl SourceMap<'_> {
                 };
                 f.declare_globals(globals);
                 if let Some(prepared) = prepared {
-                    f.prepared_function(prepared, |code, run| code.source_statements(&stmts[run]));
+                    f.prepared_function(prepared, |code, run| code.source_run(stmts, run));
                 } else {
                     f.statements(stmts);
                 }
@@ -1058,7 +1058,7 @@ impl SourceMap<'_> {
             Body::Annotations(entries, class) => f.annotations(&entries, class),
             Body::NamespaceAnnotations(plan, entries, _) => {
                 f.prepared_function(plan, |code, run| {
-                    for index in run {
+                    for index in run.statements.clone() {
                         code.unprepared_annotation(entries[index]);
                     }
                 });
@@ -2264,7 +2264,8 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
             "    class Example:\n",
             "        member: int\n",
             "        receiver().field = [item.copy() for item in items]\n",
-            "        receiver().field = (item for item in items)\n",
+            "        saved = [receiver().field, (table()[key()], *tail)] = (item for item in items)\n",
+            "        select(row for row in rows).field = fallback()\n",
             "        del receiver().field\n",
             "        saved = (first, [receiver().field, table()[key()], *rest]) = rows()\n",
             "        def read(self): return self.member\n",
@@ -2290,8 +2291,13 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
         );
         crate::verify::registered(suite.checked.region()).unwrap();
         assert!(!suite.checked.region().private_slots().is_empty());
-        assert_eq!(suite.residual.len(), 1);
-        assert_eq!(suite.residual[0].statements, 2..3);
+        let [rhs, whole] = suite.residual.as_slice() else {
+            panic!("expected a residual RHS followed by a residual statement");
+        };
+        assert_eq!(rhs.statements, 2..3);
+        assert!(rhs.assignment_input.is_some());
+        assert_eq!(whole.statements, 3..4);
+        assert!(whole.assignment_input.is_none());
 
         let emit = |prepared: &PreparedBody<'_>| {
             let mut output = Output::default();
@@ -2306,7 +2312,8 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
         let target = store.targets[0].as_attribute_expr_mut().unwrap();
         std::mem::swap(&mut target.value, &mut store.value);
         store.targets.clear();
-        class.body[4].as_assign_stmt_mut().unwrap().targets.clear();
+        class.body[2].as_assign_stmt_mut().unwrap().targets.clear();
+        class.body[5].as_assign_stmt_mut().unwrap().targets.clear();
         assert_eq!(emit(&prepared), before);
     }
 
