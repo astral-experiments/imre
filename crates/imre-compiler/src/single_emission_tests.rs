@@ -87,7 +87,7 @@ fn required_object_call_keeps_its_admission_reason() {
     let path = project.path().join("app.py");
     std::fs::write(
         &path,
-        "def render(data: bytes, spec: str) -> str:\n    return f'{data:{spec}}'\n\nprint(render(b'ok', input()))\n",
+        "def render(data: list[int], spec: str) -> str:\n    return f'{data:{spec}}'\n\nprint(render([17, 19], input()))\n",
     )
     .unwrap();
     let mut graph = modules::SourceGraph::load(&path, None, &[]).unwrap();
@@ -103,4 +103,35 @@ fn required_object_call_keeps_its_admission_reason() {
     assert_eq!(reason.kind, LoweringKind::Ordinary);
     assert_eq!(reason.to_string(), expected);
     assert_eq!(check_file(&path, None).unwrap_err(), expected);
+}
+
+#[test]
+fn interleaved_import_preserves_another_modules_list_contract() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("app.py");
+    let scores = project.path().join("scores.py");
+    std::fs::write(&entry, "import library\nimport scores\n").unwrap();
+    std::fs::write(
+        project.path().join("library.py"),
+        "print('loaded')\ndef later() -> int:\n    return 2\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &scores,
+        "def score() -> int:\n    values: list[int] = [1]\n    values.append(True)\n    return values[0]\n",
+    )
+    .unwrap();
+    let expected = format!(
+        "{}:3:19: Imre: expected int, got bool; annotations are enforced contracts",
+        scores.display()
+    );
+    assert_eq!(check_file(&entry, None).unwrap_err(), expected);
+    let options = CompileOptions {
+        sitecustomize: true,
+        ..Default::default()
+    };
+    assert_eq!(
+        compile_file(&entry, None, &options).err().unwrap(),
+        expected
+    );
 }
