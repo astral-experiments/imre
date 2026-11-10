@@ -299,7 +299,11 @@ impl CheckedBody<'_, '_, '_, '_> {
             Entry::Registered(_) => None,
         };
         let mark = match &mut self.0 {
-            Entry::Registered(f) => f.target_mark(),
+            Entry::Registered(f) => {
+                let target = f.target_mark();
+                let operands = target.clone().unwrap_or_else(|| f.temporary_mark());
+                Some((target, operands))
+            }
             _ => None,
         };
         let value = self.store_operand(value);
@@ -311,7 +315,11 @@ impl CheckedBody<'_, '_, '_, '_> {
                 let b = table.into_handle();
                 let k = key.into_handle();
                 f.op("put", &[&b, &k, &v]);
-                f.release_target(mark.as_deref());
+                // STORE_SUBSCR pops key and receiver before the RHS. The target
+                // checkpoint also releases any earlier snapshot of a taken slot.
+                let (target, operands) = mark.expect("registered store marks");
+                f.release_owned_operands(&operands);
+                f.release_target(target.as_deref());
             }
             Entry::Native(e) => {
                 let (list, index, value) =

@@ -668,7 +668,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     }
 
     /// Pop owned operands from the top, including the elements of a last-owned sequence.
-    pub(super) fn release_owned_operands(&mut self, mark: &str) {
+    pub(in crate::llvm) fn release_owned_operands(&mut self, mark: &str) {
         self.line(&format!(
             "call void @imre_dyn_unwind_display(ptr %ctx, i64 {mark})"
         ));
