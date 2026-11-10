@@ -626,15 +626,15 @@ pub(crate) fn registered_sites<'a, R>(
                     self.scope = outer;
                 }
                 ast::Stmt::FunctionDef(def) => {
-                    let generic_method = matches!(self.scope, RegisteredScope::Class)
+                    let generic_binding = !matches!(self.scope, RegisteredScope::Function { .. })
                         && super::function_scope::type_parameter_scope(
                             def,
                             self.names.string_annotations,
-                            true,
+                            matches!(self.scope, RegisteredScope::Class),
                             Some(self.names),
                         )
                         .is_some();
-                    if generic_method {
+                    if generic_binding {
                         self.output.operations.insert(
                             def.name.range(),
                             operation(
@@ -646,9 +646,9 @@ pub(crate) fn registered_sites<'a, R>(
                             ),
                         );
                     }
-                    // Nested ordinary functions of an admitted method take the
+                    // Nested ordinary functions of an admitted definition take the
                     // same preparation path as any other lexical function.
-                    let unprepared = !generic_method
+                    let unprepared = !generic_binding
                         && (self.in_unprepared_generic || def.type_params.is_some());
                     let thread_entry = imre_ast::thread_entry(def);
                     let worker = thread_entry.is_some();
@@ -1332,17 +1332,18 @@ impl statements::StatementLowering for SourceScope<'_> {
 
     fn definition(&mut self, def: &ast::StmtFunctionDef) -> StdResult<Option<Statement>, ()> {
         if def.type_params.is_some() {
-            if !matches!(self.kind, RegisteredScope::Class)
-                || !def.decorator_list.is_empty()
-                || def
-                    .parameters
-                    .iter_non_variadic_params()
-                    .any(|p| p.default.is_some())
-            {
-                return Err(());
+            let binding = self.operations.get(&def.name.range()).ok_or(())?;
+            if matches!(self.kind, RegisteredScope::Class) {
+                if !def.decorator_list.is_empty()
+                    || def
+                        .parameters
+                        .iter_non_variadic_params()
+                        .any(|p| p.default.is_some())
+                {
+                    return Err(());
+                }
+                return Ok(Some(self.store(def.name.as_str(), binding.clone())));
             }
-            let function = self.operations.get(&def.name.range()).ok_or(())?.clone();
-            return Ok(Some(self.store(def.name.as_str(), function)));
         }
         let decorators = def.decorator_list.iter().map(|d| &d.expression);
         let defaults = def

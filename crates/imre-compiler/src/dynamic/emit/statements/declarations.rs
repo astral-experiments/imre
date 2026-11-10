@@ -203,7 +203,7 @@ impl Function<'_, '_> {
             let syntax = self.source.definitions.as_ref().expect("registered scope")[&start];
             let (definition, decorators, type_params) = match syntax {
                 DefinitionSite::Function(def) => {
-                    let params = self.method_type_parameters(def);
+                    let params = self.namespace_type_parameters(def);
                     let definition = self.compile_definition(
                         def.decorator_list
                             .first()
@@ -253,6 +253,42 @@ impl Function<'_, '_> {
 mod tests {
     use crate::dynamic::emit::{ModuleOrigin, Output, PreparedBody};
     use std::path::Path;
+
+    #[test]
+    fn typing_initializer_binds_the_checked_reveal_type_definition() {
+        use crate::ir::{Builtin, DefinitionSite, ExprKind};
+
+        let source = include_str!("../../../../stdlib/typing.py");
+        let start =
+            ruff_text_size::TextSize::try_from(source.find("def reveal_type[T]").unwrap()).unwrap();
+        PreparedBody::with_module(
+            "typing",
+            Path::new("<imre stdlib>/typing.py"),
+            source,
+            0,
+            ModuleOrigin::Bundled,
+            |module| {
+                let initializer = module.source.initializer.as_ref().unwrap();
+                assert!(initializer.fully_checked());
+                let mut bindings = 0;
+                crate::ir::walk_expressions(&initializer.checked.function.body, &mut |value| {
+                    if let ExprKind::Builtin(
+                        Builtin::RegisteredDefinition(DefinitionSite::Function(site)),
+                        operands,
+                    ) = &value.kind
+                        && *site == start
+                    {
+                        assert!(operands.is_empty());
+                        bindings += 1;
+                    }
+                });
+                assert_eq!(bindings, 1);
+                assert!(module.source.function_bodies[&start].fully_checked());
+                Ok(())
+            },
+        )
+        .unwrap();
+    }
 
     #[test]
     fn forward_annotations_bind_prepared_children() {

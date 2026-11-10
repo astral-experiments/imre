@@ -577,31 +577,30 @@ impl<'p> Function<'_, 'p> {
         }
     }
 
-    fn method_type_parameters<'a>(
+    fn namespace_type_parameters<'a>(
         &self,
         function: &'a ast::StmtFunctionDef,
     ) -> Option<&'a ast::TypeParams> {
         function.type_params.as_deref().filter(|_| {
-            self.class_locals.is_some()
-                && self
-                    .source
-                    .namespace_operations
-                    .contains_key(&function.name.range())
+            self.source
+                .namespace_operations
+                .contains_key(&function.name.range())
         })
     }
 
     fn function_definition(&mut self, v: &ast::StmtFunctionDef) -> String {
         // A method's lazy annotations also need its defining class namespace.
-        let type_params = if self.class_locals.is_some() && !self.source.string_annotations {
-            self.method_type_parameters(v)
-        } else {
-            crate::frontend::function_scope::boxed_function_type_params(
-                v,
-                self.source.string_annotations,
-                !self.prefix.is_empty(),
-                Some(&self.source.private_names),
-            )
-        };
+        let type_params =
+            if self.module || (self.class_locals.is_some() && !self.source.string_annotations) {
+                self.namespace_type_parameters(v)
+            } else {
+                crate::frontend::function_scope::boxed_function_type_params(
+                    v,
+                    self.source.string_annotations,
+                    !self.prefix.is_empty(),
+                    Some(&self.source.private_names),
+                )
+            };
         self.define(
             v.decorator_list.first().map_or(v.start(), Ranged::start),
             DefinitionName::Binding(&v.name),
