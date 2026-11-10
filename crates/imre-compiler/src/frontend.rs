@@ -2139,15 +2139,17 @@ fn annotation_with_aliases(
     }
     if let Some(Binding::TypeAlias(origin, index)) = graph.resolve_type(module, expression) {
         let module = &graph.modules[origin];
-        return annotation_with_aliases(
-            &module.aliases[index].value,
-            graph,
-            (origin, &module.source),
-            classes,
-            types,
-            owner,
-            alias_depth + 1,
-        );
+        if let Some(value) = module.aliases[index].annotation_value(module) {
+            return annotation_with_aliases(
+                value,
+                graph,
+                (origin, &module.source),
+                classes,
+                types,
+                owner,
+                alias_depth + 1,
+            );
+        }
     }
     if let ast::Expr::StringLiteral(value) = expression {
         check_string(value, source)?;
@@ -2928,7 +2930,7 @@ impl<'a> Checker<'a> {
     fn parameter_shadows_binding(&self, name: &str, ty: Type, bound: bool) -> bool {
         self.mapping_class_import(name)
             || match self.graph.modules[self.module].bindings.get(name) {
-                Some(Binding::Value(_)) => bound && !self.module_scope,
+                Some(Binding::Value(_) | Binding::TypeAlias(..)) => bound && !self.module_scope,
                 Some(Binding::Definition(id)) => {
                     matches!(ty, Type::Callable(_)) && self.functions.contains_key(id)
                 }
@@ -7140,6 +7142,19 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn unsupported_comparison(&self, expression: &ast::Expr, left: Type, right: Type) -> Failure {
+        if left == Type::PythonObject || right == Type::PythonObject {
+            // The checked Python operation owns comparisons without a fixed operand layout.
+            self.scoped_builtin_error("comparing Python objects", expression)
+        } else {
+            error(
+                self.source,
+                expression,
+                "unsupported comparison for these types",
+            )
+        }
+    }
+
     /// Select the object provider only when this precise diagnostic reaches the driver.
     fn scoped_builtin_error(&self, name: &str, node: &impl Ranged) -> Failure {
         self.object_export_error(name, node)
@@ -7791,6 +7806,11 @@ impl<'a> Checker<'a> {
             ast::Expr::If(value) => return self.conditional(value, None),
             ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
             ast::Expr::Name(_) | ast::Expr::Attribute(_)
+                if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::Callable)) =>
+            {
+                return Err(self.scoped_builtin_error("the Callable object", expression));
+            }
+            ast::Expr::Name(_) | ast::Expr::Attribute(_)
                 if matches!(
                     self.resolve(expression),
                     Some(Binding::Intrinsic(Intrinsic::NamedHash(
@@ -7911,7 +7931,9 @@ impl<'a> Checker<'a> {
                             self.scoped_builtin_error("the builtin module as a value", expression)
                         );
                     }
-                    if let Some(Binding::Definition(_)) = self.resolve(expression) {
+                    if let Some(Binding::Definition(_) | Binding::TypeAlias(..)) =
+                        self.resolve(expression)
+                    {
                         return Err(self.classified_error(
                             Kind::ScopedObject,
                             expression,
@@ -8595,11 +8617,7 @@ impl<'a> Checker<'a> {
                         ast::CmpOp::Gt if ordered => Compare::Greater,
                         ast::CmpOp::GtE if ordered => Compare::GreaterEqual,
                         _ => {
-                            return Err(error(
-                                self.source,
-                                expression,
-                                "unsupported comparison for these types",
-                            ));
+                            return Err(self.unsupported_comparison(expression, ty, right));
                         }
                     };
                     if matches!(ty, Type::Patch(_)) {
@@ -8692,11 +8710,7 @@ impl<'a> Checker<'a> {
                         | Type::BytesIO
                         | Type::BinaryIO => true,
                         _ => {
-                            return Err(error(
-                                self.source,
-                                expression,
-                                "unsupported comparison for these types",
-                            ));
+                            return Err(self.unsupported_comparison(expression, ty, right));
                         }
                     };
                     if !comparable {
@@ -8741,6 +8755,12 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
+                if self.resolve(&subscript.value) == Some(Binding::Intrinsic(Intrinsic::Callable)) {
+                    return Err(self.object_builtin_error_with_checked_calls(
+                        "a parameterized Callable",
+                        subscript,
+                    ));
+                }
                 let list = Self::enum_text(self.expr(&subscript.value)?);
                 if list.ty == Type::PythonObject && !subscript.slice.is_slice_expr() {
                     let key = self.expr(&subscript.slice)?;
@@ -8770,12 +8790,9 @@ impl<'a> Checker<'a> {
                     });
                 }
                 if list.ty == Type::BuiltinClass {
-                    // Python evaluates type arguments before invoking __class_getitem__.
-                    self.expr(&subscript.slice)?;
-                    return Err(error(
-                        self.source,
+                    return Err(self.object_builtin_error_with_checked_calls(
+                        "a runtime generic alias",
                         subscript,
-                        "runtime generic aliases of builtin classes are unsupported",
                     ));
                 }
                 if list.ty == Type::Context {
@@ -10536,7 +10553,10 @@ impl<'a> Checker<'a> {
                 ));
             }
             Some(Binding::TypeAlias(module, index))
-                if self.graph.modules[module].aliases[index].constructor =>
+                if matches!(
+                    self.graph.modules[module].aliases[index],
+                    crate::modules::TypeAlias::NewType(_)
+                ) =>
             {
                 self.reject_builtin_keywords(call)?;
                 let [value] = call.arguments.args.as_ref() else {

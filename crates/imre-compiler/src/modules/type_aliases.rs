@@ -75,18 +75,10 @@ pub(super) fn static_type(modules: &[SourceModule], module: ModuleId, value: &as
 }
 
 impl Loader<'_> {
-    pub(super) fn add_alias(
-        &mut self,
-        module: ModuleId,
-        value: &ast::Expr,
-        constructor: bool,
-    ) -> Binding {
+    pub(super) fn add_alias(&mut self, module: ModuleId, alias: TypeAlias) -> Binding {
         let aliases = &mut self.modules[module].aliases;
         let index = aliases.len();
-        aliases.push(TypeAlias {
-            value: value.clone(),
-            constructor,
-        });
+        aliases.push(alias);
         Binding::TypeAlias(module, index)
     }
 
@@ -114,7 +106,7 @@ impl Loader<'_> {
             self.bind(module, name.id.as_str(), binding, name)?;
             return Ok(true);
         }
-        let (value, constructor) = match &*assign.value {
+        let alias = match &*assign.value {
             ast::Expr::Call(call)
                 if resolve_binding(&self.modules, module, &call.func)
                     == Some(Binding::Intrinsic(Intrinsic::NewType)) =>
@@ -129,14 +121,14 @@ impl Loader<'_> {
                 {
                     return Ok(false);
                 }
-                (value, true)
+                TypeAlias::NewType(value.clone())
             }
             value @ ast::Expr::Subscript(_) if static_type(&self.modules, module, value) => {
-                (value, false)
+                TypeAlias::Expression(value.clone())
             }
             _ => return Ok(false),
         };
-        let binding = self.add_alias(module, value, constructor);
+        let binding = self.add_alias(module, alias);
         self.bind(module, name.id.as_str(), binding, name)?;
         Ok(true)
     }
