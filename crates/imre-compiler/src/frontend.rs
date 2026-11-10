@@ -65,7 +65,7 @@ mod exception_forwarders;
 mod expandtabs;
 mod expansions;
 mod fixed_body_source;
-pub(crate) use fixed_body_source::{FixedBodySource, FixedNode};
+pub(crate) use fixed_body_source::{FixedBodySource, FixedField, FixedNode};
 mod fixed_tuples;
 mod fnmatch;
 mod format_cursors;
@@ -1216,7 +1216,7 @@ fn lower_graph(
         checker.fixed_sites = (!needs_registered_entry
             && (signature.method.is_none() || has_wrapper_link)
             && signature.physical_frame)
-            .then(Default::default);
+            .then(|| fixed_body_source::SourceSites::new(has_wrapper_link));
         let result = match cache.as_deref_mut() {
             Some(cache) if signature.method.is_none() => cache.body(checker, definition, signature),
             _ => lower_body(checker, definition, signature),
@@ -9785,6 +9785,9 @@ impl<'a> Checker<'a> {
                             kind: ExprKind::Field(Box::new(receiver), field),
                         })),
                     });
+                }
+                if let Some(sites) = &mut self.fixed_sites {
+                    sites.field(attribute.range(), &attribute.attr, field, ty);
                 }
                 (ty, ExprKind::Field(Box::new(receiver), field))
             }

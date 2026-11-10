@@ -154,6 +154,8 @@ impl RegisteredOperand {
 pub(crate) struct RegisteredFunction {
     /// Physical positions for the unchanged fixed operations, in checked node order.
     pub(crate) fixed_sites: Vec<TextRange>,
+    /// Descriptor names and token positions for placed fixed-layout field reads.
+    pub(crate) fixed_fields: Option<Box<HashMap<TextRange, FixedField>>>,
     pub(crate) function: ir::Function,
     pub(crate) local_names: HashMap<usize, LocalBinding>,
 }
@@ -163,6 +165,7 @@ impl RegisteredFunction {
         let body = Self::returning(range, value);
         Self {
             fixed_sites: Vec::new(),
+            fixed_fields: None,
             function: ir::Function {
                 params: vec![],
                 returns: Type::PythonObject,
@@ -254,6 +257,7 @@ pub(super) fn lower_definition<'a>(
     }
     let function = RegisteredFunction {
         fixed_sites: Vec::new(),
+        fixed_fields: None,
         function: body.function,
         local_names,
     };
@@ -706,6 +710,7 @@ impl DeferredAnnotation {
         RegisteredSuite {
             checked: RegisteredFunction {
                 fixed_sites: Vec::new(),
+                fixed_fields: None,
                 function: ir::Function {
                     params: vec![],
                     returns: Type::PythonObject,
@@ -2678,6 +2683,7 @@ impl<'a> SourceScope<'a> {
         let (locals, local_names) = self.bindings();
         RegisteredFunction {
             fixed_sites: Vec::new(),
+            fixed_fields: None,
             function: ir::Function {
                 params: Vec::new(),
                 returns: Type::PythonObject,

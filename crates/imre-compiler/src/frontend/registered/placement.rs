@@ -11,6 +11,7 @@ pub(crate) fn place_fixed_function(
         function,
         local_names: source.local_names,
         fixed_sites: source.positions,
+        fixed_fields: (!source.fields.is_empty()).then(|| Box::new(source.fields)),
     }
 }
 
