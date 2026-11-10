@@ -4786,6 +4786,12 @@ impl Heap {
         self.frames.last_mut().unwrap().live.push(value);
     }
 
+    /// Place restored lexical and operand roots below the frame's evaluation temporaries.
+    pub(super) fn prepend_temporaries(&mut self, roots: &[Id]) {
+        let live = &mut self.frames.last_mut().unwrap().live;
+        live.splice(..0, roots.iter().copied());
+    }
+
     /// Insert a root below newer temporaries so they can be released before it.
     pub(super) fn keep_at(&mut self, mark: usize, value: Id) {
         self.frames.last_mut().unwrap().live.insert(mark, value);
