@@ -142,10 +142,12 @@ pub(crate) use registered::{
     annotation_expression, attribute_write, registered_sites, registered_type_alias,
     registered_type_parameters,
 };
-pub(crate) use registered::{ContextTarget, LoopBinding, LoopSuite, PreparedFor, SourceGuard};
 pub(crate) use registered::{
     LambdaBinding, LambdaDefault, LocalBinding, PreparedTemplate, RegisteredClass,
     RegisteredOperand, RegisteredRegion, TemplateField,
+};
+pub(crate) use registered::{
+    PhysicalBinding, PhysicalSuite, PreparedContext, PreparedFor, SourceGuard,
 };
 mod sequences;
 mod shutil;
