@@ -4677,6 +4677,41 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
+    fn physical_comprehension_keeps_its_prepared_diagnostic() {
+        let source = "async def make():\n    return [lambda v=await get(x): v for x in [1, 2]]\n";
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let value = def.body[0]
+            .as_return_stmt_mut()
+            .unwrap()
+            .value
+            .as_deref_mut()
+            .unwrap();
+        assert!(matches!(
+            prepared.source.statement_sites.expressions.get(value),
+            Some(crate::frontend::ExpressionSelection::Refused(range, _)) if *range == value.range()
+        ));
+        let display = value.as_list_comp_expr_mut().unwrap();
+        *display.elt = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+            range: display.elt.range(),
+            node_index: Default::default(),
+        });
+        assert_eq!(
+            prepared.standalone().unwrap_err(),
+            "example.py:2:12: cannot compile this comprehension ahead of time (through 2:54)",
+        );
+    }
+
+    #[test]
     fn dictionary_reports_its_rejected_comprehension() {
         let source = concat!(
             "async def make():\n",

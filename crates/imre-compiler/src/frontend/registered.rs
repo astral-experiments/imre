@@ -2416,6 +2416,10 @@ struct SourceScope<'a> {
     diagnostic_suspension: Option<bool>,
 }
 
+const FORMATTED_STRING_REFUSAL: &str = "cannot compile this formatted string ahead of time";
+const GENERATOR_REFUSAL: &str = "cannot compile this generator expression ahead of time";
+const COMPREHENSION_REFUSAL: &str = "cannot compile this comprehension ahead of time";
+
 /// Prepare an inline expression that can require private slots in the enclosing activation.
 pub(crate) fn inline_operand(
     expr: &ast::Expr,
@@ -2423,7 +2427,7 @@ pub(crate) fn inline_operand(
     kind: RegisteredScope,
     native_suspension: bool,
 ) -> StdResult<Option<RegisteredOperand>, (TextRange, &'static str)> {
-    match expr {
+    let reason = match expr {
         ast::Expr::List(_)
         | ast::Expr::Tuple(_)
         | ast::Expr::Set(_)
@@ -2441,7 +2445,7 @@ pub(crate) fn inline_operand(
                 refusal = scope.refusal;
                 value
             });
-            operand.map(Some).ok_or_else(|| {
+            return operand.map(Some).ok_or_else(|| {
                 refusal.unwrap_or_else(|| {
                     (
                         expr.range(),
@@ -2456,15 +2460,21 @@ pub(crate) fn inline_operand(
                         },
                     )
                 })
-            })
+            });
         }
-        ast::Expr::ListComp(_)
-        | ast::Expr::SetComp(_)
-        | ast::Expr::DictComp(_)
-        | ast::Expr::Generator(_)
-        | ast::Expr::FString(_) => Ok(RegisteredOperand::prepare(expr, source, kind)),
-        _ => Ok(None),
-    }
+        ast::Expr::FString(_) => FORMATTED_STRING_REFUSAL,
+        ast::Expr::Generator(_) => GENERATOR_REFUSAL,
+        ast::Expr::DictComp(display) if display.key.is_none() => {
+            return Ok(RegisteredOperand::prepare(expr, source, kind));
+        }
+        ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_) => {
+            COMPREHENSION_REFUSAL
+        }
+        _ => return Ok(None),
+    };
+    RegisteredOperand::prepare(expr, source, kind)
+        .map(Some)
+        .ok_or((expr.range(), reason))
 }
 
 impl unpacking::PatternBinder for SourceScope<'_> {
@@ -2961,8 +2971,8 @@ impl SourceScope<'_> {
         let value = self.checked_operand(expr, whole);
         if value.is_none() && self.diagnostic_suspension.is_some() {
             let reason = match expr {
-                ast::Expr::FString(_) => "cannot compile this formatted string ahead of time",
-                ast::Expr::Generator(_) => "cannot compile this generator expression ahead of time",
+                ast::Expr::FString(_) => FORMATTED_STRING_REFUSAL,
+                ast::Expr::Generator(_) => GENERATOR_REFUSAL,
                 _ => return None,
             };
             self.refusal = Some((expr.range(), reason));
@@ -3021,10 +3031,7 @@ impl SourceScope<'_> {
         ) {
             let value = self.eager_comprehension(expr);
             if value.is_none() {
-                self.refusal = Some((
-                    expr.range(),
-                    "cannot compile this comprehension ahead of time",
-                ));
+                self.refusal = Some((expr.range(), COMPREHENSION_REFUSAL));
             }
             value?
         } else if (self.comprehension.is_some() || self.generator_expression)
