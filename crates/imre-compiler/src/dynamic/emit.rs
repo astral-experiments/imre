@@ -490,10 +490,6 @@ impl<'a> PreparedBody<'a> {
                     site.prepare_entry,
                 )))
             };
-            let checked_entry = match &body {
-                FunctionBody::Program(_) => true,
-                FunctionBody::Suite(suite) => site.prepare_entry && suite.fully_checked(),
-            };
             let refusal = match &body {
                 FunctionBody::Program(checked) => {
                     prepare.checked_declaration_refusal(&checked.function.body)
@@ -503,13 +499,7 @@ impl<'a> PreparedBody<'a> {
             if let Some(refusal) = refusal {
                 prepare.declaration_refusals.insert(start, refusal);
             }
-            function_bodies.insert(
-                start,
-                PreparedFunction {
-                    body,
-                    checked_entry,
-                },
-            );
+            function_bodies.insert(start, body);
         }
         for start in class_bodies.keys() {
             scopes
@@ -755,29 +745,23 @@ enum FunctionBody<'a> {
     Suite(Box<crate::frontend::RegisteredSuite>),
 }
 
-struct PreparedFunction<'a> {
-    body: FunctionBody<'a>,
-    /// A physical-only suite retains its original frame even if every selected operation checked.
-    checked_entry: bool,
-}
-
-impl PreparedFunction<'_> {
+impl FunctionBody<'_> {
+    #[cfg(test)]
     fn fully_checked(&self) -> bool {
-        self.checked_entry
+        self.suite().is_none_or(crate::frontend::RegisteredSuite::fully_checked)
     }
 
-    #[cfg(test)]
     fn suite(&self) -> Option<&crate::frontend::RegisteredSuite> {
-        match &self.body {
-            FunctionBody::Program(_) => None,
-            FunctionBody::Suite(suite) => Some(suite),
+        match self {
+            Self::Program(_) => None,
+            Self::Suite(suite) => Some(suite),
         }
     }
 
     fn checked(&self) -> &crate::frontend::RegisteredFunction {
-        match &self.body {
-            FunctionBody::Program(checked) => checked,
-            FunctionBody::Suite(suite) => &suite.checked,
+        match self {
+            Self::Program(checked) => checked,
+            Self::Suite(suite) => &suite.checked,
         }
     }
 }
@@ -797,7 +781,7 @@ struct SourceInfo<'a> {
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
     module_annotations: crate::frontend::ModuleAnnotations,
     parameter_annotations: HashMap<ruff_text_size::TextSize, crate::frontend::ParameterAnnotations>,
-    function_bodies: HashMap<ruff_text_size::TextSize, PreparedFunction<'a>>,
+    function_bodies: HashMap<ruff_text_size::TextSize, FunctionBody<'a>>,
     class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredClass>,
     initializer: Option<crate::frontend::RegisteredSuite>,
     bundled: bool,
@@ -1142,16 +1126,14 @@ mod tests {
         def: &ast::StmtFunctionDef,
         body: crate::frontend::RegisteredSuite,
     ) {
-        let function = source.function_bodies.get_mut(&def.start()).unwrap();
-        function.body = FunctionBody::Suite(Box::new(body));
-        function.checked_entry = false;
+        *source.function_bodies.get_mut(&def.start()).unwrap() = FunctionBody::Suite(Box::new(body));
     }
 
     fn test_function_suite<'s>(
         source: &'s mut SourceInfo<'_>,
         start: TextSize,
     ) -> &'s mut crate::frontend::RegisteredSuite {
-        match &mut source.function_bodies.get_mut(&start).unwrap().body {
+        match source.function_bodies.get_mut(&start).unwrap() {
             FunctionBody::Suite(suite) => suite,
             FunctionBody::Program(_) => panic!("expected the physical suite of a named function"),
         }
@@ -1346,7 +1328,7 @@ mod tests {
                         .source
                         .function_bodies
                         .values()
-                        .filter_map(PreparedFunction::suite),
+                        .filter_map(FunctionBody::suite),
                 ) {
                     assert!(suite.fully_checked());
                     crate::ir::walk_expressions(&suite.checked.function.body, &mut |value| {
@@ -1470,7 +1452,7 @@ mod tests {
         let site = ruff_text_size::TextSize::default();
         let mut initial =
             PreparedBody::module("header", path, source, 0, ModuleOrigin::Program(None)).unwrap();
-        let FunctionBody::Suite(suite) = initial.source.function_bodies.remove(&site).unwrap().body
+        let FunctionBody::Suite(suite) = initial.source.function_bodies.remove(&site).unwrap()
         else {
             panic!("expected a prepared function suite");
         };

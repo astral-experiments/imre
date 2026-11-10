@@ -16,9 +16,7 @@ use serde_json::json;
 impl SourceInfo<'_> {
     pub(in crate::dynamic::emit) fn function_body(&self, site: TextSize) -> Body<'_> {
         let plan = &self.function_bodies[&site];
-        if !plan.fully_checked()
-            && let super::super::FunctionBody::Suite(suite) = &plan.body
-        {
+        if let Some(suite) = plan.suite().filter(|suite| !suite.fully_checked()) {
             Body::Suite(suite)
         } else {
             let globals = &self.scopes.functions[&site].globals;
