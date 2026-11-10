@@ -130,8 +130,8 @@ pub(crate) use registered::type_alias::type_alias_body;
 pub(crate) use registered::values::{
     RegisteredSource, ValueStatement, binary_operands, display_elements, index_operands,
     literal_replacements, module_literal_replacements, packed_arguments,
-    push_codepoints, registered_arguments, registered_index_key, registered_value,
-    suspended_operand, value_statement,
+    push_codepoints, registered_argument_at, registered_arguments, registered_index_key,
+    registered_value, suspended_operand, value_statement,
 };
 pub(crate) use registered::{
     AnnotationValue, DeferredAnnotation, PreparedStrings, RegisteredFunction, RegisteredGenerator,
@@ -140,7 +140,9 @@ pub(crate) use registered::{
     attribute_write, delete_targets, prepare_expression_sites, registered_index_target, registered_sites,
     registered_type_alias, registered_type_parameters, template_operands,
 };
-pub(crate) use registered::{LambdaDefault, LocalBinding, RegisteredOperand, RegisteredRegion, inline_operand};
+pub(crate) use registered::{
+    LambdaDefault, LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion, inline_operand,
+};
 mod sequences;
 mod shutil;
 mod sign_parameters;

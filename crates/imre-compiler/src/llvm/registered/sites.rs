@@ -19,7 +19,7 @@ pub(crate) struct CompiledDefinition {
     pub(crate) provider: Option<CompiledProvider>,
     pub(crate) default_names: Vec<String>,
     pub(crate) type_alias: bool,
-    pub(crate) header: bool,
+    pub(crate) class_header: Option<TextRange>,
 }
 
 pub(crate) struct CompiledProvider {
@@ -42,6 +42,27 @@ impl DefinitionOperands {
 }
 
 impl CompiledDefinition {
+    pub(crate) fn instantiate_class(
+        &self,
+        frame: &mut RegisteredFrame<'_, '_>,
+        (bases, kwargs): (String, String),
+        parameter_range: Option<TextRange>,
+    ) -> String {
+        let scope = frame.scope.clone();
+        if parameter_range.is_some() {
+            let base = frame.lookup(".generic_base");
+            frame.op("append", &[&bases, &base]);
+        }
+        let namespace = self.bind_defaults(frame, &scope, &[]);
+        let operation = if let Some(range) = parameter_range {
+            frame.set_source_range(Some(range));
+            "parameterized_class"
+        } else {
+            "class"
+        };
+        frame.op(operation, &[&kwargs, &bases, &namespace])
+    }
+
     pub(crate) fn doc(&self, frame: &mut RegisteredFrame<'_, '_>) -> String {
         self.doc
             .as_ref()
@@ -111,7 +132,8 @@ impl CompiledDefinition {
             qualname,
             defaults,
         } = operands;
-        let Self { code, header, .. } = self;
+        let code = &self.code;
+        let header = self.class_header.is_some();
         frame.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {scope}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 {header})"))
     }
 }
@@ -284,7 +306,7 @@ impl CheckedSites {
     pub(crate) fn definition(
         &self,
         frame: &mut RegisteredFrame<'_, '_>,
-        site: &DefinitionSite,
+        site: TextSize,
         header: &[String],
         class_arguments: Option<(String, String)>,
     ) -> String {
@@ -292,19 +314,29 @@ impl CheckedSites {
             definition,
             decorator_lines,
             type_params,
-        } = &self.definitions[&site.start()];
+        } = &self.definitions[&site];
         let (decorators, defaults) = header.split_at(decorator_lines.len());
-        let mut scope = frame.scope.clone();
-        if !type_params.is_empty() {
-            scope = frame.checked_parameter_scope(&scope, type_params, false);
-        }
-        let mut value = definition.bind_defaults(frame, &scope, defaults);
-        if !type_params.is_empty() {
-            frame.publish_type_parameters(&scope, &value);
-        }
-        if let Some((bases, kwargs)) = class_arguments {
-            value = frame.op("class", &[&kwargs, &bases, &value]);
-        }
+        let scope = frame.scope.clone();
+        let value = if let Some(arguments) = class_arguments {
+            definition.instantiate_class(frame, arguments, None)
+        } else if let Some(range) = definition.class_header {
+            let header = definition.bind_defaults(frame, &scope, &[]);
+            frame.set_source_range(Some(range));
+            let class = frame.invoke(&header, &[]);
+            frame.set_source_range(None);
+            class
+        } else {
+            let scope = if type_params.is_empty() {
+                scope
+            } else {
+                frame.checked_parameter_scope(&scope, type_params, false)
+            };
+            let function = definition.bind_defaults(frame, &scope, defaults);
+            if !type_params.is_empty() {
+                frame.publish_type_parameters(&scope, &function);
+            }
+            function
+        };
         frame.decorate(decorators, decorator_lines.iter().copied(), value)
     }
 }
