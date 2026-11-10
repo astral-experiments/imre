@@ -3954,12 +3954,18 @@ mod tests {
             .unwrap();
         let literals = values::ModuleSource::new(module);
         let source = literals.context(text);
-        let prepare = |kind, suspended| inline_operand(expr, source, kind, suspended).unwrap();
+        let prepare = |kind, suspended| inline_operand(expr, source, kind, suspended);
         let value = prepare(RegisteredScope::Function { is_async: false }, true)
+            .unwrap()
             .expect("the creating generator owns the outer yield");
         crate::verify::registered(value.region()).unwrap();
-        assert!(prepare(RegisteredScope::Module, false).is_none());
-        assert!(prepare(RegisteredScope::Function { is_async: true }, true).is_none());
+
+        let refusal = Some((expr.range(), COMPREHENSION_REFUSAL));
+        assert_eq!(prepare(RegisteredScope::Module, false).err(), refusal);
+        assert_eq!(
+            prepare(RegisteredScope::Function { is_async: true }, true).err(),
+            refusal
+        );
     }
 
     #[test]
