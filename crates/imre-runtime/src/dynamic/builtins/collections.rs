@@ -666,6 +666,15 @@ pub(super) fn construct(
     {
         return Ok(*one);
     }
+    // list() consults the cursor's signed length hint before pulling an item.
+    if name == "list"
+        && let [source] = args
+        && matches!(ctx.heap.get(*source), Value::SetIterator(_))
+    {
+        let list = ctx.alloc(Value::List(Vec::new()));
+        list_extend(ctx, list, *source)?;
+        return Ok(list);
+    }
     if let [source] = args
         && matches!(ctx.heap.get(*source), Value::Generator { .. })
     {
@@ -1604,6 +1613,7 @@ pub(super) fn builtin_slot(
             return match owner {
                 "list" => Ok(ctx.forward_iterator(object, "list_iterator")),
                 "tuple" => Ok(ctx.forward_iterator(object, "tuple_iterator")),
+                "set" | "frozenset" => Ok(ctx.set_iterator(object)),
                 _ => ctx.iterator(storage),
             };
         }

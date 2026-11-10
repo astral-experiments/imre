@@ -4,13 +4,13 @@ use super::*;
 
 pub(super) mod booleans;
 mod eager;
-pub(crate) use eager::eager_operand;
+mod generators;
+pub(crate) use generators::RegisteredGenerator;
 mod lambdas;
-pub(crate) use lambdas::RegisteredLambda;
+pub(crate) use lambdas::{LambdaBinding, LambdaDefault, RegisteredLambda};
 mod templates;
-pub(crate) use templates::{PreparedStrings, prepare_strings};
+pub(crate) use templates::{PreparedStrings, ResidualField, prepare_expression_sites, template_operands};
 pub(super) mod patterns;
-pub(super) mod type_alias;
 pub(super) mod values;
 
 /// Prepare the bindings installed by the existing type-parameter frame constructor.
@@ -94,17 +94,29 @@ impl RegisteredOperand {
         source: values::RegisteredSource<'_>,
         kind: RegisteredScope,
     ) -> Option<Self> {
+        Self::prepare_with(source, kind, |scope| scope.operand(expr))
+    }
+
+    fn prepare_with(
+        source: values::RegisteredSource<'_>,
+        kind: RegisteredScope,
+        lower: impl FnOnce(&mut SourceScope<'_>) -> Option<Expr>,
+    ) -> Option<Self> {
         let operations = HashMap::new();
         let sites = StatementSites::default();
         let mut scope = SourceScope::new(kind, source, &operations, &sites);
-        let value = scope.ordinary_operand(expr)?;
+        let value = lower(&mut scope)?;
+        Some(Self::from_scope(value, scope))
+    }
+
+    fn from_scope(value: Expr, scope: SourceScope<'_>) -> Self {
         let (_locals, local_names) = scope.bindings();
-        Some(Self {
+        Self {
             value,
             #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
             locals: _locals,
             local_names,
-        })
+        }
     }
 
     pub(crate) fn region(&self) -> RegisteredRegion<'_> {
@@ -126,22 +138,12 @@ pub(crate) struct RegisteredFunction {
 
 impl RegisteredFunction {
     pub(super) fn expression(range: TextRange, value: Expr) -> Self {
-        Self::expression_with_prologue(range, value, None)
-    }
-
-    fn expression_with_prologue(
-        range: TextRange,
-        value: Expr,
-        prologue: Option<Statement>,
-    ) -> Self {
         let checkpoint = operation(
             Builtin::RegisteredStatement(range, None),
             Type::None,
             vec![],
         );
-        let mut body = vec![Statement::Expr(checkpoint)];
-        body.extend(prologue);
-        body.push(Statement::Return(value));
+        let body = vec![Statement::Expr(checkpoint), Statement::Return(value)];
         Self {
             function: ir::Function {
                 params: vec![],
@@ -173,6 +175,36 @@ pub(crate) struct LocalBinding {
 }
 
 /// Lower a definition whose binder supplies Python object handles in its normal function scope.
+/// A call to a generator returns its resumable frame. Keep the actual checked body
+/// so emission can bind the same instructions that established this calling convention.
+pub(super) fn generator_body(
+    module: &crate::modules::SourceModule,
+    definition: &ast::StmtFunctionDef,
+    optimization: i32,
+    source: &values::ModuleSource,
+) -> Option<RegisteredFunction> {
+    let physical = module.parsed.syntax().body.iter().find_map(|stmt| {
+        stmt.as_function_def_stmt()
+            .filter(|original| original.start() == definition.start())
+    })?;
+    if physical.is_async || !imre_ast::code_flags::is_generator(&physical.body) {
+        return None;
+    }
+    let operations = HashMap::new();
+    let preparation = SuitePreparation::new(
+        &operations,
+        source.context(&module.source),
+        &physical.body,
+        optimization == 0,
+    );
+    preparation
+        .complete(
+            &physical.body,
+            RegisteredScope::Function { is_async: false },
+        )
+        .map(|suite| suite.checked)
+}
+
 pub(super) fn lower_definition<'a>(
     mut checker: Checker<'a>,
     definition: &ast::StmtFunctionDef,
@@ -373,6 +405,28 @@ fn operation(op: Builtin, ty: Type, operands: Vec<Expr>) -> Expr {
     }
 }
 
+/// The implicit format argument is checked in the lazy evaluator, before its RHS.
+pub(crate) fn type_alias_body(
+    value: &ast::Expr,
+    source: values::RegisteredSource<'_>,
+) -> Option<AnnotationCode> {
+    let mut code = AnnotationCode::prepare(value, source)?;
+    let format = operation(
+        Builtin::RegisteredAnnotationFormat,
+        Type::None,
+        vec![values::name_binding(".format")],
+    );
+    code.operand.value = Expr {
+        ty: code.operand.value.ty,
+        kind: ExprKind::Scope {
+            body: vec![Statement::Expr(format)],
+            value: Box::new(code.operand.value),
+            clear: Vec::new(),
+        },
+    };
+    Some(code)
+}
+
 pub(crate) fn registered_type_alias(site: TextSize) -> Expr {
     operation(
         Builtin::RegisteredTypeAlias(site),
@@ -435,6 +489,7 @@ fn registered_import(stmt: &ast::Stmt, private_names: &imre_ast::Names) -> Optio
 pub(crate) enum RegisteredScope {
     Module,
     Class,
+    Lambda,
     Function { is_async: bool },
 }
 
@@ -455,6 +510,58 @@ pub(crate) struct DeferredAnnotation {
     pub(crate) value: AnnotationValue,
 }
 
+pub(crate) struct ParameterAnnotations {
+    pub(crate) entries: Vec<ir::AnnotationOccurrence>,
+    pub(crate) body: RegisteredSuite,
+    pub(crate) references: HashMap<String, String>,
+}
+
+impl ParameterAnnotations {
+    fn prepare<R>(
+        def: &ast::StmtFunctionDef,
+        operands: &HashMap<TextSize, PreparedAnnotation<R>>,
+        sites: &mut HashMap<TextSize, DeferredAnnotation>,
+    ) -> Option<Self> {
+        let annotations = parameter_annotations(&def.parameters, def.returns.as_deref());
+        if annotations.is_empty() {
+            return None;
+        }
+        let mut entries = Vec::with_capacity(annotations.len());
+        let mut references = HashMap::new();
+        for (name, expression) in annotations {
+            let site = expression.start();
+            if let Some(reference) = scalar_reference(expression) {
+                references.insert(name.to_owned(), reference);
+            }
+            sites.insert(
+                site,
+                DeferredAnnotation::new(name.to_owned(), expression, operands),
+            );
+            entries.push(ir::AnnotationOccurrence { site, index: None });
+        }
+        let body = DeferredAnnotation::prepare_body(sites, &entries);
+        Some(Self {
+            entries,
+            body,
+            references,
+        })
+    }
+}
+
+/// Names that can refer directly to a type without calling Python.
+fn scalar_reference(expr: &ast::Expr) -> Option<String> {
+    match expr {
+        ast::Expr::NoneLiteral(_) => Some("None".to_owned()),
+        ast::Expr::Name(name) if !name.id.starts_with("__") => Some(name.id.to_string()),
+        ast::Expr::Attribute(attr) => {
+            let module = attr.value.as_name_expr()?;
+            (!module.id.starts_with("__") && !attr.attr.starts_with("__"))
+                .then(|| format!("{}.{}", module.id, attr.attr))
+        }
+        _ => None,
+    }
+}
+
 pub(crate) enum AnnotationValue {
     Checked(Expr),
     Source(ast::Expr),
@@ -466,16 +573,9 @@ impl DeferredAnnotation {
         expression: &ast::Expr,
         operands: &HashMap<TextSize, super::PreparedAnnotation<R>>,
     ) -> Self {
-        let value = match operands.get(&expression.start()) {
-            Some(PreparedAnnotation::String {
-                body: Some(body), ..
-            }) if matches!(body.code, AnnotationCode::Residual(_)) => None,
-            Some(operand) => Some(operand.operand(expression.start())),
-            None => None,
-        }
-        .map_or_else(
+        let value = operands.get(&expression.start()).map_or_else(
             || AnnotationValue::Source(expression.clone()),
-            AnnotationValue::Checked,
+            |operand| AnnotationValue::Checked(operand.operand(expression.start())),
         );
         Self {
             name,
@@ -530,12 +630,39 @@ impl DeferredAnnotation {
 }
 
 /// Physical source operands shared by namespace initialization and lazy annotation providers.
+pub(crate) struct FunctionSite<'a> {
+    pub(crate) def: &'a ast::StmtFunctionDef,
+    pub(crate) prepare_entry: bool,
+    pub(crate) thread_entry: Option<imre_ast::ThreadEntry>,
+}
+
+pub(crate) struct ClassSite<'a> {
+    pub(crate) def: &'a ast::StmtClassDef,
+    enclosing: RegisteredScope,
+    parameters: Option<Vec<ir::RegisteredTypeParameter>>,
+}
+
+pub(crate) struct RegisteredClass {
+    pub(crate) body: RegisteredSuite,
+    pub(crate) header: ClassHeader,
+}
+
+/// Decorators use the enclosing activation. Generic bases and keywords use the
+/// type-parameter activation. A missing operand keeps its individual source callback.
+pub(crate) struct ClassHeader {
+    pub(crate) parameters: Option<Vec<ir::RegisteredTypeParameter>>,
+    pub(crate) layout: ir::PackedArguments,
+    pub(crate) operands: Vec<Option<RegisteredOperand>>,
+    pub(crate) decorators: Vec<Option<RegisteredOperand>>,
+}
+
 #[derive(Default)]
 pub(crate) struct RegisteredSites<'a> {
     pub(crate) operations: HashMap<TextRange, Expr>,
-    pub(crate) workers: Vec<(&'a ast::StmtFunctionDef, imre_ast::ThreadEntry)>,
-    pub(crate) classes: Vec<&'a ast::StmtClassDef>,
+    pub(crate) functions: Vec<FunctionSite<'a>>,
+    pub(crate) classes: Vec<ClassSite<'a>>,
     pub(crate) annotations: HashMap<TextSize, DeferredAnnotation>,
+    pub(crate) parameter_annotations: HashMap<TextSize, ParameterAnnotations>,
 }
 
 pub(crate) fn registered_sites<'a, R>(
@@ -548,6 +675,7 @@ pub(crate) fn registered_sites<'a, R>(
         names: &'s imre_ast::Names,
         operands: &'s HashMap<TextSize, PreparedAnnotation<R>>,
         scope: RegisteredScope,
+        in_unprepared_generic: bool,
         output: RegisteredSites<'a>,
     }
     impl<'a, R> StatementVisitor<'a> for Collector<'_, 'a, R> {
@@ -557,21 +685,37 @@ pub(crate) fn registered_sites<'a, R>(
             }
             match stmt {
                 ast::Stmt::ClassDef(class) => {
-                    self.output.classes.push(class);
+                    self.output.classes.push(ClassSite {
+                        def: class,
+                        enclosing: self.scope,
+                        parameters: class
+                            .type_params
+                            .as_deref()
+                            .map(|params| registered_type_parameters(params, self.names)),
+                    });
                     let outer = std::mem::replace(&mut self.scope, RegisteredScope::Class);
                     walk_stmt(self, stmt);
                     self.scope = outer;
                 }
                 ast::Stmt::FunctionDef(def) => {
-                    if matches!(self.scope, RegisteredScope::Class)
-                        && super::function_scope::boxed_function_type_params(
+                    if let Some(provider) = ParameterAnnotations::prepare(
+                        def,
+                        self.operands,
+                        &mut self.output.annotations,
+                    ) {
+                        self.output
+                            .parameter_annotations
+                            .insert(def.parameters.start(), provider);
+                    }
+                    let generic_binding = !matches!(self.scope, RegisteredScope::Function { .. })
+                        && super::function_scope::type_parameter_scope(
                             def,
                             self.names.string_annotations,
-                            true,
+                            matches!(self.scope, RegisteredScope::Class),
                             Some(self.names),
                         )
-                        .is_some()
-                    {
+                        .is_some();
+                    if generic_binding {
                         self.output.operations.insert(
                             def.name.range(),
                             operation(
@@ -583,10 +727,23 @@ pub(crate) fn registered_sites<'a, R>(
                             ),
                         );
                     }
-                    if let Some(entry) = imre_ast::thread_entry(def) {
-                        self.output.workers.push((def, entry));
+                    // Nested ordinary functions of an admitted definition take the
+                    // same preparation path as any other lexical function.
+                    let unprepared = !generic_binding
+                        && (self.in_unprepared_generic || def.type_params.is_some());
+                    let thread_entry = imre_ast::thread_entry(def);
+                    let worker = thread_entry.is_some();
+                    self.output.functions.push(FunctionSite {
+                        def,
+                        prepare_entry: !unprepared || worker,
+                        thread_entry,
+                    });
+                    if worker {
+                        // A proven worker contains no nested declarations or namespace effects.
                         return;
                     }
+                    let outer_generic =
+                        std::mem::replace(&mut self.in_unprepared_generic, unprepared);
                     let outer = std::mem::replace(
                         &mut self.scope,
                         RegisteredScope::Function {
@@ -595,6 +752,7 @@ pub(crate) fn registered_sites<'a, R>(
                     );
                     walk_stmt(self, stmt);
                     self.scope = outer;
+                    self.in_unprepared_generic = outer_generic;
                 }
                 ast::Stmt::AnnAssign(ann)
                     if !matches!(self.scope, RegisteredScope::Function { .. }) && ann.simple =>
@@ -640,6 +798,7 @@ pub(crate) fn registered_sites<'a, R>(
         names,
         operands,
         scope: RegisteredScope::Module,
+        in_unprepared_generic: false,
         output: RegisteredSites::default(),
     };
     sites.visit_body(body);
@@ -651,11 +810,26 @@ pub(crate) fn registered_sites<'a, R>(
 pub(crate) struct SourceRun {
     pub(crate) at: usize,
     pub(crate) statements: std::ops::Range<usize>,
+    pub(crate) effect: Option<SourceEffect>,
+}
+
+pub(crate) enum SourceEffect {
+    /// Evaluate the RHS once for the following checked assignment targets.
+    AssignmentInput(usize),
+    /// Evaluate the operands at their place in the operation, in the current frame.
+    ObjectOperation(Box<Builtin>, Vec<PhysicalOperand>),
+}
+
+pub(crate) enum PhysicalOperand {
+    Checked(Box<RegisteredOperand>),
+    Source(Box<ast::Expr>),
 }
 
 impl SourceRun {
     fn record(runs: &mut Vec<Self>, source_index: usize, checked_offset: usize) {
         if let Some(run) = runs.last_mut()
+            && run.effect.is_none()
+            && run.at == checked_offset
             && run.statements.end == source_index
         {
             run.statements.end += 1;
@@ -663,6 +837,7 @@ impl SourceRun {
             runs.push(Self {
                 at: checked_offset,
                 statements: source_index..source_index + 1,
+                effect: None,
             });
         }
     }
@@ -712,18 +887,107 @@ fn checked_assertion(
 #[derive(Default)]
 pub(crate) struct StatementSites {
     pub(crate) assertions: HashMap<TextRange, Vec<Statement>>,
-    pub(crate) ifs: HashMap<TextRange, Vec<SourceGuard>>,
-    pub(crate) matches: HashMap<TextRange, patterns::SourceMatch>,
-    pub(crate) contexts: HashMap<TextRange, ir::ContextSite>,
+    pub(crate) ifs: HashMap<TextRange, SourceConditional>,
+    pub(crate) matches: HashMap<TextRange, Option<patterns::SourceMatch>>,
+    pub(crate) contexts: HashMap<TextRange, Vec<ContextInput>>,
 }
 
-/// A residual arm keeps its source test in the source adapter. Compilable tests
-/// are already owned IR when the enclosing statement needs a residual arm.
+pub(crate) struct ContextInput {
+    pub(crate) site: ir::ContextSite,
+    pub(crate) manager: Option<Expr>,
+    pub(crate) target: ContextTarget,
+}
+
+pub(crate) enum ContextTarget {
+    Absent,
+    Residual,
+    Checked {
+        entered: usize,
+        binding: Box<RegisteredFunction>,
+    },
+}
+
+impl ContextTarget {
+    fn prepare(
+        target: &ast::Expr,
+        source: values::RegisteredSource<'_>,
+        kind: RegisteredScope,
+    ) -> Self {
+        let operations = HashMap::new();
+        let sites = StatementSites::default();
+        let mut scope = SourceScope::new(kind, source, &operations, &sites);
+        let Ok(ir::ContextBinding { entered, body }) = scope.with_binding(target) else {
+            return Self::Residual;
+        };
+        if PhysicalRegion::Fallthrough.accepts(&body) {
+            Self::Checked {
+                entered,
+                binding: Box::new(scope.finish(body)),
+            }
+        } else {
+            Self::Residual
+        }
+    }
+}
+
+/// Source sites for a statement which could not be lowered as a complete checked block.
+pub(crate) struct SourceConditional(Vec<SourceIfArm>);
+
+pub(crate) struct SourceIfArm {
+    clause: Option<usize>,
+    pub(crate) body_start: Option<TextSize>,
+    guard: Option<SourceGuard>,
+}
+
 pub(crate) enum SourceGuard {
     Literal(bool),
     Checked(Expr),
     Residual,
-    Otherwise,
+}
+
+impl SourceIfArm {
+    pub(crate) fn test<'a>(&self, source: &'a ast::StmtIf) -> &'a ast::Expr {
+        match self.clause {
+            Some(index) => source.elif_else_clauses[index]
+                .test
+                .as_ref()
+                .expect("conditional guard"),
+            None => &source.test,
+        }
+    }
+
+    pub(crate) fn body<'a>(&self, source: &'a ast::StmtIf) -> &'a [ast::Stmt] {
+        match self.clause {
+            Some(index) => &source.elif_else_clauses[index].body,
+            None => &source.body,
+        }
+    }
+}
+
+impl SourceConditional {
+    /// Dead literal arms in a suspended frame have no resume entry.
+    pub(crate) fn arms(
+        &self,
+        suspended: bool,
+    ) -> impl Iterator<Item = (Option<&SourceGuard>, &SourceIfArm)> {
+        self.0.iter().filter_map(move |arm| {
+            let test = match &arm.guard {
+                Some(SourceGuard::Literal(false)) if suspended => return None,
+                Some(SourceGuard::Literal(true)) if suspended => None,
+                guard => guard.as_ref(),
+            };
+            Some((test, arm))
+        })
+    }
+}
+
+fn if_clauses(branch: &ast::StmtIf) -> impl Iterator<Item = (Option<&ast::Expr>, &[ast::Stmt])> {
+    std::iter::once((Some(branch.test.as_ref()), branch.body.as_slice())).chain(
+        branch
+            .elif_else_clauses
+            .iter()
+            .map(|clause| (clause.test.as_ref(), clause.body.as_slice())),
+    )
 }
 
 fn statement_sites(
@@ -753,15 +1017,26 @@ fn statement_sites(
                 return;
             }
             if let ast::Stmt::With(with) = stmt {
-                for item in &with.items {
-                    let site = context_site(self.source.text, &item.context_expr);
-                    self.sites.contexts.insert(site.range, site);
-                }
+                let inputs = with
+                    .items
+                    .iter()
+                    .map(|item| ContextInput {
+                        site: context_site(self.source.text, &item.context_expr, with.is_async),
+                        manager: None,
+                        target: if item.optional_vars.is_some() {
+                            ContextTarget::Residual
+                        } else {
+                            ContextTarget::Absent
+                        },
+                    })
+                    .collect();
+                self.sites.contexts.insert(stmt.range(), inputs);
             }
-            if let ast::Stmt::Match(branch) = stmt
-                && let Some(plan) = patterns::SourceMatch::prepare(branch, self.source)
-            {
-                self.sites.matches.insert(stmt.range(), plan);
+            if let ast::Stmt::Match(branch) = stmt {
+                self.sites.matches.insert(
+                    stmt.range(),
+                    patterns::SourceMatch::prepare(branch, self.source),
+                );
             }
             if let ast::Stmt::If(branch) = stmt {
                 let guard = |expr: &ast::Expr| {
@@ -772,12 +1047,15 @@ fn statement_sites(
                             .map_or(SourceGuard::Residual, SourceGuard::Checked)
                     }
                 };
-                let tests = std::iter::once(guard(&branch.test))
-                    .chain(branch.elif_else_clauses.iter().map(|clause| {
-                        clause.test.as_ref().map_or(SourceGuard::Otherwise, guard)
-                    }))
+                let arms = if_clauses(branch)
+                    .enumerate()
+                    .map(|(index, (test, body))| SourceIfArm {
+                        clause: index.checked_sub(1),
+                        body_start: body.first().map(Ranged::start),
+                        guard: test.map(guard),
+                    })
                     .collect();
-                self.sites.ifs.insert(stmt.range(), tests);
+                self.sites.ifs.insert(stmt.range(), SourceConditional(arms));
             }
             walk_stmt(self, stmt);
         }
@@ -790,6 +1068,12 @@ fn statement_sites(
     };
     collector.visit_body(body);
     collector.sites
+}
+
+#[derive(Clone, Copy)]
+enum SuiteSelection {
+    All,
+    Physical,
 }
 
 /// Prepare ordered suites while the source tree and its namespace operands are available.
@@ -817,44 +1101,89 @@ impl<'a> SuitePreparation<'a> {
 
     pub(crate) fn class_suites(
         &mut self,
-        classes: &[&ast::StmtClassDef],
-    ) -> HashMap<TextSize, RegisteredSuite> {
+        classes: Vec<ClassSite<'_>>,
+    ) -> HashMap<TextSize, RegisteredClass> {
         classes
-            .iter()
-            .map(|class| {
+            .into_iter()
+            .map(|site| {
+                let class = site.def;
                 let start = class
                     .decorator_list
                     .first()
                     .map_or(class.start(), Ranged::start);
-                (start, self.suite(&class.body, RegisteredScope::Class))
+                let decorators = class
+                    .decorator_list
+                    .iter()
+                    .map(|decorator| {
+                        RegisteredOperand::prepare(
+                            &decorator.expression,
+                            self.source,
+                            site.enclosing,
+                        )
+                    })
+                    .collect();
+                let bases_scope = if site.parameters.is_some() {
+                    RegisteredScope::Function { is_async: false }
+                } else {
+                    site.enclosing
+                };
+                let (layout, operands) =
+                    class
+                        .arguments
+                        .as_deref()
+                        .map_or_else(Default::default, |args| {
+                            let operands = registered_arguments(args)
+                                .map(|expr| {
+                                    RegisteredOperand::prepare(expr, self.source, bases_scope)
+                                })
+                                .collect();
+                            (packed_arguments(args), operands)
+                        });
+                let header = ClassHeader {
+                    parameters: site.parameters,
+                    layout,
+                    operands,
+                    decorators,
+                };
+                let body = self.suite(&class.body, RegisteredScope::Class);
+                (start, RegisteredClass { body, header })
             })
             .collect()
     }
 
     pub(crate) fn suite(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope) -> RegisteredSuite {
-        self.selected_suite(stmts, kind, |_, _| true)
+        self.selected_suite(stmts, kind, SuiteSelection::All, SuiteSelection::All)
+    }
+
+    /// A residual statement in a suspended function owns its cursor and pending exits.
+    /// Its child suites retain their physical-frame contract while its siblings use checked runs.
+    pub(crate) fn function_suite(
+        &mut self,
+        stmts: &[ast::Stmt],
+        kind: RegisteredScope,
+        suspends: bool,
+    ) -> RegisteredSuite {
+        let children = if suspends {
+            SuiteSelection::Physical
+        } else {
+            SuiteSelection::All
+        };
+        self.selected_suite(stmts, kind, SuiteSelection::All, children)
     }
 
     /// Keep the enclosing physical frame's entry and cleanup. Its complete target effects
     /// share one slot layout per suite, including when another statement must run from source.
     pub(crate) fn physical_body(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope) {
-        self.nested_suite(stmts, kind, |sites, stmt| {
-            stmt.is_delete_stmt()
-                || sites.assertions.contains_key(&stmt.range())
-                || attribute_effects(stmt).is_some()
-        });
+        self.nested_suite(stmts, kind, SuiteSelection::Physical);
     }
 
-    fn nested_suite(
-        &mut self,
-        stmts: &[ast::Stmt],
-        kind: RegisteredScope,
-        select: fn(&StatementSites, &ast::Stmt) -> bool,
-    ) {
+    fn nested_suite(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope, select: SuiteSelection) {
         if let Some(first) = stmts.first() {
-            let plan = self.selected_suite(stmts, kind, select);
+            let plan = self.selected_suite(stmts, kind, select, select);
             // An optimized-away assertion has no instructions and still owns its source slot.
-            if !matches!(plan.residual.as_slice(), [run] if run.statements == (0..stmts.len())) {
+            if !matches!(plan.residual.as_slice(), [run]
+                if run.effect.is_none() && run.statements == (0..stmts.len()))
+            {
                 self.nested.insert(first.start(), plan);
             }
         }
@@ -864,14 +1193,15 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
-        select: fn(&StatementSites, &ast::Stmt) -> bool,
+        select: SuiteSelection,
+        child_selection: SuiteSelection,
     ) -> RegisteredSuite {
         use ast::statement_visitor::{StatementVisitor, walk_stmt};
         let plan = self.lower(stmts, kind, select);
         struct Children<'p, 's> {
             prepare: &'p mut SuitePreparation<'s>,
             kind: RegisteredScope,
-            select: fn(&StatementSites, &ast::Stmt) -> bool,
+            select: SuiteSelection,
         }
         impl<'a> StatementVisitor<'a> for Children<'_, '_> {
             fn visit_body(&mut self, stmts: &'a [ast::Stmt]) {
@@ -881,10 +1211,49 @@ impl<'a> SuitePreparation<'a> {
         let mut children = Children {
             prepare: self,
             kind,
-            select,
+            select: child_selection,
         };
-        for run in &plan.residual {
+        for run in plan.residual.iter().filter(|run| run.effect.is_none()) {
             for stmt in &stmts[run.statements.clone()] {
+                if let ast::Stmt::With(with) = stmt {
+                    let inputs = children
+                        .prepare
+                        .sites
+                        .contexts
+                        .get_mut(&stmt.range())
+                        .expect("with inputs");
+                    let region = match (kind, child_selection) {
+                        (RegisteredScope::Function { .. }, SuiteSelection::Physical) => {
+                            values::Region::SuspendedOperand
+                        }
+                        _ => values::Region::Residual,
+                    };
+                    for (input, item) in inputs.iter_mut().zip(&with.items) {
+                        input.manager = region.operand(&item.context_expr, children.prepare.source);
+                        if let Some(target) = &item.optional_vars {
+                            input.target =
+                                ContextTarget::prepare(target, children.prepare.source, kind);
+                        }
+                    }
+                }
+                if let ast::Stmt::Match(branch) = stmt
+                    && let Some(mut site) = children
+                        .prepare
+                        .sites
+                        .matches
+                        .get_mut(&branch.range())
+                        .and_then(Option::take)
+                {
+                    for (case, input) in site.cases.iter_mut().zip(&branch.cases) {
+                        case.body = Some(children.prepare.suite(&input.body, kind));
+                    }
+                    children
+                        .prepare
+                        .sites
+                        .matches
+                        .insert(branch.range(), Some(site));
+                    continue;
+                }
                 // A declaration opens a separate activation with its own scope and admission.
                 if !matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)) {
                     walk_stmt(&mut children, stmt);
@@ -898,22 +1267,67 @@ impl<'a> SuitePreparation<'a> {
         &self,
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
-        select: fn(&StatementSites, &ast::Stmt) -> bool,
+        select: SuiteSelection,
     ) -> RegisteredSuite {
         let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
         let mut body = Vec::new();
         let mut residual: Vec<SourceRun> = Vec::new();
         for (i, stmt) in stmts.iter().enumerate() {
             let slots_before = scope.locals.len();
-            if !select(&self.sites, stmt) || scope.statement(stmt, &mut body).is_err() {
-                // A partially lowered target can allocate slots before a later operand fails.
-                if scope.locals.len() != slots_before {
-                    scope.locals.truncate(slots_before);
-                    scope.names.retain(|_, slot| *slot < slots_before);
-                    scope.namespaces.retain(|slot, _| *slot < slots_before);
-                }
-                SourceRun::record(&mut residual, i, body.len());
+            let lowered = match select {
+                SuiteSelection::All => scope.statement(stmt, &mut body),
+                SuiteSelection::Physical => scope.physical_statement(stmt, &mut body),
+            };
+            if lowered.is_ok() {
+                continue;
             }
+            scope.truncate_locals(slots_before);
+            if let ast::Stmt::Assign(assign) = stmt {
+                let input = scope.hidden(Type::PythonObject);
+                let value = unpacking::take_pattern_temporary(
+                    Expr::local(input, Type::PythonObject),
+                    input,
+                );
+                if let Ok(targets) = scope.assignment_targets(&assign.targets, value) {
+                    body.push(checkpoint(stmt));
+                    residual.push(SourceRun {
+                        at: body.len(),
+                        statements: i..i + 1,
+                        effect: Some(SourceEffect::AssignmentInput(input)),
+                    });
+                    body.extend(targets);
+                    continue;
+                }
+                scope.truncate_locals(slots_before);
+            } else if let ast::Stmt::Delete(delete) = stmt {
+                // A missing operand keeps its place between the other targets' checked effects.
+                body.push(checkpoint(stmt));
+                for target in delete_targets(delete) {
+                    let (op, inputs) = deletion(target);
+                    let slots = scope.locals.len();
+                    if let Some(values) = inputs
+                        .clone()
+                        .map(|input| input.lower(&mut scope))
+                        .collect()
+                    {
+                        body.push(Statement::Expr(operation(op, Type::None, values)));
+                    } else {
+                        scope.truncate_locals(slots);
+                        residual.push(SourceRun {
+                            at: body.len(),
+                            statements: i..i + 1,
+                            effect: Some(SourceEffect::ObjectOperation(
+                                Box::new(op),
+                                inputs
+                                    .map(|input| input.physical(self.source, kind))
+                                    .collect(),
+                            )),
+                        });
+                    }
+                }
+                continue;
+            }
+            SourceRun::record(&mut residual, i, body.len());
         }
         RegisteredSuite {
             checked: scope.finish(body),
@@ -926,7 +1340,7 @@ impl<'a> SuitePreparation<'a> {
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
     ) -> Option<RegisteredSuite> {
-        let plan = self.lower(stmts, kind, |_, _| true);
+        let plan = self.lower(stmts, kind, SuiteSelection::All);
         plan.fully_checked().then_some(plan)
     }
 }
@@ -958,18 +1372,22 @@ pub(super) fn attribute_statement(
     values: Vec<Expr>,
 ) -> Statement {
     Statement::Expr(operation(
-        Builtin::RegisteredAttribute {
-            action,
-            name: field.attr.to_string(),
-            range: field.range(),
-        },
+        attribute_opcode(action, field),
         Type::None,
         values,
     ))
 }
 
+fn attribute_opcode(action: ir::AttributeAction, field: &ast::ExprAttribute) -> Builtin {
+    Builtin::RegisteredAttribute {
+        action,
+        name: field.attr.to_string(),
+        range: field.range(),
+    }
+}
+
 /// Deletion groups evaluate their leaves from left to right without constructing a tuple or list.
-pub(crate) fn delete_targets(delete: &ast::StmtDelete) -> Vec<&ast::Expr> {
+fn delete_targets(delete: &ast::StmtDelete) -> Vec<&ast::Expr> {
     let mut remaining: Vec<_> = delete.targets.iter().rev().collect();
     let mut leaves = Vec::new();
     while let Some(target) = remaining.pop() {
@@ -984,7 +1402,7 @@ pub(crate) fn delete_targets(delete: &ast::StmtDelete) -> Vec<&ast::Expr> {
 
 /// Resolve the implicit manager protocol's source anchor while its syntax and
 /// original source text are available. LLVM only converts accepted offsets to columns.
-fn context_site(source: &str, manager: &ast::Expr) -> ir::ContextSite {
+fn context_site(source: &str, manager: &ast::Expr, is_async: bool) -> ir::ContextSite {
     let range = manager.range();
     let delimiter = match manager {
         ast::Expr::Call(call) => Some((call.func.end(), b'(')),
@@ -1001,7 +1419,11 @@ fn context_site(source: &str, manager: &ast::Expr) -> ir::ContextSite {
             )
         })
         .map_or(range.start(), |offset| TextSize::try_from(offset).unwrap());
-    ir::ContextSite { range, anchor }
+    ir::ContextSite {
+        is_async,
+        range,
+        anchor,
+    }
 }
 
 pub(crate) fn attribute_write(stmt: &ast::Stmt) -> Option<AttributeEffect<'_>> {
@@ -1088,6 +1510,9 @@ impl statements::StatementLowering for SourceScope<'_> {
     type Error = ();
 
     fn attribute_statements(&mut self, stmt: &ast::Stmt) -> StdResult<Option<Vec<Statement>>, ()> {
+        if stmt.is_assign_stmt() {
+            return Ok(None);
+        }
         let Some(effect) = attribute_write(stmt) else {
             return Ok(None);
         };
@@ -1104,25 +1529,15 @@ impl statements::StatementLowering for SourceScope<'_> {
     }
 
     fn assignment(&mut self, assign: &ast::StmtAssign) -> StdResult<Vec<Statement>, ()> {
-        let value = match assign.targets.as_slice() {
-            [ast::Expr::Name(_)] => self.operand(&assign.value),
-            _ => self.ordinary_operand(&assign.value),
-        }
-        .ok_or(())?;
-        unpacking::bind_assignment(self, &assign.targets, value)
+        let value = self.operand(&assign.value).ok_or(())?;
+        self.assignment_targets(&assign.targets, value)
     }
 
     fn branch(&mut self, branch: &ast::StmtIf) -> StdResult<statements::Block, ()> {
         let mut arms = Vec::new();
         let mut otherwise = (Vec::new(), true);
         let mut falls = false;
-        let clauses = std::iter::once((Some(branch.test.as_ref()), branch.body.as_slice())).chain(
-            branch
-                .elif_else_clauses
-                .iter()
-                .map(|clause| (clause.test.as_ref(), clause.body.as_slice())),
-        );
-        for (test, suite) in clauses {
+        for (test, suite) in if_clauses(branch) {
             if let Some(test) = test {
                 let condition = truth(self.operand(test).ok_or(())?);
                 let (body, continues) = self.block(suite)?;
@@ -1137,17 +1552,18 @@ impl statements::StatementLowering for SourceScope<'_> {
 
     fn definition(&mut self, def: &ast::StmtFunctionDef) -> StdResult<Option<Statement>, ()> {
         if def.type_params.is_some() {
-            if !matches!(self.kind, RegisteredScope::Class)
-                || !def.decorator_list.is_empty()
-                || def
-                    .parameters
-                    .iter_non_variadic_params()
-                    .any(|p| p.default.is_some())
-            {
-                return Err(());
+            let binding = self.operations.get(&def.name.range()).ok_or(())?;
+            if matches!(self.kind, RegisteredScope::Class) {
+                if !def.decorator_list.is_empty()
+                    || def
+                        .parameters
+                        .iter_non_variadic_params()
+                        .any(|p| p.default.is_some())
+                {
+                    return Err(());
+                }
+                return Ok(Some(self.store(def.name.as_str(), binding.clone())));
             }
-            let function = self.operations.get(&def.name.range()).ok_or(())?.clone();
-            return Ok(Some(self.store(def.name.as_str(), function)));
         }
         let decorators = def.decorator_list.iter().map(|d| &d.expression);
         let defaults = def
@@ -1186,17 +1602,18 @@ impl statements::StatementLowering for SourceScope<'_> {
         }
     }
 
+    fn async_iteration(&self) -> bool {
+        matches!(self.kind, RegisteredScope::Function { is_async: true })
+    }
+
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> StdResult<statements::Block, ()> {
-        let source = self.ordinary_operand(&loop_.iter).ok_or(())?;
-        let cursor = operation(Builtin::RegisteredIter, Type::PythonObject, vec![source]);
-        let input = pipelines::Prepared::cursor(cursor, Type::PythonObject, |ty| self.hidden(ty));
-        let binding = unpacking::bind_targets(
-            self,
-            &loop_.target,
-            Expr::local(input.value, Type::PythonObject),
-            None,
-        )?;
-        let body = self.loop_body(&loop_.body)?;
+        let pull = loop_.is_async.then(|| ir::AsyncPull {
+            range: loop_.iter.range(),
+            header: Some(loop_.start()),
+        });
+        let input = self.iteration_input(&loop_.iter, pull).ok_or(())?;
+        let (binding, body) =
+            self.iteration_body(&loop_.target, &input, |scope| scope.suite(&loop_.body))?;
         let otherwise = self.suite(&loop_.orelse)?;
         Ok((input.for_suite(binding, body, otherwise, Vec::new()), true))
     }
@@ -1239,23 +1656,28 @@ impl statements::StatementLowering for SourceScope<'_> {
                 false,
             )),
             ast::Stmt::Match(branch) => self.match_statement(branch),
-            ast::Stmt::ClassDef(class) if class.type_params.is_none() => {
+            ast::Stmt::ClassDef(class) => {
                 let mut operands = class
                     .decorator_list
                     .iter()
                     .map(|d| self.ordinary_operand(&d.expression))
                     .collect::<Option<Vec<_>>>()
                     .ok_or(())?;
-                let mut layout = ir::PackedArguments::default();
-                if let Some(arguments) = &class.arguments {
-                    layout = super::packed_arguments(arguments);
-                    for operand in super::registered_arguments(arguments) {
-                        operands.push(self.ordinary_operand(operand).ok_or(())?);
+                let arguments = if class.type_params.is_some() {
+                    None
+                } else {
+                    let mut layout = ir::PackedArguments::default();
+                    if let Some(arguments) = &class.arguments {
+                        layout = super::packed_arguments(arguments);
+                        for operand in super::registered_arguments(arguments) {
+                            operands.push(self.ordinary_operand(operand).ok_or(())?);
+                        }
                     }
-                }
+                    Some(layout)
+                };
                 let site = ir::DefinitionSite::Class {
                     start: class.start(),
-                    arguments: layout,
+                    arguments,
                 };
                 let value = operation(
                     Builtin::RegisteredDefinition(site),
@@ -1297,23 +1719,20 @@ impl statements::StatementLowering for SourceScope<'_> {
                     true,
                 ))
             }
-            ast::Stmt::With(stmt) if !stmt.is_async => {
-                Ok((self.with_items(&stmt.items, &stmt.body)?, true))
-            }
-            ast::Stmt::If(branch) if branch.elif_else_clauses.is_empty() => {
-                let test = self.ordinary_operand(&branch.test).ok_or(())?;
-                let condition = operation(Builtin::Bool, Type::Bool, vec![test]);
-                let body = self.suite(&branch.body)?;
-                Ok((vec![Statement::If(condition, body, Vec::new())], true))
-            }
+            ast::Stmt::With(stmt) if !stmt.is_async || self.async_iteration() => Ok((
+                self.with_items(&stmt.items, &self.sites.contexts[&stmt.range()], &stmt.body)?,
+                true,
+            )),
             ast::Stmt::While(loop_) => {
                 let condition = self.ordinary_operand(&loop_.test).ok_or(())?;
-                let body = self.loop_body(&loop_.body)?;
+                let body = self.in_loop(LoopScope::While, |scope| scope.suite(&loop_.body))?;
                 let otherwise = self.suite(&loop_.orelse)?;
                 Ok((vec![Statement::While(condition, body, otherwise)], true))
             }
-            ast::Stmt::Break(_) if self.loop_depth != 0 => Ok((vec![Statement::Break], false)),
-            ast::Stmt::Continue(_) if self.loop_depth != 0 => {
+            ast::Stmt::Break(_) if self.loop_scope != LoopScope::Outside => {
+                Ok((vec![Statement::Break], false))
+            }
+            ast::Stmt::Continue(_) if self.loop_scope != LoopScope::Outside => {
                 Ok((vec![Statement::Continue], false))
             }
             ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => Ok((Vec::new(), true)),
@@ -1336,24 +1755,11 @@ impl statements::StatementLowering for SourceScope<'_> {
                 let body = delete_targets(delete)
                     .into_iter()
                     .map(|target| {
-                        if let Some(op) = registered_delete_name(target) {
-                            return Some(Statement::Expr(op));
-                        }
-                        if let Some(sub) = target.as_subscript_expr() {
-                            let receiver = self.ordinary_operand(&sub.value)?;
-                            let key = values::index_key(&sub.slice, &mut |e| {
-                                self.ordinary_operand(e).ok_or(())
-                            })
-                            .ok()?;
-                            return Some(Statement::Expr(delete_item(receiver, key)));
-                        }
-                        let field = target.as_attribute_expr()?;
-                        let receiver = self.ordinary_operand(&field.value)?;
-                        Some(attribute_statement(
-                            ir::AttributeAction::Delete,
-                            field,
-                            vec![receiver],
-                        ))
+                        let (op, inputs) = deletion(target);
+                        let values = inputs
+                            .map(|input| input.lower(self))
+                            .collect::<Option<_>>()?;
+                        Some(Statement::Expr(operation(op, Type::None, values)))
                     })
                     .collect::<Option<_>>()
                     .ok_or(())?;
@@ -1369,14 +1775,63 @@ impl statements::StatementLowering for SourceScope<'_> {
     }
 }
 
-/// Attribute and subscript targets retain their ordinary receiver evaluation.
-fn registered_delete_name(target: &ast::Expr) -> Option<Expr> {
-    let name = target.as_name_expr()?;
-    Some(operation(
-        Builtin::RegisteredDeleteName(name.id.to_string(), name.range()),
-        Type::None,
-        vec![],
-    ))
+#[derive(Clone, Copy)]
+enum TargetInput<'a> {
+    Receiver(&'a ast::Expr),
+    Index(&'a ast::Expr),
+}
+
+impl TargetInput<'_> {
+    fn lower(self, scope: &mut SourceScope<'_>) -> Option<Expr> {
+        match self {
+            Self::Receiver(expr) => scope.ordinary_operand(expr),
+            Self::Index(key) => {
+                values::index_key(key, &mut |expr| scope.ordinary_operand(expr).ok_or(())).ok()
+            }
+        }
+    }
+
+    fn physical(
+        self,
+        source: values::RegisteredSource<'_>,
+        kind: RegisteredScope,
+    ) -> PhysicalOperand {
+        if let Some(value) =
+            RegisteredOperand::prepare_with(source, kind, |scope| self.lower(scope))
+        {
+            PhysicalOperand::Checked(Box::new(value))
+        } else {
+            let (Self::Receiver(expr) | Self::Index(expr)) = self;
+            PhysicalOperand::Source(Box::new(expr.clone()))
+        }
+    }
+}
+
+fn deletion(target: &ast::Expr) -> (Builtin, impl Iterator<Item = TargetInput<'_>> + Clone) {
+    use TargetInput::{Index, Receiver};
+    let (op, inputs) = match target {
+        ast::Expr::Name(name) => (
+            Builtin::RegisteredDeleteName(name.id.to_string(), name.range()),
+            [None, None],
+        ),
+        ast::Expr::Attribute(field) => (
+            attribute_opcode(ir::AttributeAction::Delete, field),
+            [Some(Receiver(&field.value)), None],
+        ),
+        ast::Expr::Subscript(sub) => (
+            Builtin::RegisteredDeleteItem,
+            [Some(Receiver(&sub.value)), Some(Index(&sub.slice))],
+        ),
+        _ => unreachable!("validated deletion target"),
+    };
+    (op, inputs.into_iter().flatten())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LoopScope {
+    Outside,
+    While,
+    WithCursor,
 }
 
 struct SourceScope<'a> {
@@ -1387,8 +1842,31 @@ struct SourceScope<'a> {
     names: HashMap<String, usize>,
     namespaces: HashMap<usize, LocalBinding>,
     comprehension: Option<eager::Namespace>,
+    generator_expression: bool,
     locals: Vec<Type>,
-    loop_depth: usize,
+    loop_scope: LoopScope,
+    suspending_operands: bool,
+}
+
+/// Prepare an inline expression that can require private slots in the enclosing activation.
+pub(crate) fn inline_operand(
+    expr: &ast::Expr,
+    source: values::RegisteredSource<'_>,
+    kind: RegisteredScope,
+) -> Option<RegisteredOperand> {
+    if !matches!(
+        expr,
+        ast::Expr::Named(_)
+            | ast::Expr::Dict(_)
+            | ast::Expr::ListComp(_)
+            | ast::Expr::SetComp(_)
+            | ast::Expr::DictComp(_)
+            | ast::Expr::Generator(_)
+            | ast::Expr::FString(_)
+    ) {
+        return None;
+    }
+    RegisteredOperand::prepare(expr, source, kind)
 }
 
 impl unpacking::PatternBinder for SourceScope<'_> {
@@ -1441,8 +1919,10 @@ impl<'a> SourceScope<'a> {
             names: HashMap::new(),
             namespaces: HashMap::new(),
             comprehension: None,
+            generator_expression: false,
             locals: Vec::new(),
-            loop_depth: 0,
+            loop_scope: LoopScope::Outside,
+            suspending_operands: false,
         }
     }
 
@@ -1464,6 +1944,15 @@ impl<'a> SourceScope<'a> {
         (self.locals, names)
     }
 
+    /// Discard bindings allocated by operands before a later operand failed to lower.
+    fn truncate_locals(&mut self, len: usize) {
+        if self.locals.len() != len {
+            self.locals.truncate(len);
+            self.names.retain(|_, slot| *slot < len);
+            self.namespaces.retain(|slot, _| *slot < len);
+        }
+    }
+
     fn finish(self, body: Vec<Statement>) -> RegisteredFunction {
         let (locals, local_names) = self.bindings();
         RegisteredFunction {
@@ -1478,7 +1967,104 @@ impl<'a> SourceScope<'a> {
     }
 }
 
+/// Which control transfers a checked region can handle inside a physical frame.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PhysicalRegion {
+    Fallthrough,
+    Loop,
+    Protected,
+}
+
+impl PhysicalRegion {
+    fn accepts(self, body: &[Statement]) -> bool {
+        let mut self_contained = true;
+        ir::walk_nodes(body, &mut |node, _| match node {
+            // Named definitions in loops and protected regions still need their source headers.
+            ir::Node::Expression(Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredDefinition(_), _),
+                ..
+            }) if self != Self::Fallthrough => self_contained = false,
+            ir::Node::Statement(Statement::Break | Statement::Continue | Statement::Exhaust)
+                if self != Self::Loop =>
+            {
+                self_contained = false;
+            }
+            ir::Node::Statement(Statement::Return(_) | Statement::Raise(_))
+                if self != Self::Protected =>
+            {
+                self_contained = false;
+            }
+            ir::Node::Statement(Statement::IterNext {
+                kind: ir::IterNextKind::Async(_),
+                ..
+            })
+            | ir::Node::Statement(Statement::With {
+                site: ir::ContextSite { is_async: true, .. },
+                ..
+            })
+            | ir::Node::Expression(Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredSuspend(..), _),
+                ..
+            }) => self_contained = false,
+            _ => {}
+        });
+        self_contained
+    }
+}
+
 impl SourceScope<'_> {
+    fn assignment_targets(
+        &mut self,
+        targets: &[ast::Expr],
+        value: Expr,
+    ) -> StdResult<Vec<Statement>, ()> {
+        let bind = |scope: &mut Self| unpacking::bind_assignment(scope, targets, value);
+        if self.loop_scope == LoopScope::WithCursor
+            && matches!(self.kind, RegisteredScope::Function { is_async: true })
+        {
+            return bind(self);
+        }
+        // A receiver or key runs in the assigning frame, after the binder captures its value.
+        self.with_suspending_operands(bind)
+    }
+
+    fn physical_statement(
+        &mut self,
+        stmt: &ast::Stmt,
+        body: &mut Vec<Statement>,
+    ) -> StdResult<bool, ()> {
+        if let ast::Stmt::Assign(assign) = stmt {
+            // The physical frame owns an assignment that yields or awaits its value.
+            if ir::SuspendValue::operand(&assign.value).is_some() {
+                return Err(());
+            }
+            return self.statement(stmt, body);
+        }
+        if stmt.is_delete_stmt()
+            || stmt.is_raise_stmt()
+            || self.sites.assertions.contains_key(&stmt.range())
+            || attribute_write(stmt).is_some()
+        {
+            return self.statement(stmt, body);
+        }
+        if !matches!(self.kind, RegisteredScope::Function { .. }) {
+            return Err(());
+        }
+        let region = match stmt {
+            ast::Stmt::If(_) => PhysicalRegion::Fallthrough,
+            ast::Stmt::For(loop_) if !loop_.is_async => PhysicalRegion::Loop,
+            ast::Stmt::Try(region) if !region.is_star => PhysicalRegion::Protected,
+            _ => return Err(()),
+        };
+        let begin = body.len();
+        let continues = self.statement(stmt, body)?;
+        if !region.accepts(&body[begin..]) {
+            body.truncate(begin);
+            return Err(());
+        }
+        Ok(continues)
+    }
+
     fn statement(&mut self, stmt: &ast::Stmt, body: &mut Vec<Statement>) -> StdResult<bool, ()> {
         if let ast::Stmt::Assert(assertion) = stmt {
             if let Some(statements) = self.sites.assertions.get(&stmt.range()) {
@@ -1504,42 +2090,55 @@ impl SourceScope<'_> {
         self.block(stmts).map(|(body, _)| body)
     }
 
+    fn with_binding(&mut self, target: &ast::Expr) -> StdResult<ir::ContextBinding, ()> {
+        let slot = self.hidden(Type::PythonObject);
+        let value = Expr::local(slot, Type::PythonObject);
+        let body = if pattern_elements(target).is_some() {
+            unpacking::bind_targets(self, target, value, None)?
+        } else {
+            self.assignment_targets(std::slice::from_ref(target), value)?
+        };
+        Ok(ir::ContextBinding {
+            entered: slot,
+            body: vec![Statement::Scope {
+                body,
+                clear: vec![slot],
+            }],
+        })
+    }
+
     fn with_items(
         &mut self,
         items: &[ast::WithItem],
+        inputs: &[ContextInput],
         suite: &[ast::Stmt],
     ) -> StdResult<Vec<Statement>, ()> {
         let Some((item, rest)) = items.split_first() else {
             return self.suite(suite);
         };
         let manager = self.ordinary_operand(&item.context_expr).ok_or(())?;
-        let site = self.sites.contexts[&item.context_expr.range()];
-        let mut body = Vec::new();
-        let entered = if let Some(target) = &item.optional_vars {
-            let slot = self.hidden(Type::PythonObject);
-            let binding =
-                unpacking::bind_targets(self, target, Expr::local(slot, Type::PythonObject), None)?;
-            body.push(Statement::Scope {
-                body: binding,
-                clear: vec![slot],
-            });
-            Some(slot)
-        } else {
-            None
-        };
-        body.extend(self.with_items(rest, suite)?);
+        let (input, remaining) = inputs.split_first().expect("with input");
+        let binding = item
+            .optional_vars
+            .as_ref()
+            .map(|target| self.with_binding(target))
+            .transpose()?;
+        let body = self.with_items(rest, remaining, suite)?;
         Ok(vec![Statement::With {
             manager,
-            site,
-            entered,
+            site: input.site,
+            binding,
             body,
         }])
     }
 
-    fn loop_body(&mut self, statements: &[ast::Stmt]) -> StdResult<Vec<Statement>, ()> {
-        self.loop_depth += 1;
-        let body = self.suite(statements);
-        self.loop_depth -= 1;
+    fn in_loop<T>(&mut self, kind: LoopScope, lower: impl FnOnce(&mut Self) -> T) -> T {
+        let enclosing = self.loop_scope;
+        if enclosing != LoopScope::WithCursor {
+            self.loop_scope = kind;
+        }
+        let body = lower(self);
+        self.loop_scope = enclosing;
         body
     }
 
@@ -1558,6 +2157,7 @@ impl SourceScope<'_> {
             .sites
             .matches
             .get(&branch.range())
+            .and_then(Option::as_ref)
             .ok_or(())?
             .cases;
         for (case, planned) in branch.cases.iter().zip(patterns) {
@@ -1618,22 +2218,113 @@ impl SourceScope<'_> {
         }
     }
 
+    fn iteration_body(
+        &mut self,
+        target: &ast::Expr,
+        input: &pipelines::Prepared,
+        body: impl FnOnce(&mut Self) -> StdResult<Vec<Statement>, ()>,
+    ) -> StdResult<(Vec<Statement>, Vec<Statement>), ()> {
+        let binding = unpacking::bind_targets(
+            self,
+            target,
+            Expr::local(input.value, Type::PythonObject),
+            None,
+        )?;
+        let body = self.in_loop(LoopScope::WithCursor, body)?;
+        Ok((binding, body))
+    }
+
+    fn iteration_input(
+        &mut self,
+        iterable: &ast::Expr,
+        pull: Option<ir::AsyncPull>,
+    ) -> Option<pipelines::Prepared> {
+        let value = self.ordinary_operand(iterable)?;
+        let (op, kind) = match pull {
+            Some(pull) => (
+                Builtin::RegisteredIter(ir::IteratorOp::Async(iterable.range())),
+                ir::IterNextKind::Async(pull),
+            ),
+            None => (Builtin::RegisteredIter(ir::IteratorOp::Loop), ir::IterNextKind::Generic),
+        };
+        let cursor = operation(op, Type::PythonObject, vec![value]);
+        Some(pipelines::Prepared::pull_cursor(
+            cursor,
+            Type::PythonObject,
+            kind,
+            |ty| self.hidden(ty),
+        ))
+    }
+
+    fn operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
+        self.lower_operand(expr, true)
+    }
+
+    fn with_suspending_operands<T>(&mut self, lower: impl FnOnce(&mut Self) -> T) -> T {
+        let previous = std::mem::replace(&mut self.suspending_operands, true);
+        let value = lower(self);
+        self.suspending_operands = previous;
+        value
+    }
+
+    fn lambda_binding(&mut self, lambda: &ast::ExprLambda) -> Option<Expr> {
+        let defaults = values::lambda_defaults(lambda)
+            .map(|default| self.ordinary_operand(default))
+            .collect::<Option<_>>()?;
+        Some(values::lambda_binding(lambda, defaults))
+    }
+
     fn ordinary_operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
-        let mut value = if matches!(
-            expr,
-            ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_)
-        ) {
+        self.lower_operand(expr, false)
+    }
+
+    fn lower_operand(&mut self, expr: &ast::Expr, whole: bool) -> Option<Expr> {
+        // A generator lambda can resume within its return expression. Eager
+        // display bodies use their own iteration and operand boundaries.
+        let suspension = match self.kind {
+            RegisteredScope::Function { is_async } if whole || self.suspending_operands => {
+                Some(is_async)
+            }
+            RegisteredScope::Lambda if self.comprehension.is_none() => Some(false),
+            _ => None,
+        };
+        let mut value = if let Some(is_async) = suspension
+            && let Some((kind, value)) = ir::SuspendValue::operand(expr)
+            && !matches!(
+                (kind, is_async),
+                (ir::SuspendValue::Await, false) | (ir::SuspendValue::Delegate, true)
+            )
+        {
+            self.suspend_operand(kind, value, expr.range())?
+        } else if let ast::Expr::TString(template) = expr {
+            self.source.template(
+                template,
+                matches!(self.kind, RegisteredScope::Function { .. } | RegisteredScope::Lambda),
+                |child| self.ordinary_operand(child),
+            )?
+        } else if let ast::Expr::FString(formatted) = expr {
+            self.with_suspending_operands(|scope| {
+                fstrings::registered_fstring(formatted, scope.source, |child| {
+                    scope.ordinary_operand(child).ok_or(())
+                })
+            })
+            .ok()?
+        } else if matches!(expr, ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_)) {
             self.eager_comprehension(expr)?
+        } else if (self.comprehension.is_some() || self.generator_expression)
+            && matches!(self.kind, RegisteredScope::Function { is_async: true })
+            && let ast::Expr::Await(awaited) = expr
+        {
+            self.suspend_operand(ir::SuspendValue::Await, Some(&awaited.value), expr.range())?
         } else if let ast::Expr::Lambda(lambda) = expr {
-            if !values::can_bind(lambda, self.source) {
+            if !values::has_checked_lambda_body(lambda, self.source) {
                 return None;
             }
-            let defaults = values::lambda_defaults(lambda)
-                .map(|default| self.ordinary_operand(default))
-                .collect::<Option<_>>()?;
-            let binding = values::lambda_binding(lambda, defaults);
-            if self.loop_depth != 0 {
-                // A default may suspend while its surrounding iteration cursor is live.
+            let binding = self.lambda_binding(lambda)?;
+            // A generator expression retains its own clause cursors across an awaited default.
+            if self.loop_scope != LoopScope::Outside
+                && !self.generator_expression
+            {
                 let mut suspends = false;
                 ir::walk_operand_expressions(&binding, &mut |child| {
                     suspends |= matches!(
@@ -1648,7 +2339,8 @@ impl SourceScope<'_> {
             binding
         } else if let ast::Expr::Named(named) = expr {
             let target = named.target.as_name_expr()?;
-            let value = self.ordinary_operand(&named.value)?;
+            // Binding has no preceding operand to keep live across a suspension.
+            let value = self.lower_operand(&named.value, whole)?;
             Expr {
                 ty: value.ty,
                 kind: ExprKind::Bind(self.slot(&target.id), Box::new(value)),
@@ -1660,47 +2352,44 @@ impl SourceScope<'_> {
                 None,
                 matches!(self.kind, RegisteredScope::Class),
                 |_| true,
-                |child| self.ordinary_operand(child).ok_or(()),
+                |child| {
+                    match expr {
+                        ast::Expr::Generator(_) => {
+                            self.creating_iterable(|scope| scope.ordinary_operand(child))
+                        }
+                        // The dictionary retains earlier operands while a key, value or spread suspends.
+                        ast::Expr::Dict(_) => self.operand(child),
+                        ast::Expr::Set(_) | ast::Expr::Subscript(_) if child.is_await_expr() => {
+                            self.operand(child)
+                        }
+                        _ => self.ordinary_operand(child),
+                    }
+                    .ok_or(())
+                },
             )
             .ok()??
         };
         if let Some(scope) = &self.comprehension {
-            values::in_namespace(
-                expr,
-                &mut value,
-                Expr::local(scope.slot, Type::PythonObject),
-            );
+            values::in_namespace(&mut value, Expr::local(scope.slot, Type::PythonObject));
         }
         Some(self.source.located(expr, value))
     }
 
-    fn operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
-        // The current loop cursor lives in this native activation; a suspension
-        // across a pull needs a persisted cursor in the generator frame.
-        if self.loop_depth == 0
-            && let RegisteredScope::Function { is_async } = self.kind
-            && let Some((kind, value)) = ir::SuspendValue::operand(expr)
-            && !matches!(
-                (kind, is_async),
-                (ir::SuspendValue::Await, false) | (ir::SuspendValue::Delegate, true)
-            )
-        {
-            // Admit a suspension only at this whole-expression boundary. All previous
-            // statements have committed their owners to the observable frame.
-            let value = match value {
-                Some(value) => self.ordinary_operand(value)?,
-                None => Expr::none(),
-            };
-            return Some(self.source.located(
-                expr,
-                operation(
-                    Builtin::RegisteredSuspend(kind, expr.range()),
-                    Type::PythonObject,
-                    vec![value],
-                ),
-            ));
-        }
-        self.ordinary_operand(expr)
+    fn suspend_operand(
+        &mut self,
+        kind: ir::SuspendValue,
+        operand: Option<&ast::Expr>,
+        range: TextRange,
+    ) -> Option<Expr> {
+        let value = match operand {
+            Some(operand) => self.ordinary_operand(operand)?,
+            None => Expr::none(),
+        };
+        Some(operation(
+            Builtin::RegisteredSuspend(kind, range),
+            Type::PythonObject,
+            vec![value],
+        ))
     }
 }
 
@@ -1750,7 +2439,24 @@ mod tests {
     }
 
     #[test]
-    fn unprepared_datetime_assertion_stays_physical() {
+    fn generic_method_closure_uses_ordinary_function_sites() {
+        let source = "class Box:\n    def capture[T](self, __value: T):\n        def get():\n            return __value\n        return get\n";
+        let mut body = ruff_python_parser::parse_module(source)
+            .unwrap()
+            .into_syntax()
+            .body;
+        let names = imre_ast::lower(&mut body);
+        let sites = registered_sites::<()>(&body, &names, &HashMap::new());
+        let [method, closure] = sites.functions.as_slice() else {
+            panic!("expected the method and its lexical function");
+        };
+        assert!(method.prepare_entry && closure.prepare_entry);
+        assert!(sites.operations.contains_key(&method.def.name.range()));
+        assert_eq!(closure.def.name.as_str(), "get");
+    }
+
+    #[test]
+    fn datetime_assertion_formats_its_message_on_the_failure_edge() {
         let text = include_str!("../../stdlib/_pydatetime.py");
         let module = ruff_python_parser::parse_module(text).unwrap();
         let body = &module.syntax().body;
@@ -1771,7 +2477,8 @@ mod tests {
             Some(ast::Expr::FString(_))
         ));
         let source = RegisteredSource {
-            templates: None,
+            template_fields: None,
+            generators: None,
             lambdas: None,
             text,
             private_names: None,
@@ -1783,14 +2490,27 @@ mod tests {
         let operations = HashMap::new();
         let mut preparation = SuitePreparation::new(&operations, source, stmts, true);
         let plan = preparation.suite(stmts, RegisteredScope::Function { is_async: false });
-        assert!(plan.checked.function.body.is_empty());
-        assert_eq!(plan.residual.len(), 1);
-        assert_eq!(plan.residual[0].statements, 0..1);
+        assert!(plan.fully_checked());
+        let [_, Statement::If(_, succeeds, fails)] = plan.checked.function.body.as_slice() else {
+            panic!("expected the checked assertion checkpoint and branch");
+        };
+        assert!(succeeds.is_empty());
+        let mut fields = 0;
+        ir::walk_nodes(fails, &mut |node, _| {
+            if let ir::Node::Expression(Expr {
+                kind: ExprKind::Builtin(Builtin::FormatField, _),
+                ..
+            }) = node
+            {
+                fields += 1;
+            }
+        });
+        assert_eq!(fields, 1);
     }
 
     #[test]
     fn assertion_admission_keeps_the_message_on_the_failure_edge() {
-        let text = "assert (lost := probe()), f'{value}'\nassert (selected := [value][0]), [message(), values[1:]]\n";
+        let text = "assert (lost := probe()), f'{(item for item in values)}'\nassert (selected := [value][0]), [message(), values[1:]]\n";
         let graph = SourceGraph::single(text).unwrap();
         let module = &graph.modules[graph.entry];
         let body = &module.parsed.syntax().body;
@@ -1804,7 +2524,7 @@ mod tests {
         assert_eq!(plan.checked.local_names.len(), 1);
         assert_eq!(plan.checked.local_names[&0].name, "selected");
         let [physical] = plan.residual.as_slice() else {
-            panic!("expected only the f-string assertion to remain physical");
+            panic!("expected the generator-expression message to remain physical");
         };
         assert_eq!(physical.at, 0);
         assert_eq!(physical.statements, 0..1);
@@ -1872,6 +2592,39 @@ mod tests {
             });
             assert_eq!(calls, 1);
         }
+    }
+
+    #[test]
+    fn parameter_annotation_callback_preserves_field_order_and_string_operands() {
+        let text =
+            "def f(a: mod.T, /, b: 'list[T]', *args: int, c: bool, **kw: bytes) -> None: pass\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let stmts = &module.parsed.syntax().body;
+        let sites = prepared_sites(
+            stmts,
+            values::ModuleSource::new(module).context(text),
+            false,
+        );
+        let def = stmts[0].as_function_def_stmt().unwrap();
+        let provider = &sites.parameter_annotations[&def.parameters.start()];
+        assert!(provider.body.fully_checked());
+        let fields: Vec<_> = provider
+            .entries
+            .iter()
+            .map(|entry| &sites.annotations[&entry.site])
+            .collect();
+        let names: Vec<_> = fields.iter().map(|field| field.name.as_str()).collect();
+        assert_eq!(names, ["b", "a", "args", "c", "kw", "return"]);
+        assert!(matches!(
+            &fields[0].value,
+            AnnotationValue::Checked(Expr {
+                kind: ExprKind::Builtin(Builtin::BindAnnotationExpression(site), _), ..
+            }) if *site == fields[0].range.start()
+        ));
+        assert_eq!(provider.references["a"], "mod.T");
+        assert_eq!(provider.references["return"], "None");
+        assert!(!provider.references.contains_key("b"));
     }
 
     #[test]
@@ -1988,7 +2741,8 @@ mod tests {
         let replacements = HashMap::new();
         let imports = imre_ast::module_imports(&stmts);
         let source = RegisteredSource {
-            templates: None,
+            template_fields: None,
+            generators: None,
             lambdas: None,
             text,
             private_names: Some(&names),
@@ -2083,16 +2837,17 @@ mod tests {
         let bodies = graph.registered_functions();
         let body = &bodies[&graph.entry][&TextSize::default()].function.body;
         assert!(body.iter().any(|stmt| matches!(stmt, Statement::If(..))));
-        let mut counts = [0; 5];
+        let mut counts = [0; 6];
         ir::walk_expressions(body, &mut |expr| match &expr.kind {
             ExprKind::Conditional(..) => counts[0] += 1,
             ExprKind::Boolean(..) => counts[1] += 1,
             ExprKind::BooleanValue(..) => counts[2] += 1,
             ExprKind::Builtin(Builtin::RegisteredName(name), _) if name == "bool" => counts[3] += 1,
             ExprKind::Builtin(Builtin::RegisteredCall(..), _) => counts[4] += 1,
+            ExprKind::Invoke { .. } => counts[5] += 1,
             _ => {}
         });
-        assert_eq!(counts, [1, 1, 2, 1, 3]);
+        assert_eq!(counts, [1, 1, 2, 1, 1, 2]);
     }
 
     #[test]
@@ -2253,7 +3008,10 @@ mod tests {
         let mut headers = 0;
         ir::walk_expressions(&suite.function.body, &mut |expr| {
             if let ExprKind::Builtin(
-                Builtin::RegisteredDefinition(ir::DefinitionSite::Class { arguments, .. }),
+                Builtin::RegisteredDefinition(ir::DefinitionSite::Class {
+                    arguments: Some(arguments),
+                    ..
+                }),
                 operands,
             ) = &expr.kind
             {
@@ -2264,6 +3022,76 @@ mod tests {
             }
         });
         assert_eq!(headers, 1);
+    }
+
+    #[test]
+    fn inline_bind_inherits_the_whole_operand_suspension_boundary() {
+        let prepare = |rhs: &str, is_async| {
+            let text = format!("async def run(value):\n    return (saved := {rhs})\n");
+            let graph = SourceGraph::single(&text).unwrap();
+            let module = &graph.modules[graph.entry];
+            let def = module.parsed.syntax().body[0].as_function_def_stmt().unwrap();
+            let expr = def.body[0].as_return_stmt().unwrap().value.as_deref().unwrap();
+            let literals = values::ModuleSource::new(module);
+            inline_operand(expr, literals.context(&text), RegisteredScope::Function { is_async })
+        };
+        let operand = prepare("(inner := await value)", true).unwrap();
+        crate::verify::registered(operand.region()).unwrap();
+        assert_eq!(operand.local_names.len(), 2);
+        assert!(prepare("await value", false).is_none());
+        assert!(prepare("[value, (inner := await value)]", true).is_none());
+    }
+
+    #[test]
+    fn standalone_dictionary_uses_the_current_async_scope() {
+        let text = concat!(
+            "async def gather(stream, first, second, mapping):\n",
+            "    return {0: (saved := [item async for item in stream]),\n",
+            "            1: {await first, await second}, **await mapping}\n",
+        );
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let def = module.parsed.syntax().body[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let value = def.body[0]
+            .as_return_stmt()
+            .unwrap()
+            .value
+            .as_deref()
+            .unwrap();
+        let literals = values::ModuleSource::new(module);
+        let source = literals.context(text);
+        let prepare = |is_async| inline_operand(value, source, RegisteredScope::Function { is_async });
+        assert!(prepare(false).is_none());
+        let operand = prepare(true).unwrap();
+        crate::verify::registered(operand.region()).unwrap();
+        assert!(operand.local_names.values().any(|binding| binding.name == "saved"));
+        let mut awaits = Vec::new();
+        ir::walk_operand_expressions(&operand.value, &mut |value| {
+            if let ExprKind::Builtin(Builtin::RegisteredSuspend(ir::SuspendValue::Await, range), _) =
+                &value.kind
+            {
+                awaits.push(&text[*range]);
+            }
+        });
+        assert_eq!(awaits, ["await first", "await second", "await mapping"]);
+    }
+
+    #[test]
+    fn eager_first_iterable_can_delegate_before_the_cursor_exists() {
+        let text = "def gather():\n    return [value for value in ((yield from rows) or ())]\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let function = module.parsed.syntax().body[0].as_function_def_stmt().unwrap();
+        let expr = function.body[0].as_return_stmt().unwrap().value.as_deref().unwrap();
+        let literals = values::ModuleSource::new(module);
+        let source = literals.context(text);
+        let value = inline_operand(expr, source, RegisteredScope::Function { is_async: false })
+            .expect("the creating generator owns the outer yield");
+        crate::verify::registered(value.region()).unwrap();
+        assert!(inline_operand(expr, source, RegisteredScope::Module).is_none());
+        assert!(inline_operand(expr, source, RegisteredScope::Function { is_async: true }).is_none());
     }
 
     #[test]
@@ -2367,7 +3195,7 @@ mod tests {
         let mut callbacks = 0;
         ir::walk_expressions(&body.body, &mut |expr| match expr.kind {
             ExprKind::Binary(Binary::Add, ..) => adds += 1,
-            ExprKind::Builtin(Builtin::RegisteredCall(..), _) => callbacks += 1,
+            ExprKind::Invoke { .. } => callbacks += 1,
             _ => {}
         });
         assert_eq!((adds, callbacks), (1, 1));
@@ -2526,6 +3354,43 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_generator_calls_retain_their_checked_body_and_typed_neighbor() {
+        let graph = SourceGraph::single(concat!(
+            "def bump(value: int) -> int:\n",
+            "    return value + 1\n",
+            "def values():\n",
+            "    for item in (1, 2):\n",
+            "        yield item\n",
+            "for value in values(): print(bump(5), value)\n",
+        ))
+        .unwrap();
+        let _ = super::super::lower(&graph);
+        let module = &graph.modules[graph.entry];
+        let table = graph.registered_functions();
+        let bodies = &table[&graph.entry];
+        let body = &bodies[&module.parsed.syntax().body[1].start()]
+            .function
+            .body;
+        let mut suspension = false;
+        ir::walk_expressions(body, &mut |expr| {
+            suspension |= matches!(
+                expr.kind,
+                ExprKind::Builtin(Builtin::RegisteredSuspend(..), _)
+            )
+        });
+        assert!(suspension);
+        let body = &bodies[&module.parsed.syntax().body[0].start()]
+            .function
+            .body;
+        let mut addition = false;
+        ir::walk_expressions(body, &mut |expr| {
+            addition |=
+                expr.ty == Type::Int && matches!(expr.kind, ExprKind::Binary(ir::Binary::Add, ..))
+        });
+        assert!(addition);
+    }
+
+    #[test]
     fn solved_scalar_arithmetic_uses_the_registered_entry() {
         let dir = tempfile::tempdir().unwrap();
         let main = dir.path().join("__main__.py");
@@ -2575,17 +3440,83 @@ mod tests {
         );
         let mut checkpoints = Vec::new();
         let mut checked_adds = 0;
-        let mut object_calls = 0;
+        let mut invokes = 0;
         ir::walk_expressions(&body.body, &mut |expr| match expr.kind {
             ExprKind::Builtin(Builtin::RegisteredStatement(range, _), _) => {
                 checkpoints.push(&graph.modules[graph.entry].source[range]);
             }
             ExprKind::Binary(Binary::Add, ..) => checked_adds += 1,
-            ExprKind::Builtin(Builtin::RegisteredCall(..), _) => object_calls += 1,
+            ExprKind::Invoke { ref args, .. } => {
+                let site = args.python_site.as_ref().unwrap();
+                let source = &graph.modules[graph.entry].source;
+                assert_eq!(&source[site.range], "sink(answer)");
+                let name = site.suspended_name.unwrap();
+                assert_eq!(&source[name], "sink");
+                assert_eq!(name.end(), site.callee_end);
+                assert_eq!(args.order, [0]);
+                assert_eq!(expr.ty, Type::PythonObject);
+                invokes += 1;
+            }
             _ => {}
         });
         assert_eq!(checkpoints, ["answer = x + y", "pass", "sink(answer)"]);
-        assert_eq!((checked_adds, object_calls), (1, 1));
+        assert_eq!((checked_adds, invokes), (1, 1));
+    }
+
+    #[test]
+    fn computed_positional_calls_bind_the_evaluated_callee() {
+        let source = concat!(
+            "def apply(factory, obj, value):\n",
+            "    factory()(value)\n",
+            "    (obj.action if value else factory)(value)\n",
+            "    obj.action(value)\n",
+            "    factory(*value)\n",
+        );
+        let graph = SourceGraph::single(source).unwrap();
+        let _ = super::super::lower(&graph);
+        let functions = graph.registered_functions();
+        let checked = &functions[&graph.entry][&TextSize::default()];
+        assert!(crate::llvm::registered::supports(checked));
+        let mut calls = Vec::new();
+        ir::walk_expressions(&checked.function.body, &mut |expr| match &expr.kind {
+            ExprKind::Invoke { callable, args } => {
+                let site = args.python_site.as_ref().unwrap();
+                let ExprKind::Builtin(Builtin::RegisteredLocation(range, _), callee) =
+                    &callable.kind
+                else {
+                    panic!("expected the checked callable operand");
+                };
+                assert_eq!(site.callee_end, range.end());
+                let kind = match &callee[0].kind {
+                    ExprKind::Local(_) => "local",
+                    ExprKind::Invoke { .. } => "result",
+                    ExprKind::Conditional(..) => "conditional",
+                    _ => panic!("unexpected positional callable"),
+                };
+                calls.push((&source[site.range], kind));
+            }
+            ExprKind::Builtin(Builtin::RegisteredCall(site), _) => {
+                let kind = match (&site.target, &site.arguments) {
+                    (ir::RegisteredCallTarget::Method { .. }, ir::RegisteredArguments::Positional) => {
+                        "method"
+                    }
+                    (_, ir::RegisteredArguments::Packed(_)) => "packed",
+                    _ => panic!("unexpected registered call"),
+                };
+                calls.push((&source[site.range], kind));
+            }
+            _ => {}
+        });
+        assert_eq!(
+            calls,
+            [
+                ("factory()(value)", "result"),
+                ("factory()", "local"),
+                ("(obj.action if value else factory)(value)", "conditional"),
+                ("obj.action(value)", "method"),
+                ("factory(*value)", "packed"),
+            ]
+        );
     }
 
     #[test]
@@ -2794,7 +3725,7 @@ mod tests {
         let graph = SourceGraph::single(positive).unwrap();
         let selected = super::super::lower_current(&graph, None, &mut HashSet::new());
         match selected {
-            Ok(crate::CheckedProgram::Registered) => {}
+            Ok(crate::CheckedProgram::Registered(None)) => {}
             Err(error) | Ok(crate::CheckedProgram::Runtime(error)) => {
                 assert!(
                     matches!(error.kind, Kind::UnresolvedParameter(owner, start)
@@ -2951,11 +3882,12 @@ mod tests {
         let mut filters = 0;
         ir::walk_statements(&checked.function.body, &mut |stmt| match stmt {
             Statement::With {
-                entered: Some(slot),
-                body,
+                binding: Some(binding),
                 ..
             } => {
-                assert!(matches!(&body[0], Statement::Scope { clear, .. } if clear == &[*slot]));
+                assert!(
+                    matches!(binding.body.as_slice(), [Statement::Scope { clear, .. }] if clear == &[binding.entered])
+                );
                 targets += 1;
             }
             Statement::Try { handlers, .. } => {
@@ -3036,7 +3968,9 @@ mod tests {
         let mut anchors: Vec<_> = sites
             .contexts
             .values()
-            .map(|site| {
+            .flatten()
+            .map(|input| {
+                let site = input.site;
                 (
                     &text[site.range],
                     &text[site.range.start().to_usize()..site.anchor.to_usize()],
@@ -3145,22 +4079,114 @@ mod tests {
     }
 
     #[test]
-    fn suspending_loop_keeps_its_resumable_generator_body() {
-        let graph =
-            SourceGraph::single("def sales(rows):\n    for row in rows:\n        yield row\n")
+    fn traceback_while_suspends_without_a_for_cursor() {
+        fn prepare(text: &str, name: &str) -> Option<RegisteredFunction> {
+            let module = ruff_python_parser::parse_module(text).unwrap();
+            let body = &module.syntax().body;
+            let function = body
+                .iter()
+                .filter_map(ast::Stmt::as_function_def_stmt)
+                .find(|def| def.name.as_str() == name)
                 .unwrap();
-        let definition = graph.modules[graph.entry].parsed.syntax().body[0]
+            let source = RegisteredSource {
+                template_fields: None,
+                generators: None,
+                lambdas: None,
+                text,
+                private_names: None,
+                method_imports: &imre_ast::module_imports(body),
+                replacements: &HashMap::new(),
+                has_templates: false,
+            };
+            registered_suite(
+                &function.body,
+                RegisteredScope::Function { is_async: false },
+                source,
+            )
+        }
+
+        let checked = prepare(include_str!("../../stdlib/traceback.py"), "walk_tb").unwrap();
+        let mut yields_per_loop = Vec::new();
+        ir::walk_statements(&checked.function.body, &mut |stmt| {
+            if let Statement::While(_, body, _) = stmt {
+                let mut yields = 0;
+                ir::walk_expressions(body, &mut |value| {
+                    if matches!(
+                        value.kind,
+                        ExprKind::Builtin(
+                            Builtin::RegisteredSuspend(ir::SuspendValue::Yield, _),
+                            _
+                        )
+                    ) {
+                        yields += 1;
+                    }
+                });
+                yields_per_loop.push(yields);
+            }
+        });
+        assert_eq!(yields_per_loop, [1]);
+        let nested = "def walk(rows, test):\n    for row in rows:\n        while test(row):\n            yield row\n";
+        assert!(prepare(nested, "walk").is_some());
+    }
+
+    #[test]
+    fn synchronous_suspensions_retain_the_checked_loop_cursor() {
+        let source = concat!(
+            "def sales(rows):\n",
+            "    for row in rows:\n",
+            "        received = yield row\n",
+            "        yield from received\n",
+        );
+        assert_cursor_suspensions(source, &["yield row", "yield from received"]);
+    }
+
+    #[test]
+    fn awaited_calls_retain_the_checked_loop_cursor() {
+        let source =
+            "async def visit(rows, call):\n    for row in rows:\n        await call(row)\n";
+        assert_cursor_suspensions(source, &["await call(row)"]);
+    }
+
+    #[test]
+    fn awaited_subscription_binds_its_result_in_the_checked_loop() {
+        let source = concat!(
+            "async def visit(rows, key):\n",
+            "    for result in rows:\n",
+            "        left, right = (await result)[await key()]\n",
+        );
+        assert_cursor_suspensions(source, &["await result", "await key()"]);
+    }
+
+    fn assert_cursor_suspensions(source: &str, expected: &[&str]) {
+        let graph = SourceGraph::single(source).unwrap();
+        let module = &graph.modules[graph.entry];
+        let definition = module.parsed.syntax().body[0]
             .as_function_def_stmt()
             .unwrap();
-        assert!(
-            registered_suite(
-                &definition.body,
-                RegisteredScope::Function { is_async: false },
-                values::ModuleSource::new(&graph.modules[graph.entry])
-                    .context(&graph.modules[graph.entry].source)
-            )
-            .is_none()
-        );
+        let checked = registered_suite(
+            &definition.body,
+            RegisteredScope::Function {
+                is_async: definition.is_async,
+            },
+            values::ModuleSource::new(module).context(&module.source),
+        )
+        .expect("complete suspended body");
+        let mut cursors = Vec::new();
+        let mut suspensions = Vec::new();
+        ir::walk_statements(&checked.function.body, &mut |stmt| {
+            if let Statement::IterNext { iterator, .. } = stmt {
+                cursors.push(*iterator);
+            }
+        });
+        ir::walk_expressions(&checked.function.body, &mut |expr| {
+            if let ExprKind::Builtin(Builtin::RegisteredSuspend(kind, range), _) = &expr.kind {
+                assert_eq!(matches!(kind, ir::SuspendValue::Await), definition.is_async);
+                suspensions.push(&source[*range]);
+            }
+        });
+        assert_eq!(cursors.len(), 1);
+        assert!(checked.region().private_slots().contains(&cursors[0]));
+        assert_eq!(suspensions, expected);
     }
 
     #[test]
@@ -3246,8 +4272,8 @@ mod tests {
         let mut opens = 0;
         let mut calls = 0;
         ir::walk_expressions(&function.body, &mut |expr| match &expr.kind {
-            ExprKind::Builtin(Builtin::RegisteredIter, _) => opens += 1,
-            ExprKind::Builtin(Builtin::RegisteredCall(..), _) => calls += 1,
+            ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::Loop), _) => opens += 1,
+            ExprKind::Invoke { .. } => calls += 1,
             _ => {}
         });
         let mut pulls = 0;
@@ -3271,6 +4297,7 @@ mod tests {
             "    sink([project(rows) for rows in rows if accept(rows)])\n",
             "    sink({project(x) for x in rows})\n",
             "    sink({project(x): project(x) for x in rows})\n",
+            "    sink([(locals if observed else globals)() for observed in rows])\n",
         ))
         .unwrap();
         let _ = super::super::lower(&graph);
@@ -3278,25 +4305,40 @@ mod tests {
         let checked = &bodies[&graph.entry][&TextSize::default()];
         let mut namespaces = 0;
         let mut scoped_calls = 0;
+        let mut observers = 0;
         let mut pulls = 0;
         ir::walk_expressions(&checked.function.body, &mut |expr| match &expr.kind {
             ExprKind::Builtin(Builtin::RegisteredNamespace(_), _) => namespaces += 1,
-            ExprKind::Builtin(Builtin::RegisteredCall(call), _) if call.explicit_scope => {
-                scoped_calls += 1
+            ExprKind::Invoke { args, .. }
+                if let Some(site) = &args.python_site
+                    && let Some(scope) = &site.scope =>
+            {
+                let ExprKind::Local(namespace) = scope.kind else {
+                    panic!("expected the comprehension's namespace slot")
+                };
+                scoped_calls += 1;
+                if &graph.modules[graph.entry].source[site.range]
+                    == "(locals if observed else globals)()"
+                {
+                    assert!(checked.local_names.values().any(|binding| {
+                        binding.name == "observed" && binding.namespace == Some(namespace)
+                    }));
+                    observers += 1;
+                }
             }
             _ => {}
         });
         ir::walk_statements(&checked.function.body, &mut |stmt| {
             pulls += usize::from(matches!(stmt, Statement::IterNext { .. }));
         });
-        assert_eq!((namespaces, scoped_calls, pulls), (3, 5, 3));
+        assert_eq!((namespaces, scoped_calls, observers, pulls), (4, 6, 1, 4));
         assert_eq!(
             checked
                 .local_names
                 .values()
                 .filter(|binding| binding.namespace.is_some())
                 .count(),
-            3
+            4
         );
     }
 

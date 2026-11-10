@@ -68,6 +68,17 @@ impl SourcePosition {
     }
 }
 
+#[derive(Default)]
+pub(crate) enum AnnotationScope {
+    #[default]
+    Plain,
+    Method(ClassBindings),
+    Class {
+        globals: BTreeSet<String>,
+        conditional: bool,
+    },
+}
+
 /// The registered calling convention supplies object handles, scoped roots and pending errors.
 pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) output: &'a mut Output,
@@ -80,7 +91,7 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) async_generator: bool,
     pub(crate) class_locals: Option<ClassBindings>,
     pub(crate) annotation_values: Option<String>,
-    pub(crate) annotation_class: Option<(BTreeSet<String>, bool)>,
+    pub(crate) annotation_scope: AnnotationScope,
     annotation_active: Option<String>,
     pub(crate) module_annotation_sites: Option<Vec<TextSize>>,
     pub(crate) body: FunctionBody,
@@ -97,6 +108,8 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) expression_integer_start: Option<usize>,
     // A caught error abandons this expression's intermediates and preserves enclosing owners.
     integer_unwinds: BTreeMap<(usize, String), (usize, String)>,
+    /// Private roots whose lexical scope exits at an existing error landing block.
+    pub(super) scope_unwinds: BTreeMap<String, BTreeSet<usize>>,
     pub(crate) caught: Vec<String>,
     pub(crate) simple_call: Option<TextRange>,
     pub(super) position: SourcePosition,
@@ -129,7 +142,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             async_generator: false,
             class_locals: None,
             annotation_values: None,
-            annotation_class: None,
+            annotation_scope: AnnotationScope::Plain,
             annotation_active: None,
             module_annotation_sites: None,
             id,
@@ -143,6 +156,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             integer_owners: 0,
             expression_integer_start: None,
             integer_unwinds: BTreeMap::new(),
+            scope_unwinds: BTreeMap::new(),
             caught: Vec::new(),
             simple_call: None,
             position: SourcePosition::statement(0),
@@ -160,12 +174,20 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         } else {
             format!("  %live = alloca [{} x i64]\n", self.max_live)
         };
-        for slot in 0..self.private_slot_count {
+        let count = self.private_slot_count;
+        if count != 0 {
             writeln!(
                 entry,
-                "  %ir_slot{slot} = alloca i64\n  store i64 0, ptr %ir_slot{slot}"
+                "  %ir_slot0 = alloca [{count} x i64]\n  store [{count} x i64] zeroinitializer, ptr %ir_slot0"
             )
             .unwrap();
+            for slot in 1..count {
+                writeln!(
+                    entry,
+                    "  %ir_slot{slot} = getelementptr i64, ptr %ir_slot0, i64 {slot}"
+                )
+                .unwrap();
+            }
         }
         for slot in 0..self.integer_owners {
             writeln!(
@@ -353,6 +375,11 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     pub(crate) fn label(&mut self, label: &str) {
         self.flush_check();
         self.body.start(label);
+        if let Some(slots) = self.scope_unwinds.remove(label) {
+            for slot in slots {
+                self.line(&format!("store i64 0, ptr %ir_slot{slot}"));
+            }
+        }
     }
 
     pub(crate) fn branch(&mut self, condition: &str, yes: &str, no: &str) {
@@ -606,6 +633,32 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         ))
     }
 
+    pub(crate) fn format_conversion(&mut self, value: &str, conversion: char) -> String {
+        let flag = self.text(&conversion.to_string());
+        self.format_at_field("format_conversion", &[value, &flag])
+    }
+
+    pub(crate) fn format_field(&mut self, value: &str, spec: &str) -> String {
+        self.format_at_field("format", &[value, "0", spec])
+    }
+
+    fn format_at_field(&mut self, op: &str, args: &[&str]) -> String {
+        self.call_position(self.current_range);
+        self.op(op, args)
+    }
+
+    /// Join completed fields without dispatching to a Python string subclass's addition.
+    pub(crate) fn format_join(&mut self, mark: &str, parts: Vec<String>) -> String {
+        let result = parts
+            .into_iter()
+            .reduce(|left, right| self.op("format_concat", &[&left, &right]))
+            .unwrap_or_else(|| self.text(""));
+        self.line(&format!(
+            "call void @imre_dyn_finish_format_join(ptr %ctx, i64 {mark}, i64 {result})"
+        ));
+        result
+    }
+
     /// Save the caller's earlier operands before an expression can release a writer.
     pub(crate) fn temporary_mark(&mut self) -> String {
         self.value("call i64 @imre_dyn_truth_mark(ptr %ctx)")
@@ -632,21 +685,56 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         Some([line, col, col + (split - start), col + (end - start)])
     }
 
-    /// Store the handles that must survive the next statement or assignment target.
-    fn live_handles(&mut self) -> (&'static str, usize) {
-        let mut live = self.live.clone();
-        for i in 0..self.live_slots.len() {
-            let slot = self.live_slots[i];
-            live.push(self.value(&format!("load i64, ptr %ir_slot{slot}")));
+    /// Pass consecutive private roots in place. Mixed or discontiguous roots need a snapshot.
+    fn live_handles(&mut self, trailing: &[&str]) -> (String, usize) {
+        if trailing.is_empty()
+            && self.live.is_empty()
+            && let Some(first) = self.live_slots.first()
+            && self
+                .live_slots
+                .windows(2)
+                .all(|pair| pair[1] == pair[0] + 1)
+        {
+            return (format!("%ir_slot{first}"), self.live_slots.len());
         }
-        self.handle_array(&live)
+        let (_, prefix) = self.handle_array(&self.live.clone());
+        let mut copied = 0;
+        while let Some(run) = self.live_slots[copied..]
+            .chunk_by(|a, b| *b == *a + 1)
+            .next()
+        {
+            let first = run[0];
+            let len = run.len();
+            let offset = prefix + copied;
+            let dst = self.value(&format!("getelementptr i64, ptr %live, i64 {offset}"));
+            if len == 1 {
+                let value = self.value(&format!("load i64, ptr %ir_slot{first}"));
+                self.line(&format!("store i64 {value}, ptr {dst}"));
+            } else {
+                self.line(&format!(
+                    "call void @llvm.memcpy.p0.p0.i64(ptr {dst}, ptr %ir_slot{first}, i64 {}, i1 false)",
+                    len * 8
+                ));
+            }
+            copied += len;
+        }
+        let (ptr, count) = self.write_handles_at(prefix + copied, trailing);
+        (ptr.to_owned(), count)
     }
 
     /// Copy evaluated handles into reusable storage in this activation's entry block.
     pub(crate) fn handle_array(&mut self, values: &[impl AsRef<str>]) -> (&'static str, usize) {
-        let count = values.len();
+        self.write_handles_at(0, values)
+    }
+
+    fn write_handles_at(
+        &mut self,
+        offset: usize,
+        values: &[impl AsRef<str>],
+    ) -> (&'static str, usize) {
+        let count = offset + values.len();
         self.max_live = self.max_live.max(count);
-        for (i, value) in values.iter().enumerate() {
+        for (i, value) in (offset..).zip(values) {
             let value = value.as_ref();
             let ptr = self.value(&format!("getelementptr i64, ptr %live, i64 {i}"));
             self.line(&format!("store i64 {value}, ptr {ptr}"));
@@ -655,7 +743,12 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     }
 
     pub(crate) fn checkpoint(&mut self, range: TextRange) {
-        let (ptr, count) = self.live_handles();
+        self.checkpoint_with_roots(range, &[]);
+    }
+
+    /// Place temporary operands after all outer frame roots, including private slots.
+    pub(super) fn checkpoint_with_roots(&mut self, range: TextRange, trailing: &[&str]) {
+        let (ptr, count) = self.live_handles(trailing);
         let line = self.positions.line(range.start());
         self.position = SourcePosition::statement(line);
         self.line(&format!(
@@ -681,6 +774,20 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         self.line(&format!(
             "call void @imre_dyn_call_position(ptr %ctx, ptr {position})"
         ));
+    }
+
+    pub(crate) fn positioned_call(
+        &mut self,
+        callable: &str,
+        operands: CallArguments,
+        mark: &str,
+        range: TextRange,
+        callee_end: TextSize,
+        scope: &str,
+    ) -> String {
+        let span = self.expression_range_span(range, callee_end, b'(');
+        self.call_position(range);
+        self.call_in_scope(callable, operands, mark, span, scope)
     }
 
     /// Pass the caller's temporary root boundary and optional traceback position.
@@ -774,7 +881,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         if let Some((mark, value)) = expression {
             self.line(&format!("call void @imre_dyn_named_assignment(ptr %ctx, i64 {mark}, i64 {value}, i64 {replaced})"));
         } else {
-            let (ptr, count) = self.live_handles();
+            let (ptr, count) = self.live_handles(&[]);
             self.line(&format!("call void @imre_dyn_assignment_target(ptr %ctx, ptr {ptr}, i64 {count}, i64 {replaced})"));
         }
     }
@@ -857,17 +964,23 @@ impl RegisteredFrame<'_, '_> {
         ))
     }
 
-    pub(crate) fn check_annotation_format(&mut self) {
+    pub(crate) fn begin_annotations(&mut self) {
+        // The format argument belongs to this callback, even if the class also defines it.
         let format = self.lookup("format");
         self.op("annotation_format", &[&format]);
-    }
-
-    pub(crate) fn begin_annotations(&mut self) {
-        self.check_annotation_format();
-        let Some((globals, conditional)) = self.annotation_class.clone() else {
-            self.annotation_values = Some(self.op("dict", &[]));
-            self.scope = self.op("annotation_scope", &[&self.scope.clone()]);
-            return;
+        let (globals, conditional) = match &self.annotation_scope {
+            AnnotationScope::Class {
+                globals,
+                conditional,
+            } => (globals.clone(), *conditional),
+            scope => {
+                if let AnnotationScope::Method(class) = scope {
+                    self.class_locals = Some(class.clone());
+                }
+                self.annotation_values = Some(self.op("dict", &[]));
+                self.scope = self.op("annotation_scope", &[&self.scope.clone()]);
+                return;
+            }
         };
         if conditional {
             self.annotation_active = Some(self.lookup("__conditional_annotations__"));
@@ -903,6 +1016,69 @@ impl RegisteredFrame<'_, '_> {
         let result = self.suspend_at(&iterator, Suspension::Await, range, mark);
         self.keep_operands(mark, &result, "0");
         result
+    }
+
+    pub(crate) fn retained_loop_header(&mut self, header: TextSize) {
+        if self.native_suspension && !self.iteration.in_expression {
+            // A retained frame exposes the statement header on each pull, including exhaustion.
+            self.set_statement_line(self.positions.line(header));
+        }
+    }
+
+    /// Enter the item block, or transfer to the exhaustion edge before binding a target.
+    /// A fused two-target pull leaves both items in the frame's scratch slots.
+    pub(crate) fn enter_sync_iteration(
+        &mut self,
+        cursor: &str,
+        has_else: bool,
+        unpack_pair: bool,
+        item: &str,
+        exhausted: &str,
+    ) {
+        let more = if unpack_pair {
+            self.max_live = self.max_live.max(2);
+            self.checked(&format!(
+                "call i64 @imre_dyn_next_pair(ptr %ctx, i64 {cursor}, ptr %live, i1 {has_else})"
+            ))
+        } else {
+            self.op(if has_else { "more_else" } else { "more" }, &[cursor])
+        };
+        let ready = self.value(&format!("icmp eq i64 {more}, {}", permanent::TRUE));
+        self.branch(&ready, item, exhausted);
+        self.label(item);
+    }
+
+    /// Only the implicit __anext__ call and its await can exhaust an async for.
+    pub(crate) fn async_pull(
+        &mut self,
+        iter: &str,
+        pull: ir::AsyncPull,
+        body: &str,
+        exhausted: &str,
+    ) -> String {
+        if let Some(header) = pull.header {
+            self.set_statement_line(self.positions.line(header));
+        }
+        let handler = self.name("b");
+        let outer = std::mem::replace(&mut self.body.error_target, handler.clone());
+        let mark = self.temporary_mark();
+        let next = self.op("async_next_iter", &[iter]);
+        let item = self.suspend_at(&next, Suspension::Await, pull.range, &mark);
+        self.flush_check();
+        self.body.error_target = outer;
+        self.jump(body);
+        self.label(&handler);
+        self.discard_truth(&mark);
+        let error = self.op("take_error", &[]);
+        let name = self.text("StopAsyncIteration");
+        let class = self.op("builtin", &[&name]);
+        let matches = self.op("matches", &[&error, &class]);
+        let stop = self.value(&format!("icmp eq i64 {matches}, 2"));
+        let propagate = self.name("b");
+        self.branch(&stop, exhausted, &propagate);
+        self.label(&propagate);
+        self.raise(&error, None, true);
+        item
     }
 
     pub(crate) fn suspend_at(
@@ -957,7 +1133,7 @@ impl RegisteredFrame<'_, '_> {
             after
         });
         let key = self.code_name(name);
-        if self.annotation_class.is_some() {
+        if matches!(self.annotation_scope, AnnotationScope::Class { .. }) {
             self.checkpoint(range);
         }
         AnnotationTarget { key, after }
@@ -1122,6 +1298,26 @@ impl<'a> ArgumentPack<'a> {
 pub(crate) trait FrameEmitter<'a, 'p>:
     std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>> + Sized
 {
+    /// A bare raise transfers the active exception immediately. An explicit raise
+    /// roots its evaluated exception until the caller has evaluated the cause.
+    fn raise_operands<T>(
+        &mut self,
+        exception: Option<T>,
+        cause: Option<T>,
+        operand: impl Fn(&mut Self, T) -> String,
+    ) {
+        let Some(exception) = exception else {
+            let active = self.caught.last().cloned().unwrap_or_else(|| "0".into());
+            self.raise(&active, None, true);
+            return;
+        };
+        let exception = operand(self, exception);
+        self.live.push(exception);
+        let cause = cause.map(|value| operand(self, value));
+        let exception = self.live.pop().expect("pending explicit raise");
+        self.raise(&exception, cause.as_deref(), false);
+    }
+
     fn with_operand_source<T>(&mut self, expr: &ir::Expr, emit: impl FnOnce(&mut Self) -> T) -> T {
         if let ir::ExprKind::Builtin(ir::Builtin::RegisteredLocation(range, _), _) = &expr.kind {
             self.with_source_range(*range, emit)
@@ -1150,8 +1346,33 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         self.checked(&format!("call i64 @imre_dyn_contains_literal_tuple(ptr %ctx, i64 {value}, ptr {array}, i64 {count}, i32 {negate})"))
     }
 
+    /// The activation keeps its live handles until the next Python statement.
+    /// Release the iterable when its cursor exists, and the cursor and local scope
+    /// when the comprehension delivers its result to the enclosing expression.
+    fn iteration_result(&mut self, emit: impl FnOnce(&mut Self) -> String) -> String {
+        if !self.native_suspension {
+            return emit(self);
+        }
+        let mark = self.temporary_mark();
+        let result = self.unwind_operands(&mark, emit);
+        self.keep_operands(&mark, &result, "0");
+        result
+    }
+
     fn unwind_operands<T>(&mut self, mark: &str, body: impl FnOnce(&mut Self) -> T) -> T {
         self.unwind_with(|f| f.discard_truth(mark), body)
+    }
+
+    /// Release incomplete operands in evaluation-stack order before entering the handler.
+    fn unwind_stack_operands<T>(&mut self, mark: &str, body: impl FnOnce(&mut Self) -> T) -> T {
+        self.unwind_with(
+            |frame| {
+                frame.line(&format!(
+                    "call void @imre_dyn_unwind_operands(ptr %ctx, i64 {mark})"
+                ));
+            },
+            body,
+        )
     }
 
     fn suspend_value(
@@ -1323,10 +1544,15 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         &mut self,
         op: &Builtin,
         target: &'e T,
-        args: impl Iterator<Item = &'e T>,
-        evaluate: impl FnMut(&mut Self, &T) -> String,
+        mut args: impl Iterator<Item = &'e T>,
+        mut evaluate: impl FnMut(&mut Self, &T) -> String,
     ) -> String {
         match op {
+            Builtin::RegisteredDeleteItem => {
+                let receiver = evaluate(self, target);
+                let key = evaluate(self, args.next().expect("indexed deletion key"));
+                self.delete_item(&receiver, &key)
+            }
             Builtin::RegisteredCall(call) => self.call_value(call, target, args, evaluate),
             Builtin::RegisteredAttribute {
                 action,
@@ -1456,9 +1682,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
                 CallArguments::Packed { args, kwargs }
             }),
         };
-        let span = self.expression_range_span(call.range, callee_end, b'(');
-        self.call_position(call.range);
-        self.call_in_scope(&callable, operands, &mark, span, &scope)
+        self.positioned_call(&callable, operands, &mark, call.range, callee_end, &scope)
     }
 
     /// Execute a descriptor operation at the original target, using the same live receiver
@@ -1743,24 +1967,6 @@ impl RegisteredFrame<'_, '_> {
         self.raise(&error, None, false);
     }
 
-    /// A bare raise transfers the active exception immediately. An explicit raise
-    /// roots its evaluated exception until the caller has evaluated the cause.
-    pub(crate) fn begin_raise(&mut self, exception: Option<String>) -> bool {
-        if let Some(exception) = exception {
-            self.live.push(exception);
-            true
-        } else {
-            let active = self.caught.last().cloned().unwrap_or_else(|| "0".into());
-            self.raise(&active, None, true);
-            false
-        }
-    }
-
-    pub(crate) fn finish_raise(&mut self, cause: Option<&str>) {
-        let exception = self.live.pop().expect("pending explicit raise");
-        self.raise(&exception, cause, false);
-    }
-
     pub(crate) fn raise(&mut self, exc: &str, cause: Option<&str>, reraise: bool) {
         // Raising always transfers control to the enclosing handler.
         let op = self
@@ -1848,6 +2054,8 @@ impl RegisteredFrame<'_, '_> {
             None
         };
         if let Some(lookup) = lookup {
+            // Method lookup propagates a pending receiver error before inspecting the handle.
+            self.take_matching_check();
             let target = self.checked(&lookup);
             // Nested argument calls can reuse the entry-block scratch space.
             let bound = self.value("load i64, ptr %live");

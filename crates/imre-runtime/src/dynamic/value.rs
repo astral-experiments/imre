@@ -1429,6 +1429,7 @@ pub(super) enum Value {
         ordered: bool,
     },
     DictIterator(DictIterator),
+    SetIterator(SetIterator),
     DefaultDict {
         factory: Id,
         entries: super::dictionary::Entries,
@@ -1640,7 +1641,6 @@ pub(super) enum Value {
         table: Id,
         marker: Id,
     },
-    Yielded(Id),
     AstWalk {
         queue: std::collections::VecDeque<Id>,
         running: bool,
@@ -1928,6 +1928,7 @@ impl Value {
             Self::Enumerate { .. } => "enumerate",
             Self::Iterator { kind, .. } => kind,
             Self::DictIterator(iter) => iter.class_name(),
+            Self::SetIterator(_) => "set_iterator",
             Self::Set { frozen: true, .. } => "frozenset",
             Self::Set { frozen: false, .. } => "set",
             Self::Dict(_) => "dict",
@@ -2061,8 +2062,7 @@ impl Value {
             | Self::LoopIterator { .. }
             | Self::PythonBufferLease { .. }
             | Self::ProcessPreparation(_)
-            | Self::ProcessHandle { .. }
-            | Self::Yielded(_) => false,
+            | Self::ProcessHandle { .. } => false,
             Self::Weak(reference) if reference.internal => false,
             Self::Tuple(items) => !items.is_empty(),
             _ => true,
@@ -2211,6 +2211,7 @@ impl Value {
                 }
             }
             Self::DictIterator(iter) => visit.extend(iter.dict),
+            Self::SetIterator(iter) => visit.extend(iter.set),
             Self::FormatIterator { input, .. } => visit.push(*input),
             Self::ThreadLocal(local) => visit.extend(local.live()),
             Self::Count { current, step, .. } => visit.extend([*current, *step]),
@@ -2273,7 +2274,6 @@ impl Value {
                 visit.extend([*context, *variable]);
                 visit.extend(old);
             }
-            Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
             Self::BytesIoStorage(state) => visit.extend(state.snapshot.get()),
             Self::BufferWrapper => {}
@@ -2744,6 +2744,59 @@ pub(super) enum DictViewKind {
     Keys,
     Values,
     Items,
+}
+
+/// Set iteration checks size at each pull, even after yielding the last item.
+/// Detach the owner on observed exhaustion and latch an observed size mismatch.
+#[derive(Clone, Copy)]
+pub(super) struct SetIterator {
+    set: Option<Id>,
+    expected_len: Option<usize>,
+    position: usize,
+    remaining: i64,
+}
+
+impl SetIterator {
+    pub(super) fn new(set: Id, len: usize) -> Self {
+        Self {
+            set: Some(set),
+            expected_len: Some(len),
+            position: 0,
+            remaining: len as i64,
+        }
+    }
+
+    pub(super) fn length_hint(&self, ctx: &Context) -> i64 {
+        match self.set {
+            Some(set)
+                if self.expected_len == Some(ctx.stored_entries(ctx.scalar_value(set)).len()) =>
+            {
+                self.remaining
+            }
+            _ => 0,
+        }
+    }
+
+    pub(super) fn next(&mut self, ctx: &Context) -> Result<Option<Id>> {
+        let Some(set) = self.set else {
+            return Ok(None);
+        };
+        let entries = ctx.stored_entries(ctx.scalar_value(set));
+        if self.expected_len != Some(entries.len()) {
+            self.expected_len = None;
+            return Err(Error::new(
+                "RuntimeError",
+                "Set changed size during iteration",
+            ));
+        }
+        let Some((position, key, _)) = entries.at(self.position) else {
+            self.set = None;
+            return Ok(None);
+        };
+        self.position = position + 1;
+        self.remaining -= 1;
+        Ok(Some(key))
+    }
 }
 
 #[derive(Clone, Copy)]

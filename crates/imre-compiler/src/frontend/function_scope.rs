@@ -6,11 +6,13 @@ mod class_metadata;
 pub(crate) mod classes;
 mod type_parameters;
 
-pub(crate) use type_parameters::{boxed_function_type_params, check_nonlocals};
+pub(crate) use type_parameters::{
+    TypeParameterScope, boxed_function_type_params, check_nonlocals, type_parameter_scope,
+};
 
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
-use ruff_text_size::{Ranged, TextSize};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 use serde_json::json;
 use std::collections::{BTreeSet, HashMap};
 
@@ -351,24 +353,36 @@ impl FunctionScope {
     }
 }
 
+pub(crate) struct NamedFunctionScope {
+    pub(crate) lexical: FunctionScope,
+    pub(crate) suspension_flags: u32,
+}
+
 #[derive(Default)]
 pub(crate) struct ScopeFacts {
     pub(crate) module_annotations: bool,
-    pub(crate) functions: HashMap<TextSize, FunctionScope>,
+    pub(crate) functions: HashMap<TextSize, NamedFunctionScope>,
     pub(crate) lambdas: HashMap<TextSize, FunctionScope>,
     pub(crate) aliases: HashMap<TextSize, FunctionScope>,
-    pub(crate) generators: HashMap<TextSize, FunctionScope>,
-    pub(crate) comprehension_targets: HashMap<TextSize, String>,
+    pub(crate) generators: HashMap<TextRange, FunctionScope>,
+    pub(crate) comprehension_targets: HashMap<TextRange, String>,
     pub(crate) classes: HashMap<TextSize, classes::ClassScope>,
     pub(crate) annotations: annotations::AnnotationScopes,
     pub(crate) module_globals: BTreeSet<String>,
 }
 
 impl ScopeFacts {
-    pub(crate) fn prepare(
-        body: &[ast::Stmt],
+    pub(crate) fn function(&self, def: &ast::StmtFunctionDef) -> &NamedFunctionScope {
+        &self.functions[&def
+            .decorator_list
+            .first()
+            .map_or(def.start(), Ranged::start)]
+    }
+
+    pub(crate) fn prepare<'a>(
+        body: &'a [ast::Stmt],
         names: &imre_ast::Names,
-        alias_site: impl FnMut(&ast::StmtTypeAlias),
+        alias_site: impl FnMut(&'a ast::StmtTypeAlias),
         expression_site: impl FnMut(&ast::Expr),
     ) -> Self {
         let mut scopes = Self::default();
@@ -399,7 +413,9 @@ struct Collector<'a, A, E> {
     expression_site: E,
 }
 
-impl<'a, A: FnMut(&ast::StmtTypeAlias), E: FnMut(&ast::Expr)> Visitor<'a> for Collector<'_, A, E> {
+impl<'a, A: FnMut(&'a ast::StmtTypeAlias), E: FnMut(&ast::Expr)> Visitor<'a>
+    for Collector<'_, A, E>
+{
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         let strings = self.names.string_annotations;
         let parent = self.scope;
@@ -409,9 +425,20 @@ impl<'a, A: FnMut(&ast::StmtTypeAlias), E: FnMut(&ast::Expr)> Visitor<'a> for Co
                     .decorator_list
                     .first()
                     .map_or(def.start(), Ranged::start);
-                self.scopes
-                    .functions
-                    .insert(start, FunctionScope::function(def, strings));
+                use imre_ast::code_flags::{ASYNC_GENERATOR, COROUTINE, GENERATOR, is_generator};
+                let suspension_flags = match (def.is_async, is_generator(&def.body)) {
+                    (false, false) => 0,
+                    (false, true) => GENERATOR,
+                    (true, false) => COROUTINE,
+                    (true, true) => ASYNC_GENERATOR,
+                };
+                self.scopes.functions.insert(
+                    start,
+                    NamedFunctionScope {
+                        lexical: FunctionScope::function(def, strings),
+                        suspension_flags,
+                    },
+                );
                 self.scopes.annotations.function(def, strings);
                 self.scope = Scope::Function;
             }
@@ -479,7 +506,7 @@ impl<'a, A: FnMut(&ast::StmtTypeAlias), E: FnMut(&ast::Expr)> Visitor<'a> for Co
         } else if let Some(plan) = imre_ast::comprehension::Plan::from_expr(expr) {
             let targets: indexmap::IndexSet<String> = plan.collect_target_names();
             self.scopes.comprehension_targets.insert(
-                expr.start(),
+                expr.range(),
                 targets
                     .iter()
                     .map(String::as_str)
@@ -491,7 +518,7 @@ impl<'a, A: FnMut(&ast::StmtTypeAlias), E: FnMut(&ast::Expr)> Visitor<'a> for Co
                 let captures_class = names.reads.contains("__class__");
                 names.locals.insert(".0".into());
                 self.scopes.generators.insert(
-                    expr.start(),
+                    expr.range(),
                     FunctionScope::new(names, None, captures_class),
                 );
             }

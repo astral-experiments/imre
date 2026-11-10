@@ -34,6 +34,30 @@ def query_client():
     assert (first.conversion, first.format_spec) == ("s", ">9")
     print(sql, parameters, events)
 
+    events.clear()
+    query = t"""where tag = { (f"sku:{record('sku', 7)!r}/{record('lot', 3):02}") !s:>12}"""
+    sql, parameters = parameterize(query)
+    field = query.interpolations[0]
+    assert sql == "where tag = ?" and parameters == ["sku:7/03"]
+    assert field.value is parameters[0]
+    assert field.expression == """ (f"sku:{record('sku', 7)!r}/{record('lot', 3):02}")"""
+    assert (field.conversion, field.format_spec) == ("s", ">12")
+    assert events == ["sku", "lot"]
+
+    events.clear()
+    v = "outer"
+    queries = [
+        t"""{ (f"[{record('item', v)}]") !s:{f">{len(record('width', v))}"}}"""
+        for v in ("a", "bb")
+    ]
+    first = queries[0].interpolations[0]
+    second = queries[1].interpolations[0]
+    assert (first.value, first.format_spec) == ("[a]", ">1")
+    assert (second.value, second.format_spec) == ("[bb]", ">2")
+    assert first.expression == """ (f"[{record('item', v)}]")"""
+    assert first.expression is second.expression and first.conversion == "s"
+    assert v == "outer" and events == ["item", "width", "item", "width"]
+
     debug = t"""{ (user # comment
  ) = }{user=:>9}"""
     assert debug.strings == (" (user \n ) = ", "user=", "")
@@ -79,6 +103,28 @@ def method_fields():
     assert template.values[0] is value and template.values[1] == 3
     assert template.interpolations[0].format_spec == ">8"
     print(template.interpolations[0].format_spec, events)
+
+    class Part(str):
+        def __del__(self):
+            events.append("drop " + self)
+
+    class Label(str):
+        def __format__(self, spec):
+            if spec == "fail":
+                raise ValueError("nested format")
+            return Part(self)
+
+    events.clear()
+    template = t"""{0:{Label('a')}{Label('b')}{f"<{Label('c')}>"}}{note('tail', 0)}"""
+    assert template.interpolations[0].format_spec == "ab<c>"
+    assert events == ["drop c", "drop b", "drop a", "tail"]
+
+    events.clear()
+    try:
+        t"""{0:{Label('a')}{Label('b')}{f"<{Label('c')}{Label('d'):fail}>"}}{note('tail', 0)}"""
+    except ValueError as error:
+        events.append(str(error))
+    assert events == ["drop c", "drop b", "drop a", "nested format"]
 
 
 def capture(value):

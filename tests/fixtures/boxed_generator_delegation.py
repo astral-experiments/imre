@@ -272,8 +272,17 @@ def current():
     del retained
     assert closed == ["temporary", "retained"]
 
+    def nested_stream():
+        return (b for a in tracked("outer") for b in tracked("inner"))
+
     closed.clear()
-    stream = (b for a in tracked("outer") for b in tracked("inner"))
+    stream = nested_stream()
+    assert next(stream) == 1
+    stream.close()
+    assert closed == ["inner", "outer"]
+
+    closed.clear()
+    stream = nested_stream()
     assert next(stream) == 1
     error = LookupError("injected")
     try:

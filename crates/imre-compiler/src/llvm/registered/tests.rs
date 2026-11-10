@@ -94,16 +94,70 @@ fn captured_unpack_roots_its_private_slot_in_the_function_frame() {
         emit_captured_body("def post(row, book, read):\n    book[0], book[read()] = row\n");
     let body = &output.functions;
     let (before_checkpoint, _) = body
-        .split_once("call void @imre_dyn_statement_with_exception(ptr %ctx, ptr %live,")
+        .split_once("call void @imre_dyn_statement_with_exception(ptr %ctx, ptr %ir_slot0,")
         .unwrap();
-    assert_eq!(body.matches("%ir_slot0 = alloca i64").count(), 1);
-    assert!(before_checkpoint.contains("store i64 0, ptr %ir_slot0"));
-    assert!(before_checkpoint.contains("load i64, ptr %ir_slot0"));
+    assert_eq!(body.matches("%ir_slot0 = alloca [").count(), 1);
+    assert!(before_checkpoint.contains("zeroinitializer, ptr %ir_slot0"));
+    assert!(!before_checkpoint.contains("load i64, ptr %ir_slot0"));
     assert_eq!(
         body.matches("call i64 @imre_dyn_positional_call_at(")
             .count(),
         1
     );
+}
+
+#[test]
+fn checkpoints_preserve_the_selected_roots_of_nested_regions() {
+    let mut output = Output::default();
+    let file = output.data(b"nested.py");
+    let positions = SourcePositions::new("", &file);
+    let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
+    frame.live_slots = vec![2, 3];
+    frame.checkpoint(Default::default());
+    assert!(frame.body.code.contains("ptr %ir_slot2, i64 2,"));
+
+    frame.body.code.clear();
+    frame.live_slots = vec![0, 3];
+    frame.checkpoint(Default::default());
+    assert!(frame.body.code.contains("ptr %live, i64 2,"));
+    assert!(frame.body.code.contains("load i64, ptr %ir_slot0"));
+    assert!(frame.body.code.contains("load i64, ptr %ir_slot3"));
+    assert!(!frame.body.code.contains("%ir_slot2"));
+
+    frame.body.code.clear();
+    frame.live_slots = vec![2, 3];
+    frame.live.push("%exception".into());
+    frame.checkpoint(Default::default());
+    assert!(frame.body.code.contains("store i64 %exception,"));
+    assert!(frame.body.code.contains("ptr %live, i64 3,"));
+}
+
+#[test]
+fn checkpoint_batches_active_slots_after_the_register_prefix() {
+    let mut output = Output::default();
+    let file = output.data(b"nested.py");
+    let positions = SourcePositions::new("", &file);
+    let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
+    frame.live.push("%exception".into());
+    frame.live_slots = vec![0, 1, 4, 5, 6];
+    frame.checkpoint(Default::default());
+
+    let body = &frame.body.code;
+    let (_, suffix) = body.split_once("store i64 %exception,").unwrap();
+    let (_, suffix) = suffix
+        .split_once("getelementptr i64, ptr %live, i64 1")
+        .unwrap();
+    let (_, suffix) = suffix
+        .split_once("ptr %ir_slot0, i64 16, i1 false)")
+        .unwrap();
+    let (_, suffix) = suffix
+        .split_once("getelementptr i64, ptr %live, i64 3")
+        .unwrap();
+    let (_, suffix) = suffix
+        .split_once("ptr %ir_slot4, i64 24, i1 false)")
+        .unwrap();
+    assert!(suffix.contains("ptr %live, i64 6,"));
+    assert_eq!(body.matches("call void @llvm.memcpy").count(), 2);
 }
 
 #[test]
@@ -153,4 +207,68 @@ fn checked_assertion_message_and_raise_use_the_failure_edge() {
         .unwrap();
     assert!(raise.contains("call i64 @imre_dyn_op_at("));
     assert!(raise.contains("br label %caught"));
+}
+
+#[test]
+fn async_pull_parks_the_iterator_returned_by_the_protocol_once() {
+    use crate::ir::AsyncPull;
+    use ruff_text_size::TextRange;
+
+    let mut output = Output::default();
+    let file = output.data(b"stream.py");
+    let source = SourcePositions::new("async for item in stream:\n    pass", &file);
+    let mut frame = RegisteredFrame::new(&mut output, &source, true, 0, 0.into());
+    frame.body.error_target = "outer".into();
+    let pull = AsyncPull {
+        range: TextRange::new(18.into(), 24.into()),
+        header: Some(0.into()),
+    };
+    frame.async_pull("%stream", pull, "item", "exhausted");
+
+    assert_eq!(frame.body.error_target, "outer");
+    let body = &frame.body.code;
+    let next = frame.output.strings[b"async_next_iter".as_slice()];
+    assert_eq!(
+        body.matches(&format!("ptr @str{next}, i64 %stream"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        body.matches("call void @imre_dyn_suspend_operands(")
+            .count(),
+        1
+    );
+    assert!(!frame.output.strings.contains_key(b"await_iter".as_slice()));
+    assert!(body.contains("label %exhausted,"));
+    assert!(body.contains("br label %outer"));
+}
+
+#[test]
+fn inner_handler_preserves_the_enclosing_cursor_slot() {
+    let mut output = Output::default();
+    let file = output.data(b"stream.py");
+    let positions = SourcePositions::new("", &file);
+    let mut code = RegisteredFrame::new(&mut output, &positions, true, 0, 0.into());
+    let sites = CheckedSites::default();
+    let mut frame = super::Frame::for_expression(&mut code, &sites);
+    frame.iteration.private_slots = vec![2, 8];
+    frame.iteration.first_slot = 3;
+    frame.body.error_target = "outer".into();
+    frame.enter_scope(&[2]);
+    frame.body.error_target = "inner".into();
+    frame.enter_scope(&[8]);
+    frame.leave_scope();
+    frame.jump("inner");
+    frame.label("inner");
+    frame.leave_scope();
+    frame.jump("outer");
+    frame.label("outer");
+
+    let (_, handlers) = frame.body.code.split_once("\ninner:\n").unwrap();
+    let (inner, outer) = handlers.split_once("\nouter:\n").unwrap();
+    assert!(inner.contains("store i64 0, ptr %ir_slot4"));
+    assert!(!inner.contains("%ir_slot3"));
+    assert!(outer.contains("store i64 0, ptr %ir_slot3"));
+    assert!(!outer.contains("%ir_slot4"));
+    assert!(!handlers.contains("call "));
 }

@@ -332,61 +332,54 @@ enum Completion {
 #[derive(Debug)]
 pub(crate) struct Unsupported(pub(crate) &'static str);
 
+#[cfg(test)]
 pub(crate) fn emit(
     module: &Module,
     ranges: &RangeFacts<'_>,
     sanitize: bool,
 ) -> Result<String, Unsupported> {
-    emit_file(module, ranges, sanitize).map(|(llvm, _)| llvm)
+    emit_file(module, ranges, sanitize, analyze_program(module)?)
 }
 
 pub(crate) fn emit_file(
     module: &Module,
     ranges: &RangeFacts<'_>,
     sanitize: bool,
-) -> Result<(String, bool), Unsupported> {
+    program: NativeProgram,
+) -> Result<String, Unsupported> {
     let mut output = Output::new(&vec![0; module.functions.len()], 1, 0, false);
-    let prefer_objects = emit_program(module, ranges, sanitize, &mut output)?;
-    Ok((std::mem::take(output.entry_buffer()), prefer_objects))
+    emit_program(module, ranges, sanitize, &mut output, program)?;
+    Ok(std::mem::take(output.entry_buffer()))
 }
 
 const BRANCH_WEIGHTS: &str = "\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n!1 = !{!\"branch_weights\", i32 2000, i32 1}\n";
 
-fn emit_program(
-    module: &Module,
-    ranges: &RangeFacts<'_>,
-    sanitize: bool,
-    output: &mut Output,
-) -> Result<bool, Unsupported> {
+/// Representation and runtime dependencies of a specialized checked module.
+pub(crate) struct NativeProgram {
+    pub(crate) prefer_objects: bool,
+    callable_targets: crate::callables::Targets,
+    function_link_types: HashSet<Type>,
+    extension_modules: BTreeSet<String>,
+    literal_globals: Vec<Option<String>>,
+    uses_regex_positions: bool,
+    uses_format_scalar: bool,
+    uses_sys_argv: bool,
+    uses_orig_argv: bool,
+    uses_linecache: bool,
+    uses_cache_paths: bool,
+    uses_builtins_last: bool,
+    changes_stdout: bool,
+}
+
+pub(crate) fn analyze_program(module: &Module) -> Result<NativeProgram, Unsupported> {
     let callable_targets = crate::callables::Targets::analyze(module);
-    let mut resource_types: HashSet<_> = module
-        .functions
-        .iter()
-        .chain([&module.entry])
-        .flat_map(|function| function.locals.iter().copied())
-        .collect();
-    resource_types.retain(|&ty| {
-        if matches!(ty, Type::Callable(_)) {
-            // A plain function has no captured receiver to finalize.
-            return callable_targets.get(ty).iter().any(|target| {
-                let f = &module.functions[target.function];
-                target.bound
-                    && module
-                        .types
-                        .may_own_file(f.locals[f.params[0]], &module.class_fields, true)
-            });
-        }
-        module.types.may_own_file(ty, &module.class_fields, true)
-    });
-    let borrows = borrows::analyze(module, &callable_targets);
-    let effects = effects::analyze(module, &callable_targets);
-    let inline_dispatch = string_enums::inline_dispatch(module, &effects);
     let mut literal_globals = vec![None; module.globals.len()];
-    let mut extension_modules = std::collections::BTreeSet::new();
+    let mut extension_modules = BTreeSet::new();
     let mut function_link_types = HashSet::new();
     let mut mixed_link_owners = Vec::new();
     let mut declared_caches = HashSet::new();
     let mut uses_regex_positions = false;
+    let mut uses_format_scalar = false;
     let mut uses_sys_argv = false;
     let mut uses_orig_argv = false;
     let mut uses_linecache = false;
@@ -402,7 +395,7 @@ fn emit_program(
             };
             match builtin {
                 Builtin::ObjectCall(kind, ..)
-                    if object_call.is_none() || matches!(kind, ir::ObjectCall::ExecText) =>
+                    if object_call.is_none_or(|previous| *kind < previous) =>
                 {
                     object_call = Some(*kind);
                 }
@@ -410,6 +403,7 @@ fn emit_program(
                     operation: RegexCapture::Start | RegexCapture::End,
                     ..
                 } => uses_regex_positions = true,
+                Builtin::FormatField => uses_format_scalar = true,
                 Builtin::ExtensionImport(name) => {
                     extension_modules.insert(name.clone());
                 }
@@ -474,6 +468,9 @@ fn emit_program(
     if let Some(call) = object_call {
         return Err(Unsupported(match call {
             ir::ObjectCall::ExecText => "Imre: native execution requires linked code",
+            ir::ObjectCall::FormatField => {
+                "Imre: this f-string field requires registered Python formatting"
+            }
             ir::ObjectCall::SocketSendfile => {
                 "Imre: socket.sendfile requires native Python object operations"
             }
@@ -487,6 +484,52 @@ fn emit_program(
             "Imre: native wrapper links require a plain function as their owner",
         ));
     }
+    Ok(NativeProgram {
+        prefer_objects: !mixed_link_owners.is_empty(),
+        callable_targets,
+        function_link_types,
+        extension_modules,
+        literal_globals,
+        uses_regex_positions,
+        uses_format_scalar,
+        uses_sys_argv,
+        uses_orig_argv,
+        uses_linecache,
+        uses_cache_paths,
+        uses_builtins_last,
+        changes_stdout,
+    })
+}
+
+fn emit_program(
+    module: &Module,
+    ranges: &RangeFacts<'_>,
+    sanitize: bool,
+    output: &mut Output,
+    program: NativeProgram,
+) -> Result<(), Unsupported> {
+    let mut resource_types: HashSet<_> = module
+        .functions
+        .iter()
+        .chain([&module.entry])
+        .flat_map(|function| function.locals.iter().copied())
+        .collect();
+    resource_types.retain(|&ty| {
+        if matches!(ty, Type::Callable(_)) {
+            // A plain function has no captured receiver to finalize.
+            return program.callable_targets.get(ty).iter().any(|target| {
+                let f = &module.functions[target.function];
+                target.bound
+                    && module
+                        .types
+                        .may_own_file(f.locals[f.params[0]], &module.class_fields, true)
+            });
+        }
+        module.types.may_own_file(ty, &module.class_fields, true)
+    });
+    let borrows = borrows::analyze(module, &program.callable_targets);
+    let effects = effects::analyze(module, &program.callable_targets);
+    let inline_dispatch = string_enums::inline_dispatch(module, &effects);
     let mut emitter = Emitter {
         module,
         output,
@@ -509,16 +552,16 @@ fn emit_program(
         callable_uses: callables::Uses::default(),
         async_frames: BTreeMap::new(),
         async_invoke_frames: BTreeMap::new(),
-        function_link_types,
+        function_link_types: program.function_link_types,
         json_schema_roots: Vec::new(),
-        module_reads_regex_positions: uses_regex_positions,
+        module_reads_regex_positions: program.uses_regex_positions,
         uses_regex_positions: false,
         regex_literals: BTreeMap::new(),
         bytes_literals: BTreeMap::new(),
         integer_literals: BTreeMap::new(),
         enum_members: Vec::new(),
         http_members: Vec::new(),
-        literal_globals,
+        literal_globals: program.literal_globals,
         loops: Vec::new(),
         locals: Vec::new(),
         directory_slot_count: 0,
@@ -547,16 +590,16 @@ fn emit_program(
         ranges,
         effects,
         inline_dispatch,
-        callable_targets,
+        callable_targets: program.callable_targets,
         integer_regions: integer_regions::analyze(module),
-        uses_sys_argv: uses_sys_argv || uses_orig_argv,
-        uses_orig_argv,
-        uses_linecache,
+        uses_sys_argv: program.uses_sys_argv || program.uses_orig_argv,
+        uses_orig_argv: program.uses_orig_argv,
+        uses_linecache: program.uses_linecache,
         uses_percent_tuple: false,
-        uses_builtins_last,
-        uses_cache_paths,
-        changes_stdout,
-        has_extensions: !extension_modules.is_empty(),
+        uses_builtins_last: program.uses_builtins_last,
+        uses_cache_paths: program.uses_cache_paths,
+        changes_stdout: program.changes_stdout,
+        has_extensions: !program.extension_modules.is_empty(),
     };
     emitter.prepare_enum_members();
     // Erased formatters may call back through another missing key. The normal
@@ -586,7 +629,7 @@ fn emit_program(
         .output
         .common()
         .push_str("; Generated by Imre. Runtime arguments borrow; results transfer ownership.\n");
-    write_declarations(emitter.output.common());
+    write_declarations(emitter.output.common(), program.uses_format_scalar);
     if emitter.uses_sequence_layout {
         emitter
             .output
@@ -618,10 +661,10 @@ fn emit_program(
             .common()
             .push_str("declare ptr @imre_str_percent_tuple(ptr,ptr)\n");
     }
-    if !extension_modules.is_empty() {
+    if !program.extension_modules.is_empty() {
         let output = emitter.output.common();
         output.push_str("declare i1 @imre_extension_enter()\ndeclare void @imre_extension_import(ptr)\ndeclare void @imre_extension_clear()\ndeclare i64 @imre_extension_call(ptr, ptr, ptr, ptr, i64, i32)\n");
-        for name in extension_modules {
+        for name in program.extension_modules {
             writeln!(output, "declare ptr @PyInit_{name}()").unwrap();
         }
     }
@@ -730,7 +773,7 @@ fn emit_program(
     write_function_bodies(emitter.output, module, bodies, sanitize);
     // Layout hints never replace the representation, overflow, or error guards.
     emitter.output.common().push_str(BRANCH_WEIGHTS);
-    Ok(!mixed_link_owners.is_empty())
+    Ok(())
 }
 
 fn write_function_bodies(
@@ -3149,6 +3192,7 @@ impl Emitter<'_, '_> {
             | ExprKind::None
             | ExprKind::Local(_)
             | ExprKind::Bind(..)
+            | ExprKind::Invoke { .. }
             | ExprKind::Binary(..)
             | ExprKind::Boolean(..)
             | ExprKind::BooleanValue(..)
@@ -3245,9 +3289,6 @@ impl Emitter<'_, '_> {
             ExprKind::Callable { function, receiver } => {
                 self.callable_value(expression.ty, *function, receiver.as_deref())
             }
-            ExprKind::Invoke { callable, args } => {
-                self.invoke_callable(callable, args, expression.ty)
-            }
             ExprKind::Construct { initializer, args } => {
                 // A type call keeps its own arguments while __init__ runs.
                 // Its stack releases them in reverse source order on return.
@@ -3314,7 +3355,7 @@ impl Emitter<'_, '_> {
     fn concat_assign(&mut self, slot: usize, expression: &Expr) -> bool {
         if self.locals[slot] != Type::Str
             || self.expression_rebound[slot]
-            || !matches!(expression.kind, ExprKind::Binary(Binary::Concat, ..))
+            || !expression.is_string_concat()
         {
             return false;
         }
@@ -3565,7 +3606,7 @@ impl Emitter<'_, '_> {
     /// receiver and fragment roots survive until the status has been checked.
     fn write_discard(&mut self, args: &[Expr]) {
         let receiver = self.operand(&args[0]);
-        let (status, owners) = if matches!(args[1].kind, ExprKind::Binary(Binary::Concat, ..)) {
+        let (status, owners) = if args[1].is_string_concat() {
             let (scratch, count, owners) = self.concat_parts(concat_leaves(self, &args[1]));
             let status = self.instruction(format!(
                 "call i32 @imre_text_write_parts(ptr {}, ptr {scratch}, i64 {count})",
@@ -4777,11 +4818,12 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredDeleteName(..)
             | Builtin::RegisteredDefinition(_)
             | Builtin::RegisteredLambda(..)
+            | Builtin::RegisteredGenerator(..)
             | Builtin::RegisteredTypeAlias(_)
             | Builtin::RegisteredStatement(..)
             | Builtin::RegisteredNamespace(_)
             | Builtin::RegisteredUnpack { .. }
-            | Builtin::RegisteredIter
+            | Builtin::RegisteredIter(_)
             | Builtin::RegisteredCall(..)
             | Builtin::RegisteredName(_)
             | Builtin::RegisteredUnary(_)
@@ -4797,16 +4839,15 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredDict(_)
             | Builtin::RegisteredEllipsis
             | Builtin::RegisteredComplex(..)
+            | Builtin::FormatConversion(_)
             | Builtin::RegisteredString(_)
             | Builtin::RegisteredTemplate(_)
             | Builtin::RegisteredInterpolation { .. }
-            | Builtin::RegisteredFormatConversion(_)
-            | Builtin::RegisteredFormat
-            | Builtin::RegisteredFormatJoin
             | Builtin::RegisteredAttribute { .. }
             | Builtin::RegisteredLocation(..) => {
                 unreachable!("registered operation in fixed calling convention")
             }
+            Builtin::FormatJoin => unreachable!("the checked body emits string joins"),
             Builtin::PairTable(ir::PairTableOp::ViewLen(slot)) => {
                 let count = self.instruction(format!(
                     "getelementptr inbounds {{ ptr, i64 }}, ptr %pair_view{slot}, i32 0, i32 1"
@@ -5968,6 +6009,7 @@ impl Emitter<'_, '_> {
             | Builtin::SortRestore
             | Builtin::StringJoin
             | Builtin::StringFormat
+            | Builtin::FormatField
             | Builtin::StringReplace
             | Builtin::FloatFormat { .. }
             | Builtin::HexFormat { .. }
@@ -9533,6 +9575,7 @@ impl Emitter<'_, '_> {
         }
         let iterator = self.borrow_slot(iterator);
         let (available, direct_key) = match kind {
+            ir::IterNextKind::Async(_) => unreachable!("async pull requires a suspended frame"),
             ir::IterNextKind::SplitField => {
                 let field = self.instruction(format!(
                     "call i64 @imre_split_field_next(ptr {})",
@@ -10200,7 +10243,9 @@ const INLINE_CONCAT_LITERAL: usize = 3 * size_of::<usize>();
 /// leaf order without evaluating through calls or other expression boundaries.
 fn concat_leaves<'e>(emitter: &Emitter<'_, '_>, expression: &'e Expr) -> Vec<&'e Expr> {
     fn visit<'a>(emitter: &Emitter<'_, '_>, expression: &'a Expr, output: &mut Vec<&'a Expr>) {
-        if let ExprKind::Binary(Binary::Concat, left, right) = &expression.kind {
+        if let ExprKind::Builtin(Builtin::FormatJoin, parts) = &expression.kind {
+            output.extend(parts);
+        } else if let ExprKind::Binary(Binary::Concat, left, right) = &expression.kind {
             // A completed left addition can raise before the right operand runs.
             // An in-bounds ASCII lookup with an already evaluated index is
             // also an immutable read. The range proof alone does not establish
@@ -10417,7 +10462,10 @@ fn none() -> Value {
 
 // Use i32 for runtime flags and status codes. Narrow C integers require different
 // extension attributes on Apple ARM64 and Linux ARM64, even for the same Rust type.
-fn write_declarations(output: &mut String) {
+fn write_declarations(output: &mut String, uses_format_scalar: bool) {
+    if uses_format_scalar {
+        output.push_str("declare ptr @imre_format_scalar(i32, i64, ptr)\n");
+    }
     output.push_str(
         r#"
 declare ptr @imre_run_config(ptr, i32, i64, i64, i32, i32, i1, ptr)

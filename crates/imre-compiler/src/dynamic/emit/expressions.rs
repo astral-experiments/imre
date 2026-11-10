@@ -1,13 +1,39 @@
-use crate::llvm::registered::ReadKey;
 use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
 use super::FrameEmitter;
-use super::{Body, Function, permanent};
-use crate::frontend::{SourceOperand, prepare_boolean};
+use super::{Function, permanent};
+use crate::frontend::{
+    LambdaBinding, LambdaDefault, RegisteredScope, SourceOperand, prepare_boolean,
+};
 use crate::ir::control::Context as BooleanContext;
-use crate::llvm::operations::branches::{Logical, LogicalOperand};
-use crate::llvm::operations::{CheckedValue, Choice, ComparisonChain, ValueJoin};
+use crate::llvm::operations::branches::{Logical, LogicalEmitter, LogicalInput};
+use crate::llvm::operations::{CheckedBody, CheckedValue, ComparisonChain, ValueJoin};
+
+impl LogicalEmitter<SourceOperand<'_>> for Function<'_, '_> {
+    fn logical_input<'a>(
+        &mut self,
+        leaf: &'a SourceOperand<'_>,
+        context: BooleanContext,
+    ) -> LogicalInput<'a> {
+        match leaf {
+            SourceOperand::Checked(value) => {
+                self.prepare_checked_value(value);
+                LogicalInput::Checked(value)
+            }
+            SourceOperand::Residual(expr) if context == BooleanContext::Condition => {
+                LogicalInput::Predicate(self.test_operand(expr))
+            }
+            SourceOperand::Residual(expr) => LogicalInput::Handle(self.expr(expr)),
+        }
+    }
+
+    fn with_logical_body<R>(&mut self, emit: impl FnOnce(&mut CheckedBody) -> R) -> R {
+        self.frame.with_checked_frame(&self.sites, None, |frame| {
+            emit(&mut CheckedBody::registered(frame))
+        })
+    }
+}
 
 impl Function<'_, '_> {
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
@@ -26,53 +52,61 @@ impl Function<'_, '_> {
         })
     }
 
-    fn source_lambda(&mut self, lambda: &ast::ExprLambda) -> String {
+    fn source_lambda(
+        &mut self,
+        lambda: &ast::ExprLambda,
+        operation: &crate::ir::Expr,
+        defaults: &[LambdaDefault],
+    ) -> String {
         let site = lambda.start();
         let plan = &self.source.lambdas[&site];
-        let source_defaults = std::cell::LazyCell::new(|| {
-            crate::frontend::lambda_defaults(lambda).collect::<Vec<_>>()
-        });
-        let defaults = plan
-            .defaults
+        let Some(body) = &plan.body else {
+            return self.with_source_range(lambda.body.range(), |code| {
+                code.build_diagnostic("cannot compile this lambda body ahead of time")
+            });
+        };
+        let defaults = defaults
             .iter()
-            .enumerate()
-            .map(|(index, operand)| match operand {
-                Some(value) => self.with_operand_source(value, |code| code.registered_value(value)),
-                None => {
-                    let operand = source_defaults[index];
-                    self.with_source_range(operand.range(), |code| code.expr(operand))
+            .map(|default| match default {
+                LambdaDefault::Value(value) => {
+                    self.with_operand_source(value, |code| code.registered_value(value))
+                }
+                LambdaDefault::Operand(operand) => {
+                    self.prepare_checked_value(&operand.value);
+                    self.with_operand_source(&operand.value, |code| {
+                        code.frame.prepared_operand(operand, &code.sites, false)
+                    })
+                }
+                LambdaDefault::Source(parameter) => {
+                    let value = parameter.source(lambda);
+                    self.with_source_range(value.range(), |code| code.expr(value))
                 }
             })
             .collect::<Vec<_>>();
-        let body = match &plan.body {
-            Some(body) => Body::CheckedExpression(body),
-            None => Body::Expression(&lambda.body),
-        };
-        let definition = self.compile_lambda(site, body);
-        let scope = self.scope.clone();
-        definition.bind_defaults(&mut self.frame, &scope, &defaults)
+        self.place_lambda(site, body, false);
+        self.frame
+            .registered_with_inputs(operation, &defaults, &self.sites)
     }
 
     fn registered_region(&mut self, expr: &ast::Expr, condition: bool) -> Option<String> {
+        if matches!(
+            self.source.logicals.get(expr),
+            Some(crate::frontend::LogicalSelection::Comparison(_))
+        ) {
+            return None;
+        }
+        if let Some(operand) = self.source.strings.templates.get(&expr.range()) {
+            self.prepare_checked_value(&operand.value);
+            return Some(self.frame.prepared_operand(operand, &self.sites, condition));
+        }
         let source = self.source.registered_source();
         let value = if self.native_suspension {
             crate::frontend::suspended_operand(expr, source)
         } else {
             crate::frontend::registered_value(expr, source)
-        };
-        if let Some(value) = value {
-            self.prepare_checked_value(&value);
-            return Some(
-                self.frame
-                    .registered_expression(&value, &self.sites, condition),
-            );
-        }
-        let operand = crate::frontend::eager_operand(expr, source)?;
-        self.prepare_checked_value(&operand.value);
-        Some(
-            self.frame
-                .prepared_operand(&operand, &self.sites, condition),
-        )
+        }?;
+        self.prepare_checked_value(&value);
+        Some(self.frame.registered_expression(&value, &self.sites, condition))
     }
 
     pub(super) fn with_expression_range(
@@ -87,19 +121,96 @@ impl Function<'_, '_> {
     }
 
     pub(super) fn located_expr(&mut self, expr: &ast::Expr) -> String {
+        self.located_operand(expr, false)
+    }
+
+    fn located_operand(&mut self, expr: &ast::Expr, condition: bool) -> String {
+        let kind = if self.class_locals.is_some() {
+            RegisteredScope::Class
+        } else if self.module {
+            RegisteredScope::Module
+        } else {
+            RegisteredScope::Function {
+                is_async: self.is_async,
+            }
+        };
+        if let Some(operand) =
+            crate::frontend::inline_operand(expr, self.source.registered_source(), kind)
+        {
+            self.prepare_checked_value(&operand.value);
+            return self
+                .frame
+                .prepared_operand(&operand, &self.sites, condition);
+        }
         let position = imre_ast::expression_position(
             expr,
             &self.source.method_imports,
             Some(&self.source.private_names),
         );
         let previous = self.enter_expression(expr.range(), position);
-        // The display itself is covered even if an operand still needs the syntax adapter.
-        let value = if let Some((items, display)) = crate::frontend::display_elements(expr) {
+        let comparison = self
+            .source
+            .logicals
+            .comparison(expr, self.native_suspension);
+        let value = if let Some((ops, inputs)) = comparison {
+            let result = ComparisonChain::emit_registered(
+                self,
+                ops,
+                condition,
+                |code| &mut code.frame,
+                inputs,
+                Self::source_operand,
+            );
+            if condition {
+                result.into_condition()
+            } else {
+                result.into_handle()
+            }
+        } else if let Some((items, display)) = crate::frontend::display_elements(expr) {
             self.sequence_display(items, display, None, ast_spread, Self::expr)
+        } else if let Some(index) =
+            crate::frontend::index_operands(expr, self.source.registered_source())
+        {
+            let inputs = index
+                .inputs
+                .into_iter()
+                .map(|operand| self.source_operand(operand))
+                .collect::<Vec<_>>();
+            self.frame
+                .registered_with_inputs(&index.value, &inputs, &self.sites)
         } else if let Some((op, [left, right])) = crate::frontend::binary_operands(expr) {
             let left = self.expr(left);
             let right = self.expr(right);
             self.binary_handles(op, &left, &right)
+        } else if let Some((edges, inputs)) = self
+            .source
+            .logicals
+            .value(expr, self.source.registered_source())
+        {
+            let value = Logical::value(&mut self.frame.body, edges, crate::ir::Type::PythonObject)
+                .emit(self, &inputs)
+                .expect("a selected operand reaches the join");
+            self.frame
+                .with_checked_frame(&self.sites, None, |mut frame| frame.materialize(&value))
+        } else if let Some([test, yes, no]) = self.source.logicals.conditional(expr) {
+            ValueJoin::select(
+                self,
+                |code| {
+                    code.flush_check();
+                    &mut code.frame.body
+                },
+                |code, yes, no| match test {
+                    SourceOperand::Checked(test) => {
+                        code.prepare_checked_value(&test);
+                        code.frame.registered_branch(&test, &code.sites, yes, no);
+                    }
+                    SourceOperand::Residual(test) => code.branch_expr(test, yes, no),
+                },
+                |code| CheckedValue::handle(code.source_operand(yes)),
+                |code| CheckedValue::handle(code.source_operand(no)),
+            )
+            .expect("value-producing conditional")
+            .into_handle()
         } else if let Some(operation) = self.source.registered_source().object_operation(expr) {
             if let crate::ir::Builtin::RegisteredUnary(op) = operation.opcode {
                 let scope = self.begin_unary();
@@ -122,6 +233,21 @@ impl Function<'_, '_> {
     }
 
     fn expr_inner(&mut self, expr: &ast::Expr) -> String {
+        if let Some(operands) = crate::frontend::template_operands(expr) {
+            let Some(plan) = self.source.strings.residual_templates.get(&expr.range()) else {
+                return self.unsupported("t-string expression spelling");
+            };
+            let template = self.frame.begin_template(plan.segments.clone());
+            for (operand, field) in operands.zip(&plan.fields) {
+                let interpolation = match template.field(&mut self.frame, field, &self.sites) {
+                    Ok(interpolation) => interpolation,
+                    Err(reason) => return self.unsupported(reason),
+                };
+                let value = self.expr(operand);
+                interpolation.capture(&mut self.frame, &value);
+            }
+            return template.finish(&mut self.frame);
+        }
         if self.native_suspension
             && let Some((kind, value)) = crate::ir::SuspendValue::operand(expr)
         {
@@ -130,42 +256,10 @@ impl Function<'_, '_> {
             });
         }
         match expr {
-            ast::Expr::Subscript(v) => {
-                let base = self.expr(&v.value);
-                let key = if let ast::Expr::Slice(slice) = &*v.slice
-                    && slice.step.is_none()
-                {
-                    let [start, stop] =
-                        [slice.lower.as_deref(), slice.upper.as_deref()].map(|bound| {
-                            bound.map_or_else(|| "0".into(), |bound| self.index_operand(bound))
-                        });
-                    let slot = crate::frontend::registered_constant_key(
-                        &v.slice,
-                        self.source.registered_source(),
-                    )
-                    .map(|(key, _)| self.constant_slot(key));
-                    ReadKey::Bounds { start, stop, slot }
-                } else {
-                    ReadKey::Object(self.index_operand(&v.slice))
-                };
-                self.read_item(&base, key, v.range(), v.value.end())
-            }
-            ast::Expr::Slice(slice) => {
-                let bounds = [
-                    slice.lower.as_deref(),
-                    slice.upper.as_deref(),
-                    slice.step.as_deref(),
-                ]
-                .map(|bound| bound.map_or_else(|| "0".into(), |bound| self.expr(bound)));
-                self.slice_object(bounds)
-            }
             ast::Expr::Dict(v) => self.dict_display(
                 v.items.iter().map(|item| (item.key.as_ref(), &item.value)),
                 Self::expr,
             ),
-            ast::Expr::BoolOp(_) => self.boolean_value(expr),
-            ast::Expr::Compare(v) => self.source_comparison(v, false),
-            ast::Expr::If(branch) => self.residual_conditional(branch),
             ast::Expr::Named(v) => {
                 let ast::Expr::Name(target) = &*v.target else {
                     return self.unsupported("assignment expression target");
@@ -177,58 +271,37 @@ impl Function<'_, '_> {
                 self.assign_expression_name(&scope, &name, &value, &mark);
                 value
             }
-            ast::Expr::Lambda(lambda) => self.source_lambda(lambda),
-            ast::Expr::TString(template) => self.residual_template(template),
-            ast::Expr::FString(v) => {
-                let mut parts = Vec::new();
-                for part in v.value.iter() {
-                    match part {
-                        ast::FStringPartRef::Literal(lit) => {
-                            if let Some(value) = self.source.strings.literals.get(&lit.range()) {
-                                parts.push(self.registered_value(value));
-                            }
-                        }
-                        ast::FStringPartRef::FString(s) => {
-                            self.format_parts(&s.elements, &mut parts)
-                        }
-                    }
+            ast::Expr::Lambda(lambda) => match &self.source.lambdas[&lambda.start()].binding {
+                LambdaBinding::Inline(value) => self.registered_value(value),
+                LambdaBinding::Operand(operand) => {
+                    self.prepare_checked_value(&operand.value);
+                    self.frame.prepared_operand(operand, &self.sites, false)
                 }
-                self.join_format_parts(parts)
+                LambdaBinding::Residual { operation, defaults } => {
+                    self.source_lambda(lambda, operation, defaults)
+                }
+            },
+            ast::Expr::FString(_) => {
+                self.build_diagnostic("cannot compile this formatted string ahead of time")
             }
-            expr if let Some(plan) = imre_ast::comprehension::Plan::from_expr(expr) => {
-                self.comprehension(expr, plan)
+            ast::Expr::Generator(_) => {
+                self.build_diagnostic("cannot compile this generator expression ahead of time")
             }
-            ast::Expr::DictComp(_) => self.unsupported("dict unpacking comprehension"),
+            ast::Expr::DictComp(display) if display.key.is_none() => {
+                self.unsupported("dict unpacking comprehension")
+            }
+            ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_) => {
+                self.build_diagnostic("cannot compile this comprehension ahead of time")
+            }
             _ => self.unsupported(&format!("{:?}", ast::AnyNodeRef::from(expr).kind())),
         }
     }
 
-    fn residual_conditional(&mut self, expr: &ast::ExprIf) -> String {
-        let (yes, no) = Choice::successors(&mut self.frame.body);
-        let mut choice = Choice::new(&mut self.frame.body);
-        let mut values = ValueJoin::default();
-        let parts = self.source.logicals.choice(expr);
-        if let Some(test) = parts.and_then(|p| p[0].as_ref()) {
-            self.prepare_checked_value(test);
-            self.frame.registered_branch(test, &self.sites, &yes, &no);
-        } else {
-            self.branch_expr(&expr.test, &yes, &no);
+    fn source_operand(&mut self, operand: SourceOperand<'_>) -> String {
+        match operand {
+            SourceOperand::Checked(value) => self.registered_value(&value),
+            SourceOperand::Residual(expr) => self.expr(expr),
         }
-        for (i, block, operand) in [(1, &yes, &expr.body), (2, &no, &expr.orelse)] {
-            self.label(block);
-            let value = match parts.and_then(|p| p[i].as_ref()) {
-                Some(value) => self.registered_value(value),
-                None => self.expr(operand),
-            };
-            self.flush_check();
-            values.incoming(&mut self.frame.body, CheckedValue::handle(value));
-            choice.finish_arm(&mut self.frame.body);
-        }
-        choice.finish(&mut self.frame.body, false);
-        values
-            .finish(&mut self.frame.body)
-            .expect("value-producing conditional")
-            .into_handle()
     }
 
     /// The enclosing source operation supplies evaluated leaves. Its branch graph
@@ -248,74 +321,14 @@ impl Function<'_, '_> {
             self.source.registered_source(),
             &self.source.logicals,
         );
-        let mut plan = Logical::branch(&mut self.frame.body, edges, yes, no);
-        self.logical_inputs(&mut plan, inputs, BooleanContext::Condition);
-    }
-
-    fn boolean_value(&mut self, expr: &ast::Expr) -> String {
-        let (edges, inputs) = prepare_boolean(
-            expr,
-            BooleanContext::Value,
-            self.source.registered_source(),
-            &self.source.logicals,
-        );
-        let mut plan = Logical::value(&mut self.frame.body, edges, crate::ir::Type::PythonObject);
-        self.logical_inputs(&mut plan, inputs, BooleanContext::Value);
-        self.flush_check();
-        plan.finish(&mut self.frame.body).into_handle()
-    }
-
-    fn logical_inputs(
-        &mut self,
-        plan: &mut Logical,
-        inputs: Vec<SourceOperand<'_>>,
-        context: BooleanContext,
-    ) {
-        for (i, leaf) in inputs.into_iter().enumerate().rev() {
-            if let Some(block) = plan.block(i) {
-                self.label(block);
-            }
-            let operand = if context == BooleanContext::Condition {
-                let bit = match leaf {
-                    SourceOperand::Checked(value) => {
-                        self.prepare_checked_value(&value);
-                        self.frame.registered_expression(&value, &self.sites, true)
-                    }
-                    SourceOperand::Residual(expr) => self.test_operand(expr),
-                };
-                LogicalOperand::Predicate(bit)
-            } else {
-                let mark = (!plan.final_value(i)).then(|| self.temporary_mark());
-                let value = match leaf {
-                    SourceOperand::Checked(value) => self.registered_value(&value),
-                    SourceOperand::Residual(expr) => self.expr(expr),
-                };
-                match mark {
-                    Some(mark) => {
-                        let truth = self.truth(&value);
-                        LogicalOperand::Tested {
-                            value: CheckedValue::handle(value),
-                            truth,
-                            mark: Some(mark),
-                        }
-                    }
-                    None => LogicalOperand::Selected(CheckedValue::handle(value)),
-                }
-            };
-            self.frame.logical_operand(plan, i, operand);
-        }
+        Logical::branch(&mut self.frame.body, edges, yes, no).emit(self, &inputs);
     }
 
     fn test_operand(&mut self, expr: &ast::Expr) -> String {
         self.test_with_temporaries(|f| {
-            if let ast::Expr::Compare(cmp) = expr {
+            if expr.is_compare_expr() {
                 f.registered_region(expr, true).unwrap_or_else(|| {
-                    f.with_expression_range(cmp.range(), |f| {
-                        let previous = f.enter_expression(cmp.range(), cmp.start());
-                        let bit = f.source_comparison(cmp, true);
-                        f.leave_expression(previous);
-                        bit
-                    })
+                    f.with_expression_range(expr.range(), |f| f.located_operand(expr, true))
                 })
             } else {
                 let value = f.expr(expr);
@@ -324,100 +337,6 @@ impl Function<'_, '_> {
         })
     }
 
-    fn source_comparison(&mut self, cmp: &ast::ExprCompare, condition: bool) -> String {
-        if let Some((needle, items, negate)) = crate::frontend::literal_membership(cmp) {
-            let needle = self.expr(needle);
-            let items = items.iter().map(|item| self.expr(item)).collect::<Vec<_>>();
-            let value = self.contains_literal(&needle, &items, negate);
-            return if condition { self.truth(&value) } else { value };
-        }
-        let mut chain = ComparisonChain::registered(&mut self.frame, &cmp.ops, condition);
-        for operand in &*cmp.operands {
-            let handle = self.expr(operand);
-            if let Some(result) = chain.push_handle(&mut self.frame, handle) {
-                return if condition {
-                    result.into_condition()
-                } else {
-                    result.into_handle()
-                };
-            }
-        }
-        unreachable!("a comparison has a final link")
-    }
-
-    /// A residual field keeps its whole template on the original literal-spec path.
-    fn residual_template(&mut self, template: &ast::ExprTString) -> String {
-        let Some(plan) = self
-            .source
-            .strings
-            .residual_templates
-            .get(&template.range())
-        else {
-            return self.unsupported("t-string expression spelling");
-        };
-        let strings = self.emit_string_tuple(plan.segments.clone());
-        let parts = self.op("list", &[]);
-        for (field, spec) in template
-            .value
-            .iter()
-            .flat_map(|t| t.elements.interpolations())
-            .zip(&plan.specs)
-        {
-            let spec = match spec {
-                Ok(value) => self.registered_value(value),
-                Err(reason) => return self.unsupported(reason),
-            };
-            let Some(spelling) = self.source.template_fields.get(&field.start()) else {
-                return self.unsupported("t-string expression spelling");
-            };
-            let value = self.expr(&field.expression);
-            let part = self.interpolation(
-                &value,
-                &spelling.expression,
-                field.conversion.to_char(),
-                &spec,
-            );
-            self.op("append", &[&parts, &part]);
-        }
-        self.op("build_template", &[&strings, &parts])
-    }
-
-    /// Evaluate the fields and their conversions in source order before joining their text.
-    fn format_parts(
-        &mut self,
-        elements: &[ast::InterpolatedStringElement],
-        parts: &mut Vec<String>,
-    ) {
-        for element in elements {
-            let value = match element {
-                ast::InterpolatedStringElement::Literal(lit) => {
-                    let Some(value) = self.source.strings.literals.get(&lit.range()) else {
-                        continue;
-                    };
-                    self.registered_value(value)
-                }
-                ast::InterpolatedStringElement::Interpolation(field) => {
-                    if let Some(prefix) = self.source.strings.literals.get(&field.range()) {
-                        parts.push(self.registered_value(prefix));
-                    }
-                    let mut value = self.expr(&field.expression);
-                    if let Some(conversion) = imre_ast::strings::interpolation_conversion(field) {
-                        value = self.convert_format_value(&value, conversion);
-                    }
-                    let spec = match &field.format_spec {
-                        Some(s) => {
-                            let mut spec = Vec::new();
-                            self.format_parts(&s.elements, &mut spec);
-                            self.join_format_parts(spec)
-                        }
-                        None => self.text(""),
-                    };
-                    self.format_value(&value, &spec)
-                }
-            };
-            parts.push(value);
-        }
-    }
 }
 
 fn ast_spread(element: &ast::Expr) -> Option<&ast::Expr> {

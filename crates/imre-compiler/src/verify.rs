@@ -92,6 +92,33 @@ pub(crate) fn registered(
         }
         result = match node {
             ir::Node::Statement(Statement::Assign(slot, _)) => local(*slot),
+            ir::Node::Statement(Statement::With {
+                binding: Some(binding),
+                ..
+            }) => require(
+                frame.locals.get(binding.entered) == Some(&Type::PythonObject)
+                    && private.contains(&binding.entered),
+                "context binding needs a private entered-value slot",
+            ),
+            ir::Node::Statement(Statement::IterNext {
+                kind: ir::IterNextKind::Async(_),
+                iterator,
+                key,
+                ready,
+                value,
+            }) => require(
+                value.is_none()
+                    && iterator != key
+                    && key != ready
+                    && iterator != ready
+                    && [iterator, key, ready]
+                        .iter()
+                        .all(|slot| private.contains(*slot))
+                    && frame.locals.get(*iterator) == Some(&Type::PythonObject)
+                    && frame.locals.get(*key) == Some(&Type::PythonObject)
+                    && frame.locals.get(*ready) == Some(&Type::Bool),
+                "async pull needs distinct private cursor, item and readiness slots",
+            ),
             ir::Node::Expression(value) => match &value.kind {
                 ExprKind::Local(slot) => local(*slot),
                 ExprKind::List(_) => require(
@@ -128,6 +155,10 @@ pub(crate) fn registered(
                     value.ty == Type::None && args.len() <= 1,
                     "registered assertion failure takes at most one message",
                 ),
+                ExprKind::Invoke { .. } => require(
+                    value.is_registered_invoke(),
+                    "registered invocation needs a Python callable, call position and positional arguments",
+                ),
                 ExprKind::Builtin(Builtin::RegisteredLocation(..), args) => match args.as_slice() {
                     [inner] => same(value.ty, inner.ty),
                     _ => Err("registered location needs one operand".into()),
@@ -143,6 +174,11 @@ pub(crate) fn registered(
                         display && value.ty == Type::PythonObject && args.len() == 1,
                         "registered spread needs one operand inside a Python display",
                     )
+                }
+                ExprKind::Builtin(Builtin::RegisteredGenerator(_, scoped), args) => {
+                    ir::generator_operands(*scoped, args)
+                        .map(|_| ())
+                        .map_err(str::to_owned)
                 }
                 ExprKind::Builtin(op, args) => op
                     .iteration_operands(args)
@@ -301,9 +337,10 @@ impl Verifier<'_> {
             Statement::Assign(slot, value) => same(value.ty, self.local(*slot)?),
             Statement::Move(target, source) => same(self.local(*source)?, self.local(*target)?),
             Statement::Clear(slot) => self.local(*slot).map(|_| ()),
-            Statement::With { entered, body, .. } => {
-                if let Some(slot) = entered {
-                    same(self.local(*slot)?, Type::PythonObject)?;
+            Statement::With { binding, body, .. } => {
+                if let Some(binding) = binding {
+                    same(self.local(binding.entered)?, Type::PythonObject)?;
+                    self.block(&binding.body)?;
                 }
                 self.block(body)
             }
@@ -382,6 +419,9 @@ impl Verifier<'_> {
                     }
                     crate::ir::IterNextKind::CodePoint | crate::ir::IterNextKind::Utf8Byte => {
                         Some(Type::Int)
+                    }
+                    crate::ir::IterNextKind::Async(_) => {
+                        return Err("async cursor requires a registered frame".into());
                     }
                     crate::ir::IterNextKind::Generic => None,
                 };
@@ -794,7 +834,8 @@ mod tests {
         let text = "out = [1, ('s', callback(arg)), *rest]\n";
         let graph = SourceGraph::single(text).unwrap();
         let source = frontend::RegisteredSource {
-            templates: None,
+            template_fields: None,
+            generators: None,
             lambdas: None,
             text,
             private_names: None,
@@ -890,6 +931,7 @@ mod tests {
             body: Vec::new(),
         });
         let mut args = CallArgs {
+            python_site: None,
             exhaustive_enum_match: false,
             values: vec![
                 Expr {

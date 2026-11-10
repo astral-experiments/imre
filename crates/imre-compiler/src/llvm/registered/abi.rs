@@ -25,9 +25,11 @@ declare i64 @imre_dyn_import_name(ptr, i64, i64, i64, i32)
 declare i64 @imre_dyn_mark_class_annotation(ptr, i64, i64, i32)
 declare i64 @imre_dyn_define(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
 declare i1 @imre_dyn_failed(ptr)
-declare i64 @imre_dyn_truth_mark(ptr)
+declare i64 @imre_dyn_truth_mark(ptr) memory(read)
 declare void @imre_dyn_comprehension_step(ptr, i64)
 declare void @imre_dyn_discard_truth(ptr, i64)
+declare void @imre_dyn_unwind_operands(ptr, i64)
+declare void @imre_dyn_finish_format_join(ptr, i64, i64)
 declare i64 @imre_dyn_keep_operands(ptr, i64, i64, i64)
 declare void @imre_dyn_discard_expression(ptr, i64)
 declare void @imre_dyn_named_assignment(ptr, i64, i64, i64)
@@ -49,6 +51,7 @@ declare i64 @imre_dyn_positional_call_at(ptr, i64, ptr, i64, i64, ptr, i64)
 declare i64 @imre_dyn_keyword_call_at(ptr, i64, ptr, i64, ptr, i64, i64, ptr, i64)
 declare void @imre_dyn_expression_line(ptr, i32)
 declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
+declare void @llvm.memcpy.p0.p0.i64(ptr noalias nocapture writeonly, ptr noalias nocapture readonly, i64, i1 immarg)
 ";
 
 // Keep repeated code-name loads and their error edge out of each caller.
@@ -162,36 +165,6 @@ impl Output {
                     .push_str(&crate::llvm::integer_arithmetic_helper(op));
             }
         }
-    }
-
-    /// Roll back private code sites when an optional annotation expression cannot be compiled.
-    pub(crate) fn try_native_body(
-        &mut self,
-        emit: impl FnOnce(&mut Self) -> String,
-    ) -> Option<String> {
-        let code = self.count;
-        let functions = self.functions.len();
-        let constants = self.constants.len();
-        let strings = self.strings.len() as u32;
-        let positions = self.positions.len();
-        let slots = self.constant_slots.len();
-        let declarations = self.declarations;
-        let names = std::mem::take(&mut self.interned_identifiers);
-        let outer_diagnostic = self.diagnostic.take();
-        let site = emit(self);
-        let added_names = std::mem::replace(&mut self.interned_identifiers, names);
-        if std::mem::replace(&mut self.diagnostic, outer_diagnostic).is_none() {
-            self.interned_identifiers.extend(added_names);
-            return Some(site);
-        }
-        self.count = code;
-        self.functions.truncate(functions);
-        self.constants.truncate(constants);
-        self.strings.retain(|_, id| *id < strings);
-        self.positions.retain(|_, id| *id < positions);
-        self.constant_slots.retain(|_, id| *id < slots);
-        self.declarations = declarations;
-        None
     }
 
     pub(crate) fn data(&mut self, bytes: &[u8]) -> String {

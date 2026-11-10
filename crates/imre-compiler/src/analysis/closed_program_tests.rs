@@ -383,7 +383,11 @@ fn retained_native_candidate_registers_its_original_source_owner() {
     fs::write(&external, replacement).unwrap();
     assert!(!graph.inputs.fresh());
     let compilation = crate::dynamic::compile(
-        (&entry, None, Default::default(), &mut Default::default()),
+        (
+            crate::ProgramEntry::File(&entry, None),
+            Default::default(),
+            &mut Default::default(),
+        ),
         &options,
         true,
         Some(crate::dynamic::ObjectOperation::CheckedEntry),
@@ -418,7 +422,11 @@ fn retained_native_candidate_registers_its_original_source_owner() {
     fs::create_dir(&package).unwrap();
     fs::write(package.join("__init__.py"), replacement).unwrap();
     let error = crate::dynamic::compile(
-        (&entry, None, Default::default(), &mut Default::default()),
+        (
+            crate::ProgramEntry::File(&entry, None),
+            Default::default(),
+            &mut Default::default(),
+        ),
         &options,
         true,
         Some(crate::dynamic::ObjectOperation::CheckedEntry),
@@ -638,6 +646,16 @@ fn initializer_calls_use_original_bindings_and_all_arguments() {
             "{caller}"
         );
     }
+    let generator = "def rows():\n    yield eval(input())\n";
+    let caller = "from scores import rows\nfor value in rows(): pass\n";
+    let message = check(caller, generator).unwrap();
+    assert!(
+        message.contains("scores.py:2:16")
+            && message.contains("builtins.eval without a linked body"),
+        "{message}"
+    );
+    let replaced = "import scores\ninstall_hook()\nfor value in scores.rows(): pass\n";
+    assert!(check(replaced, generator).is_none());
     let docstring = "'application setup'\nimport scores\nif False:\n    scores.take('x')\n";
     assert!(
         check(docstring, number)
@@ -802,6 +820,66 @@ fn a_linked_signature_requires_a_reaching_initializer_call() {
         true,
     )
     .unwrap();
+}
+
+#[test]
+fn registered_generators_require_a_linked_source_body() {
+    let project = tempdir().unwrap();
+    let path = project.path().join("main.py");
+    let source = "def rows():\n    yield eval(input())\nfor row in rows(): print(row)\n";
+    fs::write(&path, source).unwrap();
+    let module = ("__main__".to_owned(), path, source.to_owned());
+    let error = super::check_registered_project(
+        project.path(),
+        &[],
+        std::iter::once(RegisteredSource::new(&module, true, None)),
+        None,
+        None,
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("main.py:2:16") && error.contains("builtins.eval without a linked body"),
+        "{error}"
+    );
+}
+
+#[test]
+fn captured_generator_keeps_its_source_requirement_through_a_helper() {
+    let project = tempdir().unwrap();
+    let provider = (
+        "producer".to_owned(),
+        project.path().join("producer.py"),
+        "def rows():\n    yield eval(input())\n".to_owned(),
+    );
+    fs::write(&provider.1, &provider.2).unwrap();
+    let check = |tail: &str| {
+        let entry = (
+            "__main__".to_owned(),
+            project.path().join("main.py"),
+            format!(
+                "from producer import rows\ndef run():\n    for row in rows(): print(row)\n{tail}\nrun()\n"
+            ),
+        );
+        fs::write(&entry.1, &entry.2).unwrap();
+        let mut main = RegisteredSource::new(&entry, true, None);
+        main.initial = true;
+        main.main_body = true;
+        super::check_registered_project(
+            project.path(),
+            &[],
+            [main, RegisteredSource::new(&provider, true, None)],
+            None,
+            None,
+            None,
+        )
+    };
+    let error = check("if False: globals()").unwrap_err();
+    assert!(
+        error.contains("producer.py:2:16") && error.contains("builtins.eval without a linked body"),
+        "{error}"
+    );
+    check("def safe(): yield 7\nglobals()['rows'] = safe").unwrap();
 }
 
 #[test]

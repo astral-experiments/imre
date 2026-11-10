@@ -688,6 +688,7 @@ impl Builtin {
             | Self::RegisteredDeleteName(..)
             | Self::RegisteredDefinition(_)
             | Self::RegisteredLambda(..)
+            | Self::RegisteredGenerator(..)
             | Self::RegisteredTypeAlias(_)
             | Self::RegisteredStatement(..)
             | Self::RegisteredName(_)
@@ -705,15 +706,14 @@ impl Builtin {
             | Self::RegisteredDeleteItem
             | Self::RegisteredEllipsis
             | Self::RegisteredComplex(..)
+            | Self::FormatConversion(_)
+            | Self::FormatField
             | Self::RegisteredString(_)
             | Self::RegisteredTemplate(_)
             | Self::RegisteredInterpolation { .. }
-            | Self::RegisteredFormatConversion(_)
-            | Self::RegisteredFormat
-            | Self::RegisteredFormatJoin
             | Self::RegisteredNamespace(_)
             | Self::RegisteredUnpack { .. }
-            | Self::RegisteredIter
+            | Self::RegisteredIter(_)
             | Self::RegisteredCall(..)
             | Self::SortByComparator => Contract::new(true, Unknown),
             Self::ListReserveRange | Self::StructCyclePrefix => Contract::new(false, PreservesOwners),
@@ -722,6 +722,7 @@ impl Builtin {
             | Self::BinaryRead
             | Self::BinaryReadSize
             | Self::Ndiff
+            | Self::FormatJoin
             | Self::StringListCopy
             | Self::JoinedSplitLines
             | Self::StringListSortSuffix(_)

@@ -129,7 +129,7 @@ fn protocol_snapshot(
     snapshot
 }
 
-fn take_pattern_temporary(value: Expr, slot: usize) -> Expr {
+pub(super) fn take_pattern_temporary(value: Expr, slot: usize) -> Expr {
     Expr {
         ty: value.ty,
         kind: ExprKind::Scope {

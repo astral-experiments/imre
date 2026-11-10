@@ -345,6 +345,7 @@ impl Session {
         has_file_body: Option<&dyn Fn(&str) -> bool>,
         entry_operand: Option<(usize, &str, &crate::frontend::phase::Diagnostic)>,
     ) -> Result<(), String> {
+        let mut captures = execution::CapturedImports::default();
         if let Some((entry, start)) = sources
             .clone()
             .find(|(_, source)| source.initial && source.declares_signatures)
@@ -364,11 +365,12 @@ impl Session {
                 .filter(|(_, source)| source.declares_signatures)
                 .map(|(id, source)| (source.name, (id, source.path)))
                 .collect();
-            if let Some(error) =
-                self.initializer_call_error((entry, start.path), start.main_body, |name| {
-                    declarations.get(name).copied()
-                })
-            {
+            if let Some(error) = self.checked_initializer_calls(
+                (entry, start.path),
+                start.main_body,
+                |name| declarations.get(name).copied(),
+                Some(&mut captures),
+            ) {
                 if !matches!(
                     error.kind,
                     crate::frontend::phase::Kind::ExecutionOperand(_)
@@ -387,11 +389,12 @@ impl Session {
             }
         }
         contracts?;
-        let ordinary = self.check_execution_escapes(
+        let ordinary = self.check_execution_with_imports(
             sources
                 .clone()
                 .filter(|(_, source)| source.check_execution)
                 .map(|(id, source)| (id, source.path)),
+            captures,
         );
         let files = self.check_run_path_callers(sources, has_file_body);
         match (ordinary, files) {

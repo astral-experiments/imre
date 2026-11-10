@@ -69,6 +69,8 @@ mod fnmatch;
 mod format_cursors;
 mod fractions;
 mod fromkeys;
+mod fstrings;
+use fstrings::FStringLiteral;
 mod fspath;
 mod function_caches;
 pub(crate) mod function_scope;
@@ -119,25 +121,28 @@ mod record_inputs;
 mod records;
 mod regex;
 mod registered;
-pub(crate) use registered::SourceGuard;
 pub(crate) use registered::booleans::{
     LogicalSites, Selection as LogicalSelection, SourceOperand, prepare_boolean,
 };
-pub(crate) use registered::patterns::MatchGuard;
-pub(crate) use registered::type_alias::type_alias_body;
+pub(crate) use registered::patterns::{MatchGuard, SourceMatch};
+pub(crate) use registered::type_alias_body;
 pub(crate) use registered::values::{
-    RegisteredSource, ValueStatement, binary_operands, display_elements, lambda_defaults,
-    literal_membership, literal_replacements, module_literal_replacements, packed_arguments,
-    push_codepoints, registered_arguments, registered_constant_key, registered_index_key,
+    RegisteredSource, ValueStatement, binary_operands, display_elements, index_operands,
+    literal_replacements, module_literal_replacements, packed_arguments,
+    push_codepoints, registered_argument_at, registered_arguments, registered_index_key,
     registered_value, suspended_operand, value_statement,
 };
 pub(crate) use registered::{
-    AnnotationValue, DeferredAnnotation, PreparedStrings, RegisteredFunction, RegisteredLambda,
-    RegisteredScope, RegisteredSuite, StatementSites, SuitePreparation, annotation_expression,
-    attribute_write, delete_targets, prepare_strings, registered_index_target, registered_sites,
-    registered_type_alias, registered_type_parameters,
+    AnnotationValue, DeferredAnnotation, ParameterAnnotations, PhysicalOperand, PreparedStrings, RegisteredFunction,
+    RegisteredGenerator, RegisteredLambda, RegisteredScope, RegisteredSites, RegisteredSuite,
+    ResidualField, SourceEffect, SourceRun, StatementSites, SuitePreparation,
+    annotation_expression, attribute_write, prepare_expression_sites, registered_index_target,
+    registered_sites, registered_type_alias, registered_type_parameters, template_operands,
 };
-pub(crate) use registered::{LocalBinding, RegisteredOperand, RegisteredRegion, eager_operand};
+pub(crate) use registered::{ContextTarget, SourceGuard};
+pub(crate) use registered::{
+    LambdaBinding, LambdaDefault, LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion, inline_operand,
+};
 mod sequences;
 mod shutil;
 mod sign_parameters;
@@ -947,7 +952,11 @@ fn lower_graph(
             inference.discover_packed_arguments();
         }
     }
-    let inference::Solution { registered_parameters, checked_bodies } = inference.solve(
+    let inference::Solution {
+        registered_parameters,
+        checked_bodies,
+        registered_generators,
+    } = inference.solve(
         graph,
         &mut definitions,
         &mut signatures,
@@ -1000,13 +1009,13 @@ fn lower_graph(
             }
         }
     }
-    let initializer_start = definitions.len();
     let entry_declarations = classes.declarations.has_class_values(graph.entry)
         || graph.modules[graph.entry].parsed.syntax().body.iter().any(|stmt| {
             matches!(stmt, ast::Stmt::FunctionDef(def) if inspect::marks_function(graph, graph.entry, def))
         });
     let helpers = Helpers::new(definitions.len() + graph.initializers(entry_declarations).count());
-    let needs_registered_entry = signatures.values().any(Signature::registered_frame);
+    let needs_registered_entry =
+        !registered_generators.is_empty() || signatures.values().any(Signature::registered_frame);
     let globals = ModuleValues::for_initializers(needs_registered_entry);
     // Fixed FILE compilations need no secondary body. A registered launch or an
     // actual representation failure can still use functions whose signatures solved.
@@ -1053,11 +1062,14 @@ fn lower_graph(
             &helpers,
             &globals,
         );
-        let result =
-            Initialization::lower(checker, &mut available, range).inspect_err(capture_on_object);
-        if let Some(body) = checked_region(result, graph, module_id, &mut unavailable)? {
-            initializations.push(body);
-        }
+        let result = Initialization::lower(
+            checker,
+            &mut available,
+            range,
+            (!needs_registered_entry).then_some(&mut initializations),
+        )
+        .inspect_err(capture_on_object);
+        checked_region(result, graph, module_id, &mut unavailable)?;
     }
     if graph.registered_startup || needs_registered_entry {
         capture();
@@ -1084,6 +1096,9 @@ fn lower_graph(
             &globals,
         );
         let original = registered_parameters.get(&signature.id);
+        if registered_generators.contains(&signature.id) {
+            continue;
+        }
         let accepted =
             signature.registered_frame() && source_checks.accepts(graph, *module_id, definition);
         if accepted || original.is_some() {
@@ -1152,6 +1167,11 @@ fn lower_graph(
         else {
             continue;
         };
+        if needs_registered_entry {
+            // The fixed-layout checks have supplied their diagnostics. Registered
+            // definitions and the registered initializer already own this program.
+            continue;
+        }
         let LoweredBody {
             function,
             calls,
@@ -1193,6 +1213,7 @@ fn lower_graph(
         ));
     }
     let mut entry = None;
+    let mut startup = Vec::new();
     for (module_id, module) in graph.modules.iter().enumerate() {
         if module_id != graph.entry {
             continue;
@@ -1220,7 +1241,7 @@ fn lower_graph(
                 entry_site: None,
             }));
             let _ = graph.try_registered_body(module_id, || {
-                checker.block(&statements).ok().map(drop)
+                checker.lower_block(&statements, None).ok().map(drop)
             });
             if let Some((statement, call)) =
                 checker.observed_definition.and_then(|seen| seen.entry_site)
@@ -1229,31 +1250,18 @@ fn lower_graph(
             }
             return Err(report);
         }
-        let result = checker.block(&statements);
+        let mut fixed_entry = (!needs_registered_entry).then(Vec::new);
+        let result = checker.lower_block(&statements, fixed_entry.as_mut());
         let result = checker.finish_region(result).inspect_err(capture_on_object);
-        let Some((mut body, _)) = checked_region(result, graph, module_id, &mut unavailable)?
-        else {
-            continue;
-        };
-        if module_id == graph.entry {
-            let mut startup = (0..initializations.len())
-                .map(|index| {
-                    Statement::Expr(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::Call(
-                            initializer_start + index,
-                            ir::CallArgs::positional(Vec::new()),
-                        ),
-                    })
-                })
-                .collect::<Vec<_>>();
+        if checked_region(result, graph, module_id, &mut unavailable)?.is_some()
+            && let Some(body) = fixed_entry
+        {
             checker.fault_frame(&mut startup, "<module>", TextSize::default());
-            startup.append(&mut body);
             entry = Some(ir::Function {
                 params: Vec::new(),
                 returns: Type::None,
                 locals: checker.locals,
-                body: startup,
+                body,
             });
         }
     }
@@ -1264,7 +1272,7 @@ fn lower_graph(
         return Err(reason);
     }
     if needs_registered_entry {
-        return Ok(crate::CheckedProgram::Registered);
+        return Ok(crate::CheckedProgram::Registered(None));
     }
     if let Some(error) = graph.deferred_object_error.take() {
         if error.kind.is_object() {
@@ -1276,46 +1284,16 @@ fn lower_graph(
         .command_startup
         .as_ref()
         .is_some_and(|(flags, _)| flags.faulthandler);
-    for initialization in &initializations {
-        let module = &graph.modules[initialization.module];
-        let mut body = initialization.function.body.clone();
-        if module.archive.is_some() {
-            body.insert(
-                0,
-                Statement::Expr(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(
-                        Builtin::ExtensionImport(
-                            module.name.rsplit('.').next().unwrap().to_owned(),
-                        ),
-                        vec![],
-                    ),
-                }),
-            );
-        }
-        if fault_enabled && initialization.module != graph.entry && module.archive.is_none() {
-            body.insert(
-                0,
-                fault_frame_statement(
-                    graph
-                        .module_filename(initialization.module)
-                        .to_string_lossy()
-                        .into_owned(),
-                    "<module>",
-                    1,
-                ),
-            );
-        }
-        owners.push(initialization.module);
-        functions.push(ir::Function {
-            params: Vec::new(),
-            returns: Type::None,
-            locals: initialization.function.locals.clone(),
-            body,
-        });
-        call_graph.push(initialization.calls.clone());
+    let initializer_ids = functions.len()..functions.len() + initializations.len();
+    let mut initialization_order = Vec::with_capacity(initializations.len());
+    for initialization in initializations {
+        let module_id = initialization.order.module;
+        functions.push(initialization.function);
+        call_graph.push(initialization.calls);
+        initialization_order.push(initialization.order);
+        owners.push(module_id);
         class_reads.push(HashSet::new());
-        let module = &graph.modules[initialization.module];
+        let module = &graph.modules[module_id];
         recursion_errors
             .push(module.error(module.parsed.syntax(), "recursive module initialization"));
     }
@@ -1352,8 +1330,9 @@ fn lower_graph(
     if let Some(id) = recursive_call_root(&call_graph) {
         return Err(recursion_errors.swap_remove(id).into());
     }
-    for initialization in &initializations {
-        initialization.validate(
+    for (id, order) in initializer_ids.clone().zip(initialization_order) {
+        order.validate(
+            id,
             graph,
             &functions,
             &class_reads,
@@ -1380,29 +1359,8 @@ fn lower_graph(
     }
     // The native call graph is acyclic. Programs that cannot inspect frames,
     // lower their limit, or reach the default depth need no tracking at all.
-    let source_frames =
-        if fault_enabled || names || count || source_functions + generator_sites > 1000 {
-            python_frames
-                .into_iter()
-                .zip(owners.iter().copied().chain([graph.entry]))
-                .map(|(frame, module)| {
-                    frame.then(|| {
-                        if names {
-                            ir::SourceFrame::Module(if module == graph.entry {
-                                "__main__".to_owned()
-                            } else {
-                                graph.modules[module].name.clone()
-                            })
-                        } else {
-                            ir::SourceFrame::Depth
-                        }
-                    })
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
-    if generator_sites != 0 && source_frames.is_empty() {
+    let track_frames = fault_enabled || names || count || source_functions + generator_sites > 1000;
+    if generator_sites != 0 && !track_frames {
         for function in functions.iter_mut().chain([&mut entry]) {
             ir::walk_expressions_mut(&mut function.body, &mut |value| {
                 if matches!(
@@ -1422,20 +1380,97 @@ fn lower_graph(
     }
     let json_records = json::schemas(graph, &classes, &types, &functions, &entry)?;
     // Fusing adjacent sums also inlines their generator bodies and scalar calls.
-    if source_frames.is_empty() {
+    if !track_frames {
         for (id, sums) in zip_sums {
             zip_sums::fuse(&mut functions, id, &sums);
         }
     }
+    if let Some(cache) = cache {
+        cache.finish(&types);
+    }
+    if needs_object_string_order(&functions, &entry) {
+        graph.needs_object_runtime.set(true);
+        let diagnostic = Diagnostic::plain(
+            " Imre: ordering strings from chr() with possible surrogate values requires native Python object operations".to_owned(),
+        )
+        .with_path(&graph.modules[graph.entry].path)
+        .classified(Kind::ScopedObject);
+        return Err(diagnostic);
+    }
+    // The checked functions and module statements have supplied their graph diagnostics.
+    // Only the fixed startup links initializer calls and allocates native module metadata.
+    if graph.registered_startup {
+        return Ok(crate::CheckedProgram::Registered(None));
+    }
+    if let Some(reason) = graph
+        .runtime_initializer
+        .clone()
+        .map(Into::into)
+        .or_else(|| required_object_diagnostic(graph, &functions, &entry))
+    {
+        return Ok(crate::CheckedProgram::Registered(Some(reason)));
+    }
+    // Checkpoints above refer to the source operations. Insert native startup
+    // bookkeeping into these same bodies only after their source order is checked.
+    for id in initializer_ids {
+        let module_id = owners[id];
+        let module = &graph.modules[module_id];
+        let prefix = if module.archive.is_some() {
+            Some(Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(
+                    Builtin::ExtensionImport(module.name.rsplit('.').next().unwrap().to_owned()),
+                    vec![],
+                ),
+            }))
+        } else if fault_enabled && module_id != graph.entry {
+            Some(fault_frame_statement(
+                graph
+                    .module_filename(module_id)
+                    .to_string_lossy()
+                    .into_owned(),
+                "<module>",
+                1,
+            ))
+        } else {
+            None
+        };
+        if let Some(prefix) = prefix {
+            functions[id].body.insert(0, prefix);
+        }
+        startup.push(Statement::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Call(id, ir::CallArgs::positional(Vec::new())),
+        }));
+    }
+    entry.body.splice(..0, startup);
+    let source_frames = if track_frames {
+        python_frames
+            .into_iter()
+            .zip(owners.iter().copied().chain([graph.entry]))
+            .map(|(frame, module)| {
+                frame.then(|| {
+                    if names {
+                        ir::SourceFrame::Module(if module == graph.entry {
+                            "__main__".to_owned()
+                        } else {
+                            graph.modules[module].name.clone()
+                        })
+                    } else {
+                        ir::SourceFrame::Depth
+                    }
+                })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     globals
         .class_data
         .borrow_mut()
         .extend_layouts(&mut classes.fields);
     let mut globals = globals.into_types();
     types.reserve_constructor_globals(&mut globals, &functions, &entry);
-    if let Some(cache) = cache {
-        cache.finish(&types);
-    }
     let lowered = (
         ir::Module {
             builtin_module_sources: uses_builtin_module_names
@@ -1456,24 +1491,38 @@ fn lower_graph(
         },
         owners,
     );
-    if needs_object_string_order(&lowered.0) {
-        graph.needs_object_runtime.set(true);
-        let diagnostic = Diagnostic::plain(
-            " Imre: ordering strings from chr() with possible surrogate values requires native Python object operations".to_owned(),
-        )
-        .with_path(&graph.modules[graph.entry].path)
-        .classified(Kind::ScopedObject);
-        return Err(diagnostic);
-    }
     Ok(crate::CheckedProgram::Native(Box::new(lowered)))
+}
+
+fn required_object_diagnostic(
+    graph: &SourceGraph,
+    functions: &[ir::Function],
+    entry: &ir::Function,
+) -> Option<Diagnostic> {
+    let (id, operand, call) = ir::required_object_call(functions.iter().chain([entry]))?;
+    let (name, kind) = match call {
+        ir::ObjectCall::ExecText => ("exec", Kind::ScopedObject),
+        ir::ObjectCall::FormatField => ("this f-string field", Kind::Ordinary),
+        ir::ObjectCall::SocketSendfile => ("socket.sendfile", Kind::Object),
+    };
+    let source = &graph.modules[id];
+    Some(
+        Diagnostic::at(
+            &source.source,
+            &operand,
+            format!("{name} requires native Python object operations"),
+        )
+        .with_path(&source.path)
+        .classified(kind),
+    )
 }
 
 /// Native text is UTF-8. Use object comparisons when a call to `chr` could
 /// construct a lone surrogate.
-fn needs_object_string_order(module: &ir::Module) -> bool {
+fn needs_object_string_order(functions: &[ir::Function], entry: &ir::Function) -> bool {
     let mut orders_strings = false;
     let mut code_points = Vec::new();
-    for function in module.functions.iter().chain([&module.entry]) {
+    for function in functions.iter().chain([entry]) {
         ir::walk_expressions(&function.body, &mut |expr| match &expr.kind {
             ExprKind::Builtin(Builtin::Chr, args) => code_points.push(&args[0]),
             ExprKind::Compare(values, operators) => {
@@ -1488,7 +1537,7 @@ fn needs_object_string_order(module: &ir::Module) -> bool {
     if !orders_strings || code_points.is_empty() {
         return false;
     }
-    let ranges = crate::ranges::analyze(module);
+    let ranges = crate::ranges::analyze_functions(functions.iter().chain([entry]));
     code_points.into_iter().any(|value| {
         ranges
             .integer(value)
@@ -4412,7 +4461,7 @@ impl<'a> Checker<'a> {
             };
             let cursor = Expr {
                 ty: Type::PythonObject,
-                kind: ExprKind::Builtin(Builtin::RegisteredIter, vec![value]),
+                kind: ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::Loop), vec![value]),
             };
             return Ok(Iteration::Prepared(self.prepare_cursor(cursor, element)));
         }
@@ -4746,11 +4795,16 @@ impl<'a> Checker<'a> {
             .types
             .iteration_element(iterable.ty, items)
             .ok_or_else(|| {
-                error(
+                let reason = error(
                     self.source,
                     target,
                     "iteration requires a concrete list, dictionary, set, string, bytes, or range",
-                )
+                );
+                if iterable.ty == Type::PythonObject {
+                    reason.classify(Kind::ScopedObject)
+                } else {
+                    reason
+                }
             })?;
         // A private forward cursor can borrow the UTF-8 bytes of an exact string.
         let (iterable, encoded_bytes) = match iterable {
@@ -5010,23 +5064,38 @@ impl<'a> Checker<'a> {
 
     /// Checks dead syntax too, but merges definite assignment only from reachable exits.
     fn block(&mut self, statements: &[ast::Stmt]) -> Result<(Vec<Statement>, bool), String> {
+        let mut body = Vec::new();
+        let falls_through = self.lower_block(statements, Some(&mut body))?;
+        Ok((body, falls_through))
+    }
+
+    /// Keep binding, flow and diagnostic evidence for every statement. Only the
+    /// owner of an executable body collects instructions and frame checkpoints.
+    fn lower_block(
+        &mut self,
+        statements: &[ast::Stmt],
+        mut output: Option<&mut Vec<Statement>>,
+    ) -> Result<bool, String> {
         if let Some(reason) = statements.first().and_then(|first| {
             self.graph
                 .entry_profile
                 .excluded(self.module, first.start())
         }) {
-            let message = Expr {
-                ty: Type::Str,
-                kind: ExprKind::Str(reason.to_owned()),
-            };
-            let exception = Expr {
-                ty: Type::Exception,
-                kind: ExprKind::Exception {
-                    kind: exception_kind("ValueError").unwrap(),
-                    message: Some(Box::new(message)),
-                },
-            };
-            return Ok((vec![Statement::Raise(Some(exception))], false));
+            if let Some(body) = output {
+                let message = Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Str(reason.to_owned()),
+                };
+                let exception = Expr {
+                    ty: Type::Exception,
+                    kind: ExprKind::Exception {
+                        kind: exception_kind("ValueError").unwrap(),
+                        message: Some(Box::new(message)),
+                    },
+                };
+                body.push(Statement::Raise(Some(exception)));
+            }
+            return Ok(false);
         }
 
         if self.block_depth == 0 && !self.module_scope {
@@ -5063,7 +5132,6 @@ impl<'a> Checker<'a> {
             }
         }
         self.block_depth += 1;
-        let mut body = Vec::new();
         let mut falls_through = true;
         let reachable = self.reachable;
         let enclosing_sum = self.zip_sum_rhs;
@@ -5144,19 +5212,21 @@ impl<'a> Checker<'a> {
             {
                 lowered.push(Statement::Assign(*flag, Expr::boolean(true)));
             }
-            if self.registered.is_some() {
-                // Even a pass has a Python frame checkpoint for pending signals and exceptions.
-                body.push(registered::checkpoint(statement));
-            } else if !lowered.is_empty() && self.fault_enabled() {
-                body.push(self.fault_line(statement));
+            if let Some(body) = output.as_deref_mut() {
+                if self.registered.is_some() {
+                    // Even a pass has a Python frame checkpoint for pending signals and exceptions.
+                    body.push(registered::checkpoint(statement));
+                } else if !lowered.is_empty() && self.fault_enabled() {
+                    body.push(self.fault_line(statement));
+                }
+                body.extend(lowered);
             }
-            body.extend(lowered);
             falls_through &= continues;
         }
         self.reachable = reachable;
         self.zip_sum_rhs = enclosing_sum;
         self.block_depth -= 1;
-        Ok((body, falls_through))
+        Ok(falls_through)
     }
 
     fn require_registered_operation(&self, site: &impl Ranged) {
@@ -9584,6 +9654,14 @@ impl<'a> Checker<'a> {
                     "generator expressions require an immediate for, comprehension, list, sum, min, max, any, or all consumer",
                 ));
             }
+            ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => {
+                return Err(error(
+                    self.source,
+                    expression,
+                    "generator suspension requires a registered frame",
+                )
+                .classify(Kind::GeneratorSuspension));
+            }
             _ => {
                 return Err(error(
                     self.source,
@@ -9605,57 +9683,6 @@ impl<'a> Checker<'a> {
         Ok(Expr { ty, kind })
     }
 
-    /// Preserves the complete adjacent-part sequence and converts each field
-    /// before evaluating the next. Sealed conversions never resolve a local `str`.
-    fn fstring(&mut self, value: &ast::ExprFString) -> Result<Expr, String> {
-        let mut parts = Vec::new();
-        for part in value.value.iter() {
-            match part {
-                ast::FStringPartRef::Literal(literal) => {
-                    check_string_literal(literal, self.source)?;
-                    parts.push(Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Str(literal.value.to_string()),
-                    });
-                }
-                ast::FStringPartRef::FString(fstring) => {
-                    for element in &fstring.elements {
-                        let part = match element {
-                            ast::InterpolatedStringElement::Literal(literal) => {
-                                if !matches!(
-                                    fstring.flags.prefix(),
-                                    ast::str_prefix::FStringPrefix::Raw { .. }
-                                ) {
-                                    check_string_escapes(literal.range(), self.source)?;
-                                }
-                                Expr {
-                                    ty: Type::Str,
-                                    kind: ExprKind::Str(literal.value.to_string()),
-                                }
-                            }
-                            ast::InterpolatedStringElement::Interpolation(field) => {
-                                self.formatted_scalar(field)?
-                            }
-                        };
-                        parts.push(part);
-                    }
-                }
-            }
-        }
-        // A formatted string evaluates every interpolation before joining them.
-        Ok(parts
-            .into_iter()
-            .rev()
-            .reduce(|right, left| Expr {
-                ty: Type::Str,
-                kind: ExprKind::Binary(Binary::Concat, Box::new(left), Box::new(right)),
-            })
-            .unwrap_or_else(|| Expr {
-                ty: Type::Str,
-                kind: ExprKind::Str(String::new()),
-            }))
-    }
-
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {
         let live = match &*call.func {
             ast::Expr::Attribute(field) => self
@@ -9664,7 +9691,7 @@ impl<'a> Checker<'a> {
             target => self.live_module_binding(target),
         };
         if let Some(callee) = live {
-            let value = registered::values::call_with_target(call, callee, |arg| self.expr(arg))?;
+            let value = self.call_with_target(call, callee)?;
             self.graph.checked_live_call(self.module, call);
             return Ok(value);
         }
@@ -9675,10 +9702,7 @@ impl<'a> Checker<'a> {
         {
             // A registered initializer already owns the namespace returned by globals().
             self.namespace_calls.insert(call.range());
-            return Ok(registered::values::object_call(
-                call,
-                vec![registered::values::name_binding("globals")],
-            ));
+            return Ok(registered::values::name_call(call, "globals", vec![]));
         }
         if self.unshadowed_builtin(&call.func, "range") {
             return self.range_value(call);
@@ -10304,9 +10328,7 @@ impl<'a> Checker<'a> {
                 };
                 if object.ty == Type::PythonObject {
                     let method = registered::values::loaded_attribute(method, object);
-                    return registered::values::call_with_target(call, method, |arg| {
-                        self.expr(arg)
-                    });
+                    return self.call_with_target(call, method);
                 }
                 if let Type::Class(class)
                 | Type::IntEnum(class)
@@ -11601,7 +11623,7 @@ impl<'a> Checker<'a> {
             };
             if receiver.ty == Type::PythonObject {
                 let method = registered::values::loaded_attribute(attribute, receiver);
-                return registered::values::call_with_target(call, method, |arg| self.expr(arg));
+                return self.call_with_target(call, method);
             }
             self.check_namedtuple_asdict(attribute, Some(receiver.ty))?;
             if let Some(result) =
@@ -13084,11 +13106,9 @@ impl<'a> Checker<'a> {
                     || self.graph.modules[self.module].is_program_source()) =>
             {
                 self.require_registered_operation(call);
-                let mut operands = args;
-                operands.insert(0, registered::values::name_binding("id"));
                 return Ok(Expr {
                     ty: Type::Int,
-                    ..registered::values::object_call(call, operands)
+                    ..registered::values::name_call(call, "id", args)
                 });
             }
             "int"
@@ -13226,9 +13246,7 @@ impl<'a> Checker<'a> {
                 if self.registered.is_none() && !self.globals.registered_initializers {
                     self.missing_operation(&self.scoped_builtin_error(name, call));
                 }
-                let mut operands = args;
-                operands.insert(0, registered::values::name_binding(name));
-                return Ok(registered::values::object_call(call, operands));
+                return Ok(registered::values::name_call(call, name, args));
             }
             _ => return Err(error(self.source, call, UNSUPPORTED_ARGUMENTS)),
         };

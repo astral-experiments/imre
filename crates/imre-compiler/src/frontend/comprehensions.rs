@@ -117,11 +117,12 @@ pub(super) trait EagerDisplay: Sized {
     type Error;
 
     fn before_pull(&mut self, _plan: &Plan<'_>, _depth: usize) {}
-    fn input(&mut self, iter: &ast::Expr) -> StdResult<Self::Input, Self::Error>;
+    fn input(&mut self, clause: &ast::Comprehension) -> StdResult<Self::Input, Self::Error>;
     fn with_target(
         &mut self,
         target: &ast::Expr,
         input: Self::Input,
+        output: Output<'_>,
         body: impl FnOnce(&mut Self) -> StdResult<Vec<Statement>, Self::Error>,
     ) -> StdResult<Vec<Statement>, Self::Error>;
     fn filter(&mut self, test: &ast::Expr) -> StdResult<Expr, Self::Error>;
@@ -163,19 +164,30 @@ pub(super) trait EagerDisplay: Sized {
         destination: Self::Destination,
         result: usize,
     ) -> StdResult<Vec<Statement>, Self::Error> {
+        self.comprehension_loop(plan, pc, parent, input, &mut |lower, output, conditions| {
+            lower.collect(output, destination, result, conditions)
+        })
+    }
+
+    fn comprehension_loop<'p>(
+        &mut self,
+        plan: &Plan<'p>,
+        pc: usize,
+        parent: Option<usize>,
+        input: Self::Input,
+        emit: &mut impl FnMut(&mut Self, Output<'p>, &[Expr]) -> StdResult<Vec<Statement>, Self::Error>,
+    ) -> StdResult<Vec<Statement>, Self::Error> {
         let Step::Next { depth, target, .. } = plan.steps[pc] else {
             unreachable!("an iterator is followed by its pull")
         };
         self.before_pull(plan, depth);
-        self.with_target(target, input, |lower| {
+        self.with_target(target, input, plan.output, |lower| {
             let (next, conditions) = lower.eager_filters(plan, pc, parent)?;
             let mut body = match plan.steps[next] {
-                Step::Emit { output, .. } => {
-                    lower.collect(output, destination, result, &conditions)?
-                }
-                Step::Open { iterable, .. } => {
-                    let input = lower.input(iterable)?;
-                    lower.eager_loop(plan, next + 1, Some(pc), input, destination, result)?
+                Step::Emit { output, .. } => emit(lower, output, &conditions)?,
+                Step::Open { depth, .. } => {
+                    let input = lower.input(&plan.clauses[depth])?;
+                    lower.comprehension_loop(plan, next + 1, Some(pc), input, emit)?
                 }
                 _ => unreachable!("an accepted input opens an iterator or emits"),
             };
@@ -196,14 +208,15 @@ impl EagerDisplay for Checker<'_> {
         self.forget_comprehension_writes(plan, depth)
     }
 
-    fn input(&mut self, iter: &ast::Expr) -> Result<Iteration, String> {
-        self.iteration_input(iter, None)
+    fn input(&mut self, clause: &ast::Comprehension) -> Result<Iteration, String> {
+        self.iteration_input(&clause.iter, None)
     }
 
     fn with_target(
         &mut self,
         target: &ast::Expr,
         input: Iteration,
+        _: Output<'_>,
         body: impl FnOnce(&mut Self) -> Result<Vec<Statement>, String>,
     ) -> Result<Vec<Statement>, String> {
         self.lower_iteration(target, input, &[], body)

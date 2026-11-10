@@ -8,18 +8,22 @@ pub(crate) mod patterns;
 mod sequences;
 pub(crate) mod sites;
 pub(crate) mod suspension;
-use crate::frontend::{LocalBinding, RegisteredFunction, RegisteredOperand, RegisteredRegion};
+use crate::frontend::{
+    LocalBinding, RegisteredFunction, RegisteredOperand, RegisteredRegion, ResidualField,
+};
 use crate::ir::DisplayKind;
 use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Statement, Type};
 use crate::llvm::body::FunctionBody;
 pub(crate) use abi::{ABI, CallArguments, Output, permanent};
 use abi::{GUARDED_LIT, GUARDED_NAMED_OP, NAMED_OP};
-pub(crate) use frame::{ArgumentPack, FrameEmitter, Place, RegisteredFrame, SourcePositions};
+pub(crate) use frame::{
+    AnnotationScope, ArgumentPack, FrameEmitter, Place, RegisteredFrame, SourcePositions,
+};
 use sites::CheckedSites;
 
 use crate::llvm::operations::{CheckedBody, CheckedValue, LoopEdges};
 use context::Region;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 /// Only take a body when all its operations have a lowering for the registered calling convention.
 pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
@@ -65,10 +69,11 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                                 })
                             })
                     }
-                    Statement::With { body, entered, .. } => {
+                    Statement::With { binding, body, .. } => {
                         uses_python_protocol = true;
-                        entered.as_ref().is_none_or(|slot| private.contains(slot))
-                            && !suspends(body)
+                        binding.as_ref().is_none_or(|binding| {
+                            private.contains(&binding.entered) && !suspends(&binding.body)
+                        }) && !suspends(body)
                     }
                     Statement::Scope { body, .. } => !suspends(body),
                     Statement::SetItem(receiver, _, _)
@@ -80,7 +85,7 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                     Statement::If(..) => true,
                     Statement::Match(_, cases) => cases.iter().flat_map(|case| &case.captures).all(has_slot),
                     Statement::IterNext {
-                        kind: ir::IterNextKind::Generic,
+                        kind: ir::IterNextKind::Generic | ir::IterNextKind::Async(_),
                         iterator,
                         key,
                         value: None,
@@ -130,9 +135,17 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
             ExprKind::Conditional(..) | ExprKind::BooleanValue(..) | ExprKind::Boolean(..) => true,
             ExprKind::Dict { entries, .. } => entries.is_empty(),
             ExprKind::Builtin(op, args) if let Some(iteration) = op.iteration_operands(args) => {
-                uses_python_protocol |= matches!(iteration, Ok(ir::IterationOperands::Iter(_)));
+                uses_python_protocol |= matches!(iteration, Ok(ir::IterationOperands::Iter(..)));
                 iteration.is_ok()
             }
+            ExprKind::Builtin(Builtin::FormatConversion(_), args) => args.len() == 1,
+            ExprKind::Builtin(Builtin::FormatField, args) => {
+                uses_python_protocol |= args
+                    .first()
+                    .is_some_and(|value| value.ty == Type::PythonObject);
+                args.len() == 2
+            }
+            ExprKind::Builtin(Builtin::FormatJoin, parts) => parts.len() >= 2,
             ExprKind::Binary(..) => true,
             ExprKind::List(_) | ExprKind::Tuple(_) | ExprKind::Set { .. } => {
                 uses_python_protocol = true;
@@ -143,10 +156,18 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                 uses_python_protocol = true;
                 !scoped || !operands.is_empty()
             }
+            ExprKind::Builtin(Builtin::RegisteredGenerator(_, scoped), operands) => {
+                uses_python_protocol = true;
+                ir::generator_operands(*scoped, operands).is_ok()
+            }
             ExprKind::Builtin(Builtin::RegisteredCompare(ops), values) => {
                 !ops.is_empty() && values.len() == ops.len() + 1
             }
             ExprKind::Builtin(Builtin::RegisteredContainsLiteral(_), values) => !values.is_empty(),
+            ExprKind::Invoke { .. } => {
+                uses_python_protocol = true;
+                expr.is_registered_invoke()
+            }
             ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
                 uses_python_protocol = true;
                 operands.len() > usize::from(call.explicit_scope)
@@ -185,12 +206,7 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
             ExprKind::Builtin(Builtin::RegisteredTemplate(segments), fields) => {
                 segments.len() == fields.len() + 1
             }
-            ExprKind::Builtin(
-                Builtin::RegisteredInterpolation { .. } | Builtin::RegisteredFormat,
-                args,
-            ) => args.len() == 2,
-            ExprKind::Builtin(Builtin::RegisteredFormatConversion(_), args) => args.len() == 1,
-            ExprKind::Builtin(Builtin::RegisteredFormatJoin, _) => true,
+            ExprKind::Builtin(Builtin::RegisteredInterpolation { .. }, args) => args.len() == 2,
             ExprKind::Builtin(Builtin::RegisteredDict(entries), operands) => {
                 operands.len()
                     == entries
@@ -229,7 +245,7 @@ fn suspends(body: &[Statement]) -> bool {
 pub(super) struct IterationState {
     private_slots: Vec<usize>,
     first_slot: usize,
-    cursors: BTreeSet<usize>,
+    cursors: HashMap<usize, ir::IterNextKind>,
     scopes: Vec<Region>,
     loops: Vec<(LoopEdges, usize)>,
     in_expression: bool,
@@ -241,11 +257,61 @@ pub(super) struct ExpressionScope {
     error_targets: (String, String),
 }
 
+/// Live objects under construction at a single template literal.
+pub(crate) struct TemplateBuilder {
+    strings: String,
+    parts: String,
+}
+
+/// The spec is loaded before the physical owner evaluates the interpolation value.
+pub(crate) struct ReadyInterpolation<'a> {
+    template: &'a TemplateBuilder,
+    field: &'a ResidualField,
+    spec: String,
+}
+
+impl ReadyInterpolation<'_> {
+    pub(crate) fn capture(self, frame: &mut RegisteredFrame<'_, '_>, value: &str) {
+        let interpolation = frame.interpolation(
+            value,
+            &self.field.expression,
+            self.field.conversion,
+            &self.spec,
+        );
+        self.template.push(frame, &interpolation);
+    }
+}
+
+impl TemplateBuilder {
+    pub(crate) fn field<'a>(
+        &'a self,
+        frame: &mut RegisteredFrame<'_, '_>,
+        metadata: &'a Result<ResidualField, &'static str>,
+        sites: &CheckedSites,
+    ) -> Result<ReadyInterpolation<'a>, &'static str> {
+        let field = metadata.as_ref().map_err(|&reason| reason)?;
+        Ok(ReadyInterpolation {
+            template: self,
+            field,
+            spec: frame.registered_value(&field.spec, sites),
+        })
+    }
+
+    fn push(&self, frame: &mut RegisteredFrame<'_, '_>, interpolation: &str) {
+        frame.op("append", &[&self.parts, interpolation]);
+    }
+
+    pub(crate) fn finish(self, frame: &mut RegisteredFrame<'_, '_>) -> String {
+        frame.op("build_template", &[&self.strings, &self.parts])
+    }
+}
+
 /// The registered binder owns the scope, argument identities and frame.
 pub(crate) struct Frame<'f, 'a, 'p> {
     code: &'f mut RegisteredFrame<'a, 'p>,
     sites: &'f CheckedSites,
     names: Option<&'f HashMap<usize, LocalBinding>>,
+    inputs: &'f [String],
 }
 
 impl<'a, 'p> std::ops::Deref for Frame<'_, 'a, 'p> {
@@ -267,11 +333,7 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
             Some((exception, cause)) => (Some(exception), Some(cause)),
             None => (value, None),
         };
-        let exception = exception.map(|value| self.evaluate_handle(value));
-        if self.begin_raise(exception) {
-            let cause = cause.map(|value| self.evaluate_handle(value));
-            self.finish_raise(cause.as_deref());
-        }
+        self.raise_operands(exception, cause, Self::evaluate_handle);
     }
 
     pub(super) fn for_expression(
@@ -282,6 +344,7 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
             code,
             sites,
             names: None,
+            inputs: &[],
         }
     }
 
@@ -290,6 +353,7 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
             code: self.code,
             sites: self.sites,
             names: self.names,
+            inputs: self.inputs,
         }
     }
 }
@@ -346,6 +410,9 @@ impl Frame<'_, '_, '_> {
     }
 
     pub(crate) fn lookup_local(&mut self, slot: usize) -> String {
+        if !self.inputs.is_empty() {
+            return self.inputs[slot].clone();
+        }
         if self
             .code
             .iteration
@@ -507,25 +574,37 @@ impl Frame<'_, '_, '_> {
         };
         self.code.keep_operands(&mark, handle, "0");
     }
-    fn physical_slot(&self, slot: usize) -> usize {
-        let frame = &self.code.iteration;
-        frame.first_slot
-            + frame
-                .private_slots
-                .binary_search(&slot)
-                .expect("checked private slot")
-    }
-
     fn load_private(&mut self, slot: usize) -> String {
         let slot = self.physical_slot(slot);
         self.code.value(&format!("load i64, ptr %ir_slot{slot}"))
     }
-    fn store_private(&mut self, slot: usize, value: &str) {
-        let slot = self.physical_slot(slot);
-        self.code
-            .line(&format!("store i64 {value}, ptr %ir_slot{slot}"));
+    /// A nested handler inside the scope keeps its cursor. Only a transfer to
+    /// the scope's enclosing error target abandons these physical root words.
+    pub(crate) fn unwind_scope(&mut self, clear: &[usize]) {
+        if clear.is_empty() || self.code.body.error_target == "failed" {
+            return;
+        }
+        let frame = &mut *self.code;
+        let slots = frame
+            .scope_unwinds
+            .entry(frame.body.error_target.clone())
+            .or_default();
+        for slot in clear {
+            if let Ok(index) = frame.iteration.private_slots.binary_search(slot) {
+                slots.insert(frame.iteration.first_slot + index);
+            }
+        }
     }
+
+    pub(super) fn owns_sync_cursor(&self, slots: &[usize]) -> bool {
+        !self.code.iteration.in_expression
+            && slots.iter().any(|slot| {
+                self.code.iteration.cursors.get(slot) == Some(&ir::IterNextKind::Generic)
+            })
+    }
+
     pub(crate) fn enter_scope(&mut self, clear: &[usize]) {
+        self.unwind_scope(clear);
         self.code
             .iteration
             .scopes
@@ -539,13 +618,16 @@ impl Frame<'_, '_, '_> {
             if self.names.is_some_and(|n| n.contains_key(&slot)) {
                 continue;
             }
-            if self.code.iteration.cursors.contains(&slot) {
+            if self.code.iteration.cursors.contains_key(&slot) {
                 let old = self.load_private(slot);
                 self.store_private(slot, "0");
                 self.code.op("break_iter", &[&old]);
             } else {
                 self.store_private(slot, "0");
             }
+        }
+        if self.owns_sync_cursor(slots) {
+            self.release_target(None);
         }
     }
     pub(crate) fn enter_loop(&mut self, edges: &LoopEdges) {
@@ -571,26 +653,42 @@ impl Frame<'_, '_, '_> {
             "call void @imre_dyn_comprehension_step(ptr %ctx, i64 {mark})"
         ));
     }
-    pub(crate) fn pull_ready(&mut self, iterator: usize, ready: usize) -> (String, String) {
+    pub(crate) fn pull(
+        &mut self,
+        iterator: usize,
+        key: usize,
+        ready: usize,
+        kind: ir::IterNextKind,
+    ) {
         let cursor = self.load_private(iterator);
-        let has_else = self
-            .code
-            .iteration
-            .loops
-            .last()
-            .is_some_and(|(edges, _)| edges.exhausted != edges.done);
-        let more = self
-            .code
-            .op(if has_else { "more_else" } else { "more" }, &[&cursor]);
-        self.store_private(ready, &more);
-        let available = self
-            .code
-            .value(&format!("icmp eq i64 {more}, {}", permanent::TRUE));
-        (cursor, available)
-    }
-    pub(crate) fn pull_item(&mut self, cursor: &str, key: usize) {
-        let item = self.code.op("next", &[cursor]);
+        let item_block = self.code.name("b");
+        let done = self.code.name("b");
+        self.store_private(ready, &permanent::FALSE.to_string());
+        let item = match kind {
+            ir::IterNextKind::Generic => {
+                let header = self.code.current_range.start();
+                self.code.retained_loop_header(header);
+                let has_else = self
+                    .code
+                    .iteration
+                    .loops
+                    .last()
+                    .is_some_and(|(edges, _)| edges.exhausted != edges.done);
+                self.code
+                    .enter_sync_iteration(&cursor, has_else, false, &item_block, &done);
+                self.code.op("next", &[&cursor])
+            }
+            ir::IterNextKind::Async(pull) => {
+                let item = self.code.async_pull(&cursor, pull, &item_block, &done);
+                self.code.label(&item_block);
+                item
+            }
+            _ => unreachable!("registered iterator kind"),
+        };
         self.store_private(key, &item);
+        self.store_private(ready, &permanent::TRUE.to_string());
+        self.code.jump(&done);
+        self.code.label(&done);
     }
     pub(crate) fn declare_integer_arithmetic(&mut self, op: Binary) {
         match op {
@@ -736,10 +834,19 @@ impl Frame<'_, '_, '_> {
             (op, args) if let Some(iteration) = op.iteration_operands(args) => {
                 use ir::IterationOperands::*;
                 match iteration.expect("checked iteration operands") {
-                    Iter(value) => {
-                        let value = self.evaluate_handle(value);
-                        self.code.op("iter", &[&value])
-                    }
+                    Iter(value, op) => match op {
+                        ir::IteratorOp::Get(range) | ir::IteratorOp::Async(range) => {
+                            self.iteration_result(|frame| {
+                                let value = frame.evaluate_handle(value);
+                                frame.call_position(range);
+                                frame.op(op.runtime_op(), &[&value])
+                            })
+                        }
+                        ir::IteratorOp::Loop | ir::IteratorOp::LoopCursor => {
+                            let value = self.evaluate_handle(value);
+                            self.code.op(op.runtime_op(), &[&value])
+                        }
+                    },
                     Truth(value) => {
                         let value = self.evaluate_handle(value);
                         self.code.op("truth", &[&value])
@@ -772,6 +879,34 @@ impl Frame<'_, '_, '_> {
                     .collect::<Vec<_>>();
                 self.contains_literal(&needle, &items, *negate)
             }
+            (Builtin::FormatConversion(_) | Builtin::FormatField | Builtin::FormatJoin, _) => {
+                let mark = self.temporary_mark();
+                self.unwind_stack_operands(&mark, |frame| {
+                    let result = match (op, operands) {
+                        (Builtin::FormatConversion(conversion), [value]) => {
+                            let value = frame.evaluate_handle(value);
+                            frame.keep_operands(&mark, &value, "0");
+                            frame.format_conversion(&value, *conversion)
+                        }
+                        (Builtin::FormatField, [value, spec]) => {
+                            let value = frame.evaluate_handle(value);
+                            frame.keep_operands(&mark, &value, "0");
+                            let spec = frame.evaluate_handle(spec);
+                            frame.format_field(&value, &spec)
+                        }
+                        (Builtin::FormatJoin, parts) => {
+                            let parts = parts
+                                .iter()
+                                .map(|part| frame.evaluate_handle(part))
+                                .collect();
+                            return frame.format_join(&mark, parts);
+                        }
+                        _ => unreachable!("checked format operands"),
+                    };
+                    frame.keep_operands(&mark, &result, "0");
+                    result
+                })
+            }
             (Builtin::RegisteredName(name), []) => self.code.lookup(name),
             (Builtin::RegisteredName(name), [scope]) => {
                 let scope = self.evaluate_handle(scope);
@@ -786,13 +921,12 @@ impl Frame<'_, '_, '_> {
                 .lit(4, &[real.to_le_bytes(), imag.to_le_bytes()].concat()),
             (Builtin::RegisteredString(points), []) => self.code.linked_string(points.clone()),
             (Builtin::RegisteredTemplate(segments), fields) => {
-                let strings = self.code.emit_string_tuple(segments.clone());
-                let parts = self.code.op("list", &[]);
+                let template = self.code.begin_template(segments.clone());
                 for field in fields {
                     let part = self.evaluate_handle(field);
-                    self.code.op("append", &[&parts, &part]);
+                    template.push(self.code, &part);
                 }
-                self.code.op("build_template", &[&strings, &parts])
+                template.finish(self.code)
             }
             (
                 Builtin::RegisteredInterpolation {
@@ -805,22 +939,6 @@ impl Frame<'_, '_, '_> {
                 let spec = self.evaluate_handle(spec);
                 self.code
                     .interpolation(&value, expression, *conversion, &spec)
-            }
-            (Builtin::RegisteredFormatConversion(conversion), [value]) => {
-                let value = self.evaluate_handle(value);
-                self.code.convert_format_value(&value, *conversion)
-            }
-            (Builtin::RegisteredFormat, [value, spec]) => {
-                let value = self.evaluate_handle(value);
-                let spec = self.evaluate_handle(spec);
-                self.code.format_value(&value, &spec)
-            }
-            (Builtin::RegisteredFormatJoin, parts) => {
-                let parts = parts
-                    .iter()
-                    .map(|part| self.evaluate_handle(part))
-                    .collect();
-                self.code.join_format_parts(parts)
             }
             (Builtin::RegisteredLocation(range, position), [value]) => {
                 let previous_range = std::mem::replace(&mut self.code.current_range, *range);
@@ -842,14 +960,35 @@ impl Frame<'_, '_, '_> {
                     .collect::<Vec<_>>();
                 self.sites.bind_lambda(self.code, *site, &scope, &defaults)
             }
+            (Builtin::RegisteredGenerator(site, scoped), operands) => {
+                let (scope, cursor) =
+                    ir::generator_operands(*scoped, operands).expect("checked generator operands");
+                let scope = scope
+                    .map(|scope| self.evaluate_handle(scope))
+                    .unwrap_or_else(|| self.code.scope.clone());
+                let mark = self.temporary_mark();
+                self.unwind_operands(&mark, |frame| {
+                    let cursor = frame.evaluate_handle(cursor);
+                    frame.keep_operands(&mark, &cursor, "0");
+                    let result = frame.sites.bind_generator(frame.code, *site, &scope, &cursor);
+                    frame.keep_operands(&mark, &result, "0");
+                    result
+                })
+            }
             (Builtin::RegisteredDefinition(site), header) => {
                 let (prefix, arguments) = match site {
-                    ir::DefinitionSite::Class { arguments, .. } => {
+                    ir::DefinitionSite::Class {
+                        arguments: Some(arguments),
+                        ..
+                    } => {
                         let count = arguments.starred.len() + arguments.keywords.len();
                         let (decorators, operands) = header.split_at(header.len() - count);
                         (decorators, Some((arguments, operands)))
                     }
-                    ir::DefinitionSite::Function(_) => (header, None),
+                    ir::DefinitionSite::Class {
+                        arguments: None, ..
+                    }
+                    | ir::DefinitionSite::Function(_) => (header, None),
                 };
                 let header = prefix
                     .iter()
@@ -865,11 +1004,18 @@ impl Frame<'_, '_, '_> {
                     pack.finish(self.code)
                 });
                 self.sites
-                    .definition(self.code, site, &header, class_arguments)
+                    .definition(self.code, site.start(), &header, class_arguments)
             }
-            (Builtin::RegisteredTypeAlias(site), []) => {
-                self.sites.aliases[site].instantiate(self.code)
-            }
+            (Builtin::RegisteredTypeAlias(site), []) => match &self.sites.aliases[site] {
+                Ok(alias) => alias.instantiate(self.code),
+                Err(error) => {
+                    self.code
+                        .output
+                        .diagnostic
+                        .get_or_insert_with(|| error.clone());
+                    "0".to_owned()
+                }
+            },
             (Builtin::RegisteredImport(import), []) => {
                 self.code.namespace_import(import);
                 "0".to_owned()
@@ -933,11 +1079,6 @@ impl Frame<'_, '_, '_> {
                 let left = self.evaluate_handle(left);
                 let right = self.evaluate_handle(right);
                 self.code.inplace(op, &left, &right)
-            }
-            (Builtin::RegisteredDeleteItem, [base, key]) => {
-                let base = self.evaluate_handle(base);
-                let key = self.evaluate_handle(key);
-                self.code.delete_item(&base, &key)
             }
             (Builtin::RegisteredSubscript(range, base_end), [base, key]) => {
                 let base = self.evaluate_handle(base);
@@ -1083,8 +1224,15 @@ impl RegisteredFrame<'_, '_> {
         ));
     }
 
+    pub(crate) fn begin_template(&mut self, segments: Vec<Vec<u8>>) -> TemplateBuilder {
+        TemplateBuilder {
+            strings: self.emit_string_tuple(segments),
+            parts: self.op("list", &[]),
+        }
+    }
+
     /// Construct an interpolation from evaluated handles and its constant source spelling.
-    pub(crate) fn interpolation(
+    fn interpolation(
         &mut self,
         value: &str,
         expression: &str,
@@ -1099,7 +1247,7 @@ impl RegisteredFrame<'_, '_> {
         self.op("template_interpolation", &[value, &expression, &metadata])
     }
 
-    pub(crate) fn emit_string_tuple(&mut self, segments: Vec<Vec<u8>>) -> String {
+    fn emit_string_tuple(&mut self, segments: Vec<Vec<u8>>) -> String {
         let slot = self.constant_slot(ir::Constant::Tuple(
             segments.iter().cloned().map(ir::Constant::Text).collect(),
         ));
@@ -1111,23 +1259,6 @@ impl RegisteredFrame<'_, '_> {
                 .collect::<Vec<_>>();
             code.build_sequence(&values, true, Some(&slot))
         })
-    }
-
-    pub(crate) fn convert_format_value(&mut self, value: &str, conversion: char) -> String {
-        let conversion = self.text(&conversion.to_string());
-        self.op("format_conversion", &[value, &conversion])
-    }
-
-    pub(crate) fn format_value(&mut self, value: &str, spec: &str) -> String {
-        self.op("format", &[value, "0", spec])
-    }
-
-    /// Preserve a lone formatted value and bypass string-subclass addition when joining fields.
-    pub(crate) fn join_format_parts(&mut self, parts: Vec<String>) -> String {
-        parts
-            .into_iter()
-            .reduce(|left, right| self.op("format_concat", &[&left, &right]))
-            .unwrap_or_else(|| self.text(""))
     }
 }
 
@@ -1168,8 +1299,8 @@ impl RegisteredFrame<'_, '_> {
         self.private_slot_count = end;
         self.live_slots.extend(first..end);
         checked.walk(&mut |node, _| {
-            if let ir::Node::Statement(Statement::IterNext { iterator, .. }) = node {
-                self.iteration.cursors.insert(*iterator);
+            if let ir::Node::Statement(Statement::IterNext { iterator, kind, .. }) = node {
+                self.iteration.cursors.insert(*iterator, *kind);
             }
         });
         Some(EnclosingSlots {
@@ -1183,8 +1314,22 @@ impl RegisteredFrame<'_, '_> {
         self.iteration = enclosing.iteration;
     }
 
+    fn physical_slot(&self, slot: usize) -> usize {
+        self.iteration.first_slot
+            + self
+                .iteration
+                .private_slots
+                .binary_search(&slot)
+                .expect("checked private slot")
+    }
+
+    pub(crate) fn store_private(&mut self, slot: usize, value: &str) {
+        let slot = self.physical_slot(slot);
+        self.line(&format!("store i64 {value}, ptr %ir_slot{slot}"));
+    }
+
     /// Emit a registered expression whose names are resolved through this live frame.
-    fn with_checked_frame<R>(
+    pub(crate) fn with_checked_frame<R>(
         &mut self,
         sites: &CheckedSites,
         names: Option<&HashMap<usize, LocalBinding>>,
@@ -1196,6 +1341,7 @@ impl RegisteredFrame<'_, '_> {
             code: self,
             names,
             sites,
+            inputs: &[],
         });
         self.expression_integer_start = outer;
         result
@@ -1225,19 +1371,21 @@ impl RegisteredFrame<'_, '_> {
         })
     }
 
-    pub(crate) fn logical_operand(
-        &mut self,
-        plan: &mut super::operations::branches::Logical,
-        step: usize,
-        operand: super::operations::branches::LogicalOperand,
-    ) {
-        self.with_checked_frame(&CheckedSites::default(), None, |frame| {
-            plan.accept(&mut CheckedBody::registered(frame), step, operand)
-        });
-    }
-
     pub(crate) fn registered_value(&mut self, expression: &Expr, sites: &CheckedSites) -> String {
         self.registered_expression(expression, sites, false)
+    }
+
+    /// Bind frame-rooted SSA handles to the positional slots of one checked expression.
+    /// The caller has already evaluated all inputs in their Python order.
+    pub(crate) fn registered_with_inputs(
+        &mut self,
+        expression: &Expr,
+        inputs: &[String],
+        sites: &CheckedSites,
+    ) -> String {
+        self.with_checked_frame(sites, None, |frame| {
+            Frame { inputs, ..frame }.evaluate_handle(expression)
+        })
     }
 
     pub(crate) fn registered_expression(
@@ -1280,6 +1428,27 @@ impl RegisteredFrame<'_, '_> {
         result
     }
 
+    pub(crate) fn checked_binding(
+        &mut self,
+        checked: &RegisteredFunction,
+        entered: usize,
+        value: &str,
+        sites: &CheckedSites,
+    ) {
+        let Some(enclosing) = self.enter_checked_slots(checked.region()) else {
+            return;
+        };
+        let mut frame = Frame {
+            code: self,
+            names: Some(&checked.local_names),
+            sites,
+            inputs: &[],
+        };
+        frame.store_private(entered, value);
+        CheckedBody::registered(frame).emit_block(&checked.function.body);
+        self.restore_checked_slots(enclosing);
+    }
+
     pub(crate) fn checked_block(
         &mut self,
         statements: &[Statement],
@@ -1290,6 +1459,7 @@ impl RegisteredFrame<'_, '_> {
             code: self,
             names: Some(&checked.local_names),
             sites,
+            inputs: &[],
         })
         .emit_block(statements);
     }
@@ -1302,6 +1472,7 @@ impl RegisteredFrame<'_, '_> {
             code: self,
             names: Some(&checked.local_names),
             sites,
+            inputs: &[],
         })
         .emit_function(&checked.function);
         self.restore_checked_slots(enclosing);

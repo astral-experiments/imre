@@ -97,7 +97,7 @@ pub(super) fn targets(
     functions: &[ir::Function],
     entry: &ir::Function,
     types: &Types,
-) -> std::result::Result<HashMap<Type, HashSet<usize>>, String> {
+) -> std::result::Result<HashMap<Type, HashSet<usize>>, Diagnostic> {
     let mut targets = HashMap::<Type, HashSet<usize>>::new();
     for function in functions.iter().chain([entry]) {
         ir::walk_expressions(&function.body, &mut |value| {
@@ -118,7 +118,10 @@ pub(super) fn targets(
                 .iter()
                 .any(|&id| functions[id].returns == returns)
         {
-            return Err("an Awaitable callback must be defined with async def".into());
+            return Err(
+                Diagnostic::from("an Awaitable callback must be defined with async def")
+                    .classified(Kind::UnsupportedRepresentation),
+            );
         }
     }
     Ok(targets)
@@ -535,7 +538,7 @@ impl Checker<'_> {
     /// Callable types contain positional types, not parameter names or defaults.
     pub(super) fn invoke(&mut self, call: &ast::ExprCall, callable: Expr) -> Result<Expr, String> {
         if callable.ty == Type::PythonObject {
-            return registered::values::call_with_target(call, callable, |arg| self.expr(arg));
+            return self.call_with_target(call, callable);
         }
         if let Type::WeakProxy(class) = callable.ty {
             return self.weak_proxy_call(call, callable, class);
@@ -722,24 +725,51 @@ mod tests {
 
     #[test]
     fn eager_coroutine_factories_remain_direct_calls() {
+        use crate::frontend::{lower, lower_with_caller_cache, phase::Kind};
+        use crate::ir::{self, Builtin, ExprKind, ProcessOperation};
+        use crate::modules::SourceGraph;
+
         let source = "from collections.abc import Awaitable, Callable\nasync def cold(x: int) -> int:\n    return x\ndef factory(x: int) -> Awaitable[int]:\n    return cold(x)\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("callbacks.py");
         for callback in ["cold", "factory", "lambda x: cold(x)"] {
             let program = format!(
                 "{source}async def run() -> int:\n    cb: Callable[[int], Awaitable[int]] = {callback}\n    return await cb(7)\n"
             );
+            let mut graph = SourceGraph::single(&program).unwrap();
             if callback == "cold" {
-                crate::check(&program).unwrap();
+                let module = lower(&graph).unwrap();
+                let mut indirect = false;
+                ir::walk_expressions(&module.functions[2].body, &mut |expr| {
+                    indirect |= matches!(
+                        expr.kind,
+                        ExprKind::Builtin(
+                            Builtin::Process(ProcessOperation::IndirectCoroutine { .. }),
+                            _
+                        )
+                    );
+                });
+                assert!(indirect);
             } else {
-                assert!(
-                    crate::check(&program)
-                        .unwrap_err()
-                        .contains("Awaitable callback must be defined with async def")
+                let Err(error) = lower_with_caller_cache(&mut graph, None) else {
+                    panic!("eager factory cannot enter a cold callback adapter");
+                };
+                assert_eq!(error.kind, Kind::UnsupportedRepresentation);
+                assert_eq!(
+                    error.to_string(),
+                    "an Awaitable callback must be defined with async def"
                 );
             }
+            std::fs::write(&path, &program).unwrap();
+            crate::check(&program).unwrap();
+            crate::check_file(&path, None).unwrap();
         }
-        crate::check(&format!(
-            "{source}async def run() -> int:\n    return await factory(7)\n"
-        ))
-        .unwrap();
+        let direct = format!("{source}async def run() -> int:\n    return await factory(7)\n");
+        let module = lower(&SourceGraph::single(&direct).unwrap()).unwrap();
+        let mut calls_factory = false;
+        ir::walk_expressions(&module.functions[2].body, &mut |expr| {
+            calls_factory |= matches!(expr.kind, ExprKind::Call(1, _));
+        });
+        assert!(calls_factory);
     }
 }

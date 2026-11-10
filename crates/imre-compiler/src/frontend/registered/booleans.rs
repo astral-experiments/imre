@@ -4,6 +4,7 @@ use crate::ir;
 use ir::control::{BranchShape, Context, Depth, Edges, Split, edges};
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 impl BranchShape for ast::Expr {
@@ -21,6 +22,13 @@ impl BranchShape for ast::Expr {
     }
 }
 
+fn conditional_parts<E: BranchShape>(node: &E) -> Option<[&E; 3]> {
+    match node.split(Context::Condition) {
+        Split::Conditional(test, yes, no) => Some([test, yes, no]),
+        _ => None,
+    }
+}
+
 /// Only complete semantic expressions are retained. A residual operation keeps its
 /// original source owner. Nested work is already present in a complete parent.
 #[derive(Default)]
@@ -31,11 +39,17 @@ pub(crate) struct LogicalSites {
 
 pub(crate) enum Selection {
     Checked(ir::Expr),
+    Comparison(Vec<Option<CheckedChild>>),
     Mixed {
         parts: Option<Box<[Option<ir::Expr>; 3]>>,
         branch: PreparedSteps,
         value: Option<PreparedSteps>,
     },
+}
+
+pub(crate) struct CheckedChild {
+    value: ir::Expr,
+    requires_suspension: bool,
 }
 
 pub(crate) struct PreparedSteps {
@@ -55,7 +69,11 @@ impl PreparedSteps {
 
     /// Find the original, explicitly residual leaves at this operation. No syntax
     /// is stored in the plan or used to reconstruct its edges or its checked values.
-    fn inputs<'a>(&self, node: &'a ast::Expr, context: Context) -> Option<Vec<SourceOperand<'a>>> {
+    fn inputs<'a>(
+        &'a self,
+        node: &'a ast::Expr,
+        context: Context,
+    ) -> Option<Vec<SourceOperand<'a>>> {
         let mut pending = vec![node];
         let mut inputs = Vec::with_capacity(self.operands.len());
         while let Some(node) = pending.pop() {
@@ -64,10 +82,10 @@ impl PreparedSteps {
                 Split::Pair(_, left, right) => pending.extend([left, right]),
                 Split::Conditional(test, yes, no) => pending.extend([test, yes, no]),
                 Split::Not(child) => pending.push(child),
-                Split::Leaf => inputs.push(match self.operands.get(inputs.len())? {
-                    Some(value) => SourceOperand::Checked(value.clone()),
-                    None => SourceOperand::Residual(node),
-                }),
+                Split::Leaf => inputs.push(SourceOperand::prepared(
+                    node,
+                    self.operands.get(inputs.len())?.as_ref(),
+                )),
             }
         }
         (inputs.len() == self.operands.len()).then_some(inputs)
@@ -81,21 +99,79 @@ impl LogicalSites {
     }
 
     pub(crate) fn get(&self, node: &ast::Expr) -> Option<&Selection> {
-        Self::governs(node)
+        (Self::governs(node) || node.is_compare_expr())
             .then(|| self.selected.get(&node.range()))
             .flatten()
     }
 
-    pub(crate) fn choice(&self, node: &ast::ExprIf) -> Option<&[Option<ir::Expr>; 3]> {
-        match self.selected.get(&node.range()) {
+    pub(crate) fn value<'a>(
+        &'a self,
+        node: &'a ast::Expr,
+        source: RegisteredSource<'_>,
+    ) -> Option<(Edges, Vec<SourceOperand<'a>>)> {
+        matches!(node.split(Context::Value), Split::Operands(..))
+            .then(|| prepare_boolean(node, Context::Value, source, self))
+    }
+
+    pub(crate) fn conditional<'a>(&'a self, node: &'a ast::Expr) -> Option<[SourceOperand<'a>; 3]> {
+        let children = conditional_parts(node)?;
+        Some(match self.selected.get(&node.range()) {
+            Some(Selection::Checked(value)) => {
+                conditional_parts(value)?.map(|v| SourceOperand::Checked(Cow::Borrowed(v)))
+            }
             Some(Selection::Mixed {
                 parts: Some(parts), ..
-            }) => Some(parts),
-            _ => None,
-        }
+            }) => std::array::from_fn(|i| SourceOperand::prepared(children[i], parts[i].as_ref())),
+            _ => children.map(SourceOperand::Residual),
+        })
+    }
+
+    pub(crate) fn comparison<'a>(
+        &'a self,
+        node: &'a ast::Expr,
+        suspended: bool,
+    ) -> Option<(
+        &'a [ast::CmpOp],
+        impl Iterator<Item = SourceOperand<'a>> + 'a,
+    )> {
+        let cmp = node.as_compare_expr()?;
+        let inputs = match self.get(node) {
+            Some(Selection::Comparison(inputs)) => inputs.as_slice(),
+            _ => &[],
+        };
+        let operands = cmp.operands.iter().enumerate().map(move |(index, child)| {
+            let value = inputs
+                .get(index)
+                .and_then(Option::as_ref)
+                .filter(|v| suspended || !v.requires_suspension)
+                .map(|v| &v.value);
+            SourceOperand::prepared(child, value)
+        });
+        Some((&cmp.ops, operands))
     }
 
     pub(crate) fn visit(&mut self, node: &ast::Expr, source: RegisteredSource<'_>) {
+        if let Some(cmp) = node.as_compare_expr() {
+            let inputs: Vec<_> = cmp
+                .operands
+                .iter()
+                .map(|child| {
+                    let ordinary = values::registered_value(child, source);
+                    let requires_suspension = ordinary.is_none();
+                    let value = ordinary.or_else(|| values::suspended_operand(child, source))?;
+                    Some(CheckedChild {
+                        value,
+                        requires_suspension,
+                    })
+                })
+                .collect();
+            // Whole checked comparisons, including suspendable ones, keep their normal entry.
+            if inputs.iter().any(Option::is_none) {
+                self.selected
+                    .insert(node.range(), Selection::Comparison(inputs));
+            }
+            return;
+        }
         if !Self::governs(node)
             || self
                 .covered
@@ -110,10 +186,8 @@ impl LogicalSites {
                 .is_bool_op_expr()
                 .then(|| PreparedSteps::new(node, Context::Value, source)),
         };
-        let selected = if let ast::Expr::If(branch) = node {
-            match [&branch.test, &branch.body, &branch.orelse]
-                .map(|part| values::registered_value(part, source))
-            {
+        let selected = if let Some(children) = conditional_parts(node) {
+            match children.map(|part| values::registered_value(part, source)) {
                 [Some(test), Some(yes), Some(no)] => {
                     Selection::Checked(source.located(node, super::select(test, yes, no)))
                 }
@@ -133,8 +207,17 @@ impl LogicalSites {
 }
 
 pub(crate) enum SourceOperand<'a> {
-    Checked(ir::Expr),
+    Checked(Cow<'a, ir::Expr>),
     Residual(&'a ast::Expr),
+}
+
+impl<'a> SourceOperand<'a> {
+    fn prepared(node: &'a ast::Expr, value: Option<&'a ir::Expr>) -> Self {
+        match value {
+            Some(value) => Self::Checked(Cow::Borrowed(value)),
+            None => Self::Residual(node),
+        }
+    }
 }
 
 /// The source adapter owns each irreducible operation. Only successor indices and
@@ -143,7 +226,7 @@ pub(crate) fn prepare_boolean<'a>(
     expression: &'a ast::Expr,
     context: Context,
     source: RegisteredSource<'_>,
-    sites: &LogicalSites,
+    sites: &'a LogicalSites,
 ) -> (Edges, Vec<SourceOperand<'a>>) {
     if let Some(Selection::Mixed { branch, value, .. }) = sites.get(expression) {
         let plan = match context {
@@ -159,9 +242,12 @@ pub(crate) fn prepare_boolean<'a>(
     let (edges, leaves) = edges(expression, context, Depth::All);
     let leaves = leaves
         .into_iter()
-        .map(|leaf| match values::registered_value(leaf, source) {
-            Some(operand) => SourceOperand::Checked(operand),
-            None => SourceOperand::Residual(leaf),
+        .map(|leaf| match sites.get(leaf) {
+            Some(Selection::Comparison(_)) => SourceOperand::Residual(leaf),
+            _ => match values::registered_value(leaf, source) {
+                Some(operand) => SourceOperand::Checked(Cow::Owned(operand)),
+                None => SourceOperand::Residual(leaf),
+            },
         })
         .collect();
     (edges, leaves)

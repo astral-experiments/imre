@@ -17,6 +17,7 @@ fn nonconstructible_result_type(name: &str) -> bool {
             | HashState::OPENSSL_CLASS
             | KEY_WRAPPER
             | "getset_descriptor"
+            | "set_iterator"
             | value::ZLIB_DECOMPRESS_TYPE
             | "anext_awaitable"
             | "_buffer_wrapper"
@@ -1090,6 +1091,7 @@ impl Context {
                 | Value::Range(_)
                 | Value::Iterator { .. }
                 | Value::DictIterator(_)
+                | Value::SetIterator(_)
         ) {
             return Ok(false);
         }
@@ -1136,6 +1138,7 @@ impl Context {
             return self.lookup_attr(object, name).map(Some);
         }
         let class = match self.heap.get(object) {
+            Value::SetIterator(_) if name == "__length_hint__" => self.builtin("set_iterator"),
             Value::Weak(wr)
                 if name == "__repr__"
                     || (wr.kind == weakref::Kind::Proxy
@@ -5625,8 +5628,9 @@ impl Context {
                 }
             }
             Value::Native(ref class)
-                if DictIterator::methods(class).contains(&name)
-                    && DictIterator::class(class).is_some() =>
+                if (class == "set_iterator" && builtins::SET_ITERATOR_METHODS.contains(&name))
+                    || (DictIterator::methods(class).contains(&name)
+                        && DictIterator::class(class).is_some()) =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
@@ -8428,6 +8432,7 @@ impl Context {
                                 | "dict"
                                 | "list"
                                 | "list_iterator"
+                                | "set_iterator"
                                 | "str_ascii_iterator"
                                 | "str_iterator"
                                 | "tuple_iterator"

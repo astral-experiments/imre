@@ -27,6 +27,8 @@ mod ranges;
 mod record_copies;
 mod reductions;
 #[cfg(test)]
+mod single_emission_tests;
+#[cfg(test)]
 mod slice_sum_validation;
 mod sorted_rows;
 mod split_fields;
@@ -202,12 +204,21 @@ impl CompileOptions {
     }
 }
 
+/// The isolated source origin has a diagnostic filename but no filesystem search root.
+#[derive(Clone, Copy)]
+enum ProgramEntry<'a> {
+    Source(&'a str),
+    File(&'a Path, Option<&'a Path>),
+}
+
 /// Checks source syntax, ty diagnostics, and Imre's exact type contract.
 pub fn check(source: &str) -> Result<(), String> {
-    let mut graph = modules::SourceGraph::single(source)?;
-    graph.session.explicit_check = true;
-    let (module, _) = checked_lower(&mut graph)?.into_native()?;
-    verify_after(&module, "lowering")
+    check_with(
+        ProgramEntry::Source(source),
+        &CompileOptions::default(),
+        None,
+        Default::default(),
+    )
 }
 
 /// Compiles a checked module to LLVM IR; the resulting executable uses no CPython.
@@ -215,14 +226,14 @@ pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String>
     if options.entry_profile.is_some() {
         return Err("an entry profile requires a source file and its module name".to_owned());
     }
-    let (mut module, _) = checked_lower(&mut modules::SourceGraph::single_with_mode(
-        source,
-        options.reachable_only,
-    )?)?
-    .into_native()?;
-    specialize(&mut module)?;
-    let ranges = ranges::analyze(&module);
-    llvm::emit(&module, &ranges, options.address_sanitizer).map_err(|error| error.0.to_owned())
+    let options = CompileOptions {
+        target_os: options.target_os,
+        reachable_only: options.reachable_only,
+        address_sanitizer: options.address_sanitizer,
+        ..Default::default()
+    };
+    compile_with_layout(ProgramEntry::Source(source), &options, BoxedLayout::Whole)
+        .map(|product| product.into_whole().llvm_ir)
 }
 
 /// The generated IR and every source file that must be protected from output writes.
@@ -314,19 +325,33 @@ fn check_file_with(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
+    cache: Option<&mut IncrementalCompiler>,
+    filesystem: watch::FileSystem<'_>,
+) -> Result<(), String> {
+    check_with(
+        ProgramEntry::File(path, module_root),
+        options,
+        cache,
+        filesystem,
+    )
+}
+
+fn check_with(
+    entry: ProgramEntry<'_>,
+    options: &CompileOptions,
     mut cache: Option<&mut IncrementalCompiler>,
     filesystem: watch::FileSystem<'_>,
 ) -> Result<(), String> {
     object_fallback(
         BoxedLayout::Check,
-        (path, module_root),
+        entry,
         options,
         filesystem,
         |graph, call_error| {
             graph.session.explicit_check = true;
             checked_lower_with(graph, cache.as_deref_mut(), call_error)
         },
-        |_, _| Ok((Vec::new(), false)),
+        |_, _, _| unreachable!("check does not emit LLVM"),
     )
     .map(drop)
 }
@@ -383,7 +408,7 @@ enum BoxedLayout<'a> {
 /// Uses the boxed backend when the checked graph requires Python object operations.
 fn object_fallback(
     layout: BoxedLayout<'_>,
-    (path, module_root): (&Path, Option<&Path>),
+    entry: ProgramEntry<'_>,
     options: &CompileOptions,
     mut filesystem: watch::FileSystem<'_>,
     mut lower: impl FnMut(
@@ -393,7 +418,8 @@ fn object_fallback(
     native: impl Fn(
         &modules::SourceGraph,
         CheckedIr,
-    ) -> Result<(Vec<CodegenUnit>, bool), llvm::Unsupported>,
+        llvm::NativeProgram,
+    ) -> Result<Vec<CodegenUnit>, llvm::Unsupported>,
 ) -> Result<UnitCompilation, String> {
     for name in &options.include_modules {
         if !modules::valid_module_operand(name) {
@@ -409,8 +435,11 @@ fn object_fallback(
                 "--include-module requires a runtime module loader; this entry is fully typed"
                     .into(),
             )
-        } else if checking {
-            Ok(UnitCompilation::default())
+        } else if checking || matches!(entry, ProgramEntry::Source(_)) {
+            Ok(UnitCompilation {
+                units,
+                ..Default::default()
+            })
         } else {
             Ok(UnitCompilation::native(
                 graph,
@@ -431,14 +460,21 @@ fn object_fallback(
             .is_some_and(|(flags, _)| flags.tracemalloc > 0);
     let mut import_failure = None;
     let mut site_probes = modules::SiteProbes::default();
-    let mut native_candidate = None;
-    let (mut refusal, graph) = match options.load_graph(
-        path,
-        module_root,
-        filesystem.reborrow(),
-        &mut import_failure,
-        &mut site_probes,
-    ) {
+    let mut deferred_native = None;
+    let loaded = match entry {
+        ProgramEntry::Source(source) => Ok(Some(modules::SourceGraph::single_with_mode(
+            source,
+            options.reachable_only,
+        )?)),
+        ProgramEntry::File(path, module_root) => options.load_graph(
+            path,
+            module_root,
+            filesystem.reborrow(),
+            &mut import_failure,
+            &mut site_probes,
+        ),
+    };
+    let (mut refusal, graph) = match loaded {
         Ok(Some(mut graph)) => {
             graph.registered_startup = boxed_startup;
             site_probes.record(&mut graph.inputs);
@@ -451,40 +487,34 @@ fn object_fallback(
             let baseline = graph.lowering_baseline();
             let refusal = loop {
                 let error = match lower(&mut graph, call_error.as_ref())? {
-                    CheckedProgram::Native(_)
-                        if graph.runtime_initializer.is_some() && !boxed_startup =>
-                    {
-                        // All first-party code lowered successfully. The unresolved import alone
-                        // must use the same admission policy as an unresolved module in the loader.
-                        break graph.runtime_initializer.take().map(Into::into);
-                    }
-                    CheckedProgram::Native(ir) if !boxed_startup => {
+                    CheckedProgram::Registered(reason) => break reason,
+                    CheckedProgram::Native(ir) => {
                         let (mut module, mut owners) = *ir;
-                        if let Some(object) = required_object_diagnostic(&graph, &module) {
-                            break Some(object);
-                        }
                         if checking {
                             verify_after(&module, "lowering")?;
-                        } else {
-                            for original in specialize(&mut module)? {
-                                owners.push(owners[original]);
-                            }
+                            return native_result(graph, Vec::new());
                         }
-                        let reason = match native(&graph, (module, owners)) {
-                            Ok((value, true)) if options.entry_profile.is_none() => {
-                                // Keep the Python entry's full exception locations when it supports this
-                                // module. Otherwise the retained native callable layout can run it.
-                                native_candidate = Some(value);
+                        for original in specialize(&mut module)? {
+                            owners.push(owners[original]);
+                        }
+                        let reason = match llvm::analyze_program(&module) {
+                            Ok(program)
+                                if program.prefer_objects && options.entry_profile.is_none() =>
+                            {
+                                // Registration can preserve the Python exception locations. Keep the
+                                // checked native representation until registration decides admission.
+                                deferred_native = Some(((module, owners), program));
                                 "Imre: native bound wrapper links use checked exception locations"
                             }
-                            Ok((value, _)) => return native_result(graph, value),
+                            Ok(program) => match native(&graph, (module, owners), program) {
+                                Ok(units) => return native_result(graph, units),
+                                Err(refusal) => refusal.0,
+                            },
                             Err(refusal) => refusal.0,
                         };
                         LoweringDiagnostic::plain(reason.to_owned())
                             .classified(LoweringKind::Object)
                     }
-                    // A solved object ABI or Python startup directly selects the registered entry.
-                    CheckedProgram::Registered | CheckedProgram::Native(_) => break None,
                     CheckedProgram::Runtime(error) => error,
                 };
                 // A guessed layout must not turn a working object program into a type error,
@@ -492,7 +522,7 @@ fn object_fallback(
                 if graph.set_layout_hint.get() != modules::SetLayoutHint::Applied {
                     break Some(error);
                 }
-                native_candidate = None;
+                deferred_native = None;
                 graph.retry_without_set_layout(&baseline);
             };
             (refusal, Some(graph))
@@ -527,8 +557,11 @@ fn object_fallback(
     };
     // A newly found checked provider can lower normally. If lowering fails, its
     // dependencies alone do not admit the caller to the object importer.
-    let fallback = |graph| match (graph, native_candidate, kind) {
-        (Some(graph), Some(value), _) => native_result(graph, value),
+    let fallback = |graph| match (graph, deferred_native, kind) {
+        (Some(graph), Some((ir, program)), _) => {
+            let units = native(&graph, ir, program).map_err(|error| error.0.to_owned())?;
+            native_result(graph, units)
+        }
         (Some(graph), None, LoweringKind::ExecutionOperand(id))
             if graph.modules[id].is_program_source() =>
         {
@@ -682,12 +715,7 @@ fn object_fallback(
         Ok(())
     };
     match dynamic::compile(
-        (
-            path,
-            module_root,
-            filesystem,
-            &mut site_probes.wheel_records,
-        ),
+        (entry, filesystem, &mut site_probes.wheel_records),
         options,
         object_imports,
         operation
@@ -710,8 +738,12 @@ pub fn compile_file(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<Compilation, String> {
-    compile_file_with_layout(path, module_root, options, BoxedLayout::Whole)
-        .map(UnitCompilation::into_whole)
+    compile_with_layout(
+        ProgramEntry::File(path, module_root),
+        options,
+        BoxedLayout::Whole,
+    )
+    .map(UnitCompilation::into_whole)
 }
 
 /// Preserves the whole-program IR and returns independent boxed initializers for native codegen.
@@ -721,9 +753,8 @@ pub fn compile_file_with_boxed_units(
     options: &CompileOptions,
 ) -> Result<(Compilation, Vec<CodegenUnit>), String> {
     let mut units = Vec::new();
-    let compilation = compile_file_with_layout(
-        path,
-        module_root,
+    let compilation = compile_with_layout(
+        ProgramEntry::File(path, module_root),
         options,
         BoxedLayout::WholeWithUnits(&mut units),
     )?;
@@ -736,29 +767,30 @@ pub fn compile_file_for_thin_lto(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<UnitCompilation, String> {
-    compile_file_with_layout(path, module_root, options, BoxedLayout::Split)
+    compile_with_layout(
+        ProgramEntry::File(path, module_root),
+        options,
+        BoxedLayout::Split,
+    )
 }
 
 /// Resolves and checks the source graph once for the requested boxed outputs.
-fn compile_file_with_layout(
-    path: &Path,
-    module_root: Option<&Path>,
+fn compile_with_layout(
+    entry: ProgramEntry<'_>,
     options: &CompileOptions,
     layout: BoxedLayout<'_>,
 ) -> Result<UnitCompilation, String> {
-    let typed = |_: &modules::SourceGraph, (module, _): CheckedIr| {
+    let typed = |_: &modules::SourceGraph, (module, _): CheckedIr, program| {
         let ranges = ranges::analyze(&module);
-        let (llvm_ir, prefer_objects) =
-            llvm::emit_file(&module, &ranges, options.address_sanitizer)?;
-        let units = vec![CodegenUnit {
+        let llvm_ir = llvm::emit_file(&module, &ranges, options.address_sanitizer, program)?;
+        Ok(vec![CodegenUnit {
             name: "__main__".into(),
             llvm_ir,
-        }];
-        Ok((units, prefer_objects))
+        }])
     };
     object_fallback(
         layout,
-        (path, module_root),
+        entry,
         options,
         Default::default(),
         |graph, call_error| checked_lower_with(graph, None, call_error),
@@ -902,7 +934,7 @@ fn compile_file_units_with(
     options: &CompileOptions,
     mut cache: Option<&mut IncrementalCompiler>,
 ) -> Result<UnitCompilation, String> {
-    let typed = |graph: &modules::SourceGraph, (module, owners): CheckedIr| {
+    let typed = |graph: &modules::SourceGraph, (module, owners): CheckedIr, program| {
         let ranges = ranges::analyze(&module);
         let names = graph
             .modules
@@ -916,11 +948,12 @@ fn compile_file_units_with(
             &owners,
             &names,
             graph.entry,
+            program,
         )
     };
     object_fallback(
         BoxedLayout::Split,
-        (path, module_root),
+        ProgramEntry::File(path, module_root),
         options,
         Default::default(),
         |graph, call_error| checked_lower_with(graph, cache.as_deref_mut(), call_error),
@@ -930,55 +963,31 @@ fn compile_file_units_with(
 
 type CheckedIr = (ir::Module, Vec<modules::ModuleId>);
 
-/// The source checker admits the program before the driver chooses its representation.
+/// A checked entry selects its startup. A representation refusal still needs runtime admission.
 pub(crate) enum CheckedProgram {
-    Registered,
+    /// A checked Python frame or launcher can enter directly. A specific operation or
+    /// unresolved import retains its own admission policy and diagnostic.
+    Registered(Option<LoweringDiagnostic>),
     Native(Box<CheckedIr>),
     Runtime(LoweringDiagnostic),
 }
 
+#[cfg(test)]
 impl CheckedProgram {
     fn into_native(self) -> Result<CheckedIr, String> {
         match self {
             Self::Native(ir) => Ok(*ir),
             Self::Runtime(reason) => Err(reason.to_string()),
-            Self::Registered => Err("the checked program requires a registered entry".into()),
+            Self::Registered(Some(reason)) => Err(reason.to_string()),
+            Self::Registered(None) => Err("the checked program requires a registered entry".into()),
         }
     }
 }
 
-fn required_object_diagnostic(
-    graph: &modules::SourceGraph,
-    module: &ir::Module,
-) -> Option<LoweringDiagnostic> {
-    let (id, operand, call) = ir::required_object_call(module)?;
-    let (name, kind) = match call {
-        ir::ObjectCall::ExecText => ("exec", LoweringKind::ScopedObject),
-        ir::ObjectCall::SocketSendfile => ("socket.sendfile", LoweringKind::Object),
-    };
-    let source = &graph.modules[id];
-    Some(
-        LoweringDiagnostic::at(
-            &source.source,
-            &operand,
-            format!("{name} requires native Python object operations"),
-        )
-        .with_path(&source.path)
-        .classified(kind),
-    )
-}
-
+#[cfg(test)]
 fn checked_lower(graph: &mut modules::SourceGraph) -> Result<CheckedProgram, String> {
     let call_error = initializer_call_error(graph, false);
-    let program = checked_lower_with(graph, None, call_error.as_ref())?;
-    if let CheckedProgram::Native(ir) = &program
-        && let Some(error) = required_object_diagnostic(graph, &ir.0)
-        && error.kind == LoweringKind::Object
-    {
-        // In-memory checking and compilation have no file loader to supply a socket body.
-        return Ok(CheckedProgram::Runtime(error));
-    }
-    Ok(program)
+    checked_lower_with(graph, None, call_error.as_ref())
 }
 
 fn initializer_call_error(
@@ -1590,7 +1599,7 @@ print("result", call(b=2, a=1))
             let options = CompileOptions::default();
             let ordinary = super::object_fallback(
                 super::BoxedLayout::Check,
-                (&path, None),
+                super::ProgramEntry::File(&path, None),
                 &options,
                 Default::default(),
                 |graph, call_error| {
@@ -1599,7 +1608,7 @@ print("result", call(b=2, a=1))
                         .set(super::modules::SetLayoutHint::Disabled);
                     super::checked_lower_with(graph, None, call_error)
                 },
-                |_, _| Ok((Vec::new(), false)),
+                |_, _, _| unreachable!("check does not emit LLVM"),
             )
             .map(drop);
             assert_eq!(
@@ -1626,7 +1635,7 @@ print("result", call(b=2, a=1))
         let mut passes = 0;
         let result = super::object_fallback(
             super::BoxedLayout::Check,
-            (&path, None),
+            super::ProgramEntry::File(&path, None),
             &CompileOptions::default(),
             Default::default(),
             |graph, call_error| {
@@ -1634,7 +1643,7 @@ print("result", call(b=2, a=1))
                 assert!(graph.set_layout_hint.get() == super::modules::SetLayoutHint::Disabled);
                 super::checked_lower_with(graph, None, call_error)
             },
-            |_, _| Ok((Vec::new(), false)),
+            |_, _, _| unreachable!("check does not emit LLVM"),
         )
         .map(drop);
         assert_eq!(passes, 1);
@@ -1662,7 +1671,7 @@ print("result", call(b=2, a=1))
         let mut passes = Vec::new();
         let result = super::object_fallback(
             super::BoxedLayout::Check,
-            (&path, None),
+            super::ProgramEntry::File(&path, None),
             &options,
             Default::default(),
             |graph, call_error| {
@@ -1676,7 +1685,7 @@ print("result", call(b=2, a=1))
                 }
                 Ok(result)
             },
-            |_, _| Ok((Vec::new(), false)),
+            |_, _, _| unreachable!("check does not emit LLVM"),
         )
         .map(drop);
         assert_eq!(passes, [true, false]);

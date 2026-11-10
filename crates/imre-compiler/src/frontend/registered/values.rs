@@ -22,7 +22,8 @@ impl ModuleSource {
     }
     pub(super) fn context<'a>(&'a self, text: &'a str) -> RegisteredSource<'a> {
         RegisteredSource {
-            templates: None,
+            template_fields: None,
+            generators: None,
             lambdas: None,
             text,
             replacements: &self.replacements,
@@ -38,7 +39,8 @@ pub(crate) struct RegisteredSource<'a> {
     pub(crate) text: &'a str,
     pub(crate) replacements: &'a HashMap<TextRange, Vec<u32>>,
     pub(crate) has_templates: bool,
-    pub(crate) templates: Option<&'a HashMap<TextRange, Expr>>,
+    pub(crate) template_fields: Option<&'a HashMap<TextSize, imre_ast::strings::TemplateFieldText>>,
+    pub(crate) generators: Option<&'a HashMap<TextRange, RegisteredGenerator>>,
     pub(crate) lambdas: Option<&'a HashMap<TextSize, RegisteredLambda>>,
     pub(crate) method_imports: &'a BTreeSet<String>,
     pub(crate) private_names: Option<&'a imre_ast::Names>,
@@ -175,32 +177,40 @@ pub(crate) fn push_codepoints(bytes: &mut Vec<u8>, text: &str, replacements: Opt
     debug_assert!(points.next().is_none());
 }
 
-pub(crate) fn registered_string<'a>(
-    text: &str,
-    parts: impl Iterator<Item = &'a ast::StringLiteral> + Clone,
-    replacements: &HashMap<TextRange, Vec<u32>>,
-    has_templates: bool,
-) -> Expr {
-    let kind = if !has_templates
-        && parts
-            .clone()
-            .all(|part| !replacements.contains_key(&part.range()))
-    {
-        ExprKind::Str(text.to_owned())
-    } else {
-        let mut bytes = Vec::new();
-        for part in parts {
-            push_codepoints(
-                &mut bytes,
-                part,
-                replacements.get(&part.range()).map(Vec::as_slice),
-            );
+impl RegisteredSource<'_> {
+    /// Decode adjacent source parts together so ordinary and formatted literals share
+    /// their constant identity, including a surrogate after an ordinary UTF-8 prefix.
+    pub(crate) fn string<'a>(self, pieces: impl Iterator<Item = FStringLiteral<'a>>) -> Expr {
+        let mut text = String::new();
+        let mut encoded = self.has_templates.then(Vec::new);
+        for piece in pieces {
+            let middle;
+            let replacement = match piece {
+                FStringLiteral::Adjacent(lit) => self.replacements.get(&lit.range()),
+                FStringLiteral::Middle(lit, _) => {
+                    middle = self.format_replacements(lit);
+                    middle.as_ref()
+                }
+                FStringLiteral::Text(_) => None,
+            };
+            if replacement.is_some() || encoded.is_some() {
+                let bytes = encoded.get_or_insert_with(|| {
+                    let mut bytes = Vec::new();
+                    push_codepoints(&mut bytes, &text, None);
+                    bytes
+                });
+                push_codepoints(bytes, piece.text(), replacement.map(Vec::as_slice));
+            } else {
+                text.push_str(piece.text());
+            }
         }
-        ExprKind::Builtin(Builtin::RegisteredString(bytes), vec![])
-    };
-    Expr {
-        ty: Type::PythonObject,
-        kind,
+        Expr {
+            ty: Type::PythonObject,
+            kind: match encoded {
+                Some(bytes) => ExprKind::Builtin(Builtin::RegisteredString(bytes), vec![]),
+                None => ExprKind::Str(text),
+            },
+        }
     }
 }
 
@@ -247,17 +257,16 @@ pub(crate) fn packed_arguments(args: &ast::Arguments) -> ir::PackedArguments {
     }
 }
 
-fn positional_elements(args: &[ast::Expr]) -> impl Iterator<Item = (bool, &ast::Expr)> {
-    args.iter().map(|arg| match arg {
-        ast::Expr::Starred(star) => (true, star.value.as_ref()),
-        value => (false, value),
-    })
+pub(crate) fn registered_argument_at(args: &ast::Arguments, index: usize) -> &ast::Expr {
+    match args.args.get(index) {
+        Some(ast::Expr::Starred(star)) => &star.value,
+        Some(value) => value,
+        None => &args.keywords[index - args.args.len()].value,
+    }
 }
 
 pub(crate) fn registered_arguments(args: &ast::Arguments) -> impl Iterator<Item = &ast::Expr> {
-    positional_elements(&args.args)
-        .map(|(_, value)| value)
-        .chain(args.keywords.iter().map(|key| &key.value))
+    (0..args.len()).map(move |index| registered_argument_at(args, index))
 }
 
 impl From<ast::UnaryOp> for ir::ObjectUnary {
@@ -361,28 +370,68 @@ pub(in crate::frontend) fn fixed_positional_arguments(call: &ast::ExprCall) -> b
     )
 }
 
-pub(in crate::frontend) fn object_call(call: &ast::ExprCall, operands: Vec<Expr>) -> Expr {
-    Expr {
-        ty: Type::PythonObject,
-        kind: ExprKind::Builtin(
-            Builtin::RegisteredCall(call_site(call, callable_target(call))),
-            operands,
-        ),
+/// The checked target already identifies the distinction between a frame name lookup,
+/// a direct method receiver, and an independently evaluated callable value.
+fn bound_call(call: ir::RegisteredCall, target: Expr, mut arguments: Vec<Expr>) -> Expr {
+    let mut binding = &target;
+    while let ExprKind::Builtin(Builtin::RegisteredLocation(..), inputs) = &binding.kind {
+        binding = &inputs[0];
+    }
+    if target.ty == Type::PythonObject
+        && !matches!(
+            binding.kind,
+            ExprKind::Builtin(Builtin::RegisteredName(_), _)
+        )
+        && matches!(call.arguments, ir::RegisteredArguments::Positional)
+        && let ir::RegisteredCallTarget::Callable { end, suspended_name } = call.target
+    {
+        return Expr {
+            ty: Type::PythonObject,
+            kind: ExprKind::Invoke {
+                callable: Box::new(target),
+                args: ir::CallArgs {
+                    python_site: Some(ir::InvokeSite {
+                        range: call.range,
+                        callee_end: end,
+                        suspended_name,
+                        scope: None,
+                    }),
+                    ..ir::CallArgs::positional(arguments)
+                },
+            },
+        };
+    }
+    arguments.insert(0, target);
+    super::operation(Builtin::RegisteredCall(call), Type::PythonObject, arguments)
+}
+
+impl Checker<'_> {
+    pub(in crate::frontend) fn call_with_target(
+        &mut self,
+        call: &ast::ExprCall,
+        target: Expr,
+    ) -> Result<Expr, String> {
+        let arguments = registered_arguments(&call.arguments)
+            .map(|arg| self.expr(arg))
+            .collect::<Result<_, _>>()?;
+        let mut value = bound_call(call_site(call, callable_target(call)), target, arguments);
+        if let Some(slot) = self.namespace {
+            in_namespace(&mut value, self.local(slot));
+        }
+        Ok(value)
     }
 }
 
-pub(in crate::frontend) fn call_with_target<E>(
+pub(in crate::frontend) fn name_call(
     call: &ast::ExprCall,
-    target: Expr,
-    mut operand: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
-) -> StdResult<Expr, E> {
-    let mut operands =
-        Vec::with_capacity(1 + call.arguments.args.len() + call.arguments.keywords.len());
-    operands.push(target);
-    for arg in registered_arguments(&call.arguments) {
-        operands.push(operand(arg)?);
-    }
-    Ok(object_call(call, operands))
+    name: &str,
+    arguments: Vec<Expr>,
+) -> Expr {
+    bound_call(
+        call_site(call, callable_target(call)),
+        name_binding(name),
+        arguments,
+    )
 }
 
 pub(super) fn number_literal(number: &ast::Number, minus: bool) -> ExprKind {
@@ -424,35 +473,11 @@ pub(in crate::frontend) fn index_key<E>(
 ) -> StdResult<Expr, E> {
     use ir::Constant as C;
     let (value, constant) = match node {
-        ast::Expr::Slice(slice) => {
-            let mut bounds = Vec::with_capacity(3);
-            let mut literal = true;
-            for bound in [&slice.lower, &slice.upper, &slice.step] {
-                bounds.push(match bound.as_deref() {
-                    Some(bound) => {
-                        literal &= bound.is_literal_expr();
-                        index_key(bound, operand)?
-                    }
-                    None => Expr::none(),
-                });
-            }
-            let constant = literal
-                .then(|| {
-                    Some(C::Slice(Box::new([
-                        ir::Constant::from_expr(&bounds[0])?,
-                        ir::Constant::from_expr(&bounds[1])?,
-                        ir::Constant::from_expr(&bounds[2])?,
-                    ])))
-                })
-                .flatten();
-            if slice.step.is_none() {
-                bounds.pop();
-            }
-            (
-                super::operation(Builtin::RegisteredSlice, Type::PythonObject, bounds),
-                constant,
-            )
-        }
+        ast::Expr::Slice(slice) => slice_key(slice, |bound| {
+            let value = index_key(bound, operand)?;
+            let constant = literal_bound(bound, Some(&value));
+            Ok((value, constant))
+        })?,
         ast::Expr::Tuple(tuple) => {
             let values = tuple
                 .elts
@@ -504,6 +529,11 @@ pub(in crate::frontend) fn index_key<E>(
             (value, Some(key))
         }
     };
+    Ok(located_key(node, value, constant))
+}
+
+fn located_key(node: &ast::Expr, value: Expr, constant: Option<ir::Constant>) -> Expr {
+    use ir::Constant as C;
     let value = if let Some(key) = constant {
         // Permanent singleton handles already have their Python identity.
         match key {
@@ -517,24 +547,100 @@ pub(in crate::frontend) fn index_key<E>(
     } else {
         value
     };
-    Ok(located(node.range(), node.start(), value))
+    located(node.range(), node.start(), value)
 }
 
-/// Retain the same checked key when the subscript receiver or its containing statement is residual.
-pub(crate) fn registered_constant_key(
-    node: &ast::Expr,
-    source: RegisteredSource<'_>,
-) -> Option<(ir::Constant, Expr)> {
-    let value = index_key(node, &mut |e| registered_value(e, source).ok_or(())).ok()?;
-    match &value.kind {
-        ExprKind::Builtin(Builtin::RegisteredLocation(..), args) => match &args[0].kind {
-            ExprKind::Builtin(Builtin::RegisteredIndexConstant(key), _) => {
-                Some((key.clone(), value))
-            }
-            _ => None,
-        },
-        _ => None,
+fn literal_bound(bound: &ast::Expr, value: Option<&Expr>) -> Option<ir::Constant> {
+    if bound.is_literal_expr() {
+        ir::Constant::from_expr(value?)
+    } else {
+        None
     }
+}
+
+fn slice_key<'a, E>(
+    slice: &'a ast::ExprSlice,
+    mut operand: impl FnMut(&'a ast::Expr) -> StdResult<(Expr, Option<ir::Constant>), E>,
+) -> StdResult<(Expr, Option<ir::Constant>), E> {
+    use ir::Constant as C;
+    let mut bounds = Vec::with_capacity(3);
+    let mut constants = Some([C::None, C::None, C::None]);
+    for (i, bound) in [&slice.lower, &slice.upper, &slice.step]
+        .into_iter()
+        .enumerate()
+    {
+        if let Some(bound) = bound {
+            let (value, constant) = operand(bound)?;
+            bounds.push(value);
+            constants = constants.and_then(|mut keys| {
+                keys[i] = constant?;
+                Some(keys)
+            });
+        } else if i < 2 {
+            bounds.push(Expr::none());
+        }
+    }
+    Ok((
+        super::operation(Builtin::RegisteredSlice, Type::PythonObject, bounds),
+        constants.map(|keys| C::Slice(Box::new(keys))),
+    ))
+}
+
+/// Only the input producers may need the enclosing source adapter. The operation
+/// itself uses ordinary checked IR with positional inputs, independent of Python locals.
+pub(crate) struct IndexOperands<'a> {
+    pub(crate) value: Expr,
+    pub(crate) inputs: Vec<super::booleans::SourceOperand<'a>>,
+}
+
+pub(crate) fn index_operands<'a>(
+    node: &'a ast::Expr,
+    source: RegisteredSource<'_>,
+) -> Option<IndexOperands<'a>> {
+    use super::booleans::SourceOperand;
+    let mut inputs = Vec::new();
+    let mut input = |expr: &'a ast::Expr, value: Option<Expr>| {
+        let slot = inputs.len();
+        inputs.push(match value {
+            Some(value) => SourceOperand::Checked(std::borrow::Cow::Owned(value)),
+            None => SourceOperand::Residual(expr),
+        });
+        Expr::local(slot, Type::PythonObject)
+    };
+    let (read, key) = match node {
+        ast::Expr::Subscript(index) => {
+            let receiver = input(&index.value, registered_value(&index.value, source));
+            (Some((index, receiver)), index.slice.as_ref())
+        }
+        ast::Expr::Slice(_) => (None, node),
+        _ => return None,
+    };
+    // A complete object key keeps its ordinary cache and construction boundary.
+    // A two-bound read uses the checked slice shape directly in read_item.
+    let slice = key.as_slice_expr();
+    let fused = read.is_some() && slice.is_some_and(|slice| slice.step.is_none());
+    let checked = if fused {
+        None
+    } else {
+        registered_index_key(key, source)
+    };
+    let value = if let Some(checked) = checked {
+        input(key, Some(checked))
+    } else if let Some(slice) = slice {
+        let Ok((value, constant)) = slice_key(slice, |bound| {
+            let value = registered_index_key(bound, source);
+            let constant = literal_bound(bound, value.as_ref());
+            Ok::<_, std::convert::Infallible>((input(bound, value), constant))
+        });
+        located_key(key, value, constant)
+    } else {
+        input(key, None)
+    };
+    let value = match read {
+        Some((index, receiver)) => subscript(index, receiver, value, source.text),
+        None => value,
+    };
+    Some(IndexOperands { value, inputs })
 }
 
 fn display_operands<E>(
@@ -574,9 +680,7 @@ fn display_operands<E>(
 }
 
 /// Test membership without allocating the small constant tuple at runtime.
-pub(crate) fn literal_membership(
-    cmp: &ast::ExprCompare,
-) -> Option<(&ast::Expr, &[ast::Expr], bool)> {
+fn literal_membership(cmp: &ast::ExprCompare) -> Option<(&ast::Expr, &[ast::Expr], bool)> {
     let [op @ (ast::CmpOp::In | ast::CmpOp::NotIn)] = cmp.ops.as_ref() else {
         return None;
     };
@@ -640,16 +744,39 @@ pub(super) fn operation<E>(
         if target.ty != Type::PythonObject && !class_namespace {
             return Ok(None);
         }
-        let mut operands = vec![target];
-        for arg in selected.arguments() {
-            operands.push(child(arg)?);
+        let arguments = selected
+            .arguments()
+            .map(&mut child)
+            .collect::<StdResult<_, _>>()?;
+        if let Builtin::RegisteredCall(call) = selected.opcode {
+            return Ok(Some(bound_call(call, target, arguments)));
         }
-        return Ok(Some(Expr {
-            ty: Type::PythonObject,
-            kind: ExprKind::Builtin(selected.opcode, operands),
-        }));
+        return Ok(Some(super::operation(
+            selected.opcode,
+            Type::PythonObject,
+            vec![target],
+        )));
     }
     let kind = match node {
+        ast::Expr::Generator(generator)
+            if source.generators.is_some_and(|sites| sites.contains_key(&generator.range())) =>
+        {
+            let outer = imre_ast::comprehension::outer_clause(&generator.generators);
+            let acquire = if outer.is_async {
+                ir::IteratorOp::Async(outer.iter.range())
+            } else {
+                ir::IteratorOp::Get(outer.iter.range())
+            };
+            let iterator = super::operation(
+                Builtin::RegisteredIter(acquire),
+                Type::PythonObject,
+                vec![child(&outer.iter)?],
+            );
+            ExprKind::Builtin(
+                Builtin::RegisteredGenerator(generator.range(), false),
+                vec![iterator],
+            )
+        }
         ast::Expr::Compare(cmp) => {
             if let Some((needle, items, negate)) = literal_membership(cmp) {
                 let values = std::iter::once(needle)
@@ -684,19 +811,8 @@ pub(super) fn operation<E>(
             return Ok(Some(name_binding(&name.id)));
         }
         ast::Expr::NumberLiteral(lit) => number_literal(&lit.value, false),
-        ast::Expr::TString(_) => {
-            return Ok(source
-                .templates
-                .and_then(|sites| sites.get(&node.range()))
-                .cloned());
-        }
         ast::Expr::StringLiteral(lit) => {
-            return Ok(Some(registered_string(
-                lit.value.to_str(),
-                lit.value.iter(),
-                source.replacements,
-                source.has_templates,
-            )));
+            return Ok(Some(source.string(lit.value.iter().map(FStringLiteral::Adjacent))));
         }
         ast::Expr::BytesLiteral(lit) => ExprKind::Bytes(lit.value.bytes().collect()),
         ast::Expr::BooleanLiteral(lit) => ExprKind::Bool(lit.value),
@@ -752,31 +868,35 @@ pub(super) fn lambda_binding(lambda: &ast::ExprLambda, defaults: Vec<Expr>) -> E
     )
 }
 
-/// Check the body and defaults in their defining region. The caller may lower the
-/// defaults with its own local slots, namespace or suspension state.
-pub(super) fn can_bind(lambda: &ast::ExprLambda, source: RegisteredSource<'_>) -> bool {
-    if let Some(sites) = source.lambdas {
-        return sites
+/// The caller lowers each default in its enclosing lexical scope.
+pub(super) fn has_checked_lambda_body(
+    lambda: &ast::ExprLambda,
+    source: RegisteredSource<'_>,
+) -> bool {
+    match source.lambdas {
+        Some(sites) => sites
             .get(&lambda.start())
-            .is_some_and(|site| site.body.is_some() && site.defaults.iter().all(Option::is_some));
+            .is_some_and(|site| site.body.is_some()),
+        None => RegisteredLambda::body(lambda, source).is_some(),
     }
-    checked_binding(lambda, source).is_some()
 }
 
 pub(super) fn checked_binding(
     lambda: &ast::ExprLambda,
     source: RegisteredSource<'_>,
 ) -> Option<Expr> {
-    let defaults = if let Some(sites) = source.lambdas {
+    if let Some(sites) = source.lambdas {
         let site = sites.get(&lambda.start())?;
         site.body.as_ref()?;
-        site.defaults.iter().cloned().collect::<Option<_>>()?
-    } else {
-        Region::Lambda.operand(&lambda.body, source)?;
-        lambda_defaults(lambda)
-            .map(|default| Region::Lambda.operand(default, source))
-            .collect::<Option<_>>()?
-    };
+        return match &site.binding {
+            LambdaBinding::Inline(binding) => Some(binding.clone()),
+            _ => None,
+        };
+    }
+    RegisteredLambda::body(lambda, source)?;
+    let defaults = lambda_defaults(lambda)
+        .map(|default| Region::Lambda.operand(default, source))
+        .collect::<Option<_>>()?;
     Some(lambda_binding(lambda, defaults))
 }
 
@@ -800,6 +920,12 @@ impl Region {
             return index_key(node, &mut |child| self.operand(child, source).ok_or(())).ok();
         }
         let value = match node {
+            ast::Expr::TString(template) => {
+                source.template(template, false, |child| self.operand(child, source))?
+            }
+            ast::Expr::FString(value) if matches!(self, Self::Suite | Self::Lambda) => {
+                fstrings::registered_fstring(value, source, |child| self.operand(child, source).ok_or(())).ok()?
+            }
             ast::Expr::Lambda(lambda)
                 if !matches!(self, Self::Residual | Self::SuspendedOperand) =>
             {
@@ -835,6 +961,7 @@ impl Region {
 /// An output statement encountered in a source suite. Only a residual operand needs syntax.
 pub(crate) enum ValueStatement<'a> {
     Checked(Statement),
+    RaiseOperands(Option<&'a ast::Expr>, Option<&'a ast::Expr>),
     ReturnOperand(&'a ast::Expr),
     DiscardOperand(&'a ast::Expr),
     Ignore,
@@ -851,6 +978,9 @@ pub(crate) fn value_statement<'a>(
         None => registered_value(value, source),
     };
     Some(match stmt {
+        ast::Stmt::Raise(raise) => {
+            ValueStatement::RaiseOperands(raise.exc.as_deref(), raise.cause.as_deref())
+        }
         ast::Stmt::Return(ret) => match ret.value.as_deref() {
             None => ValueStatement::Checked(Statement::Return(Expr::none())),
             Some(value) => operand(value).map_or(ValueStatement::ReturnOperand(value), |value| {
@@ -870,28 +1000,20 @@ pub(crate) fn suspended_operand(node: &ast::Expr, source: RegisteredSource<'_>) 
     Region::SuspendedOperand.operand(node, source)
 }
 
-/// A deferred callable and a name lookup observe the lexical namespace of the display.
-pub(super) fn in_namespace(source: &ast::Expr, value: &mut Expr, namespace: Expr) {
-    if matches!(source, ast::Expr::TString(_)) {
-        // A prepared template reuses its already-lowered interpolation operands.
-        // Their calls and names need the lexical environment at this use site.
-        fn scope_template(value: &mut Expr, namespace: &Expr) {
-            ir::children_mut(value, |child| scope_template(child, namespace));
-            bind_namespace(value, namespace.clone());
-        }
-        scope_template(value, &namespace);
-    } else {
-        bind_namespace(value, namespace);
-    }
-}
-
-fn bind_namespace(value: &mut Expr, namespace: Expr) {
+/// A display's calls and name lookups observe its lexical namespace.
+pub(super) fn in_namespace(value: &mut Expr, namespace: Expr) {
     match &mut value.kind {
+        ExprKind::Invoke {
+            args: ir::CallArgs { python_site: Some(site), .. }, ..
+        } => site.scope = Some(Box::new(namespace)),
         ExprKind::Builtin(Builtin::RegisteredCall(call), args) => {
             args.insert(0, namespace);
             call.explicit_scope = true;
         }
-        ExprKind::Builtin(Builtin::RegisteredLambda(_, scoped), args) => {
+        ExprKind::Builtin(
+            Builtin::RegisteredLambda(_, scoped) | Builtin::RegisteredGenerator(_, scoped),
+            args,
+        ) => {
             args.insert(0, namespace);
             *scoped = true;
         }
@@ -965,7 +1087,7 @@ impl Checker<'_> {
     ) -> Result<Option<Expr>, String> {
         let source = module.context(self.source);
         if let ast::Expr::Lambda(lambda) = node {
-            if !can_bind(lambda, source) {
+            if checked_binding(lambda, source).is_none() {
                 return Ok(None);
             }
             let defaults = lambda_defaults(lambda)
@@ -976,7 +1098,7 @@ impl Checker<'_> {
                 .collect::<Result<_, _>>()?;
             let mut value = lambda_binding(lambda, defaults);
             if let Some(slot) = self.namespace {
-                in_namespace(node, &mut value, self.local(slot));
+                in_namespace(&mut value, self.local(slot));
             }
             return Ok(Some(source.located(node, value)));
         }
@@ -989,14 +1111,12 @@ impl Checker<'_> {
             let value = self.lower_display(node, &plan, None)?;
             return Ok(Some(source.located(node, value)));
         }
-        // A checked local with a fixed callable layout uses its original call checker.
         if let ast::Expr::Call(call) = node
             && let Some(name) = call.func.as_name_expr()
-            && self
-                .names
-                .get(name.id.as_str())
-                .is_some_and(|&slot| self.locals[slot] != Type::PythonObject)
+            && let Some(&slot) = self.names.get(name.id.as_str())
+            && self.locals[slot] != Type::PythonObject
         {
+            // The fixed call checker binds the positional signature and result type.
             return Ok(None);
         }
         if let ast::Expr::BinOp(binary) = node {
@@ -1039,7 +1159,7 @@ impl Checker<'_> {
             return Ok(None);
         };
         if let Some(slot) = self.namespace {
-            in_namespace(node, &mut value, self.local(slot));
+            in_namespace(&mut value, self.local(slot));
         }
         // Checked locals and exact literals keep their known types in the registered frame.
         value.ty = match &value.kind {
@@ -1066,15 +1186,19 @@ impl Checker<'_> {
 mod tests {
     use super::*;
 
-    fn operation_and_position(value: &Expr) -> (&Builtin, &[Expr], TextSize) {
+    fn value_and_position(value: &Expr) -> (&ExprKind, TextSize) {
         let ExprKind::Builtin(Builtin::RegisteredLocation(_, position), values) = &value.kind
         else {
             panic!("expected a located expression");
         };
-        let ExprKind::Builtin(op, operands) = &values[0].kind else {
+        (&values[0].kind, *position)
+    }
+
+    fn operation_and_position(value: &Expr) -> (&Builtin, &[Expr], TextSize) {
+        let (ExprKind::Builtin(op, operands), position) = value_and_position(value) else {
             panic!("expected a registered operation");
         };
-        (op, operands, *position)
+        (op, operands, position)
     }
 
     #[test]
@@ -1084,7 +1208,8 @@ mod tests {
         let parsed = imre_ast::indentation::prepare(text).parse_module().unwrap();
         let imports = imre_ast::module_imports(&parsed.syntax().body);
         let source = RegisteredSource {
-            templates: None,
+            template_fields: None,
+            generators: None,
             lambdas: None,
             text,
             replacements: &HashMap::new(),
@@ -1121,12 +1246,12 @@ mod tests {
             &text[attribute.start().to_usize()..pos.to_usize()],
             "holder\n ."
         );
-        let (Builtin::RegisteredCall(..), args, call_position) = operation_and_position(&values[1])
+        let (ExprKind::Invoke { callable, .. }, call_position) = value_and_position(&values[1])
         else {
             panic!("expected normal invocation of the imported module attribute");
         };
         let (Builtin::RegisteredAttribute { name, .. }, _, attr_position) =
-            operation_and_position(&args[0])
+            operation_and_position(callable)
         else {
             panic!("expected a separately evaluated attribute");
         };
@@ -1146,7 +1271,8 @@ mod tests {
         let text = "obj.emit(value, named=arg)\nf(first=a, *items, **mapping, last=b)\n";
         let parsed = imre_ast::indentation::prepare(text).parse_module().unwrap();
         let source = RegisteredSource {
-            templates: None,
+            template_fields: None,
+            generators: None,
             lambdas: None,
             text,
             replacements: &HashMap::new(),
@@ -1212,7 +1338,8 @@ mod tests {
         };
         let call = assign.value.as_call_expr().unwrap();
         let source = RegisteredSource {
-            templates: None,
+            template_fields: None,
+            generators: None,
             lambdas: None,
             text,
             replacements: &HashMap::new(),
@@ -1227,8 +1354,8 @@ mod tests {
         );
         assert!(source.direct_method(call).is_none());
         assert!(matches!(
-            operation_and_position(&registered_value(&assign.value, source).unwrap()).0,
-            Builtin::RegisteredCall(..)
+            value_and_position(&registered_value(&assign.value, source).unwrap()).0,
+            ExprKind::Invoke { .. }
         ));
     }
 
@@ -1248,7 +1375,8 @@ mod tests {
                 panic!("expected expression")
             };
             let source = RegisteredSource {
-                templates: None,
+                template_fields: None,
+                generators: None,
                 lambdas: None,
                 text: &text,
                 replacements: &replacements,
@@ -1257,19 +1385,25 @@ mod tests {
                 private_names: None,
             };
             let value = registered_value(&stmt.value, source).unwrap();
-            let (Builtin::RegisteredCall(call), operands, _) = operation_and_position(&value)
-            else {
-                panic!("expected a Python call");
-            };
-            assert_eq!(operands.len(), count + 1);
-            assert_eq!(
-                matches!(call.target, ir::RegisteredCallTarget::Method { .. }),
-                count < 30
-            );
-            assert_eq!(
-                matches!(call.arguments, ir::RegisteredArguments::Packed(_)),
-                count > 64
-            );
+            match value_and_position(&value).0 {
+                ExprKind::Invoke { args, .. } => {
+                    assert!((30..=64).contains(&count));
+                    assert_eq!(args.values.len(), count);
+                }
+                ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
+                    assert!(count < 30 || count > 64);
+                    assert_eq!(operands.len(), count + 1);
+                    assert_eq!(
+                        matches!(call.target, ir::RegisteredCallTarget::Method { .. }),
+                        count < 30
+                    );
+                    assert_eq!(
+                        matches!(call.arguments, ir::RegisteredArguments::Packed(_)),
+                        count > 64
+                    );
+                }
+                _ => panic!("expected a Python call"),
+            }
         }
         for (text, fused) in [
             ("s.partition('-')[0]", Some(0)),
@@ -1282,7 +1416,8 @@ mod tests {
                 panic!("expected expression")
             };
             let source = RegisteredSource {
-                templates: None,
+                template_fields: None,
+                generators: None,
                 lambdas: None,
                 text,
                 replacements: &replacements,
@@ -1325,7 +1460,36 @@ mod index_constant_tests {
         let module = ModuleSource::new(entry);
         let expr = &entry.parsed.syntax().body[0].as_expr_stmt().unwrap().value;
         let key = &expr.as_subscript_expr().unwrap().slice;
-        registered_constant_key(key, module.context(source)).map(|(key, _)| key)
+        ir::Constant::from_expr(&registered_index_key(key, module.context(source))?)
+    }
+
+    #[test]
+    fn residual_bound_is_an_input_to_a_checked_slice_read() {
+        let source = "owner()[1000:next(i for i in items):1001]";
+        let graph = SourceGraph::single(source).unwrap();
+        let entry = &graph.modules[graph.entry];
+        let module = ModuleSource::new(entry);
+        let expr = &entry.parsed.syntax().body[0].as_expr_stmt().unwrap().value;
+        let plan = index_operands(expr, module.context(source)).unwrap();
+        let mut residual = Vec::new();
+        for input in &plan.inputs {
+            if let super::booleans::SourceOperand::Residual(child) = input {
+                residual.push(&source[child.range()]);
+            }
+        }
+        assert_eq!(residual, ["next(i for i in items)"]);
+        assert_eq!(plan.inputs.len(), 4);
+        let mut slots = Vec::new();
+        ir::walk_operand_expressions(&plan.value, &mut |operand| {
+            if let ExprKind::Local(slot) = operand.kind {
+                slots.push(slot);
+            }
+        });
+        assert_eq!(slots, [0, 1, 2, 3]);
+        assert!(matches!(
+            plan.value.kind,
+            ExprKind::Builtin(Builtin::RegisteredSubscript(..), _)
+        ));
     }
 
     #[test]

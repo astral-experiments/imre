@@ -166,6 +166,7 @@ impl Checker<'_> {
             ir::CallArgs {
                 values,
                 order: order.to_vec(),
+                python_site: None,
                 exhaustive_enum_match: false,
             },
         ))

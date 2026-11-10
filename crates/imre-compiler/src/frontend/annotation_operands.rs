@@ -5,15 +5,13 @@ use std::collections::HashMap;
 use ruff_python_ast as ast;
 use ruff_python_ast::statement_visitor::{StatementVisitor, walk_stmt};
 use ruff_python_parser::Parsed;
-use ruff_text_size::{Ranged, TextSize};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use super::registered::values::Region;
 use super::{
-    RegisteredFunction, RegisteredSource, annotation_expression, annotation_spelling,
-    parameter_annotations,
+    RegisteredOperand, RegisteredScope, RegisteredSource, annotation_expression,
+    annotation_spelling, parameter_annotations,
 };
-#[cfg(test)]
-use crate::ir::Statement;
 use crate::ir::{Builtin, Expr, ExprKind, Type};
 
 pub(crate) enum PreparedAnnotation<R> {
@@ -45,21 +43,22 @@ pub(crate) struct AnnotationBody<R> {
     pub(crate) scope: R,
 }
 
-pub(crate) enum AnnotationCode {
-    Checked(Box<RegisteredFunction>),
-    Residual(Box<ast::Expr>),
+pub(crate) struct AnnotationCode {
+    pub(crate) range: TextRange,
+    pub(crate) operand: Box<RegisteredOperand>,
 }
 
 impl AnnotationCode {
-    /// Select the return operand while the decoded annotation owns its lambda sites.
-    pub(crate) fn prepare(expr: Box<ast::Expr>, source: RegisteredSource<'_>) -> Self {
-        match Region::Suite.operand(&expr, source) {
-            Some(value) => Self::Checked(Box::new(RegisteredFunction::expression(
-                expr.range(),
-                value,
-            ))),
-            None => Self::Residual(expr),
-        }
+    pub(crate) fn prepare(expr: &ast::Expr, source: RegisteredSource<'_>) -> Option<Self> {
+        let operand = RegisteredOperand::prepare(
+            expr,
+            source,
+            RegisteredScope::Function { is_async: false },
+        )?;
+        Some(Self {
+            range: expr.range(),
+            operand: Box::new(operand),
+        })
     }
 }
 
@@ -208,13 +207,14 @@ pub(super) fn test_annotation_body(
         text,
         replacements: &HashMap::new(),
         has_templates: false,
-        templates: None,
+        template_fields: None,
+        generators: None,
         lambdas: None,
         method_imports: &Default::default(),
         private_names: None,
     };
     Some(AnnotationBody {
-        code: AnnotationCode::prepare(parsed.syntax().body.clone(), source),
+        code: AnnotationCode::prepare(&parsed.syntax().body, source)?,
         scope: (),
     })
 }
@@ -233,7 +233,8 @@ mod tests {
             has_templates: false,
             method_imports: &Default::default(),
             private_names: None,
-            templates: None,
+            template_fields: None,
+            generators: None,
             lambdas: None,
         };
         let mut namespace_annotations = HashMap::new();
@@ -252,7 +253,7 @@ mod tests {
             let PreparedAnnotation::String {
                 body:
                     Some(AnnotationBody {
-                        code: AnnotationCode::Checked(function),
+                        code: AnnotationCode { range, .. },
                         ..
                     }),
                 ..
@@ -260,22 +261,13 @@ mod tests {
             else {
                 panic!("expected a checked function argument");
             };
-            assert!(matches!(
-                function.function.body.as_slice(),
-                [Statement::Expr(Expr { kind: ExprKind::Builtin(Builtin::RegisteredStatement(range, None), _), .. }), Statement::Return(_)]
-                    if range.start().to_u32() == 0 && range.end().to_u32() == 9
-            ));
+            assert_eq!(range.start().to_u32(), 0);
+            assert_eq!(range.end().to_u32(), 9);
         }
         let site = |token| TextSize::try_from(text.find(token).unwrap()).unwrap();
         assert!(matches!(
             sites[&site("'(lambda")],
-            PreparedAnnotation::String {
-                body: Some(AnnotationBody {
-                    code: AnnotationCode::Checked(_),
-                    ..
-                }),
-                ..
-            }
+            PreparedAnnotation::String { body: Some(_), .. }
         ));
         assert!(matches!(
             sites[&site("'Name'")],
@@ -294,7 +286,8 @@ mod tests {
             has_templates: false,
             method_imports: &Default::default(),
             private_names: None,
-            templates: None,
+            template_fields: None,
+            generators: None,
             lambdas: None,
         };
         let sites = annotation_operands(
@@ -356,7 +349,8 @@ after: K[L]
             has_templates: false,
             method_imports: &Default::default(),
             private_names: None,
-            templates: None,
+            template_fields: None,
+            generators: None,
             lambdas: None,
         };
         let mut groups = HashMap::new();

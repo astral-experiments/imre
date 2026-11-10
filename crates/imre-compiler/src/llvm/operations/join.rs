@@ -7,67 +7,44 @@ pub(crate) struct ValueJoin {
     owner: Option<usize>,
 }
 
-/// The continuation belongs to all reachable arms of an if/elif/else.
-pub(crate) struct Choice {
-    done: String,
-    reachable: bool,
-}
-
-impl Choice {
-    pub(crate) fn new(out: &mut FunctionBody) -> Self {
-        Self {
-            done: out.name("select_end"),
-            reachable: false,
-        }
-    }
-
-    pub(crate) fn successors(out: &mut FunctionBody) -> (String, String) {
-        (out.name("select_yes"), out.name("select_no"))
-    }
-
-    pub(crate) fn finish_arm(&mut self, out: &mut FunctionBody) {
-        if !out.terminated {
-            out.jump(&self.done);
-            self.reachable = true;
-        }
-    }
-
-    pub(crate) fn finish(self, out: &mut FunctionBody, resumable: bool) {
-        out.start(&self.done);
-        if !self.reachable && !resumable {
-            out.end("unreachable");
-        }
-    }
-}
-
-/// Emit a choice using the normal successors observed after each arm. The caller
-/// supplies only the edge action (transferring a value for an expression, or none
-/// for a statement). A returning/raising arm has no edge into the continuation.
-pub(super) fn choose<C, V>(
+/// Emit an ordered choice with one continuation for its reachable edges. An
+/// unconditional arm ends the chain. A missing else falls through normally.
+pub(crate) fn choose<C, T, A>(
     context: &mut C,
     output: fn(&mut C) -> &mut FunctionBody,
-    branch: impl FnOnce(&mut C, &str, &str),
-    on_true: impl FnOnce(&mut C) -> V,
-    on_false: impl FnOnce(&mut C) -> V,
-    mut transfer: impl FnMut(&mut FunctionBody, V),
+    arms: impl IntoIterator<Item = (Option<T>, A)>,
+    mut branch: impl FnMut(&mut C, T, &str, &str),
+    mut emit: impl FnMut(&mut C, A),
+    resumable: bool,
 ) {
-    let out = output(context);
-    let (yes, no) = Choice::successors(out);
-    let mut choice = Choice::new(out);
-    let mut finish = |out: &mut FunctionBody, value| {
+    let done = output(context).name("select_end");
+    let mut reachable = false;
+    let mut finish = |out: &mut FunctionBody| {
         if !out.terminated {
-            transfer(out, value);
-            choice.finish_arm(out);
+            out.jump(&done);
+            reachable = true;
         }
     };
-    branch(context, &yes, &no);
-    output(context).start(&yes);
-    let left = on_true(context);
-    finish(output(context), left);
-    output(context).start(&no);
-    let right = on_false(context);
-    finish(output(context), right);
-    choice.finish(output(context), false);
+    for (test, arm) in arms {
+        let next = test.map(|test| {
+            let out = output(context);
+            let yes = out.name("select_yes");
+            let no = out.name("select_no");
+            branch(context, test, &yes, &no);
+            output(context).start(&yes);
+            no
+        });
+        emit(context, arm);
+        finish(output(context));
+        let Some(next) = next else { break };
+        output(context).start(&next);
+    }
+    let out = output(context);
+    finish(out);
+    out.start(&done);
+    if !reachable && !resumable {
+        out.end("unreachable");
+    }
 }
 
 impl ValueJoin {
@@ -81,9 +58,20 @@ impl ValueJoin {
         on_false: impl FnOnce(&mut C) -> CheckedValue,
     ) -> Option<CheckedValue> {
         let mut join = Self::default();
-        choose(context, output, branch, on_true, on_false, |out, value| {
-            join.incoming(out, value);
-        });
+        choose(
+            context,
+            output,
+            [(Some(branch), Ok(on_true)), (None, Err(on_false))],
+            |code, test, yes, no| test(code, yes, no),
+            |code, arm| {
+                let value = match arm {
+                    Ok(yes) => yes(code),
+                    Err(no) => no(code),
+                };
+                join.incoming(output(code), value);
+            },
+            false,
+        );
         join.finish(output(context))
     }
 

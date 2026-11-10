@@ -4507,6 +4507,7 @@ for name in ("md4", "ripemd160"):
             "boxed_pprint.py",
             "boxed_formatter.py",
             "boxed_template_client.py",
+            "boxed_fstring_join.py",
             "boxed_template_literals.py",
             "boxed_re_ascii.py",
             "boxed_re_numeric_escapes.py",
@@ -4691,6 +4692,7 @@ for name in ("md4", "ripemd160"):
             "boxed_multiprocessing_context.py",
             "boxed_textwrap.py",
             "boxed_set_ordering.py",
+            "boxed_set_iteration.py",
             "boxed_dict_view_equality.py",
             "boxed_set_issubset.py",
             "boxed_set_operator_descriptors.py",
@@ -4832,6 +4834,7 @@ for name in ("md4", "ripemd160"):
             "boxed_generator_delegation.py",
             "boxed_suspended_operand_positions.py",
             "boxed_lambda_default_positions.py",
+            "boxed_mixed_lambda_defaults.py",
             "boxed_source_coroutine.py",
             "boxed_coroutine_origin.py",
             "boxed_anext.py",
@@ -4894,6 +4897,7 @@ for name in ("md4", "ripemd160"):
                 check_slice_stack(imre, imports, root, env)
             elif fixture in (
                 "boxed_nested_callable_scope.py",
+                "boxed_mixed_lambda_defaults.py",
                 "boxed_codec_registry.py",
                 "boxed_gc_generator_loop.py",
                 "boxed_gc_generator_resurrection.py",

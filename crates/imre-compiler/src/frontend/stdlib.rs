@@ -1045,44 +1045,47 @@ impl Checker<'_> {
     pub(super) fn formatted_scalar(
         &mut self,
         field: &ast::InterpolatedElement,
-    ) -> Result<Expr, String> {
-        if field.debug_text.is_some() {
-            return Err(error(
-                self.source,
-                field,
-                "debug f-string fields are unsupported",
-            ));
-        }
+        conversion: ast::ConversionFlag,
+    ) -> Result<Option<Expr>, String> {
         let mut specification = String::new();
         if let Some(spec) = &field.format_spec {
             for part in &spec.elements {
                 let ast::InterpolatedStringElement::Literal(literal) = part else {
-                    return Err(error(
-                        self.source,
-                        field,
-                        "f-string format specifications must be literal",
-                    ));
+                    return Ok(None);
                 };
                 specification.push_str(&literal.value);
             }
         }
-        if field.conversion == ast::ConversionFlag::Ascii {
-            if !specification.is_empty() {
-                return Err(error(
-                    self.source,
-                    field,
-                    "formatted strings support !a with an empty format specification",
-                ));
-            }
-            return self.ascii_expr(&field.expression);
+        if conversion == ast::ConversionFlag::Ascii {
+            return if specification.is_empty() {
+                self.ascii_expr(&field.expression).map(Some)
+            } else {
+                Ok(None)
+            };
         }
-        if specification.is_empty()
+        let format = if specification.is_empty() {
+            None
+        } else if let Some(numeric) = NumericField::parse(&specification) {
+            Some(numeric)
+        } else {
+            return Ok(None);
+        };
+        self.scalar_field(field, conversion, format).map(Some)
+    }
+
+    fn scalar_field(
+        &mut self,
+        field: &ast::InterpolatedElement,
+        conversion: ast::ConversionFlag,
+        format: Option<NumericField<'_>>,
+    ) -> Result<Expr, String> {
+        if format.is_none()
             && let Some(text) = self.unittest_failure_repr(&field.expression)?
         {
             return Ok(text);
         }
         let mut value = self.expr(&field.expression)?;
-        if field.conversion != ast::ConversionFlag::Repr {
+        if conversion != ast::ConversionFlag::Repr {
             value = if matches!(value.ty, Type::Enum(_)) {
                 Expr {
                     ty: Type::Str,
@@ -1092,100 +1095,71 @@ impl Checker<'_> {
                 Self::enum_text(value)
             };
         }
-        if !specification.is_empty() {
-            if let Some(digits) = specification.strip_suffix(['x', 'X'])
-                && digits.bytes().all(|b| b.is_ascii_digit())
-                && let Some(width) = if digits.is_empty() {
-                    Some(0)
-                } else {
-                    digits.parse::<u32>().ok()
-                }
-                && width <= 1000
-            {
-                if field.conversion != ast::ConversionFlag::None
-                    || !matches!(value.ty, Type::Int | Type::Bool)
+        if let Some(format) = format {
+            match &format {
+                NumericField::Decimal(_) | NumericField::Hex { .. }
+                    if conversion != ast::ConversionFlag::None
+                        || !matches!(value.ty, Type::Int | Type::Bool) =>
                 {
-                    return Err(error(
-                        self.source,
-                        field,
-                        "hexadecimal formats require an unconverted int or bool",
-                    ));
-                }
-                if value.ty == Type::Bool {
-                    value = Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                    let reason = match format {
+                        NumericField::Decimal(_) => {
+                            "decimal integer formats require an unconverted int or bool"
+                        }
+                        _ => "hexadecimal formats require an unconverted int or bool",
                     };
+                    return Err(error(self.source, field, reason));
                 }
-                return Ok(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(
-                        Builtin::HexFormat {
-                            width,
-                            zero: digits.starts_with('0'),
-                            upper: specification.ends_with('X'),
-                        },
-                        vec![value],
-                    ),
-                });
-            }
-            let sign = specification.strip_suffix('d').unwrap_or(&specification);
-            if matches!(sign, "" | "-" | "+" | " ") {
-                if field.conversion != ast::ConversionFlag::None
-                    || !matches!(value.ty, Type::Int | Type::Bool)
+                NumericField::Float { .. }
+                    if conversion != ast::ConversionFlag::None
+                        || !matches!(value.ty, Type::Int | Type::Float | Type::Bool) =>
                 {
                     return Err(error(
                         self.source,
                         field,
-                        "decimal integer formats require an unconverted int or bool",
+                        "numeric format specifications require an unconverted int, float, or bool",
                     ));
                 }
-                return Ok(self.formatted_integer(value, sign));
+                _ => {}
             }
-            let (positive_sign, unsigned) = match specification.as_bytes().first() {
-                Some(&sign @ (b'+' | b' ')) => (sign, &specification[1..]),
-                Some(b'-') => (0, &specification[1..]),
-                _ => (0, specification.as_str()),
-            };
-            let (precision, percent) = numeric_format(unsigned).ok_or_else(|| {
-                error(
-                    self.source,
-                    field,
-                    "numeric formats support signed decimal integers or f and % with literal precision from 0 through 1000",
-                )
-            })?;
-            if field.conversion != ast::ConversionFlag::None
-                || !matches!(value.ty, Type::Int | Type::Float | Type::Bool)
-            {
-                return Err(error(
-                    self.source,
-                    field,
-                    "numeric format specifications require an unconverted int, float, or bool",
-                ));
-            }
-            if value.ty != Type::Float {
-                value = Expr {
-                    ty: Type::Float,
-                    kind: ExprKind::Builtin(Builtin::Float, vec![value]),
-                };
-            }
-            return Ok(Expr {
-                ty: Type::Str,
-                kind: ExprKind::Builtin(
+            let op = match format {
+                NumericField::Decimal(sign) => return Ok(self.formatted_integer(value, sign)),
+                NumericField::Hex { width, zero, upper } => {
+                    if value.ty == Type::Bool {
+                        value = Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                        };
+                    }
+                    Builtin::HexFormat { width, zero, upper }
+                }
+                NumericField::Float {
+                    precision,
+                    percent,
+                    positive_sign,
+                } => {
+                    if value.ty != Type::Float {
+                        value = Expr {
+                            ty: Type::Float,
+                            kind: ExprKind::Builtin(Builtin::Float, vec![value]),
+                        };
+                    }
                     Builtin::FloatFormat {
                         precision,
                         percent,
                         positive_sign,
-                    },
-                    vec![value],
-                ),
+                    }
+                }
+            };
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(op, vec![value]),
             });
         }
         if matches!(
             value.ty,
             Type::Exception | Type::ImportException | Type::NamedException(_)
         ) {
-            let op = if field.conversion == ast::ConversionFlag::Repr {
+            let op = if conversion == ast::ConversionFlag::Repr {
                 Builtin::ExceptionRepr
             } else {
                 Builtin::ExceptionMessage
@@ -1196,31 +1170,31 @@ impl Checker<'_> {
             });
         }
         if matches!(value.ty, Type::Calendar(_)) {
-            let name = if field.conversion == ast::ConversionFlag::Repr {
+            let name = if conversion == ast::ConversionFlag::Repr {
                 "repr"
             } else {
                 "str"
             };
             return Ok(calendar::format_builtin(name, vec![value]));
         }
-        if field.conversion != ast::ConversionFlag::Repr
+        if conversion != ast::ConversionFlag::Repr
             && matches!(value.ty, Type::Class(_) | Type::CompletedProcess(..))
         {
             return self.record_text(value, field);
         }
-        if field.conversion == ast::ConversionFlag::Repr && matches!(value.ty, Type::Class(_)) {
+        if conversion == ast::ConversionFlag::Repr && matches!(value.ty, Type::Class(_)) {
             return self.record_repr(value, field);
         }
-        if field.conversion == ast::ConversionFlag::Repr && value.ty == Type::ObjectValue {
+        if conversion == ast::ConversionFlag::Repr && value.ty == Type::ObjectValue {
             return Ok(Expr {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::ExceptionFieldRepr, vec![value]),
             });
         }
-        if field.conversion == ast::ConversionFlag::Repr && matches!(value.ty, Type::Document(_)) {
+        if conversion == ast::ConversionFlag::Repr && matches!(value.ty, Type::Document(_)) {
             return Ok(documents::op(ir::DocumentOp::Repr, Type::Str, vec![value]));
         }
-        if field.conversion == ast::ConversionFlag::Repr
+        if conversion == ast::ConversionFlag::Repr
             || self.types.element(value.ty).is_some()
             || matches!(value.ty, Type::Set(_))
         {
@@ -1339,6 +1313,55 @@ impl Checker<'_> {
                 clear: vec![slot],
             },
         }
+    }
+}
+
+enum NumericField<'a> {
+    Decimal(&'a str),
+    Hex {
+        width: u32,
+        zero: bool,
+        upper: bool,
+    },
+    Float {
+        precision: u32,
+        percent: bool,
+        positive_sign: u8,
+    },
+}
+
+impl<'a> NumericField<'a> {
+    fn parse(specification: &'a str) -> Option<Self> {
+        if let Some(digits) = specification.strip_suffix(['x', 'X'])
+            && digits.bytes().all(|b| b.is_ascii_digit())
+            && let Some(width) = if digits.is_empty() {
+                Some(0)
+            } else {
+                digits.parse().ok()
+            }
+            && width <= 1000
+        {
+            return Some(Self::Hex {
+                width,
+                zero: digits.starts_with('0'),
+                upper: specification.ends_with('X'),
+            });
+        }
+        let sign = specification.strip_suffix('d').unwrap_or(specification);
+        if matches!(sign, "" | "-" | "+" | " ") {
+            return Some(Self::Decimal(sign));
+        }
+        let (positive_sign, unsigned) = match specification.as_bytes().first() {
+            Some(&sign @ (b'+' | b' ')) => (sign, &specification[1..]),
+            Some(b'-') => (0, &specification[1..]),
+            _ => (0, specification),
+        };
+        let (precision, percent) = numeric_format(unsigned)?;
+        Some(Self::Float {
+            precision,
+            percent,
+            positive_sign,
+        })
     }
 }
 

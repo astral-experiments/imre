@@ -9,30 +9,27 @@ pub(super) struct Namespace {
     pub(super) targets: HashMap<String, usize>,
 }
 
-/// Give a checked display its own compiler-owned slots in the enclosing Python activation.
-/// The IR remains an expression even when surrounding source statements are residual.
-pub(crate) fn eager_operand(
-    expr: &ast::Expr,
-    source: values::RegisteredSource<'_>,
-) -> Option<RegisteredOperand> {
-    if !matches!(
-        expr,
-        ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_)
-    ) {
-        return None;
-    }
-    RegisteredOperand::prepare(expr, source, RegisteredScope::Function { is_async: false })
-}
-
 impl SourceScope<'_> {
+    pub(super) fn creating_iterable<T>(&mut self, lower: impl FnOnce(&mut Self) -> T) -> T {
+        if matches!(self.kind, RegisteredScope::Function { .. } | RegisteredScope::Lambda)
+            && self.loop_scope != LoopScope::WithCursor
+        {
+            self.with_suspending_operands(lower)
+        } else {
+            lower(self)
+        }
+    }
+
     pub(super) fn eager_comprehension(&mut self, expression: &ast::Expr) -> Option<Expr> {
         let plan = Plan::from_expr(expression)?;
-        if plan.suspends() {
+        if plan.body_suspends() && !matches!(self.kind, RegisteredScope::Function { is_async: true }) {
             return None;
         }
 
         let first_private = self.locals.len();
-        let mut input = self.input(plan.outer).ok()?;
+        // The first iterable belongs to the creating frame and runs before this cursor exists.
+        let first = &plan.clauses[0];
+        let mut input = self.creating_iterable(|scope| scope.input(first)).ok()?;
         let mut prefix = std::mem::take(&mut input.evaluate);
         prefix.append(&mut input.acquire);
         let namespace = self.hidden(Type::PythonObject);
@@ -102,37 +99,40 @@ impl SourceScope<'_> {
     }
 }
 
+pub(super) fn async_pull(clause: &ast::Comprehension) -> Option<ir::AsyncPull> {
+    clause.is_async.then(|| ir::AsyncPull {
+        range: clause.target.range(),
+        header: None,
+    })
+}
+
 impl EagerDisplay for SourceScope<'_> {
     type Input = pipelines::Prepared;
     type Destination = ();
     type Error = ();
 
-    fn input(&mut self, iter: &ast::Expr) -> StdResult<pipelines::Prepared, ()> {
-        let iterable = self.ordinary_operand(iter).ok_or(())?;
-        let iterator = operation(Builtin::RegisteredIter, Type::PythonObject, vec![iterable]);
-        Ok(pipelines::Prepared::cursor(
-            iterator,
-            Type::PythonObject,
-            |ty| self.hidden(ty),
-        ))
+    fn input(&mut self, clause: &ast::Comprehension) -> StdResult<pipelines::Prepared, ()> {
+        self.iteration_input(&clause.iter, async_pull(clause)).ok_or(())
     }
 
     fn with_target(
         &mut self,
         target: &ast::Expr,
         input: Self::Input,
+        output: Output<'_>,
         body: impl FnOnce(&mut Self) -> StdResult<Vec<Statement>, ()>,
     ) -> StdResult<Vec<Statement>, ()> {
-        let binding = unpacking::bind_targets(
-            self,
-            target,
-            Expr::local(input.value, Type::PythonObject),
-            None,
-        )?;
-        self.loop_depth += 1;
-        let body = body(self);
-        self.loop_depth -= 1;
-        Ok(input.for_suite(binding, body?, Vec::new(), Vec::new()))
+        let (binding, body) = self.iteration_body(target, &input, body)?;
+        Ok(match output {
+            Output::Generator(item) => generators::clause(
+                input,
+                binding,
+                body,
+                item.range(),
+                self.loop_scope == super::LoopScope::WithCursor,
+            ),
+            _ => input.for_suite(binding, body, Vec::new(), Vec::new()),
+        })
     }
 
     fn filter(&mut self, test: &ast::Expr) -> StdResult<Expr, ()> {

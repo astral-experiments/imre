@@ -8,7 +8,7 @@ pub(crate) mod branches;
 mod join;
 pub(crate) mod sequences;
 use crate::ir::{DisplayKind, ObjectUnary};
-pub(crate) use join::{Choice, ValueJoin};
+pub(crate) use join::{ValueJoin, choose};
 
 use super::records;
 use super::{Binary, Builtin, Expr, ExprKind, Statement, Type};
@@ -16,18 +16,6 @@ use super::{Emitter, Value, none, small};
 use crate::llvm::registered::{Frame as CheckedFrame, FrameEmitter};
 
 use super::{Operand, Ownership, body::FunctionBody};
-
-/// Evaluate a positional call's callable first, then each argument exactly once.
-pub(crate) fn call_arguments<C, E, V>(
-    context: &mut C,
-    callee: &E,
-    args: &[E],
-    mut evaluate: impl FnMut(&mut C, &E) -> V,
-) -> (V, Vec<V>) {
-    let callable = evaluate(context, callee);
-    let values = args.iter().map(|arg| evaluate(context, arg)).collect();
-    (callable, values)
-}
 
 /// A checked expression keeps the representation selected by its producer.
 /// A guarded integer carries an owned integer result on the exact edge and the
@@ -168,6 +156,74 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         match &mut self.0 {
             Entry::Native(emitter) => CheckedValue::native(emitter.operand(expr)),
             Entry::Registered(_) => self.emit_value(expr),
+        }
+    }
+
+    /// Capture the callable before evaluating each argument. A native operand keeps
+    /// its checked borrow or owner; a Python argument must already have its rooted
+    /// handle before the next argument can call back into the frame.
+    fn invoke(
+        &mut self,
+        callable: &Expr,
+        args: &crate::ir::CallArgs,
+        returns: Type,
+    ) -> CheckedValue {
+        fn operands<T>(
+            callable: &Expr,
+            args: &crate::ir::CallArgs,
+            mut evaluate: impl FnMut(&Expr) -> T,
+        ) -> (T, Vec<T>) {
+            let target = evaluate(callable);
+            let values = args.values.iter().map(evaluate).collect();
+            (target, values)
+        }
+
+        match &mut self.0 {
+            Entry::Native(emitter) => {
+                let (target, values) = operands(callable, args, |expr| emitter.operand(expr));
+                CheckedValue::owned(emitter.invoke_callable(target, values, &args.order, returns))
+            }
+            Entry::Registered(frame) => {
+                let site = args.python_site.as_ref().expect("checked Python call site");
+                let enclosing_scope = frame.scope.clone();
+                let mark = frame.temporary_mark();
+                let result = frame.unwind_stack_operands(&mark, |frame| {
+                    if frame.native_suspension
+                        && let Some(name) = site.suspended_name
+                    {
+                        frame.call_position(name);
+                    }
+                    // Each evaluation leaves just its result above the previous operands.
+                    // Release intermediate owners before the next argument can run Python.
+                    let mut next = mark.clone();
+                    let mut evaluate = |expr: &Expr| {
+                        let value = frame.evaluate_handle(expr);
+                        next = frame.keep_operands(&next, &value, "0");
+                        value
+                    };
+                    let scope = site
+                        .scope
+                        .as_deref()
+                        .map(&mut evaluate)
+                        .unwrap_or(enclosing_scope);
+                    let (target, values) = operands(callable, args, evaluate);
+                    let (array, count) = frame.handle_array(&values);
+                    let positional = super::registered::CallArguments::Positional {
+                        array,
+                        count,
+                        receiver_slot: false,
+                    };
+                    frame.positioned_call(
+                        &target,
+                        positional,
+                        &mark,
+                        site.range,
+                        site.callee_end,
+                        &scope,
+                    )
+                });
+                CheckedValue::handle(result)
+            }
         }
     }
 
@@ -454,8 +510,15 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 }
             },
             ExprKind::Binary(op, left, right) => self.binary_expression(*op, left, right, expr),
+            ExprKind::Builtin(Builtin::FormatJoin, parts) => match &mut self.0 {
+                Entry::Native(emitter) => CheckedValue::owned(emitter.concat(expr)),
+                Entry::Registered(frame) => frame.builtin(&Builtin::FormatJoin, parts),
+            },
+            ExprKind::Invoke { callable, args } => self.invoke(callable, args, expr.ty),
             ExprKind::Builtin(
-                op @ (Builtin::RegisteredCall(_) | Builtin::RegisteredAttribute { .. }),
+                op @ (Builtin::RegisteredCall(_)
+                | Builtin::RegisteredAttribute { .. }
+                | Builtin::RegisteredDeleteItem),
                 args,
             ) => self.python().object_operation(op, args),
             ExprKind::Builtin(Builtin::RegisteredUnary(op), args) => {
@@ -532,10 +595,11 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             Statement::With {
                 manager,
                 site,
-                entered,
+                binding,
                 body,
             } => {
-                self.python().with_manager(manager, *site, *entered, body);
+                self.python()
+                    .with_manager(manager, *site, binding.as_ref(), body);
             }
             Statement::Clear(slot) => self.clear_iteration_slots(&[*slot]),
             Statement::Scope { body, clear } => self.scoped_suite(body, clear),
