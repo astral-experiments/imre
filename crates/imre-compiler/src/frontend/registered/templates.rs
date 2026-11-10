@@ -5,6 +5,7 @@ use imre_ast::strings::{TemplateFieldText, interpolation_conversion};
 
 #[derive(Default)]
 pub(crate) struct PreparedStrings {
+    pub(crate) fields: HashMap<TextSize, TemplateFieldText>,
     pub(crate) templates: HashMap<TextRange, RegisteredOperand>,
     pub(crate) literals: HashMap<TextRange, Expr>,
     pub(crate) residual_templates: HashMap<TextRange, ResidualTemplate>,
