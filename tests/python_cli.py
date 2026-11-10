@@ -24,6 +24,18 @@ def check_registered_entry_operand(imre, root, run):
         "def publish(a: int, b: int, send):\n    send(a + b)\n"
         "def report(value):\n    print(value)\n"
     )
+    entry.write_text(
+        "def model() -> int:\n"
+        "    items: list[int] = [3]\n"
+        "    items.append(True)\n"
+        "    return items[0]\n"
+        "print('reached')\nprint(model())\n"
+    )
+    for argv in ((entry,), ("-m", entry.stem)):
+        result = run(imre, *argv)
+        assert result.returncode and not result.stdout, result
+        assert b"checked_operand.py:3:18: Imre: expected int, got bool" in result.stderr, result
+
     setup = "send = {'send': report}[input()]\npublish(3, 5, send)\n"
     before = functions + setup + "values: list[int] = [3]\noffset = 17\n"
     for use in ("values.append(True)", "result = values.append(True)", "print(values.append(True))"):
