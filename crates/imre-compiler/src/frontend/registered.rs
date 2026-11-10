@@ -204,16 +204,23 @@ pub(super) fn capture(
 ) {
     let mut sources = HashMap::new();
     let mut checks = SourceChecks::default();
-    for (&owner, signature) in signatures {
+    let mut pending = inference.pending_bodies.borrow_mut();
+    let owners = pending.get_or_insert_with(|| {
+        // Inference can request recovery before signatures settle.
+        signatures
+            .keys()
+            .copied()
+            .filter(|owner| graph.modules[owner.module].is_program_source())
+            .collect()
+    });
+    owners.retain(|&owner| {
+        let signature = &signatures[&owner];
         let id = owner.module;
         let module = &graph.modules[id];
-        if !module.is_program_source() {
-            continue;
-        }
         // Use the original definition. The registered binder retains its names, defaults and frame.
         let Some(function) = module.parsed.syntax().body[owner.statement].as_function_def_stmt()
         else {
-            continue;
+            return false;
         };
         // Recovery may follow an owning definition that has already checked this site.
         if graph
@@ -221,11 +228,12 @@ pub(super) fn capture(
             .get(&id)
             .is_some_and(|bodies| bodies.contains_key(&function.start()))
         {
-            continue;
+            return false;
         }
-        let (signature, solved) = if let Some(signature) = inference.registered_signature(signature) {
+        let (signature, solved) = if let Some(signature) = inference.registered_signature(signature)
+        {
             if !retain_live_parameters {
-                continue;
+                return true;
             }
             (signature, false)
         } else if let Some(mut signature) = inference.checked_signature(signature)
@@ -236,7 +244,7 @@ pub(super) fn capture(
             signature.returns = Type::PythonObject;
             (signature, true)
         } else {
-            continue;
+            return true;
         };
         let helpers = Helpers::new(inference.len());
         // A solved definition reads names from the Python namespace. Its trial
@@ -264,8 +272,10 @@ pub(super) fn capture(
             && checks.accepts(graph, id, function)
         {
             graph.register_function(id, function.start(), body);
+            return false;
         }
-    }
+        true
+    });
 }
 
 pub(super) fn checkpoint(stmt: &ast::Stmt) -> Statement {
