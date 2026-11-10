@@ -628,7 +628,7 @@ mod tests {
                 ModuleOrigin::Program(None),
             )
             .unwrap();
-            assert!(module.initializer().plan.fully_checked());
+            assert!(module.initializer().fully_checked());
             let mut output = Output::default();
             let file = output.data(b"decls.py");
             let location = SourceMap {
