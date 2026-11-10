@@ -267,6 +267,9 @@ pub struct SourceInputs {
     /// File-kind queries that affect import admission without reading a provider's contents.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub file_checks: std::collections::BTreeMap<PathBuf, bool>,
+    /// Resolution of runpy's normalized open path when it differs from the loader's origin.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declared_file_resolutions: Vec<(PathBuf, Option<PathBuf>)>,
     /// Import search directories and the canonical directories they resolve to.
     #[serde(default)]
     pub directories: Vec<(PathBuf, PathBuf)>,
@@ -288,6 +291,10 @@ impl SourceInputs {
                 .wheel_records
                 .iter()
                 .all(|(root, expected)| &installed_wheels::records(root) == expected)
+            && self
+                .declared_file_resolutions
+                .iter()
+                .all(|(path, identity)| path.canonicalize().ok().as_ref() == identity.as_ref())
             && self.directories.iter().all(|(p, identity)| {
                 p.is_dir() && p.canonicalize().is_ok_and(|now| &now == identity)
             })

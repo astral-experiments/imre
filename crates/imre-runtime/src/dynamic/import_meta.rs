@@ -160,7 +160,7 @@ impl Context {
         self.module_code(source.code, Path::new(&format!("<frozen {original}>")))
     }
 
-    fn sealed_native(&self, name: &str) -> bool {
+    pub(super) fn sealed_native(&self, name: &str) -> bool {
         self.is_frozen(name)
             || (stdlib::is_module(name)
                 && !imre_ast::providers::is_native_package(name)

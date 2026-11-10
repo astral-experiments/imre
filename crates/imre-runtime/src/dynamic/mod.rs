@@ -100,7 +100,12 @@ enum LinkedSource {
 #[derive(Clone, Copy)]
 enum ModuleInitializer {
     Native(Code),
-    File(Code, Option<&'static [u8; 32]>, Option<u32>),
+    File {
+        entry: Code,
+        digest: Option<&'static [u8; 32]>,
+        flags: Option<u32>,
+        declared_open_path: Option<&'static Path>,
+    },
     Zip(Code, &'static [u8; 32], u32),
     Builtin(Code),
     Invalid {

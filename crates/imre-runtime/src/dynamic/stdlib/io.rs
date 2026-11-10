@@ -322,6 +322,20 @@ pub(super) fn open_code(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
             ));
         }
     };
+    open_code_file(ctx, path, None).map(|(stream, _)| stream)
+}
+
+/// Preserve both Python opener lookups before substituting a declared initializer for ENOENT.
+pub(super) fn open_run_path(ctx: &mut Context, opener: Id, path: Id, filename: Id) -> Result<Id> {
+    let (stream, code) = if opener == ctx.builtin("io.open_code") {
+        open_code_file(ctx, path, Some(filename))?
+    } else {
+        (ctx.call(opener, vec![path], Vec::new())?, NONE)
+    };
+    Ok(ctx.alloc(Value::Tuple(vec![stream, code])))
+}
+
+fn open_code_file(ctx: &mut Context, path: Id, filename: Option<Id>) -> Result<(Id, Id)> {
     if ctx.string_storage(path).is_none() {
         let kind = if path == NONE {
             "None"
@@ -336,7 +350,19 @@ pub(super) fn open_code(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
     let module = ctx.module("_io")?;
     let open = ctx.lookup_attr(module, "open")?;
     let mode = ctx.text("rb");
-    ctx.call(open, vec![path, mode], Vec::new())
+    match ctx.call(open, vec![path, mode], Vec::new()) {
+        Ok(stream) => Ok((stream, NONE)),
+        Err(error) => {
+            if let Some(filename) = filename
+                && open == ctx.builtin("open")
+                && ctx.missing_open_path(&error, path)
+                && let Some(code) = ctx.declared_file_code(path, filename)?
+            {
+                return Ok((NONE, code));
+            }
+            Err(error)
+        }
+    }
 }
 
 /// Install public metadata and the types of native buffered file handles.

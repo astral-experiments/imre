@@ -1061,7 +1061,12 @@ pub(super) unsafe extern "C" fn imre_dyn_register_file_source(
             file,
             std::ptr::null(),
             0,
-            ModuleInitializer::File(code, digest, None),
+            ModuleInitializer::File {
+                entry: code,
+                digest,
+                flags: None,
+                declared_open_path: None,
+            },
         )
     }
 }
@@ -1076,6 +1081,44 @@ pub(super) unsafe extern "C" fn imre_dyn_register_file_code(
     flags: u32,
     code: Code,
 ) {
+    // SAFETY: the compiler supplies the static operands of a physical file registration.
+    unsafe { register_file_code(ctx, name, file, digest, flags, code, None) }
+}
+
+/// Register the physical file selected for an explicitly included module.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_declared_file_code_at(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    digest: *const [u8; 32],
+    flags: u32,
+    code: Code,
+    file_to_open: *const c_char,
+) {
+    // SAFETY: the compiler supplies the static operands of the selected file registration.
+    unsafe {
+        register_file_code(
+            ctx,
+            name,
+            file,
+            digest,
+            flags,
+            code,
+            Some(native_path(file_to_open)),
+        )
+    }
+}
+
+unsafe fn register_file_code(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    digest: *const [u8; 32],
+    flags: u32,
+    entry: Code,
+    declared_open_path: Option<&'static Path>,
+) {
     // SAFETY: the compiler supplies a static digest, names and module entry point.
     unsafe {
         register_compiled(
@@ -1084,7 +1127,12 @@ pub(super) unsafe extern "C" fn imre_dyn_register_file_code(
             file,
             std::ptr::null(),
             0,
-            ModuleInitializer::File(code, Some(&*digest), Some(flags)),
+            ModuleInitializer::File {
+                entry,
+                digest: Some(&*digest),
+                flags: Some(flags),
+                declared_open_path,
+            },
         );
     }
 }

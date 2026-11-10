@@ -51,6 +51,7 @@ pub mod indentation;
 pub mod layout;
 pub mod lzma;
 pub mod numbers;
+pub mod posixpath;
 pub mod providers;
 pub mod python_nodes;
 pub mod source_encoding;

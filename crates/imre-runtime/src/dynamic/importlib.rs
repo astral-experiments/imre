@@ -492,12 +492,12 @@ impl Context {
     ) -> Result<Id> {
         let flags = match entry {
             ModuleInitializer::Zip(_, _, flags) => Some(flags),
-            ModuleInitializer::File(_, _, flags) => flags,
+            ModuleInitializer::File { flags, .. } => flags,
             _ => None,
         };
         let entry = match entry {
             ModuleInitializer::Native(entry)
-            | ModuleInitializer::File(entry, ..)
+            | ModuleInitializer::File { entry, .. }
             | ModuleInitializer::Zip(entry, _, _)
             | ModuleInitializer::Builtin(entry) => entry,
             ModuleInitializer::Invalid {
@@ -578,9 +578,12 @@ impl Context {
                 return None;
             }
             match source.code {
-                code @ ModuleInitializer::File(entry, Some(digest), flags) => {
-                    Some((code, Some(entry), digest, flags))
-                }
+                code @ ModuleInitializer::File {
+                    entry,
+                    digest: Some(digest),
+                    flags,
+                    ..
+                } => Some((code, Some(entry), digest, flags)),
                 code @ ModuleInitializer::Zip(entry, digest, flags) => {
                     Some((code, Some(entry), digest, Some(flags)))
                 }
@@ -615,6 +618,37 @@ impl Context {
             return Ok(None);
         }
         self.module_code_at(code, &path, filename).map(Some)
+    }
+
+    /// Resolve the file that runpy tried to open to the declaring loader’s native code.
+    pub(super) fn declared_file_code(&mut self, path: Id, filename: Id) -> Result<Option<Id>> {
+        let path = self.import_path(path)?;
+        let mut selected = None;
+        for (name, sources) in &self.sources {
+            for source in sources {
+                let ModuleInitializer::File {
+                    entry,
+                    digest,
+                    flags,
+                    declared_open_path: Some(open_path),
+                } = source.code
+                else {
+                    continue;
+                };
+                if open_path.as_os_str() != path.as_os_str() || self.sealed_native(name) {
+                    continue;
+                }
+                if let Some((_, previous, hash, future)) = selected
+                    && (!std::ptr::fn_addr_eq(previous, entry) || hash != digest || future != flags)
+                {
+                    return Ok(None);
+                }
+                selected = Some((source.code, entry, digest, flags));
+            }
+        }
+        selected
+            .map(|(code, ..)| self.module_code_at(code, &path, filename))
+            .transpose()
     }
 
     fn registered_file(&self, name: &str, filename: &Path) -> Option<&super::SourceModule> {
@@ -698,7 +732,7 @@ impl Context {
             if let Ok(name) = self.str_value(name)
                 && let Some(source) = self.registered_file(name, &path)
                 && source.path.as_os_str() == path.as_os_str()
-                && let entry @ ModuleInitializer::File(..) = source.code
+                && let entry @ ModuleInitializer::File { .. } = source.code
             {
                 return self.module_code(entry, &path);
             }

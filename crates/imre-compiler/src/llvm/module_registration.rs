@@ -11,6 +11,7 @@ use std::path::Path;
 const SOURCE: &str = "imre_dyn_register_source";
 const BUILTIN: &str = "imre_dyn_register_builtin_source";
 const FILE: &str = "imre_dyn_register_file_code";
+const DECLARED_FILE: &str = "imre_dyn_register_declared_file_code_at";
 const ZIP: &str = "imre_dyn_register_zip_source";
 const ERROR: &str = "imre_dyn_register_module_error";
 
@@ -44,7 +45,11 @@ impl ModuleLauncher {
         main.line(format!(
             "%ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})"
         ));
-        writeln!(output.functions, "declare void @{FILE}({physical_args})").unwrap();
+        writeln!(
+            output.functions,
+            "declare void @{FILE}({physical_args})\ndeclare void @{DECLARED_FILE}({physical_args}, ptr)"
+        )
+        .unwrap();
         if has_zip {
             writeln!(output.functions, "declare void @{ZIP}({physical_args})").unwrap();
         }
@@ -143,6 +148,7 @@ impl ModuleOperands<'_> {
     pub(crate) fn write_call(self, launcher: &mut ModuleLauncher, code: &str) {
         let name = self.name;
         let file = self.file;
+        let mut declared_path = String::new();
         let (function, data, argument) = match self.loader {
             ModuleLoader::Source { builtin, text } => {
                 let function = if *builtin { BUILTIN } else { SOURCE };
@@ -160,6 +166,11 @@ impl ModuleOperands<'_> {
             } => {
                 let function = match kind {
                     PhysicalModuleKind::File => FILE,
+                    PhysicalModuleKind::DeclaredFile(path) => {
+                        let origin = launcher.output.data(path.as_os_str().as_encoded_bytes());
+                        write!(declared_path, ", ptr {origin}").unwrap();
+                        DECLARED_FILE
+                    }
                     PhysicalModuleKind::Zip => ZIP,
                 };
                 (
@@ -171,7 +182,7 @@ impl ModuleOperands<'_> {
         };
         writeln!(
             launcher.main.code,
-            "  call void @{function}(ptr %ctx, ptr {name}, ptr {file}, ptr {data}, {argument}, ptr {code})"
+            "  call void @{function}(ptr %ctx, ptr {name}, ptr {file}, ptr {data}, {argument}, ptr {code}{declared_path})"
         )
         .unwrap();
     }
