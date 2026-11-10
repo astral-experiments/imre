@@ -11,7 +11,6 @@ pub(crate) use lambdas::{LambdaBinding, LambdaDefault, RegisteredLambda};
 mod templates;
 pub(crate) use templates::{PreparedStrings, ResidualField, prepare_expression_sites, template_operands};
 pub(super) mod patterns;
-pub(super) mod type_alias;
 pub(super) mod values;
 
 /// Prepare the bindings installed by the existing type-parameter frame constructor.
@@ -139,22 +138,12 @@ pub(crate) struct RegisteredFunction {
 
 impl RegisteredFunction {
     pub(super) fn expression(range: TextRange, value: Expr) -> Self {
-        Self::expression_with_prologue(range, value, None)
-    }
-
-    fn expression_with_prologue(
-        range: TextRange,
-        value: Expr,
-        prologue: Option<Statement>,
-    ) -> Self {
         let checkpoint = operation(
             Builtin::RegisteredStatement(range, None),
             Type::None,
             vec![],
         );
-        let mut body = vec![Statement::Expr(checkpoint)];
-        body.extend(prologue);
-        body.push(Statement::Return(value));
+        let body = vec![Statement::Expr(checkpoint), Statement::Return(value)];
         Self {
             function: ir::Function {
                 params: vec![],
@@ -414,6 +403,28 @@ fn operation(op: Builtin, ty: Type, operands: Vec<Expr>) -> Expr {
         ty,
         kind: ExprKind::Builtin(op, operands),
     }
+}
+
+/// The implicit format argument is checked in the lazy evaluator, before its RHS.
+pub(crate) fn type_alias_body(
+    value: &ast::Expr,
+    source: values::RegisteredSource<'_>,
+) -> Option<AnnotationCode> {
+    let mut code = AnnotationCode::prepare(value, source)?;
+    let format = operation(
+        Builtin::RegisteredAnnotationFormat,
+        Type::None,
+        vec![values::name_binding(".format")],
+    );
+    code.operand.value = Expr {
+        ty: code.operand.value.ty,
+        kind: ExprKind::Scope {
+            body: vec![Statement::Expr(format)],
+            value: Box::new(code.operand.value),
+            clear: Vec::new(),
+        },
+    };
+    Some(code)
 }
 
 pub(crate) fn registered_type_alias(site: TextSize) -> Expr {

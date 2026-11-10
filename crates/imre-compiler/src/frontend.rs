@@ -125,7 +125,7 @@ pub(crate) use registered::booleans::{
     LogicalSites, Selection as LogicalSelection, SourceOperand, prepare_boolean,
 };
 pub(crate) use registered::patterns::{MatchGuard, SourceMatch};
-pub(crate) use registered::type_alias::type_alias_body;
+pub(crate) use registered::type_alias_body;
 pub(crate) use registered::values::{
     RegisteredSource, ValueStatement, binary_operands, display_elements, index_operands,
     literal_replacements, module_literal_replacements, packed_arguments,

@@ -335,14 +335,6 @@ impl<'p> Function<'_, 'p> {
             }
             match stmt {
                 ast::Stmt::Pass(_) | ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => {}
-                ast::Stmt::TypeAlias(v) if self.class_locals.is_none() => {
-                    let alias = &self.source.type_aliases[&v.start()];
-                    debug_assert!(alias.body.is_none());
-                    let compiled =
-                        self.compile_type_alias(v.start(), super::AliasValue::Residual(&v.value));
-                    let value = compiled.instantiate(&mut self.frame);
-                    self.bind(&alias.name, &value);
-                }
                 ast::Stmt::Assign(v) => {
                     let value = self.expr(&v.value);
                     let chained = v.targets.len() > 1;
@@ -682,13 +674,14 @@ impl<'p> Function<'_, 'p> {
         type_params: Option<&ast::TypeParams>,
         body: Body<'_>,
     ) -> CompiledDefinition {
+        let type_alias = matches!(name, DefinitionName::TypeAlias(_));
         let (name, global, generator) = match name {
             DefinitionName::Binding(identifier) => (
                 self.source.private_names.definition(identifier),
                 self.declared_globals.contains(identifier.as_str()),
                 None,
             ),
-            DefinitionName::Plain(name) => (name, false, None),
+            DefinitionName::Plain(name) | DefinitionName::TypeAlias(name) => (name, false, None),
             DefinitionName::Generator(site) => ("<genexpr>", false, Some(site)),
         };
         let qualname = if global {
@@ -813,7 +806,7 @@ impl<'p> Function<'_, 'p> {
                 }
                 Some(&class.namespace)
             }
-            Body::AliasEvaluator(_) => Some(&scopes.aliases[&start]),
+            _ if type_alias => Some(&scopes.aliases[&start]),
             _ => generator.map(|site| &scopes.generators[&site]),
         };
         if let Some(facts) = scope_facts {
@@ -851,7 +844,6 @@ impl<'p> Function<'_, 'p> {
             }
         }
         // A type alias thunk has an implicit default for its format parameter.
-        let type_alias = matches!(body, Body::AliasEvaluator(_));
         if type_alias {
             signature["posonly"] = json!([".format"]);
         }

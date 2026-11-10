@@ -3,7 +3,7 @@ use super::super::sites::{
     AnnotationString, CheckedSites, CompiledAlias, CompiledDefinition, CompiledGenerator, Declaration,
     RequiredSite,
 };
-use super::super::{AliasValue, Body, DefinitionName, DefinitionSite, Entry, Function, SourceInfo};
+use super::super::{Body, DefinitionName, DefinitionSite, Entry, Function, SourceInfo};
 use crate::frontend::PreparedAnnotation;
 use crate::ir::{Expr, Statement};
 use ruff_python_ast as ast;
@@ -41,7 +41,7 @@ impl Function<'_, '_> {
             location.code(
                 self.frame.output,
                 String::new(),
-                Body::AnnotationOperand(body.code.range, &body.code.operand),
+                Body::AnnotationOperand(&body.code),
                 false,
                 None,
             )
@@ -120,26 +120,35 @@ impl Function<'_, '_> {
         self.sites.lambdas.insert(site, definition);
     }
 
-    pub(super) fn compile_type_alias(
-        &mut self,
-        site: TextSize,
-        body: AliasValue<'_>,
-    ) -> CompiledAlias {
+    fn compile_type_alias(&mut self, site: TextSize) -> Result<CompiledAlias, String> {
         let alias = &self.source.type_aliases[&site];
+        // Placement can visit children of a suite that exits before the alias binds.
+        let outer_diagnostic = self.frame.output.diagnostic.take();
         if let Some(parameters) = &alias.parameters {
             self.check_suspended_parameters(parameters, alias.range);
         }
-        let definition = self.compile_definition(
-            site,
-            DefinitionName::Plain(&alias.name),
-            None,
-            None,
-            None,
-            Body::AliasEvaluator(body),
-        );
-        CompiledAlias {
-            definition,
-            parameters: alias.parameters.clone(),
+        let compiled = match &alias.body {
+            Ok(code) => Some(CompiledAlias {
+                definition: self.compile_definition(
+                    site,
+                    DefinitionName::TypeAlias(&alias.name),
+                    None,
+                    None,
+                    None,
+                    Body::AnnotationOperand(code),
+                ),
+                parameters: alias.parameters.clone(),
+            }),
+            Err(range) => {
+                self.with_expression_range(*range, |code| {
+                    code.build_diagnostic("type alias value has no checked expression operand")
+                });
+                None
+            }
+        };
+        match std::mem::replace(&mut self.frame.output.diagnostic, outer_diagnostic) {
+            Some(error) => Err(error),
+            None => Ok(compiled.expect("prepared alias evaluator")),
         }
     }
 
@@ -171,11 +180,7 @@ impl Function<'_, '_> {
             }
             RequiredSite::Alias(site) => {
                 if !self.sites.aliases.contains_key(&site) {
-                    let body = self.source.type_aliases[&site]
-                        .body
-                        .as_ref()
-                        .expect("checked alias value");
-                    let alias = self.compile_type_alias(site, AliasValue::Checked(body));
+                    let alias = self.compile_type_alias(site);
                     self.sites.aliases.insert(site, alias);
                 }
                 return;
@@ -292,6 +297,53 @@ mod tests {
             },
         )
         .unwrap();
+    }
+
+    #[test]
+    fn suspended_alias_diagnostic_follows_the_emitted_binding() {
+        for (suite, reachable) in [
+            ("    raise Stop()\n    ALIAS", false),
+            (
+                "    try:\n        return\n        ALIAS\n    finally:\n        done()",
+                false,
+            ),
+            (
+                "    with manager:\n        raise Stop()\n        ALIAS",
+                false,
+            ),
+            (
+                "    try:\n        raise Stop()\n    except Stop:\n        ALIAS",
+                true,
+            ),
+            (
+                "    try:\n        return\n    finally:\n        ALIAS",
+                true,
+            ),
+        ] {
+            let source = format!("def stream():\n    yield 1\n{suite}\n").replace(
+                "ALIAS",
+                "type Dormant[T: int] = (item async for item in items)",
+            );
+            let module = PreparedBody::module(
+                "stream",
+                Path::new("stream.py"),
+                &source,
+                0,
+                ModuleOrigin::Provider,
+            )
+            .unwrap();
+            let outcome = module.standalone();
+            if reachable {
+                assert!(
+                    outcome
+                        .unwrap_err()
+                        .contains("unsupported class type parameter bounds and defaults"),
+                    "{suite}"
+                );
+            } else {
+                outcome.unwrap().unwrap();
+            }
+        }
     }
 
     #[test]
