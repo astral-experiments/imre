@@ -881,22 +881,20 @@ impl<'p> Function<'_, 'p> {
         self.bind("__annotate_func__", &function);
     }
 
-    pub(super) fn unprepared_annotation(&mut self, occurrence: crate::ir::AnnotationOccurrence) {
-        let decl = &self.source.annotations[&occurrence.site];
-        let crate::frontend::AnnotationValue::Source(expression) = &decl.value else {
+    pub(super) fn insert_annotation_input(&mut self, occurrence: crate::ir::AnnotationOccurrence) {
+        let field = &self.source.annotations[&occurrence.site];
+        let crate::frontend::AnnotationValue::Input { operand, unpack } = &field.value else {
             unreachable!("checked annotation outside its prepared run")
         };
         let target = self
             .frame
-            .annotation_target(occurrence.index, &decl.name, decl.range);
-        let value = if let ast::Expr::Starred(starred) = expression {
-            let value = self.expr(&starred.value);
-            let count = self.integer(1);
-            let items = self.op("unpack", &[&value, &count, "0"]);
-            let index = self.integer(0);
-            self.op("get", &[&items, &index])
-        } else {
-            self.expr(expression)
+            .annotation_target(occurrence.index, &field.name, field.range);
+        let value = self.physical_operand(operand);
+        let value = match unpack {
+            Some(unpack) => self
+                .frame
+                .registered_with_inputs(unpack, &[value], &self.sites),
+            None => value,
         };
         self.frame.store_annotation(target, &value);
     }
