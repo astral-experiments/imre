@@ -1036,13 +1036,33 @@ impl Checker<'_> {
                 }
                 loaded = true;
             } else {
-                if !checked {
+                if !checked && !self.globals.checked_entry_stores.borrow().contains(&index) {
                     return None;
                 }
                 passive_prefix = false;
             }
         }
         None
+    }
+
+    fn call_operand_returns(&self, value: &Expr) -> bool {
+        let ExprKind::Call(callee, _) = &value.kind else {
+            return true;
+        };
+        let Some((definition, _)) = self
+            .functions
+            .iter()
+            .find(|(_, signature)| signature.id == *callee)
+        else {
+            return true;
+        };
+        let statement =
+            &self.graph.modules[definition.module].parsed.syntax().body[definition.statement];
+        statement.as_function_def_stmt().is_none_or(|function| {
+            self.graph
+                .session
+                .function_may_return(definition.module, function)
+        })
     }
 
     pub(super) fn source_call(
@@ -1073,6 +1093,8 @@ impl Checker<'_> {
                 }))
             .then_some(&mut scope),
         )?;
+        let entry_site =
+            entry_site.filter(|_| args.values.iter().all(|arg| self.call_operand_returns(arg)));
         if let (Some(site), Some(seen)) = (entry_site, &mut self.observed_definition) {
             seen.entry_site.get_or_insert(site);
         }

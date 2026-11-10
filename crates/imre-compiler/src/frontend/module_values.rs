@@ -13,6 +13,8 @@ pub(super) struct ModuleValues {
     /// A reached initializer may still be waiting for a callee during this inference round.
     waiting: RefCell<HashMap<DefinitionId, Failure>>,
     pub(super) registered_initializers: bool,
+    /// Ordered first stores whose checked RHS kept the live entry namespace intact.
+    pub(super) checked_entry_stores: RefCell<HashSet<usize>>,
     /// A concrete source read supplies the registered function's ordinary Python binding.
     pub(super) missing_bindings: RefCell<std::collections::BTreeMap<usize, Diagnostic>>,
     pub(super) class_data: RefCell<class_data::Storage>,
@@ -651,7 +653,30 @@ impl Initialization {
                 || crate::modules::value_name(statement).is_some()
             {
                 match checker.initialize_global(statement, definition) {
-                    Ok(value) => body.push(value),
+                    Ok(value) => {
+                        if checker.graph.registered_startup
+                            && checker.module == checker.graph.entry
+                            && checker.inference.is_none()
+                            && checker.module_namespace.is_unexposed()
+                            && checker.unrepresented.borrow().is_none()
+                            && checker.graph.deferred_object_error.borrow().is_none()
+                            && matches!(
+                                &value,
+                                Statement::Expr(Expr {
+                                    kind: ExprKind::Builtin(Builtin::GlobalSet(_), _),
+                                    ..
+                                })
+                            )
+                        {
+                            checker
+                                .globals
+                                .checked_entry_stores
+                                .borrow_mut()
+                                .insert(index);
+                        }
+                        body.push(value);
+                    }
+
                     Err(wait @ Failure::PendingSignature { .. }) => {
                         checker
                             .globals

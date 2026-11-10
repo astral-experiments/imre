@@ -251,6 +251,49 @@ impl Session {
         )
     }
 
+    /// A known argument call that cannot return never enters the enclosing callee.
+    pub(crate) fn function_may_return(
+        &self,
+        module: usize,
+        function: &ruff_python_ast::StmtFunctionDef,
+    ) -> bool {
+        use ruff_python_ast::statement_visitor::{StatementVisitor, walk_stmt};
+        use ty_python_core::reachability_constraints::ScopedReachabilityConstraintId;
+
+        let file = self.db.program_file(self.files[module]);
+        let index = ty_python_core::semantic_index(&self.db, file);
+        let Some(scope) =
+            index.try_node_scope(ty_python_core::scope::NodeWithScopeRef::Function(function))
+        else {
+            return true;
+        };
+        if function.is_async
+            || !function.decorator_list.is_empty()
+            || scope.is_generator_function(index)
+            || index.use_def_map(scope).end_of_scope_reachability()
+                != ScopedReachabilityConstraintId::ALWAYS_FALSE
+        {
+            return true;
+        }
+        struct Returns(Vec<TextRange>);
+        impl<'a> StatementVisitor<'a> for Returns {
+            fn visit_stmt(&mut self, stmt: &'a ruff_python_ast::Stmt) {
+                match stmt {
+                    ruff_python_ast::Stmt::Return(ret) => self.0.push(ret.range()),
+                    ruff_python_ast::Stmt::FunctionDef(_) | ruff_python_ast::Stmt::ClassDef(_) => {}
+                    _ => walk_stmt(self, stmt),
+                }
+            }
+        }
+        let mut returns = Returns(Vec::new());
+        returns.visit_body(&function.body);
+        let excluded = ty_python_semantic::types::ide_support::unreachable_ranges(&self.db, file);
+        returns
+            .0
+            .into_iter()
+            .any(|site| !excluded.iter().any(|r| r.range.contains_range(site)))
+    }
+
     pub(crate) fn unconditional_function_operand(
         &self,
         module: usize,
