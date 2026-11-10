@@ -178,6 +178,13 @@ def current():
     assert local(2) == {"x": ["outer"], "y": ["class"]}
     values = declared_global(2)
     assert values["x"] is bytes and values["y"]() == "outer"
+    class Variadic:
+        options = (float,)
+
+        def select(self, *items: *(lambda values=[v for v in options]: values)()):
+            pass
+
+    assert Variadic.select.__annotations__ == {"items": float}
     print("annotation closures", names, copied(2)["x"].__name__, replaced(2)["y"].__name__)
 
 
