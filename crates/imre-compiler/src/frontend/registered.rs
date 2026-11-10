@@ -1698,9 +1698,9 @@ impl<'a> SuitePreparation<'a> {
         let mut region = PreparedRegion::default();
         let test = match loop_.test.as_ref() {
             ast::Expr::BooleanLiteral(literal) => Expr::boolean(literal.value),
-            expr => region.guard(self.owned_operand(expr, kind, suspended, |scope| {
-                scope.condition_operand(expr)
-            })),
+            expr => region.guard(
+                self.owned_operand(expr, kind, suspended, |scope| scope.condition_operand(expr)),
+            ),
         };
         // A dead body has no resume entry, even when its syntax declares a generator.
         let disabled = matches!(test.kind, ExprKind::Bool(false));

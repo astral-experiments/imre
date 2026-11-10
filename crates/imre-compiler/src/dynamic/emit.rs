@@ -2016,7 +2016,10 @@ mod tests {
         let SourceEffect::Region(region) = &mut run.effect else {
             panic!("expected the prepared while");
         };
-        assert!(matches!(region.body.as_slice(), [crate::ir::Statement::While(..)]));
+        assert!(matches!(
+            region.body.as_slice(),
+            [crate::ir::Statement::While(..)]
+        ));
         let suite = &mut region.suites[0];
         fn transfer(
             suite: &mut crate::frontend::RegisteredSuite,
