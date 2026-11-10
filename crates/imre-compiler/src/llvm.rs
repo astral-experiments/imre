@@ -3271,7 +3271,12 @@ impl Emitter<'_, '_> {
                     );
                 }
                 let values = self.call_operands(args);
-                self.native_call(callables::NativeCallTarget::Function(*id), args, values, expression.ty)
+                self.native_call(
+                    callables::NativeCallTarget::Function(*id),
+                    args,
+                    values,
+                    expression.ty,
+                )
             }
             ExprKind::Callable { function, receiver } => {
                 self.callable_value(expression.ty, *function, receiver.as_deref())
