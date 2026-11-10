@@ -3720,6 +3720,25 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
+    fn suspending_assertions_prepare_their_external_expression_children() {
+        let source = concat!(
+            "def verify(left, right):\n",
+            "    assert left() and (yield right()), 'failed'\n",
+            "def explain():\n",
+            "    assert (yield 'first') and (yield 'second'), 1 + (yield 'message')\n",
+        );
+        let module = PreparedBody::module(
+            "program",
+            Path::new("program.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        assert!(module.standalone().unwrap().is_some());
+    }
+
+    #[test]
     fn physical_assertion_retains_its_test_before_a_suspending_message() {
         let mut module = PreparedBody::module(
             "proof",
@@ -3749,6 +3768,23 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         );
         physical.physical_body(
             &def.body,
+            crate::frontend::RegisteredScope::Function { is_async: false },
+            true,
+        );
+        let message = def.body[0]
+            .as_assert_stmt()
+            .unwrap()
+            .msg
+            .as_deref()
+            .unwrap();
+        let replacement = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+            range: message.range(),
+            node_index: Default::default(),
+        });
+        // The alternate physical input also needs an entry in the expression table.
+        physical.sites.expressions.prepare_input(
+            &replacement,
+            source,
             crate::frontend::RegisteredScope::Function { is_async: false },
             true,
         );
@@ -3783,7 +3819,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .as_function_def_stmt_mut()
             .unwrap();
         let assertion = def.body[0].as_assert_stmt_mut().unwrap();
-        erase(assertion.msg.as_deref_mut().unwrap());
+        *assertion.msg.as_deref_mut().unwrap() = replacement;
         assert_ne!(module.standalone().unwrap().unwrap(), original);
     }
 

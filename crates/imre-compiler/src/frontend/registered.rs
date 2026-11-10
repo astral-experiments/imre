@@ -1374,6 +1374,19 @@ impl<'a> SuitePreparation<'a> {
                             }
                         }
                     }
+                    Some(SourceEffect::Assertion(site)) => {
+                        let assertion = stmt.as_assert_stmt().expect("prepared assertion");
+                        if site.external_test {
+                            sites.prepare_input(&assertion.test, source, kind, suspended);
+                        }
+                        if site.external_message {
+                            let message = assertion
+                                .msg
+                                .as_deref()
+                                .expect("external assertion message");
+                            sites.prepare_input(message, source, kind, suspended);
+                        }
+                    }
                     Some(SourceEffect::While(SourceGuard::Residual)) => {
                         if let ast::Stmt::While(loop_) = stmt {
                             sites.prepare_input(&loop_.test, source, kind, suspended);
