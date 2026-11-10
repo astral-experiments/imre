@@ -664,7 +664,6 @@ impl Frame<'_, '_, '_> {
         kind: ir::IterNextKind,
     ) {
         let cursor = self.load_private(iterator);
-        let item_block = self.code.name("b");
         let done = self.code.name("b");
         self.store_private(ready, &permanent::FALSE.to_string());
         let header = self.code.current_range.start();
@@ -673,11 +672,17 @@ impl Frame<'_, '_, '_> {
             .loops
             .last()
             .is_some_and(|target| target.edges.exhausted != target.edges.done);
-        let pulled = self
-            .code
-            .iteration_edge(&cursor, kind, header, has_else, &item_block, &done);
-        self.code.label(&item_block);
-        let item = self.code.iteration_item(&cursor, pulled);
+        let item = if kind == ir::IterNextKind::Generic {
+            self.code
+                .checked_sync_item(&cursor, header, has_else, &done)
+        } else {
+            let item_block = self.code.name("b");
+            let pulled =
+                self.code
+                    .iteration_edge(&cursor, kind, header, has_else, &item_block, &done);
+            self.code.label(&item_block);
+            self.code.iteration_item(&cursor, pulled)
+        };
         self.store_private(key, &item);
         self.store_private(ready, &permanent::TRUE.to_string());
         self.code.jump(&done);

@@ -1084,6 +1084,44 @@ impl RegisteredFrame<'_, '_> {
         }
     }
 
+    /// Advance a checked synchronous cursor once. An exact forward list cursor supplies
+    /// the rooted item directly. All other cursors keep the ordinary lookahead protocol.
+    pub(super) fn checked_sync_item(
+        &mut self,
+        cursor: &str,
+        header: TextSize,
+        has_else: bool,
+        exhausted: &str,
+    ) -> String {
+        self.retained_loop_header(header);
+        let ordinary = self.name("b");
+        let ordinary_item = self.name("b");
+        let list_item = self.name("b");
+        let joined = self.name("b");
+        self.max_live = self.max_live.max(1);
+        let status = self.checked(&format!(
+            "call i32 @imre_dyn_list_cursor_pull(ptr %ctx, i64 {cursor}, ptr %live, i1 {has_else})"
+        ));
+        self.end(&format!(
+            "switch i32 {status}, label %{ordinary} [ i32 0, label %{exhausted} i32 1, label %{list_item} ]"
+        ));
+        self.label(&list_item);
+        let direct = self.value("load i64, ptr %live");
+        self.jump(&joined);
+
+        self.label(&ordinary);
+        self.more_edge(cursor, has_else, &ordinary_item, exhausted);
+        self.label(&ordinary_item);
+        let protocol = self.iteration_item(cursor, None);
+        let previous = self.current_block().to_owned();
+        self.jump(&joined);
+
+        self.label(&joined);
+        self.value(&format!(
+            "phi i64 [ {direct}, %{list_item} ], [ {protocol}, %{previous} ]"
+        ))
+    }
+
     /// A plain dictionary-items cursor can deliver two handles in the scratch slots.
     /// Other cursors buffer a single row for the ordinary target binding.
     pub(crate) fn sync_iteration_edge(
@@ -1108,6 +1146,10 @@ impl RegisteredFrame<'_, '_> {
             self.branch_on_item(&more, item, exhausted);
             self.label(&ordinary);
         }
+        self.more_edge(cursor, has_else, item, exhausted);
+    }
+
+    fn more_edge(&mut self, cursor: &str, has_else: bool, item: &str, exhausted: &str) {
         let more = self.op(if has_else { "more_else" } else { "more" }, &[cursor]);
         self.branch_on_item(&more, item, exhausted);
     }
