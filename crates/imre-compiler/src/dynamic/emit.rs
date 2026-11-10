@@ -1258,6 +1258,70 @@ mod tests {
     }
 
     #[test]
+    fn a_suspended_loop_owns_its_fall_through_conditional() {
+        let source = concat!(
+            "def values(flag, consume):\n",
+            "    for item in (1, 2):\n",
+            "        yield item\n",
+            "        if (selected := flag): consume(selected, item)\n",
+            "        if (suspended := flag): yield suspended\n",
+            "        if flag: return item\n",
+            "async def asynchronous(flag, consume, stream):\n",
+            "    for item in (1, 2):\n",
+            "        yield item\n",
+            "        if flag: consume(item)\n",
+            "        if flag: await consume(item)\n",
+            "        if flag:\n",
+            "            async for child in stream: consume(child)\n",
+        );
+        let prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let def = prepared.body[0].as_function_def_stmt().unwrap();
+        let loop_ = def.body[0].as_for_stmt().unwrap();
+        let suite = &prepared.source.nested_bodies[&loop_.body[0].start()];
+        crate::verify::registered(suite.checked.region()).unwrap();
+        let gaps: Vec<_> = suite
+            .residual
+            .iter()
+            .map(|run| run.statements.clone())
+            .collect();
+        assert_eq!(gaps, [0..1, 2..4]);
+        assert!(
+            suite
+                .checked
+                .function
+                .body
+                .iter()
+                .any(|stmt| matches!(stmt, crate::ir::Statement::If(..)))
+        );
+        assert!(
+            suite
+                .checked
+                .local_names
+                .values()
+                .any(|binding| binding.name == "selected")
+        );
+        assert!(
+            !suite
+                .checked
+                .local_names
+                .values()
+                .any(|binding| binding.name == "suspended")
+        );
+        let def = prepared.body[1].as_function_def_stmt().unwrap();
+        let loop_ = def.body[0].as_for_stmt().unwrap();
+        let suite = &prepared.source.nested_bodies[&loop_.body[0].start()];
+        let gaps: Vec<_> = suite.residual.iter().map(|run| run.statements.clone()).collect();
+        assert_eq!(gaps, [0..1, 2..4]);
+    }
+
+    #[test]
     fn residual_named_assignment_consumes_its_completed_choice_after_erasing_the_arm_syntax() {
         let mut prepared = PreparedBody::module(
             "program", Path::new("program.py"),
