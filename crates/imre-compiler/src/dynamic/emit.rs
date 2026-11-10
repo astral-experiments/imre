@@ -2656,7 +2656,7 @@ mod tests {
             .upper
             .as_deref_mut()
             .unwrap();
-        erase(&mut residual.as_call_expr_mut().unwrap().arguments.args[0]);
+        erase(&mut residual.as_call_expr_mut().unwrap().func);
         assert_ne!(prepared.standalone().unwrap().unwrap(), original);
     }
 
@@ -2725,8 +2725,55 @@ mod tests {
         let binary = bound(prepared.syntax.as_mut().unwrap().to_mut())
             .as_bin_op_expr_mut()
             .unwrap();
-        erase(&mut binary.left.as_call_expr_mut().unwrap().arguments.args[0]);
+        erase(&mut binary.left.as_call_expr_mut().unwrap().func);
         assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
+    fn a_physical_method_retains_lookup_keywords_and_checked_inputs() {
+        use crate::frontend::SourceOperand::{Checked, Residual};
+
+        let mut prepared = PreparedBody::module(
+            "store",
+            Path::new("store.py"),
+            "target()[owner().apply(first(), label=(lambda v: v)(key()), tail=last())]: int = rhs()\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let original = prepared.standalone().unwrap().unwrap();
+        let target = &mut prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_ann_assign_stmt_mut()
+            .unwrap()
+            .target;
+        let key = target.as_subscript_expr_mut().unwrap().slice.as_mut();
+        let inputs = prepared
+            .source
+            .statement_sites
+            .expressions
+            .physical(key)
+            .unwrap();
+        let operands = inputs.operands(key, false).collect::<Vec<_>>();
+        assert!(
+            matches!(operands.as_slice(), [Checked(_), Checked(_), Residual(arg), Checked(_)]
+            if arg.range() == key.as_call_expr().unwrap().arguments.keywords[0].value.range())
+        );
+
+        fn erase(expr: &mut ast::Expr) {
+            *expr = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+                range: expr.range(),
+                node_index: Default::default(),
+            });
+        }
+
+        let call = key.as_call_expr_mut().unwrap();
+        let receiver = call.func.as_attribute_expr_mut().unwrap();
+        receiver.attr.id = "other".into();
+        erase(&mut receiver.value);
+        erase(&mut call.arguments.args[0]);
+        call.arguments.keywords[0].arg.as_mut().unwrap().id = "other".into();
+        erase(&mut call.arguments.keywords[1].value);
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
     }
 
     #[test]
@@ -2805,7 +2852,9 @@ mod tests {
         let [crate::frontend::PhysicalOperand::Source(call)] = inputs.as_mut_slice() else {
             panic!("expected the residual call");
         };
-        call.as_call_expr_mut().unwrap().arguments.args = Default::default();
+        // Keep the prepared call's argument slot and pass its lambda without invoking it.
+        let arg = &mut call.as_call_expr_mut().unwrap().arguments.args[0];
+        *arg = (*arg.as_call_expr().unwrap().func).clone();
         assert_ne!(prepared.standalone().unwrap().unwrap(), original);
     }
 
@@ -2912,7 +2961,7 @@ mod tests {
 
         let value = choice(prepared.syntax.as_mut().unwrap().to_mut());
         let residual = &mut value.as_if_expr_mut().unwrap().orelse;
-        erase(&mut residual.as_call_expr_mut().unwrap().arguments.args[0]);
+        erase(&mut residual.as_call_expr_mut().unwrap().func);
         assert_ne!(prepared.standalone().unwrap().unwrap(), original);
     }
 

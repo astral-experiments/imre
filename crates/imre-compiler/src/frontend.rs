@@ -124,7 +124,8 @@ mod records;
 mod regex;
 mod registered;
 pub(crate) use registered::booleans::{
-    ExpressionSites, Selection as ExpressionSelection, SourceOperand, prepare_boolean,
+    ExpressionSites, PhysicalInputs, Selection as ExpressionSelection, SourceOperand,
+    prepare_boolean,
 };
 #[cfg(test)]
 pub(crate) use registered::inline_operand;
