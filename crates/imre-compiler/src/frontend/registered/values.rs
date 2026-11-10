@@ -641,9 +641,7 @@ fn display_operands<E>(
 }
 
 /// Test membership without allocating the small constant tuple at runtime.
-pub(crate) fn literal_membership(
-    cmp: &ast::ExprCompare,
-) -> Option<(&ast::Expr, &[ast::Expr], bool)> {
+fn literal_membership(cmp: &ast::ExprCompare) -> Option<(&ast::Expr, &[ast::Expr], bool)> {
     let [op @ (ast::CmpOp::In | ast::CmpOp::NotIn)] = cmp.ops.as_ref() else {
         return None;
     };

@@ -83,6 +83,12 @@ impl Function<'_, '_> {
     }
 
     fn registered_region(&mut self, expr: &ast::Expr, condition: bool) -> Option<String> {
+        if matches!(
+            self.source.logicals.get(expr),
+            Some(crate::frontend::LogicalSelection::Comparison(_))
+        ) {
+            return None;
+        }
         if let Some(operand) = self.source.strings.templates.get(&expr.range()) {
             self.prepare_checked_value(&operand.value);
             return Some(self.frame.prepared_operand(operand, &self.sites, condition));
@@ -109,6 +115,10 @@ impl Function<'_, '_> {
     }
 
     pub(super) fn located_expr(&mut self, expr: &ast::Expr) -> String {
+        self.located_operand(expr, false)
+    }
+
+    fn located_operand(&mut self, expr: &ast::Expr, condition: bool) -> String {
         let kind = if self.class_locals.is_some() {
             RegisteredScope::Class
         } else if self.module {
@@ -122,7 +132,9 @@ impl Function<'_, '_> {
             crate::frontend::inline_operand(expr, self.source.registered_source(), kind)
         {
             self.prepare_checked_value(&operand.value);
-            return self.frame.prepared_operand(&operand, &self.sites, false);
+            return self
+                .frame
+                .prepared_operand(&operand, &self.sites, condition);
         }
         let position = imre_ast::expression_position(
             expr,
@@ -130,8 +142,25 @@ impl Function<'_, '_> {
             Some(&self.source.private_names),
         );
         let previous = self.enter_expression(expr.range(), position);
-        // The display itself is covered even if an operand still needs the syntax adapter.
-        let value = if let Some((items, display)) = crate::frontend::display_elements(expr) {
+        let comparison = self
+            .source
+            .logicals
+            .comparison(expr, self.native_suspension);
+        let value = if let Some((ops, inputs)) = comparison {
+            let result = ComparisonChain::emit_registered(
+                self,
+                ops,
+                condition,
+                |code| &mut code.frame,
+                inputs,
+                Self::source_operand,
+            );
+            if condition {
+                result.into_condition()
+            } else {
+                result.into_handle()
+            }
+        } else if let Some((items, display)) = crate::frontend::display_elements(expr) {
             self.sequence_display(items, display, None, ast_spread, Self::expr)
         } else if let Some(index) =
             crate::frontend::index_operands(expr, self.source.registered_source())
@@ -225,7 +254,6 @@ impl Function<'_, '_> {
                 v.items.iter().map(|item| (item.key.as_ref(), &item.value)),
                 Self::expr,
             ),
-            ast::Expr::Compare(v) => self.source_comparison(v, false),
             ast::Expr::Named(v) => {
                 let ast::Expr::Name(target) = &*v.target else {
                     return self.unsupported("assignment expression target");
@@ -286,41 +314,15 @@ impl Function<'_, '_> {
 
     fn test_operand(&mut self, expr: &ast::Expr) -> String {
         self.test_with_temporaries(|f| {
-            if let ast::Expr::Compare(cmp) = expr {
+            if expr.is_compare_expr() {
                 f.registered_region(expr, true).unwrap_or_else(|| {
-                    f.with_expression_range(cmp.range(), |f| {
-                        let previous = f.enter_expression(cmp.range(), cmp.start());
-                        let bit = f.source_comparison(cmp, true);
-                        f.leave_expression(previous);
-                        bit
-                    })
+                    f.with_expression_range(expr.range(), |f| f.located_operand(expr, true))
                 })
             } else {
                 let value = f.expr(expr);
                 f.truth_at(&value, Some(expr.range()))
             }
         })
-    }
-
-    fn source_comparison(&mut self, cmp: &ast::ExprCompare, condition: bool) -> String {
-        if let Some((needle, items, negate)) = crate::frontend::literal_membership(cmp) {
-            let needle = self.expr(needle);
-            let items = items.iter().map(|item| self.expr(item)).collect::<Vec<_>>();
-            let value = self.contains_literal(&needle, &items, negate);
-            return if condition { self.truth(&value) } else { value };
-        }
-        let mut chain = ComparisonChain::registered(&mut self.frame, &cmp.ops, condition);
-        for operand in &*cmp.operands {
-            let handle = self.expr(operand);
-            if let Some(result) = chain.push_handle(&mut self.frame, handle) {
-                return if condition {
-                    result.into_condition()
-                } else {
-                    result.into_handle()
-                };
-            }
-        }
-        unreachable!("a comparison has a final link")
     }
 
 }
