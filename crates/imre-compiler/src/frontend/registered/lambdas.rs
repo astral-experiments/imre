@@ -186,6 +186,7 @@ mod tests {
             replacements: &Default::default(),
             has_templates: false,
             template_fields: None,
+            generators: None,
             lambdas: None,
             private_names: None,
         };
@@ -254,6 +255,7 @@ mod tests {
             replacements: &Default::default(),
             has_templates: false,
             template_fields: None,
+            generators: None,
             lambdas: None,
             private_names: None,
         };

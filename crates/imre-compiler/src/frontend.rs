@@ -134,11 +134,11 @@ pub(crate) use registered::values::{
     registered_value, suspended_operand, value_statement,
 };
 pub(crate) use registered::{
-    AnnotationValue, DeferredAnnotation, PreparedStrings, RegisteredFunction, RegisteredLambda,
-    RegisteredScope, RegisteredSuite, ResidualField, SourceRun, StatementSites, SuitePreparation,
-    annotation_expression, attribute_write, delete_targets, prepare_strings,
-    registered_index_target, registered_sites, registered_type_alias, registered_type_parameters,
-    template_operands,
+    AnnotationValue, DeferredAnnotation, PreparedStrings, RegisteredFunction, RegisteredGenerator,
+    RegisteredLambda, ResidualField,
+    RegisteredScope, RegisteredSuite, SourceRun, StatementSites, SuitePreparation, annotation_expression,
+    attribute_write, delete_targets, prepare_expression_sites, registered_index_target, registered_sites,
+    registered_type_alias, registered_type_parameters, template_operands,
 };
 pub(crate) use registered::{LocalBinding, RegisteredOperand, RegisteredRegion, inline_operand};
 mod sequences;

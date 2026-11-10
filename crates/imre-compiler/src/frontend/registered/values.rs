@@ -23,6 +23,7 @@ impl ModuleSource {
     pub(super) fn context<'a>(&'a self, text: &'a str) -> RegisteredSource<'a> {
         RegisteredSource {
             template_fields: None,
+            generators: None,
             lambdas: None,
             text,
             replacements: &self.replacements,
@@ -39,6 +40,7 @@ pub(crate) struct RegisteredSource<'a> {
     pub(crate) replacements: &'a HashMap<TextRange, Vec<u32>>,
     pub(crate) has_templates: bool,
     pub(crate) template_fields: Option<&'a HashMap<TextSize, imre_ast::strings::TemplateFieldText>>,
+    pub(crate) generators: Option<&'a HashMap<TextRange, RegisteredGenerator>>,
     pub(crate) lambdas: Option<&'a HashMap<TextSize, RegisteredLambda>>,
     pub(crate) method_imports: &'a BTreeSet<String>,
     pub(crate) private_names: Option<&'a imre_ast::Names>,
@@ -658,6 +660,22 @@ pub(super) fn operation<E>(
         }));
     }
     let kind = match node {
+        ast::Expr::Generator(generator)
+            if source
+                .generators
+                .is_some_and(|sites| sites.contains_key(&generator.range())) =>
+        {
+            let outer = &imre_ast::comprehension::outer_clause(&generator.generators).iter;
+            let iterator = super::operation(
+                Builtin::RegisteredIter,
+                Type::PythonObject,
+                vec![child(outer)?],
+            );
+            ExprKind::Builtin(
+                Builtin::RegisteredGenerator(generator.range(), false),
+                vec![iterator],
+            )
+        }
         ast::Expr::Compare(cmp) => {
             if let Some((needle, items, negate)) = literal_membership(cmp) {
                 let values = std::iter::once(needle)
@@ -882,7 +900,10 @@ pub(super) fn in_namespace(value: &mut Expr, namespace: Expr) {
             args.insert(0, namespace);
             call.explicit_scope = true;
         }
-        ExprKind::Builtin(Builtin::RegisteredLambda(_, scoped), args) => {
+        ExprKind::Builtin(
+            Builtin::RegisteredLambda(_, scoped) | Builtin::RegisteredGenerator(_, scoped),
+            args,
+        ) => {
             args.insert(0, namespace);
             *scoped = true;
         }
@@ -1076,6 +1097,7 @@ mod tests {
         let imports = imre_ast::module_imports(&parsed.syntax().body);
         let source = RegisteredSource {
             template_fields: None,
+            generators: None,
             lambdas: None,
             text,
             replacements: &HashMap::new(),
@@ -1138,6 +1160,7 @@ mod tests {
         let parsed = imre_ast::indentation::prepare(text).parse_module().unwrap();
         let source = RegisteredSource {
             template_fields: None,
+            generators: None,
             lambdas: None,
             text,
             replacements: &HashMap::new(),
@@ -1204,6 +1227,7 @@ mod tests {
         let call = assign.value.as_call_expr().unwrap();
         let source = RegisteredSource {
             template_fields: None,
+            generators: None,
             lambdas: None,
             text,
             replacements: &HashMap::new(),
@@ -1240,6 +1264,7 @@ mod tests {
             };
             let source = RegisteredSource {
                 template_fields: None,
+                generators: None,
                 lambdas: None,
                 text: &text,
                 replacements: &replacements,
@@ -1274,6 +1299,7 @@ mod tests {
             };
             let source = RegisteredSource {
                 template_fields: None,
+                generators: None,
                 lambdas: None,
                 text,
                 replacements: &replacements,

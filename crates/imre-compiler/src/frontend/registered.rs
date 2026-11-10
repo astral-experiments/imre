@@ -4,10 +4,12 @@ use super::*;
 
 pub(super) mod booleans;
 mod eager;
+mod generators;
+pub(crate) use generators::RegisteredGenerator;
 mod lambdas;
 pub(crate) use lambdas::RegisteredLambda;
 mod templates;
-pub(crate) use templates::{PreparedStrings, ResidualField, prepare_strings, template_operands};
+pub(crate) use templates::{PreparedStrings, ResidualField, prepare_expression_sites, template_operands};
 pub(super) mod patterns;
 pub(super) mod type_alias;
 pub(super) mod values;
@@ -1279,10 +1281,10 @@ impl statements::StatementLowering for SourceScope<'_> {
             header: Some(loop_.start()),
         });
         let input = self.iteration_input(&loop_.iter, pull).ok_or(())?;
-        let body = self.iteration_suite(&loop_.target, input, &loop_.orelse, |scope| {
-            scope.suite(&loop_.body)
-        })?;
-        Ok((body, true))
+        let (binding, body) =
+            self.iteration_body(&loop_.target, &input, |scope| scope.suite(&loop_.body))?;
+        let otherwise = self.suite(&loop_.orelse)?;
+        Ok((input.for_suite(binding, body, otherwise, Vec::new()), true))
     }
 
     fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<statements::Block, ()> {
@@ -1803,13 +1805,12 @@ impl SourceScope<'_> {
         }
     }
 
-    fn iteration_suite(
+    fn iteration_body(
         &mut self,
         target: &ast::Expr,
-        input: pipelines::Prepared,
-        otherwise: &[ast::Stmt],
+        input: &pipelines::Prepared,
         body: impl FnOnce(&mut Self) -> StdResult<Vec<Statement>, ()>,
-    ) -> StdResult<Vec<Statement>, ()> {
+    ) -> StdResult<(Vec<Statement>, Vec<Statement>), ()> {
         let binding = unpacking::bind_targets(
             self,
             target,
@@ -1817,7 +1818,7 @@ impl SourceScope<'_> {
             None,
         )?;
         let body = self.in_loop(LoopScope::WithCursor, body)?;
-        Ok(input.for_suite(binding, body, self.suite(otherwise)?, Vec::new()))
+        Ok((binding, body))
     }
 
     fn iteration_input(
@@ -2024,6 +2025,7 @@ mod tests {
         ));
         let source = RegisteredSource {
             template_fields: None,
+            generators: None,
             lambdas: None,
             text,
             private_names: None,
@@ -2254,6 +2256,7 @@ mod tests {
         let imports = imre_ast::module_imports(&stmts);
         let source = RegisteredSource {
             template_fields: None,
+            generators: None,
             lambdas: None,
             text,
             private_names: Some(&names),
@@ -3446,6 +3449,7 @@ mod tests {
                 .unwrap();
             let source = RegisteredSource {
                 template_fields: None,
+                generators: None,
                 lambdas: None,
                 text,
                 private_names: None,

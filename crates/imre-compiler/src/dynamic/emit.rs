@@ -6,11 +6,11 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use ruff_python_ast as ast;
-use ruff_text_size::Ranged;
+use ruff_text_size::{Ranged, TextRange};
 
 use crate::CodegenUnit;
-use crate::frontend::RegisteredLambda;
 use crate::frontend::module_source::{self, ParsedModule};
+use crate::frontend::{RegisteredGenerator, RegisteredLambda};
 use crate::llvm::registered::{
     ABI, FrameEmitter, Output, RegisteredFrame, SourcePositions, permanent, sites, suspension,
 };
@@ -413,10 +413,6 @@ impl<'a> PreparedBody<'a> {
         let has_templates = tokens
             .iter()
             .any(|t| t.kind() == ast::token::TokenKind::TStringStart);
-        let has_interpolation = has_templates
-            || tokens
-                .iter()
-                .any(|token| token.kind() == ast::token::TokenKind::FStringStart);
         // CPython starts the module provider at the first statement, excluding its decorators.
         let module_start = syntax
             .body
@@ -457,7 +453,13 @@ impl<'a> PreparedBody<'a> {
             has_templates,
             method_imports: &method_imports,
             template_fields: Some(&template_fields),
+            generators: None,
             lambdas: None,
+        };
+        let (strings, generators) = crate::frontend::prepare_expression_sites(&body, values);
+        let values = crate::frontend::RegisteredSource {
+            generators: Some(&generators),
+            ..values
         };
         let mut namespace_annotations = HashMap::new();
         let annotation_operands = crate::frontend::annotation_operands(
@@ -506,11 +508,6 @@ impl<'a> PreparedBody<'a> {
             lambdas: Some(&lambdas),
             ..values
         };
-        let strings = if has_interpolation {
-            crate::frontend::prepare_strings(&body, values)
-        } else {
-            Default::default()
-        };
         let mut prepare = crate::frontend::SuitePreparation::new(
             &operations,
             values,
@@ -557,6 +554,7 @@ impl<'a> PreparedBody<'a> {
             python_optimization,
             nested_bodies: prepare.nested,
             lambdas,
+            generators,
             namespace_operations: operations,
             type_aliases,
             annotations: sites.annotations,
@@ -716,16 +714,21 @@ enum Body<'a> {
     CheckedExpression(&'a crate::frontend::RegisteredFunction),
     Expression(&'a ast::Expr),
     AliasEvaluator(AliasValue<'a>),
-    Generator(&'a imre_ast::comprehension::Plan<'a>),
+    CheckedGenerator(TextRange, &'a crate::frontend::RegisteredFunction),
+    Generator(TextRange, &'a imre_ast::comprehension::Plan<'a>),
 }
 
 impl Body<'_> {
+    fn is_genexpr(&self) -> bool {
+        matches!(self, Self::CheckedGenerator(..) | Self::Generator(..))
+    }
+
     fn generator_flags(&self) -> u32 {
         use imre_ast::code_flags::{ASYNC_GENERATOR, GENERATOR};
         match self {
             Self::GeneratorFunction(_, flags) => *flags,
-            Self::Generator(plan) if plan.body_suspends() => ASYNC_GENERATOR,
-            Self::Generator(..) => GENERATOR,
+            Self::Generator(_, plan) if plan.body_suspends() => ASYNC_GENERATOR,
+            Self::Generator(..) | Self::CheckedGenerator(..) => GENERATOR,
             _ => 0,
         }
     }
@@ -808,6 +811,7 @@ struct SourceInfo<'a> {
     scopes: crate::frontend::function_scope::ScopeFacts,
     thread_entries: HashMap<ruff_text_size::TextSize, imre_ast::ThreadEntry>,
     lambdas: HashMap<ruff_text_size::TextSize, RegisteredLambda>,
+    generators: HashMap<TextRange, RegisteredGenerator>,
     type_aliases: HashMap<ruff_text_size::TextSize, TypeAliasDefinition>,
     python_optimization: i32,
     statement_sites: crate::frontend::StatementSites,
@@ -842,6 +846,7 @@ impl SourceInfo<'_> {
             has_templates: self.has_templates,
             template_fields: None,
             lambdas: Some(&self.lambdas),
+            generators: Some(&self.generators),
             method_imports: &self.method_imports,
             private_names: Some(&self.private_names),
         }
@@ -968,8 +973,8 @@ impl SourceMap<'_> {
                     flags,
                     imre_ast::code_flags::COROUTINE | imre_ast::code_flags::ASYNC_GENERATOR
                 ),
-                // Synchronous generator expressions use an ordinary compiled step.
-                Body::Generator(_) => native_suspension,
+                // A residual synchronous generator uses an ordinary compiled step.
+                Body::Generator(..) => native_suspension,
                 _ => false,
             },
             module,
@@ -1063,11 +1068,13 @@ impl SourceMap<'_> {
                     }
                 });
             }
-            Body::CheckedExpression(checked) | Body::AliasEvaluator(AliasValue::Checked(checked)) => {
+            Body::CheckedExpression(checked)
+            | Body::CheckedGenerator(_, checked)
+            | Body::AliasEvaluator(AliasValue::Checked(checked)) => {
                 f.prepare_checked_sites(&checked.function.body);
                 RegisteredFrame::checked_body(&mut f.frame, checked, &f.sites);
             }
-            Body::Generator(plan) => f.generator_step(plan),
+            Body::Generator(_, plan) => f.generator_step(plan),
             Body::AliasEvaluator(AliasValue::Residual(expr)) => {
                 f.checkpoint(expr);
                 let format = f.lookup(".format");
@@ -1558,7 +1565,7 @@ mod tests {
     #[test]
     fn residual_source_supplies_only_the_interpolation_value() {
         let path = Path::new("field.py");
-        let original = r#"q = t"left{(v for v in xs)!r:>4}right""#;
+        let original = r#"q = t"left{(v async for v in xs)!r:>4}right""#;
         let mut prepared =
             PreparedBody::module("field", path, original, 0, ModuleOrigin::Program(None)).unwrap();
         assert!(prepared.source.strings.templates.is_empty());
@@ -1579,9 +1586,9 @@ mod tests {
                 .into_syntax()
                 .body
         };
-        prepared.body = replace_body(r#"q = t"xxxx{(v for v in xs)!s:^9}yyyyy""#);
+        prepared.body = replace_body(r#"q = t"xxxx{(v async for v in xs)!s:^9}yyyyy""#);
         assert_eq!(emit(&prepared), expected);
-        prepared.body = replace_body(r#"q = t"xxxx{(v for v in ys)!s:^9}yyyyy""#);
+        prepared.body = replace_body(r#"q = t"xxxx{(v async for v in ys)!s:^9}yyyyy""#);
         assert_ne!(emit(&prepared), expected);
     }
 
@@ -1645,12 +1652,95 @@ mod tests {
     }
 
     #[test]
+    fn checked_generator_emits_after_source_body_is_dropped() {
+        use crate::ir::{Builtin, ExprKind};
+
+        let mut prepared = PreparedBody::module(
+            "scan",
+            Path::new("scan.py"),
+            "found = any(t'{(matches(y) for xs in rows() if keep(xs) for y in xs)!r}'.values[0])\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let initializer = prepared.source.initializer.as_ref().unwrap();
+        assert!(initializer.fully_checked());
+        assert_eq!(prepared.source.generators.len(), 1);
+        let (site, generator) = prepared.source.generators.iter().next().unwrap();
+        let template = prepared.source.strings.templates.values().next().unwrap();
+        let mut references = Vec::new();
+        let mut caller_names = Vec::new();
+        crate::ir::walk_operand_expressions(&template.value, &mut |expr| match &expr.kind {
+            ExprKind::Builtin(Builtin::RegisteredGenerator(range, _), _) => references.push(*range),
+            ExprKind::Builtin(Builtin::RegisteredName(name), _) => caller_names.push(name.as_str()),
+            _ => {}
+        });
+        assert_eq!(references, [*site]);
+        assert_eq!(caller_names, ["rows"]);
+        let mut pulls = 0;
+        crate::ir::walk_statements(&generator.body.function.body, &mut |stmt| {
+            pulls += usize::from(matches!(stmt, crate::ir::Statement::IterNext { .. }));
+        });
+        assert_eq!(pulls, 2);
+        prepared.body.clear();
+        prepared.source.strings.templates.clear();
+
+        let mut output = Output::default();
+        let file = output.data(b"scan.py");
+        prepared.emit(&mut output, 0, &file).unwrap();
+        assert_eq!(
+            output.functions.matches("call i64 @imre_dyn_define(").count(),
+            1
+        );
+        assert_eq!(
+            output
+                .functions
+                .matches("call void @imre_dyn_suspend_operands(")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn residual_outer_iterable_uses_the_checked_child_after_its_clauses_are_erased() {
+        let mut prepared = PreparedBody::module(
+            "scan",
+            Path::new("scan.py"),
+            "cursor = (emit(y) for x in rows((lambda: [key for key in keys])()) if keep(x) for y in children(x))\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let initializer = prepared.source.initializer.as_ref().unwrap();
+        assert!(!initializer.fully_checked());
+        let site = prepared.body[0].as_assign_stmt().unwrap().value.range();
+        assert!(prepared.source.generators.contains_key(&site));
+        let before = prepared.standalone().unwrap().unwrap();
+        assert!(before.1.contains("call void @imre_dyn_suspend_operands("));
+
+        let assignment = prepared.body[0].as_assign_stmt_mut().unwrap();
+        let generator = assignment.value.as_generator_expr_mut().unwrap();
+        // The caller still evaluates the outer iterable. Only the child owns
+        // the target, filters, inner loop and yield operand.
+        generator.generators.truncate(1);
+        let outer = &mut generator.generators[0];
+        outer.ifs.clear();
+        for operand in [generator.elt.as_mut(), &mut outer.target] {
+            *operand = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+                range: operand.range(),
+                node_index: Default::default(),
+            });
+        }
+        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+    }
+
+    #[test]
     fn a_residual_operand_keeps_its_entire_template_at_the_source_boundary() {
         let prepared = PreparedBody::module(
             "query",
             Path::new("query.py"),
             "first = t'{client.lookup(*args)}{v * 2}'
-second = t'{client.lookup(*args)}{(v for v in values)}'",
+second = t'{client.lookup(*args)}{(v async for v in values)}'",
             0,
             ModuleOrigin::Program(None),
         )
@@ -2385,7 +2475,7 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
     fn physical_deletion_uses_the_complete_checked_statement_after_targets_are_dropped() {
         let source = concat!(
             "del first, [(owner := obj).field, obj[lo:hi]], obj[[key for key in keys if key]], last\n",
-            "del rejected, (orphan := obj)[(key for key in keys if key)]\n",
+            "del rejected, (orphan := obj)[(key async for key in keys if key)]\n",
         );
         let mut prepared = PreparedBody::module(
             "remove",

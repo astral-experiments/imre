@@ -4819,6 +4819,7 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredDeleteName(..)
             | Builtin::RegisteredDefinition(_)
             | Builtin::RegisteredLambda(..)
+            | Builtin::RegisteredGenerator(..)
             | Builtin::RegisteredTypeAlias(_)
             | Builtin::RegisteredStatement(..)
             | Builtin::RegisteredNamespace(_)

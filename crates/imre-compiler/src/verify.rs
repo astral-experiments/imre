@@ -163,6 +163,11 @@ pub(crate) fn registered(
                         "registered spread needs one operand inside a Python display",
                     )
                 }
+                ExprKind::Builtin(Builtin::RegisteredGenerator(_, scoped), args) => {
+                    ir::generator_operands(*scoped, args)
+                        .map(|_| ())
+                        .map_err(str::to_owned)
+                }
                 ExprKind::Builtin(op, args) => op
                     .iteration_operands(args)
                     .transpose()
@@ -817,6 +822,7 @@ mod tests {
         let graph = SourceGraph::single(text).unwrap();
         let source = frontend::RegisteredSource {
             template_fields: None,
+            generators: None,
             lambdas: None,
             text,
             private_names: None,

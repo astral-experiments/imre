@@ -31,25 +31,30 @@ pub(crate) fn template_operands(expr: &ast::Expr) -> Option<impl Iterator<Item =
     }))
 }
 
-struct StringPreparation<'a> {
+struct ExpressionPreparation<'a> {
     source: RegisteredSource<'a>,
     prepared: PreparedStrings,
+    generators: HashMap<TextRange, RegisteredGenerator>,
     // Template text is owned by its segments. Nested expressions can switch string kinds.
     in_f_string: bool,
 }
 
-/// A template with a residual operand stays at its original whole-expression boundary.
-pub(crate) fn prepare_strings(body: &[ast::Stmt], source: RegisteredSource<'_>) -> PreparedStrings {
-    let mut preparation = StringPreparation {
+/// Prepare nested generator bodies before a parent expression binds or captures them.
+pub(crate) fn prepare_expression_sites(
+    body: &[ast::Stmt],
+    source: RegisteredSource<'_>,
+) -> (PreparedStrings, HashMap<TextRange, RegisteredGenerator>) {
+    let mut preparation = ExpressionPreparation {
         source,
         prepared: PreparedStrings::default(),
+        generators: HashMap::new(),
         in_f_string: false,
     };
     preparation.visit_body(body);
-    preparation.prepared
+    (preparation.prepared, preparation.generators)
 }
 
-impl<'a> Visitor<'a> for StringPreparation<'_> {
+impl<'a> Visitor<'a> for ExpressionPreparation<'_> {
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
         let enclosing =
             std::mem::replace(&mut self.in_f_string, matches!(expr, ast::Expr::FString(_)));
@@ -57,10 +62,19 @@ impl<'a> Visitor<'a> for StringPreparation<'_> {
             visitor::walk_expr(self, expr)
         });
         self.in_f_string = enclosing;
+        let source = RegisteredSource {
+            generators: Some(&self.generators),
+            ..self.source
+        };
         match expr {
+            ast::Expr::Generator(generator) => {
+                if let Some(child) = RegisteredGenerator::prepare(generator, source) {
+                    self.generators.insert(generator.range(), child);
+                }
+            }
             ast::Expr::TString(template) => {
                 if let Some(value) =
-                    RegisteredOperand::prepare(expr, self.source, RegisteredScope::Module)
+                    RegisteredOperand::prepare(expr, source, RegisteredScope::Module)
                 {
                     self.prepared.templates.insert(expr.range(), value);
                 } else if let Some(fields) = self.source.template_fields

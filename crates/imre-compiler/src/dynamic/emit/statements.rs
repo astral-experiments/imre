@@ -744,14 +744,14 @@ impl<'p> Function<'_, 'p> {
         if let Some(flags) = flags {
             signature["code_flags"] = json!(flags);
         }
-        if matches!(body, Body::Generator(..)) {
+        if body.is_genexpr() {
             // generator() binds the implicit .0 argument without calling the step function.
             signature["positional"] = json!([".0"]);
         }
-        // A synchronous generator expression has its own compiled comprehension step.
+        // Residual synchronous expressions still use the stateless step entry.
         let entry = match generator_flags {
             0 => Entry::Compiled,
-            code_flags::GENERATOR if matches!(body, Body::Generator(_)) => Entry::Compiled,
+            code_flags::GENERATOR if matches!(body, Body::Generator(..)) => Entry::Compiled,
             _ => Entry::Suspended,
         };
         let scopes = &self.source.scopes;
@@ -772,7 +772,9 @@ impl<'p> Function<'_, 'p> {
                 Some(&class.namespace)
             }
             Body::AliasEvaluator(_) => Some(&scopes.aliases[&start]),
-            Body::Generator(_) => Some(&scopes.generators[&start]),
+            Body::Generator(site, _) | Body::CheckedGenerator(site, _) => {
+                Some(&scopes.generators[site])
+            }
             _ => None,
         };
         if let Some(facts) = scope_facts {
@@ -781,7 +783,7 @@ impl<'p> Function<'_, 'p> {
             if callable && facts.captures_class {
                 signature["class_cell"] = json!(true);
             }
-            if (callable || matches!(body, Body::Generator(_)))
+            if (callable || body.is_genexpr())
                 && self.class_locals.is_some()
                 && self.annotation_values.is_none()
                 && type_params.is_none()

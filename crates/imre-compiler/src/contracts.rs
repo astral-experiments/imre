@@ -688,6 +688,7 @@ impl Builtin {
             | Self::RegisteredDeleteName(..)
             | Self::RegisteredDefinition(_)
             | Self::RegisteredLambda(..)
+            | Self::RegisteredGenerator(..)
             | Self::RegisteredTypeAlias(_)
             | Self::RegisteredStatement(..)
             | Self::RegisteredName(_)

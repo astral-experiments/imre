@@ -20,6 +20,7 @@ fn template_children_use_their_eager_bindings_after_source_is_dropped() {
                 has_templates: true,
                 template_fields: Some(&fields),
                 lambdas: None,
+                generators: None,
                 method_imports: &Default::default(),
             },
             RegisteredScope::Module,
@@ -119,6 +120,7 @@ fn template_async_comprehension_uses_its_enclosing_activation() {
         has_templates: true,
         template_fields: Some(&fields),
         lambdas: None,
+        generators: None,
         method_imports: &Default::default(),
     };
     assert!(RegisteredOperand::prepare(result, source, RegisteredScope::Module).is_none());
