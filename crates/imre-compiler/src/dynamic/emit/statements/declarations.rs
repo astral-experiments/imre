@@ -15,10 +15,12 @@ impl SourceInfo<'_> {
         &'s self,
         def: &'s ast::StmtFunctionDef,
     ) -> Body<'s> {
-        if let Some(plan) = self.function_bodies.get(&def.start())
+        let start = def.start();
+        if let Some(plan) = self.function_bodies.get(&start)
             && plan.header.is_some()
         {
-            Body::Checked(plan.checked())
+            let globals = self.scopes.functions[&start].lexical.globals();
+            Body::Checked(plan.checked(), Some(globals))
         } else {
             Body::Function(&def.body, self.scopes.function(def).suspension_flags)
         }
@@ -92,7 +94,7 @@ impl Function<'_, '_> {
         let definition = self.compile_callable(
             site,
             Callable::Lambda { comprehension },
-            Body::Checked(body),
+            Body::Checked(body, None),
         );
         self.sites.lambdas.insert(site, definition);
     }
@@ -142,10 +144,6 @@ impl Function<'_, '_> {
             } else {
                 Entry::Compiled
             };
-            let globals = match callable {
-                Callable::Ordinary(_) => Some(source.scopes.functions[&site].lexical.globals()),
-                Callable::Lambda { .. } => None,
-            };
             let code = source.definition(
                 self.frame.output,
                 format!("{qualname}.<locals>."),
@@ -153,7 +151,6 @@ impl Function<'_, '_> {
                 site,
                 true,
                 entry,
-                globals,
             );
             if let Some(cache) = cache {
                 cache.borrow_mut().insert(site, code.clone());
@@ -251,7 +248,7 @@ impl Function<'_, '_> {
             None,
             None,
             None,
-            Body::Checked(&body.body),
+            Body::Checked(&body.body, None),
         );
         let targets = self.source.scopes.comprehension_targets[&site].clone();
         self.sites.generators.insert(
