@@ -238,6 +238,13 @@ enum FunctionArguments {
     Bound(Vec<Id>),
 }
 
+fn method_arguments(receiver: Id, mut args: Vec<Id>) -> Result<Vec<Id>> {
+    args.try_reserve_exact(1)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    args.insert(0, receiver);
+    Ok(args)
+}
+
 fn invalid_bound_call() -> Error {
     Error::new(
         "SystemError",
@@ -245,9 +252,21 @@ fn invalid_bound_call() -> Error {
     )
 }
 
-enum RegisteredCall {
+pub(super) enum RegisteredCall {
     Returned(Id),
     Native(RegisteredFrame),
+}
+
+impl RegisteredCall {
+    /// # Safety
+    /// A prepared frame belongs to the exclusively executing context that pushed it.
+    pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
+        match self {
+            Self::Returned(value) => Ok(value),
+            // SAFETY: the owner keeps the context and its linked code live through the call.
+            Self::Native(frame) => unsafe { frame.run(context) },
+        }
+    }
 }
 
 struct FunctionReturn {
@@ -8082,14 +8101,40 @@ impl Context {
         Ok(())
     }
 
+    /// A generated call can enter a registered function from its owning ABI pointer.
+    pub(super) fn prepare_call_in_scope(
+        &mut self,
+        scope: Id,
+        callable: Id,
+        args: Vec<Id>,
+        kwargs: Vec<(String, Id)>,
+    ) -> Result<RegisteredCall> {
+        let (function, args) = match *self.heap.get(callable) {
+            Value::Function { .. } => (callable, args),
+            Value::Method {
+                callable: function,
+                receiver,
+                ..
+            } if matches!(self.heap.get(function), Value::Function { .. }) => {
+                (function, method_arguments(receiver, args)?)
+            }
+            _ => {
+                return self
+                    .call_in_scope(scope, callable, args, kwargs)
+                    .map(RegisteredCall::Returned);
+            }
+        };
+        self.prepare_function_call(function, args, kwargs, None)
+    }
+
     /// Bind the call's private keyword dictionary directly when every key belongs in **kwargs.
-    pub(super) fn call_with_keyword_dict(
+    pub(super) fn prepare_call_with_keyword_dict(
         &mut self,
         scope: Id,
         callable: Id,
         args: Vec<Id>,
         mapping: Id,
-    ) -> Result<Id> {
+    ) -> Result<RegisteredCall> {
         let (callable, args) = if matches!(self.heap.get(callable), Value::Native(name) if name == "operator.call")
         {
             match self.operator_call_target(args) {
@@ -8108,11 +8153,11 @@ impl Context {
             let sig = self.parsed_parameters(code)?;
             if sig.kwargs.is_some() && sig.positional.is_empty() && sig.keyword_only.is_empty() {
                 self.validate_keyword_keys(mapping)?;
-                return self.call_bound_keywords(callable, args, Vec::new(), Some(mapping));
+                return self.prepare_function_call(callable, args, Vec::new(), Some(mapping));
             }
         }
         let kwargs = self.keyword_args(mapping)?;
-        self.call_in_scope(scope, callable, args, kwargs)
+        self.prepare_call_in_scope(scope, callable, args, kwargs)
     }
 
     fn validate_keyword_keys(&self, mapping: Id) -> Result<()> {
@@ -8131,19 +8176,8 @@ impl Context {
     pub(super) fn call(
         &mut self,
         callable: Id,
-        args: Vec<Id>,
-        kwargs: Vec<(String, Id)>,
-    ) -> Result<Id> {
-        self.call_bound_keywords(callable, args, kwargs, None)
-    }
-
-    /// Invoke the callable with named arguments or an already bound variadic keyword dictionary.
-    fn call_bound_keywords(
-        &mut self,
-        callable: Id,
         mut args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
-        variadic: Option<Id>,
     ) -> Result<Id> {
         // An explicit type.__call__ invokes the ordinary constructor without
         // dispatching back to an override on the receiver's metaclass.
@@ -8203,18 +8237,9 @@ impl Context {
         }
         let target = match self.heap.get(callable) {
             Value::Function { .. } => {
-                let arguments = FunctionArguments::Call {
-                    args,
-                    kwargs,
-                    variadic,
-                };
-                return match self.prepare_function(callable, arguments)? {
-                    RegisteredCall::Returned(value) => Ok(value),
-                    RegisteredCall::Native(frame) => {
-                        // SAFETY: this synchronous caller retains exclusive use of its Context.
-                        unsafe { frame.run(self) }
-                    }
-                };
+                let call = self.prepare_function_call(callable, args, kwargs, None)?;
+                // SAFETY: this synchronous caller retains exclusive use of its Context.
+                return unsafe { call.run(self) };
             }
             Value::Native(name) => Value::Native(copy_label(name)?),
             Value::Class {
@@ -8679,14 +8704,7 @@ impl Context {
             }
             Value::Method {
                 callable, receiver, ..
-            } => {
-                let mut all = Vec::new();
-                all.try_reserve_exact(args.len() + 1)
-                    .map_err(|_| Error::new("MemoryError", ""))?;
-                all.push(receiver);
-                all.extend(args);
-                self.call(callable, all, kwargs)
-            }
+            } => self.call(callable, method_arguments(receiver, args)?, kwargs),
             Value::AttrGetter(paths) => self.apply_attrgetter(&paths, &args, &kwargs),
             Value::ItemGetter(keys) => self.apply_itemgetter(keys, &args, &kwargs),
             Value::MethodCaller { .. } => self.apply_methodcaller(callable, &args, &kwargs),
@@ -9018,6 +9036,23 @@ impl Context {
             RegisteredCall::Native(frame) => Ok(frame),
             RegisteredCall::Returned(_) => unreachable!("bound slots require a native entry"),
         }
+    }
+
+    fn prepare_function_call(
+        &mut self,
+        callable: Id,
+        args: Vec<Id>,
+        kwargs: Vec<(String, Id)>,
+        variadic: Option<Id>,
+    ) -> Result<RegisteredCall> {
+        self.prepare_function(
+            callable,
+            FunctionArguments::Call {
+                args,
+                kwargs,
+                variadic,
+            },
+        )
     }
 
     fn prepare_function(
