@@ -1654,6 +1654,34 @@ mod tests {
     }
 
     #[test]
+    fn checked_with_owns_its_single_yielding_target() {
+        let source = concat!(
+            "def receive(cm, sink):\n",
+            "    with cm as sink[(yield 'key')]:\n",
+            "        return sink\n",
+            "def unpack(cm, sink):\n",
+            "    with cm as (sink.head, *middle, sink[(yield 'key')]):\n",
+            "        return sink\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "program",
+            Path::new("program.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let original = prepared.standalone().unwrap().unwrap();
+        let syntax = prepared.syntax.as_mut().unwrap().to_mut();
+        let unpack = syntax[1].as_function_def_stmt().unwrap();
+        assert!(!prepared.source.function_bodies[&unpack.start()].fully_checked());
+        let receive = syntax[0].as_function_def_stmt_mut().unwrap();
+        assert!(prepared.source.function_bodies[&receive.start()].fully_checked());
+        receive.body.clear();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
     fn async_with_owns_its_checked_binding_and_return() {
         let mut prepared = PreparedBody::module(
             "program",
