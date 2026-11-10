@@ -842,7 +842,10 @@ pub(super) fn checked_binding(
     let defaults = if let Some(sites) = source.lambdas {
         let site = sites.get(&lambda.start())?;
         site.body.as_ref()?;
-        site.defaults.iter().cloned().collect::<Option<_>>()?
+        site.defaults
+            .iter()
+            .map(|default| default.inline().cloned())
+            .collect::<Option<_>>()?
     } else {
         Region::Lambda.operand(&lambda.body, source)?;
         lambda_defaults(lambda)

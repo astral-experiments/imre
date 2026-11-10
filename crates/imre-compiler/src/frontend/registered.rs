@@ -7,7 +7,7 @@ mod eager;
 mod generators;
 pub(crate) use generators::RegisteredGenerator;
 mod lambdas;
-pub(crate) use lambdas::RegisteredLambda;
+pub(crate) use lambdas::{LambdaDefault, RegisteredLambda};
 mod templates;
 pub(crate) use templates::{PreparedStrings, ResidualField, prepare_expression_sites, template_operands};
 pub(super) mod patterns;

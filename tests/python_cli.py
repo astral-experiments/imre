@@ -4833,6 +4833,7 @@ for name in ("md4", "ripemd160"):
             "boxed_generator_delegation.py",
             "boxed_suspended_operand_positions.py",
             "boxed_lambda_default_positions.py",
+            "boxed_mixed_lambda_defaults.py",
             "boxed_source_coroutine.py",
             "boxed_coroutine_origin.py",
             "boxed_anext.py",
@@ -4895,6 +4896,7 @@ for name in ("md4", "ripemd160"):
                 check_slice_stack(imre, imports, root, env)
             elif fixture in (
                 "boxed_nested_callable_scope.py",
+                "boxed_mixed_lambda_defaults.py",
                 "boxed_codec_registry.py",
                 "boxed_gc_generator_loop.py",
                 "boxed_gc_generator_resurrection.py",
