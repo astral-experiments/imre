@@ -17,7 +17,6 @@ use crate::llvm::registered::{
     suspension,
 };
 
-mod expressions;
 mod statements;
 
 type ModuleSource = (String, PathBuf, String);
@@ -1105,15 +1104,6 @@ impl Function<'_, '_> {
     fn checkpoint(&mut self, node: &impl Ranged) {
         self.current_range = node.range();
         self.frame.checkpoint(node.range());
-    }
-
-    fn build_diagnostic(&mut self, reason: &str) -> String {
-        let range = self.frame.current_range;
-        self.frame
-            .output
-            .diagnostic
-            .get_or_insert_with(|| self.source.diagnostic_at(range, reason));
-        "0".into()
     }
 }
 
@@ -4693,10 +4683,13 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             } else {
                 (message, &site.test)
             };
-            assert!(
-                matches!(owned, PhysicalOperand::Residual(input) if matches!(input.selected.as_ref(),
-                crate::frontend::ExpressionSelection::Suspension(crate::ir::SuspendValue::Yield, _)))
-            );
+            let PhysicalOperand::Residual(input) = owned else {
+                panic!("expected the retained suspension");
+            };
+            let inputs = input.selected.physical().unwrap();
+            assert!(matches!(&inputs.operation.kind,
+                crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredSuspend(crate::ir::SuspendValue::Yield, range), _) if *range == input.range));
+            assert_eq!(inputs.operands().count(), 1);
             let PhysicalOperand::Checked(checked) = checked else {
                 panic!("expected a checked walrus")
             };
@@ -4823,6 +4816,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .as_function_def_stmt_mut()
             .unwrap();
         let start = def.start();
+        let guard_range = def.body[0].as_while_stmt().unwrap().test.range();
         def.body.clear();
         assert_eq!(module.standalone().unwrap_err(), expected);
 
@@ -4831,7 +4825,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             panic!("expected the prepared while");
         };
         assert!(
-            matches!(&region.condition, WhileGuard::Operand(PhysicalOperand::Residual(test)) if test.kind == ast::NodeKind::ExprListComp)
+            matches!(&region.condition, WhileGuard::Operand(PhysicalOperand::Residual(test)) if test.range == guard_range)
         );
         region.condition = WhileGuard::Literal(false);
         assert!(module.standalone().is_ok());

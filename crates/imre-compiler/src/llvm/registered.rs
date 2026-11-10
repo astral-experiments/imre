@@ -269,9 +269,52 @@ pub(super) struct ExpressionScope {
 pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
     std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>>
 {
-    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites);
+    /// Place any child definitions before borrowing the frame for its operand.
+    fn frame_and_sites(
+        &mut self,
+        operand: Option<&Expr>,
+    ) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites);
     fn emit_prepared(&mut self, suite: &'p crate::frontend::RegisteredSuite);
-    fn source_operand(&mut self, input: crate::frontend::BorrowedOperand<'_>) -> String;
+    fn refuse_at(&mut self, range: ruff_text_size::TextRange, reason: &str);
+}
+
+/// Evaluate an operand in its lexical activation, with the same demand used by
+/// ordinary registered expressions. Child placement stays with the owning scope.
+pub(crate) fn emit_operand<'a, 'p>(
+    owner: &mut dyn PreparedSuiteEmitter<'a, 'p>,
+    operand: crate::frontend::BorrowedOperand<'_>,
+    condition: bool,
+) -> String {
+    use crate::frontend::{ExpressionSelection, SourceOperand};
+
+    let emit_checked = |owner: &mut dyn PreparedSuiteEmitter<'a, 'p>, value: &Expr| {
+        let (frame, sites) = owner.frame_and_sites(Some(value));
+        frame.registered_expression(value, sites, condition)
+    };
+    let input = match operand {
+        SourceOperand::Checked(value) => return emit_checked(owner, value),
+        SourceOperand::Residual(input) => input,
+    };
+    let previous = std::mem::replace(&mut owner.current_range, input.range);
+    let result = match input.selected {
+        ExpressionSelection::Checked(value) => emit_checked(owner, value),
+        ExpressionSelection::Operand(operand) => {
+            let (frame, sites) = owner.frame_and_sites(Some(&operand.value));
+            frame.prepared_operand(operand, sites, condition)
+        }
+        ExpressionSelection::Inputs(inputs) => {
+            let location = owner.enter_expression(input.range, inputs.position);
+            let result = Frame::prepared_operation(owner, inputs, condition);
+            owner.leave_expression(location);
+            result
+        }
+        ExpressionSelection::Refused(range, reason) => {
+            owner.refuse_at(*range, reason);
+            "0".into()
+        }
+    };
+    owner.current_range = previous;
+    result
 }
 
 /// A checked run borrows its enclosing suite when a return can reach a prepared finally.
@@ -291,7 +334,7 @@ impl<'a, 'p> FrameOwner<'_, 'a, 'p> {
     fn parts(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites) {
         match self {
             Self::Registered(code, sites) => (code, sites),
-            Self::Prepared(owner) => owner.frame_and_sites(),
+            Self::Prepared(owner) => owner.frame_and_sites(None),
         }
     }
 
@@ -375,8 +418,10 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
         condition: bool,
     ) -> String {
         if let Some(operands) = inputs.eager_operands() {
-            let handles: Vec<_> = operands.map(|child| owner.source_operand(child)).collect();
-            let (code, sites) = owner.frame_and_sites();
+            let handles: Vec<_> = operands
+                .map(|child| emit_operand(owner, child, false))
+                .collect();
+            let (code, sites) = owner.frame_and_sites(None);
             return code.with_checked_frame(sites, None, |mut enclosing| {
                 let mut frame = enclosing.reborrow();
                 frame.inputs = FrameInputs::Handles(&handles);
@@ -532,7 +577,7 @@ impl Frame<'_, '_, '_> {
                 let FrameOwner::Prepared(owner) = &mut self.code else {
                     unreachable!("prepared inputs belong to their enclosing suite")
                 };
-                return owner.source_operand(inputs.operand(slot));
+                return emit_operand(&mut **owner, inputs.operand(slot), false);
             }
         }
         if self
@@ -1444,22 +1489,6 @@ impl RegisteredFrame<'_, '_> {
         });
         self.expression_integer_start = outer;
         result
-    }
-
-    pub(crate) fn registered_branch(
-        &mut self,
-        test: &Expr,
-        sites: &CheckedSites,
-        yes: &str,
-        no: &str,
-    ) {
-        self.with_checked_frame(sites, None, |frame| {
-            CheckedBody::registered(frame).branch_condition(test, yes, no)
-        })
-    }
-
-    pub(crate) fn registered_value(&mut self, expression: &Expr, sites: &CheckedSites) -> String {
-        self.registered_expression(expression, sites, false)
     }
 
     pub(crate) fn registered_expression(
