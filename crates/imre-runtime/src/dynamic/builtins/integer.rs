@@ -1,5 +1,3 @@
-use num_bigint::{BigInt, Sign};
-
 #[cfg(target_os = "linux")]
 use super::super::stdlib::mmap;
 use super::*;
@@ -156,13 +154,9 @@ pub(super) fn from_bytes(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
             &items
         }
     };
-    let number = match (little, signed) {
-        (true, true) => BigInt::from_signed_bytes_le(bytes),
-        (false, true) => BigInt::from_signed_bytes_be(bytes),
-        (true, false) => BigInt::from_bytes_le(Sign::Plus, bytes),
-        (false, false) => BigInt::from_bytes_be(Sign::Plus, bytes),
-    };
-    let value = ctx.alloc(Value::Int(crate::Int::new(number)));
+    let value = ctx.alloc(Value::Int(crate::objects::integer_from_bytes(
+        bytes, little, signed,
+    )));
     if class == ctx.builtin("int") {
         Ok(value)
     } else {

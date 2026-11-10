@@ -11745,6 +11745,20 @@ impl<'a> Checker<'a> {
                     ),
                 ));
             }
+            if attribute.attr.as_str() == "from_bytes"
+                && self.unshadowed_builtin(&attribute.value, "int")
+                && call.arguments.keywords.is_empty()
+                && let [input] = call.arguments.args.as_slice()
+                && self.graph.session.scalar_type(self.module, input) == Some(Type::Bytes)
+            {
+                let value = self.expr(input)?;
+                if value.ty == Type::Bytes {
+                    return Ok(Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Builtin(Builtin::IntFromBytes, vec![value]),
+                    });
+                }
+            }
             if attribute.attr.as_str() == "__hash__"
                 && self.unshadowed_builtin(&attribute.value, "int")
             {
