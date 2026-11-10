@@ -249,8 +249,14 @@ pub(super) struct IterationState {
     first_slot: usize,
     cursors: HashMap<usize, ir::IterNextKind>,
     scopes: Vec<Region>,
-    loops: Vec<(LoopEdges, usize)>,
     in_expression: bool,
+}
+
+/// Branches to the next pull and to exhaustion keep the loop's cursor live.
+pub(crate) struct LoopTarget {
+    edges: LoopEdges,
+    step_depth: usize,
+    exit_depth: usize,
 }
 
 pub(super) struct ExpressionScope {
@@ -587,21 +593,13 @@ impl Frame<'_, '_, '_> {
     }
     pub(crate) fn enter_loop(&mut self, edges: &LoopEdges) {
         let depth = self.code.iteration.scopes.len();
-        self.code.iteration.loops.push((edges.clone(), depth));
+        self.push_loop(edges.clone(), depth, depth);
     }
     pub(crate) fn leave_loop(&mut self) {
-        self.code.iteration.loops.pop();
+        self.code.loops.pop();
     }
     pub(crate) fn transfer_loop(&mut self, stmt: &Statement) {
-        let (edges, depth) = self.code.iteration.loops.last().expect("loop transfer");
-        let dest = match stmt {
-            Statement::Break => &edges.done,
-            Statement::Continue => &edges.step,
-            _ => &edges.exhausted,
-        }
-        .clone();
-        self.exit_regions(*depth, None);
-        self.code.jump(&dest);
+        self.unwind_loop(stmt, |frame, depth| frame.exit_regions(depth, None));
     }
     pub(crate) fn begin_step(&mut self, mark: &str) {
         self.code.line(&format!(
@@ -622,10 +620,9 @@ impl Frame<'_, '_, '_> {
         let header = self.code.current_range.start();
         let has_else = self
             .code
-            .iteration
             .loops
             .last()
-            .is_some_and(|(edges, _)| edges.exhausted != edges.done);
+            .is_some_and(|target| target.edges.exhausted != target.edges.done);
         let pulled = self
             .code
             .iteration_edge(&cursor, kind, header, has_else, &item_block, &done);

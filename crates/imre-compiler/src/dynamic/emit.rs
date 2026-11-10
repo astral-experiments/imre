@@ -1191,7 +1191,6 @@ impl SourceMap<'_> {
             module,
             declared_globals: Default::default(),
             prefix,
-            loops: Vec::new(),
             exits: Vec::new(),
         }
     }
@@ -1338,7 +1337,6 @@ struct Function<'a, 'p> {
     in_function: bool,
     is_async: bool,
     module: bool,
-    loops: Vec<LoopTarget>,
     exits: Vec<(Cleanup<'p>, String)>,
 }
 
@@ -1377,11 +1375,6 @@ enum Cleanup<'p> {
         loop_depth: usize,
         caught_depth: usize,
     },
-}
-
-struct LoopTarget {
-    step: (String, usize),
-    done: (String, usize),
 }
 
 impl Function<'_, '_> {
@@ -1777,6 +1770,92 @@ mod tests {
         }
         .into();
         assert_eq!(module.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
+    fn mixed_loop_transfers_emit_after_erasing_their_keywords() {
+        use crate::frontend::{RegisteredScope, RegisteredSource, SourceEffect, SuitePreparation};
+        let text = concat!(
+            "def run(ready, decide, callback):\n",
+            "    while ready():\n",
+            "        if decide():\n",
+            "            callback(lambda: 1)\n",
+            "            continue\n",
+            "        callback(lambda: 2)\n",
+            "        break\n",
+        );
+        let mut module = PreparedBody::module(
+            "worker",
+            Path::new("worker.py"),
+            text,
+            0,
+            ModuleOrigin::Bundled,
+        )
+        .unwrap();
+        // The ordinary compilation can already discard this function's syntax.
+        // Supply the original tree to the intentionally mixed preparation below.
+        let parsed = ruff_python_parser::parse_module(text).unwrap();
+        module.syntax = Some(Cow::Owned(parsed.into_syntax().body));
+        let function = module.syntax.as_ref().unwrap()[0]
+            .as_function_def_stmt()
+            .unwrap();
+        // Keep both suites mixed by withholding only the callback descriptors.
+        let missing = HashMap::new();
+        let source = RegisteredSource {
+            lambdas: Some(&missing),
+            ..module.source.registered_source()
+        };
+        let mut plan = SuitePreparation::new(
+            &module.source.namespace_operations,
+            source,
+            &function.body,
+            true,
+        );
+        plan.physical_body(
+            &function.body,
+            RegisteredScope::Function { is_async: false },
+            false,
+        );
+        let (sites, nested) = (plan.sites, plan.nested);
+        module.source.statement_sites = sites;
+        module.source.nested_bodies.extend(nested);
+        module.source.function_bodies.remove(&function.start());
+
+        let original = module.standalone().unwrap().unwrap();
+        let def = module.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let body = &mut def.body[0].as_while_stmt_mut().unwrap().body;
+        let (branch, tail) = body.split_at_mut(1);
+        let skip = &mut branch[0].as_if_stmt_mut().unwrap().body[1];
+        for keyword in [skip, &mut tail[1]] {
+            let range = keyword.range();
+            assert!(module.source.nested_bodies.values().any(|suite| suite.residual.iter().any(
+                |run| matches!(run.effect, Some(SourceEffect::LoopTransfer(site, _)) if site == range)
+            )));
+            *keyword = ast::StmtPass {
+                range,
+                node_index: Default::default(),
+            }
+            .into();
+        }
+        assert_eq!(module.standalone().unwrap().unwrap(), original);
+        let transfer = module
+            .source
+            .nested_bodies
+            .values_mut()
+            .flat_map(|suite| &mut suite.residual)
+            .find_map(|run| match &mut run.effect {
+                Some(SourceEffect::LoopTransfer(_, op))
+                    if matches!(op, crate::ir::Statement::Continue) =>
+                {
+                    Some(op)
+                }
+                _ => None,
+            })
+            .unwrap();
+        *transfer = &crate::ir::Statement::Break;
+        assert_ne!(module.standalone().unwrap().unwrap(), original);
     }
 
     #[test]

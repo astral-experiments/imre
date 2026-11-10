@@ -11,9 +11,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use serde_json::json;
 
-use super::{
-    Body, CheckedHeader, Cleanup, DefinitionName, Entry, FinallySuite, Function, LoopTarget,
-};
+use super::{Body, CheckedHeader, Cleanup, DefinitionName, Entry, FinallySuite, Function};
 
 impl<'a, 'p> ContextEmitter<'a, 'p> for Function<'a, 'p> {
     fn push_context(&mut self, exit: ContextRegion, outer: String) {
@@ -156,6 +154,15 @@ impl<'p> Function<'_, 'p> {
             return;
         }
         match effect {
+            SourceEffect::LoopTransfer(range, transfer) => {
+                self.checkpoint(range);
+                self.simple_call = None;
+                if self.loops.is_empty() {
+                    self.unsupported("loop control outside a loop");
+                } else {
+                    self.unwind_loop(transfer, |code, depth| code.run_cleanups(depth, None));
+                }
+            }
             SourceEffect::Assertion(site) => {
                 let source = suite[run.statements.start]
                     .as_assert_stmt()
@@ -195,10 +202,7 @@ impl<'p> Function<'_, 'p> {
                     },
                     |code, edges, ()| {
                         let depth = code.exits.len();
-                        code.loops.push(LoopTarget {
-                            step: (edges.step.clone(), depth),
-                            done: (edges.done.clone(), depth),
-                        });
+                        code.push_loop(edges.clone(), depth, depth);
                         code.statements(&source.body);
                         code.loops.pop();
                     },
@@ -462,19 +466,6 @@ impl<'p> Function<'_, 'p> {
                 ast::Stmt::FunctionDef(v) => {
                     let function = self.function_definition(v);
                     self.bind(v.name.as_str(), &function);
-                }
-                ast::Stmt::Break(_) | ast::Stmt::Continue(_) => {
-                    if let Some(target) = self.loops.last() {
-                        let (dest, cleanup_depth) = if matches!(stmt, ast::Stmt::Break(_)) {
-                            target.done.clone()
-                        } else {
-                            target.step.clone()
-                        };
-                        self.run_cleanups(cleanup_depth, None);
-                        self.jump(&dest);
-                    } else {
-                        self.unsupported("loop control outside a loop");
-                    }
                 }
                 ast::Stmt::Try(v) => self.protected_statement(v),
                 _ => {
@@ -1243,10 +1234,7 @@ impl<'p> Function<'_, 'p> {
             |code, edges, pulled| {
                 let item = code.frame.iteration_item(&cursor, pulled);
                 code.physical_binding(&region.target, &item);
-                code.loops.push(LoopTarget {
-                    step: (edges.step.clone(), code.exits.len()),
-                    done: (edges.done.clone(), enclosing),
-                });
+                code.push_loop(edges.clone(), code.exits.len(), enclosing);
                 code.physical_suite(&region.body);
                 code.loops.pop();
             },

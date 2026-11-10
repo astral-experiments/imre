@@ -10,7 +10,7 @@ use crate::frontend::push_codepoints;
 use crate::ir;
 use crate::ir::{Builtin, Constant, DisplayKind, Expr};
 use crate::llvm::body::FunctionBody;
-use crate::llvm::operations::CheckedValue;
+use crate::llvm::operations::{CheckedValue, LoopEdges};
 use ruff_text_size::{TextRange, TextSize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -85,6 +85,7 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) positions: &'p SourcePositions<'p>,
     pub(crate) unit: usize,
     pub(super) iteration: super::IterationState,
+    pub(crate) loops: Vec<super::LoopTarget>,
     pub(crate) current_range: TextRange,
     /// A mixed block branches to its enclosing finally/with cleanup in the syntax visitor.
     pub(crate) cleanup_returns: Option<Vec<(String, String, TextRange)>>,
@@ -137,6 +138,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             positions,
             unit,
             iteration: Default::default(),
+            loops: Vec::new(),
             current_range: TextRange::empty(start),
             cleanup_returns: None,
             async_generator: false,
@@ -1317,6 +1319,27 @@ pub(crate) trait FrameEmitter<'a, 'p>:
             }
         }
         self.op("build_template", &[&strings, &parts])
+    }
+
+    fn push_loop(&mut self, edges: LoopEdges, step_depth: usize, exit_depth: usize) {
+        self.loops.push(super::LoopTarget {
+            edges,
+            step_depth,
+            exit_depth,
+        });
+    }
+
+    fn unwind_loop(&mut self, stmt: &ir::Statement, unwind: impl FnOnce(&mut Self, usize)) {
+        let target = self.loops.last().expect("loop transfer");
+        let (label, depth) = match stmt {
+            ir::Statement::Break => (&target.edges.done, target.exit_depth),
+            ir::Statement::Continue => (&target.edges.step, target.step_depth),
+            ir::Statement::Exhaust => (&target.edges.exhausted, target.step_depth),
+            _ => unreachable!("loop transfer"),
+        };
+        let label = label.clone();
+        unwind(self, depth);
+        self.jump(&label);
     }
 
     /// A bare raise transfers the active exception immediately. An explicit raise

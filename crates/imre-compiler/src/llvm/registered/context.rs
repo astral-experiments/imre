@@ -318,7 +318,7 @@ impl Frame<'_, '_, '_> {
                     caught,
                 } => {
                     self.code.body.error_target.clone_from(outer);
-                    let inner_loops = self.code.iteration.loops.split_off(*loops);
+                    let inner_loops = self.code.loops.split_off(*loops);
                     let inner_handlers = self.code.caught.split_off(*caught);
                     let value = pending_return.filter(|value| *value != "0");
                     if let Some(value) = value {
@@ -333,7 +333,7 @@ impl Frame<'_, '_, '_> {
                         self.leave_scope();
                     }
                     self.code.caught.extend(inner_handlers);
-                    self.code.iteration.loops.extend(inner_loops);
+                    self.code.loops.extend(inner_loops);
                 }
                 Region::ExceptionName { name, outer } => {
                     self.code.body.error_target.clone_from(outer);
