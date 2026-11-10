@@ -1626,13 +1626,15 @@ mod tests {
             "            pass",
         );
         let deletion = "        del sink[(yield 1)]";
-        let mixed = "        with manager((yield 1)): pass";
+        let manager = "        with manager((yield 1)): pass";
+        let mixed = "        selected = (lambda value=(yield 1): value)()";
         let annotated = "        sink[0]: int = 1";
         let checked_default = "        def resume(answer=(yield 1)):\n            return answer";
         let checked = "        publish(x, y)";
         let pair_header = "def f(rows):\n    for x, y in rows:";
         for (header, body, guarded) in [
             (pair_header, deletion, false),
+            (pair_header, manager, false),
             (pair_header, mixed, true),
             ("def f():\n    for x, y in (yield 'rows'):", checked, false),
             (pair_header, annotated, false),
@@ -1644,12 +1646,19 @@ mod tests {
                 deletion,
                 false,
             ),
+            ("def f(table):\n    for x in table.items():", manager, false),
             ("def f(table):\n    for x in table.items():", mixed, false),
             ("def f(rows):\n    for x, *ys in rows:", deletion, false),
+            ("def f(rows):\n    for x, *ys in rows:", manager, false),
             ("def f(rows):\n    for x, *ys in rows:", mixed, false),
             (
                 "def f(manager):\n    with manager as (x, y):",
                 deletion,
+                false,
+            ),
+            (
+                "def f(manager):\n    with manager as (x, y):",
+                manager,
                 false,
             ),
             ("def f(manager):\n    with manager as (x, y):", mixed, false),
@@ -1671,7 +1680,7 @@ mod tests {
             let plan = module.source.function_bodies[&ruff_text_size::TextSize::new(0)]
                 .suite()
                 .expect("prepared function suite");
-            if body == deletion {
+            if body == deletion || body == manager {
                 assert!(plan.fully_checked(), "{source}");
             }
             if body == annotated {
@@ -1735,7 +1744,11 @@ mod tests {
     fn mixed_named_entry_uses_its_stored_suite_after_erasing_the_declaration_body() {
         for (update, checked) in [
             ("del sink[(yield 1)]", true),
-            ("with manager((yield 1)): pass", false),
+            ("with manager((yield 1)): pass", true),
+            (
+                "for entry in rows: selected = (lambda value=(yield 1): value)()",
+                false,
+            ),
         ] {
             let source = format!(
                 "def make():
@@ -2550,6 +2563,36 @@ mod tests {
         }
         .into();
         assert_eq!(prepared.standalone().unwrap(), original);
+    }
+
+    #[test]
+    fn checked_with_retains_the_manager_factory_across_a_suspended_argument() {
+        let source = concat!(
+            "def named(manager):\n",
+            "    with manager((yield 1)): pass\n",
+            "def pairs(rows, op):\n",
+            "    for name, value in rows:\n",
+            "        with op((yield 'manager')) as entered: publish(name, value, entered)\n",
+            "async def select(subject, manager, key):\n",
+            "    match subject:\n",
+            "        case item if accept(item):\n",
+            "            with manager(await key(item)): pass\n",
+        );
+        let mut module = PreparedBody::module_with_syntax(
+            "program",
+            Path::new("program.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let original = module.standalone().unwrap();
+        for stmt in module.syntax.as_mut().unwrap().to_mut() {
+            let def = stmt.as_function_def_stmt_mut().unwrap();
+            assert!(module.source.function_bodies[&def.start()].fully_checked());
+            def.body.clear();
+        }
+        assert_eq!(module.standalone().unwrap(), original);
     }
 
     #[test]

@@ -2896,7 +2896,7 @@ impl SourceScope<'_> {
         let Some((item, rest)) = items.split_first() else {
             return self.suite(suite);
         };
-        let manager = self.operand(&item.context_expr).ok_or(())?;
+        let manager = self.frame_value(&item.context_expr).ok_or(())?;
         let (input, remaining) = inputs.split_first().expect("with input");
         let binding = item
             .optional_vars
