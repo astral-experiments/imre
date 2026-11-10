@@ -259,6 +259,13 @@ impl Context {
         }
     }
 
+    /// Match a failed open of this exact filesystem argument before a Python frame handled it.
+    pub(super) fn missing_open_path(&self, error: &Error, path: Id) -> bool {
+        error.trace.is_none()
+            && matches!(error.os_args.as_deref(), Some(Args::Python(fields)) if fields.filename == Some(path))
+            && self.has_errno(error, libc::ENOENT)
+    }
+
     pub(super) fn is_os_error(&self, error: &Error) -> bool {
         if error.os_args.is_some() {
             return true;

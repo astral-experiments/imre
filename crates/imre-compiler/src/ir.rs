@@ -492,15 +492,16 @@ pub(crate) enum ModuleLoader<'a> {
         text: Option<&'a [u8]>,
     },
     Physical {
-        kind: PhysicalModuleKind,
+        kind: PhysicalModuleKind<'a>,
         digest: [u8; 32],
         future_flags: u32,
     },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PhysicalModuleKind {
+pub(crate) enum PhysicalModuleKind<'a> {
     File,
+    DeclaredFile(&'a std::path::Path),
     Zip,
 }
 

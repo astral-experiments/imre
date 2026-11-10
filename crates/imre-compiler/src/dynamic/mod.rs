@@ -16,6 +16,34 @@ use ruff_python_ast::{self as ast, Expr, Stmt};
 use crate::frontend::module_source::{self, CheckedFile, ParsedModule};
 use crate::{CompileOptions, SourceInputs, SourceKind, UnitCompilation};
 
+/// runpy opens the lexical abspath, which can cross a symlink and select a
+/// different file from the loader's spelling. Only register an equivalent origin.
+fn declared_open_path(
+    path: &Path,
+    identity: &Path,
+    inputs: &mut SourceInputs,
+    filesystem: &mut crate::watch::FileSystem<'_>,
+) -> Result<Option<PathBuf>, String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+        let bytes = path.as_os_str().as_bytes();
+        let normalized = imre_ast::posixpath::normalize(bytes, None).map_err(|e| e.to_string())?;
+        if normalized != bytes {
+            let path = PathBuf::from(std::ffi::OsString::from_vec(normalized));
+            let resolved = filesystem.canonicalize(&path).ok();
+            let same = resolved.as_deref() == Some(identity);
+            inputs
+                .declared_file_resolutions
+                .push((path.clone(), resolved));
+            return Ok(same.then_some(path));
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = (identity, inputs, filesystem);
+    Ok(Some(path.to_owned()))
+}
+
 /// Only a winning file can add a first-party frozen override while walking SDK dependencies.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ImportOrigin {
@@ -1064,6 +1092,10 @@ pub(crate) fn compile(
             .entry(sources[0].1.clone())
             .or_default()
             .future_flags = first.module_flags;
+        if module_entry.is_none() && options.include_modules.contains("__main__") {
+            registrations.checked_units.entry(0).or_default().run_path =
+                declared_open_path(&sources[0].1, &identity, &mut inputs, &mut filesystem)?;
+        }
         let digest = file_entry.map_or_else(
             || blake3::hash(src.as_bytes()).to_hex().to_string(),
             |graph| graph.inputs.files[graph.entry].2.clone(),
@@ -1598,6 +1630,14 @@ pub(crate) fn compile(
                             Err(error) => return Err(error.to_string()),
                         }
                     };
+                    let run_path = if winner
+                        && ordinary_registrations.is_none()
+                        && options.include_modules.contains(&prefix)
+                    {
+                        declared_open_path(&path, &identity, &mut inputs, &mut filesystem)?
+                    } else {
+                        None
+                    };
                     let checked =
                         graph_file.filter(|(graph, id)| graph.inputs.files[*id].1 == identity);
                     let src = if let Some((graph, id)) = checked {
@@ -1744,6 +1784,13 @@ pub(crate) fn compile(
                                     .entry(sources.len())
                                     .or_default()
                                     .source = Some(parsed);
+                            }
+                            if run_path.is_some() {
+                                registrations
+                                    .checked_units
+                                    .entry(sources.len())
+                                    .or_default()
+                                    .run_path = run_path;
                             }
                             selected_sources.push((
                                 sources.len(),
@@ -2378,4 +2425,54 @@ fn bundled_module_source(
 
 fn imports_for_module(path: &Path, src: &str) -> Result<Imports, String> {
     scan_imports(src, SourceKind::File, None, None).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn declared_open_path_tracks_the_identity_after_lexical_normalization() {
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let child = root.join("package/child");
+    fs::create_dir_all(&child).unwrap();
+    let target = root.join("package/report.py");
+    fs::write(&target, "answer = 1").unwrap();
+    let identity = target.canonicalize().unwrap();
+    let mut filesystem = crate::watch::FileSystem::default();
+    let mut inputs = SourceInputs::default();
+    assert_eq!(
+        declared_open_path(
+            &child.join("../report.py"),
+            &identity,
+            &mut inputs,
+            &mut filesystem
+        )
+        .unwrap(),
+        Some(target.clone())
+    );
+
+    symlink(&child, root.join("link")).unwrap();
+    let origin = root.join("link/../report.py");
+    let opened = root.join("report.py");
+    symlink(&target, &opened).unwrap();
+    assert_eq!(
+        declared_open_path(&origin, &identity, &mut inputs, &mut filesystem).unwrap(),
+        Some(opened.clone())
+    );
+    assert!(inputs.fresh());
+    fs::remove_file(&opened).unwrap();
+    fs::write(&opened, "answer = 2").unwrap();
+    assert!(!inputs.fresh());
+    assert_eq!(origin.canonicalize().unwrap(), identity);
+    let mut changed = SourceInputs::default();
+    assert_eq!(
+        declared_open_path(&origin, &identity, &mut changed, &mut filesystem).unwrap(),
+        None
+    );
+    assert!(changed.fresh());
+    fs::remove_file(&opened).unwrap();
+    symlink(&target, opened).unwrap();
+    assert!(!changed.fresh());
 }

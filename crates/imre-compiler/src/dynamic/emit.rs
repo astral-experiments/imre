@@ -31,6 +31,9 @@ pub(super) struct PhysicalFile {
 pub(super) struct CheckedUnit<'a> {
     pub(super) source: Option<module_source::CheckedFile>,
     pub(super) functions: Option<&'a super::CheckedFunctions>,
+    // A declaration belongs to the selected name and origin, even when another
+    // loader registers the same physical file under a different name.
+    pub(super) run_path: Option<PathBuf>,
 }
 
 /// Snapshots and admission facts for the bodies selected by import resolution.
@@ -170,7 +173,7 @@ impl<'a> PreparedBody<'a> {
         &self,
         original_source: &'a str,
         builtin: bool,
-        physical: Option<&PhysicalFile>,
+        physical: Option<(&PhysicalFile, crate::ir::PhysicalModuleKind<'a>)>,
         zip: Option<&([u8; 32], u32)>,
     ) -> crate::ir::ModuleRegistration<'a> {
         use crate::ir::{ModuleLoader, ModuleRegistration, PhysicalModuleKind};
@@ -182,10 +185,10 @@ impl<'a> PreparedBody<'a> {
                 digest,
                 future_flags,
             }
-        } else if let Some(file) = physical {
+        } else if let Some((file, kind)) = physical {
             // A file loader fingerprints the original bytes even when the body was normalized.
             ModuleLoader::Physical {
-                kind: PhysicalModuleKind::File,
+                kind,
                 digest: file
                     .digest
                     .unwrap_or_else(|| Sha256::digest(original_source.as_bytes()).into()),

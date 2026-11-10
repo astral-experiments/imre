@@ -1594,11 +1594,11 @@ def check_registered_run_path(imre, root, run):
         "runpy = import_module('runpy')\n"
         "quotes = []\n"
         "for package, quantity in [(wholesale.invoice.__package__, 2), (retail.rates.__package__, 3)]:\n"
-        "    result = runpy.run_path(sys.argv[1], {'quantity': quantity}, package + '.report')\n"
+        f"    result = runpy.run_path({str(invoice)!r}, {{'quantity': quantity}}, package + '.report')\n"
         "    quotes.append(result['quote'])\n"
         "assert quotes[0].__code__ is not quotes[1].__code__\n"
         "seen = []\n"
-        "try: runpy.run_path(sys.argv[1], {'__builtins__': {'__import__': veto}}, 'retail.report')\n"
+        f"try: runpy.run_path({str(invoice)!r}, {{'__builtins__': {{'__import__': veto}}}}, 'retail.report')\n"
         "except PermissionError as exc: assert exc.args == ('rates',)\n"
         "assert seen == [('__future__', ('annotations',), 0), ('rates', ('rate',), 1)]\n"
         "print(wholesale.invoice.quote(), quotes[0](), quotes[1]())\n"
@@ -1607,8 +1607,18 @@ def check_registered_run_path(imre, root, run):
     build = run(imre, "build", entry, "--module-root", project, "-o", application, timeout=300)
     assert build.returncode == 0, build
     for command in ((sys.executable, "-BS", entry), (application,)):
-        result = run(*command, invoice)
+        result = run(*command)
         assert (result.returncode, result.stdout, result.stderr) == (0, b"7 14 33\n", b""), result
+
+    declared = project / "declared"
+    build = run(imre, "build", entry, "--module-root", project,
+                "--include-module", "wholesale.invoice", "-o", declared, timeout=300)
+    assert build.returncode == 0, build
+    invoice.unlink()
+    result = run(declared)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"7 14 33\n", b""), result
+    missing = run(application)
+    assert missing.returncode == 1 and b"FileNotFoundError" in missing.stderr, missing
 
 
 def check_frozen_modules_startup(imre, root, run):

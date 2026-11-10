@@ -626,6 +626,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "get_source_data"
             | "uses_builtin_compile"
             | "compile_filename"
+            | "open_run_path"
             | "compile_file"
             | "get_code"
             | "loader_fields"
@@ -2657,6 +2658,9 @@ pub(super) fn call(
                     return builtins::compile(ctx, &[*data, *filename, mode], options, true);
                 }
                 return ctx.call(*compiler, vec![*data, *filename, mode], options.to_vec());
+            }
+            ("open_run_path", [opener, path, filename], []) => {
+                return io::open_run_path(ctx, *opener, *path, *filename);
             }
             ("get_code", [loader, path], []) => return ctx.registered_code(*loader, *path, None),
             ("get_code", [loader, path, name, read, convert], []) => {

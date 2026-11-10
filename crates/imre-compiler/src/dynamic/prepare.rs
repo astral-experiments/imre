@@ -5,13 +5,14 @@ use std::path::{Path, PathBuf};
 use super::ModuleSyntaxError;
 use super::emit::{ModuleOrigin, PhysicalFile, PreparedBody, RegisteredBodies};
 use crate::frontend::module_source::ParsedModule;
+use crate::ir::PhysicalModuleKind;
 
 pub(super) type ModuleSource = (String, PathBuf, String);
 
 pub(super) struct PreparedUnit<'a> {
     pub(super) module: &'a ModuleSource,
     pub(super) builtin: bool,
-    pub(super) physical: Option<&'a PhysicalFile>,
+    pub(super) physical: Option<(&'a PhysicalFile, PhysicalModuleKind<'a>)>,
     pub(super) zip: Option<&'a ([u8; 32], u32)>,
     pub(super) initializer: Result<PreparedBody<'a>, &'a ModuleSyntaxError>,
 }
@@ -80,7 +81,12 @@ pub(super) fn units<'a>(
         Ok(PreparedUnit {
             module: original,
             builtin,
-            physical,
+            physical: physical.map(|file| {
+                let kind = checked
+                    .and_then(|unit| unit.run_path.as_deref())
+                    .map_or(PhysicalModuleKind::File, PhysicalModuleKind::DeclaredFile);
+                (file, kind)
+            }),
             zip,
             initializer,
         })
