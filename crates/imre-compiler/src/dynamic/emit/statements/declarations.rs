@@ -462,7 +462,7 @@ mod tests {
                     "{suite}"
                 );
             } else {
-                outcome.unwrap().unwrap();
+                outcome.unwrap();
             }
         }
     }

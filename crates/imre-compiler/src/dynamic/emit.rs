@@ -142,9 +142,8 @@ pub(super) fn emit(
                 let separate = split && unit != 0 && !source.is_empty();
                 let mut external = None;
                 let mut archived = false;
-                if (check_archive || separate)
-                    && let Some((symbol, ir)) = initializer.standalone()?
-                {
+                if check_archive || separate {
+                    let (symbol, ir) = initializer.standalone()?;
                     archived = check_archive && providers.contains(&symbol);
                     if !archived && separate && !root.declares(&symbol) {
                         if whole.is_none()
@@ -730,7 +729,7 @@ impl<'a> PreparedBody<'a, '_> {
     }
 
     /// Emit independent IR with private, address-significant constant slots.
-    pub(super) fn standalone(&self) -> Result<Option<(String, String)>, String> {
+    pub(super) fn standalone(&self) -> Result<(String, String), String> {
         let mut output = Output {
             keep_docstrings: self.source.python_optimization < 2,
             ..Output::default()
@@ -754,7 +753,7 @@ impl<'a> PreparedBody<'a, '_> {
         hash.update(&[u8::from(self.source.python_optimization < 2)]);
         let symbol = format!("imre_provider_{}", hash.finalize().to_hex());
         writeln!(ir, "@{symbol} = alias i64 (ptr, i64), ptr {entry}").unwrap();
-        Ok(Some((symbol, ir)))
+        Ok((symbol, ir))
     }
 }
 
@@ -1369,7 +1368,7 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
         let owner = ruff_text_size::TextSize::new(0);
         let [first, second] = prepared.source.scopes.classes[&owner]
             .annotations
@@ -1385,7 +1384,7 @@ mod tests {
         let second = second.clone();
         prepared.source.annotations.get_mut(&first).unwrap().value =
             AnnotationValue::Checked(second.clone());
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
 
         let provider = prepared
             .source
@@ -1411,7 +1410,7 @@ mod tests {
             panic!("expected the first annotation value");
         };
         *value = second;
-        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+        assert_ne!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
@@ -1453,14 +1452,14 @@ mod tests {
                 }
                 headers.sort_unstable();
                 assert_eq!(headers, [(0, 0), (source.find("@decorate").unwrap(), 3)]);
-                let expected = module.standalone()?.unwrap();
+                let expected = module.standalone()?;
                 assert_eq!(
                     expected.1.matches(" = private constant %code_site").count(),
                     2
                 );
                 let retained = (module.syntax.take().is_some(), module.declarations.len());
                 module.declarations.clear();
-                assert!(module.standalone()?.unwrap() == expected);
+                assert!(module.standalone()? == expected);
                 assert_eq!(retained, (false, 0));
                 Ok(())
             },
@@ -1491,7 +1490,7 @@ mod tests {
         assert_eq!(prepared.source.initializer_sites.len(), 4);
         assert_eq!(prepared.source.function_bodies.len(), 4);
 
-        let (_, llvm) = prepared.standalone().unwrap().unwrap();
+        let (_, llvm) = prepared.standalone().unwrap();
         let mut ordinary = Vec::new();
         let mut annotated = Vec::new();
         for (start, plan) in &prepared.source.function_bodies {
@@ -1607,7 +1606,7 @@ mod tests {
             }
         });
         assert_eq!(captures, [(" (v)", Some('r'))]);
-        assert!(module.standalone().unwrap().is_some());
+        module.standalone().unwrap();
     }
 
     #[test]
@@ -1630,7 +1629,7 @@ mod tests {
             ModuleOrigin::Program(Some(&bodies[&graph.entry])),
         )
         .unwrap();
-        let entry = prepared.standalone().unwrap().unwrap();
+        let entry = prepared.standalone().unwrap();
         assert!(entry.1.contains("call i64 @int_add("));
         assert!(entry.1.contains("call i64 @imre_dyn_positional_call_at("));
         assert!(entry.1.contains("Send the sum."));
@@ -1649,7 +1648,7 @@ mod tests {
             &bodies[&graph.entry][&def.start()]
         ));
         def.body.clear();
-        assert_eq!(prepared.standalone().unwrap().unwrap(), entry);
+        assert_eq!(prepared.standalone().unwrap(), entry);
     }
 
     #[test]
@@ -1710,7 +1709,7 @@ mod tests {
                     assert!(owners.contains(slot) && !slots[..index].contains(slot));
                 }
             }
-            let (_, llvm) = module.standalone().unwrap().unwrap();
+            let (_, llvm) = module.standalone().unwrap();
             let test = "call i1 @imre_dyn_plain_items_cursor(";
             let pull = "call i64 @imre_dyn_next_pair(";
             assert_eq!(llvm.matches(test).count(), usize::from(guarded), "{source}");
@@ -1783,7 +1782,7 @@ mod tests {
             crate::frontend::PhysicalBinding::Checked { .. }
         ));
         assert!(!region.body.plan.fully_checked());
-        let original = module.standalone().unwrap().unwrap();
+        let original = module.standalone().unwrap();
         let def = module.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
@@ -1792,7 +1791,7 @@ mod tests {
             node_index: Default::default(),
         }
         .into();
-        assert_eq!(module.standalone().unwrap().unwrap(), original);
+        assert_eq!(module.standalone().unwrap(), original);
     }
 
     #[test]
@@ -1873,7 +1872,7 @@ mod tests {
         module.source.nested_bodies.extend(nested);
         module.source.function_bodies.remove(&function.start());
 
-        let original = module.standalone().unwrap().unwrap();
+        let original = module.standalone().unwrap();
         let def = module.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
@@ -1890,7 +1889,7 @@ mod tests {
             }
             .into();
         }
-        assert_eq!(module.standalone().unwrap().unwrap(), original);
+        assert_eq!(module.standalone().unwrap(), original);
 
         let suite = module
             .source
@@ -1918,7 +1917,7 @@ mod tests {
         assert_eq!(*site, skip_range);
         assert!(matches!(op, crate::ir::Statement::Continue));
         *op = &crate::ir::Statement::Break;
-        assert_ne!(module.standalone().unwrap().unwrap(), original);
+        assert_ne!(module.standalone().unwrap(), original);
     }
 
     #[test]
@@ -1959,7 +1958,7 @@ mod tests {
         let task_group = main.body.len() - 1;
         assert!(!residual(task_group), "async TaskGroup still uses source");
 
-        let before = module.standalone().unwrap().unwrap();
+        let before = module.standalone().unwrap();
         let body = &mut module.syntax.as_mut().unwrap().to_mut()[definition]
             .as_function_def_stmt_mut()
             .unwrap()
@@ -1971,7 +1970,7 @@ mod tests {
             }
             .into();
         }
-        assert!(module.standalone().unwrap().unwrap() == before);
+        assert!(module.standalone().unwrap() == before);
     }
 
     #[test]
@@ -2006,7 +2005,7 @@ mod tests {
             ModuleOrigin::Program(Some(bodies)),
         )
         .unwrap();
-        let before = module.standalone().unwrap().unwrap();
+        let before = module.standalone().unwrap();
         assert!(module.syntax.is_none());
         module.syntax = Some(Cow::Owned(
             graph.modules[graph.entry].parsed.syntax().body.clone(),
@@ -2017,7 +2016,7 @@ mod tests {
         // The nested declaration still supplies its signature and code site.
         def.body.retain(ast::Stmt::is_function_def_stmt);
         assert_eq!(def.body.len(), 1);
-        assert_eq!(module.standalone().unwrap().unwrap().1, before.1);
+        assert_eq!(module.standalone().unwrap().1, before.1);
     }
 
     #[test]
@@ -2075,14 +2074,14 @@ mod tests {
         assert!(plan.residual.iter().any(|run| matches!(
             run.effect, Some(crate::frontend::SourceEffect::Class(class)) if class == site
         )));
-        let expected = module.standalone().unwrap().unwrap();
+        let expected = module.standalone().unwrap();
         def.body[0] = ast::StmtPass {
             range: def.body[0].range(),
             node_index: Default::default(),
         }
         .into();
         module.syntax = Some(Cow::Owned(body));
-        assert_eq!(module.standalone().unwrap().unwrap(), expected);
+        assert_eq!(module.standalone().unwrap(), expected);
     }
 
     #[test]
@@ -2097,7 +2096,7 @@ mod tests {
             0,
             ModuleOrigin::Bundled,
             |mut typing| {
-                let expected = typing.standalone()?.unwrap();
+                let expected = typing.standalone()?;
                 let mut body = typing.syntax.as_deref().unwrap().clone();
                 let mut protocols = Vec::new();
                 for stmt in &mut body {
@@ -2143,7 +2142,7 @@ mod tests {
                     syntax: Some(Cow::Borrowed(&body)),
                     ..typing
                 };
-                assert!(withheld.standalone()?.unwrap() == expected);
+                assert!(withheld.standalone()? == expected);
                 Ok(())
             },
         )
@@ -2297,7 +2296,7 @@ mod tests {
             }
         });
         assert_eq!(pulls, 1);
-        let (_, llvm) = module.standalone().unwrap().unwrap();
+        let (_, llvm) = module.standalone().unwrap();
         assert!(llvm.contains("%ir_slot0 = alloca ["));
     }
 
@@ -2311,10 +2310,10 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let before = prepared.standalone().unwrap().unwrap();
+        let before = prepared.standalone().unwrap();
         assert!(!prepared.source.replacements.is_empty());
         prepared.source.replacements.clear();
-        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+        assert_eq!(prepared.standalone().unwrap(), before);
     }
 
     #[test]
@@ -2392,7 +2391,7 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
@@ -2401,7 +2400,7 @@ mod tests {
             node_index: Default::default(),
         }
         .into();
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
@@ -2422,7 +2421,7 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
         let syntax = prepared.syntax.as_mut().unwrap().to_mut();
         for statement in syntax {
             let function = statement.as_function_def_stmt_mut().unwrap();
@@ -2434,7 +2433,7 @@ mod tests {
             );
             function.body.clear();
         }
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
@@ -2447,7 +2446,7 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
@@ -2462,7 +2461,7 @@ mod tests {
         let context = function.body[0].as_with_stmt_mut().unwrap();
         context.items.clear();
         context.body.clear();
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
@@ -2475,7 +2474,7 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
@@ -2484,7 +2483,7 @@ mod tests {
             node_index: Default::default(),
         }
         .into();
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
@@ -2507,7 +2506,6 @@ mod tests {
                 prepared.standalone()
             },
         )
-        .unwrap()
         .unwrap();
     }
 
@@ -2552,13 +2550,13 @@ mod tests {
             );
         }
 
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
         prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap()
             .body
             .clear();
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
@@ -2582,7 +2580,7 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
@@ -2615,7 +2613,7 @@ mod tests {
             range: value.range(),
             node_index: Default::default(),
         });
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
@@ -2656,13 +2654,13 @@ mod tests {
         assert_eq!(discarded, 7);
         assert!(module.source.initializer_sites.is_empty());
         assert!(module.syntax.is_none());
-        let withdrawn = module.standalone().unwrap().unwrap();
+        let withdrawn = module.standalone().unwrap();
         assert!(withdrawn.1.contains("setup_module_annotations"));
         let parsed = ParsedModule::parse(path, source.into()).unwrap();
         module.syntax = Some(Cow::Owned(module_source::into_body(parsed.parsed)));
-        assert_eq!(module.standalone().unwrap().unwrap(), withdrawn);
+        assert_eq!(module.standalone().unwrap(), withdrawn);
         module.syntax.as_mut().unwrap().to_mut().clear();
-        assert_eq!(module.standalone().unwrap().unwrap(), withdrawn);
+        assert_eq!(module.standalone().unwrap(), withdrawn);
     }
 
     #[test]
@@ -2677,7 +2675,7 @@ mod tests {
         .unwrap();
         assert!(module.syntax.is_none());
         assert!(module.source.initializer_sites.is_empty());
-        let (_, llvm) = module.standalone().unwrap().unwrap();
+        let (_, llvm) = module.standalone().unwrap();
         assert!(llvm.contains("mark_module_annotation"));
         assert!(llvm.contains("setup_module_annotations"));
         assert!(llvm.contains("__annotate__"));
@@ -2694,7 +2692,7 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let before = module.standalone().unwrap().unwrap();
+        let before = module.standalone().unwrap();
         assert!(module.syntax.is_none());
         let suite = module.source.initializer.as_mut().unwrap();
         assert!(suite.fully_checked());
@@ -2710,7 +2708,7 @@ mod tests {
             }
         });
         assert_eq!(stored, 1);
-        assert_ne!(module.standalone().unwrap().unwrap(), before);
+        assert_ne!(module.standalone().unwrap(), before);
     }
 
     #[test]
@@ -2740,14 +2738,14 @@ mod tests {
             inputs.as_slice(),
             [PhysicalOperand::Checked(_), PhysicalOperand::Checked(_)]
         ));
-        let before = prepared.standalone().unwrap().unwrap();
+        let before = prepared.standalone().unwrap();
         let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
         let raise = def.body[0].as_raise_stmt_mut().unwrap();
         raise.exc = None;
         raise.cause = None;
-        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+        assert_eq!(prepared.standalone().unwrap(), before);
     }
 
     #[test]
@@ -2772,7 +2770,7 @@ mod tests {
             });
         }
 
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
         let adjacent = &prepared.syntax.as_deref().unwrap()[0]
             .as_assign_stmt()
             .unwrap()
@@ -2821,7 +2819,7 @@ mod tests {
                 .as_deref_mut()
                 .unwrap(),
         );
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
 
         let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let key = value
@@ -2844,7 +2842,7 @@ mod tests {
             .as_mut()
             .unwrap();
         erase(&mut residual.as_call_expr_mut().unwrap().func);
-        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+        assert_ne!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
@@ -2866,7 +2864,7 @@ mod tests {
             });
         }
 
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
         let checked = &prepared.syntax.as_deref().unwrap()[0]
             .as_assign_stmt()
             .unwrap()
@@ -2893,12 +2891,12 @@ mod tests {
         let binary = value.as_bin_op_expr_mut().unwrap();
         binary.op = ast::Operator::Sub;
         erase(&mut binary.right);
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
 
         let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let binary = value.as_bin_op_expr_mut().unwrap();
         erase(&mut binary.left.as_call_expr_mut().unwrap().func);
-        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+        assert_ne!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
@@ -2914,7 +2912,7 @@ mod tests {
         )
         .unwrap();
         inject_residual_child_module(&mut prepared);
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
         let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let inputs = prepared
             .source
@@ -2942,13 +2940,13 @@ mod tests {
         erase(&mut call.arguments.args[0]);
         call.arguments.keywords[0].arg.as_mut().unwrap().id = "other".into();
         erase(&mut call.arguments.keywords[1].value);
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
 
         let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let call = value.as_call_expr_mut().unwrap();
         let residual = &mut call.arguments.keywords[0].value;
         erase(&mut residual.as_call_expr_mut().unwrap().func);
-        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+        assert_ne!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
@@ -2999,7 +2997,7 @@ mod tests {
             && matches!(input.target, Some(crate::frontend::PhysicalBinding::Checked { .. })))
         );
         assert!(context.body.sources.is_empty());
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
 
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
@@ -3009,7 +3007,7 @@ mod tests {
             node_index: Default::default(),
         }
         .into();
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
 
         // The expression statement owns the one call that still needs its lambda child.
         let suite = prepared.source.nested_bodies.get_mut(&position).unwrap();
@@ -3030,7 +3028,7 @@ mod tests {
         // Keep the prepared call's argument slot and pass its lambda without invoking it.
         let arg = &mut call.as_call_expr_mut().unwrap().arguments.args[0];
         *arg = (*arg.as_call_expr().unwrap().func).clone();
-        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+        assert_ne!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
@@ -3097,7 +3095,7 @@ mod tests {
                 node_index: Default::default(),
             });
         }
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
         let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         assert!(matches!(
             prepared
@@ -3110,12 +3108,12 @@ mod tests {
         let branch = value.as_if_expr_mut().unwrap();
         erase(&mut branch.test);
         erase(&mut branch.body);
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
 
         let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let branch = value.as_if_expr_mut().unwrap();
         erase(&mut branch.orelse.as_call_expr_mut().unwrap().func);
-        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+        assert_ne!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
@@ -3129,7 +3127,7 @@ mod tests {
         )
         .unwrap();
         inject_residual_child_module(&mut prepared);
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
         let choice = residual_value_mut(prepared.source.initializer.as_mut().unwrap())
             .as_if_expr_mut()
             .unwrap();
@@ -3144,7 +3142,7 @@ mod tests {
         let guard = choice.test.as_bool_op_expr_mut().unwrap();
         guard.op = ast::BoolOp::Or;
         guard.values = Default::default();
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
@@ -3195,9 +3193,9 @@ mod tests {
         assert!(first.plan.fully_checked() && last.plan.fully_checked());
         assert!(arms.iter().all(|(_, arm)| arm.sources.is_empty()));
         assert!(!middle.plan.fully_checked());
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
         prepared.syntax.as_mut().unwrap().to_mut().clear();
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
 
         // Each retained operand must still affect the generated code on its own.
         let none = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
@@ -3214,9 +3212,9 @@ mod tests {
         };
         let (guard, child) = (checked_none(), checked_none());
         let saved = middle_arm(&mut prepared).0.replace(guard);
-        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+        assert_ne!(prepared.standalone().unwrap(), original);
         middle_arm(&mut prepared).0 = saved;
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
 
         let [run] = middle_arm(&mut prepared).1.plan.residual.as_mut_slice() else {
             panic!("expected the middle arm to retain only the call");
@@ -3228,7 +3226,7 @@ mod tests {
             panic!("expected only the call to need its source operand");
         };
         *operand = child;
-        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+        assert_ne!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
@@ -3264,7 +3262,7 @@ mod tests {
                 assert!(subject.is_none());
                 crate::verify::registered(suite.checked.region()).unwrap();
             }
-            let original = prepared.standalone().unwrap().unwrap();
+            let original = prepared.standalone().unwrap();
             let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
                 .as_function_def_stmt_mut()
                 .unwrap();
@@ -3273,7 +3271,7 @@ mod tests {
                 range: branch.subject.range(),
                 node_index: Default::default(),
             });
-            assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+            assert_eq!(prepared.standalone().unwrap(), original);
             if physical {
                 let subject = prepared
                     .source
@@ -3288,7 +3286,7 @@ mod tests {
                     .unwrap();
                 subject.value = crate::ir::Expr::none();
                 crate::verify::registered(subject.region()).unwrap();
-                assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+                assert_ne!(prepared.standalone().unwrap(), original);
             }
         }
     }
@@ -3376,7 +3374,7 @@ mod tests {
         assert!(provider.body.fully_checked());
         assert_eq!(provider.entries.len(), 2);
         assert!(!provider.body.checked.local_names.is_empty());
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
         let class = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_class_def_stmt_mut()
             .unwrap();
@@ -3385,7 +3383,7 @@ mod tests {
             let annotation = parameter.parameter.annotation.as_mut().unwrap();
             *annotation = annotation.as_list_comp_expr().unwrap().elt.clone();
         }
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
@@ -3490,7 +3488,7 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let before = module.standalone().unwrap().unwrap();
+        let before = module.standalone().unwrap();
         let defs = module.syntax.as_mut().unwrap().to_mut();
         for (i, stmt) in defs.iter_mut().enumerate() {
             let def = stmt.as_function_def_stmt_mut().unwrap();
@@ -3519,7 +3517,7 @@ mod tests {
             }
             def.body.clear();
         }
-        assert!(module.standalone().unwrap().unwrap() == before);
+        assert!(module.standalone().unwrap() == before);
     }
 
     #[test]
@@ -3544,12 +3542,12 @@ mod tests {
             )
             .unwrap();
             assert!(module.syntax.is_none());
-            let entry = module.standalone().unwrap().unwrap();
+            let entry = module.standalone().unwrap();
 
             // Exercise the same plan through the entry used by modules with residual code.
             let parsed = ParsedModule::parse(path, source.into()).unwrap();
             module.syntax = Some(Cow::Owned(module_source::into_body(parsed.parsed)));
-            assert!(module.standalone().unwrap().unwrap() == entry);
+            assert!(module.standalone().unwrap() == entry);
         }
     }
 
@@ -3684,7 +3682,7 @@ mod tests {
             .unwrap();
         let site = enclosing.body[0].as_assign_stmt().unwrap().value.range();
         assert!(prepared.source.generators.contains_key(&site));
-        let before = prepared.standalone().unwrap().unwrap();
+        let before = prepared.standalone().unwrap();
         assert!(before.1.contains("call void @imre_dyn_suspend_operands("));
 
         let enclosing = prepared.syntax.as_mut().unwrap().to_mut()[0]
@@ -3703,7 +3701,7 @@ mod tests {
                 node_index: Default::default(),
             });
         }
-        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+        assert_eq!(prepared.standalone().unwrap(), before);
     }
 
     #[test]
@@ -3846,7 +3844,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                     .contains_key(&alias.range())
             );
         }
-        prepared.standalone().unwrap().expect("native initializer");
+        prepared.standalone().unwrap();
     }
 
     #[test]
@@ -3889,7 +3887,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         )
         .unwrap();
         assert!(prepared.syntax.is_none());
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
 
         let parsed = ParsedModule::parse(path, source.into()).unwrap();
         let mut body = module_source::into_body(parsed.parsed);
@@ -3901,7 +3899,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert_eq!(withdraw.count.get(), 4);
         assert_eq!(withdraw.definitions.len(), 4);
         prepared.syntax = Some(Cow::Owned(body));
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
@@ -4071,7 +4069,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Provider,
         )
         .unwrap();
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
         // One binding creates closing. Normal and exceptional exits each bind cleanup.
         assert_eq!(
             original.1.matches(" = private constant %code_site").count(),
@@ -4089,7 +4087,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         }
         .into();
         assert!(!prepared.linked_declarations().contains_key(&site));
-        assert!(prepared.standalone().unwrap().unwrap() == original);
+        assert!(prepared.standalone().unwrap() == original);
     }
 
     #[test]
@@ -4161,7 +4159,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert!(!region.body.plan.fully_checked());
         assert!(region.otherwise.plan.fully_checked());
         assert!(!region.finalbody.as_ref().unwrap().plan.fully_checked());
-        let original = module.standalone().unwrap().unwrap();
+        let original = module.standalone().unwrap();
         let function = module.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
@@ -4171,7 +4169,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             node_index: Default::default(),
         }
         .into();
-        assert_eq!(module.standalone().unwrap().unwrap(), original);
+        assert_eq!(module.standalone().unwrap(), original);
 
         let run = &mut module
             .source
@@ -4183,7 +4181,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             unreachable!()
         };
         region.handlers[0].name = None;
-        assert_ne!(module.standalone().unwrap().unwrap(), original);
+        assert_ne!(module.standalone().unwrap(), original);
     }
 
     #[test]
@@ -4207,7 +4205,6 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         )
         .unwrap()
         .standalone()
-        .unwrap()
         .unwrap();
         let reacquire = ir.lines().filter(|line| {
             line.contains("call void @imre_dyn_statement_with_exception(")
@@ -4229,7 +4226,6 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         )
         .unwrap()
         .standalone()
-        .unwrap()
         .unwrap();
         let tag = format!(", i32 {} }}", permanent::NATIVE_SUSPENDED_BODY);
         assert_eq!(ir.lines().filter(|line| line.ends_with(&tag)).count(), 5);
@@ -4250,7 +4246,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let before = prepared.standalone().unwrap().unwrap();
+        let before = prepared.standalone().unwrap();
         let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
@@ -4270,7 +4266,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             range: def.body[0].range(),
             node_index: Default::default(),
         });
-        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+        assert_eq!(prepared.standalone().unwrap(), before);
     }
 
     #[test]
@@ -4289,7 +4285,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert!(module.standalone().unwrap().is_some());
+        module.standalone().unwrap();
     }
 
     #[test]
@@ -4361,7 +4357,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             panic!("expected a mixed assertion");
         };
         assert!(!site.external_test && site.external_message);
-        let original = module.standalone().unwrap().unwrap();
+        let original = module.standalone().unwrap();
         let def = module.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
@@ -4383,14 +4379,14 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .as_yield_expr_mut()
             .unwrap();
         suspension.value = None;
-        assert_eq!(module.standalone().unwrap().unwrap(), original);
+        assert_eq!(module.standalone().unwrap(), original);
 
         let def = module.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
         let assertion = def.body[0].as_assert_stmt_mut().unwrap();
         *assertion.msg.as_deref_mut().unwrap() = replacement;
-        assert_ne!(module.standalone().unwrap().unwrap(), original);
+        assert_ne!(module.standalone().unwrap(), original);
     }
 
     #[test]
@@ -4411,7 +4407,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 crate::frontend::SourceEffect::While(crate::frontend::SourceGuard::Checked(_))
             ))
         ));
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
         fn statement(body: &mut [ast::Stmt]) -> &mut ast::StmtWhile {
             body[0].as_while_stmt_mut().unwrap()
         }
@@ -4420,7 +4416,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             range: loop_.test.range(),
             node_index: Default::default(),
         });
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
 
         let loop_ = statement(prepared.syntax.as_mut().unwrap().to_mut());
         let child = &mut loop_.body[0];
@@ -4429,7 +4425,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             range: child.range(),
             node_index: Default::default(),
         });
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
         let call = residual_value_mut(prepared.source.nested_bodies.get_mut(&child_start).unwrap())
             .as_call_expr_mut()
             .unwrap();
@@ -4438,7 +4434,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             range: inner.func.range(),
             node_index: Default::default(),
         });
-        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+        assert_ne!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
@@ -4452,7 +4448,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let before = prepared.standalone().unwrap().unwrap();
+        let before = prepared.standalone().unwrap();
         let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
@@ -4469,7 +4465,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         });
         loop_.body.clear();
         loop_.orelse.clear();
-        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+        assert_eq!(prepared.standalone().unwrap(), before);
     }
 
     #[test]
@@ -4488,7 +4484,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 },
             )
             .unwrap();
-            let original = prepared.standalone().unwrap().unwrap();
+            let original = prepared.standalone().unwrap();
             let syntax = prepared.syntax.as_mut().unwrap().to_mut();
             for name in ["items", "more", "consume", "defaults"] {
                 let def = syntax
@@ -4507,7 +4503,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 }
                 def.body.clear();
             }
-            let (_, ir) = prepared.standalone().unwrap().unwrap();
+            let (_, ir) = prepared.standalone().unwrap();
             assert_eq!(ir, original.1);
             let tag = format!(", i32 {} }}", permanent::NATIVE_SUSPENDED_BODY);
             assert_eq!(ir.lines().filter(|line| line.ends_with(&tag)).count(), 6);
@@ -4535,7 +4531,6 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         )
         .unwrap()
         .standalone()
-        .unwrap()
         .unwrap();
         assert_eq!(ir.matches("call i64 @imre_dyn_keyword_call_at(").count(), 1);
         assert_eq!(ir.matches("call i64 @imre_dyn_scoped_call_at(").count(), 1);
@@ -4577,7 +4572,6 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let (symbol, _) = PreparedBody::module(name, path, source, 0, ModuleOrigin::Bundled)
             .unwrap()
             .standalone()
-            .unwrap()
             .unwrap();
         let providers = HashSet::from([symbol.clone()]);
         let registrations = RegisteredBodies {
@@ -4685,7 +4679,6 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             let (_, ir) = PreparedBody::module("example", path, source, 0, ModuleOrigin::Bundled)
                 .unwrap()
                 .standalone()
-                .unwrap()
                 .unwrap();
             assert_eq!(ir.matches(declare).count(), expected);
         }
@@ -4700,7 +4693,6 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             PreparedBody::module(name, path, src, optimization, ModuleOrigin::Bundled)
                 .unwrap()
                 .standalone()
-                .unwrap()
                 .unwrap()
         };
         let (symbol, ir) = compiled("example", &path, source, 0);
@@ -4861,7 +4853,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         )
         .unwrap();
         inject_residual_child_module(&mut prepared);
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
         let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let sites = &prepared.source.statement_sites.expressions;
         let inputs = sites.physical(value).unwrap();
@@ -4882,7 +4874,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             node_index: Default::default(),
         });
         value.as_dict_expr_mut().unwrap().items.clear();
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
         let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let call = value.as_call_expr_mut().unwrap().arguments.args[0]
             .as_call_expr_mut()
@@ -4891,7 +4883,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             range: call.func.range(),
             node_index: Default::default(),
         });
-        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+        assert_ne!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
@@ -5026,9 +5018,9 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let before = prepared.standalone().unwrap().unwrap();
+        let before = prepared.standalone().unwrap();
         prepared.source.strings.templates.clear();
-        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+        assert_eq!(prepared.standalone().unwrap(), before);
     }
 
     #[test]
@@ -5045,7 +5037,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let before = prepared.standalone().unwrap().unwrap();
+        let before = prepared.standalone().unwrap();
         let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
@@ -5057,7 +5049,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         );
         let assignment = def.body[0].as_assign_stmt_mut().unwrap();
         assignment.value.as_dict_expr_mut().unwrap().items.clear();
-        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+        assert_eq!(prepared.standalone().unwrap(), before);
     }
 
     #[test]
@@ -5074,7 +5066,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let before = prepared.standalone().unwrap().unwrap();
+        let before = prepared.standalone().unwrap();
         let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
@@ -5085,7 +5077,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 .fully_checked()
         );
         def.body[0].as_assign_stmt_mut().unwrap().targets.clear();
-        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+        assert_eq!(prepared.standalone().unwrap(), before);
     }
 
     #[test]
@@ -5106,7 +5098,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let before = prepared.standalone().unwrap().unwrap();
+        let before = prepared.standalone().unwrap();
         assert!(prepared.syntax.is_none());
         let mut syntax = ruff_python_parser::parse_module(source)
             .unwrap()
@@ -5123,7 +5115,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             assignment.as_assign_stmt_mut().unwrap().targets.clear();
         }
         prepared.syntax = Some(Cow::Owned(syntax));
-        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+        assert_eq!(prepared.standalone().unwrap(), before);
     }
 
     #[test]
@@ -5241,7 +5233,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         )
         .unwrap();
         inject_residual_child_module(&mut prepared);
-        let before = prepared.standalone().unwrap().unwrap();
+        let before = prepared.standalone().unwrap();
         let protected = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_try_stmt_mut()
             .unwrap();
@@ -5263,7 +5255,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .unwrap()
             .targets
             .clear();
-        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+        assert_eq!(prepared.standalone().unwrap(), before);
     }
 
     #[test]
@@ -5357,7 +5349,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
         let factory = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
@@ -5387,7 +5379,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 .is_none()
         );
         tuple.as_tuple_expr_mut().unwrap().elts.clear();
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
     }
 
     #[test]
@@ -5403,7 +5395,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         )
         .unwrap();
         inject_residual_child_module(&mut prepared);
-        let original = prepared.standalone().unwrap().unwrap();
+        let original = prepared.standalone().unwrap();
 
         let sites = &prepared.source.statement_sites.expressions;
         let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
@@ -5423,7 +5415,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             Some(ExpressionSelection::Operand(_))
         ));
         tuple.as_tuple_expr_mut().unwrap().elts.clear();
-        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        assert_eq!(prepared.standalone().unwrap(), original);
 
         let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let residual = &mut value.as_call_expr_mut().unwrap().arguments.args[1];
@@ -5432,6 +5424,6 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             range: callee.range(),
             node_index: Default::default(),
         });
-        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+        assert_ne!(prepared.standalone().unwrap(), original);
     }
 }
