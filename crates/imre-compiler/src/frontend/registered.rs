@@ -1004,7 +1004,7 @@ pub(crate) struct PhysicalSuite {
 }
 
 impl PhysicalSuite {
-    fn new(mut plan: RegisteredSuite, stmts: &[ast::Stmt]) -> Self {
+    pub(crate) fn new(mut plan: RegisteredSuite, stmts: &[ast::Stmt]) -> Self {
         let mut sources = Vec::new();
         for run in &mut plan.residual {
             let start = sources.len();
@@ -1360,8 +1360,26 @@ impl<'a> SuitePreparation<'a> {
         self.selected_suite(stmts, kind, SuiteSelection::All, children, suspends)
     }
 
+    pub(crate) fn named_body(
+        &mut self,
+        stmts: &[ast::Stmt],
+        kind: RegisteredScope,
+        suspended: bool,
+        prepare_entry: bool,
+        has_ordinary_header: &dyn Fn(TextSize) -> bool,
+    ) -> PhysicalSuite {
+        let plan = if prepare_entry {
+            self.function_suite(stmts, kind, suspended, has_ordinary_header)
+        } else {
+            let physical = SuiteSelection::Physical(has_ordinary_header);
+            self.selected_suite(stmts, kind, physical, physical, suspended)
+        };
+        PhysicalSuite::new(plan, stmts)
+    }
+
     /// Keep the enclosing physical frame's entry and cleanup. Its complete target effects
     /// share one slot layout per suite, including when another statement must run from source.
+    #[cfg(test)]
     pub(crate) fn physical_body(
         &mut self,
         stmts: &[ast::Stmt],

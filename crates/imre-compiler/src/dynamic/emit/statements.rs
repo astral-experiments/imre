@@ -10,7 +10,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use serde_json::json;
 
-use super::{Body, CheckedHeader, Cleanup, DefinitionName, Entry, Function};
+use super::{Body, Cleanup, DefinitionName, Entry, Function};
 
 impl<'a, 'p> ContextEmitter<'a, 'p> for Function<'a, 'p> {
     fn push_context(&mut self, exit: ContextRegion, outer: String) {
@@ -618,38 +618,26 @@ impl<'p> Function<'_, 'p> {
             format!("{qualname}.<locals>.")
         };
         let named_scope = function.map(|def| self.source.scopes.function(def));
-        let statements = match &body {
-            Body::Function(stmts, _) => Some(*stmts),
-            _ => None,
-        };
-        let declaration = function
-            .and_then(|def| self.source.checked_function_header(def.start()))
-            .map(|header| match header {
-                CheckedHeader::Declaration {
-                    docstring,
-                    integer_sign_parameters,
-                    ..
-                } => (docstring, integer_sign_parameters),
-                CheckedHeader::Ordinary => {
-                    unreachable!("ordinary header uses its callable metadata")
-                }
-            });
-        let doc = if !self.output.keep_docstrings {
-            None
-        } else if let Some((docstring, _)) = declaration {
-            docstring
-                .clone()
-                .or_else(|| self.source.bundled_docstring(&qualname))
+        let declaration =
+            function.map(|def| &self.source.function_bodies[&def.start()].declaration);
+        let doc = if self.output.keep_docstrings {
+            declaration.and_then(|facts| {
+                facts
+                    .docstring
+                    .clone()
+                    .or_else(|| self.source.bundled_docstring(&qualname))
+            })
         } else {
-            statements.and_then(|stmts| self.source.docstring(&qualname, stmts))
+            None
         };
-        let generator_flags = match (&body, generator) {
-            (Body::Function(_, flags), _) => *flags,
-            (_, Some(site)) if self.source.generators[&site].is_async => {
+        let generator_flags = if let Some(site) = generator {
+            if self.source.generators[&site].is_async {
                 code_flags::ASYNC_GENERATOR
+            } else {
+                code_flags::GENERATOR
             }
-            (_, Some(_)) => code_flags::GENERATOR,
-            _ => named_scope.map_or(0, |scope| scope.suspension_flags),
+        } else {
+            named_scope.map_or(0, |scope| scope.suspension_flags)
         };
         let flags = match &body {
             Body::Namespace => None,
@@ -806,14 +794,9 @@ impl<'p> Function<'_, 'p> {
                 if let Some(ty) = scalar(name) {
                     signature["types"][name] = json!(ty);
                     if ty == "float"
-                        && declaration.map_or_else(
-                            || {
-                                statements.is_some_and(|body| {
-                                    crate::frontend::only_compares_zero(body, name)
-                                })
-                            },
-                            |(_, names)| names.iter().any(|p| p == name),
-                        )
+                        && declaration.is_some_and(|facts| {
+                            facts.integer_sign_parameters.iter().any(|p| p == name)
+                        })
                     {
                         signature["integer_sign_parameters"][name] = json!(true);
                     }
