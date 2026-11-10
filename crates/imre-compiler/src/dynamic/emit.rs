@@ -3452,6 +3452,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         physical.physical_body(
             &def.body,
             crate::frontend::RegisteredScope::Function { is_async: false },
+            true,
         );
         let (sites, nested) = (physical.sites, physical.nested);
         module.source.statement_sites = sites;
