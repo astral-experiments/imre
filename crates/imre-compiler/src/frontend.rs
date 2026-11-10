@@ -1009,7 +1009,6 @@ fn lower_graph(
             }
         }
     }
-    let initializer_start = definitions.len();
     let entry_declarations = classes.declarations.has_class_values(graph.entry)
         || graph.modules[graph.entry].parsed.syntax().body.iter().any(|stmt| {
             matches!(stmt, ast::Stmt::FunctionDef(def) if inspect::marks_function(graph, graph.entry, def))
@@ -1063,13 +1062,14 @@ fn lower_graph(
             &helpers,
             &globals,
         );
-        let result =
-            Initialization::lower(checker, &mut available, range).inspect_err(capture_on_object);
-        if let Some(body) = checked_region(result, graph, module_id, &mut unavailable)?
-            && !needs_registered_entry
-        {
-            initializations.push(body);
-        }
+        let result = Initialization::lower(
+            checker,
+            &mut available,
+            range,
+            (!needs_registered_entry).then_some(&mut initializations),
+        )
+        .inspect_err(capture_on_object);
+        checked_region(result, graph, module_id, &mut unavailable)?;
     }
     if graph.registered_startup || needs_registered_entry {
         capture();
@@ -1213,6 +1213,7 @@ fn lower_graph(
         ));
     }
     let mut entry = None;
+    let mut startup = Vec::new();
     for (module_id, module) in graph.modules.iter().enumerate() {
         if module_id != graph.entry {
             continue;
@@ -1253,26 +1254,14 @@ fn lower_graph(
         let result = checker.lower_block(&statements, fixed_entry.as_mut());
         let result = checker.finish_region(result).inspect_err(capture_on_object);
         if checked_region(result, graph, module_id, &mut unavailable)?.is_some()
-            && let Some(mut body) = fixed_entry
+            && let Some(body) = fixed_entry
         {
-            let mut startup = (0..initializations.len())
-                .map(|index| {
-                    Statement::Expr(Expr {
-                        ty: Type::None,
-                        kind: ExprKind::Call(
-                            initializer_start + index,
-                            ir::CallArgs::positional(Vec::new()),
-                        ),
-                    })
-                })
-                .collect::<Vec<_>>();
             checker.fault_frame(&mut startup, "<module>", TextSize::default());
-            startup.append(&mut body);
             entry = Some(ir::Function {
                 params: Vec::new(),
                 returns: Type::None,
                 locals: checker.locals,
-                body: startup,
+                body,
             });
         }
     }
@@ -1283,7 +1272,7 @@ fn lower_graph(
         return Err(reason);
     }
     if needs_registered_entry {
-        return Ok(crate::CheckedProgram::Registered);
+        return Ok(crate::CheckedProgram::Registered(None));
     }
     if let Some(error) = graph.deferred_object_error.take() {
         if error.kind.is_object() {
@@ -1295,46 +1284,16 @@ fn lower_graph(
         .command_startup
         .as_ref()
         .is_some_and(|(flags, _)| flags.faulthandler);
-    for initialization in &initializations {
-        let module = &graph.modules[initialization.module];
-        let mut body = initialization.function.body.clone();
-        if module.archive.is_some() {
-            body.insert(
-                0,
-                Statement::Expr(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(
-                        Builtin::ExtensionImport(
-                            module.name.rsplit('.').next().unwrap().to_owned(),
-                        ),
-                        vec![],
-                    ),
-                }),
-            );
-        }
-        if fault_enabled && initialization.module != graph.entry && module.archive.is_none() {
-            body.insert(
-                0,
-                fault_frame_statement(
-                    graph
-                        .module_filename(initialization.module)
-                        .to_string_lossy()
-                        .into_owned(),
-                    "<module>",
-                    1,
-                ),
-            );
-        }
-        owners.push(initialization.module);
-        functions.push(ir::Function {
-            params: Vec::new(),
-            returns: Type::None,
-            locals: initialization.function.locals.clone(),
-            body,
-        });
-        call_graph.push(initialization.calls.clone());
+    let initializer_ids = functions.len()..functions.len() + initializations.len();
+    let mut initialization_order = Vec::with_capacity(initializations.len());
+    for initialization in initializations {
+        let module_id = initialization.order.module;
+        functions.push(initialization.function);
+        call_graph.push(initialization.calls);
+        initialization_order.push(initialization.order);
+        owners.push(module_id);
         class_reads.push(HashSet::new());
-        let module = &graph.modules[initialization.module];
+        let module = &graph.modules[module_id];
         recursion_errors
             .push(module.error(module.parsed.syntax(), "recursive module initialization"));
     }
@@ -1371,8 +1330,9 @@ fn lower_graph(
     if let Some(id) = recursive_call_root(&call_graph) {
         return Err(recursion_errors.swap_remove(id).into());
     }
-    for initialization in &initializations {
-        initialization.validate(
+    for (id, order) in initializer_ids.clone().zip(initialization_order) {
+        order.validate(
+            id,
             graph,
             &functions,
             &class_reads,
@@ -1399,29 +1359,8 @@ fn lower_graph(
     }
     // The native call graph is acyclic. Programs that cannot inspect frames,
     // lower their limit, or reach the default depth need no tracking at all.
-    let source_frames =
-        if fault_enabled || names || count || source_functions + generator_sites > 1000 {
-            python_frames
-                .into_iter()
-                .zip(owners.iter().copied().chain([graph.entry]))
-                .map(|(frame, module)| {
-                    frame.then(|| {
-                        if names {
-                            ir::SourceFrame::Module(if module == graph.entry {
-                                "__main__".to_owned()
-                            } else {
-                                graph.modules[module].name.clone()
-                            })
-                        } else {
-                            ir::SourceFrame::Depth
-                        }
-                    })
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
-    if generator_sites != 0 && source_frames.is_empty() {
+    let track_frames = fault_enabled || names || count || source_functions + generator_sites > 1000;
+    if generator_sites != 0 && !track_frames {
         for function in functions.iter_mut().chain([&mut entry]) {
             ir::walk_expressions_mut(&mut function.body, &mut |value| {
                 if matches!(
@@ -1441,20 +1380,97 @@ fn lower_graph(
     }
     let json_records = json::schemas(graph, &classes, &types, &functions, &entry)?;
     // Fusing adjacent sums also inlines their generator bodies and scalar calls.
-    if source_frames.is_empty() {
+    if !track_frames {
         for (id, sums) in zip_sums {
             zip_sums::fuse(&mut functions, id, &sums);
         }
     }
+    if let Some(cache) = cache {
+        cache.finish(&types);
+    }
+    if needs_object_string_order(&functions, &entry) {
+        graph.needs_object_runtime.set(true);
+        let diagnostic = Diagnostic::plain(
+            " Imre: ordering strings from chr() with possible surrogate values requires native Python object operations".to_owned(),
+        )
+        .with_path(&graph.modules[graph.entry].path)
+        .classified(Kind::ScopedObject);
+        return Err(diagnostic);
+    }
+    // The checked functions and module statements have supplied their graph diagnostics.
+    // Only the fixed startup links initializer calls and allocates native module metadata.
+    if graph.registered_startup {
+        return Ok(crate::CheckedProgram::Registered(None));
+    }
+    if let Some(reason) = graph
+        .runtime_initializer
+        .clone()
+        .map(Into::into)
+        .or_else(|| required_object_diagnostic(graph, &functions, &entry))
+    {
+        return Ok(crate::CheckedProgram::Registered(Some(reason)));
+    }
+    // Checkpoints above refer to the source operations. Insert native startup
+    // bookkeeping into these same bodies only after their source order is checked.
+    for id in initializer_ids {
+        let module_id = owners[id];
+        let module = &graph.modules[module_id];
+        let prefix = if module.archive.is_some() {
+            Some(Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(
+                    Builtin::ExtensionImport(module.name.rsplit('.').next().unwrap().to_owned()),
+                    vec![],
+                ),
+            }))
+        } else if fault_enabled && module_id != graph.entry {
+            Some(fault_frame_statement(
+                graph
+                    .module_filename(module_id)
+                    .to_string_lossy()
+                    .into_owned(),
+                "<module>",
+                1,
+            ))
+        } else {
+            None
+        };
+        if let Some(prefix) = prefix {
+            functions[id].body.insert(0, prefix);
+        }
+        startup.push(Statement::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Call(id, ir::CallArgs::positional(Vec::new())),
+        }));
+    }
+    entry.body.splice(..0, startup);
+    let source_frames = if track_frames {
+        python_frames
+            .into_iter()
+            .zip(owners.iter().copied().chain([graph.entry]))
+            .map(|(frame, module)| {
+                frame.then(|| {
+                    if names {
+                        ir::SourceFrame::Module(if module == graph.entry {
+                            "__main__".to_owned()
+                        } else {
+                            graph.modules[module].name.clone()
+                        })
+                    } else {
+                        ir::SourceFrame::Depth
+                    }
+                })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     globals
         .class_data
         .borrow_mut()
         .extend_layouts(&mut classes.fields);
     let mut globals = globals.into_types();
     types.reserve_constructor_globals(&mut globals, &functions, &entry);
-    if let Some(cache) = cache {
-        cache.finish(&types);
-    }
     let lowered = (
         ir::Module {
             builtin_module_sources: uses_builtin_module_names
@@ -1475,24 +1491,38 @@ fn lower_graph(
         },
         owners,
     );
-    if needs_object_string_order(&lowered.0) {
-        graph.needs_object_runtime.set(true);
-        let diagnostic = Diagnostic::plain(
-            " Imre: ordering strings from chr() with possible surrogate values requires native Python object operations".to_owned(),
-        )
-        .with_path(&graph.modules[graph.entry].path)
-        .classified(Kind::ScopedObject);
-        return Err(diagnostic);
-    }
     Ok(crate::CheckedProgram::Native(Box::new(lowered)))
+}
+
+fn required_object_diagnostic(
+    graph: &SourceGraph,
+    functions: &[ir::Function],
+    entry: &ir::Function,
+) -> Option<Diagnostic> {
+    let (id, operand, call) = ir::required_object_call(functions.iter().chain([entry]))?;
+    let (name, kind) = match call {
+        ir::ObjectCall::ExecText => ("exec", Kind::ScopedObject),
+        ir::ObjectCall::FormatField => ("this f-string field", Kind::Ordinary),
+        ir::ObjectCall::SocketSendfile => ("socket.sendfile", Kind::Object),
+    };
+    let source = &graph.modules[id];
+    Some(
+        Diagnostic::at(
+            &source.source,
+            &operand,
+            format!("{name} requires native Python object operations"),
+        )
+        .with_path(&source.path)
+        .classified(kind),
+    )
 }
 
 /// Native text is UTF-8. Use object comparisons when a call to `chr` could
 /// construct a lone surrogate.
-fn needs_object_string_order(module: &ir::Module) -> bool {
+fn needs_object_string_order(functions: &[ir::Function], entry: &ir::Function) -> bool {
     let mut orders_strings = false;
     let mut code_points = Vec::new();
-    for function in module.functions.iter().chain([&module.entry]) {
+    for function in functions.iter().chain([entry]) {
         ir::walk_expressions(&function.body, &mut |expr| match &expr.kind {
             ExprKind::Builtin(Builtin::Chr, args) => code_points.push(&args[0]),
             ExprKind::Compare(values, operators) => {
@@ -1507,7 +1537,7 @@ fn needs_object_string_order(module: &ir::Module) -> bool {
     if !orders_strings || code_points.is_empty() {
         return false;
     }
-    let ranges = crate::ranges::analyze(module);
+    let ranges = crate::ranges::analyze_functions(functions.iter().chain([entry]));
     code_points.into_iter().any(|value| {
         ranges
             .integer(value)

@@ -487,18 +487,9 @@ fn object_fallback(
             let baseline = graph.lowering_baseline();
             let refusal = loop {
                 let error = match lower(&mut graph, call_error.as_ref())? {
-                    CheckedProgram::Native(_)
-                        if graph.runtime_initializer.is_some() && !boxed_startup =>
-                    {
-                        // All first-party code lowered successfully. The unresolved import alone
-                        // must use the same admission policy as an unresolved module in the loader.
-                        break graph.runtime_initializer.take().map(Into::into);
-                    }
-                    CheckedProgram::Native(ir) if !boxed_startup => {
+                    CheckedProgram::Registered(reason) => break reason,
+                    CheckedProgram::Native(ir) => {
                         let (mut module, mut owners) = *ir;
-                        if let Some(object) = required_object_diagnostic(&graph, &module) {
-                            break Some(object);
-                        }
                         if checking {
                             verify_after(&module, "lowering")?;
                             return native_result(graph, Vec::new());
@@ -524,8 +515,6 @@ fn object_fallback(
                         LoweringDiagnostic::plain(reason.to_owned())
                             .classified(LoweringKind::Object)
                     }
-                    // A solved object ABI or Python startup directly selects the registered entry.
-                    CheckedProgram::Registered | CheckedProgram::Native(_) => break None,
                     CheckedProgram::Runtime(error) => error,
                 };
                 // A guessed layout must not turn a working object program into a type error,
@@ -974,9 +963,11 @@ fn compile_file_units_with(
 
 type CheckedIr = (ir::Module, Vec<modules::ModuleId>);
 
-/// The source checker admits the program before the driver chooses its representation.
+/// A checked entry selects its startup. A representation refusal still needs runtime admission.
 pub(crate) enum CheckedProgram {
-    Registered,
+    /// A checked Python frame or launcher can enter directly. A specific operation or
+    /// unresolved import retains its own admission policy and diagnostic.
+    Registered(Option<LoweringDiagnostic>),
     Native(Box<CheckedIr>),
     Runtime(LoweringDiagnostic),
 }
@@ -987,31 +978,10 @@ impl CheckedProgram {
         match self {
             Self::Native(ir) => Ok(*ir),
             Self::Runtime(reason) => Err(reason.to_string()),
-            Self::Registered => Err("the checked program requires a registered entry".into()),
+            Self::Registered(Some(reason)) => Err(reason.to_string()),
+            Self::Registered(None) => Err("the checked program requires a registered entry".into()),
         }
     }
-}
-
-fn required_object_diagnostic(
-    graph: &modules::SourceGraph,
-    module: &ir::Module,
-) -> Option<LoweringDiagnostic> {
-    let (id, operand, call) = ir::required_object_call(module)?;
-    let (name, kind) = match call {
-        ir::ObjectCall::ExecText => ("exec", LoweringKind::ScopedObject),
-        ir::ObjectCall::FormatField => ("this f-string field", LoweringKind::Ordinary),
-        ir::ObjectCall::SocketSendfile => ("socket.sendfile", LoweringKind::Object),
-    };
-    let source = &graph.modules[id];
-    Some(
-        LoweringDiagnostic::at(
-            &source.source,
-            &operand,
-            format!("{name} requires native Python object operations"),
-        )
-        .with_path(&source.path)
-        .classified(kind),
-    )
 }
 
 #[cfg(test)]

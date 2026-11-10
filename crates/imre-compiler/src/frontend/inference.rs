@@ -745,7 +745,8 @@ impl Inference {
                     graph, module, signatures, classes, types, &helpers, &globals,
                 );
                 checker.inference = Some(self);
-                if let Err(diagnostic) = Initialization::lower(checker, &mut available, range) {
+                if let Err(diagnostic) = Initialization::lower(checker, &mut available, range, None)
+                {
                     errors.push((module, diagnostic));
                 }
             }
