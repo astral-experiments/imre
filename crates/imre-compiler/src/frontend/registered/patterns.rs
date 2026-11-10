@@ -175,6 +175,7 @@ fn prepare_pattern(
                     p.rest.as_ref().map(|id| self.capture(id)),
                 ),
                 ast::Pattern::MatchClass(p) => MatchTest::Class {
+                    range: p.range(),
                     class: self.operand(&p.cls, "expected a class name in match pattern")?,
                     positional: p
                         .arguments

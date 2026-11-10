@@ -3268,6 +3268,7 @@ pub(crate) enum MatchTest {
     Sequence(imre_ast::SequencePatternPlan, Vec<MatchTest>),
     Mapping(Vec<(Expr, MatchTest)>, Option<String>),
     Class {
+        range: ruff_text_size::TextRange,
         class: Expr,
         positional: Vec<MatchTest>,
         keywords: Vec<(String, MatchTest)>,
@@ -3375,6 +3376,7 @@ macro_rules! pattern_expressions {
                     class,
                     positional,
                     keywords,
+                    ..
                 } => {
                     ($visit)(class);
                     pending.extend(keywords.into_iter().rev().map(|(_, test)| test));

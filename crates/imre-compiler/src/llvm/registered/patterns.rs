@@ -1,5 +1,5 @@
 //! Native structural matching on semantic operands in the live registered namespace.
-use super::{Frame, RegisteredFrame, sites::CheckedSites};
+use super::{Frame, FrameEmitter, RegisteredFrame, sites::CheckedSites};
 use crate::frontend::SourceMatch;
 use crate::ir::{Expr, MatchCase, MatchPattern, MatchTest};
 use crate::llvm::operations::{CheckedBody, CheckedValue};
@@ -187,10 +187,12 @@ impl Frame<'_, '_, '_> {
     fn pattern_equal(&mut self, subject: &str, expr: &Expr, failed: &str, last_use: Option<&str>) {
         let mark = last_use.map_or_else(|| self.temporary_mark(), str::to_owned);
         let target = self.begin_operand_scope();
-        let expected = self.pattern_value(expr);
+        let bit = self.with_operand_source(expr, |frame| {
+            let expected = frame.pattern_value(expr);
+            let equal = frame.comparison_result(&mark, "==", subject, &expected);
+            frame.truth(&equal)
+        });
         let f = &mut *self.code;
-        let equal = f.comparison_result(&mark, "==", subject, &expected);
-        let bit = f.truth(&equal);
         f.finish_operand_scope(&mark, target);
         f.discard_truth(&mark);
         f.pattern_check(&bit, failed);
@@ -362,6 +364,7 @@ impl Frame<'_, '_, '_> {
                 }
             }
             MatchTest::Class {
+                range,
                 class,
                 positional,
                 keywords,
@@ -376,7 +379,10 @@ impl Frame<'_, '_, '_> {
                     let key = f.code_name(key);
                     f.op("append", &[&keys, &key]);
                 }
-                let fields = f.op("match_class", &[value, &class, &keys]);
+                let fields = self.with_source_range(*range, |frame| {
+                    frame.op("match_class", &[value, &class, &keys])
+                });
+                let f = &mut *self.code;
                 let ok = f.value(&format!("icmp ne i64 {fields}, 0"));
                 f.pattern_check(&ok, failed);
                 for (i, child) in positional
