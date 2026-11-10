@@ -921,13 +921,7 @@ pub(crate) fn lambda_defaults(lambda: &ast::ExprLambda) -> impl Iterator<Item = 
         .parameters
         .as_deref()
         .into_iter()
-        .flat_map(parameter_defaults)
-}
-
-pub(super) fn parameter_defaults(parameters: &ast::Parameters) -> impl Iterator<Item = &ast::Expr> {
-    parameters
-        .iter_non_variadic_params()
-        .filter_map(|p| p.default.as_deref())
+        .flat_map(imre_ast::parameter_defaults)
 }
 
 pub(super) fn lambda_binding(lambda: &ast::ExprLambda, defaults: Vec<Expr>) -> Expr {
