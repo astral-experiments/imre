@@ -904,7 +904,11 @@ enum Body<'a> {
         &'a [crate::ir::AnnotationOccurrence],
         AnnotationScope,
     ),
-    Checked(&'a crate::frontend::RegisteredFunction),
+    /// Named bodies carry their lexical global declarations into the checked frame.
+    Checked(
+        &'a crate::frontend::RegisteredFunction,
+        Option<&'a BTreeSet<String>>,
+    ),
     AnnotationOperand(&'a crate::frontend::AnnotationCode),
 }
 
@@ -1102,7 +1106,7 @@ impl SourceInfo<'_> {
         let scope = &self.scopes.functions[&site];
         Some((
             scope.ordinary.as_ref().expect("ordinary function header"),
-            Body::Checked(plan.checked()),
+            Body::Checked(plan.checked(), Some(scope.lexical.globals())),
         ))
     }
 
@@ -1201,7 +1205,6 @@ impl SourceMap<'_> {
         start: ruff_text_size::TextSize,
         in_function: bool,
         entry: Entry,
-        globals: Option<&BTreeSet<String>>,
     ) -> String {
         let site = format!("@code_site{}", output.count);
         let suspended = matches!(entry, Entry::Suspended(_));
@@ -1214,13 +1217,7 @@ impl SourceMap<'_> {
         } else {
             0
         };
-        let entry = self.code(
-            output,
-            prefix,
-            body,
-            in_function,
-            Some((start, entry, globals)),
-        );
+        let entry = self.code(output, prefix, body, in_function, Some((start, entry)));
         writeln!(
             output.constants,
             "{site} = private constant %code_site {{ ptr {entry}, ptr {}, i32 {}, i32 {tag} }}",
@@ -1237,14 +1234,13 @@ impl SourceMap<'_> {
         prefix: String,
         body: Body<'_>,
         in_function: bool,
-        definition: Option<(ruff_text_size::TextSize, Entry, Option<&BTreeSet<String>>)>,
+        definition: Option<(ruff_text_size::TextSize, Entry)>,
     ) -> String {
         let suspension = match definition {
-            Some((_, Entry::Suspended(flags), _)) => flags,
+            Some((_, Entry::Suspended(flags))) => flags,
             _ => 0,
         };
-        let globals = definition.as_ref().and_then(|(_, _, globals)| *globals);
-        let start = definition.map(|(start, _, _)| start);
+        let start = definition.map(|(start, _)| start);
         let mut frame = RegisteredFrame::new(
             output,
             self.positions,
@@ -1322,7 +1318,7 @@ impl SourceMap<'_> {
                 let value = f.frame.prepared_operand(operand, &f.sites, false);
                 f.return_value(&value);
             }
-            Body::Checked(checked) => {
+            Body::Checked(checked, globals) => {
                 if let Some(globals) = globals {
                     f.declare_globals(globals);
                 }
@@ -3083,7 +3079,7 @@ mod tests {
         let defs = module.syntax.as_mut().unwrap().to_mut();
         for (i, stmt) in defs.iter_mut().enumerate() {
             let def = stmt.as_function_def_stmt_mut().unwrap();
-            let Body::Checked(body) = module.source.function_body(def) else {
+            let Body::Checked(body, Some(_)) = module.source.function_body(def) else {
                 panic!("named activation still needs source");
             };
             let mut required = Vec::new();

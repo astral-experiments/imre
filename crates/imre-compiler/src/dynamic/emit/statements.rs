@@ -824,7 +824,6 @@ impl<'p> Function<'_, 'p> {
                 start,
                 false,
                 Entry::Compiled,
-                None,
             );
             CompiledProvider {
                 code,
@@ -916,16 +915,9 @@ impl<'p> Function<'_, 'p> {
         {
             signature["return_type"] = json!(ty);
         }
-        let globals = named_scope.map(|scope| scope.lexical.globals());
-        let code = self.source.definition(
-            self.frame.output,
-            prefix,
-            body,
-            start,
-            in_function,
-            entry,
-            globals,
-        );
+        let code =
+            self.source
+                .definition(self.frame.output, prefix, body, start, in_function, entry);
         if let Some(p) = params {
             self.output
                 .interned_identifiers
@@ -1048,7 +1040,6 @@ impl<'p> Function<'_, 'p> {
             start,
             false,
             Entry::Compiled,
-            None,
         )
     }
 
