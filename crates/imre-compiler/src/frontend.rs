@@ -602,7 +602,7 @@ fn fault_frame_statement(file: String, name: &str, line: u32) -> Statement {
 pub(crate) fn lower(graph: &SourceGraph) -> StdResult<ir::Module, String> {
     lower_current(graph, None, &mut HashSet::new())
         .map_err(|report| report.to_string())?
-        .into_native()
+        .into_native(graph)
         .map(|(module, _)| module)
 }
 
@@ -611,7 +611,7 @@ pub(crate) fn lower_with_owners(
     graph: &mut SourceGraph,
 ) -> StdResult<crate::CheckedIr, Diagnostic> {
     lower_with_caller_cache(graph, None)?
-        .into_native()
+        .into_native(graph)
         .map_err(Into::into)
 }
 
@@ -1542,8 +1542,7 @@ fn lower_graph(
     types.reserve_constructor_globals(&mut globals, &functions, &entry);
     let lowered = (
         ir::Module {
-            builtin_module_sources: uses_builtin_module_names
-                .then(|| crate::dynamic::builtin_inventory_sources(graph)),
+            builtin_module_sources: None,
             command_flags: graph
                 .command_startup
                 .as_ref()
@@ -1564,6 +1563,7 @@ fn lower_graph(
         crate::FixedProgram {
             ir: lowered,
             frame_sources,
+            uses_builtin_module_names,
         },
     )))
 }
