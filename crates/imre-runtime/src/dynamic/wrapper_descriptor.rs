@@ -900,6 +900,9 @@ impl BuiltinDescriptor {
                     ("isprintable", "__doc__") => {
                         "Return True if all characters in the string are printable, False otherwise.\n\nA character is printable if repr() may use it in its output."
                     }
+                    ("isnumeric", "__doc__") => {
+                        "Return True if the string is a numeric string, False otherwise.\n\nA string is numeric if all characters in the string are numeric and there is at\nleast one character in the string."
+                    }
                     ("islower", "__doc__") => {
                         "Return True if the string is a lowercase string, False otherwise.\n\nA string is lowercase if all cased characters in the string are lowercase and\nthere is at least one cased character in the string."
                     }
@@ -947,7 +950,7 @@ impl BuiltinDescriptor {
                         "Convert uppercase characters to lowercase and lowercase characters to uppercase."
                     }
                     (
-                        "isascii" | "isalpha" | "isdigit" | "isidentifier" | "islower" | "isprintable" | "istitle" | "lower" | "title"
+                        "isascii" | "isalpha" | "isdigit" | "isidentifier" | "islower" | "isnumeric" | "isprintable" | "istitle" | "lower" | "title"
                         | "swapcase" | "casefold",
                         _,
                     ) => "($self, /)",
