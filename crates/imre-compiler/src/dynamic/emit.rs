@@ -1209,7 +1209,7 @@ mod tests {
             Path::new("example.py"),
             r#"out = f"\ud800{{{value = :{width}\ud801}}}" "\ud802""#,
             0,
-            ModuleOrigin::Program(ProgramBodies::default()),
+            ModuleOrigin::Program(None),
         )
         .unwrap();
         assert!(!prepared.source.strings.literals.is_empty());
