@@ -1288,8 +1288,17 @@ impl RegisteredFrame<'_, '_> {
     }
 
     pub(crate) fn checked_statement(&mut self, stmt: &Statement, sites: &CheckedSites) {
+        self.checked_statement_with_inputs(stmt, sites, &[]);
+    }
+
+    pub(crate) fn checked_statement_with_inputs(
+        &mut self,
+        stmt: &Statement,
+        sites: &CheckedSites,
+        inputs: &[String],
+    ) {
         self.with_checked_frame(sites, None, |frame| {
-            CheckedBody::registered(frame).emit_statement(stmt)
+            CheckedBody::registered(Frame { inputs, ..frame }).emit_statement(stmt)
         })
     }
 
