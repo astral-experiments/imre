@@ -354,102 +354,39 @@ pub(crate) fn emit_file(
 
 const BRANCH_WEIGHTS: &str = "\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n!1 = !{!\"branch_weights\", i32 2000, i32 1}\n";
 
-/// Representation and runtime dependencies of a specialized checked module.
+/// Callable representation selected for the specialized checked module.
 pub(crate) struct NativeProgram {
     pub(crate) prefer_objects: bool,
     callable_targets: crate::callables::Targets,
     function_link_types: HashSet<Type>,
-    extension_modules: BTreeSet<String>,
-    literal_globals: Vec<Option<String>>,
-    uses_regex_positions: bool,
-    uses_format_field: bool,
-    uses_sys_argv: bool,
-    uses_orig_argv: bool,
-    uses_linecache: bool,
-    uses_cache_paths: bool,
-    uses_builtins_last: bool,
-    changes_stdout: bool,
 }
 
 pub(crate) fn analyze_program(module: &Module) -> Result<NativeProgram, Unsupported> {
-    let callable_targets = crate::callables::Targets::analyze(module);
-    let mut literal_globals = vec![None; module.globals.len()];
-    let mut extension_modules = BTreeSet::new();
     let mut function_link_types = HashSet::new();
-    let mut mixed_link_owners = Vec::new();
+    let mut link_owners = BTreeMap::<usize, Vec<&Expr>>::new();
     let mut declared_caches = HashSet::new();
-    let mut uses_regex_positions = false;
-    let mut uses_format_field = false;
-    let mut uses_sys_argv = false;
-    let mut uses_orig_argv = false;
-    let mut uses_linecache = false;
-    let mut uses_cache_paths = false;
-    let mut uses_builtins_last = false;
-    let mut changes_stdout = false;
     let mut object_call = None;
-    for function in module.functions.iter().chain([&module.entry]) {
-        let mut owners = Vec::new();
-        crate::ir::walk_expressions(&function.body, &mut |expr| {
-            let ExprKind::Builtin(builtin, args) = &expr.kind else {
-                return;
-            };
-            match builtin {
-                Builtin::ObjectCall(kind, ..)
-                    if object_call.is_none_or(|previous| *kind < previous) =>
-                {
-                    object_call = Some(*kind);
-                }
-                Builtin::RegexCapture {
-                    operation: RegexCapture::Start | RegexCapture::End,
-                    ..
-                } => uses_regex_positions = true,
-                Builtin::FormatField(_) => uses_format_field = true,
-                Builtin::ExtensionImport(name) => {
-                    extension_modules.insert(name.clone());
-                }
-                Builtin::FunctionWrappedSet | Builtin::FunctionWrappedGet => {
-                    let owner = &args[0];
-                    function_link_types.insert(owner.ty);
-                    if callable_targets
-                        .get(owner.ty)
-                        .iter()
-                        .any(|target| target.bound)
-                    {
-                        owners.push(owner);
-                    }
-                }
-                Builtin::ModuleCache(id) => {
-                    declared_caches.insert(*id);
-                }
-                Builtin::GlobalSet(slot) => {
-                    // A checked module binding has only one initializer.
-                    if let [
-                        Expr {
-                            kind: ExprKind::Str(value),
-                            ..
-                        },
-                    ] = args.as_slice()
-                    {
-                        literal_globals[*slot] = Some(value.clone());
-                    }
-                }
-                Builtin::SysArgv => uses_sys_argv = true,
-                Builtin::SysOrigArgv => uses_orig_argv = true,
-                Builtin::Linecache(..) => uses_linecache = true,
-                Builtin::WarningFormat { .. } if args[5].ty != Type::Str => uses_linecache = true,
-                Builtin::CachePath(_) | Builtin::ModuleCacheFromOrigin => uses_cache_paths = true,
-                Builtin::BuiltinsSetLast
-                | Builtin::SysDisplayHook
-                | Builtin::BuiltinsLen
-                | Builtin::BuiltinsSetLen => uses_builtins_last = true,
-                Builtin::SysStdoutSet | Builtin::SysStdoutDelete => changes_stdout = true,
-                _ => {}
+    let callable_targets = crate::callables::Targets::analyze_with(module, |id, expr| {
+        let ExprKind::Builtin(builtin, args) = &expr.kind else {
+            return;
+        };
+        match builtin {
+            Builtin::ObjectCall(kind, ..)
+                if object_call.is_none_or(|previous| *kind < previous) =>
+            {
+                object_call = Some(*kind);
             }
-        });
-        if !owners.is_empty() {
-            mixed_link_owners.push((function, owners));
+            Builtin::FunctionWrappedSet | Builtin::FunctionWrappedGet => {
+                let owner = &args[0];
+                function_link_types.insert(owner.ty);
+                link_owners.entry(id).or_default().push(owner);
+            }
+            Builtin::ModuleCache(id) => {
+                declared_caches.insert(*id);
+            }
+            _ => {}
         }
-    }
+    });
     if function_link_types.iter().any(|&ty| {
         let targets = callable_targets.get(ty);
         module.types.dispatcher(ty).is_some()
@@ -476,28 +413,29 @@ pub(crate) fn analyze_program(module: &Module) -> Result<NativeProgram, Unsuppor
             }
         }));
     }
-    if mixed_link_owners
-        .iter()
-        .any(|(function, owners)| !ir::plain_link_owners(function, owners))
-    {
-        return Err(Unsupported(
-            "Imre: native wrapper links require a plain function as their owner",
-        ));
+    let mut prefer_objects = false;
+    for (id, mut owners) in link_owners {
+        owners.retain(|owner| {
+            callable_targets
+                .get(owner.ty)
+                .iter()
+                .any(|target| target.bound)
+        });
+        if owners.is_empty() {
+            continue;
+        }
+        let function = module.functions.get(id).unwrap_or(&module.entry);
+        if !ir::plain_link_owners(function, &owners) {
+            return Err(Unsupported(
+                "Imre: native wrapper links require a plain function as their owner",
+            ));
+        }
+        prefer_objects = true;
     }
     Ok(NativeProgram {
-        prefer_objects: !mixed_link_owners.is_empty(),
+        prefer_objects,
         callable_targets,
         function_link_types,
-        extension_modules,
-        literal_globals,
-        uses_regex_positions,
-        uses_format_field,
-        uses_sys_argv,
-        uses_orig_argv,
-        uses_linecache,
-        uses_cache_paths,
-        uses_builtins_last,
-        changes_stdout,
     })
 }
 
@@ -508,6 +446,56 @@ fn emit_program(
     output: &mut Output,
     program: NativeProgram,
 ) -> Result<(), Unsupported> {
+    let mut literal_globals = vec![None; module.globals.len()];
+    let mut extension_modules = BTreeSet::new();
+    let mut uses_regex_positions = false;
+    let mut uses_format_field = false;
+    let mut uses_sys_argv = false;
+    let mut uses_orig_argv = false;
+    let mut uses_linecache = false;
+    let mut uses_cache_paths = false;
+    let mut uses_builtins_last = false;
+    let mut changes_stdout = false;
+    for function in module.functions.iter().chain([&module.entry]) {
+        ir::walk_expressions(&function.body, &mut |expr| {
+            let ExprKind::Builtin(builtin, args) = &expr.kind else {
+                return;
+            };
+            match builtin {
+                Builtin::RegexCapture {
+                    operation: RegexCapture::Start | RegexCapture::End,
+                    ..
+                } => uses_regex_positions = true,
+                Builtin::FormatField(_) => uses_format_field = true,
+                Builtin::ExtensionImport(name) => {
+                    extension_modules.insert(name.clone());
+                }
+                Builtin::GlobalSet(slot) => {
+                    // A checked module binding has only one initializer.
+                    if let [
+                        Expr {
+                            kind: ExprKind::Str(value),
+                            ..
+                        },
+                    ] = args.as_slice()
+                    {
+                        literal_globals[*slot] = Some(value.clone());
+                    }
+                }
+                Builtin::SysArgv => uses_sys_argv = true,
+                Builtin::SysOrigArgv => uses_orig_argv = true,
+                Builtin::Linecache(..) => uses_linecache = true,
+                Builtin::WarningFormat { .. } if args[5].ty != Type::Str => uses_linecache = true,
+                Builtin::CachePath(_) | Builtin::ModuleCacheFromOrigin => uses_cache_paths = true,
+                Builtin::BuiltinsSetLast
+                | Builtin::SysDisplayHook
+                | Builtin::BuiltinsLen
+                | Builtin::BuiltinsSetLen => uses_builtins_last = true,
+                Builtin::SysStdoutSet | Builtin::SysStdoutDelete => changes_stdout = true,
+                _ => {}
+            }
+        });
+    }
     let mut resource_types: HashSet<_> = module
         .functions
         .iter()
@@ -554,14 +542,14 @@ fn emit_program(
         async_invoke_frames: BTreeMap::new(),
         function_link_types: program.function_link_types,
         json_schema_roots: Vec::new(),
-        module_reads_regex_positions: program.uses_regex_positions,
+        module_reads_regex_positions: uses_regex_positions,
         uses_regex_positions: false,
         regex_literals: BTreeMap::new(),
         bytes_literals: BTreeMap::new(),
         integer_literals: BTreeMap::new(),
         enum_members: Vec::new(),
         http_members: Vec::new(),
-        literal_globals: program.literal_globals,
+        literal_globals,
         loops: Vec::new(),
         locals: Vec::new(),
         directory_slot_count: 0,
@@ -592,14 +580,14 @@ fn emit_program(
         inline_dispatch,
         callable_targets: program.callable_targets,
         integer_regions: integer_regions::analyze(module),
-        uses_sys_argv: program.uses_sys_argv || program.uses_orig_argv,
-        uses_orig_argv: program.uses_orig_argv,
-        uses_linecache: program.uses_linecache,
+        uses_sys_argv: uses_sys_argv || uses_orig_argv,
+        uses_orig_argv,
+        uses_linecache,
         uses_percent_tuple: false,
-        uses_builtins_last: program.uses_builtins_last,
-        uses_cache_paths: program.uses_cache_paths,
-        changes_stdout: program.changes_stdout,
-        has_extensions: !program.extension_modules.is_empty(),
+        uses_builtins_last,
+        uses_cache_paths,
+        changes_stdout,
+        has_extensions: !extension_modules.is_empty(),
     };
     emitter.prepare_enum_members();
     // Erased formatters may call back through another missing key. The normal
@@ -629,7 +617,7 @@ fn emit_program(
         .output
         .common()
         .push_str("; Generated by Imre. Runtime arguments borrow; results transfer ownership.\n");
-    write_declarations(emitter.output.common(), program.uses_format_field);
+    write_declarations(emitter.output.common(), uses_format_field);
     if emitter.uses_sequence_layout {
         emitter
             .output
@@ -661,10 +649,10 @@ fn emit_program(
             .common()
             .push_str("declare ptr @imre_str_percent_tuple(ptr,ptr)\n");
     }
-    if !program.extension_modules.is_empty() {
+    if !extension_modules.is_empty() {
         let output = emitter.output.common();
         output.push_str("declare i1 @imre_extension_enter()\ndeclare void @imre_extension_import(ptr)\ndeclare void @imre_extension_clear()\ndeclare i64 @imre_extension_call(ptr, ptr, ptr, ptr, i64, i32)\n");
-        for name in program.extension_modules {
+        for name in extension_modules {
             writeln!(output, "declare ptr @PyInit_{name}()").unwrap();
         }
     }

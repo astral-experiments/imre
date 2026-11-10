@@ -557,7 +557,7 @@ fn object_fallback(
     };
     // A newly found checked provider can lower normally. If lowering fails, its
     // dependencies alone do not admit the caller to the object importer.
-    let fallback = |graph| match (graph, deferred_native, kind) {
+    let fallback = |graph, deferred_native| match (graph, deferred_native, kind) {
         (Some(graph), Some((ir, program)), _) => {
             let units = native(&graph, ir, program).map_err(|error| error.0.to_owned())?;
             native_result(graph, units)
@@ -590,7 +590,7 @@ fn object_fallback(
                 ) || g.imports_struct_decorator()
             }))
     {
-        return fallback(checked_graph);
+        return fallback(checked_graph, deferred_native);
     }
     let operation = graph.as_ref().and_then(|g| {
         if checked_entry {
@@ -673,6 +673,11 @@ fn object_fallback(
         Ok(())
     };
     let check = |entry_requests_objects, registered: Option<dynamic::RegisteredSources<'_>>| {
+        // The registered compiler has selected its sources. Only a declined
+        // registration can use the fixed functions, owners and callable targets.
+        if registered.is_some() {
+            drop(deferred_native.take());
+        }
         check_returns(entry_requests_objects)?;
         if let Some(registered) = registered {
             analysis::check_registered_project(
@@ -728,7 +733,7 @@ fn object_fallback(
             site_probes.record(&mut compilation.source_inputs);
             Ok(compilation)
         }
-        None => fallback(checked_graph),
+        None => fallback(checked_graph, deferred_native),
     }
 }
 

@@ -3925,6 +3925,31 @@ mod tests {
     }
 
     #[test]
+    fn registered_arithmetic_keeps_scalar_types_and_original_protocol_operands() {
+        let source = concat!(
+            "def deliver(a: int, b: int, flag: bool, send):\n",
+            "    send(a * b)\n",
+            "    send(a + flag)\n",
+            "    send(a ** flag)\n",
+        );
+        let graph = SourceGraph::single(source).unwrap();
+        assert!(super::super::lower(&graph).is_err());
+        let functions = graph.registered_functions();
+        let body = &functions[&graph.entry][&TextSize::default()].function.body;
+        let mut operations = Vec::new();
+        ir::walk_expressions(body, &mut |expr| {
+            if let ExprKind::Binary(op, left, right) = &expr.kind {
+                operations.push((op.protocol(), left.ty, right.ty, expr.ty));
+            }
+        });
+        assert_eq!(operations, [
+            ("*", Type::Int, Type::Int, Type::Int),
+            ("+", Type::Int, Type::Bool, Type::Int),
+            ("**", Type::Int, Type::Bool, Type::Int),
+        ]);
+    }
+
+    #[test]
     fn checked_capture_requires_an_object_receiver_for_late_method_lookup() {
         for expression in [
             "n.unknown",

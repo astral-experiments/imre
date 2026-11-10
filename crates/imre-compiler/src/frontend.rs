@@ -6769,21 +6769,26 @@ impl<'a> Checker<'a> {
         } else {
             (self.expr(&binary.left)?, self.expr(&binary.right)?)
         };
-        if self.registered.is_some() {
-            // Validate concrete layouts with the ordinary checker. The Python frame
-            // still sees the original operands (including subclasses) in source order.
-            let ty = if left.ty == Type::PythonObject || right.ty == Type::PythonObject {
-                Type::PythonObject
-            } else {
-                self.binary_operands(binary, left.clone(), right.clone())?
-                    .ty
-            };
-            return Ok(Expr {
-                ty,
-                kind: ExprKind::Binary(binary.op.into(), Box::new(left), Box::new(right)),
-            });
+        // Scalar arithmetic keeps both operands in the checked operation. The
+        // registered emitter guards their actual handles, including subclasses.
+        // Power has a distinct fixed operation selected from the exponent.
+        let scalar = binary.op != ast::Operator::Pow
+            && matches!(left.ty, Type::Int | Type::Float)
+            && matches!(right.ty, Type::Int | Type::Float);
+        if self.registered.is_none() || scalar {
+            return self.binary_operands(binary, left, right);
         }
-        self.binary_operands(binary, left, right)
+        // Other fixed layouts can convert operands or select a builtin. Check the
+        // contract and keep the original handles for the Python operation.
+        let ty = if left.ty == Type::PythonObject || right.ty == Type::PythonObject {
+            Type::PythonObject
+        } else {
+            self.binary_operands(binary, left.clone(), right.clone())?.ty
+        };
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Binary(binary.op.into(), Box::new(left), Box::new(right)),
+        })
     }
 
     fn binary_operands(
