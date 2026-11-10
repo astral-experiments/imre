@@ -121,7 +121,6 @@ mod record_inputs;
 mod records;
 mod regex;
 mod registered;
-pub(crate) use registered::SourceGuard;
 pub(crate) use registered::booleans::{
     LogicalSites, Selection as LogicalSelection, SourceOperand, prepare_boolean,
 };
@@ -140,6 +139,7 @@ pub(crate) use registered::{
     attribute_write, delete_targets, prepare_expression_sites, registered_index_target, registered_sites,
     registered_type_alias, registered_type_parameters, template_operands,
 };
+pub(crate) use registered::{ContextTarget, SourceGuard};
 pub(crate) use registered::{
     LambdaBinding, LambdaDefault, LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion, inline_operand,
 };

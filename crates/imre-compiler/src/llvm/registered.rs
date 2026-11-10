@@ -1423,6 +1423,27 @@ impl RegisteredFrame<'_, '_> {
         result
     }
 
+    pub(crate) fn checked_binding(
+        &mut self,
+        checked: &RegisteredFunction,
+        entered: usize,
+        value: &str,
+        sites: &CheckedSites,
+    ) {
+        let Some(enclosing) = self.enter_checked_slots(checked.region()) else {
+            return;
+        };
+        let mut frame = Frame {
+            code: self,
+            names: Some(&checked.local_names),
+            sites,
+            inputs: &[],
+        };
+        frame.store_private(entered, value);
+        CheckedBody::registered(frame).emit_block(&checked.function.body);
+        self.restore_checked_slots(enclosing);
+    }
+
     pub(crate) fn checked_block(
         &mut self,
         statements: &[Statement],
