@@ -2053,8 +2053,9 @@ pub(super) unsafe extern "C" fn imre_dyn_string_method_target(
 ) -> Id {
     // SAFETY: generated code owns the context and passes a UTF-8 constant and one writable slot.
     let (ctx, name, bound_receiver) = unsafe { (&mut *ctx, cstr(name), &mut *bound_receiver) };
-    let target = ctx.string_method_target(receiver, name);
-    finish_method_target(ctx, target, bound_receiver)
+    method_target(ctx, bound_receiver, |ctx| {
+        ctx.string_method_target(receiver, name)
+    })
 }
 
 /// Prepare an ordinary positional method call before evaluating its arguments.
@@ -2070,8 +2071,9 @@ pub(super) unsafe extern "C" fn imre_dyn_builtin_method_target(
 ) -> Id {
     // SAFETY: generated code retains the context and passes static method names.
     let (ctx, name, bound_receiver) = unsafe { (&mut *ctx, cstr(name), &mut *bound_receiver) };
-    let target = ctx.builtin_method_target(receiver, name);
-    finish_method_target(ctx, target, bound_receiver)
+    method_target(ctx, bound_receiver, |ctx| {
+        ctx.builtin_method_target(receiver, name)
+    })
 }
 
 /// Resolve an immediate get call before evaluating arguments that may release its receiver.
@@ -2086,17 +2088,19 @@ pub(super) unsafe extern "C" fn imre_dyn_dict_get_target(
 ) -> Id {
     // SAFETY: generated code owns the context and passes one writable slot.
     let (ctx, bound_receiver) = unsafe { (&mut *ctx, &mut *bound_receiver) };
-    let target = ctx.dict_get_target(receiver);
-    finish_method_target(ctx, target, bound_receiver)
+    method_target(ctx, bound_receiver, |ctx| ctx.dict_get_target(receiver))
 }
 
-/// Publish the receiver only after method lookup succeeds.
-fn finish_method_target(
+/// Propagate a failing receiver expression before looking up its method.
+fn method_target(
     ctx: &mut Context,
-    target: Result<(Id, Id)>,
     bound_receiver: &mut Id,
+    lookup: impl FnOnce(&mut Context) -> Result<(Id, Id)>,
 ) -> Id {
-    let mut result = target.map(|(callable, receiver)| {
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let mut result = lookup(ctx).map(|(callable, receiver)| {
         *bound_receiver = receiver;
         callable
     });
