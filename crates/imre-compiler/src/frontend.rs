@@ -9646,7 +9646,7 @@ impl<'a> Checker<'a> {
             target => self.live_module_binding(target),
         };
         if let Some(callee) = live {
-            let value = registered::values::call_with_target(call, callee, |arg| self.expr(arg))?;
+            let value = self.call_with_target(call, callee)?;
             self.graph.checked_live_call(self.module, call);
             return Ok(value);
         }
@@ -9657,10 +9657,7 @@ impl<'a> Checker<'a> {
         {
             // A registered initializer already owns the namespace returned by globals().
             self.namespace_calls.insert(call.range());
-            return Ok(registered::values::object_call(
-                call,
-                vec![registered::values::name_binding("globals")],
-            ));
+            return Ok(registered::values::name_call(call, "globals", vec![]));
         }
         if self.unshadowed_builtin(&call.func, "range") {
             return self.range_value(call);
@@ -10286,9 +10283,7 @@ impl<'a> Checker<'a> {
                 };
                 if object.ty == Type::PythonObject {
                     let method = registered::values::loaded_attribute(method, object);
-                    return registered::values::call_with_target(call, method, |arg| {
-                        self.expr(arg)
-                    });
+                    return self.call_with_target(call, method);
                 }
                 if let Type::Class(class)
                 | Type::IntEnum(class)
@@ -11583,7 +11578,7 @@ impl<'a> Checker<'a> {
             };
             if receiver.ty == Type::PythonObject {
                 let method = registered::values::loaded_attribute(attribute, receiver);
-                return registered::values::call_with_target(call, method, |arg| self.expr(arg));
+                return self.call_with_target(call, method);
             }
             self.check_namedtuple_asdict(attribute, Some(receiver.ty))?;
             if let Some(result) =
@@ -13194,9 +13189,7 @@ impl<'a> Checker<'a> {
                 if self.registered.is_none() && !self.globals.registered_initializers {
                     self.missing_operation(&self.scoped_builtin_error(name, call));
                 }
-                let mut operands = args;
-                operands.insert(0, registered::values::name_binding(name));
-                return Ok(registered::values::object_call(call, operands));
+                return Ok(registered::values::name_call(call, name, args));
             }
             _ => return Err(error(self.source, call, UNSUPPORTED_ARGUMENTS)),
         };

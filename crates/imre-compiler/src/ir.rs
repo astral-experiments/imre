@@ -627,38 +627,21 @@ pub(crate) struct Expr {
 }
 
 impl Expr {
-    /// The registered binder loads this callable by name at its original operand site.
-    pub(crate) fn registered_local_range(&self) -> Option<ruff_text_size::TextRange> {
-        let ExprKind::Builtin(Builtin::RegisteredLocation(range, _), inputs) = &self.kind else {
-            return None;
-        };
-        (self.ty == Type::PythonObject
-            && matches!(
-                inputs.as_slice(),
-                [Expr {
-                    ty: Type::PythonObject,
-                    kind: ExprKind::Local(_)
-                }]
-            ))
-        .then_some(*range)
-    }
-
-    /// A Python invocation uses its enclosing call location and source-ordered positional operands.
-    pub(crate) fn is_registered_invoke(&self, parent: Option<&Expr>) -> bool {
+    /// A registered invocation carries the Python binder's position and source-ordered values.
+    pub(crate) fn is_registered_invoke(&self) -> bool {
         let ExprKind::Invoke { callable, args } = &self.kind else {
             return false;
         };
-        let Some(Expr {
-            kind: ExprKind::Builtin(Builtin::RegisteredLocation(call, _), _),
-            ..
-        }) = parent
-        else {
-            return false;
-        };
         self.ty == Type::PythonObject
-            && callable
-                .registered_local_range()
-                .is_some_and(|name| call.contains_range(name))
+            && callable.ty == Type::PythonObject
+            && args.python_site.as_ref().is_some_and(|site| {
+                site.range.start() < site.callee_end
+                    && site.callee_end < site.range.end()
+                    && site.suspended_name.is_none_or(|name| {
+                        site.range.contains_range(name) && name.end() == site.callee_end
+                    })
+                    && site.scope.as_ref().is_none_or(|scope| scope.ty == Type::PythonObject)
+            })
             && args.order.iter().copied().eq(0..args.values.len())
     }
 
@@ -863,12 +846,22 @@ pub(crate) enum DisplayKind {
     Set,
 }
 
+/// The Python call position and, for an inline comprehension, its lexical namespace.
+#[derive(Clone)]
+pub(crate) struct InvokeSite {
+    pub range: ruff_text_size::TextRange,
+    pub callee_end: ruff_text_size::TextSize,
+    pub suspended_name: Option<ruff_text_size::TextRange>,
+    pub scope: Option<Box<Expr>>,
+}
+
 /// Values are evaluated and rooted in source order. `order` is a permutation of
 /// their indices that supplies the native call's parameter order without
 /// reevaluation. Methods include their receiver first; constructors omit the
 /// implicit receiver, which is allocated only after these values are evaluated.
 #[derive(Clone)]
 pub(crate) struct CallArgs {
+    pub python_site: Option<InvokeSite>,
     /// The callee's nominal tag feeds a complete member dispatch at this site.
     pub exhaustive_enum_match: bool,
     pub values: Vec<Expr>,
@@ -879,6 +872,7 @@ impl CallArgs {
     /// Uses the existing positional order for calls that need no argument binding.
     pub(crate) fn positional(values: Vec<Expr>) -> Self {
         Self {
+            python_site: None,
             exhaustive_enum_match: false,
             order: (0..values.len()).collect(),
             values,
@@ -3872,8 +3866,11 @@ macro_rules! expression_children {
             }
             ExprKind::Invoke {
                 callable,
-                args: CallArgs { values, .. },
+                args: CallArgs { python_site, values, .. },
             } => {
+                if let Some(InvokeSite { scope: Some(scope), .. }) = python_site {
+                    $visit(scope);
+                }
                 $visit(callable);
                 for value in values {
                     $visit(value);

@@ -148,8 +148,8 @@ pub(crate) fn registered(
                     "registered assertion failure takes at most one message",
                 ),
                 ExprKind::Invoke { .. } => require(
-                    value.is_registered_invoke(parent),
-                    "registered invocation needs a located callable and positional arguments",
+                    value.is_registered_invoke(),
+                    "registered invocation needs a Python callable, call position and positional arguments",
                 ),
                 ExprKind::Builtin(Builtin::RegisteredLocation(..), args) => match args.as_slice() {
                     [inner] => same(value.ty, inner.ty),
@@ -922,6 +922,7 @@ mod tests {
             body: Vec::new(),
         });
         let mut args = CallArgs {
+            python_site: None,
             exhaustive_enum_match: false,
             values: vec![
                 Expr {
