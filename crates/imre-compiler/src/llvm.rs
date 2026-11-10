@@ -337,52 +337,42 @@ pub(crate) fn emit(
     ranges: &RangeFacts<'_>,
     sanitize: bool,
 ) -> Result<String, Unsupported> {
-    emit_file(module, ranges, sanitize).map(|(llvm, _)| llvm)
+    emit_file(module, ranges, sanitize, analyze_program(module)?)
 }
 
 pub(crate) fn emit_file(
     module: &Module,
     ranges: &RangeFacts<'_>,
     sanitize: bool,
-) -> Result<(String, bool), Unsupported> {
+    program: NativeProgram,
+) -> Result<String, Unsupported> {
     let mut output = Output::new(&vec![0; module.functions.len()], 1, 0, false);
-    let prefer_objects = emit_program(module, ranges, sanitize, &mut output)?;
-    Ok((std::mem::take(output.entry_buffer()), prefer_objects))
+    emit_program(module, ranges, sanitize, &mut output, program)?;
+    Ok(std::mem::take(output.entry_buffer()))
 }
 
 const BRANCH_WEIGHTS: &str = "\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n!1 = !{!\"branch_weights\", i32 2000, i32 1}\n";
 
-fn emit_program(
-    module: &Module,
-    ranges: &RangeFacts<'_>,
-    sanitize: bool,
-    output: &mut Output,
-) -> Result<bool, Unsupported> {
+/// Representation and runtime dependencies of a specialized checked module.
+pub(crate) struct NativeProgram {
+    pub(crate) prefer_objects: bool,
+    callable_targets: crate::callables::Targets,
+    function_link_types: HashSet<Type>,
+    extension_modules: BTreeSet<String>,
+    literal_globals: Vec<Option<String>>,
+    uses_regex_positions: bool,
+    uses_sys_argv: bool,
+    uses_orig_argv: bool,
+    uses_linecache: bool,
+    uses_cache_paths: bool,
+    uses_builtins_last: bool,
+    changes_stdout: bool,
+}
+
+pub(crate) fn analyze_program(module: &Module) -> Result<NativeProgram, Unsupported> {
     let callable_targets = crate::callables::Targets::analyze(module);
-    let mut resource_types: HashSet<_> = module
-        .functions
-        .iter()
-        .chain([&module.entry])
-        .flat_map(|function| function.locals.iter().copied())
-        .collect();
-    resource_types.retain(|&ty| {
-        if matches!(ty, Type::Callable(_)) {
-            // A plain function has no captured receiver to finalize.
-            return callable_targets.get(ty).iter().any(|target| {
-                let f = &module.functions[target.function];
-                target.bound
-                    && module
-                        .types
-                        .may_own_file(f.locals[f.params[0]], &module.class_fields, true)
-            });
-        }
-        module.types.may_own_file(ty, &module.class_fields, true)
-    });
-    let borrows = borrows::analyze(module, &callable_targets);
-    let effects = effects::analyze(module, &callable_targets);
-    let inline_dispatch = string_enums::inline_dispatch(module, &effects);
     let mut literal_globals = vec![None; module.globals.len()];
-    let mut extension_modules = std::collections::BTreeSet::new();
+    let mut extension_modules = BTreeSet::new();
     let mut function_link_types = HashSet::new();
     let mut mixed_link_owners = Vec::new();
     let mut declared_caches = HashSet::new();
@@ -487,6 +477,51 @@ fn emit_program(
             "Imre: native wrapper links require a plain function as their owner",
         ));
     }
+    Ok(NativeProgram {
+        prefer_objects: !mixed_link_owners.is_empty(),
+        callable_targets,
+        function_link_types,
+        extension_modules,
+        literal_globals,
+        uses_regex_positions,
+        uses_sys_argv,
+        uses_orig_argv,
+        uses_linecache,
+        uses_cache_paths,
+        uses_builtins_last,
+        changes_stdout,
+    })
+}
+
+fn emit_program(
+    module: &Module,
+    ranges: &RangeFacts<'_>,
+    sanitize: bool,
+    output: &mut Output,
+    program: NativeProgram,
+) -> Result<(), Unsupported> {
+    let mut resource_types: HashSet<_> = module
+        .functions
+        .iter()
+        .chain([&module.entry])
+        .flat_map(|function| function.locals.iter().copied())
+        .collect();
+    resource_types.retain(|&ty| {
+        if matches!(ty, Type::Callable(_)) {
+            // A plain function has no captured receiver to finalize.
+            return program.callable_targets.get(ty).iter().any(|target| {
+                let f = &module.functions[target.function];
+                target.bound
+                    && module
+                        .types
+                        .may_own_file(f.locals[f.params[0]], &module.class_fields, true)
+            });
+        }
+        module.types.may_own_file(ty, &module.class_fields, true)
+    });
+    let borrows = borrows::analyze(module, &program.callable_targets);
+    let effects = effects::analyze(module, &program.callable_targets);
+    let inline_dispatch = string_enums::inline_dispatch(module, &effects);
     let mut emitter = Emitter {
         module,
         output,
@@ -509,16 +544,16 @@ fn emit_program(
         callable_uses: callables::Uses::default(),
         async_frames: BTreeMap::new(),
         async_invoke_frames: BTreeMap::new(),
-        function_link_types,
+        function_link_types: program.function_link_types,
         json_schema_roots: Vec::new(),
-        module_reads_regex_positions: uses_regex_positions,
+        module_reads_regex_positions: program.uses_regex_positions,
         uses_regex_positions: false,
         regex_literals: BTreeMap::new(),
         bytes_literals: BTreeMap::new(),
         integer_literals: BTreeMap::new(),
         enum_members: Vec::new(),
         http_members: Vec::new(),
-        literal_globals,
+        literal_globals: program.literal_globals,
         loops: Vec::new(),
         locals: Vec::new(),
         directory_slot_count: 0,
@@ -547,16 +582,16 @@ fn emit_program(
         ranges,
         effects,
         inline_dispatch,
-        callable_targets,
+        callable_targets: program.callable_targets,
         integer_regions: integer_regions::analyze(module),
-        uses_sys_argv: uses_sys_argv || uses_orig_argv,
-        uses_orig_argv,
-        uses_linecache,
+        uses_sys_argv: program.uses_sys_argv || program.uses_orig_argv,
+        uses_orig_argv: program.uses_orig_argv,
+        uses_linecache: program.uses_linecache,
         uses_percent_tuple: false,
-        uses_builtins_last,
-        uses_cache_paths,
-        changes_stdout,
-        has_extensions: !extension_modules.is_empty(),
+        uses_builtins_last: program.uses_builtins_last,
+        uses_cache_paths: program.uses_cache_paths,
+        changes_stdout: program.changes_stdout,
+        has_extensions: !program.extension_modules.is_empty(),
     };
     emitter.prepare_enum_members();
     // Erased formatters may call back through another missing key. The normal
@@ -618,10 +653,10 @@ fn emit_program(
             .common()
             .push_str("declare ptr @imre_str_percent_tuple(ptr,ptr)\n");
     }
-    if !extension_modules.is_empty() {
+    if !program.extension_modules.is_empty() {
         let output = emitter.output.common();
         output.push_str("declare i1 @imre_extension_enter()\ndeclare void @imre_extension_import(ptr)\ndeclare void @imre_extension_clear()\ndeclare i64 @imre_extension_call(ptr, ptr, ptr, ptr, i64, i32)\n");
-        for name in extension_modules {
+        for name in program.extension_modules {
             writeln!(output, "declare ptr @PyInit_{name}()").unwrap();
         }
     }
@@ -730,7 +765,7 @@ fn emit_program(
     write_function_bodies(emitter.output, module, bodies, sanitize);
     // Layout hints never replace the representation, overflow, or error guards.
     emitter.output.common().push_str(BRANCH_WEIGHTS);
-    Ok(!mixed_link_owners.is_empty())
+    Ok(())
 }
 
 fn write_function_bodies(
