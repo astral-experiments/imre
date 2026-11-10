@@ -585,14 +585,14 @@ fn launch(
         let mut update = None;
         let (python, acquire) = match operation {
             Operation::Python(callback) => match callback.load() {
-                Ok((mut worker, call)) => {
+                Ok((mut worker, function, slots)) => {
                     worker
                         .heap
                         .observe_fault_workers(fault_workers.as_ref().expect("Python worker"));
                     worker.threads.count = Arc::clone(&count);
                     worker.threads.private_context = true;
                     worker.threads.acquire_bound = operand_bound;
-                    (Some((worker, call)), None)
+                    (Some((worker, function, slots)), None)
                 }
                 Err(error) => {
                     let _ = ready.send(Err(error.to_string()));
@@ -623,8 +623,15 @@ fn launch(
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         let native_id = None;
         if ready.send(Ok((thread_ident(), native_id))).is_ok() {
-            if let Some((mut worker, call)) = python {
-                if let Err(error) = call.invoke(&mut worker) {
+            if let Some((mut worker, function, slots)) = python {
+                let result = match worker.prepare_bound_function(function, slots) {
+                    // SAFETY: the ABI pointer comes from the Context owned by this
+                    // pthread. Preparation's borrow has ended and no other code can
+                    // move or access the Context until this frame returns.
+                    Ok(frame) => unsafe { frame.run(&raw mut worker) },
+                    Err(error) => Err(error),
+                };
+                if let Err(error) = result {
                     if let Some(label) = detached_label {
                         if error.kind != "SystemExit" {
                             let _ = writeln!(

@@ -8,6 +8,77 @@ fn context() -> Context {
     )
 }
 
+#[test]
+fn owned_registered_entry_roots_bound_slots_and_restores_its_frame() {
+    unsafe extern "C" fn entry(raw: *mut Context, scope: Id) -> Id {
+        // SAFETY: the worker owns its Context until the registered frame returns.
+        let ctx = unsafe { &mut *raw };
+        ctx.collect_unreachable();
+        let result = (|| {
+            let value = ctx.lookup(scope, "value")?;
+            if ctx.lookup(scope, "alias")? != value {
+                return Err(Error::new("AssertionError", "slot identity changed"));
+            }
+            if ctx.truth(value)? {
+                return Err(Error::new("ValueError", "worker failed"));
+            }
+            Ok(value)
+        })();
+        match result {
+            Ok(value) => value,
+            Err(error) => {
+                ctx.pending = Some(error);
+                NONE
+            }
+        }
+    }
+
+    let mut ctx = context();
+    let scope = ctx.scope("worker_test", None);
+    let name = ctx.text("target");
+    let signature = ctx.text(r#"{"positional":["value"],"kwonly":["alias"]}"#);
+    let file = ctx.text("worker_test.py");
+    let code = ctx.prelinked_code(
+        crate::dynamic::value::Body::Native(entry, NONE),
+        scope,
+        name,
+        signature,
+        (name, NONE),
+        (file, 1),
+    );
+    let defaults = ctx.dict(Vec::new());
+    let target = ctx
+        .define_function(code, scope, name, defaults, name, NONE, NONE, false)
+        .unwrap();
+    let worker = std::cell::RefCell::new(ctx);
+    for fails in [false, true] {
+        let (value, frame) = {
+            let mut ctx = worker.borrow_mut();
+            let mark = ctx.heap.temporary_mark();
+            let value = ctx.alloc(Value::List(if fails { vec![NONE] } else { Vec::new() }));
+            // Collection in the linked entry must find the value through its bound scope.
+            ctx.heap.release_temporaries_since(mark);
+            let frame = ctx
+                .prepare_bound_function(target, vec![value, value])
+                .unwrap();
+            (value, frame)
+        };
+        // SAFETY: preparation released its RefMut. This thread owns the stable Context.
+        let result = unsafe { frame.run(worker.as_ptr()) };
+        let ctx = worker.borrow();
+        assert_eq!(ctx.heap.python_depth(), 0);
+        assert_eq!(ctx.call_depth, 0);
+        assert!(ctx.pending.is_none());
+        if fails {
+            let error = result.unwrap_err();
+            assert_eq!(error.kind, "ValueError");
+            assert_eq!(error.message, "worker failed");
+        } else {
+            assert_eq!(result.unwrap(), value);
+        }
+    }
+}
+
 // An accidental blocking join must fail the live-state checks without hanging the test process.
 fn while_lock_held<T>(probe: impl FnOnce(&Arc<PrimitiveLock>) -> T) -> T {
     let lock = Arc::new(PrimitiveLock::default());

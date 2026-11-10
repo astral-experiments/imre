@@ -33,18 +33,6 @@ pub(super) struct Callback {
     finalizing: Arc<std::sync::atomic::AtomicBool>,
 }
 
-pub(super) struct WorkerCall {
-    function: Id,
-    arguments: Vec<Id>,
-    keywords: Vec<(String, Id)>,
-}
-
-impl WorkerCall {
-    pub(super) fn invoke(self, worker: &mut Context) -> Result<Id> {
-        worker.call(self.function, self.arguments, self.keywords)
-    }
-}
-
 fn unsupported() -> Error {
     Error::new(
         "NotImplementedError",
@@ -419,7 +407,7 @@ impl Callback {
         self.receiver.is_some()
     }
 
-    pub(super) fn load(self) -> Result<(Context, WorkerCall)> {
+    pub(super) fn load(self) -> Result<(Context, Id, Vec<Id>)> {
         let mut heap = super::Heap::with_worker_stack(Some(self.frames));
         heap.allocation_traces = self.allocation_traces;
         let mut ctx = ffi::new_context_with_heap(self.config, std::iter::empty::<String>(), heap);
@@ -459,8 +447,9 @@ impl Callback {
         aliases
             .try_reserve(self.values.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
-        let mut args = Vec::new();
-        args.try_reserve_exact(self.values.len())
+        let mut slots = Vec::new();
+        slots
+            .try_reserve_exact(self.values.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
         for value in self.values {
             let id = match value {
@@ -472,30 +461,12 @@ impl Callback {
                     .or_insert_with(|| ctx.alloc(Value::HandlerLock(lock))),
                 Argument::Builtin(name) => ctx.builtin(name),
             };
-            args.push(id);
+            slots.push(id);
         }
         let parameters = ctx.parsed_parameters(code)?;
-        if args.len() != parameters.positional.len() + parameters.keyword_only.len() {
+        if slots.len() != parameters.positional.len() + parameters.keyword_only.len() {
             return Err(unsupported());
         }
-        let mut keywords = Vec::new();
-        keywords
-            .try_reserve_exact(parameters.keyword_only.len())
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        for (name, id) in parameters
-            .keyword_only
-            .iter()
-            .zip(args.drain(parameters.positional.len()..))
-        {
-            keywords.push((copy_label(name)?, id));
-        }
-        Ok((
-            ctx,
-            WorkerCall {
-                function,
-                arguments: args,
-                keywords,
-            },
-        ))
+        Ok((ctx, function, slots))
     }
 }

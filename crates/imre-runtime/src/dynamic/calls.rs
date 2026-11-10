@@ -229,6 +229,74 @@ fn non_callable_error(name: &str) -> Error {
     Error::new_static("TypeError", message)
 }
 
+enum FunctionArguments {
+    Call {
+        args: Vec<Id>,
+        kwargs: Vec<(String, Id)>,
+        variadic: Option<Id>,
+    },
+    Bound(Vec<Id>),
+}
+
+fn invalid_bound_call() -> Error {
+    Error::new(
+        "SystemError",
+        "invalid bound arguments for registered function",
+    )
+}
+
+enum RegisteredCall {
+    Returned(Id),
+    Native(RegisteredFrame),
+}
+
+struct FunctionReturn {
+    callable: Id,
+    signature: std::rc::Rc<CallParameters>,
+    name: crate::Str,
+}
+
+impl FunctionReturn {
+    fn finish(self, ctx: &mut Context, result: Result<Id>) -> Result<Id> {
+        ctx.call_depth -= 1;
+        let value = result?;
+        if let Some(expected) = self.signature.return_type.as_deref() {
+            ctx.require_scalar(
+                self.callable,
+                "return",
+                value,
+                expected,
+                false,
+                format_args!("{} return value", self.name),
+            )?;
+        }
+        Ok(value)
+    }
+}
+
+/// The pushed frame owns the function and local scope until completion.
+pub(super) struct RegisteredFrame {
+    entry: Code,
+    scope: Id,
+    returning: FunctionReturn,
+}
+
+impl RegisteredFrame {
+    /// # Safety
+    /// `context` must point to the exclusively executing Context which prepared this frame.
+    /// It must stay in place on this thread until the linked entry and finalization return.
+    pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
+        stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+            // SAFETY: the caller owns this execution and its loaded code. The ABI returns
+            // before the Context is borrowed to finish the rooted frame.
+            let value = unsafe { (self.entry)(context, self.scope) };
+            let ctx = unsafe { &mut *context };
+            let result = ctx.finish_native_frame(value);
+            self.returning.finish(ctx, result)
+        })
+    }
+}
+
 impl Context {
     pub(super) fn class_attr(&self, class: Id, name: &str) -> Option<Id> {
         if name == "__hash__" {
@@ -8128,6 +8196,20 @@ impl Context {
             ));
         }
         let target = match self.heap.get(callable) {
+            Value::Function { .. } => {
+                let arguments = FunctionArguments::Call {
+                    args,
+                    kwargs,
+                    variadic,
+                };
+                return match self.prepare_function(callable, arguments)? {
+                    RegisteredCall::Returned(value) => Ok(value),
+                    RegisteredCall::Native(frame) => {
+                        // SAFETY: this synchronous caller retains exclusive use of its Context.
+                        unsafe { frame.run(self) }
+                    }
+                };
+            }
             Value::Native(name) => Value::Native(copy_label(name)?),
             Value::Class {
                 name,
@@ -8916,60 +8998,100 @@ impl Context {
                 }
                 Ok(instance)
             }
-            Value::Function {
-                fields,
-                scope,
-                class_cell,
-                code,
-                defaults,
-                kwdefaults,
-                ..
+            _ => Err(non_callable_error(self.type_name(callable))),
+        }
+    }
+
+    /// Prepare the worker-local function using the canonical slots already bound by its caller.
+    pub(super) fn prepare_bound_function(
+        &mut self,
+        callable: Id,
+        slots: Vec<Id>,
+    ) -> Result<RegisteredFrame> {
+        match self.prepare_function(callable, FunctionArguments::Bound(slots))? {
+            RegisteredCall::Native(frame) => Ok(frame),
+            RegisteredCall::Returned(_) => unreachable!("bound slots require a native entry"),
+        }
+    }
+
+    fn prepare_function(
+        &mut self,
+        callable: Id,
+        arguments: FunctionArguments,
+    ) -> Result<RegisteredCall> {
+        let Value::Function {
+            ref fields,
+            scope,
+            class_cell,
+            code,
+            defaults,
+            kwdefaults,
+            ..
+        } = *self.heap.get(callable)
+        else {
+            return Err(invalid_bound_call());
+        };
+        let parameters = self.code_object(code).parameters;
+        let name = self.copy_name(fields.qualname)?;
+        if parameters == NONE {
+            let FunctionArguments::Call { args, kwargs, .. } = arguments else {
+                return Err(invalid_bound_call());
+            };
+            if let Some((key, _)) = kwargs.first() {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("{name}() got an unexpected keyword argument '{key}'"),
+                ));
+            }
+            if !args.is_empty() {
+                let verb = if args.len() == 1 { "was" } else { "were" };
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "{name}() takes 0 positional arguments but {} {verb} given",
+                        args.len()
+                    ),
+                ));
+            }
+            let globals = self.module_globals(scope)?;
+            return self
+                .exec_source(code, globals, None, Some(callable))
+                .map(RegisteredCall::Returned);
+        }
+        // Root the scope, packed arguments, keyword names, and returning value.
+        let keyword_count = match &arguments {
+            FunctionArguments::Call { kwargs, .. } => kwargs.len(),
+            FunctionArguments::Bound(_) => 0,
+        };
+        self.heap
+            .reserve_temporaries(keyword_count.saturating_add(4))?;
+        let module = copy_label(&self.scope_data(scope).module)?;
+        let local = allocator_api2::boxed::Box::try_new(Scope::new(module, Some(scope)))
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        let local = self.alloc(Value::Scope(local));
+        let sig = self.parsed_parameters(code)?;
+        let Value::Scope(frame) = self.heap.get_mut(local) else {
+            unreachable!()
+        };
+        frame.closure.declared = sig.locals.clone();
+        frame
+            .closure
+            .nonlocals
+            .try_reserve(sig.nonlocals.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        frame.closure.declared_complete = sig.locals_complete;
+        for name in &sig.nonlocals {
+            frame.closure.nonlocals.insert(copy_label(name)?);
+        }
+
+        let shape = sig.shape();
+        match arguments {
+            FunctionArguments::Call {
+                args,
+                kwargs,
+                variadic,
             } => {
-                let parameters = self.code_object(code).parameters;
-                let name = self.copy_name(fields.qualname)?;
-                if parameters == NONE {
-                    if let Some((key, _)) = kwargs.first() {
-                        return Err(Error::new(
-                            "TypeError",
-                            format!("{name}() got an unexpected keyword argument '{key}'"),
-                        ));
-                    }
-                    if !args.is_empty() {
-                        let verb = if args.len() == 1 { "was" } else { "were" };
-                        return Err(Error::new(
-                            "TypeError",
-                            format!(
-                                "{name}() takes 0 positional arguments but {} {verb} given",
-                                args.len()
-                            ),
-                        ));
-                    }
-                    let globals = self.module_globals(scope)?;
-                    return self.exec_source(code, globals, None, Some(callable));
-                }
-                // Root the scope, packed arguments, keyword names, and returning value.
-                self.heap
-                    .reserve_temporaries(kwargs.len().saturating_add(4))?;
-                let module = copy_label(&self.scope_data(scope).module)?;
-                let local = allocator_api2::boxed::Box::try_new(Scope::new(module, Some(scope)))
-                    .map_err(|_| Error::new("MemoryError", ""))?;
-                let local = self.alloc(Value::Scope(local));
-                let sig = self.parsed_parameters(code)?;
-                let Value::Scope(frame) = self.heap.get_mut(local) else {
-                    unreachable!()
-                };
-                frame.closure.declared = sig.locals.clone();
-                frame
-                    .closure
-                    .nonlocals
-                    .try_reserve(sig.nonlocals.len())
-                    .map_err(|_| Error::new("MemoryError", ""))?;
-                frame.closure.declared_complete = sig.locals_complete;
-                for name in &sig.nonlocals {
-                    frame.closure.nonlocals.insert(copy_label(name)?);
-                }
                 let pos = &sig.positional;
-                let shape = sig.shape();
                 let default_values = if defaults == NONE {
                     Vec::new()
                 } else {
@@ -9025,34 +9147,52 @@ impl Context {
                     self.bind_argument(local, n, value)?;
                 }
                 supplied_types?;
-                let Value::Scope(frame) = self.heap.get_mut(local) else {
-                    unreachable!()
-                };
-                frame.first_argument = pos.first().map(|name| copy_label(name)).transpose()?;
-                if sig.class_cell {
-                    frame.class_cell = class_cell;
-                }
-                self.check_call_depth(0)?;
-                self.call_depth += 1;
-                let result = stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
-                    self.execute(code, local, FrameOwner::Function(callable))
-                });
-                self.call_depth -= 1;
-                let value = result?;
-                if let Some(expected) = sig.return_type.as_deref() {
-                    self.require_scalar(
-                        callable,
-                        "return",
-                        value,
-                        expected,
-                        false,
-                        format_args!("{name} return value"),
-                    )?;
-                }
-                Ok(value)
             }
-            _ => Err(non_callable_error(self.type_name(callable))),
+            FunctionArguments::Bound(slots) => {
+                if !matches!(self.code_object(code).body, value::Body::Native(_, NONE))
+                    || sig.varargs.is_some()
+                    || sig.kwargs.is_some()
+                    || slots.len() != sig.positional.len() + sig.keyword_only.len()
+                {
+                    return Err(invalid_bound_call());
+                }
+                for (name, id) in sig.positional.iter().chain(&sig.keyword_only).zip(slots) {
+                    self.bind_argument(local, name, id)?;
+                }
+                self.check_supplied_types(callable, local, &sig, &name)?;
+            }
         }
+        let Value::Scope(frame) = self.heap.get_mut(local) else {
+            unreachable!()
+        };
+        frame.first_argument = sig
+            .positional
+            .first()
+            .map(|name| copy_label(name))
+            .transpose()?;
+        if sig.class_cell {
+            frame.class_cell = class_cell;
+        }
+        self.check_call_depth(0)?;
+        self.call_depth += 1;
+        let returning = FunctionReturn {
+            callable,
+            signature: sig,
+            name,
+        };
+        let owner = FrameOwner::Function(callable);
+        if let value::Body::Native(entry, _) = self.code_object(code).body {
+            self.heap.enter(local, code, owner);
+            return Ok(RegisteredCall::Native(RegisteredFrame {
+                entry,
+                scope: local,
+                returning,
+            }));
+        }
+        let result = stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+            self.execute(code, local, owner)
+        });
+        returning.finish(self, result).map(RegisteredCall::Returned)
     }
 
     /// Guard nested native slots that can recurse without entering a Python frame.
