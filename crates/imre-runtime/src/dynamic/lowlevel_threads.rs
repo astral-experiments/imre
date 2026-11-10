@@ -42,45 +42,21 @@ pub(super) struct Workers {
     pub(super) default_unraisable_hook: Option<Id>,
     pub(super) asyncgen_hooks: [Id; 2],
     pub(super) coroutine_origin_depth: u32,
-    running: Vec<(Arc<AtomicBool>, Vec<Id>)>,
 }
 
 impl Workers {
-    pub(super) fn reap(&mut self, heap: &mut super::value::Heap) {
-        self.running.retain(|(active, roots)| {
-            if active.load(Ordering::Acquire) {
-                return true;
-            }
-            for &value in roots {
-                heap.weak_edge_removed(value);
-            }
-            false
-        });
-    }
-
-    // The bootstrap tuple and bound objects remain rooted until the callback exits.
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
         self.system_module
             .into_iter()
             .chain(self.default_unraisable_hook)
             .chain(self.asyncgen_hooks)
-            .chain(
-                self.running
-                    .iter()
-                    .flat_map(|(_, roots)| roots.iter().copied()),
-            )
     }
 }
 
 impl Context {
     /// The worker cannot route an error through an object on the caller's heap.
     pub(super) fn check_thread_reporter_mutable(&self) -> Result<()> {
-        if self
-            .threads
-            .running
-            .iter()
-            .any(|(active, _)| active.load(Ordering::Acquire))
-        {
+        if self.workers.detached_active() {
             return Err(Error::new(
                 "NotImplementedError",
                 "changing thread exception reporting while a worker runs requires the boxed Python heap",
@@ -161,8 +137,7 @@ pub(super) fn call(
             return super::thread_worker::call(ctx, "shutdown", args, kwargs);
         }
         let count = ctx.threads.count.load(Ordering::SeqCst);
-        ctx.threads.reap(&mut ctx.heap);
-        ctx.reap_thread_operands();
+        ctx.workers.reap_finished(&mut ctx.heap);
         return Ok(ctx.int(count as i64));
     }
     let [function, positional, rest @ ..] = args else {
@@ -228,13 +203,6 @@ pub(super) fn call(
             "custom thread exception reporting requires the boxed Python heap",
         ));
     }
-    ctx.threads.reap(&mut ctx.heap);
-    ctx.threads
-        .running
-        .try_reserve(1)
-        .map_err(|_| Error::new("MemoryError", ""))?;
-    let label = ctx.repr(*function);
-    let (ident, roots_active) = super::thread_worker::start_detached(ctx, callback, label)?;
-    ctx.threads.running.push((roots_active, roots));
+    let ident = super::thread_worker::start_detached(ctx, callback, *function, roots)?;
     Ok(ctx.int(ident as i64))
 }

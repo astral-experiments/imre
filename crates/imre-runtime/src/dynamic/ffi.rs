@@ -3096,8 +3096,7 @@ impl Context {
     }
 
     pub(super) fn heap_and_roots(&mut self) -> (&mut Heap, impl Iterator<Item = Id> + '_) {
-        self.threads.reap(&mut self.heap);
-        self.reap_thread_operands();
+        self.workers.reap_finished(&mut self.heap);
         (
             &mut self.heap,
             self.classes
