@@ -965,8 +965,8 @@ fn context_site(source: &str, manager: &ast::Expr) -> ir::ContextSite {
     ir::ContextSite { range, anchor }
 }
 
-pub(crate) fn attribute_effects(stmt: &ast::Stmt) -> Option<Vec<AttributeEffect<'_>>> {
-    use ir::AttributeAction::{Delete, InPlace, Store};
+pub(crate) fn attribute_write(stmt: &ast::Stmt) -> Option<AttributeEffect<'_>> {
+    use ir::AttributeAction::{InPlace, Store};
     let (target, action, value) = match stmt {
         ast::Stmt::Assign(assign) => {
             let [target] = assign.targets.as_slice() else {
@@ -984,25 +984,29 @@ pub(crate) fn attribute_effects(stmt: &ast::Stmt) -> Option<Vec<AttributeEffect<
             InPlace(assign.op.as_str()),
             Some(assign.value.as_ref()),
         ),
-        ast::Stmt::Delete(delete) => {
-            return delete_targets(delete)
-                .into_iter()
-                .map(|target| {
-                    Some(AttributeEffect {
-                        action: Delete,
-                        field: target.as_attribute_expr()?,
-                        value: None,
-                    })
-                })
-                .collect();
-        }
         _ => return None,
     };
-    Some(vec![AttributeEffect {
+    Some(AttributeEffect {
         action,
         field: target.as_attribute_expr()?,
         value,
-    }])
+    })
+}
+
+pub(super) fn attribute_effects(stmt: &ast::Stmt) -> Option<Vec<AttributeEffect<'_>>> {
+    let ast::Stmt::Delete(delete) = stmt else {
+        return Some(vec![attribute_write(stmt)?]);
+    };
+    delete_targets(delete)
+        .into_iter()
+        .map(|target| {
+            Some(AttributeEffect {
+                action: ir::AttributeAction::Delete,
+                field: target.as_attribute_expr()?,
+                value: None,
+            })
+        })
+        .collect()
 }
 
 /// Prepare only an indexed target's receiver and key. Its caller owns RHS evaluation
@@ -1045,21 +1049,19 @@ impl statements::StatementLowering for SourceScope<'_> {
     type Error = ();
 
     fn attribute_statements(&mut self, stmt: &ast::Stmt) -> StdResult<Option<Vec<Statement>>, ()> {
-        let Some(effects) = attribute_effects(stmt) else {
+        let Some(effect) = attribute_write(stmt) else {
             return Ok(None);
         };
-        effects
-            .iter()
-            .map(|effect| {
-                let values = effect
-                    .operands()
-                    .map(|node| self.ordinary_operand(node))
-                    .collect::<Option<_>>()
-                    .ok_or(())?;
-                Ok(attribute_statement(effect.action, effect.field, values))
-            })
-            .collect::<StdResult<Vec<_>, _>>()
-            .map(Some)
+        let values = effect
+            .operands()
+            .map(|node| self.ordinary_operand(node))
+            .collect::<Option<_>>()
+            .ok_or(())?;
+        Ok(Some(vec![attribute_statement(
+            effect.action,
+            effect.field,
+            values,
+        )]))
     }
 
     fn assignment(&mut self, assign: &ast::StmtAssign) -> StdResult<Vec<Statement>, ()> {

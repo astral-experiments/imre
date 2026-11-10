@@ -230,16 +230,14 @@ impl Function<'_, '_> {
                 }
                 continue;
             }
-            if let Some(effects) = crate::frontend::attribute_effects(stmt) {
-                for effect in effects {
-                    self.attribute_operation(
-                        effect.action,
-                        effect.field.attr.as_str(),
-                        effect.field.range(),
-                        effect.operands(),
-                        |code, node| code.expr(node),
-                    );
-                }
+            if let Some(effect) = crate::frontend::attribute_write(stmt) {
+                self.attribute_operation(
+                    effect.action,
+                    effect.field.attr.as_str(),
+                    effect.field.range(),
+                    effect.operands(),
+                    |code, node| code.expr(node),
+                );
                 continue;
             }
             match stmt {
