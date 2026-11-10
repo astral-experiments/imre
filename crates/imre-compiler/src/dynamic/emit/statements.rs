@@ -5,7 +5,7 @@ use super::sites::{CheckedSites, CompiledDefinition};
 use super::{AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourceMap};
 use crate::llvm::registered::context::{Region, RegionEmitter};
 use imre_ast::code_flags;
-use ruff_text_size::{TextRange, TextSize};
+use ruff_text_size::TextSize;
 use serde_json::json;
 
 use super::{Body, DefinitionName, Entry, Function};
@@ -18,6 +18,7 @@ pub(in crate::dynamic::emit) struct CallableSites<'a, 'p> {
     prefix: &'a str,
     declared_globals: &'a std::collections::BTreeSet<String>,
     in_function: bool,
+    native_suspension: bool,
     method_scope: bool,
     class_locals: Option<&'a crate::frontend::function_scope::ClassBindings>,
 }
@@ -417,18 +418,6 @@ impl<'p> Function<'_, 'p> {
             .sites
             .definition(&mut self.frame, site, &decorators, arguments);
         self.bind(class.name.as_str(), &value);
-    }
-
-    fn check_suspended_parameters(
-        &mut self,
-        params: &[crate::ir::RegisteredTypeParameter],
-        range: TextRange,
-    ) {
-        if self.native_suspension && params.iter().any(|param| param.has_bound_or_default) {
-            self.with_expression_range(range, |code| {
-                code.unsupported("class type parameter bounds and defaults")
-            });
-        }
     }
 }
 

@@ -49,28 +49,23 @@ impl<'p> SourceMap<'p> {
             prefix,
             declared_globals,
             in_function,
+            native_suspension: frame.native_suspension,
             class_locals: frame.class_locals.as_ref(),
             method_scope: frame.class_locals.is_some() && frame.annotation_values.is_none(),
         }
     }
 
-    pub(in crate::dynamic::emit) fn place_module_callables<'s>(
+    pub(in crate::dynamic::emit) fn place_module_callables(
         &self,
-        output: &mut Output,
+        frame: &mut RegisteredFrame<'_, '_>,
         sites: &mut CheckedSites,
-        required: &'s [RequiredSite],
-    ) -> &'s [RequiredSite] {
-        let mut callables = CallableSites {
-            source: self,
-            output,
-            sites,
-            prefix: "",
-            declared_globals: &self.scopes.module_globals,
-            in_function: false,
-            method_scope: false,
-            class_locals: None,
-        };
-        callables.place_callables(required)
+        required: &[RequiredSite],
+    ) {
+        let mut callables =
+            self.frame_callables(frame, sites, "", &self.scopes.module_globals, false);
+        for &site in required {
+            callables.place_site(site);
+        }
     }
 
     pub(in crate::dynamic::emit) fn place_annotation_string(
@@ -118,11 +113,13 @@ impl<'p> SourceMap<'p> {
 
 impl Function<'_, '_> {
     pub(in crate::dynamic::emit) fn prepare_checked_value(&mut self, value: &Expr) {
-        CheckedSites::visit_operand(value, &mut |site| self.prepare_site(site));
+        let mut callables = self.callable_sites();
+        CheckedSites::visit_operand(value, &mut |site| callables.place_site(site));
     }
 
     pub(in crate::dynamic::emit) fn prepare_checked_sites(&mut self, statements: &[Statement]) {
-        CheckedSites::visit(statements, &mut |site| self.prepare_site(site));
+        let mut callables = self.callable_sites();
+        CheckedSites::visit(statements, &mut |site| callables.place_site(site));
     }
 
     pub(in crate::dynamic::emit) fn callable_sites(&mut self) -> CallableSites<'_, '_> {
@@ -137,36 +134,24 @@ impl Function<'_, '_> {
 }
 
 impl CallableSites<'_, '_> {
-    /// Place checked declarations in lexical order up to the first site that needs its frame.
-    pub(in crate::dynamic::emit) fn place_callables<'s>(
-        &mut self,
-        required: &'s [RequiredSite],
-    ) -> &'s [RequiredSite] {
-        for (index, &site) in required.iter().enumerate() {
-            match site {
-                RequiredSite::Lambda(site, scoped) => self.place_checked_lambda(site, scoped),
-                RequiredSite::AnnotationString(site) => {
-                    self.source
-                        .place_annotation_string(self.output, self.sites, site);
-                }
-                RequiredSite::AnnotationField(site) => self.place_annotation_field(site),
-                RequiredSite::Generator(site) => self.place_generator(site),
-                RequiredSite::Alias(site) => {
-                    let alias = &self.source.type_aliases[&site];
-                    if alias.parameters.is_some() || alias.body.is_err() {
-                        return &required[index..];
-                    }
-                    if !self.sites.aliases.contains_key(&site) {
-                        let outer_diagnostic = self.output.diagnostic.take();
-                        self.place_alias(site, outer_diagnostic);
-                    }
-                }
-                RequiredSite::ClassNamespace(site) => self.place_class_namespace(site),
-                RequiredSite::Definition(site) => self.place_definition(site),
-                _ => return &required[index..],
+    pub(in crate::dynamic::emit) fn place_site(&mut self, site: RequiredSite) {
+        match site {
+            RequiredSite::Lambda(site, scoped) => self.place_checked_lambda(site, scoped),
+            RequiredSite::AnnotationString(site) => {
+                self.source
+                    .place_annotation_string(self.output, self.sites, site);
             }
+            RequiredSite::AnnotationField(site) => self.place_annotation_field(site),
+            RequiredSite::Generator(site) => self.place_generator(site),
+            RequiredSite::Alias(site) => {
+                if !self.sites.aliases.contains_key(&site) {
+                    let alias = self.compile_type_alias(site);
+                    self.sites.aliases.insert(site, alias);
+                }
+            }
+            RequiredSite::ClassNamespace(site) => self.place_class_namespace(site),
+            RequiredSite::Definition(site) => self.place_definition(site),
         }
-        &[]
     }
 
     fn place_annotation_field(&mut self, site: TextSize) {
@@ -471,83 +456,51 @@ impl CallableSites<'_, '_> {
         );
     }
 
-    fn place_alias(&mut self, site: TextSize, outer_diagnostic: Option<String>) {
+    fn compile_type_alias(&mut self, site: TextSize) -> Result<CompiledAlias, String> {
         let alias = &self.source.type_aliases[&site];
-        let compiled = alias.body.as_ref().ok().map(|code| {
-            let operand = ReturnOperand::Prepared(&code.operand, self.class_locals.cloned());
-            CompiledAlias {
-                definition: self.compile_definition(
-                    site,
-                    DefinitionName::TypeAlias(&alias.name),
-                    Body::Operand(code.range, operand),
-                ),
-                parameters: alias.parameters.clone(),
+        // Placement can visit children of a suite that exits before the alias binds.
+        let outer_diagnostic = self.output.diagnostic.take();
+        if self.native_suspension
+            && alias
+                .parameters
+                .iter()
+                .flatten()
+                .any(|param| param.has_bound_or_default)
+        {
+            self.output.diagnostic = Some(self.source.diagnostic_at(
+                alias.range, "unsupported class type parameter bounds and defaults in a compiled suspended function",
+            ));
+        }
+        let compiled = match &alias.body {
+            Ok(code) => {
+                let operand = ReturnOperand::Prepared(&code.operand, self.class_locals.cloned());
+                Some(CompiledAlias {
+                    definition: self.compile_definition(
+                        site,
+                        DefinitionName::TypeAlias(&alias.name),
+                        Body::Operand(code.range, operand),
+                    ),
+                    parameters: alias.parameters.clone(),
+                })
             }
-        });
-        // A suite can exit before it binds this alias. Only the binding reports its error.
-        let result = match std::mem::replace(&mut self.output.diagnostic, outer_diagnostic) {
+            Err(range) => {
+                self.output.diagnostic.get_or_insert_with(|| {
+                    self.source
+                        .diagnostic_at(*range, "type alias value has no checked expression operand")
+                });
+                None
+            }
+        };
+        match std::mem::replace(&mut self.output.diagnostic, outer_diagnostic) {
             Some(error) => Err(error),
             None => Ok(compiled.expect("prepared alias evaluator")),
-        };
-        self.sites.aliases.insert(site, result);
-    }
-}
-
-impl Function<'_, '_> {
-    fn prepare_type_alias(&mut self, site: TextSize) {
-        if self.sites.aliases.contains_key(&site) {
-            return;
         }
-        let alias = &self.source.type_aliases[&site];
-        let outer_diagnostic = self.frame.output.diagnostic.take();
-        if let Some(parameters) = &alias.parameters {
-            self.check_suspended_parameters(parameters, alias.range);
-        }
-        if let Err(range) = &alias.body {
-            self.with_expression_range(*range, |code| {
-                code.build_diagnostic("type alias value has no checked expression operand")
-            });
-        }
-        self.callable_sites().place_alias(site, outer_diagnostic);
     }
-
-    pub(in crate::dynamic::emit) fn prepare_site(&mut self, site: RequiredSite) {
-        let start = match site {
-            RequiredSite::Generator(site) => {
-                self.callable_sites().place_generator(site);
-                return;
-            }
-            RequiredSite::Alias(site) => {
-                self.prepare_type_alias(site);
-                return;
-            }
-            RequiredSite::Lambda(site, scoped) => {
-                self.callable_sites().place_checked_lambda(site, scoped);
-                return;
-            }
-            RequiredSite::AnnotationString(site) => {
-                self.source
-                    .place_annotation_string(self.frame.output, &mut self.sites, site);
-                return;
-            }
-            RequiredSite::AnnotationField(site) => {
-                self.callable_sites().place_annotation_field(site);
-                return;
-            }
-            RequiredSite::ClassNamespace(start) => {
-                self.callable_sites().place_class_namespace(start);
-                return;
-            }
-            RequiredSite::Definition(start) => start,
-        };
-        self.callable_sites().place_definition(start);
-    }
-
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::dynamic::emit::{ModuleOrigin, Output, PreparedBody};
+    use crate::dynamic::emit::{ModuleOrigin, Output, PreparedBody, RegisteredFrame};
     use std::path::Path;
 
     #[test]
@@ -579,6 +532,13 @@ mod tests {
             unit: 0,
             positions: &SourcePositions::new(text, &file),
         };
+        let mut frame = RegisteredFrame::new(
+            &mut output,
+            location.positions,
+            false,
+            0,
+            module.source.module_start,
+        );
         let mut sites = CheckedSites::default();
         let required = &module.source.initializer_sites;
         let [
@@ -591,8 +551,7 @@ mod tests {
         else {
             panic!("expected the function, lambda, class, generator and final lambda");
         };
-        let rest = location.place_module_callables(&mut output, &mut sites, required);
-        assert!(rest.is_empty());
+        location.place_module_callables(&mut frame, &mut sites, required);
         assert_eq!(sites.definitions.len(), 2);
         assert_eq!(sites.lambdas.len(), 2);
         assert!(sites.generators.contains_key(generator));
@@ -606,21 +565,17 @@ mod tests {
             sites.lambdas[first].code,
             location.callable_code.borrow()[first]
         );
-        let count = output.count;
-        assert!(
-            location
-                .place_module_callables(&mut output, &mut sites, required)
-                .is_empty()
-        );
-        assert_eq!(output.count, count);
+        let count = frame.output.count;
+        location.place_module_callables(&mut frame, &mut sites, required);
+        assert_eq!(frame.output.count, count);
     }
 
     #[test]
-    fn checked_module_places_plain_alias_before_its_following_lambda() {
+    fn checked_module_places_both_plain_and_generic_aliases_before_their_following_lambda() {
         use super::{CheckedSites, RequiredSite, SourceMap};
         use crate::dynamic::emit::SourcePositions;
 
-        for (alias, generic) in [("type Count = int", false), ("type Count[T] = T", true)] {
+        for alias in ["type Count = int", "type Count[T] = T"] {
             let text = format!("class Entry: pass\n{alias}\nlast = lambda: Entry\n");
             let module = PreparedBody::module(
                 "decls",
@@ -639,6 +594,13 @@ mod tests {
                 unit: 0,
                 positions: &SourcePositions::new(&text, &file),
             };
+            let mut frame = RegisteredFrame::new(
+                &mut output,
+                location.positions,
+                false,
+                0,
+                module.source.module_start,
+            );
             let mut sites = CheckedSites::default();
             let required = &module.source.initializer_sites;
             let [
@@ -650,27 +612,18 @@ mod tests {
                 panic!("expected the class, alias and final lambda");
             };
             assert_eq!(alias.to_u32(), 18);
-            let rest = location.place_module_callables(&mut output, &mut sites, required);
-            assert_eq!(sites.definitions[class].definition.code, "@code_site0");
-            if generic {
-                assert!(std::ptr::eq(rest, &required[1..]));
-                assert!(sites.aliases.is_empty());
-                assert!(sites.lambdas.is_empty());
-            } else {
-                assert!(rest.is_empty());
-                assert_eq!(
-                    sites.aliases[alias].as_ref().unwrap().definition.code,
-                    "@code_site1"
-                );
-                assert_eq!(sites.lambdas[last].code, "@code_site2");
-                let count = output.count;
-                assert!(
-                    location
-                        .place_module_callables(&mut output, &mut sites, required)
-                        .is_empty()
-                );
-                assert_eq!(output.count, count);
-            }
+            let first = frame.output.count;
+            let symbol = |index: u32| format!("@code_site{}", first + index);
+            location.place_module_callables(&mut frame, &mut sites, required);
+            assert_eq!(sites.definitions[class].definition.code, symbol(0));
+            assert_eq!(
+                sites.aliases[alias].as_ref().unwrap().definition.code,
+                symbol(1)
+            );
+            assert_eq!(sites.lambdas[last].code, symbol(2));
+            let count = frame.output.count;
+            location.place_module_callables(&mut frame, &mut sites, required);
+            assert_eq!(frame.output.count, count);
         }
     }
 
