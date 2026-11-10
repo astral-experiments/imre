@@ -10,6 +10,7 @@ use ruff_text_size::Ranged;
 
 use crate::CodegenUnit;
 use crate::frontend::RegisteredLambda;
+use crate::frontend::module_source::{self, ParsedModule};
 use crate::llvm::registered::{
     ABI, FrameEmitter, Output, RegisteredFrame, SourcePositions, permanent, sites, suspension,
 };
@@ -137,7 +138,11 @@ impl RootCode {
 
 /// All module source has already been resolved. Import execution remains conditional.
 pub(super) fn emit(
-    (files, builtins): (&[ModuleSource], &[ModuleSource]),
+    (files, builtins, mut entry_source): (
+        &[ModuleSource],
+        &[ModuleSource],
+        Option<ParsedModule<'_>>,
+    ),
     config: &str,
     python_optimization: i32,
     bundled_root: &Path,
@@ -174,6 +179,7 @@ pub(super) fn emit(
     let builtins = builtins.iter().map(|module| (module, true));
     for (unit, (module, builtin)) in files.chain(builtins).enumerate() {
         let (name, path, source) = module;
+        let discovered = entry_source.take();
         let zip = archive_members.get(path);
         if !builtin && let Some(error) = module_errors.get(path) {
             for state in std::iter::once(&mut root).chain(whole.as_mut()) {
@@ -192,15 +198,26 @@ pub(super) fn emit(
         // Preserve the loader's digest while compiling its normalized source.
         let physical = physical_files.get(path).filter(|_| !builtin);
         let file_digest = physical_files.get(path).and_then(|file| file.digest);
-        let code_source = if physical.is_some() && file_digest.is_none() {
-            crate::normalize_source(source, crate::SourceKind::File)?
-        } else if file_digest.is_some() || zip.is_some() {
-            crate::normalize_source(source, crate::SourceKind::DecodedFile)?
+        let module = if let Some(entry) = discovered {
+            entry
         } else {
-            std::borrow::Cow::Borrowed(source.as_str())
+            let text = if physical.is_some() && file_digest.is_none() {
+                crate::normalize_source(source, crate::SourceKind::File)?
+            } else if file_digest.is_some() || zip.is_some() {
+                crate::normalize_source(source, crate::SourceKind::DecodedFile)?
+            } else {
+                std::borrow::Cow::Borrowed(source.as_str())
+            };
+            ParsedModule::parse(path, text)?
         };
-        let initializer =
-            PreparedBody::module(name, path, &code_source, python_optimization, origin)?;
+        let initializer = PreparedBody::prepare(
+            name,
+            path,
+            module.text,
+            python_optimization,
+            origin,
+            Input::Module(module.parsed),
+        )?;
         let check_archive = bundled && !providers.is_empty();
         let separate = split && unit != 0 && !source.is_empty();
         let mut external = None;
@@ -281,41 +298,13 @@ pub(super) fn emit(
     Ok((units, used_archive))
 }
 
-struct ParsedSource {
-    parsed: ruff_python_parser::Parsed<ast::ModModule>,
-    replacements: HashMap<ruff_text_size::TextRange, Vec<u32>>,
-}
-
-fn parse_source(path: &Path, source: &str, keep_docstrings: bool) -> Result<ParsedSource, String> {
-    let parsed = imre_ast::indentation::prepare(source)
-        .parse_module()
-        .map_err(|err| format!("{}: {err}", path.display()))?;
-    let replacements = check_parsed_source(path, source, &parsed, keep_docstrings)?;
-    Ok(ParsedSource {
-        parsed,
-        replacements,
-    })
-}
-
 pub(super) fn check_parsed_source(
     path: &Path,
     source: &str,
     parsed: &ruff_python_parser::Parsed<ast::ModModule>,
     keep_docstrings: bool,
 ) -> Result<HashMap<ruff_text_size::TextRange, Vec<u32>>, String> {
-    if let Some((range, reason)) = imre_ast::comprehension::dict_unpacking_error(parsed) {
-        let error =
-            crate::frontend::diagnostic_message(source, &range, &format!("SyntaxError: {reason}"));
-        return Err(format!("{}:{error}", path.display()));
-    }
-    crate::analysis::check_scope_syntax(source, parsed.syntax())
-        .map_err(|error| format!("{}:{error}", path.display()))?;
-    if let Some(keyword) = imre_ast::repeated_keyword(parsed.syntax().into()) {
-        let name = keyword.arg.as_ref().expect("repeated named argument");
-        let reason = format!("SyntaxError: keyword argument repeated: {name}");
-        let error = crate::frontend::diagnostic_message(source, keyword, &reason);
-        return Err(format!("{}:{error}", path.display()));
-    }
+    module_source::validate_syntax(path, source, parsed)?;
     let replacements = strings::literal_replacements(source, parsed.tokens());
     if keep_docstrings && !replacements.is_empty() {
         strings::check_docs(source, &parsed.syntax().body, &replacements)
@@ -324,46 +313,30 @@ pub(super) fn check_parsed_source(
     Ok(replacements)
 }
 
-pub(super) fn lower_source(
-    path: &Path,
-    source: &str,
-    body: &mut [ast::Stmt],
-) -> Result<imre_ast::Names, String> {
-    let private_names = imre_ast::lower(body);
-    if source.contains("nonlocal") {
-        crate::frontend::function_scope::check_nonlocals(source, body)
-            .map_err(|error| format!("{}:{error}", path.display()))?;
-    }
-    if let Some((range, reason)) = imre_ast::annotation_scope_error(body) {
-        let error =
-            crate::frontend::diagnostic_message(source, &range, &format!("SyntaxError: {reason}"));
-        return Err(format!("{}:{error}", path.display()));
-    }
-    if let Some(param) = &private_names.duplicate_type_parameter {
-        let reason = format!("SyntaxError: duplicate type parameter '{}'", param.id);
-        let error = crate::frontend::diagnostic_message(source, param, &reason);
-        return Err(format!("{}:{error}", path.display()));
-    }
-    Ok(private_names)
-}
-
 /// Validate the executable bodies. Discovery already recorded the malformed modules.
 pub(super) fn check(
-    (files, builtins): (&[ModuleSource], &[ModuleSource]),
+    (files, builtins, mut entry_source): (
+        &[ModuleSource],
+        &[ModuleSource],
+        Option<ParsedModule<'_>>,
+    ),
     keep_docstrings: bool,
     module_errors: &HashMap<PathBuf, Box<super::ModuleSyntaxError>>,
 ) -> Result<(), String> {
     for (_, path, source) in files.iter().chain(builtins) {
-        if !module_errors.contains_key(path) {
-            check_source(path, source, keep_docstrings)?;
+        let discovered = entry_source.take();
+        if module_errors.contains_key(path) {
+            continue;
         }
+        // This check reports offsets in the registration's original text. A CRLF file
+        // has different physical offsets from its normalized executable body.
+        let module = match discovered.filter(|entry| entry.text == source.as_str()) {
+            Some(entry) => entry,
+            None => ParsedModule::parse(path, source.as_str().into())?,
+        };
+        check_parsed_source(path, &module.text, &module.parsed, keep_docstrings)?;
+        module_source::lower(path, &module.text, &mut module.parsed.into_syntax().body)?;
     }
-    Ok(())
-}
-
-fn check_source(path: &Path, source: &str, keep_docstrings: bool) -> Result<(), String> {
-    let source_tree = parse_source(path, source, keep_docstrings)?;
-    lower_source(path, source, &mut source_tree.parsed.into_syntax().body)?;
     Ok(())
 }
 
@@ -388,7 +361,7 @@ impl<'a> PreparedBody<'a> {
             Cow::Borrowed(source),
             python_optimization,
             origin,
-            Input::Module(parse_source(path, source, python_optimization < 2)?),
+            Input::Module(ParsedModule::parse(path, source.into())?.parsed),
         )
     }
 
@@ -409,9 +382,17 @@ impl<'a> PreparedBody<'a> {
             ModuleOrigin::Program(bodies) => bodies,
             _ => None,
         };
-        let (syntax, tokens) = match &input {
-            Input::Module(p) => (p.parsed.syntax(), p.parsed.tokens()),
-            Input::Expression(syntax, tokens) => (syntax, *tokens),
+        let (syntax, tokens, replacements) = match &input {
+            Input::Module(parsed) => (
+                parsed.syntax(),
+                parsed.tokens(),
+                check_parsed_source(path, source, parsed, keep_docstrings)?,
+            ),
+            Input::Expression(syntax, tokens) => (
+                syntax,
+                *tokens,
+                crate::frontend::literal_replacements(source, tokens),
+            ),
         };
         let docs = if keep_docstrings && name == "collections" && bundled {
             crate::modules::doctest::sealed(crate::modules::IntrinsicModule::Collections)
@@ -449,14 +430,12 @@ impl<'a> PreparedBody<'a> {
             .filter(|token| token.kind() == ast::token::TokenKind::Class)
             .map(Ranged::start)
             .collect();
-        let (mut body, replacements) = match input {
-            Input::Module(p) => (p.parsed.into_syntax().body, p.replacements),
-            Input::Expression(syntax, tokens) => {
-                (syntax.body, strings::literal_replacements(source, tokens))
-            }
+        let mut body = match input {
+            Input::Module(parsed) => parsed.into_syntax().body,
+            Input::Expression(syntax, _) => syntax.body,
         };
         let method_imports = imre_ast::module_imports(&body);
-        let private_names = lower_source(path, source, &mut body)?;
+        let private_names = module_source::lower(path, source, &mut body)?;
         let values = crate::frontend::RegisteredSource {
             text: source,
             private_names: Some(&private_names),
@@ -724,7 +703,7 @@ impl<'a> PreparedBody<'a> {
 }
 
 enum Input<'a> {
-    Module(ParsedSource),
+    Module(ruff_python_parser::Parsed<ast::ModModule>),
     Expression(ast::ModModule, &'a ast::token::Tokens),
 }
 
@@ -1682,7 +1661,7 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
         )]);
         let build = |layout| {
             emit(
-                (&modules, &[]),
+                (&modules, &[], None),
                 "{}",
                 0,
                 root,
@@ -1768,7 +1747,7 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
         let initializers = (&HashMap::new(), &registrations);
         let refs = |modules: &[_]| {
             let (units, used) = emit(
-                (modules, &[]),
+                (modules, &[], None),
                 "{}",
                 0,
                 root,
@@ -1801,7 +1780,7 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
         for missing in [&project, &changed] {
             assert!(
                 !emit(
-                    (std::slice::from_ref(missing), &[]),
+                    (std::slice::from_ref(missing), &[], None),
                     "{}",
                     0,
                     root,
@@ -1816,7 +1795,7 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
         assert_eq!(refs(&[project.clone(), bundled.clone()]), [false, true]);
 
         let (units, used) = emit(
-            (&[bundled.clone(), project.clone()], &[]),
+            (&[bundled.clone(), project.clone()], &[], None),
             "{}",
             0,
             root,
@@ -1863,7 +1842,7 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
             ..Default::default()
         };
         let (units, used) = emit(
-            (&[bundled, project.clone(), shadow, project], &[]),
+            (&[bundled, project.clone(), shadow, project], &[], None),
             "{}",
             0,
             root,

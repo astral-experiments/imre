@@ -95,6 +95,7 @@ mod logging_records;
 mod mapping_abc;
 mod mapping_choice;
 mod matching;
+pub(crate) mod module_source;
 mod module_specs;
 mod module_values;
 mod namedtuples;
