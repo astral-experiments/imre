@@ -420,6 +420,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         if let Entry::Registered(frame) = &mut self.0
             && let Some(range) = frame.next_fixed_site()
         {
+            if let ExprKind::Field(receiver, _) = &expr.kind {
+                return frame.load_fixed_field(receiver, range);
+            }
             return frame.located_value(range, range.start(), |frame| {
                 CheckedBody::registered(frame.reborrow()).emit_operation(expr, true)
             });

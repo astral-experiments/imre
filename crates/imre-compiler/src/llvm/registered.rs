@@ -272,7 +272,7 @@ pub(crate) struct Frame<'f, 'a, 'p> {
     sites: &'f CheckedSites,
     names: Option<&'f HashMap<usize, LocalBinding>>,
     inputs: &'f [String],
-    fixed_sites: Option<(&'f [TextRange], &'f Cell<usize>)>,
+    fixed_sites: Option<(&'f RegisteredFunction, &'f Cell<usize>)>,
 }
 
 impl<'a, 'p> std::ops::Deref for Frame<'_, 'a, 'p> {
@@ -323,10 +323,31 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
 
 impl Frame<'_, '_, '_> {
     pub(super) fn next_fixed_site(&self) -> Option<TextRange> {
-        let (sites, next) = self.fixed_sites?;
+        let (function, next) = self.fixed_sites?;
         let i = next.get();
         next.set(i + 1);
-        Some(sites[i])
+        Some(function.fixed_sites[i])
+    }
+
+    pub(super) fn load_fixed_field(&mut self, receiver: &Expr, range: TextRange) -> CheckedValue {
+        let (function, _) = self
+            .fixed_sites
+            .expect("placed field belongs to a fixed body");
+        let field = function
+            .fixed_fields
+            .as_ref()
+            .and_then(|fields| fields.get(&range))
+            .expect("placed field has a physical attribute");
+        self.located_value(range, field.position, |frame| {
+            let value = frame.attribute_operation(
+                ir::AttributeAction::Load,
+                &field.name,
+                range,
+                std::iter::once(receiver),
+                Self::evaluate_handle,
+            );
+            CheckedValue::handle(value)
+        })
     }
 
     pub(super) fn statement_site(&mut self, range: TextRange, simple: Option<TextRange>) {
@@ -1490,7 +1511,7 @@ impl RegisteredFrame<'_, '_> {
             code: self,
             names: Some(&checked.local_names),
             sites,
-            fixed_sites: (!checked.fixed_sites.is_empty()).then_some((&checked.fixed_sites, &next)),
+            fixed_sites: (!checked.fixed_sites.is_empty()).then_some((checked, &next)),
             inputs: &[],
         })
         .emit_function(&checked.function);

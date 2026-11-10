@@ -8,7 +8,10 @@ fn emit_captured_body(source: &str) -> Output {
     let _ = crate::frontend::lower(&graph);
     let registered = graph.registered_functions();
     let function = &registered[&graph.entry][&TextSize::default()];
+    emit_registered_body(source, function)
+}
 
+fn emit_registered_body(source: &str, function: &crate::frontend::RegisteredFunction) -> Output {
     let mut output = Output::default();
     let file = output.data(b"app.py");
     let positions = SourcePositions::new(source, &file);
@@ -16,6 +19,77 @@ fn emit_captured_body(source: &str) -> Output {
     RegisteredFrame::checked_body(&mut frame, function, &CheckedSites::default());
     frame.finish(false);
     output
+}
+
+#[test]
+fn placed_field_uses_the_ordinary_descriptor_and_attribute_line() {
+    use crate::frontend::{RegisteredScope, RegisteredSource, SuitePreparation};
+    use crate::ir::{ExprKind, Statement};
+    use ruff_text_size::Ranged;
+
+    let source = concat!(
+        "from functools import update_wrapper\n",
+        "from typing import Callable\n",
+        "class Item:\n",
+        "    text: str\n",
+        "    def __init__(self, text: str) -> None: self.text = text\n",
+        "    def read(self, suffix: str) -> str:\n",
+        "        return (self\n",
+        "                .text)\n",
+        "def repeat(value: str) -> str: return value + value\n",
+        "def main() -> None:\n",
+        "    method: Callable[[str], str] = Item('hello').read\n",
+        "    wrapper = update_wrapper(repeat, method, (), ())\n",
+        "    print(wrapper.__wrapped__('!'))\n",
+        "main()\n",
+    );
+    let mut graph = SourceGraph::single(source).unwrap();
+    let crate::CheckedProgram::Native(mut fixed) = crate::checked_lower(&mut graph).unwrap() else {
+        panic!("expected fixed field access");
+    };
+    crate::llvm::analyze_program(&fixed.ir.0, &mut fixed.frame_sources).unwrap();
+    let statements = &graph.modules[graph.entry].parsed.syntax().body;
+    let class = statements
+        .iter()
+        .find_map(|stmt| stmt.as_class_def_stmt())
+        .unwrap();
+    let definition = class
+        .body
+        .iter()
+        .filter_map(|stmt| stmt.as_function_def_stmt())
+        .find(|function| function.name.as_str() == "read")
+        .unwrap();
+    let (id, (_, placement)) = fixed
+        .frame_sources
+        .into_iter()
+        .find(|(_, (start, _))| *start == definition.start())
+        .unwrap();
+    let function = fixed.ir.0.functions.swap_remove(id);
+    assert!(
+        matches!(function.body.as_slice(), [Statement::Return(value)] if matches!(value.kind, ExprKind::Field(_, 0)))
+    );
+    let placed = crate::frontend::place_fixed_function(function, placement);
+
+    let values = RegisteredSource {
+        text: source,
+        replacements: &Default::default(),
+        has_templates: false,
+        template_fields: None,
+        generators: None,
+        lambdas: None,
+        method_imports: &Default::default(),
+        private_names: None,
+    };
+    let operations = Default::default();
+    let scope = RegisteredScope::Function { is_async: false };
+    let ordinary = SuitePreparation::new(&operations, values, &definition.body, true)
+        .complete(&definition.body, scope)
+        .unwrap();
+    let expected = emit_registered_body(source, &ordinary.checked);
+    let actual = emit_registered_body(source, &placed);
+    assert_eq!(actual.functions, expected.functions);
+    assert_eq!(actual.constants, expected.constants);
+    assert!(actual.interned_identifiers.contains("text"));
 }
 
 #[test]
