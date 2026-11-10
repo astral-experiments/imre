@@ -126,6 +126,27 @@ def check_registered_entry_operand(imre, root, run):
     result = run(imre, "-m", "checked_operand", stdin=b"send\n")
     assert (result.returncode, result.stdout, result.stderr) == (0, b"2\n", b""), result
 
+    # Moving an inert function declaration past a store changes which initializer
+    # lowers the store, while Python still looks up the callee before its arguments.
+    entry.write_text(
+        "import checked_worker\n"
+        "def replacement(a, b, send): send(a - b)\n"
+        "def report(value): print(value)\n"
+        "handlers = {'send': report}\nsend = handlers[input()]\n"
+        "def install(f):\n    checked_worker.publish = replacement\n    return f\n"
+        "checked_worker.publish(3, 5, install(send))\n"
+    )
+    result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+    assert result.returncode and not result.stdout, result
+    assert b"checked_worker.py:3:19: Imre: expected int, got bool" in result.stderr, result
+
+    entry.write_text(
+        bad_body + "def abort(_): raise LookupError('argument stopped')\n"
+        "send = {'send': report}[input()]\npublish(3, 5, abort(send))\n"
+    )
+    result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+    assert result.returncode == 1 and b"LookupError: argument stopped" in result.stderr, result
+
 
 def check_module_search_root(imre, root, run):
     app = root / "application"
