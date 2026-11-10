@@ -1614,7 +1614,7 @@ pub(crate) enum Builtin {
     IsCoroutineFunction,
     MarkCoroutine(usize),
     FunctionWrappedSet,
-    FunctionWrappedGet,
+    FunctionWrappedGet(FixedOrigin),
     StrEnumValue,
     IntEnumValue,
     HttpEnumPhrase,

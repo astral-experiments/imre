@@ -358,7 +358,6 @@ const BRANCH_WEIGHTS: &str = "\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n!1
 
 /// Callable representation selected for the specialized checked module.
 pub(crate) struct NativeProgram {
-    pub(crate) prefer_objects: bool,
     callable_targets: crate::callables::Targets,
     function_link_types: HashSet<Type>,
 }
@@ -393,7 +392,7 @@ pub(crate) fn analyze_program(
                 return;
             };
             match builtin {
-                Builtin::FunctionWrappedSet | Builtin::FunctionWrappedGet => {
+                Builtin::FunctionWrappedSet | Builtin::FunctionWrappedGet(_) => {
                     let owner = &args[0];
                     function_link_types.insert(owner.ty);
                     link_owners.entry(id).or_default().push(owner);
@@ -424,7 +423,6 @@ pub(crate) fn analyze_program(
             "Imre: wrapper links require a callable signature with known native functions or source methods",
         ));
     }
-    let mut prefer_objects = false;
     for (id, mut owners) in link_owners {
         owners.retain(|owner| {
             callable_targets
@@ -441,10 +439,8 @@ pub(crate) fn analyze_program(
                 "Imre: native wrapper links require a plain function as their owner",
             ));
         }
-        prefer_objects = true;
     }
     Ok(NativeProgram {
-        prefer_objects,
         callable_targets,
         function_link_types,
     })
@@ -7170,9 +7166,17 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value, &args[1].value],
             ),
-            Builtin::FunctionWrappedGet => {
-                self.call("imre_function_get_wrapped", returns, &[&args[0].value])
-            }
+            Builtin::FunctionWrappedGet(origin) => self.call_with_effect(
+                "@imre_function_get_wrapped",
+                None,
+                returns,
+                &[&args[0].value],
+                true,
+                CallSite {
+                    origin: Some(origin),
+                    ..CallSite::default()
+                },
+            ),
             Builtin::WrapperAttributes(fields) => {
                 let names = fields
                     .names()
