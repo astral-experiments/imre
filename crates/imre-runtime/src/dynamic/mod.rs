@@ -112,6 +112,28 @@ enum ModuleInitializer {
     },
 }
 
+/// The caller roots the script module and the entered frame roots its scope and code.
+struct MainModuleFrame {
+    module: Id,
+    code: Id,
+    scope: Id,
+    entry: Code,
+}
+
+impl MainModuleFrame {
+    /// # Safety
+    /// The caller owns execution of the context with this frame on top, and the linked
+    /// initializer remains loaded until it returns.
+    unsafe fn run(self, context: *mut Context) -> Result<Id> {
+        // SAFETY: use the generated ABI before borrowing the context for frame cleanup.
+        let value = unsafe { (self.entry)(context, self.scope) };
+        let ctx = unsafe { &mut *context };
+        let result = ctx.finish_module_frame(self.code, self.entry, self.scope, value);
+        ctx.finish_initialization(self.module);
+        result.map(|_| self.module)
+    }
+}
+
 struct SourceModule {
     path: PathBuf,
     code: ModuleInitializer,
@@ -3436,7 +3458,15 @@ impl Context {
         // SAFETY: a compiler-generated initializer or function uses this ABI and
         // returns before this Context can move or outlive the native module.
         let result = unsafe { entry(self, scope) };
-        if matches!(owner, FrameOwner::Module(_)) && self.pending.is_none() {
+        if matches!(owner, FrameOwner::Module(_)) {
+            self.finish_module_frame(code, entry, scope, result)
+        } else {
+            self.finish_native_frame(result)
+        }
+    }
+
+    fn finish_module_frame(&mut self, code: Id, entry: Code, scope: Id, result: Id) -> Result<Id> {
+        if self.pending.is_none() {
             self.register_decimal_class(code, entry, scope);
         }
         self.finish_native_frame(result)
@@ -3922,6 +3952,37 @@ impl Context {
         Ok(())
     }
 
+    fn prepare_main_module(&mut self) -> Result<Option<MainModuleFrame>> {
+        let Some(source) = self
+            .sources
+            .get("__main__")
+            .and_then(|sources| sources.first())
+        else {
+            return Ok(None);
+        };
+        let initializer = source.code;
+        let source = (
+            source.path.clone(),
+            importlib::SourceBody::Registered(initializer),
+        );
+        let (module, scope, name, _) =
+            self.allocate_import_module("__main__", &[], Some(&source))?;
+        self.publish_module("__main__", module)?;
+        let code = self.module_code(initializer, &source.0).inspect_err(|_| {
+            self.finish_initialization(module);
+        })?;
+        let value::Body::Native(entry, _) = self.code_object(code).body else {
+            unreachable!("registered module code has a native entry")
+        };
+        self.heap.enter(scope, code, FrameOwner::Module(name));
+        Ok(Some(MainModuleFrame {
+            module,
+            code,
+            scope,
+            entry,
+        }))
+    }
+
     /// Before installing the registry, execute its dependencies and the script's explicit entry.
     fn load_bootstrap_module(
         &mut self,
@@ -3930,13 +3991,15 @@ impl Context {
         parent: Option<(Id, &str)>,
         source_globals: Id,
     ) -> Result<Option<Id>> {
+        if name == "__main__" {
+            // SAFETY: a recursive bootstrap import synchronously runs the frame it just pushed.
+            return self
+                .prepare_main_module()?
+                .map(|frame| unsafe { frame.run(self) })
+                .transpose();
+        }
         let mut locations = Vec::new();
-        let source = if name == "__main__" {
-            self.sources
-                .get(name)
-                .and_then(|sources| sources.first())
-                .map(|m| (m.path.clone(), importlib::SourceBody::Registered(m.code)))
-        } else if stdlib::is_module(name) || self.is_frozen(name) {
+        let source = if stdlib::is_module(name) || self.is_frozen(name) {
             if matches!(name, "email" | "importlib" | "json" | "re" | "urllib") {
                 locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
             } else if name == "collections" {
@@ -3969,10 +4032,6 @@ impl Context {
             source_globals,
             source.map(|(path, body)| (path, body, origin)),
         ) {
-            // The executing script remains importable during interpreter shutdown.
-            if name == "__main__" {
-                return Err(error);
-            }
             let exception = self.raised_instance(error);
             self.with_import_exception(exception, |ctx| {
                 let modules = ctx.public_modules()?;
@@ -3982,10 +4041,6 @@ impl Context {
                 }
             })?;
             return self.op("reraise", exception, NONE, NONE).map(Some);
-        }
-        // A script can delete its own __main__ binding. Its exit status is determined by the script.
-        if name == "__main__" {
-            return Ok(Some(module));
         }
         // An initializer can replace its own registry entry. The successful import
         // returns that value and moves its binding after the dependencies it imported.
@@ -4040,6 +4095,8 @@ impl Context {
             if let Some(module) = self.public_registered_module(key)?
                 && let Value::Module { scope, .. } = *self.heap.get(module)
             {
+                // The script can delete the registry binding while its initializer is running.
+                self.heap.keep(module);
                 let origin = if self.config["command"] != true {
                     let file = self.import_path_text(path)?;
                     if self.scope_name(scope, "__file__").is_none() {
@@ -4163,6 +4220,13 @@ impl Context {
             }
             error
         })
+    }
+
+    fn finish_initialization(&mut self, module: Id) {
+        let Value::Module { initializing, .. } = self.heap.get_mut(module) else {
+            unreachable!()
+        };
+        *initializing = false;
     }
 
     fn run_initializer(
@@ -5105,10 +5169,7 @@ impl Context {
                     None => Ok(NONE),
                 },
             };
-            let Value::Module { initializing, .. } = self.heap.get_mut(module) else {
-                unreachable!()
-            };
-            *initializing = false;
+            self.finish_initialization(module);
             result?;
             if native_random {
                 stdlib::random::instance::install(self, scope)?;
