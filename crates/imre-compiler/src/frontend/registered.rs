@@ -1565,10 +1565,13 @@ impl SourceScope<'_> {
         ) {
             self.eager_comprehension(expr)?
         } else if let ast::Expr::Lambda(lambda) = expr {
-            values::checked_binding(lambda, self.source)?;
-            let binding =
-                values::lambda_binding(lambda, |default| self.ordinary_operand(default).ok_or(()))
-                    .ok()?;
+            if !values::can_bind(lambda, self.source) {
+                return None;
+            }
+            let defaults = values::lambda_defaults(lambda)
+                .map(|default| self.ordinary_operand(default))
+                .collect::<Option<_>>()?;
+            let binding = values::lambda_binding(lambda, defaults);
             if self.loop_depth != 0 {
                 // A default may suspend while its surrounding iteration cursor is live.
                 let mut suspends = false;
@@ -1719,6 +1722,7 @@ mod tests {
         ));
         let source = RegisteredSource {
             templates: None,
+            lambdas: None,
             text,
             private_names: None,
             method_imports: &imre_ast::module_imports(body),
@@ -1925,6 +1929,7 @@ mod tests {
         let imports = imre_ast::module_imports(&stmts);
         let source = RegisteredSource {
             templates: None,
+            lambdas: None,
             text,
             private_names: Some(&names),
             replacements: &replacements,

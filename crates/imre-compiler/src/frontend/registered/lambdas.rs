@@ -125,15 +125,19 @@ impl RegisteredLambda {
         }
         impl<'a> Visitor<'a> for Collector<'_> {
             fn visit_expr(&mut self, expr: &'a ast::Expr) {
+                // Nested callables own their bodies before the enclosing operand binds them.
+                walk_expr(self, expr);
                 if let ast::Expr::Lambda(lambda) = expr {
                     let plan = RegisteredLambda::prepare(
                         lambda,
-                        self.source,
+                        values::RegisteredSource {
+                            lambdas: Some(&self.sites),
+                            ..self.source
+                        },
                         &self.scopes[&lambda.start()],
                     );
                     self.sites.insert(lambda.start(), plan);
                 }
-                walk_expr(self, expr);
             }
         }
         let mut collector = Collector {
@@ -182,9 +186,16 @@ mod tests {
             replacements: &Default::default(),
             has_templates: false,
             templates: None,
+            lambdas: None,
             private_names: None,
         };
         let plan = RegisteredLambda::prepare(lambda, source, &FunctionScope::lambda(lambda, false));
+        let sites = HashMap::from([(lambda.start(), plan)]);
+        let source = values::RegisteredSource {
+            lambdas: Some(&sites),
+            ..source
+        };
+        let plan = &sites[&lambda.start()];
         assert_eq!(plan.metadata.defaults, ["x", "y"]);
         let binding = values::checked_binding(lambda, source).unwrap();
         let ExprKind::Builtin(Builtin::RegisteredLambda(site, false), defaults) = &binding.kind
@@ -243,6 +254,7 @@ mod tests {
             replacements: &Default::default(),
             has_templates: false,
             templates: None,
+            lambdas: None,
             private_names: None,
         };
         let plan = RegisteredLambda::prepare(lambda, source, &FunctionScope::lambda(lambda, false));

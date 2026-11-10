@@ -23,6 +23,7 @@ impl ModuleSource {
     pub(super) fn context<'a>(&'a self, text: &'a str) -> RegisteredSource<'a> {
         RegisteredSource {
             templates: None,
+            lambdas: None,
             text,
             replacements: &self.replacements,
             has_templates: self.has_templates,
@@ -38,6 +39,7 @@ pub(crate) struct RegisteredSource<'a> {
     pub(crate) replacements: &'a HashMap<TextRange, Vec<u32>>,
     pub(crate) has_templates: bool,
     pub(crate) templates: Option<&'a HashMap<TextRange, Expr>>,
+    pub(crate) lambdas: Option<&'a HashMap<TextSize, RegisteredLambda>>,
     pub(crate) method_imports: &'a BTreeSet<String>,
     pub(crate) private_names: Option<&'a imre_ast::Names>,
 }
@@ -736,31 +738,40 @@ pub(crate) fn lambda_defaults(lambda: &ast::ExprLambda) -> impl Iterator<Item = 
     })
 }
 
-pub(super) fn lambda_binding<E>(
-    lambda: &ast::ExprLambda,
-    operand: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
-) -> StdResult<Expr, E> {
-    let defaults = lambda_defaults(lambda)
-        .map(operand)
-        .collect::<StdResult<_, _>>()?;
-    Ok(super::operation(
+pub(super) fn lambda_binding(lambda: &ast::ExprLambda, defaults: Vec<Expr>) -> Expr {
+    super::operation(
         Builtin::RegisteredLambda(lambda.start(), false),
         Type::PythonObject,
         defaults,
-    ))
+    )
 }
 
-/// A checked instruction can bind only a wholly prepared function. This also checks
-/// each nested lambda before its binding can appear in a default or return.
+/// Check the body and defaults in their defining region. The caller may lower the
+/// defaults with its own local slots, namespace or suspension state.
+pub(super) fn can_bind(lambda: &ast::ExprLambda, source: RegisteredSource<'_>) -> bool {
+    if let Some(sites) = source.lambdas {
+        return sites
+            .get(&lambda.start())
+            .is_some_and(|site| site.body.is_some() && site.defaults.iter().all(Option::is_some));
+    }
+    checked_binding(lambda, source).is_some()
+}
+
 pub(super) fn checked_binding(
     lambda: &ast::ExprLambda,
     source: RegisteredSource<'_>,
 ) -> Option<Expr> {
-    Region::Lambda.operand(&lambda.body, source)?;
-    lambda_binding(lambda, |default| {
-        Region::Lambda.operand(default, source).ok_or(())
-    })
-    .ok()
+    let defaults = if let Some(sites) = source.lambdas {
+        let site = sites.get(&lambda.start())?;
+        site.body.as_ref()?;
+        site.defaults.iter().cloned().collect::<Option<_>>()?
+    } else {
+        Region::Lambda.operand(&lambda.body, source)?;
+        lambda_defaults(lambda)
+            .map(|default| Region::Lambda.operand(default, source))
+            .collect::<Option<_>>()?
+    };
+    Some(lambda_binding(lambda, defaults))
 }
 
 #[derive(Clone, Copy)]
@@ -947,10 +958,13 @@ impl Checker<'_> {
     ) -> Result<Option<Expr>, String> {
         let source = module.context(self.source);
         if let ast::Expr::Lambda(lambda) = node {
-            if checked_binding(lambda, source).is_none() {
+            if !can_bind(lambda, source) {
                 return Ok(None);
             }
-            let mut value = lambda_binding(lambda, |default| self.expr(default))?;
+            let defaults = lambda_defaults(lambda)
+                .map(|default| self.expr(default))
+                .collect::<Result<_, _>>()?;
+            let mut value = lambda_binding(lambda, defaults);
             if let Some(slot) = self.namespace {
                 in_namespace(node, &mut value, self.local(slot));
             }
@@ -1060,6 +1074,7 @@ mod tests {
         let imports = imre_ast::module_imports(&parsed.syntax().body);
         let source = RegisteredSource {
             templates: None,
+            lambdas: None,
             text,
             replacements: &HashMap::new(),
             has_templates: false,
@@ -1121,6 +1136,7 @@ mod tests {
         let parsed = imre_ast::indentation::prepare(text).parse_module().unwrap();
         let source = RegisteredSource {
             templates: None,
+            lambdas: None,
             text,
             replacements: &HashMap::new(),
             has_templates: false,
@@ -1186,6 +1202,7 @@ mod tests {
         let call = assign.value.as_call_expr().unwrap();
         let source = RegisteredSource {
             templates: None,
+            lambdas: None,
             text,
             replacements: &HashMap::new(),
             has_templates: false,
@@ -1221,6 +1238,7 @@ mod tests {
             };
             let source = RegisteredSource {
                 templates: None,
+                lambdas: None,
                 text: &text,
                 replacements: &replacements,
                 has_templates: false,
@@ -1254,6 +1272,7 @@ mod tests {
             };
             let source = RegisteredSource {
                 templates: None,
+                lambdas: None,
                 text,
                 replacements: &replacements,
                 has_templates: false,

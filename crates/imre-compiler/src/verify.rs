@@ -795,6 +795,7 @@ mod tests {
         let graph = SourceGraph::single(text).unwrap();
         let source = frontend::RegisteredSource {
             templates: None,
+            lambdas: None,
             text,
             private_names: None,
             replacements: &Default::default(),
