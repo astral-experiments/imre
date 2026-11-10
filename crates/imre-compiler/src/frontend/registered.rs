@@ -1239,7 +1239,7 @@ impl statements::StatementLowering for SourceScope<'_> {
             Expr::local(input.value, Type::PythonObject),
             None,
         )?;
-        let body = self.loop_body(&loop_.body)?;
+        let body = self.in_loop(LoopScope::WithCursor, |scope| scope.suite(&loop_.body))?;
         let otherwise = self.suite(&loop_.orelse)?;
         Ok((input.for_suite(binding, body, otherwise, Vec::new()), true))
     }
@@ -1345,12 +1345,14 @@ impl statements::StatementLowering for SourceScope<'_> {
             }
             ast::Stmt::While(loop_) => {
                 let condition = self.ordinary_operand(&loop_.test).ok_or(())?;
-                let body = self.loop_body(&loop_.body)?;
+                let body = self.in_loop(LoopScope::While, |scope| scope.suite(&loop_.body))?;
                 let otherwise = self.suite(&loop_.orelse)?;
                 Ok((vec![Statement::While(condition, body, otherwise)], true))
             }
-            ast::Stmt::Break(_) if self.loop_depth != 0 => Ok((vec![Statement::Break], false)),
-            ast::Stmt::Continue(_) if self.loop_depth != 0 => {
+            ast::Stmt::Break(_) if self.loop_scope != LoopScope::Outside => {
+                Ok((vec![Statement::Break], false))
+            }
+            ast::Stmt::Continue(_) if self.loop_scope != LoopScope::Outside => {
                 Ok((vec![Statement::Continue], false))
             }
             ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => Ok((Vec::new(), true)),
@@ -1416,6 +1418,13 @@ fn registered_delete_name(target: &ast::Expr) -> Option<Expr> {
     ))
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LoopScope {
+    Outside,
+    While,
+    WithCursor,
+}
+
 struct SourceScope<'a> {
     kind: RegisteredScope,
     sites: &'a StatementSites,
@@ -1425,7 +1434,7 @@ struct SourceScope<'a> {
     namespaces: HashMap<usize, LocalBinding>,
     comprehension: Option<eager::Namespace>,
     locals: Vec<Type>,
-    loop_depth: usize,
+    loop_scope: LoopScope,
     in_format: bool,
 }
 
@@ -1497,7 +1506,7 @@ impl<'a> SourceScope<'a> {
             namespaces: HashMap::new(),
             comprehension: None,
             locals: Vec::new(),
-            loop_depth: 0,
+            loop_scope: LoopScope::Outside,
             in_format: false,
         }
     }
@@ -1643,10 +1652,13 @@ impl SourceScope<'_> {
         }])
     }
 
-    fn loop_body(&mut self, statements: &[ast::Stmt]) -> StdResult<Vec<Statement>, ()> {
-        self.loop_depth += 1;
-        let body = self.suite(statements);
-        self.loop_depth -= 1;
+    fn in_loop<T>(&mut self, kind: LoopScope, lower: impl FnOnce(&mut Self) -> T) -> T {
+        let enclosing = self.loop_scope;
+        if enclosing != LoopScope::WithCursor {
+            self.loop_scope = kind;
+        }
+        let body = lower(self);
+        self.loop_scope = enclosing;
         body
     }
 
@@ -1781,8 +1793,8 @@ impl SourceScope<'_> {
                 .map(|default| self.ordinary_operand(default))
                 .collect::<Option<_>>()?;
             let binding = values::lambda_binding(lambda, defaults);
-            if self.loop_depth != 0 {
-                // A default may suspend while its surrounding iteration cursor is live.
+            if self.loop_scope != LoopScope::Outside {
+                // Keep suspending defaults out of loop operands.
                 let mut suspends = false;
                 ir::walk_operand_expressions(&binding, &mut |child| {
                     suspends |= matches!(
@@ -1841,9 +1853,9 @@ impl SourceScope<'_> {
     }
 
     fn operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
-        // The current loop cursor lives in this native activation; a suspension
-        // across a pull needs a persisted cursor in the generator frame.
-        if self.loop_depth == 0
+        // A for or comprehension cursor needs to survive the next pull, even
+        // inside a nested while. A plain while carries no cursor across a yield.
+        if self.loop_scope != LoopScope::WithCursor
             && let RegisteredScope::Function { is_async } = self.kind
             && let Some((kind, value)) = ir::SuspendValue::operand(expr)
             && !matches!(
@@ -3311,6 +3323,56 @@ mod tests {
                 assert_eq!((items, attrs), (1, 1));
             }
         }
+    }
+
+    #[test]
+    fn traceback_while_suspends_without_a_for_cursor() {
+        fn prepare(text: &str, name: &str) -> Option<RegisteredFunction> {
+            let module = ruff_python_parser::parse_module(text).unwrap();
+            let body = &module.syntax().body;
+            let function = body
+                .iter()
+                .filter_map(ast::Stmt::as_function_def_stmt)
+                .find(|def| def.name.as_str() == name)
+                .unwrap();
+            let source = RegisteredSource {
+                templates: None,
+                lambdas: None,
+                text,
+                private_names: None,
+                method_imports: &imre_ast::module_imports(body),
+                replacements: &HashMap::new(),
+                has_templates: false,
+            };
+            registered_suite(
+                &function.body,
+                RegisteredScope::Function { is_async: false },
+                source,
+            )
+        }
+
+        let checked = prepare(include_str!("../../stdlib/traceback.py"), "walk_tb").unwrap();
+        let mut yields_per_loop = Vec::new();
+        ir::walk_statements(&checked.function.body, &mut |stmt| {
+            if let Statement::While(_, body, _) = stmt {
+                let mut yields = 0;
+                ir::walk_expressions(body, &mut |value| {
+                    if matches!(
+                        value.kind,
+                        ExprKind::Builtin(
+                            Builtin::RegisteredSuspend(ir::SuspendValue::Yield, _),
+                            _
+                        )
+                    ) {
+                        yields += 1;
+                    }
+                });
+                yields_per_loop.push(yields);
+            }
+        });
+        assert_eq!(yields_per_loop, [1]);
+        let nested = "def walk(rows, test):\n    for row in rows:\n        while test(row):\n            yield row\n";
+        assert!(prepare(nested, "walk").is_none());
     }
 
     #[test]
