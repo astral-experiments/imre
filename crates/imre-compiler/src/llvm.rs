@@ -7315,6 +7315,7 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_zip_close", &[&args[0].value]);
                 none()
             }
+            Builtin::IntFromBytes => self.call("imre_int_from_bytes", Type::Int, &[&args[0].value]),
             Builtin::IntToBytes => self.call(
                 "imre_int_to_bytes",
                 Type::Bytes,
@@ -10947,6 +10948,7 @@ declare ptr @imre_zip_open(ptr)
 declare ptr @imre_zip_import_index(ptr)
 declare ptr @imre_zip_namelist(ptr)
 declare void @imre_zip_close(ptr)
+declare i64 @imre_int_from_bytes(ptr)
 declare ptr @imre_int_to_bytes(i64, i64, ptr, i1)
 declare ptr @imre_bytes_validate_utf8(ptr)
 declare ptr @imre_binary_open(ptr, i32)
@@ -13137,8 +13139,12 @@ def transform(values: list[int], count: int) -> int:
 
     #[test]
     fn lowers_integer_bytes_and_hex_conversions() {
-        let source = "def encode(value: int) -> str:\n    return value.to_bytes(16).hex()\n";
+        let source = concat!(
+            "def encode(value: int) -> str:\n    return value.to_bytes(16).hex()\n",
+            "def decode(value: bytes) -> int:\n    return int.from_bytes(value)\n",
+        );
         let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert!(llvm.contains("call i64 @imre_int_from_bytes("));
         assert!(llvm.contains("call ptr @imre_int_to_bytes("));
         assert!(llvm.contains("call ptr @imre_bytes_hex("));
     }

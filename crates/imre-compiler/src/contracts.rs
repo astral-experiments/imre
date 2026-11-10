@@ -601,6 +601,7 @@ impl Builtin {
             | Self::IntBitCount
             | Self::IntBitLength
             | Self::IntHash
+            | Self::IntFromBytes
             | Self::FloatIsInteger
             | Self::FloatAtan
             | Self::FloatDegrees
@@ -1025,6 +1026,7 @@ impl Builtin {
             Self::IntExtremum { .. } => {
                 result == Type::Int && args.len() >= 2 && args.iter().all(|arg| arg.ty == Type::Int)
             }
+            Self::IntFromBytes => signature(&[Type::Bytes], Type::Int),
             Self::MathComb | Self::MathPerm => signature(&[Type::Int, Type::Int], Type::Int),
             Self::MathFactorial | Self::IntBitCount | Self::IntBitLength | Self::IntHash => {
                 signature(&[Type::Int], Type::Int)

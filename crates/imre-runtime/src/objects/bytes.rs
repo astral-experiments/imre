@@ -314,6 +314,26 @@ pub unsafe extern "C" fn imre_byte_output_finish(output: *const Object) -> *cons
     finish(result, std::ptr::null())
 }
 
+/// Decode the bytes after argument conversion in either calling convention.
+pub(crate) fn integer_from_bytes(bytes: &[u8], little: bool, signed: bool) -> Int {
+    use num_bigint::{BigInt, Sign};
+    let number = match (little, signed) {
+        (true, true) => BigInt::from_signed_bytes_le(bytes),
+        (false, true) => BigInt::from_signed_bytes_be(bytes),
+        (true, false) => BigInt::from_bytes_le(Sign::Plus, bytes),
+        (false, false) => BigInt::from_bytes_be(Sign::Plus, bytes),
+    };
+    Int::new(number)
+}
+
+/// # Safety
+/// The caller roots the exact immutable byte string through the conversion.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_from_bytes(bytes: *const Bytes) -> usize {
+    // SAFETY: the immutable, rooted bytes are borrowed only during conversion.
+    integer_from_bytes(unsafe { &*bytes }, false, false).into_raw()
+}
+
 /// Encode an integer at a fixed width after Python argument conversion.
 pub(crate) fn integer_bytes(value: &Int, size: isize, little: bool, signed: bool) -> Result<Bytes> {
     if size < 0 {

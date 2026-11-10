@@ -1955,6 +1955,8 @@ pub(crate) enum Builtin {
     ZipImportIndex,
     ZipNamelist,
     ZipClose,
+    /// Read an unsigned big-endian integer from exact immutable bytes.
+    IntFromBytes,
     /// Encodes an integer with an explicit width, byte order, and sign policy.
     IntToBytes,
     /// Validates complete UTF-8 at the decode evaluation point and returns a

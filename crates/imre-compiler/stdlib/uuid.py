@@ -28,11 +28,11 @@ def _value(
     if data is not None:
         if len(data) != 16:
             raise ValueError("bytes is not a 16-char string")
-        return int(data.hex(), 16)
+        return int.from_bytes(data)
     if little is not None:
         if len(little) != 16:
             raise ValueError("bytes_le is not a 16-char string")
-        return int(_swap_fields(little).hex(), 16)
+        return int.from_bytes(_swap_fields(little))
     assert integer is not None
     if isinstance(integer, bool):
         return int(integer)
