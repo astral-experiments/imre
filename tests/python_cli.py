@@ -4692,6 +4692,7 @@ for name in ("md4", "ripemd160"):
             "boxed_multiprocessing_context.py",
             "boxed_textwrap.py",
             "boxed_set_ordering.py",
+            "boxed_set_iteration.py",
             "boxed_dict_view_equality.py",
             "boxed_set_issubset.py",
             "boxed_set_operator_descriptors.py",
