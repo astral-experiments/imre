@@ -1,12 +1,99 @@
 //! Resolve declaration and annotation code sites before emitting the checked block.
 use super::super::sites::{
-    AnnotationString, CompiledAlias, CompiledDefinition, CompiledGenerator, Declaration,
+    AnnotationString, CheckedSites, CompiledAlias, CompiledDefinition, CompiledGenerator, Declaration,
 };
 use super::super::{AliasValue, Body, DefinitionName, DefinitionSite, Entry, Function, SourceInfo};
 use crate::frontend::{AnnotationCode, PreparedAnnotation};
 use crate::ir::{self, Builtin, Expr, ExprKind, Statement};
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
+
+/// The compiled-site tables read by checked operations in a registered frame.
+pub(in crate::dynamic::emit) enum RequiredSite {
+    Definition(TextSize),
+    Lambda(TextSize),
+    Generator(TextRange),
+    Alias(TextSize),
+    AnnotationString(TextSize),
+    AnnotationField(TextSize),
+}
+
+fn visit_expression_site(expr: &Expr, visit: &mut impl FnMut(RequiredSite)) {
+    let ExprKind::Builtin(op, _) = &expr.kind else {
+        return;
+    };
+    visit(match op {
+        Builtin::RegisteredDefinition(site) => RequiredSite::Definition(site.start()),
+        Builtin::RegisteredLambda(site, _) => RequiredSite::Lambda(*site),
+        Builtin::RegisteredGenerator(site, _) => RequiredSite::Generator(*site),
+        Builtin::RegisteredTypeAlias(site) => RequiredSite::Alias(*site),
+        Builtin::BindAnnotationExpression(site) => RequiredSite::AnnotationString(*site),
+        Builtin::RegisteredAnnotationInsert(occurrence) => {
+            RequiredSite::AnnotationField(occurrence.site)
+        }
+        _ => return,
+    });
+}
+
+pub(in crate::dynamic::emit) fn needs_checked_sites(statements: &[Statement]) -> bool {
+    let mut needed = false;
+    CheckedSites::visit(statements, &mut |_| needed = true);
+    needed
+}
+
+impl CheckedSites {
+    pub(in crate::dynamic::emit) fn visit_operand(
+        value: &Expr,
+        visit: &mut impl FnMut(RequiredSite),
+    ) {
+        ir::walk_operand_expressions(value, &mut |expr| visit_expression_site(expr, visit));
+    }
+
+    /// A block stops emitting after a transfer. Unreachable declaration bodies must
+    /// not compile (or raise diagnostics) merely because their identity is in the IR.
+    pub(in crate::dynamic::emit) fn visit(
+        statements: &[Statement],
+        visit: &mut impl FnMut(RequiredSite),
+    ) -> bool {
+        for stmt in statements {
+            match stmt {
+                Statement::If(test, yes, no) => {
+                    Self::visit_operand(test, visit);
+                    let yes_continues = Self::visit(yes, visit);
+                    let no_continues = Self::visit(no, visit);
+                    if !yes_continues && !no_continues {
+                        return false;
+                    }
+                }
+                Statement::While(test, body, otherwise) => {
+                    Self::visit_operand(test, visit);
+                    Self::visit(body, visit);
+                    Self::visit(otherwise, visit);
+                }
+                Statement::Scope { body, .. } => {
+                    if !Self::visit(body, visit) {
+                        return false;
+                    }
+                }
+                _ => {
+                    ir::walk_expressions(std::slice::from_ref(stmt), &mut |expr| {
+                        visit_expression_site(expr, visit)
+                    });
+                    if matches!(
+                        stmt,
+                        Statement::Return(_)
+                            | Statement::Break
+                            | Statement::Continue
+                            | Statement::Exhaust
+                    ) {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    }
+}
 
 impl SourceInfo<'_> {
     pub(super) fn function_body<'s>(&self, def: &'s ast::StmtFunctionDef) -> Body<'s> {
@@ -40,7 +127,7 @@ impl Function<'_, '_> {
                 lambda_code: Default::default(),
                 definitions: None,
                 unit,
-                positions: super::super::SourcePositions::new(text, &file),
+                positions: &super::super::SourcePositions::new(text, &file),
             };
             match &body.code {
                 AnnotationCode::Checked(function) => Some(location.code(
@@ -65,51 +152,11 @@ impl Function<'_, '_> {
     }
 
     pub(in crate::dynamic::emit) fn prepare_checked_value(&mut self, value: &Expr) {
-        ir::walk_operand_expressions(value, &mut |expr| self.prepare_site(expr));
+        CheckedSites::visit_operand(value, &mut |site| self.prepare_site(site));
     }
 
     pub(in crate::dynamic::emit) fn prepare_checked_sites(&mut self, statements: &[Statement]) {
-        self.prepare_declarations(statements);
-    }
-
-    /// A block stops emitting after a transfer. Unreachable declaration bodies must
-    /// not compile (or raise diagnostics) merely because their identity is in the IR.
-    fn prepare_declarations(&mut self, statements: &[Statement]) -> bool {
-        for stmt in statements {
-            match stmt {
-                Statement::If(test, yes, no) => {
-                    ir::walk_operand_expressions(test, &mut |e| self.prepare_site(e));
-                    let yes_continues = self.prepare_declarations(yes);
-                    let no_continues = self.prepare_declarations(no);
-                    if !yes_continues && !no_continues {
-                        return false;
-                    }
-                }
-                Statement::While(test, body, otherwise) => {
-                    ir::walk_operand_expressions(test, &mut |e| self.prepare_site(e));
-                    self.prepare_declarations(body);
-                    self.prepare_declarations(otherwise);
-                }
-                Statement::Scope { body, .. } => {
-                    if !self.prepare_declarations(body) {
-                        return false;
-                    }
-                }
-                _ => {
-                    ir::walk_expressions(std::slice::from_ref(stmt), &mut |e| self.prepare_site(e));
-                    if matches!(
-                        stmt,
-                        Statement::Return(_)
-                            | Statement::Break
-                            | Statement::Continue
-                            | Statement::Exhaust
-                    ) {
-                        return false;
-                    }
-                }
-            }
-        }
-        true
+        CheckedSites::visit(statements, &mut |site| self.prepare_site(site));
     }
 
     /// Python creates a fresh callable at each execution of the binding while the
@@ -194,48 +241,48 @@ impl Function<'_, '_> {
         );
     }
 
-    fn prepare_site(&mut self, expression: &Expr) {
-        if let ExprKind::Builtin(Builtin::RegisteredGenerator(site, _), _) = &expression.kind {
-            self.prepare_generator(*site);
-            return;
-        }
-        if let ExprKind::Builtin(Builtin::RegisteredTypeAlias(site), _) = &expression.kind {
-            if !self.sites.aliases.contains_key(site) {
-                let body = self.source.type_aliases[site]
-                    .body
-                    .as_ref()
-                    .expect("checked alias value");
-                let alias = self.compile_type_alias(*site, AliasValue::Checked(body));
-                self.sites.aliases.insert(*site, alias);
+    fn prepare_site(&mut self, site: RequiredSite) {
+        let start = match site {
+            RequiredSite::Generator(site) => {
+                self.prepare_generator(site);
+                return;
             }
-            return;
-        }
-        if let ExprKind::Builtin(Builtin::RegisteredLambda(site, _), _) = &expression.kind {
-            if !self.sites.lambdas.contains_key(site) {
-                let body = self.source.lambdas[site].body.as_ref().expect("checked lambda body");
-                let lambda = self.compile_lambda(*site, Body::CheckedExpression(body));
-                self.sites.lambdas.insert(*site, lambda);
+            RequiredSite::Alias(site) => {
+                if !self.sites.aliases.contains_key(&site) {
+                    let body = self.source.type_aliases[&site]
+                        .body
+                        .as_ref()
+                        .expect("checked alias value");
+                    let alias = self.compile_type_alias(site, AliasValue::Checked(body));
+                    self.sites.aliases.insert(site, alias);
+                }
+                return;
             }
-            return;
-        }
-        if let ExprKind::Builtin(Builtin::BindAnnotationExpression(site), _) = &expression.kind {
-            self.place_annotation_string(*site);
-            return;
-        }
-        if let ExprKind::Builtin(Builtin::RegisteredAnnotationInsert(occurrence), _) =
-            &expression.kind
-        {
-            let decl = &self.source.annotations[&occurrence.site];
-            self.sites
-                .annotation_fields
-                .entry(occurrence.site)
-                .or_insert_with(|| (decl.name.clone(), decl.range));
-            return;
-        }
-        let ExprKind::Builtin(Builtin::RegisteredDefinition(site), _) = &expression.kind else {
-            return;
+            RequiredSite::Lambda(site) => {
+                if !self.sites.lambdas.contains_key(&site) {
+                    let body = self.source.lambdas[&site]
+                        .body
+                        .as_ref()
+                        .expect("checked lambda body");
+                    let lambda = self.compile_lambda(site, Body::CheckedExpression(body));
+                    self.sites.lambdas.insert(site, lambda);
+                }
+                return;
+            }
+            RequiredSite::AnnotationString(site) => {
+                self.place_annotation_string(site);
+                return;
+            }
+            RequiredSite::AnnotationField(site) => {
+                let decl = &self.source.annotations[&site];
+                self.sites
+                    .annotation_fields
+                    .entry(site)
+                    .or_insert_with(|| (decl.name.clone(), decl.range));
+                return;
+            }
+            RequiredSite::Definition(start) => start,
         };
-        let start = site.start();
         if !self.sites.definitions.contains_key(&start) {
             let syntax = self.source.definitions.as_ref().expect("registered scope")[&start];
             let (definition, decorators, type_params) = match syntax {
