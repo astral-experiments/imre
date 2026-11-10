@@ -1223,7 +1223,7 @@ mod tests {
         let [run] = suite.residual.as_mut_slice() else {
             panic!("expected one mixed statement");
         };
-        let crate::frontend::SourceEffect::Value(_, inputs) = &mut run.effect else {
+        let Ok(crate::frontend::SourceEffect::Value(_, inputs)) = &mut run.effect else {
             panic!("expected a value operand");
         };
         let [crate::frontend::PhysicalOperand::Residual(value)] = inputs.as_mut_slice() else {
@@ -1364,7 +1364,7 @@ mod tests {
             .residual
             .iter()
             .map(|run| {
-                let SourceEffect::Value(statement, input) = &run.effect else {
+                let Ok(SourceEffect::Value(statement, input)) = &run.effect else {
                     panic!("expected a mixed header operand");
                 };
                 assert!(matches!(
@@ -1694,7 +1694,7 @@ mod tests {
                 let [run] = plan.residual.as_slice() else {
                     panic!("expected one mixed loop in {source}");
                 };
-                let crate::frontend::SourceEffect::For(region) = &run.effect else {
+                let Ok(crate::frontend::SourceEffect::For(region)) = &run.effect else {
                     panic!("expected a prepared for in {source}");
                 };
                 assert!(matches!(region.acquire, crate::ir::IteratorOp::Loop(_)));
@@ -1848,7 +1848,7 @@ mod tests {
         let [run] = plan.residual.as_slice() else {
             panic!("expected a mixed for")
         };
-        let crate::frontend::SourceEffect::For(region) = &run.effect else {
+        let Ok(crate::frontend::SourceEffect::For(region)) = &run.effect else {
             panic!("missing prepared loop");
         };
         assert!(matches!(
@@ -2013,7 +2013,7 @@ mod tests {
         let [run] = plan.residual.as_mut_slice() else {
             panic!("expected one mixed while in the function");
         };
-        let SourceEffect::Region(region) = &mut run.effect else {
+        let Ok(SourceEffect::Region(region)) = &mut run.effect else {
             panic!("expected the prepared while");
         };
         assert!(matches!(
@@ -2039,7 +2039,7 @@ mod tests {
             transfer(suite, stop_range),
             crate::ir::Statement::Break
         ));
-        let SourceEffect::Region(branch) = &mut suite.residual[0].effect else {
+        let Ok(SourceEffect::Region(branch)) = &mut suite.residual[0].effect else {
             panic!("expected the if at the start of the while body");
         };
         use crate::ir::{Builtin, ExprKind, Statement};
@@ -2087,14 +2087,14 @@ mod tests {
             })
             .unwrap();
         assert!(!suite.residual.iter().any(|run| matches!(
-            &run.effect, crate::frontend::SourceEffect::For(region)
+            &run.effect, Ok(crate::frontend::SourceEffect::For(region))
                 if region.range == main.body[index].range()
         )));
         let last = main.body.last().unwrap().as_try_stmt().unwrap();
         assert!(last.body[0].as_with_stmt().unwrap().is_async);
         let task_group = main.body.len() - 1;
         assert!(!suite.residual.iter().any(|run| matches!(
-            &run.effect, crate::frontend::SourceEffect::Try(region) if region.range == last.range()
+            &run.effect, Ok(crate::frontend::SourceEffect::Try(region)) if region.range == last.range()
         )));
 
         let before = module.standalone().unwrap();
@@ -3168,7 +3168,7 @@ mod tests {
         let [run] = suite.residual.as_slice() else {
             panic!("expected a mixed context")
         };
-        let crate::frontend::SourceEffect::Context(context) = &run.effect else {
+        let Ok(crate::frontend::SourceEffect::Context(context)) = &run.effect else {
             panic!("expected a prepared context")
         };
         assert!(
@@ -3189,10 +3189,11 @@ mod tests {
 
         // The expression statement owns the one call that still needs its lambda child.
         let suite = test_function_suite(&mut prepared.source, position);
-        let crate::frontend::SourceEffect::Context(context) = &mut suite.residual[0].effect else {
+        let Ok(crate::frontend::SourceEffect::Context(context)) = &mut suite.residual[0].effect
+        else {
             panic!("expected the mixed context");
         };
-        let crate::frontend::SourceEffect::Value(statement, inputs) =
+        let Ok(crate::frontend::SourceEffect::Value(statement, inputs)) =
             &mut context.body.residual[0].effect
         else {
             panic!("expected a prepared expression statement");
@@ -3403,7 +3404,7 @@ mod tests {
 
         fn region<'a>(prepared: &'a mut PreparedBody<'_>) -> &'a mut PreparedRegion {
             let initializer = prepared.source.initializer.as_mut().unwrap();
-            let SourceEffect::Region(region) = &mut initializer.residual[0].effect else {
+            let Ok(SourceEffect::Region(region)) = &mut initializer.residual[0].effect else {
                 unreachable!()
             };
             region
@@ -3430,7 +3431,7 @@ mod tests {
         let [run] = prepared.initializer().residual.as_slice() else {
             panic!("expected only the mixed if");
         };
-        let SourceEffect::Region(branch) = &run.effect else {
+        let Ok(SourceEffect::Region(branch)) = &run.effect else {
             panic!("expected a prepared conditional");
         };
         assert!(matches!(branch.body.as_slice(),
@@ -3472,7 +3473,7 @@ mod tests {
         let [run] = region(&mut prepared).suites[1].residual.as_mut_slice() else {
             panic!("expected the middle arm to retain only the call");
         };
-        let SourceEffect::Value(_, inputs) = &mut run.effect else {
+        let Ok(SourceEffect::Value(_, inputs)) = &mut run.effect else {
             panic!("expected an expression statement");
         };
         let [operand @ PhysicalOperand::Residual(_)] = inputs.as_mut_slice() else {
@@ -3634,7 +3635,8 @@ mod tests {
                 }
                 assert_ne!(prepared.standalone().unwrap(), original);
             } else if physical {
-                let crate::frontend::SourceEffect::Match(_, site) = &mut suite.residual[0].effect
+                let Ok(crate::frontend::SourceEffect::Match(_, site)) =
+                    &mut suite.residual[0].effect
                 else {
                     panic!("expected a mixed match")
                 };
@@ -3677,7 +3679,7 @@ mod tests {
             panic!("expected match")
         };
         let suite = prepared.source.initializer.as_ref().unwrap();
-        let crate::frontend::SourceEffect::Match(_, site) = &suite.residual[0].effect else {
+        let Ok(crate::frontend::SourceEffect::Match(_, site)) = &suite.residual[0].effect else {
             panic!("expected a mixed match")
         };
         assert!(matches!(
@@ -4534,7 +4536,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         else {
             panic!("expected a single mixed try");
         };
-        let SourceEffect::Try(region) = &run.effect else {
+        let Ok(SourceEffect::Try(region)) = &run.effect else {
             panic!("expected a prepared try")
         };
         assert!(matches!(
@@ -4557,7 +4559,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert_eq!(module.standalone().unwrap(), original);
 
         let run = &mut test_function_suite(&mut module.source, function_start).residual[0];
-        let SourceEffect::Try(region) = &mut run.effect else {
+        let Ok(SourceEffect::Try(region)) = &mut run.effect else {
             unreachable!()
         };
         region.handlers[0].name = None;
@@ -4780,7 +4782,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             let [run] = suite.residual.as_slice() else {
                 panic!("expected one mixed assertion")
             };
-            let SourceEffect::Assertion(site) = &run.effect else {
+            let Ok(SourceEffect::Assertion(site)) = &run.effect else {
                 panic!("expected a prepared assertion")
             };
             assert_eq!(site.statement, start);
@@ -4825,7 +4827,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .into();
             assert_eq!(module.standalone().unwrap(), original);
 
-            let SourceEffect::Assertion(site) =
+            let Ok(SourceEffect::Assertion(site)) =
                 &mut test_function_suite(&mut module.source, function).residual[0].effect
             else {
                 unreachable!()
@@ -4860,7 +4862,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             else {
                 panic!("expected one residual statement");
             };
-            let SourceEffect::Region(region) = &mut run.effect else {
+            let Ok(SourceEffect::Region(region)) = &mut run.effect else {
                 panic!("expected the prepared while");
             };
             region
@@ -4936,7 +4938,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert_eq!(module.standalone().unwrap_err(), expected);
 
         let plan = test_function_suite(&mut module.source, start);
-        let SourceEffect::Region(region) = &mut plan.residual[0].effect else {
+        let Ok(SourceEffect::Region(region)) = &mut plan.residual[0].effect else {
             panic!("expected the prepared while");
         };
         assert!(
@@ -5710,11 +5712,11 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         };
         assert!(matches!(
             &rhs.effect,
-            crate::frontend::SourceEffect::Value(statement, _)
+            Ok(crate::frontend::SourceEffect::Value(statement, _))
                 if matches!(statement.as_ref(), crate::ir::Statement::Assign(..))
         ));
         assert!(matches!(&attribute.effect,
-            crate::frontend::SourceEffect::Value(statement, inputs)
+            Ok(crate::frontend::SourceEffect::Value(statement, inputs))
                 if inputs.len() == 2 && matches!(statement.as_ref(), crate::ir::Statement::Expr(value)
                     if matches!(&value.kind, crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredAttribute {
                         action: crate::ir::AttributeAction::Store, ..
@@ -5743,7 +5745,8 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert_eq!(emit(&prepared), before);
 
         let class = prepared.source.class_bodies.get_mut(&class_start).unwrap();
-        let crate::frontend::SourceEffect::Value(_, inputs) = &mut class.body.residual[0].effect
+        let Ok(crate::frontend::SourceEffect::Value(_, inputs)) =
+            &mut class.body.residual[0].effect
         else {
             panic!("expected the retained assignment value");
         };
@@ -5778,11 +5781,12 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .unwrap();
         let branch = protected.finalbody[0].as_match_stmt_mut().unwrap();
         let suite = prepared.source.initializer.as_ref().unwrap();
-        let crate::frontend::SourceEffect::Try(region) = &suite.residual[0].effect else {
+        let Ok(crate::frontend::SourceEffect::Try(region)) = &suite.residual[0].effect else {
             panic!("expected a mixed try")
         };
         let finalbody = &region.finalbody.as_ref().unwrap();
-        let crate::frontend::SourceEffect::Match(_, site) = &finalbody.residual[0].effect else {
+        let Ok(crate::frontend::SourceEffect::Match(_, site)) = &finalbody.residual[0].effect
+        else {
             panic!("expected a mixed match in finally")
         };
         let suite = &site.cases[0].body;
@@ -5791,7 +5795,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         };
         assert!(matches!(
             &run.effect,
-            crate::frontend::SourceEffect::Value(statement, _)
+            Ok(crate::frontend::SourceEffect::Value(statement, _))
                 if matches!(statement.as_ref(), crate::ir::Statement::Expr(value)
                     if matches!(value.kind, crate::ir::ExprKind::Builtin(
                         crate::ir::Builtin::RegisteredDeleteItem, _)))
@@ -5833,7 +5837,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             panic!("only the target with the injected key needs a source input");
         };
         assert_eq!(gap.at, suite.checked.function.body.len());
-        let crate::frontend::SourceEffect::Value(statement, operands) = &gap.effect else {
+        let Ok(crate::frontend::SourceEffect::Value(statement, operands)) = &gap.effect else {
             panic!("expected a prepared item deletion");
         };
         assert!(

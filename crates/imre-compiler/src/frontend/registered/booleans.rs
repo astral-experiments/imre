@@ -444,7 +444,7 @@ mod tests {
         let [site] = &suite.residual[..] else {
             panic!("expected one partial annotation")
         };
-        let SourceEffect::Value(statement, inputs) = &site.effect else {
+        let Ok(SourceEffect::Value(statement, inputs)) = &site.effect else {
             panic!("expected a checked statement")
         };
         assert!(matches!(

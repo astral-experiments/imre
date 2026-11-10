@@ -976,14 +976,19 @@ pub(crate) fn registered_sites<'a>(
 /// An operation at its execution position in the checked statement body.
 pub(crate) struct SuiteOperation {
     pub(crate) at: usize,
-    pub(crate) effect: SourceEffect,
+    pub(crate) effect: std::result::Result<SourceEffect, OperandRefusal>,
 }
 
-/// Preparation borrows a statement until its operations and child suites are known.
+/// Preparation retains syntax for statements whose operations remain to be selected.
 struct PendingStatement<'s> {
     at: usize,
-    source: &'s ast::Stmt,
-    effect: Option<SourceEffect>,
+    effect: PendingEffect<'s>,
+}
+
+enum PendingEffect<'s> {
+    Prepared(SourceEffect),
+    Source(&'s ast::Stmt),
+    Refused(OperandRefusal),
 }
 
 /// Lowering already knows whether each checked statement has a normal successor.
@@ -1005,8 +1010,6 @@ pub(crate) enum SourceEffect {
     Value(Box<Statement>, Vec<PhysicalOperand>),
     /// The enclosing suite owns any source inputs on their test or failure edge.
     Assertion(Box<AssertionSite>),
-    /// A refused operation retains its diagnostic and original source range.
-    Refused(TextRange, &'static str),
     /// Checked control flow with guards and child suites bound in their lexical frame.
     Region(Box<PreparedRegion>),
     /// Patterns, guards and case suites belong to the same evaluation of the subject.
@@ -1379,45 +1382,43 @@ impl<'a> SuitePreparation<'a> {
             offset = run.at;
             let preceding = self.refusal.take();
             let effect =
-                match (run.effect, run.source) {
-                    (Some(effect), _) => effect,
-                    (None, ast::Stmt::If(branch)) => {
-                        self.prepare_if(branch, kind, child_selection, suspended)
-                    }
-                    (None, ast::Stmt::While(loop_)) => {
-                        self.prepare_while(loop_, kind, child_selection, suspended)
-                    }
-                    (None, ast::Stmt::For(loop_)) => SourceEffect::For(Box::new(self.prepare_for(
-                        loop_,
-                        kind,
-                        child_selection,
-                        suspended,
-                    ))),
-                    (None, ast::Stmt::Try(protected)) => SourceEffect::Try(Box::new(
-                        self.prepare_try(protected, kind, child_selection, suspended),
-                    )),
-                    (None, ast::Stmt::With(with)) => SourceEffect::Context(Box::new(
-                        self.prepare_context(with, kind, child_selection, suspended),
-                    )),
-                    (None, ast::Stmt::Match(branch)) => {
-                        match self.prepare_match(branch, kind, suspended) {
-                            Ok(site) => SourceEffect::Match(branch.range(), Box::new(site)),
-                            Err((range, reason)) => SourceEffect::Refused(range, reason),
+                match run.effect {
+                    PendingEffect::Prepared(effect) => Ok(effect),
+                    PendingEffect::Refused(refusal) => Err(refusal),
+                    PendingEffect::Source(stmt) => {
+                        match stmt {
+                            ast::Stmt::If(branch) => {
+                                Ok(self.prepare_if(branch, kind, child_selection, suspended))
+                            }
+                            ast::Stmt::While(loop_) => {
+                                Ok(self.prepare_while(loop_, kind, child_selection, suspended))
+                            }
+                            ast::Stmt::For(loop_) => Ok(SourceEffect::For(Box::new(
+                                self.prepare_for(loop_, kind, child_selection, suspended),
+                            ))),
+                            ast::Stmt::Try(protected) => Ok(SourceEffect::Try(Box::new(
+                                self.prepare_try(protected, kind, child_selection, suspended),
+                            ))),
+                            ast::Stmt::With(with) => Ok(SourceEffect::Context(Box::new(
+                                self.prepare_context(with, kind, child_selection, suspended),
+                            ))),
+                            ast::Stmt::Match(branch) => self
+                                .prepare_match(branch, kind, suspended)
+                                .map(|site| SourceEffect::Match(branch.range(), Box::new(site))),
+                            _ => Err((stmt.range(), "cannot compile this statement ahead of time")),
                         }
                     }
-                    (None, stmt) => SourceEffect::Refused(
-                        stmt.range(),
-                        "cannot compile this statement ahead of time",
-                    ),
                 };
             let selected = match &effect {
-                SourceEffect::Value(_, inputs) => inputs.iter().find_map(PhysicalOperand::refusal),
-                SourceEffect::Assertion(site) => site
+                Err(refusal) => Some(*refusal),
+                Ok(SourceEffect::Value(_, inputs)) => {
+                    inputs.iter().find_map(PhysicalOperand::refusal)
+                }
+                Ok(SourceEffect::Assertion(site)) => site
                     .test
                     .refusal()
                     .or_else(|| site.message.as_ref()?.refusal()),
-                SourceEffect::Refused(range, reason) => Some((*range, *reason)),
-                SourceEffect::Class { site, inputs, .. } => inputs
+                Ok(SourceEffect::Class { site, inputs, .. }) => inputs
                     .iter()
                     .find_map(PhysicalOperand::refusal)
                     .or_else(|| self.declaration_refusals.get(site).copied()),
@@ -1426,11 +1427,11 @@ impl<'a> SuitePreparation<'a> {
             let operation = self.refusal.take().or(selected);
             self.refusal = preceding.or(operation.filter(|_| live));
             live &= match &effect {
-                SourceEffect::Value(statement, _) => !matches!(
+                Ok(SourceEffect::Value(statement, _)) => !matches!(
                     statement.as_ref(),
                     Statement::Return(_) | Statement::Raise(_)
                 ),
-                SourceEffect::Try(region) => try_continues(
+                Ok(SourceEffect::Try(region)) => try_continues(
                     region.body.falls_through,
                     !region.handlers.is_empty(),
                     region
@@ -1438,7 +1439,7 @@ impl<'a> SuitePreparation<'a> {
                         .as_ref()
                         .is_none_or(|suite| suite.falls_through),
                 ),
-                SourceEffect::Region(region) => !region.terminates,
+                Ok(SourceEffect::Region(region)) => !region.terminates,
                 _ => true,
             };
             residual.push(SuiteOperation { at: run.at, effect });
@@ -1809,8 +1810,7 @@ impl<'a> SuitePreparation<'a> {
                 };
                 residual.push(PendingStatement {
                     at: body.len(),
-                    source: stmt,
-                    effect: Some(SourceEffect::Assertion(Box::new(site))),
+                    effect: PendingEffect::Prepared(SourceEffect::Assertion(Box::new(site))),
                 });
                 continue;
             }
@@ -1834,8 +1834,7 @@ impl<'a> SuitePreparation<'a> {
                         body.push(checkpoint(stmt));
                         residual.push(PendingStatement {
                             at: body.len(),
-                            source: stmt,
-                            effect: Some(SourceEffect::Class {
+                            effect: PendingEffect::Prepared(SourceEffect::Class {
                                 site: class.start(),
                                 layout: packed_arguments(args),
                                 inputs,
@@ -1855,8 +1854,7 @@ impl<'a> SuitePreparation<'a> {
                         let slot = scope.hidden(Type::PythonObject);
                         residual.push(PendingStatement {
                             at: body.len(),
-                            source: stmt,
-                            effect: Some(store_input(slot, input)),
+                            effect: PendingEffect::Prepared(store_input(slot, input)),
                         });
                         unpacking::take_pattern_temporary(
                             Expr::local(slot, Type::PythonObject),
@@ -1895,8 +1893,7 @@ impl<'a> SuitePreparation<'a> {
                 body.push(checkpoint(stmt));
                 residual.push(PendingStatement {
                     at: body.len(),
-                    source: stmt,
-                    effect: Some(SourceEffect::Value(Box::new(output), inputs)),
+                    effect: PendingEffect::Prepared(SourceEffect::Value(Box::new(output), inputs)),
                 });
                 continue;
             }
@@ -1907,8 +1904,7 @@ impl<'a> SuitePreparation<'a> {
                 if let Some(inputs) = values::bare_target_operands(&ann.target) {
                     residual.push(PendingStatement {
                         at: body.len(),
-                        source: stmt,
-                        effect: Some(operation_with_inputs(
+                        effect: PendingEffect::Prepared(operation_with_inputs(
                             Builtin::RegisteredDiscard,
                             inputs.into_iter().map(frame_value).collect(),
                         )),
@@ -1922,8 +1918,7 @@ impl<'a> SuitePreparation<'a> {
                 body.push(checkpoint(stmt));
                 residual.push(PendingStatement {
                     at: body.len(),
-                    source: stmt,
-                    effect: Some(operation_with_inputs(
+                    effect: PendingEffect::Prepared(operation_with_inputs(
                         attribute_opcode(effect.action, effect.field),
                         effect.operands().map(frame_value).collect(),
                     )),
@@ -1970,8 +1965,7 @@ impl<'a> SuitePreparation<'a> {
                 body.push(checkpoint(stmt));
                 residual.push(PendingStatement {
                     at: body.len(),
-                    source: stmt,
-                    effect: Some(SourceEffect::Value(Box::new(output), inputs)),
+                    effect: PendingEffect::Prepared(SourceEffect::Value(Box::new(output), inputs)),
                 });
                 body.extend(binding);
                 continue;
@@ -1997,21 +1991,23 @@ impl<'a> SuitePreparation<'a> {
                 let targets = scope.assignment_targets(targets, value);
                 scope.report_child_refusals = false;
                 let (effect, targets) = match targets {
-                    Ok(targets) => (store_input(input, frame_value(rhs)), targets),
+                    Ok(targets) => (
+                        PendingEffect::Prepared(store_input(input, frame_value(rhs))),
+                        targets,
+                    ),
                     Err(()) => {
                         scope.truncate_locals(slots_before);
                         let (range, reason) = scope.refusal.or(first_refusal).unwrap_or((
                             stmt.range(),
                             "cannot compile this assignment target ahead of time",
                         ));
-                        (SourceEffect::Refused(range, reason), Vec::new())
+                        (PendingEffect::Refused((range, reason)), Vec::new())
                     }
                 };
                 body.push(checkpoint(stmt));
                 residual.push(PendingStatement {
                     at: body.len(),
-                    source: stmt,
-                    effect: Some(effect),
+                    effect,
                 });
                 body.extend(targets);
                 if let ast::Stmt::AnnAssign(ann) = stmt
@@ -2038,8 +2034,7 @@ impl<'a> SuitePreparation<'a> {
                         scope.truncate_locals(slots);
                         residual.push(PendingStatement {
                             at: body.len(),
-                            source: stmt,
-                            effect: Some(operation_with_inputs(
+                            effect: PendingEffect::Prepared(operation_with_inputs(
                                 op,
                                 inputs.map(target_input).collect(),
                             )),
@@ -2053,8 +2048,7 @@ impl<'a> SuitePreparation<'a> {
             }
             residual.push(PendingStatement {
                 at: body.len(),
-                source: stmt,
-                effect: None,
+                effect: PendingEffect::Source(stmt),
             });
         }
         LoweredSuite {
@@ -3334,14 +3328,15 @@ mod tests {
         let operations = HashMap::new();
         let mut prepare = SuitePreparation::new(&operations, literals.context(text), body, true);
         let suite = prepare.suite(body, RegisteredScope::Module);
-        let [operation] = suite.residual.as_slice() else {
-            panic!("expected only the omitted alias operation");
+        let (range, reason) = suite
+            .refusal
+            .expect("the omitted alias has a ranged diagnostic");
+        assert_eq!(&text[range], "type Alias = int");
+        assert_eq!(reason, "cannot compile this statement ahead of time");
+        let [step] = &suite.residual[..] else {
+            panic!("expected the omitted alias")
         };
-        let SourceEffect::Refused(range, reason) = &operation.effect else {
-            panic!("expected a ranged refusal");
-        };
-        assert_eq!(&text[*range], "type Alias = int");
-        assert_eq!(*reason, "cannot compile this statement ahead of time");
+        assert_eq!(step.effect.as_ref().err().copied(), Some((range, reason)));
     }
 
     #[test]
@@ -3365,7 +3360,7 @@ mod tests {
         assert!(matches!(
             suite.residual.as_slice(),
             [SuiteOperation {
-                effect: SourceEffect::Value(statement, _),
+                effect: Ok(SourceEffect::Value(statement, _)),
                 ..
             }] if matches!(statement.as_ref(), Statement::Assign(_, _))
         ));
@@ -3470,7 +3465,7 @@ mod tests {
         };
         assert_eq!(physical.at, 0);
 
-        let SourceEffect::Assertion(site) = &physical.effect else {
+        let Ok(SourceEffect::Assertion(site)) = &physical.effect else {
             panic!("expected a prepared assertion");
         };
         let PhysicalOperand::Checked(test) = &site.test else {
@@ -3700,7 +3695,7 @@ mod tests {
             panic!("expected only the second conditional to need a physical guard")
         };
 
-        let SourceEffect::Region(region) = &run.effect else {
+        let Ok(SourceEffect::Region(region)) = &run.effect else {
             panic!("expected the conditional to bind its child suite")
         };
         assert!(matches!(region.body.as_slice(),
@@ -3744,7 +3739,7 @@ mod tests {
         // namespace records y's annotation before executing the final import.
         assert!(matches!(
             &run.effect,
-            SourceEffect::Value(statement, _) if matches!(statement.as_ref(), Statement::Assign(_, _))
+            Ok(SourceEffect::Value(statement, _)) if matches!(statement.as_ref(), Statement::Assign(_, _))
         ));
 
         let (before, after) = plan.checked.function.body.split_at(run.at);
