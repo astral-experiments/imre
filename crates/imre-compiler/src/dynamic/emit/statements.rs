@@ -213,14 +213,11 @@ impl<'p> Function<'_, 'p> {
             SourceEffect::RefusedTargetOperand(range, reason) => {
                 self.with_expression_range(*range, |code| code.build_diagnostic(reason));
             }
-            SourceEffect::AssignmentInput(slot) => {
-                let assignment = suite[run.statements.start]
-                    .as_assign_stmt()
-                    .expect("assignment RHS");
-                let value = self.expr(&assignment.value);
-                self.frame.store_private(*slot, &value);
-            }
             SourceEffect::Value(output, inputs) => match output {
+                crate::frontend::ValueStatement::Store(slot) => {
+                    let value = self.physical_operand(&inputs[0]);
+                    self.frame.store_private(*slot, &value);
+                }
                 crate::frontend::ValueStatement::Return => {
                     let value = inputs.first().map_or_else(
                         || super::permanent::NONE.to_string(),

@@ -831,6 +831,8 @@ pub(crate) struct SourceRun {
 }
 
 pub(crate) enum ValueStatement {
+    /// Retain the RHS once for the checked assignment targets that follow.
+    Store(usize),
     Return,
     Expression,
     Raise,
@@ -839,8 +841,6 @@ pub(crate) enum ValueStatement {
 pub(crate) enum SourceEffect {
     /// Transfer control or discard a value using operands prepared in this frame.
     Value(ValueStatement, Vec<PhysicalOperand>),
-    /// Evaluate the RHS once for the following checked assignment targets.
-    AssignmentInput(usize),
     /// Evaluate and release each operand of an annotation without an assigned value.
     Discard(Vec<PhysicalOperand>),
     /// The enclosing suite owns any source inputs on their test or failure edge.
@@ -1369,11 +1369,6 @@ impl<'a> SuitePreparation<'a> {
             let sites = &mut children.prepare.sites.expressions;
             for stmt in &stmts[run.statements.clone()] {
                 match &run.effect {
-                    Some(SourceEffect::AssignmentInput(_)) => {
-                        if let ast::Stmt::Assign(assign) = stmt {
-                            sites.prepare_input(&assign.value, source, kind, suspended);
-                        }
-                    }
                     Some(
                         SourceEffect::ObjectOperation(_, inputs)
                         | SourceEffect::Discard(inputs)
@@ -1622,6 +1617,19 @@ impl<'a> SuitePreparation<'a> {
         let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
         let mut body = Vec::new();
         let mut residual: Vec<SourceRun> = Vec::new();
+        let frame_value = |expr: &ast::Expr| {
+            let checked = RegisteredOperand::prepare_with(self.source, kind, |scope| {
+                if suspended {
+                    scope.frame_value(expr)
+                } else {
+                    scope.ordinary_operand(expr)
+                }
+            });
+            match checked {
+                Some(value) => PhysicalOperand::Checked(Box::new(value)),
+                None => PhysicalOperand::Source(Box::new(expr.clone())),
+            }
+        };
         for (i, stmt) in stmts.iter().enumerate() {
             if let Some(transfer) = loop_transfer(stmt) {
                 residual.push(SourceRun {
@@ -1673,23 +1681,7 @@ impl<'a> SuitePreparation<'a> {
                 _ => None,
             };
             if let Some((output, inputs)) = output {
-                let inputs = inputs
-                    .into_iter()
-                    .flatten()
-                    .map(|expr| {
-                        let checked = RegisteredOperand::prepare_with(self.source, kind, |scope| {
-                            if suspended {
-                                scope.frame_value(expr)
-                            } else {
-                                scope.ordinary_operand(expr)
-                            }
-                        });
-                        match checked {
-                            Some(value) => PhysicalOperand::Checked(Box::new(value)),
-                            None => PhysicalOperand::Source(Box::new(expr.clone())),
-                        }
-                    })
-                    .collect();
+                let inputs = inputs.into_iter().flatten().map(frame_value).collect();
                 body.push(checkpoint(stmt));
                 residual.push(SourceRun {
                     at: body.len(),
@@ -1731,7 +1723,13 @@ impl<'a> SuitePreparation<'a> {
                 let targets = scope.assignment_targets(&assign.targets, value);
                 scope.diagnostic_suspension = None;
                 let (effect, targets) = match targets {
-                    Ok(targets) => (SourceEffect::AssignmentInput(input), targets),
+                    Ok(targets) => (
+                        SourceEffect::Value(
+                            ValueStatement::Store(input),
+                            vec![frame_value(&assign.value)],
+                        ),
+                        targets,
+                    ),
                     Err(()) => {
                         scope.truncate_locals(slots_before);
                         let (range, reason) = scope.refusal.or(first_refusal).unwrap_or((

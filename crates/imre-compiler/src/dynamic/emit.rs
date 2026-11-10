@@ -1832,6 +1832,7 @@ mod tests {
             &function.body,
             RegisteredScope::Function { is_async: false },
             false,
+            &|_| false,
         );
         let (sites, nested) = (plan.sites, plan.nested);
         module.source.statement_sites = sites;
@@ -4674,7 +4675,8 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .unwrap();
         let class = outer.body[0].as_class_def_stmt().unwrap();
         assert!(!prepared.source.function_bodies.contains_key(&outer.start()));
-        let suite = &prepared.source.class_bodies[&class.start()].body;
+        let class_start = class.start();
+        let suite = &prepared.source.class_bodies[&class_start].body;
         assert!(
             !prepared
                 .source
@@ -4689,7 +4691,10 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert_eq!(rhs.statements, 2..3);
         assert!(matches!(
             rhs.effect,
-            Some(crate::frontend::SourceEffect::AssignmentInput(_))
+            Some(crate::frontend::SourceEffect::Value(
+                crate::frontend::ValueStatement::Store(_),
+                _
+            ))
         ));
         assert_eq!(whole.statements, 3..4);
         assert!(whole.effect.is_none());
@@ -4709,9 +4714,22 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let target = store.targets[0].as_attribute_expr_mut().unwrap();
         std::mem::swap(&mut target.value, &mut store.value);
         store.targets.clear();
-        class.body[2].as_assign_stmt_mut().unwrap().targets.clear();
+        // Neither the checked targets nor their residual input need the assignment syntax.
+        class.body[2] = class.body[4].clone();
         class.body[5].as_assign_stmt_mut().unwrap().targets.clear();
         assert_eq!(emit(&prepared), before);
+
+        let class = prepared.source.class_bodies.get_mut(&class_start).unwrap();
+        let Some(crate::frontend::SourceEffect::Value(_, inputs)) =
+            &mut class.body.residual[0].effect
+        else {
+            panic!("expected the retained assignment value");
+        };
+        let [crate::frontend::PhysicalOperand::Source(value)] = &mut inputs[..] else {
+            panic!("expected the residual lambda call");
+        };
+        *value = value.as_call_expr().unwrap().func.clone();
+        assert_ne!(emit(&prepared), before);
     }
 
     #[test]
