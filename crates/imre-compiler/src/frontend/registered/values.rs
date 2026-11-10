@@ -693,7 +693,7 @@ pub(crate) fn lambda_defaults(lambda: &ast::ExprLambda) -> impl Iterator<Item = 
     })
 }
 
-fn lambda_binding<E>(
+pub(super) fn lambda_binding<E>(
     lambda: &ast::ExprLambda,
     operand: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
 ) -> StdResult<Expr, E> {
@@ -804,6 +804,36 @@ pub(crate) fn suspended_operand(node: &ast::Expr, source: RegisteredSource<'_>) 
     Region::SuspendedOperand.operand(node, source)
 }
 
+/// A deferred callable and a name lookup observe the lexical namespace of the display.
+pub(super) fn in_namespace(source: &ast::Expr, value: &mut Expr, namespace: Expr) {
+    if matches!(source, ast::Expr::TString(_)) {
+        // A prepared template reuses its already-lowered interpolation operands.
+        // Their calls and names need the lexical environment at this use site.
+        fn scope_template(value: &mut Expr, namespace: &Expr) {
+            ir::children_mut(value, |child| scope_template(child, namespace));
+            bind_namespace(value, namespace.clone());
+        }
+        scope_template(value, &namespace);
+    } else {
+        bind_namespace(value, namespace);
+    }
+}
+
+fn bind_namespace(value: &mut Expr, namespace: Expr) {
+    match &mut value.kind {
+        ExprKind::Builtin(Builtin::RegisteredCall(call), args) => {
+            args.insert(0, namespace);
+            call.explicit_scope = true;
+        }
+        ExprKind::Builtin(Builtin::RegisteredLambda(_, scoped), args) => {
+            args.insert(0, namespace);
+            *scoped = true;
+        }
+        ExprKind::Builtin(Builtin::RegisteredName(_), args) => args.push(namespace),
+        _ => {}
+    }
+}
+
 /// Build a complete expression region; an unsupported child keeps its original lowering.
 pub(crate) fn registered_value(node: &ast::Expr, source: RegisteredSource<'_>) -> Option<Expr> {
     Region::Residual.operand(node, source)
@@ -873,12 +903,8 @@ impl Checker<'_> {
                 return Ok(None);
             }
             let mut value = lambda_binding(lambda, |default| self.expr(default))?;
-            if let Some(slot) = self.namespace
-                && let ExprKind::Builtin(Builtin::RegisteredLambda(_, scoped), args) =
-                    &mut value.kind
-            {
-                args.insert(0, self.local(slot));
-                *scoped = true;
+            if let Some(slot) = self.namespace {
+                in_namespace(node, &mut value, self.local(slot));
             }
             return Ok(Some(source.located(node, value)));
         }
@@ -940,14 +966,7 @@ impl Checker<'_> {
             return Ok(None);
         };
         if let Some(slot) = self.namespace {
-            match &mut value.kind {
-                ExprKind::Builtin(Builtin::RegisteredCall(call), args) => {
-                    args.insert(0, self.local(slot));
-                    call.explicit_scope = true;
-                }
-                ExprKind::Builtin(Builtin::RegisteredName(_), args) => args.push(self.local(slot)),
-                _ => {}
-            }
+            in_namespace(node, &mut value, self.local(slot));
         }
         // Checked locals and exact literals keep their known types in the registered frame.
         value.ty = match &value.kind {
