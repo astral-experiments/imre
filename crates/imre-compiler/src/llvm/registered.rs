@@ -1447,7 +1447,6 @@ impl RegisteredFrame<'_, '_> {
         self.restore_checked_slots(enclosing);
     }
 
-
     /// Initialize the inputs before running the target stores with their checked cleanup.
     pub(crate) fn checked_binding(
         &mut self,

@@ -1599,24 +1599,28 @@ fn registered_entry(
     if graph.registered_startup {
         return Ok(Some(crate::CheckedProgram::Registered(None)));
     }
-    let reason = graph.runtime_initializer.clone().map(Into::into).or_else(|| {
-        let (call, id, operand) = first?;
-        let (name, kind) = match call {
-            ir::ObjectCall::ExecText => ("exec", Kind::ScopedObject),
-            ir::ObjectCall::FormatField => ("this f-string field", Kind::Ordinary),
-            ir::ObjectCall::SocketSendfile => ("socket.sendfile", Kind::Object),
-        };
-        let source = &graph.modules[id];
-        Some(
-            Diagnostic::at(
-                &source.source,
-                &operand,
-                format!("{name} requires native Python object operations"),
+    let reason = graph
+        .runtime_initializer
+        .clone()
+        .map(Into::into)
+        .or_else(|| {
+            let (call, id, operand) = first?;
+            let (name, kind) = match call {
+                ir::ObjectCall::ExecText => ("exec", Kind::ScopedObject),
+                ir::ObjectCall::FormatField => ("this f-string field", Kind::Ordinary),
+                ir::ObjectCall::SocketSendfile => ("socket.sendfile", Kind::Object),
+            };
+            let source = &graph.modules[id];
+            Some(
+                Diagnostic::at(
+                    &source.source,
+                    &operand,
+                    format!("{name} requires native Python object operations"),
+                )
+                .with_path(&source.path)
+                .classified(kind),
             )
-            .with_path(&source.path)
-            .classified(kind),
-        )
-    });
+        });
     Ok(reason.map(|reason| crate::CheckedProgram::Registered(Some(reason))))
 }
 

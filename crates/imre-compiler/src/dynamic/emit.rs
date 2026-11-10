@@ -3207,11 +3207,11 @@ mod tests {
         let arg = &mut call.as_call_expr_mut().unwrap().arguments.args[0];
         *arg = (*arg.as_call_expr().unwrap().func).clone();
         assert_eq!(prepared.standalone().unwrap(), original);
-        prepared.source.statement_sites.expressions.replace_residual_input(
-            &site,
-            1,
-            crate::ir::Expr::none(),
-        );
+        prepared
+            .source
+            .statement_sites
+            .expressions
+            .replace_residual_input(&site, 1, crate::ir::Expr::none());
         assert_ne!(prepared.standalone().unwrap(), original);
     }
 
@@ -3428,7 +3428,8 @@ mod tests {
             (Some(PhysicalOperand::Checked(_)), first),
             (Some(PhysicalOperand::Source(_)), middle),
             (None, last),
-        ] = arms.as_slice() else {
+        ] = arms.as_slice()
+        else {
             panic!("expected a checked guard, a residual guard, and an else");
         };
         assert!(first.plan.fully_checked() && last.plan.fully_checked());
@@ -3448,7 +3449,8 @@ mod tests {
                 &none,
                 prepared.source.registered_source(),
                 crate::frontend::RegisteredScope::Module,
-            ).unwrap();
+            )
+            .unwrap();
             PhysicalOperand::Checked(Box::new(value))
         };
         let (guard, child) = (checked_none(), checked_none());
@@ -4702,9 +4704,8 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         }
 
         for (guard, checked) in [("ready", true), ("(lambda: ready)()", false)] {
-            let source = format!(
-                "while {guard}:\n    consume((lambda v: v)(item))\nelse:\n    finish()\n"
-            );
+            let source =
+                format!("while {guard}:\n    consume((lambda v: v)(item))\nelse:\n    finish()\n");
             let mut module = PreparedBody::module(
                 "example",
                 Path::new("example.py"),
@@ -5216,11 +5217,20 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let inputs = sites.physical(value).unwrap();
         let parts = inputs.operands(false).collect::<Vec<_>>();
         let call = value.as_call_expr().unwrap();
-        let [Checked(_), Residual(first), Checked(_), Residual(dictionary)] = parts.as_slice() else {
+        let [
+            Checked(_),
+            Residual(first),
+            Checked(_),
+            Residual(dictionary),
+        ] = parts.as_slice()
+        else {
             panic!("expected the nested call and dictionary to use their own operand plans");
         };
         assert_eq!(first.range(), call.arguments.args[0].range());
-        assert!(matches!(sites.get(dictionary), Some(crate::frontend::ExpressionSelection::Operand(_))));
+        assert!(matches!(
+            sites.get(dictionary),
+            Some(crate::frontend::ExpressionSelection::Operand(_))
+        ));
         let call = value.as_call_expr_mut().unwrap();
         let [_, receiver, value] = &mut call.arguments.args[..] else {
             panic!("expected the residual call, receiver and dictionary");
@@ -5536,7 +5546,12 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ))
         ));
         assert!(attribute.statements.is_empty());
-        assert!(prepared.source.class_bodies[&class_start].body.sources.is_empty());
+        assert!(
+            prepared.source.class_bodies[&class_start]
+                .body
+                .sources
+                .is_empty()
+        );
         assert!(matches!(&attribute.effect,
             Some(crate::frontend::SourceEffect::ObjectOperation(op, inputs))
             if matches!(op.as_ref(), crate::ir::Builtin::RegisteredAttribute {
