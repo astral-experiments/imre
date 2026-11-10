@@ -849,6 +849,23 @@ impl Inference {
                     Ok::<_, Failure>(())
                 })();
                 if let Err(diagnostic) = checker.finish_region(result) {
+                    // An invalid operand does not give a procedure a different return type.
+                    // Let the ordinary binder report the same body as an explicit -> None.
+                    if infer_return
+                        && matches!(&diagnostic, Failure::Diagnostic(report) if report.exact_operand().is_some())
+                        && !function.is_async
+                        && !imre_ast::code_flags::is_generator(&function.body)
+                        && graph.session.function_may_return(*module, function)
+                    {
+                        let mut exits = ast::helpers::ReturnStatementVisitor::default();
+                        exits.visit_body(&function.body);
+                        if exits.returns.iter().all(|ret| {
+                            matches!(ret.value.as_deref(), None | Some(ast::Expr::NoneLiteral(_)))
+                        }) {
+                            self.pending.borrow_mut()[signature.id].returns = Some(Type::None);
+                            self.revision.set(self.revision.get() + 1);
+                        }
+                    }
                     if matches!(&diagnostic, Failure::Diagnostic(report) if report.kind == Kind::GeneratorSuspension)
                         && signature.method.is_none()
                         && graph.modules[*module].is_program_source()
