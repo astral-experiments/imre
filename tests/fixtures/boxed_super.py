@@ -238,6 +238,7 @@ def check_super_descriptor():
 def check_mro():
     original = D.mro()
     assert original == [D, C, B, A, object] and D.__mro__ == tuple(original)
+    assert D.__base__ is C and Mapping.__base__ is dict
     original.clear()
     assert D.mro() == type.mro(D) == [D, C, B, A, object]
     from collections import defaultdict
