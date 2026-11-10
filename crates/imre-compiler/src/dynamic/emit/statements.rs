@@ -1,6 +1,6 @@
 use crate::frontend::{PhysicalOperand, SourceEffect};
 mod declarations;
-use super::sites::{CheckedSites, CompiledDefinition, CompiledProvider};
+use super::sites::{CheckedSites, CompiledDefinition};
 
 use super::{AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourceMap};
 use crate::llvm::registered::context::{ContextEmitter, ContextRegion};
@@ -37,6 +37,29 @@ impl<'a, 'p> ContextEmitter<'a, 'p> for Function<'a, 'p> {
 }
 
 impl SourceMap<'_> {
+    fn annotation_provider(
+        &self,
+        output: &mut Output,
+        body: &crate::frontend::AnnotationProvider,
+        scope: AnnotationScope,
+        start: TextSize,
+        signature: serde_json::Value,
+        qualname: String,
+    ) -> CompiledDefinition {
+        // Class annotations already have an explicit class environment. A method's provider
+        // instead captures the class namespace of the function it annotates.
+        let annotation_scope = !matches!(&scope, AnnotationScope::Class { .. });
+        let code = self.definition(
+            output,
+            String::new(),
+            Body::AnnotationProvider(body, scope),
+            start,
+            false,
+            Entry::Compiled,
+        );
+        CompiledDefinition::new(code, signature, "__annotate__", qualname, annotation_scope)
+    }
+
     /// Publish a module's provider before its first statement. Every simple
     /// annotation, including an unconditional one, becomes visible only after
     /// execution reaches its assignment.
@@ -53,28 +76,24 @@ impl SourceMap<'_> {
                 index: Some(index),
             })
             .collect();
-        let signature = frame.text(
-            &json!({
-                "posonly": ["format"], "scope_complete": true, "scope_locals_complete": true,
-                "code_flags": self.function_flags(None, false, false),
-            })
-            .to_string(),
-        );
         let body = crate::frontend::DeferredAnnotation::prepare_body(
             &self.annotations,
             &entries,
             self.module_annotation_bindings.clone(),
         );
-        let code = self.definition(
+        let compiled = self.annotation_provider(
             frame.output,
-            String::new(),
-            Body::AnnotationProvider(&body, AnnotationScope::Plain),
+            &body,
+            AnnotationScope::Plain,
             self.module_start,
-            false,
-            Entry::Compiled,
+            json!({
+                "posonly": ["format"], "scope_complete": true, "scope_locals_complete": true,
+                "code_flags": self.function_flags(None, false, false),
+            }),
+            "__annotate__".into(),
         );
-        let name = frame.text("__annotate__");
-        let provider = frame.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {signature}, i64 0, i64 {name}, i64 0, i64 0, i1 true)", frame.scope));
+        let scope = frame.scope.clone();
+        let provider = compiled.bind_defaults(frame, &scope, &[]);
         frame.bind("__annotate__", &provider);
     }
 }
@@ -611,18 +630,14 @@ impl CallableSites<'_, '_> {
             let scope = class
                 .cloned()
                 .map_or(AnnotationScope::Plain, AnnotationScope::Method);
-            let code = self.source.definition(
+            Box::new(self.source.annotation_provider(
                 self.output,
-                String::new(),
-                Body::AnnotationProvider(&annotations.body, scope),
+                &annotations.body,
+                scope,
                 start,
-                false,
-                Entry::Compiled,
-            );
-            CompiledProvider {
-                code,
-                signature: metadata.to_string(),
-            }
+                metadata,
+                format!("{qualname}.__annotate__"),
+            ))
         });
         let mut signature = json!({});
         if let Some(flags) = flags {
@@ -731,15 +746,18 @@ impl CallableSites<'_, '_> {
             }
         }
         CompiledDefinition {
-            code,
-            signature: signature.to_string(),
-            name: name.to_owned(),
-            qualname,
             doc,
             provider,
             default_names,
             class_header,
             type_alias,
+            ..CompiledDefinition::new(
+                code,
+                signature,
+                name,
+                qualname,
+                class_header.is_some() || type_alias,
+            )
         }
     }
 }
@@ -766,30 +784,27 @@ impl<'p> Function<'_, 'p> {
         } else {
             "0".into()
         };
-        let signature = self.frame.text(&json!({
+        let signature = json!({
             "posonly": ["format"], "scope_complete": !plan.incomplete, "scope_reads": plan.reads,
             "code_flags": self.source.function_flags(None, self.in_function, false),
-        }).to_string());
+        });
         let scope = AnnotationScope::Class {
             globals: globals.clone(),
             conditional: plan.sites.iter().any(|entry| entry.index.is_some()),
         };
-        let code = self.source.definition(
+        let compiled = self.source.annotation_provider(
             self.frame.output,
-            String::new(),
-            Body::AnnotationProvider(body, scope),
+            body,
+            scope,
             plan.sites[0].site,
-            false,
-            Entry::Compiled,
+            signature,
+            format!("{}__annotate__", self.prefix),
         );
         let environment = self.frame.op(
             "class_annotation_environment",
             &[&self.scope.clone(), &offsets],
         );
-        let name = self.text("__annotate__");
-        let qualname = self.frame.text(&format!("{}__annotate__", self.prefix));
-        let defaults = self.op("dict", &[]);
-        let function = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {environment}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {qualname}, i64 0, i64 0, i1 false)"));
+        let function = compiled.bind_defaults(&mut self.frame, &environment, &[]);
         self.bind("__annotate_func__", &function);
     }
 
