@@ -257,6 +257,21 @@ impl<'p> Function<'_, 'p> {
                 crate::frontend::ValueStatement::Raise => {
                     self.raise_operands(inputs.first(), inputs.get(1), Self::physical_operand);
                 }
+                crate::frontend::ValueStatement::AugmentName(name, op) => {
+                    let left = self.physical_operand(&inputs[0]);
+                    let right = self.physical_operand(&inputs[1]);
+                    let value = self.inplace(op, &left, &right);
+                    self.bind(name, &value);
+                }
+                crate::frontend::ValueStatement::AugmentItem(op) => {
+                    self.augment_item(
+                        op,
+                        &inputs[0],
+                        &inputs[1],
+                        &inputs[2],
+                        Self::physical_operand,
+                    );
+                }
             },
             SourceEffect::Discard(inputs) => {
                 for input in inputs {

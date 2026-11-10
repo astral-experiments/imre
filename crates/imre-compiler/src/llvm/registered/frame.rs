@@ -1634,6 +1634,22 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         self.op(&format!("inplace:{op}"), &[left, right])
     }
 
+    fn augment_item<T>(
+        &mut self,
+        op: &str,
+        receiver: &T,
+        key: &T,
+        rhs: &T,
+        mut evaluate: impl FnMut(&mut Self, &T) -> String,
+    ) {
+        let receiver = evaluate(self, receiver);
+        let key = evaluate(self, key);
+        let left = self.op("get", &[&receiver, &key]);
+        let right = evaluate(self, rhs);
+        let value = self.inplace(op, &left, &right);
+        self.put_item(&receiver, &key, &value);
+    }
+
     fn delete_item(&mut self, receiver: &str, key: &str) -> String {
         self.op("delitem", &[receiver, key])
     }

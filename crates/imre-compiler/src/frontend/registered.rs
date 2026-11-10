@@ -923,6 +923,8 @@ pub(crate) enum ValueStatement {
     Return,
     Expression,
     Raise,
+    AugmentName(String, &'static str),
+    AugmentItem(&'static str),
 }
 
 pub(crate) enum SourceEffect {
@@ -1797,6 +1799,31 @@ impl<'a> SuitePreparation<'a> {
                         Box::new(attribute_opcode(effect.action, effect.field)),
                         effect.operands().map(frame_value).collect(),
                     )),
+                });
+                continue;
+            }
+            if let ast::Stmt::AugAssign(assign) = stmt {
+                let op = assign.op.as_str();
+                let (output, inputs) = match assign.target.as_ref() {
+                    ast::Expr::Name(name) => (
+                        ValueStatement::AugmentName(name.id.to_string(), op),
+                        vec![frame_value(&assign.target), frame_value(&assign.value)],
+                    ),
+                    ast::Expr::Subscript(target) => (
+                        ValueStatement::AugmentItem(op),
+                        vec![
+                            frame_value(&target.value),
+                            TargetInput::Index(&target.slice).physical(self.source, kind),
+                            frame_value(&assign.value),
+                        ],
+                    ),
+                    _ => unreachable!("validated augmented target after attribute lowering"),
+                };
+                body.push(checkpoint(stmt));
+                residual.push(SourceRun {
+                    at: body.len(),
+                    statements: i..i + 1,
+                    effect: Some(SourceEffect::Value(output, inputs)),
                 });
                 continue;
             }
