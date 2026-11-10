@@ -2013,8 +2013,10 @@ impl SourceScope<'_> {
                 .map(|default| self.ordinary_operand(default))
                 .collect::<Option<_>>()?;
             let binding = values::lambda_binding(lambda, defaults);
-            if self.loop_scope != LoopScope::Outside {
-                // Keep suspending defaults out of loop operands.
+            // A generator expression retains its own clause cursors across an awaited default.
+            if self.loop_scope != LoopScope::Outside
+                && (!self.generator_expression || self.comprehension.is_some())
+            {
                 let mut suspends = false;
                 ir::walk_operand_expressions(&binding, &mut |child| {
                     suspends |= matches!(
