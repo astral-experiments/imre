@@ -783,14 +783,7 @@ impl Frame<'_, '_, '_> {
                 self.code.module_annotation(annotation, self.sites);
                 "0".to_owned()
             }
-            (Builtin::RegisteredDeleteName(name, range), []) => {
-                let name = self.code.code_name(name);
-                let scope = self.code.scope.clone();
-                let (line, start) = self.code.positions.line_and_column(range.start());
-                let (_, end) = self.code.positions.line_and_column(range.end());
-                self.code
-                    .op_at("delname", &[&scope, &name], Some([line, start, start, end]))
-            }
+            (Builtin::RegisteredDeleteName(name, range), []) => self.code.delete_name(name, *range),
             (Builtin::GlobalSet(slot), [value]) => {
                 let value = self.evaluate_handle(value);
                 let name = self.names.expect("registered local names").local_names[slot]

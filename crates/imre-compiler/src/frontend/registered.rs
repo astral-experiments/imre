@@ -300,6 +300,7 @@ pub(crate) enum RegisteredScope {
 pub(crate) struct RegisteredSites<'a> {
     pub(crate) operations: HashMap<TextRange, Expr>,
     pub(crate) workers: Vec<(&'a ast::StmtFunctionDef, imre_ast::ThreadEntry)>,
+    pub(crate) deletions: Vec<&'a ast::Stmt>,
 }
 
 pub(crate) fn registered_sites<'a>(
@@ -321,12 +322,8 @@ pub(crate) fn registered_sites<'a>(
                 }
             } else if let Some(import) = registered_import(stmt, self.private_names) {
                 self.sites.operations.insert(stmt.range(), import);
-            } else if let ast::Stmt::Delete(delete) = stmt {
-                for target in delete_targets(delete) {
-                    if let Some(binding) = registered_delete_name(target) {
-                        self.sites.operations.insert(target.range(), binding);
-                    }
-                }
+            } else if stmt.is_delete_stmt() {
+                self.sites.deletions.push(stmt);
             }
             walk_stmt(self, stmt);
         }
@@ -1004,8 +1001,8 @@ impl statements::StatementLowering for SourceScope<'_> {
                 let body = delete_targets(delete)
                     .into_iter()
                     .map(|target| {
-                        if let Some(op) = self.operations.get(&target.range()) {
-                            return Some(Statement::Expr(op.clone()));
+                        if let Some(op) = registered_delete_name(target) {
+                            return Some(Statement::Expr(op));
                         }
                         if let Some(sub) = target.as_subscript_expr() {
                             let receiver = self.ordinary_operand(&sub.value)?;

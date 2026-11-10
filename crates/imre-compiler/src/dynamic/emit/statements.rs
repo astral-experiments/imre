@@ -150,6 +150,12 @@ impl Function<'_, '_> {
                 }
                 continue;
             }
+            if let Some(checked) = self.source.checked_deletions.get(&stmt.range()) {
+                with_checked_slots(self, checked, |code| {
+                    code.checked_block(&checked.function.body, checked);
+                });
+                continue;
+            }
             let position = stmt
                 .as_assert_stmt()
                 .map_or_else(|| stmt.range(), |assertion| assertion.test.range());
@@ -224,9 +230,8 @@ impl Function<'_, '_> {
                 }
                 ast::Stmt::Delete(v) => {
                     for target in crate::frontend::delete_targets(v) {
-                        if let Some(binding) = self.source.namespace_operations.get(&target.range())
-                        {
-                            self.registered_value(binding);
+                        if let ast::Expr::Name(name) = target {
+                            self.frame.delete_name(name.id.as_str(), name.range());
                             continue;
                         }
                         if let ast::Expr::Attribute(field) = target {
@@ -237,12 +242,6 @@ impl Function<'_, '_> {
                                 std::iter::once(field.value.as_ref()),
                                 |code, expr| code.expr(expr),
                             );
-                            continue;
-                        }
-                        if let Some((receiver, key)) = self.checked_index_target(target) {
-                            self.checked_statement(&Statement::Expr(crate::frontend::delete_item(
-                                receiver, key,
-                            )));
                             continue;
                         }
                         match self.place(target) {

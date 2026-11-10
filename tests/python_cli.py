@@ -4659,6 +4659,7 @@ for name in ("md4", "ripemd160"):
             "boxed_unittest_seal.py",
             "boxed_frozenset.py",
             "boxed_attribute_deletion.py",
+            "boxed_mixed_delete.py",
             "boxed_recursion.py",
             "boxed_function_defaults.py",
             "boxed_reprlib.py",

@@ -574,6 +574,19 @@ impl<'a> PreparedBody<'a> {
                 }
             }
         }
+        // Physical frames without a prepared suite can still emit a complete deletion.
+        // Its operands resolve names against the active Python frame.
+        let checked_deletions = sites
+            .deletions
+            .into_iter()
+            .filter_map(|stmt| {
+                let suite = prepare.complete(
+                    std::slice::from_ref(stmt),
+                    crate::frontend::RegisteredScope::Module,
+                )?;
+                Some((stmt.range(), suite.checked))
+            })
+            .collect();
         let mut thread_entries = HashMap::new();
         for (def, entry) in sites.workers {
             let start = def.start();
@@ -597,6 +610,7 @@ impl<'a> PreparedBody<'a> {
             scopes,
             lambdas,
             thread_entries,
+            checked_deletions,
             assertions: prepare.assertions,
             python_optimization,
             nested_bodies: prepare.nested,
@@ -848,6 +862,7 @@ struct SourceInfo<'a> {
     type_aliases: HashMap<ruff_text_size::TextSize, TypeAliasDefinition>,
     python_optimization: i32,
     assertions: HashMap<ruff_text_size::TextRange, Vec<crate::ir::Statement>>,
+    checked_deletions: HashMap<ruff_text_size::TextRange, crate::frontend::RegisteredFunction>,
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
     module_annotations:
         HashMap<ruff_text_size::TextSize, crate::frontend::DeferredModuleAnnotation>,
@@ -1871,5 +1886,60 @@ second = t'{client.lookup(*args)}{v * 2}'",
         assert_eq!(units.len(), 3);
         assert_eq!(units[1].name, units[2].name);
         assert_ne!(units[1].llvm_ir, units[2].llvm_ir);
+    }
+
+    #[test]
+    fn physical_deletion_uses_the_complete_checked_statement_after_targets_are_dropped() {
+        let source = concat!(
+            "del first, [(owner := obj).field, obj[lo:hi]], last\n",
+            "del rejected, (orphan := obj)[[key for key in keys if key]]\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "remove",
+            Path::new("remove.py"),
+            source,
+            0,
+            ModuleOrigin::Program(ProgramBodies::default()),
+        )
+        .unwrap();
+        let admitted = prepared.body[0].range();
+        let rejected = prepared.body[1].range();
+        assert_eq!(&source[admitted], source.lines().next().unwrap());
+        assert_eq!(&source[rejected], source.lines().nth(1).unwrap());
+        let sites = &prepared.source.checked_deletions;
+        assert_eq!(sites.len(), 1);
+        assert!(!sites.contains_key(&rejected));
+        let checked = &sites[&admitted];
+        crate::verify::registered(checked).unwrap();
+
+        let initializer = prepared.source.initializer.take().unwrap();
+        let [gap] = initializer.residual.as_slice() else {
+            panic!("expected the second deletion to remain physical");
+        };
+        assert_eq!(gap.statements, 1..2);
+        assert_eq!(gap.at, checked.function.body.len());
+        assert_eq!(gap.at, initializer.checked.function.body.len());
+        assert_eq!(initializer.checked.local_names, checked.local_names);
+
+        // Leave just the physical statement selector; the saved plan owns all its effects.
+        prepared.body.truncate(1);
+        let emit = |prepared: &PreparedBody<'_>| {
+            let mut output = Output::default();
+            let file = output.data(b"remove.py");
+            prepared.emit(&mut output, 0, &file).unwrap();
+            for op in ["delname", "delattr", "delitem"] {
+                let symbol = output.strings[op.as_bytes()];
+                assert!(
+                    output.functions.contains(&format!("ptr @str{symbol},")),
+                    "{op}"
+                );
+            }
+            (output.functions, output.constants)
+        };
+        let before = emit(&prepared);
+        let stmt = prepared.body[0].as_delete_stmt_mut().unwrap();
+        stmt.targets.clear();
+        assert_eq!(stmt.range(), admitted);
+        assert_eq!(emit(&prepared), before);
     }
 }
