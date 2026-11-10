@@ -128,7 +128,8 @@ impl Output {
     pub(crate) fn integer_prelude(&mut self) {
         use crate::ir::Binary;
         if self.declarations.reads_exact_int_word {
-            self.functions.push_str("declare i64 @imre_dyn_exact_int_word(ptr, i64)\n");
+            self.functions
+                .push_str("declare i64 @imre_dyn_exact_int_word(ptr, i64)\n");
         }
         let helpers = [
             (self.declarations.checked_integer_add, Binary::Add, "sadd"),

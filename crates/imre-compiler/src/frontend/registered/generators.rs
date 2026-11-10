@@ -74,12 +74,9 @@ impl RegisteredGenerator {
                 ir::IterNextKind::Generic,
             ),
         };
-        let input = pipelines::Prepared::pull_cursor(
-            cursor,
-            Type::PythonObject,
-            kind,
-            |ty| scope.hidden(ty),
-        );
+        let input = pipelines::Prepared::pull_cursor(cursor, Type::PythonObject, kind, |ty| {
+            scope.hidden(ty)
+        });
         let mut body = scope
             .comprehension_loop(&plan, 0, None, input, &mut |scope, output, _| {
                 let item = output.value();
@@ -137,7 +134,8 @@ mod tests {
 
     #[test]
     fn async_child_pulls_the_outer_iterator_without_reacquiring_it() {
-        let graph = SourceGraph::single("result = (item async for item in rows if item)\n").unwrap();
+        let graph =
+            SourceGraph::single("result = (item async for item in rows if item)\n").unwrap();
         let module = &graph.modules[graph.entry];
         let literals = values::ModuleSource::new(module);
         let sites = RegisteredGenerator::collect(
@@ -151,14 +149,26 @@ mod tests {
         let body = &child.body.function.body;
         let mut pulls = 0;
         ir::walk_statements(body, &mut |statement| {
-            if matches!(statement, Statement::IterNext { kind: ir::IterNextKind::Async(_), .. }) {
+            if matches!(
+                statement,
+                Statement::IterNext {
+                    kind: ir::IterNextKind::Async(_),
+                    ..
+                }
+            ) {
                 pulls += 1;
             }
         });
         let mut yields = 0;
         ir::walk_expressions(body, &mut |expr| {
-            assert!(!matches!(expr.kind, ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::Async(_)), _)));
-            if matches!(expr.kind, ExprKind::Builtin(Builtin::RegisteredSuspend(ir::SuspendValue::Yield, _), _)) {
+            assert!(!matches!(
+                expr.kind,
+                ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::Async(_)), _)
+            ));
+            if matches!(
+                expr.kind,
+                ExprKind::Builtin(Builtin::RegisteredSuspend(ir::SuspendValue::Yield, _), _)
+            ) {
                 yields += 1;
             }
         });

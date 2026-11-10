@@ -93,7 +93,9 @@ impl PhysicalInputs {
             if let Some(value) = child.as_ref().and_then(|child| child.value(suspended)) {
                 SourceOperand::Checked(value)
             } else {
-                SourceOperand::Residual(physical.get_or_insert_with(|| physical_children(node, self.split_slice))[i])
+                SourceOperand::Residual(
+                    physical.get_or_insert_with(|| physical_children(node, self.split_slice))[i],
+                )
             }
         })
     }
@@ -236,7 +238,13 @@ impl ExpressionSites {
         scope: super::RegisteredScope,
         suspended: bool,
     ) {
-        PhysicalPreparation { sites: self, source, scope, suspended }.visit_stmt(stmt);
+        PhysicalPreparation {
+            sites: self,
+            source,
+            scope,
+            suspended,
+        }
+        .visit_stmt(stmt);
     }
 
     pub(crate) fn prepare_input(
@@ -246,7 +254,13 @@ impl ExpressionSites {
         scope: super::RegisteredScope,
         suspended: bool,
     ) {
-        PhysicalPreparation { sites: self, source, scope, suspended }.visit_expr(expr);
+        PhysicalPreparation {
+            sites: self,
+            source,
+            scope,
+            suspended,
+        }
+        .visit_expr(expr);
     }
 
     pub(crate) fn visit(&mut self, node: &ast::Expr, source: RegisteredSource<'_>) {
@@ -336,18 +350,30 @@ impl<'a> Visitor<'a> for PhysicalPreparation<'_, '_> {
             Some(Selection::Mixed { .. }) | None => {}
             Some(_) => return,
         }
-        let region = if self.suspended { values::Region::SuspendedOperand } else { values::Region::Residual };
-        if !node.is_t_string_expr() && let Some(value) = region.operand(node, self.source) {
-            self.sites.selected.insert(site(node), Selection::Checked(value));
+        let region = if self.suspended {
+            values::Region::SuspendedOperand
+        } else {
+            values::Region::Residual
+        };
+        if !node.is_t_string_expr()
+            && let Some(value) = region.operand(node, self.source)
+        {
+            self.sites
+                .selected
+                .insert(site(node), Selection::Checked(value));
             return;
         }
         match super::inline_operand(node, self.source, self.scope, self.suspended) {
             Ok(Some(operand)) => {
-                self.sites.selected.insert(site(node), Selection::Operand(Box::new(operand)));
+                self.sites
+                    .selected
+                    .insert(site(node), Selection::Operand(Box::new(operand)));
                 return;
             }
             Err((range, reason)) => {
-                self.sites.selected.insert(site(node), Selection::Refused(range, reason));
+                self.sites
+                    .selected
+                    .insert(site(node), Selection::Refused(range, reason));
                 return;
             }
             Ok(None) => {}
@@ -369,7 +395,10 @@ impl<'a> Visitor<'a> for PhysicalPreparation<'_, '_> {
         };
         let children = physical.map(|child| CheckedChild::prepare(child, self.source));
         for (child, checked) in physical.into_iter().zip(&children) {
-            if checked.as_ref().is_none_or(|value| value.requires_suspension) {
+            if checked
+                .as_ref()
+                .is_none_or(|value| value.requires_suspension)
+            {
                 self.visit_expr(child);
             }
         }
@@ -392,7 +421,10 @@ impl PhysicalPreparation<'_, '_> {
         let mut children = Vec::with_capacity(index.inputs.len());
         for (child, ordinary) in index.inputs {
             let checked = CheckedChild::from_ordinary(child, self.source, ordinary);
-            if checked.as_ref().is_none_or(|value| value.requires_suspension) {
+            if checked
+                .as_ref()
+                .is_none_or(|value| value.requires_suspension)
+            {
                 self.visit_expr(child);
             }
             children.push(checked);

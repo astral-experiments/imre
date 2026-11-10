@@ -153,7 +153,10 @@ impl RegisteredSource<'_> {
                     _ => None,
                 }
             });
-            captures.push(self.interpolation(field, &mut operand).ok_or(residual_error)?);
+            captures.push(
+                self.interpolation(field, &mut operand)
+                    .ok_or(residual_error)?,
+            );
         }
         let value = object(Builtin::RegisteredTemplate(segments), captures);
         if !in_function {

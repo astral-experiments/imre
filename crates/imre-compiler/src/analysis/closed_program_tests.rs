@@ -878,7 +878,8 @@ fn a_builtin_namespace_lookup_only_requires_a_source_body_when_invoked() {
     fs::write(
         project.path().join("inspect_callback.py"),
         "def name(callback):\n    if False: eval(input())\n    return callback.__name__\n",
-    ).unwrap();
+    )
+    .unwrap();
     check("from inspect_callback import name\nprint(name(getattr(builtins,input())))").unwrap();
 }
 

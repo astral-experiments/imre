@@ -701,49 +701,47 @@ impl Checker<'_> {
         let local_callable = matches!(callable.kind, ExprKind::Local(slot)
             if local == Some(&slot) && self.locals[slot] == callable.ty && matches!(callable.ty, Type::Callable(_)));
         let index_callable = self.types.index_callable_signature(callable.ty).is_some();
-        let values = call
-            .arguments
-            .args
-            .iter()
-            .zip(params)
-            .enumerate()
-            .map(|(slot, (argument, ty))| {
-                if registered_effect.is_some() {
-                    // A Python activation passes the source object, including its identity.
-                    // A native conversion or expected display layout cannot supply that handle.
-                    let value = self.expr(argument)?;
-                    if value.ty != ty {
-                        return Err(self.scoped_builtin_error(
-                            "a converted callable argument",
-                            argument,
-                        ));
+        let values =
+            call.arguments
+                .args
+                .iter()
+                .zip(params)
+                .enumerate()
+                .map(|(slot, (argument, ty))| {
+                    if registered_effect.is_some() {
+                        // A Python activation passes the source object, including its identity.
+                        // A native conversion or expected display layout cannot supply that handle.
+                        let value = self.expr(argument)?;
+                        if value.ty != ty {
+                            return Err(self
+                                .scoped_builtin_error("a converted callable argument", argument));
+                        }
+                        return Ok(value);
                     }
-                    return Ok(value);
-                }
-                if slot == 0 && index_callable {
-                    self.integer_index(argument)
-                } else {
-                    calls::Supplied::Source(argument).check_with(
-                        self,
-                        ty,
-                        false,
-                        |checker, value, expected, site| {
-                            checker.coerce(value, expected, site).map_err(|error| {
-                                error.at_callable_argument(site.range(), || {
-                                    local_callable
-                                        && checker.graph.session.calls_annotated_parameter(
-                                            checker.module,
-                                            call,
-                                            site.range(),
-                                            &checker.graph.modules[checker.module].parsed,
-                                        )
+                    if slot == 0 && index_callable {
+                        self.integer_index(argument)
+                    } else {
+                        calls::Supplied::Source(argument).check_with(
+                            self,
+                            ty,
+                            false,
+                            |checker, value, expected, site| {
+                                checker.coerce(value, expected, site).map_err(|error| {
+                                    error.at_callable_argument(site.range(), || {
+                                        local_callable
+                                            && checker.graph.session.calls_annotated_parameter(
+                                                checker.module,
+                                                call,
+                                                site.range(),
+                                                &checker.graph.modules[checker.module].parsed,
+                                            )
+                                    })
                                 })
-                            })
-                        },
-                    )
-                }
-            })
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+                            },
+                        )
+                    }
+                })
+                .collect::<std::result::Result<Vec<_>, _>>()?;
         if let Some(expr) = registered_effect {
             return Ok(self.located_callback_effect(expr, call, callable, values));
         }
