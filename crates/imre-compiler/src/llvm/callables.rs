@@ -323,18 +323,15 @@ impl Emitter<'_, '_> {
         result
     }
 
-    /// The callee is captured before arguments. Stable local owners permit a
-    /// borrow; temporaries and expression-rebound slots keep independent owners.
     /// A singleton closed target exposes its body to LLVM without dynamic dispatch.
     pub(super) fn invoke_callable(
         &mut self,
-        callable: &Expr,
-        args: &CallArgs,
+        callable: Operand,
+        mut values: Vec<Operand>,
+        order: &[usize],
         returns: Type,
     ) -> Value {
-        let targets = self.callable_targets.get(callable.ty).to_vec();
-        let (callable, mut values) =
-            operations::call_arguments(self, callable, &args.values, Self::operand);
+        let targets = self.callable_targets.get(callable.value.ty).to_vec();
         self.transfer_call_operands(&mut values);
         let target = if let [target] = targets.as_slice() {
             format!(
@@ -347,7 +344,7 @@ impl Emitter<'_, '_> {
         let context = self.callable_context_slot(&callable.value);
         let context = self.instruction(format!("load ptr, ptr {context}"));
         let mut inputs = vec![format!("ptr {context}")];
-        inputs.extend(args.order.iter().map(|&index| {
+        inputs.extend(order.iter().map(|&index| {
             let value = &values[index].value;
             format!("{} {}", value.ty.llvm(), value.operand)
         }));

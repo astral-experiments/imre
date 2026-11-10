@@ -811,7 +811,7 @@ impl Inference {
                         checker.bind_parameter(keyword, parameter.ty)?;
                     }
                     checker.collect_local_definitions(&function.body)?;
-                    let (_, falls_through) = checker.block(&function.body)?;
+                    let falls_through = checker.lower_block(&function.body, None)?;
                     // An outstanding call cannot establish an implicit return, even
                     // when checking subsequent statements reached the end of the body.
                     if matches!(
@@ -921,7 +921,7 @@ impl Inference {
                 .iter()
                 .map(|&index| module.parsed.syntax().body[index].clone())
                 .collect::<Vec<_>>();
-            let result = checker.block(&statements);
+            let result = checker.lower_block(&statements, None);
             if let Err(diagnostic) = checker.finish_region(result) {
                 errors.push((graph.entry, diagnostic));
             }

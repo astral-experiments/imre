@@ -147,6 +147,10 @@ pub(crate) fn registered(
                     value.ty == Type::None && args.len() <= 1,
                     "registered assertion failure takes at most one message",
                 ),
+                ExprKind::Invoke { .. } => require(
+                    value.is_registered_invoke(parent),
+                    "registered invocation needs a located callable and positional arguments",
+                ),
                 ExprKind::Builtin(Builtin::RegisteredLocation(..), args) => match args.as_slice() {
                     [inner] => same(value.ty, inner.ty),
                     _ => Err("registered location needs one operand".into()),

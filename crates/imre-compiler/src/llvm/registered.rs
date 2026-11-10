@@ -31,7 +31,7 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
     let has_slot = |slot: &usize| private.contains(slot) || checked.local_names.contains_key(slot);
     let mut supported = true;
     let mut cause_wrapper = None;
-    ir::walk_nodes(body, &mut |node, _| {
+    ir::walk_nodes(body, &mut |node, parent| {
         let expr = match node {
             ir::Node::Statement(stmt) => {
                 supported &= match stmt {
@@ -161,6 +161,10 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                 !ops.is_empty() && values.len() == ops.len() + 1
             }
             ExprKind::Builtin(Builtin::RegisteredContainsLiteral(_), values) => !values.is_empty(),
+            ExprKind::Invoke { .. } => {
+                uses_python_protocol = true;
+                expr.is_registered_invoke(parent)
+            }
             ExprKind::Builtin(Builtin::RegisteredCall(call), operands) => {
                 uses_python_protocol = true;
                 operands.len() > usize::from(call.explicit_scope)

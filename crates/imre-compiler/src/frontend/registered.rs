@@ -2514,16 +2514,17 @@ mod tests {
         let bodies = graph.registered_functions();
         let body = &bodies[&graph.entry][&TextSize::default()].function.body;
         assert!(body.iter().any(|stmt| matches!(stmt, Statement::If(..))));
-        let mut counts = [0; 5];
+        let mut counts = [0; 6];
         ir::walk_expressions(body, &mut |expr| match &expr.kind {
             ExprKind::Conditional(..) => counts[0] += 1,
             ExprKind::Boolean(..) => counts[1] += 1,
             ExprKind::BooleanValue(..) => counts[2] += 1,
             ExprKind::Builtin(Builtin::RegisteredName(name), _) if name == "bool" => counts[3] += 1,
             ExprKind::Builtin(Builtin::RegisteredCall(..), _) => counts[4] += 1,
+            ExprKind::Invoke { .. } => counts[5] += 1,
             _ => {}
         });
-        assert_eq!(counts, [1, 1, 2, 1, 3]);
+        assert_eq!(counts, [1, 1, 2, 1, 1, 2]);
     }
 
     #[test]
@@ -2871,7 +2872,7 @@ mod tests {
         let mut callbacks = 0;
         ir::walk_expressions(&body.body, &mut |expr| match expr.kind {
             ExprKind::Binary(Binary::Add, ..) => adds += 1,
-            ExprKind::Builtin(Builtin::RegisteredCall(..), _) => callbacks += 1,
+            ExprKind::Invoke { .. } => callbacks += 1,
             _ => {}
         });
         assert_eq!((adds, callbacks), (1, 1));
@@ -3116,17 +3117,23 @@ mod tests {
         );
         let mut checkpoints = Vec::new();
         let mut checked_adds = 0;
-        let mut object_calls = 0;
+        let mut invokes = 0;
         ir::walk_expressions(&body.body, &mut |expr| match expr.kind {
             ExprKind::Builtin(Builtin::RegisteredStatement(range, _), _) => {
                 checkpoints.push(&graph.modules[graph.entry].source[range]);
             }
             ExprKind::Binary(Binary::Add, ..) => checked_adds += 1,
-            ExprKind::Builtin(Builtin::RegisteredCall(..), _) => object_calls += 1,
+            ExprKind::Invoke { ref callable, ref args } => {
+                let range = callable.registered_local_range().unwrap();
+                assert_eq!(&graph.modules[graph.entry].source[range], "sink");
+                assert_eq!(args.order, [0]);
+                assert_eq!(expr.ty, Type::PythonObject);
+                invokes += 1;
+            }
             _ => {}
         });
         assert_eq!(checkpoints, ["answer = x + y", "pass", "sink(answer)"]);
-        assert_eq!((checked_adds, object_calls), (1, 1));
+        assert_eq!((checked_adds, invokes), (1, 1));
     }
 
     #[test]
@@ -3872,7 +3879,7 @@ mod tests {
         let mut calls = 0;
         ir::walk_expressions(&function.body, &mut |expr| match &expr.kind {
             ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::Loop), _) => opens += 1,
-            ExprKind::Builtin(Builtin::RegisteredCall(..), _) => calls += 1,
+            ExprKind::Invoke { .. } => calls += 1,
             _ => {}
         });
         let mut pulls = 0;

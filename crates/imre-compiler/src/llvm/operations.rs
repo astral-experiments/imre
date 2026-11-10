@@ -17,18 +17,6 @@ use crate::llvm::registered::{Frame as CheckedFrame, FrameEmitter};
 
 use super::{Operand, Ownership, body::FunctionBody};
 
-/// Evaluate a positional call's callable first, then each argument exactly once.
-pub(crate) fn call_arguments<C, E, V>(
-    context: &mut C,
-    callee: &E,
-    args: &[E],
-    mut evaluate: impl FnMut(&mut C, &E) -> V,
-) -> (V, Vec<V>) {
-    let callable = evaluate(context, callee);
-    let values = args.iter().map(|arg| evaluate(context, arg)).collect();
-    (callable, values)
-}
-
 /// A checked expression keeps the representation selected by its producer.
 /// A guarded integer carries an owned integer result on the exact edge and the
 /// original Python protocol result on the other edge. Zero is not an Int word.
@@ -168,6 +156,66 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         match &mut self.0 {
             Entry::Native(emitter) => CheckedValue::native(emitter.operand(expr)),
             Entry::Registered(_) => self.emit_value(expr),
+        }
+    }
+
+    /// Capture the callable before evaluating each argument. A native operand keeps
+    /// its checked borrow or owner; a Python argument must already have its rooted
+    /// handle before the next argument can call back into the frame.
+    fn invoke(
+        &mut self,
+        callable: &Expr,
+        args: &crate::ir::CallArgs,
+        returns: Type,
+    ) -> CheckedValue {
+        let position = match &mut self.0 {
+            Entry::Native(_) => None,
+            Entry::Registered(frame) => {
+                let range = callable
+                    .registered_local_range()
+                    .expect("checked local callable");
+                let mark = frame.temporary_mark();
+                if frame.native_suspension {
+                    frame.call_position(range);
+                }
+                Some((mark, frame.scope.clone(), range.end()))
+            }
+        };
+        let mut operand = |expr: &Expr| match &mut self.0 {
+            Entry::Native(emitter) => CheckedValue::native(emitter.operand(expr)),
+            Entry::Registered(frame) => CheckedValue::handle(frame.evaluate_handle(expr)),
+        };
+        let target = operand(callable);
+        let values: Vec<_> = args.values.iter().map(operand).collect();
+        match &mut self.0 {
+            Entry::Native(emitter) => {
+                let values = values.into_iter().map(CheckedValue::into_native).collect();
+                CheckedValue::owned(emitter.invoke_callable(
+                    target.into_native(),
+                    values,
+                    &args.order,
+                    returns,
+                ))
+            }
+            Entry::Registered(frame) => {
+                let (mark, scope, end) = position.expect("registered call position");
+                let handles: Vec<_> = values.into_iter().map(CheckedValue::into_handle).collect();
+                let (array, count) = frame.handle_array(&handles);
+                let operands = super::registered::CallArguments::Positional {
+                    array,
+                    count,
+                    receiver_slot: false,
+                };
+                let range = frame.current_range;
+                CheckedValue::handle(frame.positioned_call(
+                    &target.into_handle(),
+                    operands,
+                    &mark,
+                    range,
+                    end,
+                    &scope,
+                ))
+            }
         }
     }
 
@@ -458,6 +506,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 Entry::Native(emitter) => CheckedValue::owned(emitter.concat(expr)),
                 Entry::Registered(frame) => frame.builtin(&Builtin::FormatJoin, parts),
             },
+            ExprKind::Invoke { callable, args } => self.invoke(callable, args, expr.ty),
             ExprKind::Builtin(
                 op @ (Builtin::RegisteredCall(_) | Builtin::RegisteredAttribute { .. }),
                 args,
