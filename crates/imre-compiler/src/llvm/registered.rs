@@ -368,11 +368,20 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
         }
     }
 
-    /// Read the owned operands when the checked operation requests its local slots.
+    /// Bind the owned occurrence slots used by the checked operation.
     pub(crate) fn prepared_operation(
         owner: &'f mut dyn PreparedSuiteEmitter<'a, 'p>,
         inputs: &'f crate::frontend::PhysicalInputs,
     ) -> String {
+        if let Some(operands) = inputs.eager_operands() {
+            let handles: Vec<_> = operands.map(|child| owner.source_operand(child)).collect();
+            let (code, sites) = owner.frame_and_sites();
+            return code.with_checked_frame(sites, None, |mut enclosing| {
+                let mut frame = enclosing.reborrow();
+                frame.inputs = FrameInputs::Handles(&handles);
+                frame.evaluate_handle(&inputs.operation)
+            });
+        }
         Self {
             code: FrameOwner::Prepared(owner),
             names: None,
@@ -1439,21 +1448,6 @@ impl RegisteredFrame<'_, '_> {
 
     pub(crate) fn registered_value(&mut self, expression: &Expr, sites: &CheckedSites) -> String {
         self.registered_expression(expression, sites, false)
-    }
-
-    /// Bind frame-rooted SSA handles to the positional slots of one checked expression.
-    /// The caller has already evaluated all inputs in their Python order.
-    pub(crate) fn registered_with_inputs(
-        &mut self,
-        expression: &Expr,
-        inputs: &[String],
-        sites: &CheckedSites,
-    ) -> String {
-        self.with_checked_frame(sites, None, |mut enclosing| {
-            let mut frame = enclosing.reborrow();
-            frame.inputs = FrameInputs::Handles(inputs);
-            frame.evaluate_handle(expression)
-        })
     }
 
     pub(crate) fn registered_expression(

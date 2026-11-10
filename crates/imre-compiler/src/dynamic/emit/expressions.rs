@@ -100,7 +100,7 @@ impl Function<'_, '_> {
         } else if let ExpressionSelection::Suspension(kind, child) = selected {
             self.suspend_value(*kind, range, |code| code.input_value(child.as_input()))
         } else if let Some(inputs) = physical {
-            self.physical_value(inputs)
+            crate::llvm::registered::Frame::prepared_operation(self, inputs)
         } else if let ExpressionSelection::Mixed {
             value: Some(plan), ..
         } = selected
@@ -142,31 +142,6 @@ impl Function<'_, '_> {
         };
         self.leave_expression(previous);
         value
-    }
-
-    fn physical_value(&mut self, inputs: &crate::frontend::PhysicalInputs) -> String {
-        use crate::ir::{Builtin, ExprKind};
-        let mut operands = inputs.operands();
-        match &inputs.operation.kind {
-            ExprKind::Builtin(Builtin::RegisteredUnary(_), _) => {
-                crate::llvm::registered::Frame::prepared_operation(self, inputs)
-            }
-            ExprKind::Builtin(
-                op @ (Builtin::RegisteredCall(_) | Builtin::RegisteredAttribute { .. }),
-                _,
-            ) => {
-                let target = operands.next().expect("object operation target");
-                let args: Vec<_> = operands.collect();
-                self.object_operation(op, &target, args.iter(), |code, child| {
-                    code.source_operand(*child)
-                })
-            }
-            _ => {
-                let handles: Vec<_> = operands.map(|child| self.source_operand(child)).collect();
-                self.frame
-                    .registered_with_inputs(&inputs.operation, &handles, &self.sites)
-            }
-        }
     }
 
     /// The enclosing source operation supplies evaluated leaves. Its branch graph
