@@ -4,29 +4,24 @@ use super::{Frame, FrameEmitter, RegisteredFrame, context::Region};
 use crate::ir::{ExceptHandler, ExceptionMatcher, Statement};
 use crate::llvm::operations::CheckedBody;
 
-/// Only the protected body transfers its failures to these handlers. The else
-/// suite and the handlers themselves propagate to the enclosing target.
-pub(crate) fn protected<'a, 'p, E: FrameEmitter<'a, 'p>>(
-    code: &mut E,
-    body: impl FnOnce(&mut E),
-    otherwise: impl FnOnce(&mut E),
-    dispatch: impl FnOnce(&mut E, &str, &str),
-) {
-    let handler = code.name("b");
-    let done = code.name("b");
-    let enclosing = std::mem::replace(&mut code.body.error_target, handler.clone());
-    body(code);
-    code.body.error_target = enclosing;
-    otherwise(code);
-    code.jump(&done);
-    code.label(&handler);
-    let exception = code.op("take_error", &[]);
-    code.live.push(exception.clone());
-    code.caught.push(exception.clone());
-    dispatch(code, &exception, &done);
-    code.caught.pop();
-    code.live.pop();
-    code.label(&done);
+impl RegisteredFrame<'_, '_> {
+    /// The normal else edge skips the handlers. On the error edge, keep the
+    /// pending exception live and active until handler dispatch is complete.
+    pub(crate) fn enter_handlers(&mut self, handler: &str) -> (String, String) {
+        let done = self.name("b");
+        self.jump(&done);
+        self.label(handler);
+        let exception = self.op("take_error", &[]);
+        self.live.push(exception.clone());
+        self.caught.push(exception.clone());
+        (exception, done)
+    }
+
+    pub(crate) fn leave_handlers(&mut self, done: &str) {
+        self.caught.pop();
+        self.live.pop();
+        self.label(done);
+    }
 }
 
 /// Emit the final suite on the normal and exceptional edges. The protected
@@ -219,67 +214,69 @@ impl Frame<'_, '_, '_> {
                 f.emit_suite(body);
                 return;
             }
-            protected(
-                f,
-                |f| f.emit_suite(body),
-                |f| f.emit_suite(otherwise),
-                |f, exc, done| {
-                    if matches!(handlers[0].matcher, ExceptionMatcher::Subgroup(..)) {
-                        groups(
-                            f,
-                            handlers,
-                            exc,
-                            done,
-                            |f, handler| {
-                                let ExceptionMatcher::Subgroup(site, class) = &handler.matcher
-                                else {
-                                    unreachable!("ordinary and subgroup handlers cannot be mixed")
-                                };
-                                f.checkpoint(*site);
-                                let matcher = f.evaluate_handle(class);
-                                let name = handler.name.map(|slot| {
-                                    f.names.expect("registered scope")[&slot].name.clone()
-                                });
-                                (matcher, name, handler.body.as_slice())
-                            },
-                            Self::emit_suite,
-                        );
-                        return;
-                    }
-                    for handler in handlers {
-                        let name = handler
+            let (handler, enclosing) = f.begin_operand_scope();
+            f.emit_suite(body);
+            f.body.error_target = enclosing;
+            f.emit_suite(otherwise);
+            let (exc, done) = f.enter_handlers(&handler);
+            if matches!(handlers[0].matcher, ExceptionMatcher::Subgroup(..)) {
+                groups(
+                    f,
+                    handlers,
+                    &exc,
+                    &done,
+                    |f, handler| {
+                        let ExceptionMatcher::Subgroup(site, class) = &handler.matcher else {
+                            unreachable!("ordinary and subgroup handlers cannot be mixed")
+                        };
+                        f.checkpoint(*site);
+                        let matcher = f.evaluate_handle(class);
+                        let name = handler.name.map(|slot| {
+                            f.names.expect("registered scope")[&slot]
+                                .name
+                                .clone()
+                        });
+                        (matcher, name, handler.body.as_slice())
+                    },
+                    Self::emit_suite,
+                );
+            } else {
+                for handler in handlers {
+                    let name = handler.name.map(|slot| {
+                        f.names.expect("registered scope")[&slot]
                             .name
-                            .map(|slot| f.names.expect("registered scope")[&slot].name.as_str());
-                        arm(
-                            f,
-                            exc,
-                            done,
-                            name,
-                            |f| match &handler.matcher {
-                                ExceptionMatcher::Categories(_) => None,
-                                ExceptionMatcher::Subgroup(..) => unreachable!("subgroup handler"),
-                                ExceptionMatcher::Object(range, class) => {
-                                    f.checkpoint(*range);
-                                    Some(f.evaluate_handle(class))
-                                }
-                            },
-                            |f, cleanup| {
-                                if let Some((name, outer)) = cleanup {
-                                    f.code.iteration.scopes.push(Region::ExceptionName {
-                                        name: name.into(),
-                                        outer: outer.into(),
-                                    });
-                                }
-                                f.emit_suite(&handler.body);
-                                if cleanup.is_some() {
-                                    f.leave_scope();
-                                }
-                            },
-                        );
-                    }
-                    f.raise(exc, None, true);
-                },
-            );
+                            .as_str()
+                    });
+                    arm(
+                        f,
+                        &exc,
+                        &done,
+                        name,
+                        |f| match &handler.matcher {
+                            ExceptionMatcher::Categories(_) => None,
+                            ExceptionMatcher::Subgroup(..) => unreachable!("subgroup handler"),
+                            ExceptionMatcher::Object(range, class) => {
+                                f.checkpoint(*range);
+                                Some(f.evaluate_handle(class))
+                            }
+                        },
+                        |f, cleanup| {
+                            if let Some((name, outer)) = cleanup {
+                                f.code.iteration.scopes.push(Region::ExceptionName {
+                                    name: name.into(),
+                                    outer: outer.into(),
+                                });
+                            }
+                            f.emit_suite(&handler.body);
+                            if cleanup.is_some() {
+                                f.leave_scope();
+                            }
+                        },
+                    );
+                }
+                f.raise(&exc, None, true);
+            }
+            f.leave_handlers(&done);
         };
         if finalbody.is_empty() {
             run(self);
