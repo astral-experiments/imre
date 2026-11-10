@@ -54,8 +54,7 @@ impl<'p> Function<'_, 'p> {
         emit_source: impl FnMut(&mut Self, &crate::frontend::SourceRun),
     ) {
         if prepared.fully_checked() {
-            self.prepare_checked_sites(&prepared.checked.function.body);
-            super::RegisteredFrame::checked_body(&mut self.frame, &prepared.checked, &self.sites);
+            self.checked_function(&prepared.checked);
         } else {
             self.checked_runs(prepared, emit_source);
         }
@@ -655,12 +654,14 @@ impl<'p> Function<'_, 'p> {
         type_params: Option<&ast::TypeParams>,
         body: Body<'_>,
     ) -> CompiledDefinition {
-        let (name, global) = match name {
+        let (name, global, generator) = match name {
             DefinitionName::Binding(identifier) => (
                 self.source.private_names.definition(identifier),
                 self.declared_globals.contains(identifier.as_str()),
+                None,
             ),
-            DefinitionName::Plain(name) => (name, false),
+            DefinitionName::Plain(name) => (name, false, None),
+            DefinitionName::Generator(site) => ("<genexpr>", false, Some(site)),
         };
         let qualname = if global {
             name.to_owned()
@@ -682,7 +683,8 @@ impl<'p> Function<'_, 'p> {
             } else {
                 self.prefix.clone()
             }
-        } else if matches!(body, Body::Namespace(..)) {
+        } else if matches!(body, Body::Namespace(..)) || generator.is_some() {
+            // Nested code in a comprehension uses its name without a <locals> segment.
             format!("{qualname}.")
         } else {
             format!("{qualname}.<locals>.")
@@ -694,7 +696,12 @@ impl<'p> Function<'_, 'p> {
         let doc = statements
             .filter(|_| self.output.keep_docstrings)
             .and_then(|stmts| self.source.docstring(&qualname, stmts));
-        let generator_flags = body.generator_flags();
+        let generator_flags = match (&body, generator) {
+            (Body::Function(_, flags), _) => *flags,
+            (_, Some(site)) if self.source.generators[&site].is_async => code_flags::ASYNC_GENERATOR,
+            (_, Some(_)) => code_flags::GENERATOR,
+            _ => 0,
+        };
         let flags = match &body {
             Body::Namespace(..) => None,
             _ => {
@@ -766,13 +773,13 @@ impl<'p> Function<'_, 'p> {
         if let Some(flags) = flags {
             signature["code_flags"] = json!(flags);
         }
-        if body.is_genexpr() {
-            // generator() binds the implicit .0 argument without calling the step function.
+        if generator.is_some() {
+            // The creating frame supplies the already-acquired iterator.
             signature["positional"] = json!([".0"]);
         }
         let entry = match generator_flags {
             0 => Entry::Compiled,
-            _ => Entry::Suspended,
+            flags => Entry::Suspended(flags),
         };
         let scopes = &self.source.scopes;
         let scope_facts = match &body {
@@ -790,8 +797,7 @@ impl<'p> Function<'_, 'p> {
                 Some(&class.namespace)
             }
             Body::AliasEvaluator(_) => Some(&scopes.aliases[&start]),
-            Body::CheckedGenerator(site, _) => Some(&scopes.generators[site]),
-            _ => None,
+            _ => generator.map(|site| &scopes.generators[&site]),
         };
         if let Some(facts) = scope_facts {
             facts.write_signature(&mut signature);
@@ -799,7 +805,7 @@ impl<'p> Function<'_, 'p> {
             if callable && facts.captures_class {
                 signature["class_cell"] = json!(true);
             }
-            if (callable || body.is_genexpr())
+            if (callable || generator.is_some())
                 && self.class_locals.is_some()
                 && self.annotation_values.is_none()
                 && type_params.is_none()
