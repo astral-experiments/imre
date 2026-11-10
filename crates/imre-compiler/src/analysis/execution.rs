@@ -874,8 +874,45 @@ impl Session {
     ) -> Option<Diagnostic> {
         let call = value.as_call_expr()?;
         ExecutionIntrinsic::resolve(model, &call.func)?;
-        let operand = call.arguments.args.first()?;
-        let input = operand.as_call_expr()?;
+        let operand = call.arguments.args.first()?.as_call_expr()?;
+        // compile() creates passive code for input text. A fixed filename and
+        // mode preserve the same missing entry when exec/eval consumes it.
+        let input = if is_stdlib_function_type(
+            model,
+            operand.func.inferred_type(model)?,
+            "builtins",
+            "compile",
+        ) {
+            // A function captures its defining namespace's __builtins__ at creation.
+            // A lexical builtin type alone cannot establish lookup through a replacement.
+            let index = ty_python_core::semantic_index(
+                &self.db,
+                self.db.program_file(self.files[source.0]),
+            );
+            if index
+                .place_table(ty_python_core::FileScopeId::global())
+                .symbol_by_name("__builtins__")
+                .is_some_and(|symbol| symbol.is_bound())
+            {
+                return None;
+            }
+            let [source, filename, mode] = operand.arguments.args.as_ref() else {
+                return None;
+            };
+            if !operand.arguments.keywords.is_empty()
+                || filename
+                    .as_string_literal_expr()?
+                    .value
+                    .to_str()
+                    .contains('\0')
+                || mode.as_string_literal_expr()?.value.to_str() != "exec"
+            {
+                return None;
+            }
+            source.as_call_expr()?
+        } else {
+            operand
+        };
         if !input.arguments.keywords.is_empty()
             || input.arguments.args.len() > 1
             || !input
