@@ -1093,7 +1093,14 @@ impl Frame<'_, '_, '_> {
                     }
                     | ir::DefinitionSite::Function(_) => (header, None),
                 };
-                let header = prefix
+                let count = self.code.parts().1.definitions[&site.start()]
+                    .decorator_lines
+                    .len();
+                let (decorators, defaults) = prefix.split_at(count);
+                let decorators = self.decorator_operands(decorators, |code, value| {
+                    code.evaluate_eager_handle(value)
+                });
+                let defaults = defaults
                     .iter()
                     .map(|value| self.evaluate_eager_handle(value))
                     .collect::<Vec<_>>();
@@ -1103,7 +1110,7 @@ impl Frame<'_, '_, '_> {
                     })
                 });
                 let (code, sites) = self.code.parts();
-                sites.definition(code, site.start(), &header, class_arguments)
+                sites.definition(code, site.start(), &decorators, &defaults, class_arguments)
             }
             (Builtin::RegisteredClassNamespace(site, layout), operands) => {
                 let (code, sites) = self.code.parts();

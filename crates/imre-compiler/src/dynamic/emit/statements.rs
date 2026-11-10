@@ -388,17 +388,15 @@ impl<'p> Function<'_, 'p> {
     ) {
         let class = &self.source.class_bodies[&site];
         let (decorators, operands) = inputs.split_at(class.decorator_offsets.len());
-        let decorators = decorators
-            .iter()
-            .map(|operand| self.physical_operand(operand))
-            .collect::<Vec<_>>();
+        let decorators =
+            self.decorator_operands(decorators, |code, operand| code.physical_operand(operand));
         let arguments = self.class_arguments(layout, |code, index| {
             code.physical_operand(&operands[index])
         });
         self.callable_sites().place_definition(site);
         let value = self
             .sites
-            .definition(&mut self.frame, site, &decorators, Some(arguments));
+            .definition(&mut self.frame, site, &decorators, &[], Some(arguments));
         self.bind(class.name.as_str(), &value);
     }
 }

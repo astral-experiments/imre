@@ -328,7 +328,8 @@ impl CheckedSites {
         &self,
         frame: &mut RegisteredFrame<'_, '_>,
         site: TextSize,
-        header: &[String],
+        decorators: &[(String, String)],
+        defaults: &[String],
         class_arguments: Option<(String, String)>,
     ) -> String {
         let Declaration {
@@ -336,9 +337,8 @@ impl CheckedSites {
             decorator_lines,
             type_params,
         } = &self.definitions[&site];
-        let (decorators, defaults) = header.split_at(decorator_lines.len());
         let scope = frame.scope.clone();
-        let value = if let Some(arguments) = class_arguments {
+        let mut value = if let Some(arguments) = class_arguments {
             definition.instantiate_class(frame, arguments, None)
         } else if let Some(range) = definition.class_header {
             let header = definition.bind_defaults(frame, &scope, &[]);
@@ -361,7 +361,11 @@ impl CheckedSites {
             }
             function
         };
-        frame.decorate(decorators, decorator_lines.iter().copied(), value)
+        for ((mark, decorator), &line) in decorators.iter().zip(decorator_lines).rev() {
+            frame.set_statement_line(line);
+            value = frame.invoke_from_mark(decorator, &[&value], mark, None);
+        }
+        value
     }
 }
 
@@ -451,19 +455,6 @@ impl RegisteredFrame<'_, '_> {
         let params = self.op("lookup", &[scope, &key]);
         let key = self.code_name("__type_params__");
         self.op("setattr", &[function, &key, &params]);
-    }
-
-    pub(crate) fn decorate(
-        &mut self,
-        decorators: &[String],
-        lines: impl ExactSizeIterator<Item = usize> + DoubleEndedIterator,
-        mut value: String,
-    ) -> String {
-        for (decorator, line) in decorators.iter().zip(lines).rev() {
-            self.set_statement_line(line);
-            value = self.invoke(decorator, &[&value]);
-        }
-        value
     }
 }
 
