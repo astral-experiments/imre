@@ -3,7 +3,9 @@
 mod builtin_substitution;
 mod parameter_value;
 
-pub(super) use parameter_value::{ParameterField, ParameterValue, set_parameter_evaluator};
+pub(super) use parameter_value::{
+    LazyEvaluation, ParameterField, ParameterValue, set_parameter_evaluator,
+};
 
 use crate::dynamic::value::SlotStorage;
 use std::collections::{HashMap, HashSet};
@@ -22,7 +24,7 @@ pub(super) enum ClassLayout {
 /// Statements retain a callable evaluator. The constructor receives an already evaluated value.
 #[derive(Clone, Copy)]
 pub(super) enum AliasDefinition {
-    Lazy { evaluator: Id, cached: Option<Id> },
+    Lazy(LazyEvaluation),
     Eager { value: Id, module: Id },
 }
 
@@ -1690,37 +1692,15 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             ("__type_params__", _) => *parameters,
             ("__parameters__", _) => return Some(unpacked_parameters(ctx, *parameters)),
             ("__module__", AliasDefinition::Eager { module, .. }) => module,
-            ("__module__", AliasDefinition::Lazy { evaluator, .. }) => {
-                return Some(ctx.lookup_attr(evaluator, "__module__"));
+            ("__module__", AliasDefinition::Lazy(lazy)) => {
+                return Some(ctx.lookup_attr(lazy.evaluator, "__module__"));
             }
             ("evaluate_value", AliasDefinition::Eager { value, .. }) => {
                 ctx.alloc(Value::ConstEvaluator(value))
             }
-            ("evaluate_value", AliasDefinition::Lazy { evaluator, .. }) => evaluator,
-            (
-                "__value__",
-                AliasDefinition::Eager { value, .. }
-                | AliasDefinition::Lazy {
-                    cached: Some(value),
-                    ..
-                },
-            ) => value,
-            ("__value__", AliasDefinition::Lazy { evaluator, .. }) => {
-                ctx.heap.keep(value);
-                return Some(
-                    ctx.call(evaluator, Vec::new(), Vec::new())
-                        .inspect(|&result| {
-                            let Value::TypeAlias {
-                                definition: AliasDefinition::Lazy { cached, .. },
-                                ..
-                            } = ctx.heap.get_mut(value)
-                            else {
-                                unreachable!()
-                            };
-                            *cached = Some(result);
-                        }),
-                );
-            }
+            ("evaluate_value", AliasDefinition::Lazy(lazy)) => lazy.evaluator,
+            ("__value__", AliasDefinition::Eager { value, .. }) => value,
+            ("__value__", AliasDefinition::Lazy(lazy)) => return Some(lazy.read(ctx, value, None)),
             ("__reduce__", _) => {
                 let callable = ctx.builtin("typing.TypeAliasType.__reduce__");
                 ctx.alloc(Value::Method {

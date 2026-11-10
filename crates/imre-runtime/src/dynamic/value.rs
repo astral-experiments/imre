@@ -2516,10 +2516,7 @@ impl Value {
             } => {
                 visit.extend([*name, *parameters]);
                 match *definition {
-                    super::typing::AliasDefinition::Lazy { evaluator, cached } => {
-                        visit.push(evaluator);
-                        visit.extend(cached);
-                    }
+                    super::typing::AliasDefinition::Lazy(lazy) => lazy.visit(visit),
                     super::typing::AliasDefinition::Eager { value, module } => {
                         visit.extend([value, module]);
                     }
