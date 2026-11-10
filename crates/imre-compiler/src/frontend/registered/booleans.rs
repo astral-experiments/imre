@@ -238,6 +238,7 @@ impl PhysicalPreparation<'_, '_> {
                     None => Selection::Inputs(self.slotted_operation(
                         node,
                         ir::Builtin::RegisteredSuspend(kind, node.range()),
+                        ir::Type::PythonObject,
                         std::iter::once(child),
                     )),
                 };
