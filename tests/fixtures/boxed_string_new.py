@@ -64,6 +64,35 @@ def current():
     print(str.__new__(str, plain) is plain)
     subtype = Word(plain)
     print(str(subtype) is plain, str(subtype) is str(subtype))
+    for text in ("", "é", "東京", "\ud800"):
+        word = Word(text)
+        first = str(word)
+        second = str.__str__(word)
+        assert type(first) is type(second) is str
+        assert first == second == text
+        assert (first is second) == (text == "")
+        assert (second is text) == (text == "")
+        assert str.__str__(first) is first
+
+    calls = []
+
+    class Override(Word):
+        def __str__(self):
+            calls.append(self)
+            if len(calls) == 1:
+                return subtype
+            raise ValueError("second conversion")
+
+    override = Override("東京")
+    assert str.__str__(override) == "東京"
+    assert str(override) is subtype
+    try:
+        str(override)
+    except ValueError as error:
+        assert error.args == ("second conversion",)
+    else:
+        raise AssertionError("expected the second conversion to raise")
+    assert len(calls) == 2 and calls[0] is calls[1] is override
     print(repr(subtype), [subtype])
     print(type(str(Printable())) is Word, str.__new__(Word, Printable()))
     for args in ((), (int, "text"), (12, "text")):
