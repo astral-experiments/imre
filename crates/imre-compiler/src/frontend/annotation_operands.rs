@@ -101,12 +101,11 @@ pub(crate) fn annotation_operands<R>(
     source: RegisteredSource<'_>,
     bundled: bool,
     prepare_child: impl Fn(&str, &Parsed<ast::ModExpression>) -> Option<AnnotationBody<R>>,
-    namespace_annotations: &mut HashMap<Option<TextSize>, Vec<TextSize>>,
 ) -> HashMap<TextSize, PreparedAnnotation<R>> {
     #[derive(Clone, Copy)]
     enum Scope {
         Module,
-        Class(TextSize),
+        Class,
         Function,
     }
 
@@ -117,7 +116,6 @@ pub(crate) fn annotation_operands<R>(
         string_annotations: bool,
         bundled: bool,
         scope: Scope,
-        namespace_annotations: &'a mut HashMap<Option<TextSize>, Vec<TextSize>>,
     }
 
     impl<R> Strings<'_, R> {
@@ -171,24 +169,13 @@ pub(crate) fn annotation_operands<R>(
                     self.nested(&def.body, Scope::Function);
                 }
                 ast::Stmt::ClassDef(class) => {
-                    let site = class
-                        .decorator_list
-                        .first()
-                        .map_or(class.start(), Ranged::start);
-                    self.nested(&class.body, Scope::Class(site));
+                    self.nested(&class.body, Scope::Class);
                 }
                 ast::Stmt::AnnAssign(ann) if ann.simple && ann.target.is_name_expr() => {
-                    let owner = match self.scope {
-                        Scope::Module => None,
-                        Scope::Class(start) => Some(start),
-                        Scope::Function => return,
-                    };
-                    self.record(&ann.annotation, owner.is_none());
-                    if self.string_annotations {
-                        self.namespace_annotations
-                            .entry(owner)
-                            .or_default()
-                            .push(ann.annotation.start());
+                    match self.scope {
+                        Scope::Module => self.record(&ann.annotation, true),
+                        Scope::Class => self.record(&ann.annotation, false),
+                        Scope::Function => {}
                     }
                 }
                 _ => walk_stmt(self, stmt),
@@ -203,7 +190,6 @@ pub(crate) fn annotation_operands<R>(
         string_annotations,
         bundled,
         scope: Scope::Module,
-        namespace_annotations,
     };
     strings.visit_body(stmts);
     strings.sites
@@ -248,16 +234,13 @@ mod tests {
             generators: None,
             lambdas: None,
         };
-        let mut namespace_annotations = HashMap::new();
         let sites = annotation_operands(
             &parsed.syntax().body,
             false,
             source,
             false,
             test_annotation_body,
-            &mut namespace_annotations,
         );
-        assert!(namespace_annotations.is_empty());
         assert_eq!(sites.len(), 4);
         for (start, _) in text.match_indices("'list[int]'") {
             let entry = &sites[&TextSize::try_from(start).unwrap()];
@@ -307,7 +290,6 @@ mod tests {
             source,
             false,
             test_annotation_body,
-            &mut HashMap::new(),
         );
         let offset = |s| TextSize::try_from(text.find(s).unwrap()).unwrap();
         assert!(matches!(
@@ -343,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn future_assignments_belong_to_their_declaring_namespace() {
+    fn future_operands_require_a_child_only_when_their_spelling_is_compiled() {
         let text = "mod_field: A[B]
 @decorator
 class C:
@@ -365,23 +347,28 @@ after: K[L]
             generators: None,
             lambdas: None,
         };
-        let mut groups = HashMap::new();
-        annotation_operands(
-            &parsed.syntax().body,
-            true,
-            source,
-            false,
-            test_annotation_body,
-            &mut groups,
-        );
         let site = |spelling| TextSize::try_from(text.find(spelling).unwrap()).unwrap();
-        assert_eq!(
-            groups,
-            HashMap::from([
-                (None, vec![site("A[B]"), site("K[L]")]),
-                (Some(site("@decorator")), vec![site("C[D]")]),
-                (Some(site("class Nested")), vec![site("I[J]")]),
-            ])
-        );
+        for bundled in [false, true] {
+            let sites = annotation_operands(
+                &parsed.syntax().body,
+                true,
+                source,
+                bundled,
+                test_annotation_body,
+            );
+            assert_eq!(sites.len(), 5);
+            for spelling in ["A[B]", "C[D]", "E[F]", "I[J]", "K[L]"] {
+                let location = site(spelling);
+                let value = sites[&location].operand(location);
+                if bundled {
+                    assert!(matches!(value.kind, ExprKind::Str(text) if text == spelling));
+                } else {
+                    assert!(
+                        matches!(value.kind, ExprKind::Builtin(Builtin::BindAnnotationExpression(child), _) if child == location)
+                    );
+                }
+            }
+            assert!(!sites.contains_key(&site("G[H]")));
+        }
     }
 }

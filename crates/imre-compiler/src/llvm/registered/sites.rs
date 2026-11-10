@@ -205,7 +205,7 @@ pub(crate) struct Declaration {
 
 pub(crate) struct AnnotationString {
     pub(crate) text: String,
-    pub(crate) code: Option<String>,
+    pub(crate) code: String,
 }
 
 /// The compiled-site tables read by checked operations in a registered frame.
@@ -299,9 +299,7 @@ impl CheckedSites {
     ) -> String {
         let value = &self.annotation_strings[&site];
         let text = frame.text(&value.text);
-        if let Some(code) = &value.code {
-            frame.bind_annotation_expression(&text, code);
-        }
+        frame.bind_annotation_expression(&text, &value.code);
         text
     }
 
