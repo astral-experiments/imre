@@ -2007,6 +2007,8 @@ impl RegisteredFrame<'_, '_> {
             None
         };
         if let Some(lookup) = lookup {
+            // Method lookup propagates a pending receiver error before inspecting the handle.
+            self.take_matching_check();
             let target = self.checked(&lookup);
             // Nested argument calls can reuse the entry-block scratch space.
             let bound = self.value("load i64, ptr %live");
