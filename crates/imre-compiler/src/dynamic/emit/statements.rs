@@ -10,9 +10,9 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use serde_json::json;
 
-use super::{Body, Cleanup, DefinitionName, Entry, Function, LoopTarget};
+use super::{Body, Cleanup, DefinitionName, Entry, FinallySuite, Function, LoopTarget};
 
-impl Function<'_, '_> {
+impl<'p> Function<'_, 'p> {
     pub(super) fn declare_globals(&mut self, globals: &std::collections::BTreeSet<String>) {
         for name in globals {
             self.declared_globals.insert(name.to_owned());
@@ -117,7 +117,7 @@ impl Function<'_, '_> {
         self.frame.restore_checked_slots(enclosing);
     }
 
-    pub(super) fn statements(&mut self, suite: &[ast::Stmt]) {
+    pub(super) fn statements(&mut self, suite: &'p [ast::Stmt]) {
         if let Some(plan) = suite
             .first()
             .and_then(|s| self.source.nested_bodies.get(&s.start()))
@@ -129,7 +129,7 @@ impl Function<'_, '_> {
     }
 
     /// Supply only the source operands requested by the registered matcher.
-    fn emit_match_inputs(&mut self, site: &crate::frontend::SourceMatch, source: &ast::StmtMatch) {
+    fn emit_match_inputs(&mut self, site: &crate::frontend::SourceMatch, source: &'p ast::StmtMatch) {
         use crate::llvm::registered::patterns::{MatchRegion, MatchSubject};
 
         let mark = self.temporary_mark();
@@ -192,7 +192,7 @@ impl Function<'_, '_> {
         }
     }
 
-    pub(super) fn source_statements(&mut self, suite: &[ast::Stmt]) {
+    pub(super) fn source_statements(&mut self, suite: &'p [ast::Stmt]) {
         for stmt in suite {
             if !self.start_statement() {
                 break;
@@ -1193,7 +1193,7 @@ impl Function<'_, '_> {
     }
 
     /// Return whether control can reach a subsequent arm.
-    fn conditional_fragments(&mut self, stmt: &ast::StmtIf) {
+    fn conditional_fragments(&mut self, stmt: &'p ast::StmtIf) {
         use crate::frontend::SourceGuard;
         use crate::llvm::operations::Choice;
         let guards = &self.source.statement_sites.ifs[&stmt.range()];
@@ -1245,8 +1245,8 @@ impl Function<'_, '_> {
 
     fn loop_body(
         &mut self,
-        body: &[ast::Stmt],
-        otherwise: &[ast::Stmt],
+        body: &'p [ast::Stmt],
+        otherwise: &'p [ast::Stmt],
         iterator: Option<&str>,
         enter_body: impl FnOnce(&mut Self, &str, &str),
     ) {
@@ -1289,7 +1289,7 @@ impl Function<'_, '_> {
         self.label(&done);
     }
 
-    fn protected_suite(&mut self, stmt: &ast::StmtTry) {
+    fn protected_suite(&mut self, stmt: &'p ast::StmtTry) {
         let (handler, enclosing) = self.begin_operand_scope();
         self.statements(&stmt.body);
         self.body.error_target = enclosing;
@@ -1342,17 +1342,36 @@ impl Function<'_, '_> {
         self.leave_handlers(&done);
     }
 
-    fn protected_statement(&mut self, stmt: &ast::StmtTry) {
+    fn emit_finally(&mut self, suite: FinallySuite<'p>) {
+        match suite {
+            FinallySuite::Checked(checked) => {
+                let Some(enclosing) = self.frame.enter_checked_slots(checked.region()) else {
+                    return;
+                };
+                if !checked.function.body.is_empty() && self.start_statement() {
+                    self.checked_block(&checked.function.body, checked);
+                }
+                self.frame.restore_checked_slots(enclosing);
+            }
+            FinallySuite::Residual(source) => self.statements(source),
+        }
+    }
+
+    fn protected_statement(&mut self, stmt: &'p ast::StmtTry) {
         if stmt.finalbody.is_empty() {
             self.protected_suite(stmt);
             return;
         }
+        let suite = match self.source.nested_bodies.get(&stmt.finalbody[0].start()) {
+            Some(plan) if plan.fully_checked() => FinallySuite::Checked(&plan.checked),
+            _ => FinallySuite::Residual(&stmt.finalbody),
+        };
         crate::llvm::registered::handlers::finalized(
             self,
             |code, enclosing| {
                 code.exits.push((
                     Cleanup::Finally {
-                        body: stmt.finalbody.as_slice().into(),
+                        body: suite,
                         loop_depth: code.loops.len(),
                         caught_depth: code.caught.len(),
                     },
@@ -1375,7 +1394,7 @@ impl Function<'_, '_> {
                         code.body.error_target.clone(),
                     ));
                 }
-                code.statements(&stmt.finalbody);
+                code.emit_finally(suite);
                 if pending.is_some() {
                     code.exits.pop();
                 }
@@ -1393,14 +1412,11 @@ impl Function<'_, '_> {
 
     /// A return, break or continue inside a finally may replace the pending exit.
     fn run_cleanups(&mut self, depth: usize, pending: Option<&str>) {
-        let active = self.exits.clone();
+        let mut left = Vec::new();
         let mut discarded = Vec::new();
-        for index in (depth..active.len()).rev() {
-            if self.body.terminated {
-                break;
-            }
-            self.exits.truncate(index);
-            let (cleanup, outer) = &active[index];
+        while self.exits.len() > depth && !self.body.terminated {
+            let region = self.exits.pop().unwrap();
+            let (cleanup, outer) = &region;
             let previous = std::mem::replace(&mut self.body.error_target, outer.clone());
             match cleanup {
                 Cleanup::With(context) => {
@@ -1434,7 +1450,8 @@ impl Function<'_, '_> {
                     // Loops and handlers entered inside the try do not enclose its finally.
                     let protected_loops = self.loops.split_off(*loop_depth);
                     let protected_handlers = self.caught.split_off(*caught_depth);
-                    if let Some(value) = pending.filter(|value| *value != "0") {
+                    let pending = pending.filter(|value| *value != "0");
+                    if let Some(value) = pending {
                         self.exits.push((
                             Cleanup::RetainedValue {
                                 value: value.into(),
@@ -1443,20 +1460,24 @@ impl Function<'_, '_> {
                             outer.clone(),
                         ));
                     }
-                    self.statements(body);
+                    self.emit_finally(*body);
+                    if pending.is_some() {
+                        self.exits.pop();
+                    }
                     self.caught.extend(protected_handlers);
                     self.loops.extend(protected_loops);
                 }
             }
             self.body.error_target = previous;
+            left.push(region);
         }
         for (slot, value) in discarded.into_iter().rev() {
             self.live.insert(slot, value);
         }
-        self.exits = active;
+        self.exits.extend(left.into_iter().rev());
     }
 
-    fn with(&mut self, items: &[ast::WithItem], body: &[ast::Stmt], is_async: bool) {
+    fn with(&mut self, items: &[ast::WithItem], body: &'p [ast::Stmt], is_async: bool) {
         let Some((item, rest)) = items.split_first() else {
             self.statements(body);
             return;

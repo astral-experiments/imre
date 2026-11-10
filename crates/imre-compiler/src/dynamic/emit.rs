@@ -1078,7 +1078,7 @@ struct Function<'a, 'p> {
     in_function: bool,
     module: bool,
     loops: Vec<LoopTarget>,
-    exits: Vec<(Cleanup, String)>,
+    exits: Vec<(Cleanup<'p>, String)>,
 }
 
 /// The syntax walker adds Python scopes and cleanup to the registered frame operations.
@@ -1097,8 +1097,14 @@ impl std::ops::DerefMut for Function<'_, '_> {
 
 use crate::llvm::registered::context::ContextExit;
 
-#[derive(Clone)]
-enum Cleanup {
+/// The lexical cleanup selected at try entry, valid on every edge leaving the body.
+#[derive(Clone, Copy)]
+enum FinallySuite<'p> {
+    Checked(&'p crate::frontend::RegisteredFunction),
+    Residual(&'p [ast::Stmt]),
+}
+
+enum Cleanup<'p> {
     With(ContextExit),
     ExceptionName(String),
     RetainedValue {
@@ -1106,7 +1112,7 @@ enum Cleanup {
         enclosing_exception: Option<String>,
     },
     Finally {
-        body: std::rc::Rc<[ast::Stmt]>,
+        body: FinallySuite<'p>,
         loop_depth: usize,
         caught_depth: usize,
     },

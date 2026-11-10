@@ -104,7 +104,7 @@ pub(crate) fn groups<'a, 'p, 'h, F: FrameEmitter<'a, 'p>, H, S: 'h, N: AsRef<str
     exc: &str,
     done: &str,
     mut describe: impl FnMut(&mut F, &'h H) -> (String, Option<N>, &'h [S]),
-    mut emit_suite: impl FnMut(&mut F, &[S]),
+    mut emit_suite: impl FnMut(&mut F, &'h [S]),
 ) {
     let raised = code.op("list", &[]);
     code.live.push(raised.clone());
