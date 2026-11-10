@@ -251,8 +251,7 @@ impl Frame<'_, '_, '_> {
                     self.code.exit_sync(exit, None);
                     self.code.flush_check();
                 }
-                Region::Slots(slots) if pending_return.is_none() => self.clear_slots(slots),
-                Region::Slots(_) => {}
+                Region::Slots(slots) => self.clear_slots(slots),
                 Region::Finally {
                     body,
                     outer,
