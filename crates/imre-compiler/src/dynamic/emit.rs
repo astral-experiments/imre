@@ -2852,6 +2852,30 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
+    fn suspended_dictionary_emits_after_its_entries_are_erased() {
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            concat!(
+                "def make():\n",
+                "    result = {(yield 'key'): (kept := (yield 'value')), **(yield 'spread')}\n",
+                "    return result, kept\n",
+            ),
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let before = prepared.standalone().unwrap().unwrap();
+        let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        assert!(prepared.source.function_bodies[&def.start()].fully_checked());
+        let assignment = def.body[0].as_assign_stmt_mut().unwrap();
+        assignment.value.as_dict_expr_mut().unwrap().items.clear();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+    }
+
+    #[test]
     fn suspended_assignment_emits_after_its_targets_are_erased() {
         let mut prepared = PreparedBody::module(
             "example",
