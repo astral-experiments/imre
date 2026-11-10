@@ -165,7 +165,7 @@ impl Prepared {
         Self::bind_next(
             &mut self.next,
             Expr::local(self.ready, Type::Bool),
-            self.value,
+            [self.value],
             binding,
         );
         self.next.extend(body);
@@ -210,11 +210,16 @@ impl Prepared {
         }]
     }
 
-    /// Pulls and binds one owned item, or exits the source loop on exhaustion.
-    fn bind_next(next: &mut Vec<Statement>, ready: Expr, value: usize, bindings: Vec<Statement>) {
+    /// Bind a successful pull before releasing its output slots, or exit on exhaustion.
+    pub(super) fn bind_next(
+        next: &mut Vec<Statement>,
+        ready: Expr,
+        slots: impl IntoIterator<Item = usize>,
+        bindings: Vec<Statement>,
+    ) {
         next.push(Self::exhaust_if_empty(ready));
         next.extend(bindings);
-        next.push(Statement::Clear(value));
+        next.extend(slots.into_iter().map(Statement::Clear));
     }
 
     fn exhaust_if_empty(ready: Expr) -> Statement {
@@ -2457,7 +2462,7 @@ impl Checker<'_> {
             Prepared::bind_next(
                 &mut next,
                 self.local(zip.ready),
-                zip.value,
+                [zip.value],
                 pulls[0].binding.clone(),
             );
             *out = Some(zip_sums::Sum {

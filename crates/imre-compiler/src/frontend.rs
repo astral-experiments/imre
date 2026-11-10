@@ -5050,9 +5050,8 @@ impl<'a> Checker<'a> {
             slot
         });
         let mut body = Vec::new();
-        let mut owned_items = Vec::new();
         let mut cleanup = vec![captured];
-        let (item, test) = if let Some(cursor) = cursor {
+        let (item, test, pull) = if let Some(cursor) = cursor {
             output.push(Statement::Assign(cursor, Expr::integer(0)));
             cleanup.push(cursor);
             (
@@ -5084,6 +5083,7 @@ impl<'a> Checker<'a> {
                         vec![Compare::Less],
                     ),
                 },
+                None,
             )
         } else {
             let (key_type, value_type) = mapping.unwrap_or((element, Type::None));
@@ -5125,16 +5125,6 @@ impl<'a> Checker<'a> {
                 value,
                 ready,
             });
-            body.push(Statement::If(
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Not(Box::new(self.local(ready))),
-                },
-                vec![Statement::Exhaust],
-                Vec::new(),
-            ));
-            owned_items.push(key);
-            owned_items.extend(value);
             let item = if let Some(value) = value {
                 Expr {
                     ty: element,
@@ -5143,7 +5133,7 @@ impl<'a> Checker<'a> {
             } else {
                 self.local(key)
             };
-            (item, Expr::boolean(true))
+            (item, Expr::boolean(true), Some((ready, key, value)))
         };
         let mut facts = self.narrowed.clone();
         let before = self.assigned.clone();
@@ -5189,9 +5179,13 @@ impl<'a> Checker<'a> {
             }
         }
         remove_target_facts(target, &self.names, &mut facts);
-        body.extend(bindings);
-        cleanup.extend(&owned_items);
-        body.extend(owned_items.into_iter().map(Statement::Clear));
+        if let Some((ready, key, value)) = pull {
+            let slots = std::iter::once(key).chain(value);
+            cleanup.extend(slots.clone());
+            pipelines::Prepared::bind_next(&mut body, self.local(ready), slots, bindings);
+        } else {
+            body.extend(bindings);
+        }
         // Advance before entering the body so continue and target rebinding do
         // not alter progression. Length is read anew on every loop condition.
         for slot in cursor.into_iter().chain(counter) {
