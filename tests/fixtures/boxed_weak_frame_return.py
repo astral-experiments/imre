@@ -87,4 +87,31 @@ except ValueError as exc:
 else:
     raise AssertionError("lost operand exception")
 assert events == ["left", "middle"]
+
+
+class RescuePeer:
+    def __del__(self):
+        rescued.append(peer())
+
+
+def tuple_owner(duplicate):
+    global peer
+    handler = Handler()
+    peer = weakref.ref(handler)
+    cell = (lambda: handler).__closure__[0]
+    trigger = RescuePeer()
+    if duplicate:
+        return trigger, cell, trigger
+    return cell, trigger
+
+
+for duplicate in (False, True):
+    rescued = []
+    owner = tuple_owner(duplicate)
+    del owner
+    assert len(rescued) == 1
+    assert (rescued[0] is None) == duplicate
+    rescued.clear()
+    assert peer() is None
+
 print("weak frame cleanup ok")

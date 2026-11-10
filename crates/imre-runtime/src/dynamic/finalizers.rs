@@ -90,20 +90,50 @@ impl Context {
 
     /// Recheck roots after each finalizer. An upstream owner may resurrect a descendant.
     pub(super) fn drain_acyclic_finalizers(&mut self) -> Result<bool> {
-        let mut finalized = false;
-        while self.heap.has_ordinary_finalizers() {
+        let mark = self.heap.temporary_mark();
+        let result = self.drain_released_owners(mark);
+        self.heap.release_temporaries_since(mark);
+        result
+    }
+
+    fn drain_released_owners(&mut self, mark: usize) -> Result<bool> {
+        let mut released = false;
+        while self.heap.has_ordinary_finalizers() || self.heap.temporary_mark() > mark {
             let streams = super::stdlib::io::rooted_standard_streams(self);
             let globals = self.finalizer_path_roots();
             let (heap, roots) = self.heap_and_roots();
-            let Some(owner) = heap.acyclic_finalizer(globals, roots, streams.as_ref())? else {
-                break;
-            };
-            if !super::stdlib::io::deallocate_exact_pair(self, owner)? {
-                self.dispatch_finalizer(owner);
+            if let Some(owner) = heap.next_acyclic_finalizer(globals, roots, streams.as_ref())? {
+                released = true;
+                if !super::stdlib::io::deallocate_exact_pair(self, owner)? {
+                    self.dispatch_finalizer(owner);
+                }
+                continue;
             }
-            finalized = true;
+            let end = self.heap.temporary_mark();
+            if end == mark {
+                break;
+            }
+            released = true;
+            // A weak-only value released by the previous slot must expire before
+            // the next slot loses its reference.
+            if self.heap.has_weak_values {
+                let (heap, roots) = self.heap_and_roots();
+                if let Some(callbacks) = heap.collect(roots) {
+                    self.run_weak_callbacks(callbacks);
+                }
+            }
+            self.heap.release_temporaries_since(end);
+            // A run of inert slots can retire without another trace. Stop at the
+            // first observable release before touching its earlier siblings.
+            let mut next = end;
+            while next > mark {
+                next -= 1;
+                if self.heap.discard_truth_operands(next, self.modules) {
+                    break;
+                }
+            }
         }
-        Ok(finalized)
+        Ok(released)
     }
 
     fn finalize_unstarted_coroutine(&mut self, owner: Id) -> Result<()> {
