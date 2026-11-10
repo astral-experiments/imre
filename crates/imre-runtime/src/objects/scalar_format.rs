@@ -155,6 +155,32 @@ pub(crate) fn check_object_spec(spec: &str, type_name: &str) -> Result<()> {
     }
 }
 
+/// Apply the inherited object.__format__ to a native value with checked str semantics.
+///
+/// # Safety
+/// The compiler proves the value inherits object.__format__ and has a supported
+/// Python display. The caller roots the concrete word and spec through the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_format_object(
+    kind: u32,
+    word: usize,
+    spec: *const Str,
+) -> *const Str {
+    let kind = WordKind::new(kind);
+    // SAFETY: the caller roots both the native string and its concrete operand.
+    let (spec, name) = unsafe {
+        (
+            (&*spec).as_str(),
+            super::exceptions::word_type_name(kind, word),
+        )
+    };
+    if let Err(error) = check_object_spec(spec, &name) {
+        return error.returning(std::ptr::null());
+    }
+    // SAFETY: both inputs remain live through the existing Python str operation.
+    unsafe { super::boxed_values::checked_text(kind, word, false) }
+}
+
 /// Format one exact native scalar with a runtime-selected UTF-8 specification.
 ///
 /// # Safety

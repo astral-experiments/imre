@@ -8,8 +8,8 @@
 use crate::StrOwner;
 mod arguments;
 mod imports;
-pub(super) use imports::imre_exception_field_repr;
 pub(crate) use imports::keyword_suggestion;
+pub(super) use imports::{imre_exception_field_repr, type_name as word_type_name};
 mod tree;
 pub(super) use tree::append_tree_entries;
 

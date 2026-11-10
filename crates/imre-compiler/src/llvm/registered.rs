@@ -139,7 +139,7 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                 iteration.is_ok()
             }
             ExprKind::Builtin(Builtin::FormatConversion(_), args) => args.len() == 1,
-            ExprKind::Builtin(Builtin::FormatField, args) => {
+            ExprKind::Builtin(Builtin::FormatField(_), args) => {
                 uses_python_protocol |= args
                     .first()
                     .is_some_and(|value| value.ty == Type::PythonObject);
@@ -870,7 +870,7 @@ impl Frame<'_, '_, '_> {
                     .collect::<Vec<_>>();
                 self.contains_literal(&needle, &items, *negate)
             }
-            (Builtin::FormatConversion(_) | Builtin::FormatField | Builtin::FormatJoin, _) => {
+            (Builtin::FormatConversion(_) | Builtin::FormatField(_) | Builtin::FormatJoin, _) => {
                 let mark = self.temporary_mark();
                 self.unwind_stack_operands(&mark, |frame| {
                     let result = match (op, operands) {
@@ -879,7 +879,7 @@ impl Frame<'_, '_, '_> {
                             frame.keep_operands(&mark, &value, "0");
                             frame.format_conversion(&value, *conversion)
                         }
-                        (Builtin::FormatField, [value, spec]) => {
+                        (Builtin::FormatField(_), [value, spec]) => {
                             let value = frame.evaluate_handle(value);
                             frame.keep_operands(&mark, &value, "0");
                             let spec = frame.evaluate_handle(spec);

@@ -89,17 +89,21 @@ impl Emitter<'_, '_> {
                     none()
                 }
             }
-            Builtin::FormatField => {
+            Builtin::FormatField(_) => {
                 let value = &args[0].value;
                 let spec = &args[1].value;
-                debug_assert!(value.ty.is_format_scalar());
                 debug_assert_eq!(spec.ty, Type::Str);
+                let format = if value.ty.is_format_scalar() {
+                    "imre_format_scalar"
+                } else {
+                    "imre_format_object"
+                };
                 let kind = value.ty.word_kind() as u32;
                 let word = self.word(value);
                 Value {
                     ty: Type::Str,
                     operand: self.checked_pointer(format!(
-                        "call ptr @imre_format_scalar(i32 {kind}, i64 {word}, ptr {})",
+                        "call ptr @{format}(i32 {kind}, i64 {word}, ptr {})",
                         spec.operand
                     )),
                     small_integer: false,

@@ -267,7 +267,7 @@ impl RegisteredSource<'_> {
                         value = object(Builtin::FormatConversion(c), vec![value]);
                     }
                     let value = object(
-                        Builtin::FormatField,
+                        Builtin::FormatField(Box::default()),
                         vec![value, self.template_spec(nested, operand)?],
                     );
                     object(
