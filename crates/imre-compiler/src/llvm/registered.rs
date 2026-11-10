@@ -664,27 +664,18 @@ impl Frame<'_, '_, '_> {
         let item_block = self.code.name("b");
         let done = self.code.name("b");
         self.store_private(ready, &permanent::FALSE.to_string());
-        let item = match kind {
-            ir::IterNextKind::Generic => {
-                let header = self.code.current_range.start();
-                self.code.retained_loop_header(header);
-                let has_else = self
-                    .code
-                    .iteration
-                    .loops
-                    .last()
-                    .is_some_and(|(edges, _)| edges.exhausted != edges.done);
-                self.code
-                    .enter_sync_iteration(&cursor, has_else, false, &item_block, &done);
-                self.code.op("next", &[&cursor])
-            }
-            ir::IterNextKind::Async(pull) => {
-                let item = self.code.async_pull(&cursor, pull, &item_block, &done);
-                self.code.label(&item_block);
-                item
-            }
-            _ => unreachable!("registered iterator kind"),
-        };
+        let header = self.code.current_range.start();
+        let has_else = self
+            .code
+            .iteration
+            .loops
+            .last()
+            .is_some_and(|(edges, _)| edges.exhausted != edges.done);
+        let pulled = self
+            .code
+            .iteration_edge(&cursor, kind, header, has_else, &item_block, &done);
+        self.code.label(&item_block);
+        let item = self.code.iteration_item(&cursor, pulled);
         self.store_private(key, &item);
         self.store_private(ready, &permanent::TRUE.to_string());
         self.code.jump(&done);

@@ -820,6 +820,49 @@ pub(crate) enum SourceEffect {
     ObjectOperation(Box<Builtin>, Vec<PhysicalOperand>),
     /// A mixed loop needs its source suites. A literal false test runs only the else suite.
     While(SourceGuard<Box<RegisteredOperand>>),
+    /// A loop whose checked lowering left one or more physical inputs or suites.
+    For(Box<PreparedFor>),
+}
+
+pub(crate) struct PreparedFor {
+    pub(crate) range: TextRange,
+    pub(crate) iterable_range: TextRange,
+    pub(crate) acquire: ir::IteratorOp,
+    pub(crate) pull: ir::IterNextKind,
+    pub(crate) iterable: PhysicalOperand,
+    pub(crate) target: LoopBinding,
+    pub(crate) body: LoopSuite,
+    pub(crate) otherwise: Option<LoopSuite>,
+}
+
+pub(crate) enum LoopBinding {
+    Checked {
+        entered: usize,
+        binding: Box<RegisteredFunction>,
+    },
+    Source(Box<ast::Expr>),
+}
+
+pub(crate) struct LoopSuite {
+    pub(crate) plan: RegisteredSuite,
+    pub(crate) sources: Vec<ast::Stmt>,
+}
+
+impl LoopSuite {
+    fn new(mut plan: RegisteredSuite, stmts: &[ast::Stmt]) -> Self {
+        let mut sources = Vec::new();
+        for run in &mut plan.residual {
+            let start = sources.len();
+            if !matches!(
+                run.effect,
+                Some(SourceEffect::For(_) | SourceEffect::ObjectOperation(..))
+            ) {
+                sources.extend_from_slice(&stmts[run.statements.clone()]);
+            }
+            run.statements = start..sources.len();
+        }
+        Self { plan, sources }
+    }
 }
 
 pub(crate) enum PhysicalOperand {
@@ -915,20 +958,42 @@ impl ContextTarget {
         source: values::RegisteredSource<'_>,
         kind: RegisteredScope,
     ) -> Self {
-        let operations = HashMap::new();
-        let sites = StatementSites::default();
-        let mut scope = SourceScope::new(kind, source, &operations, &sites);
-        let Ok(ir::ContextBinding { entered, body }) = scope.with_binding(target) else {
-            return Self::Residual;
-        };
-        if PhysicalRegion::Fallthrough.accepts(&body) {
-            Self::Checked {
-                entered,
-                binding: Box::new(scope.finish(body)),
-            }
-        } else {
-            Self::Residual
+        match checked_binding(target, source, kind) {
+            Some((entered, binding)) => Self::Checked { entered, binding },
+            None => Self::Residual,
         }
+    }
+}
+
+/// Bind one externally supplied value with the scope and slot layout of its target.
+fn checked_binding(
+    target: &ast::Expr,
+    source: values::RegisteredSource<'_>,
+    kind: RegisteredScope,
+) -> Option<(usize, Box<RegisteredFunction>)> {
+    let operations = HashMap::new();
+    let sites = StatementSites::default();
+    let mut scope = SourceScope::new(kind, source, &operations, &sites);
+    let ir::ContextBinding { entered, body } = scope.with_binding(target).ok()?;
+    PhysicalRegion::Fallthrough
+        .accepts(&body)
+        .then(|| (entered, Box::new(scope.finish(body))))
+}
+
+fn for_pull(loop_: &ast::StmtFor) -> Option<ir::AsyncPull> {
+    loop_.is_async.then(|| ir::AsyncPull {
+        range: loop_.iter.range(),
+        header: Some(loop_.start()),
+    })
+}
+
+fn iteration_protocol(
+    iterable: TextRange,
+    pull: Option<ir::AsyncPull>,
+) -> (ir::IteratorOp, ir::IterNextKind) {
+    match pull {
+        Some(pull) => (ir::IteratorOp::Async(iterable), ir::IterNextKind::Async(pull)),
+        None => (ir::IteratorOp::Loop, ir::IterNextKind::Generic),
     }
 }
 
@@ -1199,7 +1264,7 @@ impl<'a> SuitePreparation<'a> {
         child_selection: SuiteSelection,
     ) -> RegisteredSuite {
         use ast::statement_visitor::{StatementVisitor, walk_stmt};
-        let plan = self.lower(stmts, kind, select);
+        let mut plan = self.lower(stmts, kind, select);
         struct Children<'p, 's> {
             prepare: &'p mut SuitePreparation<'s>,
             kind: RegisteredScope,
@@ -1215,10 +1280,26 @@ impl<'a> SuitePreparation<'a> {
             kind,
             select: child_selection,
         };
-        for run in plan.residual.iter().filter(|run| {
-            matches!(run.effect.as_ref(), None | Some(SourceEffect::While(_)))
-        }) {
-            for stmt in &stmts[run.statements.clone()] {
+        for run in std::mem::take(&mut plan.residual) {
+            if run.effect.is_some() {
+                if matches!(run.effect, Some(SourceEffect::While(_))) {
+                    walk_stmt(&mut children, &stmts[run.statements.start]);
+                }
+                plan.residual.push(run);
+                continue;
+            }
+            for index in run.statements {
+                let stmt = &stmts[index];
+                if let ast::Stmt::For(loop_) = stmt {
+                    let region = children.prepare.prepare_for(loop_, kind, child_selection);
+                    plan.residual.push(SourceRun {
+                        at: run.at,
+                        statements: index..index + 1,
+                        effect: Some(SourceEffect::For(Box::new(region))),
+                    });
+                    continue;
+                }
+                SourceRun::record(&mut plan.residual, index, run.at);
                 if let ast::Stmt::With(with) = stmt {
                     let inputs = children
                         .prepare
@@ -1265,6 +1346,44 @@ impl<'a> SuitePreparation<'a> {
             }
         }
         plan
+    }
+
+    fn prepare_for(
+        &mut self,
+        loop_: &ast::StmtFor,
+        kind: RegisteredScope,
+        selection: SuiteSelection,
+    ) -> PreparedFor {
+        let iterable = RegisteredOperand::prepare_with(self.source, kind, |scope| {
+            match (kind, selection) {
+                (RegisteredScope::Function { .. }, SuiteSelection::Physical) => {
+                    scope.operand(&loop_.iter)
+                }
+                _ => scope.ordinary_operand(&loop_.iter),
+            }
+        });
+        let iterable = match iterable {
+            Some(operand) => PhysicalOperand::Checked(Box::new(operand)),
+            None => PhysicalOperand::Source(loop_.iter.clone()),
+        };
+        let target = match checked_binding(&loop_.target, self.source, kind) {
+            Some((entered, binding)) => LoopBinding::Checked { entered, binding },
+            None => LoopBinding::Source(loop_.target.clone()),
+        };
+        let (acquire, pull) = iteration_protocol(loop_.iter.range(), for_pull(loop_));
+        let mut suite = |stmts: &[ast::Stmt]| {
+            LoopSuite::new(self.selected_suite(stmts, kind, selection, selection), stmts)
+        };
+        PreparedFor {
+            range: loop_.range(),
+            iterable_range: loop_.iter.range(),
+            acquire,
+            pull,
+            iterable,
+            target,
+            body: suite(&loop_.body),
+            otherwise: (!loop_.orelse.is_empty()).then(|| suite(&loop_.orelse)),
+        }
     }
 
     fn lower(
@@ -1640,11 +1759,7 @@ impl statements::StatementLowering for SourceScope<'_> {
     }
 
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> StdResult<statements::Block, ()> {
-        let pull = loop_.is_async.then(|| ir::AsyncPull {
-            range: loop_.iter.range(),
-            header: Some(loop_.start()),
-        });
-        let input = self.iteration_input(&loop_.iter, pull).ok_or(())?;
+        let input = self.iteration_input(&loop_.iter, for_pull(loop_)).ok_or(())?;
         let (binding, body) =
             self.iteration_body(&loop_.target, &input, |scope| scope.suite(&loop_.body))?;
         let otherwise = self.suite(&loop_.orelse)?;
@@ -2282,14 +2397,8 @@ impl SourceScope<'_> {
         pull: Option<ir::AsyncPull>,
     ) -> Option<pipelines::Prepared> {
         let value = self.ordinary_operand(iterable)?;
-        let (op, kind) = match pull {
-            Some(pull) => (
-                Builtin::RegisteredIter(ir::IteratorOp::Async(iterable.range())),
-                ir::IterNextKind::Async(pull),
-            ),
-            None => (Builtin::RegisteredIter(ir::IteratorOp::Loop), ir::IterNextKind::Generic),
-        };
-        let cursor = operation(op, Type::PythonObject, vec![value]);
+        let (acquire, kind) = iteration_protocol(iterable.range(), pull);
+        let cursor = operation(Builtin::RegisteredIter(acquire), Type::PythonObject, vec![value]);
         Some(pipelines::Prepared::pull_cursor(
             cursor,
             Type::PythonObject,

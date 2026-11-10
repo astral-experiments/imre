@@ -3,7 +3,7 @@ mod declarations;
 use super::sites::{CompiledDefinition, CompiledProvider};
 
 use super::{AnnotationScope, FrameEmitter};
-use crate::ir::{ItemUpdate, IteratorOp, Statement};
+use crate::ir::{ItemUpdate, Statement};
 use crate::llvm::registered::Place;
 use crate::llvm::registered::context::{ContextEmitter, ContextRegion};
 use imre_ast::code_flags;
@@ -52,8 +52,8 @@ impl<'p> Function<'_, 'p> {
     /// frames interleave its checked blocks with only their unprepared source.
     pub(super) fn prepared_function(
         &mut self,
-        prepared: &crate::frontend::RegisteredSuite,
-        emit_source: impl FnMut(&mut Self, &crate::frontend::SourceRun),
+        prepared: &'p crate::frontend::RegisteredSuite,
+        emit_source: impl FnMut(&mut Self, &'p crate::frontend::SourceRun),
     ) {
         if prepared.fully_checked() {
             self.checked_function(&prepared.checked);
@@ -111,8 +111,8 @@ impl<'p> Function<'_, 'p> {
 
     pub(super) fn checked_runs(
         &mut self,
-        prepared: &crate::frontend::RegisteredSuite,
-        mut emit_source: impl FnMut(&mut Self, &crate::frontend::SourceRun),
+        prepared: &'p crate::frontend::RegisteredSuite,
+        mut emit_source: impl FnMut(&mut Self, &'p crate::frontend::SourceRun),
     ) {
         let Some(enclosing) = self.frame.enter_checked_slots(prepared.checked.region()) else {
             return;
@@ -143,7 +143,11 @@ impl<'p> Function<'_, 'p> {
         }
     }
 
-    pub(super) fn source_run(&mut self, suite: &'p [ast::Stmt], run: &crate::frontend::SourceRun) {
+    pub(super) fn source_run(
+        &mut self,
+        suite: &'p [ast::Stmt],
+        run: &'p crate::frontend::SourceRun,
+    ) {
         let Some(effect) = &run.effect else {
             self.source_statements(&suite[run.statements.clone()]);
             return;
@@ -152,6 +156,7 @@ impl<'p> Function<'_, 'p> {
             return;
         }
         match effect {
+            SourceEffect::For(region) => self.prepared_for(region),
             SourceEffect::While(condition) => {
                 let source = suite[run.statements.start]
                     .as_while_stmt()
@@ -181,7 +186,7 @@ impl<'p> Function<'_, 'p> {
                         }
                         SourceGuard::Residual => code.branch_expr(&source.test, yes, no),
                     },
-                    |code, edges| {
+                    |code, edges, ()| {
                         let depth = code.exits.len();
                         code.loops.push(LoopTarget {
                             step: (edges.step.clone(), depth),
@@ -215,7 +220,11 @@ impl<'p> Function<'_, 'p> {
     }
 
     /// Supply only the source operands requested by the registered matcher.
-    fn emit_match_inputs(&mut self, site: &crate::frontend::SourceMatch, source: &'p ast::StmtMatch) {
+    fn emit_match_inputs(
+        &mut self,
+        site: &'p crate::frontend::SourceMatch,
+        source: &'p ast::StmtMatch,
+    ) {
         use crate::llvm::registered::patterns::{MatchRegion, MatchSubject};
 
         let mark = self.temporary_mark();
@@ -449,31 +458,6 @@ impl<'p> Function<'_, 'p> {
                 ast::Stmt::FunctionDef(v) => {
                     let function = self.function_definition(v);
                     self.bind(v.name.as_str(), &function);
-                }
-                ast::Stmt::For(v) => {
-                    let iter = self.iteration_result(|code| {
-                        let value = code.expr(&v.iter);
-                        if code.native_suspension {
-                            code.call_position(v.iter.range());
-                        }
-                        let operation = if v.is_async {
-                            IteratorOp::Async(v.iter.range())
-                        } else {
-                            IteratorOp::Loop
-                        };
-                        code.op(operation.runtime_op(), &[&value])
-                    });
-                    self.loop_body(&v.body, &v.orelse, &iter, |f, yes, no| {
-                        f.frame.retained_loop_header(v.start());
-                        f.enter_iteration(
-                            &iter,
-                            &v.target,
-                            v.is_async.then(|| v.iter.range()),
-                            !v.orelse.is_empty(),
-                            yes,
-                            no,
-                        );
-                    });
                 }
                 ast::Stmt::Break(_) | ast::Stmt::Continue(_) => {
                     if let Some(target) = self.loops.last() {
@@ -1207,41 +1191,6 @@ impl<'p> Function<'_, 'p> {
         }
     }
 
-    /// Enter the loop body with its target bound, or branch to the exhaustion successor.
-    pub(super) fn enter_iteration(
-        &mut self,
-        iter: &str,
-        target: &ast::Expr,
-        async_range: Option<ruff_text_size::TextRange>,
-        has_else: bool,
-        body: &str,
-        exhausted: &str,
-    ) {
-        let item = if let Some(range) = async_range {
-            let item = self.frame.async_pull(
-                iter,
-                crate::ir::AsyncPull {
-                    range,
-                    header: None,
-                },
-                body,
-                exhausted,
-            );
-            self.label(body);
-            item
-        } else {
-            let pair = Self::pair_target(target);
-            self.frame
-                .enter_sync_iteration(iter, has_else, pair.is_some(), body, exhausted);
-            if let Some([left, right]) = pair {
-                self.assign_pair_slots(left, right);
-                return;
-            }
-            self.op("next", &[iter])
-        };
-        self.assign(target, &item);
-    }
-
     fn pair_target(target: &ast::Expr) -> Option<[&ast::Expr; 2]> {
         let elements = match target {
             ast::Expr::Tuple(t) => &t.elts,
@@ -1263,46 +1212,88 @@ impl<'p> Function<'_, 'p> {
         self.assign(right, &second);
     }
 
-    fn loop_body(
-        &mut self,
-        body: &'p [ast::Stmt],
-        otherwise: &'p [ast::Stmt],
-        cursor: &str,
-        enter_body: impl FnOnce(&mut Self, &str, &str),
-    ) {
-        let step = self.name("b");
-        let body_label = self.name("b");
-        let exhausted = self.name("b");
-        let done = self.name("b");
-        let done_depth = self.exits.len();
-        // Continue retains the cursor. Every transfer out of the loop releases its owner.
-        self.live.push(cursor.to_owned());
+    fn prepared_for(&mut self, region: &'p crate::frontend::PreparedFor) {
+        use crate::frontend::LoopBinding;
+
+        self.checkpoint(&region.range);
+        self.simple_call = None;
+        let cursor = self.iteration_result(|code| {
+            let value = match &region.iterable {
+                PhysicalOperand::Checked(input) => {
+                    code.prepare_checked_value(&input.value);
+                    code.frame.prepared_operand(input, &code.sites, false)
+                }
+                PhysicalOperand::Source(input) => code.expr(input),
+            };
+            if code.native_suspension {
+                code.call_position(region.iterable_range);
+            }
+            code.op(region.acquire.runtime_op(), &[&value])
+        });
+
+        let enclosing = self.exits.len();
+        self.live.push(cursor.clone());
         self.exits.push((
             Cleanup::RetainedValue {
-                value: cursor.to_owned(),
+                value: cursor.clone(),
                 enclosing_exception: None,
             },
             self.body.error_target.clone(),
         ));
-        let cursor_unwind = self.begin_operand_scope();
-        self.jump(&step);
-        self.label(&step);
-        enter_body(self, &body_label, &exhausted);
-        self.loops.push(LoopTarget {
-            step: (step.clone(), self.exits.len()),
-            done: (done.clone(), done_depth),
+        let unwind = self.begin_operand_scope();
+
+        crate::llvm::operations::loop_region(
+            self,
+            |code| {
+                code.flush_check();
+                &mut code.frame.body
+            },
+            |code| code.name("b"),
+            |code, edges| code.jump(&edges.step),
+            |code, item, exhausted| {
+                code.frame.iteration_edge(
+                    &cursor,
+                    region.pull,
+                    region.range.start(),
+                    region.otherwise.is_some(),
+                    item,
+                    exhausted,
+                )
+            },
+            |code, edges, pulled| {
+                let item = code.frame.iteration_item(&cursor, pulled);
+                match &region.target {
+                    LoopBinding::Checked { entered, binding } => {
+                        code.prepare_checked_sites(&binding.function.body);
+                        code.frame
+                            .checked_binding(binding, *entered, &item, &code.sites);
+                    }
+                    LoopBinding::Source(target) => code.assign(target, &item),
+                }
+                code.loops.push(LoopTarget {
+                    step: (edges.step.clone(), code.exits.len()),
+                    done: (edges.done.clone(), enclosing),
+                });
+                code.loop_suite(&region.body);
+                code.loops.pop();
+            },
+            // Even a loop without an else must release the cursor on exhaustion.
+            Some(|code: &mut Self| {
+                code.exits.pop();
+                code.live.pop();
+                code.finish_unwind(unwind, |frame| frame.release_target(None));
+                code.release_target(None);
+                if let Some(otherwise) = &region.otherwise {
+                    code.loop_suite(otherwise);
+                }
+            }),
+        );
+    }
+
+    fn loop_suite(&mut self, suite: &'p crate::frontend::LoopSuite) {
+        self.checked_runs(&suite.plan, |code, run| {
+            code.source_run(&suite.sources, run);
         });
-        self.statements(body);
-        self.loops.pop();
-        self.jump(&step);
-        self.label(&exhausted);
-        self.exits.pop();
-        self.live.pop();
-        self.finish_unwind(cursor_unwind, |frame| frame.release_target(None));
-        self.release_target(None);
-        self.statements(otherwise);
-        self.jump(&done);
-        self.label(&done);
     }
 
     fn protected_suite(&mut self, stmt: &'p ast::StmtTry) {
