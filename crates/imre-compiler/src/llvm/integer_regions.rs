@@ -357,6 +357,7 @@ impl Emitter<'_, '_> {
                 .map(|&index| &arguments[index].value)
                 .collect::<Vec<_>>(),
             false,
+            args.site.fixed(),
         );
         let slow_value = self.compare(operation, &left, &right.value);
         self.release(&left);

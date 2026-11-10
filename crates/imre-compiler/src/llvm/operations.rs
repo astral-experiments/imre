@@ -202,7 +202,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         args: &crate::ir::CallArgs,
         returns: Type,
     ) -> CheckedValue {
-        let Some(site) = &args.python_site else {
+        let Some(site) = args.site.python() else {
             let native = self.fixed();
             let (target, values) = args.capture_invoke(callable, |expr| native.operand(expr));
             let target = super::callables::NativeCallTarget::Callable(target);

@@ -345,9 +345,13 @@ impl Emitter<'_, '_> {
             .map(|&index| &values[index].value)
             .collect();
         let result = match &target {
-            NativeCallTarget::Function(id) => {
-                self.user_call(*id, returns, &inputs, args.exhaustive_enum_match)
-            }
+            NativeCallTarget::Function(id) => self.user_call(
+                *id,
+                returns,
+                &inputs,
+                args.exhaustive_enum_match,
+                args.site.fixed(),
+            ),
             NativeCallTarget::Callable(callable) => {
                 let targets = self.callable_targets.get(callable.value.ty).to_vec();
                 let entry = if let [target] = targets.as_slice() {
@@ -364,7 +368,17 @@ impl Emitter<'_, '_> {
                     || targets
                         .iter()
                         .any(|target| self.effects.may_raise(target.function));
-                self.call_with_effect(&entry, Some(&context), returns, &inputs, may_raise, false)
+                self.call_with_effect(
+                    &entry,
+                    Some(&context),
+                    returns,
+                    &inputs,
+                    may_raise,
+                    super::CallSite {
+                        origin: args.site.fixed(),
+                        inline: false,
+                    },
+                )
             }
         };
         for value in &values {

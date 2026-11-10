@@ -636,6 +636,7 @@ impl Checker<'_> {
             self.helpers,
             self.globals,
         );
+        helper.frame = LexicalFrame::Positioned(self.fixed_frame());
         helper.omitted_assert_locals = omitted_locals;
         helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;

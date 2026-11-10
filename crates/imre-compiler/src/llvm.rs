@@ -1,6 +1,6 @@
 //! Ownership lowering and textual LLVM emission, with no C or interpreter layer.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write;
 
 use crate::borrows::{self, FunctionBorrows};
@@ -543,6 +543,7 @@ fn emit_program(
         uses_byte_output_windows: false,
         byte_output_owners: Vec::new(),
         strings: Vec::new(),
+        frame_strings: HashMap::new(),
         string_literals: BTreeMap::new(),
         uses_string_interning: false,
         uses_sequence_layout: false,
@@ -811,6 +812,12 @@ fn write_function_bodies(
     output.entry_buffer().push_str(&main);
 }
 
+#[derive(Default)]
+struct CallSite<'a> {
+    origin: Option<&'a ir::FixedOrigin>,
+    inline: bool,
+}
+
 struct Emitter<'a, 'module> {
     module: &'a Module,
     output: &'a mut Output,
@@ -825,6 +832,7 @@ struct Emitter<'a, 'module> {
     uses_byte_output_windows: bool,
     byte_output_owners: Vec<Option<usize>>,
     strings: Vec<Vec<u8>>,
+    frame_strings: HashMap<usize, HashMap<String, String>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
     uses_string_interning: bool,
     uses_sequence_layout: bool,
@@ -991,7 +999,7 @@ impl Emitter<'_, '_> {
             returns,
             args,
             runtime_call_may_raise(name),
-            false,
+            CallSite::default(),
         )
     }
 
@@ -1003,6 +1011,7 @@ impl Emitter<'_, '_> {
         returns: Type,
         args: &[&Value],
         enum_match: bool,
+        origin: Option<&ir::FixedOrigin>,
     ) -> Value {
         let name = self.output.function_ref(function);
         self.call_with_effect(
@@ -1011,7 +1020,10 @@ impl Emitter<'_, '_> {
             returns,
             args,
             self.effects.may_raise(function),
-            enum_match && self.inline_dispatch[function],
+            CallSite {
+                origin,
+                inline: enum_match && self.inline_dispatch[function],
+            },
         )
     }
 
@@ -1043,7 +1055,7 @@ impl Emitter<'_, '_> {
         returns: Type,
         args: &[&Value],
         may_raise: bool,
-        inline: bool,
+        site: CallSite<'_>,
     ) -> Value {
         let args = context
             .into_iter()
@@ -1054,13 +1066,12 @@ impl Emitter<'_, '_> {
             )
             .collect::<Vec<_>>()
             .join(", ");
-        let attribute = if inline { " alwaysinline" } else { "" };
+        let attribute = if site.inline { " alwaysinline" } else { "" };
         let instruction = format!("call {} {target}({args}){attribute}", returns.llvm());
-        let operand = if may_raise {
-            self.checked_instruction(instruction)
-        } else {
-            self.instruction(instruction)
-        };
+        let operand = self.instruction(instruction);
+        if may_raise {
+            self.check_error_at(site.origin);
+        }
         let value = Value {
             ty: returns,
             operand,
@@ -1170,9 +1181,13 @@ impl Emitter<'_, '_> {
     /// Other fallible calls, including nullable/scalar generic getters, retain
     /// the pending-flag ABI because zero can also be a valid successful result.
     fn check_error(&mut self) {
+        self.check_error_at(None);
+    }
+
+    fn check_error_at(&mut self, origin: Option<&ir::FixedOrigin>) {
         let pending = self.instruction("call i32 @imre_error_pending()");
         let pending = self.instruction(format!("icmp ne i32 {pending}, 0"));
-        self.check_failed(&pending);
+        self.check_failed_at(&pending, origin);
     }
 
     /// SIGINT can arrive during optimized native loops. The ordinary path
@@ -1195,10 +1210,18 @@ impl Emitter<'_, '_> {
     /// restores those SSA owners before inspecting a result or out-parameter.
     /// Branch weights guide layout/inlining without assuming errors impossible.
     fn check_failed(&mut self, failed: &str) {
+        self.check_failed_at(failed, None);
+    }
+
+    fn check_failed_at(&mut self, failed: &str, origin: Option<&ir::FixedOrigin>) {
         let (error, success) = (self.label(), self.label());
         self.body.conditional(failed, &error, &success, Some(false));
         let temporaries = self.temporaries.clone();
         self.start(&error);
+        if let Some(origin) = origin {
+            let attach = self.exception_frame("null", origin);
+            self.line(attach);
+        }
         for value in temporaries.iter().rev() {
             self.release(value);
         }
@@ -3169,6 +3192,36 @@ impl Emitter<'_, '_> {
         self.output.string_name(id, "str")
     }
 
+    /// Source strings are immutable raw bytes in the same LLVM unit as their call.
+    fn frame_string(&mut self, value: &str) -> String {
+        let unit = self.output.current;
+        if let Some(name) = self
+            .frame_strings
+            .get(&unit)
+            .and_then(|strings| strings.get(value))
+        {
+            return name.clone();
+        }
+        let name = self.byte_array(value.as_bytes().to_vec());
+        self.frame_strings
+            .entry(unit)
+            .or_default()
+            .insert(value.to_owned(), name.clone());
+        name
+    }
+
+    fn exception_frame(&mut self, exception: &str, origin: &ir::FixedOrigin) -> String {
+        let file = self.frame_string(&origin.frame.filename);
+        let name = self.frame_string(&origin.frame.function);
+        let [start, split, end] = origin.span.unwrap_or_default();
+        format!(
+            "call ptr @imre_exception_at_frame(ptr {exception}, ptr @{file}, i64 {}, ptr @{name}, i64 {}, i32 {}, i32 {start}, i32 {split}, i32 {end})",
+            origin.frame.filename.len(),
+            origin.frame.function.len(),
+            origin.line,
+        )
+    }
+
     /// Produces an owned result; its consumer must transfer or release that ownership.
     fn expr(&mut self, expression: &Expr) -> Value {
         let mut value = if self.can_borrow_projection(expression) {
@@ -3273,6 +3326,7 @@ impl Emitter<'_, '_> {
                         expression.ty,
                         &[&snapshot],
                         args.exhaustive_enum_match,
+                        args.site.fixed(),
                     );
                 }
                 let values = self.call_operands(args);
@@ -3298,7 +3352,7 @@ impl Emitter<'_, '_> {
                         self.retain(input);
                     }
                 }
-                self.user_call(*initializer, Type::None, &inputs, false);
+                self.user_call(*initializer, Type::None, &inputs, false, None);
                 if values
                     .iter()
                     .any(|arg| self.resource_types.contains(&arg.value.ty))
@@ -6318,7 +6372,7 @@ impl Emitter<'_, '_> {
                     Type::Int,
                     &[&args[0].value, &args[1].value, &args[2].value],
                     true,
-                    false,
+                    CallSite::default(),
                 )
             }
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
@@ -7591,14 +7645,14 @@ impl Emitter<'_, '_> {
                 ));
                 self.unpack_word(word, returns)
             }
-            Builtin::ExceptionOrigin(line) => Value {
-                ty: Type::Exception,
-                operand: self.instruction(format!(
-                    "call ptr @imre_exception_with_origin(ptr {}, ptr {}, i64 {line})",
-                    args[0].value.operand, args[1].value.operand
-                )),
-                small_integer: false,
-            },
+            Builtin::ExceptionOrigin(origin) => {
+                let attach = self.exception_frame(&args[0].value.operand, origin);
+                Value {
+                    ty: Type::Exception,
+                    operand: self.instruction(attach),
+                    small_integer: false,
+                }
+            }
             Builtin::ExceptionWithCause => {
                 let cause =
                     self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
@@ -7728,7 +7782,7 @@ impl Emitter<'_, '_> {
                     Type::Int,
                     &[&args[0].value, &args[1].value],
                     true,
-                    false,
+                    CallSite::default(),
                 )
             }
             Builtin::Sumprod => {
@@ -11024,7 +11078,7 @@ declare ptr @imre_exception_repr(ptr)
 declare ptr @imre_named_exception_record(ptr)
 declare ptr @imre_named_exception_record_new(ptr, ptr, ptr, ptr, ptr, i32)
 declare ptr @imre_exception_with_cause(ptr, ptr)
-declare ptr @imre_exception_with_origin(ptr, ptr, i64)
+declare ptr @imre_exception_at_frame(ptr, ptr, i64, ptr, i64, i32, i32, i32, i32)
 declare ptr @imre_exception_cause(ptr)
 declare i32 @imre_exception_suppress_context(ptr)
 declare ptr @imre_exception_current()

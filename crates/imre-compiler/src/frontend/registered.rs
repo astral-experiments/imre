@@ -4294,7 +4294,7 @@ mod tests {
             }
             ExprKind::Binary(Binary::Add, ..) => checked_adds += 1,
             ExprKind::Invoke { ref args, .. } => {
-                let site = args.python_site.as_ref().unwrap();
+                let site = args.site.python().unwrap();
                 let source = &graph.modules[graph.entry].source;
                 assert_eq!(&source[site.range], "sink(answer)");
                 let name = site.suspended_name.unwrap();
@@ -4327,7 +4327,7 @@ mod tests {
         let mut calls = Vec::new();
         ir::walk_expressions(&checked.function.body, &mut |expr| match &expr.kind {
             ExprKind::Invoke { callable, args } => {
-                let site = args.python_site.as_ref().unwrap();
+                let site = args.site.python().unwrap();
                 let ExprKind::Builtin(Builtin::RegisteredLocation(range, _), callee) =
                     &callable.kind
                 else {
@@ -5227,7 +5227,7 @@ mod tests {
         ir::walk_expressions(&checked.function.body, &mut |expr| match &expr.kind {
             ExprKind::Builtin(Builtin::RegisteredNamespace(_), _) => namespaces += 1,
             ExprKind::Invoke { args, .. }
-                if let Some(site) = &args.python_site
+                if let Some(site) = args.site.python()
                     && let Some(scope) = &site.scope =>
             {
                 let ExprKind::Local(namespace) = scope.kind else {

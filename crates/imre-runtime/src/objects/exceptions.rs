@@ -83,11 +83,22 @@ pub(super) struct Exception {
 struct ExceptionDetails {
     cause: Option<crate::ObjectOwner>,
     display_context: Option<(crate::ObjectOwner, bool)>,
-    origins: Vec<(StrOwner, u64)>,
+    origins: Vec<RaiseOrigin>,
     named: Option<&'static NamedDescriptor>,
     layout: Option<Rc<NamedPayload>>,
     directories: Option<Rc<DirectoryFrame>>,
     args: Option<arguments::Cached>,
+}
+
+#[derive(Clone)]
+pub(crate) enum RaiseOrigin {
+    Line(StrOwner, u64),
+    Frame {
+        file: &'static str,
+        name: &'static str,
+        line: u32,
+        span: Option<[u32; 3]>,
+    },
 }
 
 type Formatter = unsafe extern "C" fn(*const usize) -> *const Str;
@@ -281,6 +292,14 @@ impl Exception {
         self.try_details_mut().unwrap_or_else(|_| {
             std::alloc::handle_alloc_error(std::alloc::Layout::new::<ExceptionDetails>())
         })
+    }
+
+    fn push_origin(&mut self, origin: RaiseOrigin) {
+        if let Ok(details) = self.try_details_mut()
+            && details.origins.try_reserve(1).is_ok()
+        {
+            details.origins.push(origin);
+        }
     }
 
     fn cause(&self) -> Option<&crate::ObjectOwner> {
@@ -2401,16 +2420,80 @@ pub unsafe extern "C" fn imre_exception_with_origin(
             let Storage::Exception(exception) = storage else {
                 fail("SystemError", "expected an exception object");
             };
-            let Ok(details) = exception.try_details_mut() else {
-                return;
-            };
-            let origins = &mut details.origins;
-            if origins.try_reserve(1).is_ok() {
-                crate::imre_str_retain(filename);
-                origins.push((StrOwner::from_raw(filename), line));
-            }
+            crate::imre_str_retain(filename);
+            exception.push_origin(RaiseOrigin::Line(StrOwner::from_raw(filename), line));
         });
         imre_exception_retain(value);
+    }
+    value
+}
+
+/// Append a checked operation to the exception that failed. A null value selects the
+/// pending exception as a fixed call unwinds. An explicit raise returns the same owner
+/// as `imre_exception_with_origin`.
+///
+/// # Safety
+/// A non-null value borrows a live exception. File and name are process-lifetime UTF-8
+/// constants with the supplied lengths. The columns are UTF-8 byte offsets on `line`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_exception_at_frame(
+    value: *const Object,
+    file: *const u8,
+    file_len: usize,
+    name: *const u8,
+    name_len: usize,
+    line: u32,
+    start: u32,
+    split: u32,
+    end: u32,
+) -> *const Object {
+    // SAFETY: both slices borrow immutable strings embedded in the native program.
+    let (file, name) = unsafe {
+        (
+            std::str::from_utf8_unchecked(std::slice::from_raw_parts(file, file_len)),
+            std::str::from_utf8_unchecked(std::slice::from_raw_parts(name, name_len)),
+        )
+    };
+    let record = |value: &Object| {
+        // SAFETY: the exception stays rooted and no Python code runs while appending a site.
+        unsafe {
+            value.0.with_mut(|storage| {
+                let Storage::Exception(exception) = storage else {
+                    unreachable!("checked exception");
+                };
+                if exception.kind == Kind::MemoryError {
+                    // Reusable emergency exceptions cannot retain a previous call's frames.
+                    let reserved = |slot: &RefCell<crate::ObjectOwner>| {
+                        std::ptr::eq(crate::ObjectOwner::as_ptr(&slot.borrow()), value)
+                    };
+                    if SEQUENCE_ALLOCATION_ERROR.with(reserved)
+                        || RECORD_ALLOCATION_ERROR.with(reserved)
+                        || MEMORY_ERRORS.with(|slots| slots.iter().any(reserved))
+                    {
+                        return;
+                    }
+                }
+                exception.push_origin(RaiseOrigin::Frame {
+                    file,
+                    name,
+                    line,
+                    span: (end > start).then_some([start, split, end]),
+                });
+            })
+        }
+    };
+    if value.is_null() {
+        PENDING.with_borrow(|slot| {
+            if let Some(pending) = slot {
+                record(pending);
+            }
+        });
+    } else {
+        // SAFETY: the explicit raise borrows a live exception and returns an additional owner.
+        unsafe {
+            record(object(value));
+            imre_exception_retain(value);
+        }
     }
     value
 }

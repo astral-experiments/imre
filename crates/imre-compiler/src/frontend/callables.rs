@@ -460,6 +460,7 @@ impl Checker<'_> {
         // Keep the binder's layout failure while checking the lambda body for
         // independent source errors, just as for any other checked region.
         *helper.unrepresented.get_mut() = unavailable;
+        helper.frame = LexicalFrame::Named(ast::name::Name::new_static("<lambda>"));
         helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
         helper.local_iter = bound.contains("iter");
@@ -796,7 +797,7 @@ mod tests {
                 assert!(expr.is_registered_invoke());
                 assert!(matches!(callable.ty, Type::Callable(_)));
                 assert_eq!(args.values[0].ty, Type::Int);
-                let range = args.python_site.as_ref().unwrap().range;
+                let range = args.site.python().unwrap().range;
                 assert_eq!(&source[range], "sink(n + 1)");
                 invokes += 1;
             }

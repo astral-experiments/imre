@@ -103,7 +103,7 @@ impl Checker<'_> {
                 ir::CallArgs {
                     values: vec![value, receiver],
                     order: vec![1, 0],
-                    python_site: None,
+                    site: ir::CallSite::None,
                     exhaustive_enum_match: false,
                 },
             ),

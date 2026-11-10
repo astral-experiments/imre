@@ -388,7 +388,7 @@ fn positional_invoke(
         kind: ExprKind::Invoke {
             callable: Box::new(target),
             args: ir::CallArgs {
-                python_site: Some(ir::InvokeSite {
+                site: ir::CallSite::Python(ir::InvokeSite {
                     range,
                     callee_end,
                     suspended_name,
@@ -1027,7 +1027,7 @@ pub(super) fn in_namespace(value: &mut Expr, namespace: Expr) {
         ExprKind::Invoke {
             args:
                 ir::CallArgs {
-                    python_site: Some(site),
+                    site: ir::CallSite::Python(site),
                     ..
                 },
             ..
