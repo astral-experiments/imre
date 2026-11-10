@@ -939,6 +939,36 @@ impl RegisteredFrame<'_, '_> {
         result
     }
 
+    pub(crate) fn retained_loop_header(&mut self, header: TextSize) {
+        if self.native_suspension && !self.iteration.in_expression {
+            // A retained frame exposes the statement header on each pull, including exhaustion.
+            self.set_statement_line(self.positions.line(header));
+        }
+    }
+
+    /// Enter the item block, or transfer to the exhaustion edge before binding a target.
+    /// A fused two-target pull leaves both items in the frame's scratch slots.
+    pub(crate) fn enter_sync_iteration(
+        &mut self,
+        cursor: &str,
+        has_else: bool,
+        unpack_pair: bool,
+        item: &str,
+        exhausted: &str,
+    ) {
+        let more = if unpack_pair {
+            self.max_live = self.max_live.max(2);
+            self.checked(&format!(
+                "call i64 @imre_dyn_next_pair(ptr %ctx, i64 {cursor}, ptr %live, i1 {has_else})"
+            ))
+        } else {
+            self.op(if has_else { "more_else" } else { "more" }, &[cursor])
+        };
+        let ready = self.value(&format!("icmp eq i64 {more}, {}", permanent::TRUE));
+        self.branch(&ready, item, exhausted);
+        self.label(item);
+    }
+
     /// Only the implicit __anext__ call and its await can exhaust an async for.
     pub(crate) fn async_pull(
         &mut self,

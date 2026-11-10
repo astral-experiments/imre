@@ -1176,6 +1176,56 @@ mod tests {
     use super::*;
 
     #[test]
+    fn physical_coroutine_emits_sync_for_without_its_source() {
+        let mut module = PreparedBody::module(
+            "async_groups",
+            Path::new("async_groups.py"),
+            include_str!("../../../../tests/fixtures/processes/async_groups.py"),
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let definition = module
+            .body
+            .iter()
+            .position(|stmt| {
+                stmt.as_function_def_stmt()
+                    .is_some_and(|def| def.name.as_str() == "main")
+            })
+            .unwrap();
+        let main = module.body[definition].as_function_def_stmt().unwrap();
+        assert!(!module.source.function_bodies.contains_key(&main.start()));
+        let suite = &module.source.nested_bodies[&main.body[0].start()];
+        let index = main
+            .body
+            .iter()
+            .position(|stmt| {
+                stmt.as_for_stmt()
+                    .and_then(|loop_| loop_.target.as_name_expr())
+                    .is_some_and(|name| name.id.as_str() == "entry")
+            })
+            .unwrap();
+        let residual = |i| suite.residual.iter().any(|run| run.statements.contains(&i));
+        assert!(!residual(index), "for entry in entries still uses source");
+        let last = main.body.last().unwrap().as_try_stmt().unwrap();
+        assert!(last.body[0].as_with_stmt().unwrap().is_async);
+        assert!(residual(main.body.len() - 1));
+
+        let before = module.standalone().unwrap().unwrap();
+        // Keep the indices of physical siblings while withdrawing the entire loop.
+        let slot = &mut module.body[definition]
+            .as_function_def_stmt_mut()
+            .unwrap()
+            .body[index];
+        *slot = ast::StmtPass {
+            node_index: Default::default(),
+            range: slot.range(),
+        }
+        .into();
+        assert!(module.standalone().unwrap().unwrap() == before);
+    }
+
+    #[test]
     fn bundled_generic_method_uses_the_prepared_class_suite() {
         let source = include_str!("../../stdlib/typing.py");
         let module = PreparedBody::module(

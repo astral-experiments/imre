@@ -384,11 +384,7 @@ impl<'p> Function<'_, 'p> {
                 ast::Stmt::For(v) => {
                     let iter = self.iteration_cursor(&v.iter, v.is_async);
                     self.loop_body(&v.body, &v.orelse, Some(&iter), |f, yes, no| {
-                        if f.native_suspension {
-                            // A retained frame exposes the header after its final pull.
-                            f.frame
-                                .set_statement_line(f.source.positions.line(v.start()));
-                        }
+                        f.frame.retained_loop_header(v.start());
                         f.enter_iteration(
                             &iter,
                             &v.target,
@@ -1138,7 +1134,7 @@ impl<'p> Function<'_, 'p> {
         body: &str,
         exhausted: &str,
     ) {
-        if let Some(range) = async_range {
+        let item = if let Some(range) = async_range {
             let item = self.frame.async_pull(
                 iter,
                 crate::ir::AsyncPull {
@@ -1149,26 +1145,18 @@ impl<'p> Function<'_, 'p> {
                 exhausted,
             );
             self.label(body);
-            self.assign(target, &item);
-            return;
-        }
-        let more = if Self::pair_target(target).is_some() {
-            self.max_live = self.max_live.max(2);
-            self.checked(&format!(
-                "call i64 @imre_dyn_next_pair(ptr %ctx, i64 {iter}, ptr %live, i1 {has_else})"
-            ))
+            item
         } else {
-            self.op(if has_else { "more_else" } else { "more" }, &[iter])
+            let pair = Self::pair_target(target);
+            self.frame
+                .enter_sync_iteration(iter, has_else, pair.is_some(), body, exhausted);
+            if let Some([left, right]) = pair {
+                self.assign_pair_slots(left, right);
+                return;
+            }
+            self.op("next", &[iter])
         };
-        let ready = self.value(&format!("icmp eq i64 {more}, 2"));
-        self.branch(&ready, body, exhausted);
-        self.label(body);
-        if let Some([left, right]) = Self::pair_target(target) {
-            self.assign_pair_slots(left, right);
-        } else {
-            let item = self.op("next", &[iter]);
-            self.assign(target, &item);
-        }
+        self.assign(target, &item);
     }
 
     fn pair_target(target: &ast::Expr) -> Option<[&ast::Expr; 2]> {

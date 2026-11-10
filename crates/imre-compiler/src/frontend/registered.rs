@@ -1233,15 +1233,10 @@ impl statements::StatementLowering for SourceScope<'_> {
             header: Some(loop_.start()),
         });
         let input = self.iteration_input(&loop_.iter, pull).ok_or(())?;
-        let binding = unpacking::bind_targets(
-            self,
-            &loop_.target,
-            Expr::local(input.value, Type::PythonObject),
-            None,
-        )?;
-        let body = self.in_loop(LoopScope::WithCursor, |scope| scope.suite(&loop_.body))?;
-        let otherwise = self.suite(&loop_.orelse)?;
-        Ok((input.for_suite(binding, body, otherwise, Vec::new()), true))
+        let body = self.iteration_suite(&loop_.target, input, &loop_.orelse, |scope| {
+            scope.suite(&loop_.body)
+        })?;
+        Ok((body, true))
     }
 
     fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<statements::Block, ()> {
@@ -1564,31 +1559,42 @@ impl SourceScope<'_> {
         {
             return self.statement(stmt, body);
         }
-        if !matches!(self.kind, RegisteredScope::Function { .. }) || !stmt.is_if_stmt() {
+        let sync_for = matches!(stmt, ast::Stmt::For(loop_) if !loop_.is_async);
+        if !matches!(self.kind, RegisteredScope::Function { .. })
+            || !(stmt.is_if_stmt() || sync_for)
+        {
             return Err(());
         }
 
         let begin = body.len();
         let continues = self.statement(stmt, body)?;
-        // The enclosing physical activation owns suspension and transfers out of this suite.
+        // The physical activation owns suspension and transfers out of this suite.
+        // A complete for handles its own break, continue and exhaustion edges.
         let mut falls_through = true;
-        ir::walk_nodes(&body[begin..], &mut |node, _| {
-            if matches!(
-                node,
-                ir::Node::Statement(
-                    Statement::Break
-                        | Statement::Continue
-                        | Statement::Exhaust
-                        | Statement::IterNext { kind: ir::IterNextKind::Async(_), .. }
-                        | Statement::Return(_)
-                        | Statement::Raise(_)
-                ) | ir::Node::Expression(Expr {
-                    kind: ExprKind::Builtin(Builtin::RegisteredSuspend(..), _),
-                    ..
-                })
-            ) {
+        ir::walk_nodes(&body[begin..], &mut |node, _| match node {
+            // The public named-definition operation still places its physical header.
+            ir::Node::Expression(Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredDefinition(_), _),
+                ..
+            }) if sync_for => falls_through = false,
+            ir::Node::Statement(Statement::Break | Statement::Continue | Statement::Exhaust)
+                if !sync_for =>
+            {
                 falls_through = false;
             }
+            ir::Node::Statement(
+                Statement::IterNext {
+                    kind: ir::IterNextKind::Async(_),
+                    ..
+                }
+                | Statement::Return(_)
+                | Statement::Raise(_),
+            )
+            | ir::Node::Expression(Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredSuspend(..), _),
+                ..
+            }) => falls_through = false,
+            _ => {}
         });
         if !falls_through {
             body.truncate(begin);
@@ -1738,6 +1744,23 @@ impl SourceScope<'_> {
         } else {
             Statement::Assign(slot, value)
         }
+    }
+
+    fn iteration_suite(
+        &mut self,
+        target: &ast::Expr,
+        input: pipelines::Prepared,
+        otherwise: &[ast::Stmt],
+        body: impl FnOnce(&mut Self) -> StdResult<Vec<Statement>, ()>,
+    ) -> StdResult<Vec<Statement>, ()> {
+        let binding = unpacking::bind_targets(
+            self,
+            target,
+            Expr::local(input.value, Type::PythonObject),
+            None,
+        )?;
+        let body = self.in_loop(LoopScope::WithCursor, body)?;
+        Ok(input.for_suite(binding, body, self.suite(otherwise)?, Vec::new()))
     }
 
     fn iteration_input(
