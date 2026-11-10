@@ -3279,6 +3279,62 @@ mod tests {
     }
 
     #[test]
+    fn a_physical_generic_owns_its_checked_match_after_source_erasure() {
+        let source = concat!(
+            "def choose[T: int](value):\n",
+            "    match subject(value):\n",
+            "        case 17 as captured if allow(captured): record(captured)\n",
+            "        case other: record(other)\n",
+        );
+        let mut prepared = PreparedBody::module_with_syntax(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let definition = prepared.syntax.as_ref().unwrap()[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let start = definition.start();
+        let function = &prepared.source.function_bodies[&start];
+        assert!(!function.fully_checked());
+        let suite = function.suite().unwrap();
+        assert!(suite.fully_checked());
+        crate::verify::registered(suite.checked.region()).unwrap();
+
+        let original = prepared.standalone().unwrap();
+        prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap()
+            .body
+            .clear();
+        assert_eq!(prepared.standalone().unwrap(), original);
+
+        let suite = test_function_suite(&mut prepared.source, start);
+        let cases = suite
+            .checked
+            .function
+            .body
+            .iter_mut()
+            .find_map(|statement| {
+                if let crate::ir::Statement::Match(_, cases) = statement {
+                    Some(cases)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        assert_eq!(cases[0].pattern.names, ["captured"]);
+        assert_eq!(cases[0].captures.len(), 1);
+        assert_eq!(cases[1].pattern.names, ["other"]);
+        assert!(!cases[0].body.is_empty() && !cases[1].body.is_empty());
+        assert!(cases[0].guard.take().is_some());
+        assert_ne!(prepared.standalone().unwrap(), original);
+    }
+
+    #[test]
     fn checked_and_physical_matches_own_their_suspended_subject() {
         for (body, physical) in [("return item", false), ("raise await failure(item)", true)] {
             let source = format!(
