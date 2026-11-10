@@ -1,5 +1,6 @@
 //! Registered context-manager protocol, roots and exceptional control flow.
 
+use super::frame::SourcePosition;
 use super::{Frame, RegisteredFrame};
 use crate::ir::{ContextSite, Expr, Statement};
 use ruff_text_size::TextRange;
@@ -21,15 +22,17 @@ impl RegisteredFrame<'_, '_> {
                 .push_str("declare void @imre_dyn_definition_position(ptr, ptr)\n");
             self.output.declarations.declared_definition_position = true;
         }
-        let position = range.map_or_else(
-            || "null".into(),
-            |range| {
-                let (line, start) = self.positions.line_and_column(range.start());
-                let (end_line, end) = self.positions.line_and_column(range.end());
-                self.expression_line = line;
-                self.output.position([line, end_line, start, end])
-            },
-        );
+        let position = if let Some(range) = range {
+            self.position = SourcePosition::Implicit(range);
+            self.position_constant(range)
+        } else {
+            if let SourcePosition::Implicit(previous) | SourcePosition::Expression(previous) =
+                self.position
+            {
+                self.position = SourcePosition::statement(self.positions.line(previous.start()));
+            }
+            "null".into()
+        };
         self.line(&format!(
             "call void @imre_dyn_definition_position(ptr %ctx, ptr {position})"
         ));

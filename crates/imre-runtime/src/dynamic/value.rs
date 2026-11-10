@@ -457,7 +457,11 @@ impl Context {
             .iter()
             .rev()
             .find(|frame| frame.object == Some(object))?;
-        frame.call_position
+        frame.call_position.or_else(|| {
+            let location = frame.location.as_ref()?;
+            let span = location.span?;
+            Some([location.line, span.end_line, span.start, span.end])
+        })
     }
 
     pub(super) fn active_frame(&mut self, depth: usize) -> Result<Option<(Location, Id)>> {
@@ -617,6 +621,15 @@ impl Context {
                     });
                 } else if let Some((_, span)) = position {
                     loc.span = Some(span);
+                } else if let Some(span) = &mut loc.span
+                    && span.anchor == TracebackAnchor::Hidden
+                    && let ExpressionPosition::Line(line) =
+                        self.heap.frames.last().unwrap().expression
+                    && line == loc.line
+                {
+                    // An eager expression shares the published range of a definition,
+                    // but its own failing instruction is highlighted in the traceback.
+                    span.anchor = TracebackAnchor::Uniform;
                 }
                 let active = self.heap.active_exception();
                 if error.context == NONE
@@ -6213,6 +6226,7 @@ impl Heap {
         let line = location.line;
         frame.location = Some(location);
         frame.expression = ExpressionPosition::Statement;
+        frame.call_position = None;
         frame.live.clear();
         frame.live.extend(live);
         self.set_statement_line(line);

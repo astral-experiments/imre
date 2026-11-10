@@ -606,7 +606,7 @@ impl Function<'_, '_> {
         if let Some(params) = params {
             for arg in params.iter_non_variadic_params() {
                 if let Some(default) = &arg.default {
-                    let value = self.expr(default);
+                    let value = self.with_source_range(default.range(), |code| code.expr(default));
                     operands.default(&mut self.frame, arg.parameter.name.as_str(), &value);
                 }
             }
