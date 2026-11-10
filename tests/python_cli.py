@@ -4776,6 +4776,7 @@ for name in ("md4", "ripemd160"):
             "boxed_sequence_order.py",
             "boxed_tuple_iter_descriptor.py",
             "boxed_tuple_index.py",
+            "boxed_tuple_slice_identity.py",
             "boxed_json_containers.py",
             "boxed_json_scanner.py",
             "boxed_json_decoder.py",
