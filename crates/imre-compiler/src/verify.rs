@@ -92,6 +92,25 @@ pub(crate) fn registered(
         }
         result = match node {
             ir::Node::Statement(Statement::Assign(slot, _)) => local(*slot),
+            ir::Node::Statement(Statement::IterNext {
+                kind: ir::IterNextKind::Async(_),
+                iterator,
+                key,
+                ready,
+                value,
+            }) => require(
+                value.is_none()
+                    && iterator != key
+                    && key != ready
+                    && iterator != ready
+                    && [iterator, key, ready]
+                        .iter()
+                        .all(|slot| private.contains(*slot))
+                    && frame.locals.get(*iterator) == Some(&Type::PythonObject)
+                    && frame.locals.get(*key) == Some(&Type::PythonObject)
+                    && frame.locals.get(*ready) == Some(&Type::Bool),
+                "async pull needs distinct private cursor, item and readiness slots",
+            ),
             ir::Node::Expression(value) => match &value.kind {
                 ExprKind::Local(slot) => local(*slot),
                 ExprKind::List(_) => require(
@@ -382,6 +401,9 @@ impl Verifier<'_> {
                     }
                     crate::ir::IterNextKind::CodePoint | crate::ir::IterNextKind::Utf8Byte => {
                         Some(Type::Int)
+                    }
+                    crate::ir::IterNextKind::Async(_) => {
+                        return Err("async cursor requires a registered frame".into());
                     }
                     crate::ir::IterNextKind::Generic => None,
                 };

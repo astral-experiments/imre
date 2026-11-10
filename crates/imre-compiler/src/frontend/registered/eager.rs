@@ -27,12 +27,12 @@ pub(crate) fn eager_operand(
 impl SourceScope<'_> {
     pub(super) fn eager_comprehension(&mut self, expression: &ast::Expr) -> Option<Expr> {
         let plan = Plan::from_expr(expression)?;
-        if plan.suspends() {
+        if plan.suspends() && !matches!(self.kind, RegisteredScope::Function { is_async: true }) {
             return None;
         }
 
         let first_private = self.locals.len();
-        let mut input = self.input(plan.outer).ok()?;
+        let mut input = self.input(&plan.clauses[0]).ok()?;
         let mut prefix = std::mem::take(&mut input.evaluate);
         prefix.append(&mut input.acquire);
         let namespace = self.hidden(Type::PythonObject);
@@ -107,14 +107,12 @@ impl EagerDisplay for SourceScope<'_> {
     type Destination = ();
     type Error = ();
 
-    fn input(&mut self, iter: &ast::Expr) -> StdResult<pipelines::Prepared, ()> {
-        let iterable = self.ordinary_operand(iter).ok_or(())?;
-        let iterator = operation(Builtin::RegisteredIter, Type::PythonObject, vec![iterable]);
-        Ok(pipelines::Prepared::cursor(
-            iterator,
-            Type::PythonObject,
-            |ty| self.hidden(ty),
-        ))
+    fn input(&mut self, clause: &ast::Comprehension) -> StdResult<pipelines::Prepared, ()> {
+        let pull = clause.is_async.then(|| ir::AsyncPull {
+            range: clause.target.range(),
+            header: None,
+        });
+        self.iteration_input(&clause.iter, pull).ok_or(())
     }
 
     fn with_target(

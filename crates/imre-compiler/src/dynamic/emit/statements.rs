@@ -1151,7 +1151,15 @@ impl Function<'_, '_> {
         exhausted: &str,
     ) {
         if let Some(range) = async_range {
-            let item = self.async_pull(iter, range, body, exhausted);
+            let item = self.frame.async_pull(
+                iter,
+                crate::ir::AsyncPull {
+                    range,
+                    header: None,
+                },
+                body,
+                exhausted,
+            );
             self.label(body);
             self.assign(target, &item);
             return;
@@ -1173,36 +1181,6 @@ impl Function<'_, '_> {
             let item = self.op("next", &[iter]);
             self.assign(target, &item);
         }
-    }
-
-    /// Only the implicit __anext__ call and its await can exhaust an async for.
-    fn async_pull(
-        &mut self,
-        iter: &str,
-        range: ruff_text_size::TextRange,
-        body: &str,
-        exhausted: &str,
-    ) -> String {
-        let handler = self.name("b");
-        let outer = std::mem::replace(&mut self.body.error_target, handler.clone());
-        let mark = self.temporary_mark();
-        let next = self.op("async_next_iter", &[iter]);
-        let item = self.suspend_at(&next, super::suspension::Suspension::Await, range, &mark);
-        self.flush_check();
-        self.body.error_target = outer;
-        self.jump(body);
-        self.label(&handler);
-        self.discard_truth(&mark);
-        let error = self.op("take_error", &[]);
-        let name = self.text("StopAsyncIteration");
-        let class = self.op("builtin", &[&name]);
-        let matches = self.op("matches", &[&error, &class]);
-        let stop = self.value(&format!("icmp eq i64 {matches}, 2"));
-        let propagate = self.name("b");
-        self.branch(&stop, exhausted, &propagate);
-        self.label(&propagate);
-        self.raise(&error, None, true);
-        item
     }
 
     fn pair_target(target: &ast::Expr) -> Option<[&ast::Expr; 2]> {

@@ -97,6 +97,8 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) expression_integer_start: Option<usize>,
     // A caught error abandons this expression's intermediates and preserves enclosing owners.
     integer_unwinds: BTreeMap<(usize, String), (usize, String)>,
+    /// Private roots whose lexical scope exits at an existing error landing block.
+    pub(super) scope_unwinds: BTreeMap<String, BTreeSet<usize>>,
     pub(crate) caught: Vec<String>,
     pub(crate) simple_call: Option<TextRange>,
     pub(super) position: SourcePosition,
@@ -143,6 +145,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             integer_owners: 0,
             expression_integer_start: None,
             integer_unwinds: BTreeMap::new(),
+            scope_unwinds: BTreeMap::new(),
             caught: Vec::new(),
             simple_call: None,
             position: SourcePosition::statement(0),
@@ -353,6 +356,11 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     pub(crate) fn label(&mut self, label: &str) {
         self.flush_check();
         self.body.start(label);
+        if let Some(slots) = self.scope_unwinds.remove(label) {
+            for slot in slots {
+                self.line(&format!("store i64 0, ptr %ir_slot{slot}"));
+            }
+        }
     }
 
     pub(crate) fn branch(&mut self, condition: &str, yes: &str, no: &str) {
@@ -905,6 +913,39 @@ impl RegisteredFrame<'_, '_> {
         result
     }
 
+    /// Only the implicit __anext__ call and its await can exhaust an async for.
+    pub(crate) fn async_pull(
+        &mut self,
+        iter: &str,
+        pull: ir::AsyncPull,
+        body: &str,
+        exhausted: &str,
+    ) -> String {
+        if let Some(header) = pull.header {
+            self.set_statement_line(self.positions.line(header));
+        }
+        let handler = self.name("b");
+        let outer = std::mem::replace(&mut self.body.error_target, handler.clone());
+        let mark = self.temporary_mark();
+        let next = self.op("async_next_iter", &[iter]);
+        let item = self.suspend_at(&next, Suspension::Await, pull.range, &mark);
+        self.flush_check();
+        self.body.error_target = outer;
+        self.jump(body);
+        self.label(&handler);
+        self.discard_truth(&mark);
+        let error = self.op("take_error", &[]);
+        let name = self.text("StopAsyncIteration");
+        let class = self.op("builtin", &[&name]);
+        let matches = self.op("matches", &[&error, &class]);
+        let stop = self.value(&format!("icmp eq i64 {matches}, 2"));
+        let propagate = self.name("b");
+        self.branch(&stop, exhausted, &propagate);
+        self.label(&propagate);
+        self.raise(&error, None, true);
+        item
+    }
+
     pub(crate) fn suspend_at(
         &mut self,
         value: &str,
@@ -1148,6 +1189,19 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         let (array, count) = self.handle_array(items);
         let negate = u32::from(negate);
         self.checked(&format!("call i64 @imre_dyn_contains_literal_tuple(ptr %ctx, i64 {value}, ptr {array}, i64 {count}, i32 {negate})"))
+    }
+
+    /// The activation keeps its live handles until the next Python statement.
+    /// Release the iterable when its cursor exists, and the cursor and local scope
+    /// when the comprehension delivers its result to the enclosing expression.
+    fn iteration_result(&mut self, emit: impl FnOnce(&mut Self) -> String) -> String {
+        if !self.native_suspension {
+            return emit(self);
+        }
+        let mark = self.temporary_mark();
+        let result = self.unwind_operands(&mark, emit);
+        self.keep_operands(&mark, &result, "0");
+        result
     }
 
     fn unwind_operands<T>(&mut self, mark: &str, body: impl FnOnce(&mut Self) -> T) -> T {

@@ -154,3 +154,71 @@ fn checked_assertion_message_and_raise_use_the_failure_edge() {
     assert!(raise.contains("call i64 @imre_dyn_op_at("));
     assert!(raise.contains("br label %caught"));
 }
+
+#[test]
+fn async_pull_parks_the_iterator_returned_by_the_protocol_once() {
+    use crate::ir::AsyncPull;
+    use ruff_text_size::TextRange;
+
+    let mut output = Output::default();
+    let file = output.data(b"stream.py");
+    let source = SourcePositions::new("async for item in stream:\n    pass", &file);
+    let mut frame = RegisteredFrame::new(&mut output, &source, true, 0, 0.into());
+    frame.body.error_target = "outer".into();
+    let pull = AsyncPull {
+        range: TextRange::new(18.into(), 24.into()),
+        header: Some(0.into()),
+    };
+    frame.async_pull("%stream", pull, "item", "exhausted");
+
+    assert_eq!(frame.body.error_target, "outer");
+    let body = &frame.body.code;
+    let next = frame.output.strings[b"async_next_iter".as_slice()];
+    assert_eq!(
+        body.matches(&format!("ptr @str{next}, i64 %stream"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        body.matches("call void @imre_dyn_suspend_operands(")
+            .count(),
+        1
+    );
+    assert!(!frame.output.strings.contains_key(b"await_iter".as_slice()));
+    assert!(body.contains("label %exhausted,"));
+    assert!(body.contains("br label %outer"));
+}
+
+#[test]
+fn inner_handler_preserves_the_enclosing_cursor_slot() {
+    let mut output = Output::default();
+    let file = output.data(b"stream.py");
+    let positions = SourcePositions::new("", &file);
+    let mut code = RegisteredFrame::new(&mut output, &positions, true, 0, 0.into());
+    let sites = CheckedSites::default();
+    let mut frame = super::Frame {
+        code: &mut code,
+        names: None,
+        sites: &sites,
+    };
+    frame.iteration.private_slots = vec![2, 8];
+    frame.iteration.first_slot = 3;
+    frame.body.error_target = "outer".into();
+    frame.enter_scope(&[2]);
+    frame.body.error_target = "inner".into();
+    frame.enter_scope(&[8]);
+    frame.leave_scope();
+    frame.jump("inner");
+    frame.label("inner");
+    frame.leave_scope();
+    frame.jump("outer");
+    frame.label("outer");
+
+    let (_, handlers) = frame.body.code.split_once("\ninner:\n").unwrap();
+    let (inner, outer) = handlers.split_once("\nouter:\n").unwrap();
+    assert!(inner.contains("store i64 0, ptr %ir_slot4"));
+    assert!(!inner.contains("%ir_slot3"));
+    assert!(outer.contains("store i64 0, ptr %ir_slot3"));
+    assert!(!outer.contains("%ir_slot4"));
+    assert!(!handlers.contains("call "));
+}
