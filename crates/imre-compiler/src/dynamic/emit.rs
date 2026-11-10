@@ -1612,7 +1612,9 @@ mod tests {
         let spelling = context.template_fields.unwrap().values().next().unwrap();
         assert_eq!(spelling.expression, " (v)");
         assert_eq!(spelling.debug_prefix.as_deref(), Some(" (v) = "));
-        let operand = inline_operand(default, context, RegisteredScope::Module).unwrap();
+        let operand = inline_operand(default, context, RegisteredScope::Module, false)
+            .unwrap()
+            .unwrap();
         assert!(operand.local_names.values().any(|binding| {
             binding.name == "v" && binding.namespace.is_some()
         }));
@@ -3663,6 +3665,47 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert_eq!(units.len(), 3);
         assert_eq!(units[1].name, units[2].name);
         assert_ne!(units[1].llvm_ir, units[2].llvm_ir);
+    }
+
+    #[test]
+    fn dictionary_reports_its_rejected_comprehension() {
+        let source = concat!(
+            "async def make():\n",
+            "    return {\"items\": [lambda v=await get(x): v for x in [1, 2]]}\n",
+        );
+        let prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        assert_eq!(
+            prepared.standalone().unwrap_err(),
+            "example.py:2:22: cannot compile this comprehension ahead of time (through 2:64)",
+        );
+    }
+
+    #[test]
+    fn dictionary_method_default_prepares_its_template_in_class_scope() {
+        let source = concat!(
+            "class Outer[T]:\n",
+            "    item = 7\n",
+            "    @staticmethod\n",
+            "    def run[U](value={'spelling': t'{item}'}): return value\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let before = prepared.standalone().unwrap().unwrap();
+        prepared.source.strings.templates.clear();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
     }
 
     #[test]
