@@ -481,7 +481,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         (failed, outer)
     }
 
-    fn finish_unwind(
+    pub(crate) fn finish_unwind(
         &mut self,
         (failed, outer): (String, String),
         release: impl FnOnce(&mut Self),

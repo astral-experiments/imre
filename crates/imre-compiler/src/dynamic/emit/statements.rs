@@ -1252,7 +1252,7 @@ impl Function<'_, '_> {
                 },
                 self.body.error_target.clone(),
             ));
-            self.open_operand_unwind()
+            self.begin_operand_scope()
         });
         self.jump(&step);
         self.label(&step);
@@ -1268,7 +1268,7 @@ impl Function<'_, '_> {
         if let Some(edge) = cursor_unwind {
             self.exits.pop();
             self.live.pop();
-            self.close_unwind(edge, |frame| frame.release_target(None));
+            self.finish_unwind(edge, |frame| frame.release_target(None));
             self.release_target(None);
         }
         self.statements(otherwise);
