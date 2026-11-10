@@ -4130,6 +4130,7 @@ impl SourceGraph {
             },
             FileSystem::default(),
             &mut None,
+            &mut SiteProbes::default(),
         )
     }
 
@@ -4139,6 +4140,7 @@ impl SourceGraph {
         options: &crate::CompileOptions,
         mut fs: FileSystem<'_>,
         import_failure: &mut Option<EntryImportFailure>,
+        site_probes: &mut SiteProbes,
     ) -> Result<Self, String> {
         let profile = options.entry_profile.as_deref();
         let reachable_only = options.reachable_only || profile.is_some();
@@ -4165,12 +4167,13 @@ impl SourceGraph {
                 .parent()
                 .ok_or("entry source has no parent")?
                 .to_path_buf();
-            while fs.is_file(&root.join("__init__.py")) {
+            while site_probes.is_file(&mut fs, root.join("__init__.py")) {
                 root = root
                     .parent()
                     .ok_or("package has no module root")?
                     .to_path_buf();
             }
+            site_probes.package_root = Some(root.clone());
             root
         };
         if !fs.is_dir(&root) {
@@ -4592,6 +4595,8 @@ pub(crate) enum EntryImportFailure {
 #[derive(Default)]
 pub(crate) struct SiteProbes {
     pub(crate) wheel_records: crate::installed_wheels::WheelRecords,
+    /// Canonical import root inferred for a file build, including when its checked scan fails.
+    pub(super) package_root: Option<PathBuf>,
     missing: Vec<PathBuf>,
     selected: bool,
     file_checks: BTreeMap<PathBuf, bool>,
