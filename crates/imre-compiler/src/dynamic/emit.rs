@@ -370,11 +370,6 @@ impl<'a> PreparedBody<'a> {
             generators: None,
             lambdas: None,
         };
-        let generators = RegisteredGenerator::collect(&body, values);
-        let values = crate::frontend::RegisteredSource {
-            generators: Some(&generators),
-            ..values
-        };
         let mut aliases = Vec::new();
         let mut logicals = crate::frontend::ExpressionSites::default();
         let mut scopes = crate::frontend::function_scope::ScopeFacts::prepare(
@@ -382,6 +377,12 @@ impl<'a> PreparedBody<'a> {
             &private_names,
             |alias, class| aliases.push((alias, class)),
         );
+        let generators =
+            RegisteredGenerator::collect(&body, values, std::mem::take(&mut scopes.generators));
+        let values = crate::frontend::RegisteredSource {
+            generators: Some(&generators),
+            ..values
+        };
         let lambdas = RegisteredLambda::collect(&body, values, &mut scopes, &mut logicals);
         let values = crate::frontend::RegisteredSource {
             lambdas: Some(&lambdas),
@@ -699,7 +700,6 @@ enum Input<'a> {
 
 enum DefinitionName<'a> {
     Binding(&'a ast::Identifier),
-    Generator(TextRange),
     Evaluator {
         name: &'a str,
         scope: &'a crate::frontend::function_scope::FunctionScope,
@@ -1086,7 +1086,12 @@ mod tests {
             lambdas: Some(&missing),
             ..prepared.source.registered_source()
         };
-        let generators = RegisteredGenerator::collect(body, source);
+        let scopes = crate::frontend::function_scope::ScopeFacts::prepare(
+            body,
+            &prepared.source.private_names,
+            |_, _| {},
+        );
+        let generators = RegisteredGenerator::collect(body, source, scopes.generators);
         let source = RegisteredSource {
             generators: Some(&generators),
             ..source

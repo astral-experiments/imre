@@ -2,23 +2,30 @@
 
 use super::*;
 use crate::frontend::comprehensions::EagerDisplay;
+use crate::frontend::function_scope::{CallableMetadata, FunctionScope};
 use imre_ast::comprehension::Plan;
 
 pub(crate) struct RegisteredGenerator {
     pub(crate) body: RegisteredFunction,
-    pub(crate) is_async: bool,
+    pub(crate) metadata: CallableMetadata,
 }
 
 impl RegisteredGenerator {
+    pub(super) fn is_async(&self) -> bool {
+        self.metadata.suspension_flags() == imre_ast::code_flags::ASYNC_GENERATOR
+    }
+
     /// Bind inner generator activations before any enclosing operand refers to them.
     pub(crate) fn collect(
         body: &[ast::Stmt],
         source: values::RegisteredSource<'_>,
+        scopes: HashMap<TextRange, FunctionScope>,
     ) -> HashMap<TextRange, Self> {
         use ast::visitor::{Visitor, walk_expr};
         struct Collector<'a> {
             source: values::RegisteredSource<'a>,
             sites: HashMap<TextRange, RegisteredGenerator>,
+            scopes: HashMap<TextRange, FunctionScope>,
         }
         impl<'a> Visitor<'a> for Collector<'_> {
             fn visit_expr(&mut self, expr: &'a ast::Expr) {
@@ -30,14 +37,19 @@ impl RegisteredGenerator {
                             generators: Some(&self.sites),
                             ..self.source
                         },
+                        &self.scopes[&generator.range()],
                     )
                 {
                     self.sites.insert(generator.range(), child);
                 }
             }
         }
+        if scopes.is_empty() {
+            return HashMap::new();
+        }
         let mut collector = Collector {
             source,
+            scopes,
             sites: HashMap::new(),
         };
         collector.visit_body(body);
@@ -47,6 +59,7 @@ impl RegisteredGenerator {
     fn prepare(
         generator: &ast::ExprGenerator,
         source: values::RegisteredSource<'_>,
+        scope_facts: &FunctionScope,
     ) -> Option<Self> {
         let plan = Plan::generator(generator);
         let is_async = plan.body_suspends();
@@ -108,7 +121,7 @@ impl RegisteredGenerator {
         body.push(Statement::Return(Expr::none()));
         Some(Self {
             body: scope.finish(body),
-            is_async,
+            metadata: CallableMetadata::generator(scope_facts, is_async),
         })
     }
 }
@@ -160,20 +173,28 @@ fn loop_clause(
 mod tests {
     use super::*;
 
+    fn prepared(module: &crate::modules::SourceModule) -> HashMap<TextRange, RegisteredGenerator> {
+        let body = &module.parsed.syntax().body;
+        let literals = values::ModuleSource::new(module);
+        let scopes = crate::frontend::function_scope::ScopeFacts::prepare(
+            body,
+            &Default::default(),
+            |_, _| {},
+        );
+        RegisteredGenerator::collect(body, literals.context(&module.source), scopes.generators)
+    }
+
     #[test]
     fn async_child_pulls_the_outer_iterator_without_reacquiring_it() {
         let graph =
             SourceGraph::single("result = (item async for item in rows if item)\n").unwrap();
         let module = &graph.modules[graph.entry];
-        let literals = values::ModuleSource::new(module);
-        let sites = RegisteredGenerator::collect(
-            &module.parsed.syntax().body,
-            literals.context(&module.source),
-        );
+        let sites = prepared(module);
         let [child] = sites.values().collect::<Vec<_>>()[..] else {
             panic!("expected one prepared generator");
         };
-        assert!(child.is_async);
+        assert!(child.is_async());
+        assert_eq!(child.metadata.parameter_names().collect::<Vec<_>>(), [".0"]);
         let body = &child.body.function.body;
         let mut pulls = 0;
         ir::walk_statements(body, &mut |statement| {
@@ -210,15 +231,11 @@ mod tests {
         )
         .unwrap();
         let module = &graph.modules[graph.entry];
-        let literals = values::ModuleSource::new(module);
-        let sites = RegisteredGenerator::collect(
-            &module.parsed.syntax().body,
-            literals.context(&module.source),
-        );
+        let sites = prepared(module);
         let [child] = sites.values().collect::<Vec<_>>()[..] else {
             panic!("expected one prepared generator");
         };
-        assert!(child.is_async);
+        assert!(child.is_async());
         let mut awaits = 0;
         let mut yields = 0;
         let mut adapted = 0;
@@ -244,14 +261,10 @@ mod tests {
         )
         .unwrap();
         let module = &graph.modules[graph.entry];
-        let literals = values::ModuleSource::new(module);
-        let sites = RegisteredGenerator::collect(
-            &module.parsed.syntax().body,
-            literals.context(&module.source),
-        );
+        let sites = prepared(module);
         assert_eq!(sites.len(), 2);
-        let (inner, child) = sites.iter().find(|(_, child)| child.is_async).unwrap();
-        let parent = sites.values().find(|child| !child.is_async).unwrap();
+        let (inner, child) = sites.iter().find(|(_, child)| child.is_async()).unwrap();
+        let parent = sites.values().find(|child| !child.is_async()).unwrap();
         let mut references = Vec::new();
         ir::walk_expressions(&parent.body.function.body, &mut |expr| {
             if let ExprKind::Builtin(Builtin::RegisteredGenerator(range, _), _) = &expr.kind {
@@ -288,11 +301,7 @@ mod tests {
     fn nested_generators_starting_at_one_offset_reference_distinct_children() {
         let graph = SourceGraph::single("list((y for y in x) for x in rows)\n").unwrap();
         let module = &graph.modules[graph.entry];
-        let literals = values::ModuleSource::new(module);
-        let sites = RegisteredGenerator::collect(
-            &module.parsed.syntax().body,
-            literals.context(&module.source),
-        );
+        let sites = prepared(module);
         let mut ranges: Vec<_> = sites.keys().copied().collect();
         ranges.sort_by_key(|range| range.end());
         let [inner, outer] = ranges.as_slice() else {

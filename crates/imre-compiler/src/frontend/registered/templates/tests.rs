@@ -256,19 +256,26 @@ fn unavailable_template_child_is_reported_at_its_own_range() {
         .unwrap()
         .as_tuple_expr()
         .unwrap();
-    let children = RegisteredGenerator::collect(&module.body, source);
-    let missing = HashMap::new();
-    for (generators, complete) in [(&missing, false), (&children, true)] {
+    for complete in [false, true] {
         let mut scopes = crate::frontend::function_scope::ScopeFacts::prepare(
             &module.body,
             &Default::default(),
             |_, _| {},
         );
+        let generators = if complete {
+            RegisteredGenerator::collect(
+                &module.body,
+                source,
+                std::mem::take(&mut scopes.generators),
+            )
+        } else {
+            HashMap::new()
+        };
         let mut sites = ExpressionSites::default();
         RegisteredLambda::collect(
             &module.body,
             RegisteredSource {
-                generators: Some(generators),
+                generators: Some(&generators),
                 ..source
             },
             &mut scopes,

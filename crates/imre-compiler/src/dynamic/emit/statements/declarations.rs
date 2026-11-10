@@ -30,6 +30,7 @@ impl SourceInfo<'_> {
 enum Callable<'a> {
     Lambda { comprehension: bool },
     Named(&'a NamedFunction),
+    Generator(&'a crate::frontend::RegisteredGenerator),
 }
 
 impl<'p> SourceMap<'p> {
@@ -167,6 +168,13 @@ impl CallableSites<'_, '_> {
                 &source.lambdas[&site].metadata,
                 comprehension,
             ),
+            Callable::Generator(generator) => (
+                "<genexpr>",
+                format!("{}<genexpr>", self.prefix),
+                None,
+                &generator.metadata,
+                false,
+            ),
             Callable::Named(header) => {
                 let qualname = if self.declared_globals.contains(&header.binding) {
                     header.name.clone()
@@ -190,19 +198,23 @@ impl CallableSites<'_, '_> {
                 !header.generic || header.type_params.is_empty(),
                 self.parameter_provider(header, &qualname),
             ),
-            Callable::Lambda { .. } => (false, true, None),
+            Callable::Lambda { .. } | Callable::Generator(_) => (false, true, None),
         };
         let suspension = metadata.suspension_flags();
         // Several expression regions can place the same lexical lambda.
         let cache = match callable {
             Callable::Lambda { .. } => Some(&source.callable_code),
-            Callable::Named(_) => None,
+            Callable::Named(_) | Callable::Generator(_) => None,
         };
         let existing = cache.and_then(|cache| cache.borrow().get(&site).cloned());
         let code = existing.unwrap_or_else(|| {
             let code = source.code(
                 self.output,
-                format!("{qualname}.<locals>."),
+                if matches!(callable, Callable::Generator(_)) {
+                    format!("{qualname}.")
+                } else {
+                    format!("{qualname}.<locals>.")
+                },
                 body,
                 true,
                 Some((site, suspension)),
@@ -225,9 +237,11 @@ impl CallableSites<'_, '_> {
         if let Callable::Named(header) = callable {
             self.named_signature(site, header, suspension, &mut signature);
         }
-        self.output
-            .interned_identifiers
-            .extend(metadata.parameter_names().map(str::to_owned));
+        if !matches!(callable, Callable::Generator(_)) {
+            self.output
+                .interned_identifiers
+                .extend(metadata.parameter_names().map(str::to_owned));
+        }
         CompiledDefinition {
             doc,
             provider,
@@ -428,9 +442,9 @@ impl CallableSites<'_, '_> {
             return;
         }
         let body = &self.source.generators[&site];
-        let definition = self.compile_definition(
+        let definition = self.compile_callable(
             site.start(),
-            DefinitionName::Generator(site),
+            Callable::Generator(body),
             Body::Checked(&body.body, None),
         );
         let targets = self.source.scopes.comprehension_targets[&site].clone();
