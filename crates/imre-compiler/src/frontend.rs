@@ -144,10 +144,7 @@ pub(crate) use registered::{
     ValueStatement, annotation_expression, place_fixed_function, registered_sites,
     registered_type_alias, registered_type_parameters,
 };
-pub(crate) use registered::{
-    LocalBinding, PreparedTemplate, RegisteredClass, RegisteredOperand, RegisteredRegion,
-    TemplateField,
-};
+pub(crate) use registered::{LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion};
 pub(crate) use registered::{
     PhysicalBinding, PhysicalSuite, PreparedContext, PreparedFor, PreparedTry, SourceGuard,
 };

@@ -26,28 +26,18 @@ impl RegisteredLambda {
             source: values::RegisteredSource<'a>,
             templates: &'t mut HashMap<TextRange, PreparedTemplate>,
             scopes: HashMap<TextSize, FunctionScope>,
-            functions: &'t HashMap<TextSize, crate::frontend::function_scope::NamedFunctionScope>,
             sites: HashMap<TextSize, RegisteredLambda>,
-            owner: (RegisteredScope, bool),
-            suite_owner: Option<(RegisteredScope, bool)>,
+            owner: RegisteredScope,
+            suite_owner: Option<RegisteredScope>,
         }
         impl<'a> Visitor<'a> for Collector<'_, '_> {
             fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
                 // Ruff visits the entire header before calling visit_body for the suite.
                 self.suite_owner = match stmt {
-                    ast::Stmt::FunctionDef(def) => {
-                        let start = def
-                            .decorator_list
-                            .first()
-                            .map_or(def.start(), Ranged::start);
-                        Some((
-                            RegisteredScope::Function {
-                                is_async: def.is_async,
-                            },
-                            self.functions[&start].suspension_flags != 0,
-                        ))
-                    }
-                    ast::Stmt::ClassDef(_) => Some((RegisteredScope::Class, false)),
+                    ast::Stmt::FunctionDef(def) => Some(RegisteredScope::Function {
+                        is_async: def.is_async,
+                    }),
+                    ast::Stmt::ClassDef(_) => Some(RegisteredScope::Class),
                     _ => None,
                 };
                 walk_stmt(self, stmt);
@@ -63,18 +53,12 @@ impl RegisteredLambda {
             }
 
             fn visit_expr(&mut self, expr: &'a ast::Expr) {
-                let generator = expr
-                    .as_lambda_expr()
-                    .is_some_and(|lambda| code_flags::yields_in_expression(&lambda.body));
                 stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || match expr {
                     ast::Expr::Lambda(lambda) => {
                         if let Some(parameters) = &lambda.parameters {
                             self.visit_parameters(parameters);
                         }
-                        let parent = std::mem::replace(
-                            &mut self.owner,
-                            (RegisteredScope::Lambda, generator),
-                        );
+                        let parent = std::mem::replace(&mut self.owner, RegisteredScope::Lambda);
                         self.visit_expr(&lambda.body);
                         self.owner = parent;
                     }
@@ -84,7 +68,7 @@ impl RegisteredLambda {
                         let owner = RegisteredScope::Function {
                             is_async: plan.body_suspends(),
                         };
-                        let parent = std::mem::replace(&mut self.owner, (owner, true));
+                        let parent = std::mem::replace(&mut self.owner, owner);
                         plan.visit_body(|child| self.visit_expr(child));
                         self.owner = parent;
                     }
@@ -102,14 +86,18 @@ impl RegisteredLambda {
                             source,
                             &self.scopes[&lambda.start()],
                             self.owner,
-                            generator,
                         );
                         self.sites.insert(lambda.start(), plan);
                     }
                     ast::Expr::TString(_) => {
-                        if let Some(value) = PreparedTemplate::prepare(expr, source, self.owner.0) {
-                            self.templates.insert(expr.range(), value);
-                        }
+                        let value = RegisteredOperand::prepare_required(
+                            expr,
+                            source,
+                            self.owner,
+                            "cannot compile this template ahead of time",
+                            |scope| scope.report_child_refusals = true,
+                        );
+                        self.templates.insert(expr.range(), value);
                     }
                     _ => {}
                 }
@@ -119,9 +107,8 @@ impl RegisteredLambda {
             source,
             templates,
             scopes: std::mem::take(&mut scopes.lambdas),
-            functions: &scopes.functions,
             sites: HashMap::new(),
-            owner: (RegisteredScope::Module, false),
+            owner: RegisteredScope::Module,
             suite_owner: None,
         };
         collector.visit_body(body);
@@ -146,16 +133,14 @@ impl RegisteredLambda {
         lambda: &ast::ExprLambda,
         source: values::RegisteredSource<'_>,
         scope: &FunctionScope,
-        owner: (RegisteredScope, bool),
-        generator: bool,
+        owner: RegisteredScope,
     ) -> Self {
         let body = Self::body(lambda, source);
         let binding = if body.is_some() {
             let operations = HashMap::new();
             let sites = StatementSites::default();
-            let (kind, suspended) = owner;
-            let mut scope = SourceScope::new(kind, source, &operations, &sites);
-            scope.diagnostic_suspension = Some(suspended);
+            let mut scope = SourceScope::new(owner, source, &operations, &sites);
+            scope.report_child_refusals = true;
             match scope.with_suspending_operands(|scope| scope.lambda_binding(lambda)) {
                 Ok(value) if scope.locals.is_empty() => ExpressionSelection::Checked(value),
                 Ok(value) => ExpressionSelection::Operand(Box::new(RegisteredOperand::from_scope(
@@ -170,7 +155,11 @@ impl RegisteredLambda {
             )
         };
         Self {
-            metadata: CallableMetadata::new(lambda.parameters.as_deref(), scope, generator),
+            metadata: CallableMetadata::new(
+                lambda.parameters.as_deref(),
+                scope,
+                code_flags::yields_in_expression(&lambda.body),
+            ),
             binding,
             body,
         }
@@ -290,8 +279,7 @@ async def factory(seed, rows, mark):
                 ..source
             },
             &FunctionScope::lambda(residual, false),
-            (owner, true),
-            false,
+            owner,
         );
         assert!(
             matches!(mixed.binding, ExpressionSelection::Refused(range, "cannot compile this lambda body ahead of time") if range == thunk.range())
@@ -327,8 +315,7 @@ async def factory(seed, rows, mark):
             lambda,
             literals.context(&module.source),
             &FunctionScope::lambda(lambda, false),
-            (RegisteredScope::Function { is_async: true }, true),
-            false,
+            RegisteredScope::Function { is_async: true },
         );
 
         let ExpressionSelection::Operand(binding) = &plan.binding else {
@@ -376,8 +363,7 @@ async def factory(seed, rows, mark):
             lambda,
             source,
             &FunctionScope::lambda(lambda, false),
-            (RegisteredScope::Module, false),
-            code_flags::yields_in_expression(&lambda.body),
+            RegisteredScope::Module,
         );
         assert!(plan.metadata.generator);
         let checked = plan.body.unwrap();
@@ -424,8 +410,7 @@ async def factory(seed, rows, mark):
             lambda,
             source,
             &FunctionScope::lambda(lambda, false),
-            (RegisteredScope::Module, false),
-            code_flags::yields_in_expression(&lambda.body),
+            RegisteredScope::Module,
         );
         let sites = HashMap::from([(lambda.start(), plan)]);
         let source = values::RegisteredSource {
@@ -499,8 +484,7 @@ async def factory(seed, rows, mark):
             lambda,
             source,
             &FunctionScope::lambda(lambda, false),
-            (RegisteredScope::Module, false),
-            code_flags::yields_in_expression(&lambda.body),
+            RegisteredScope::Module,
         );
         let nested = values::lambda_defaults(lambda)
             .nth(1)

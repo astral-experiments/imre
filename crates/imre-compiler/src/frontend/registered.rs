@@ -9,7 +9,7 @@ pub(crate) use generators::RegisteredGenerator;
 mod lambdas;
 pub(crate) use lambdas::RegisteredLambda;
 mod templates;
-pub(crate) use templates::{PreparedStrings, PreparedTemplate, TemplateField};
+pub(crate) use templates::{PreparedStrings, PreparedTemplate};
 pub(super) mod patterns;
 mod placement;
 pub(crate) use placement::place_fixed_function;
@@ -109,6 +109,24 @@ impl RegisteredOperand {
         let mut scope = SourceScope::new(kind, source, &operations, &sites);
         let value = lower(&mut scope)?;
         Some(Self::from_scope(value, scope))
+    }
+
+    /// Prepare a required value once and keep the diagnostic chosen by its lexical scope.
+    fn prepare_required(
+        expr: &ast::Expr,
+        source: values::RegisteredSource<'_>,
+        kind: RegisteredScope,
+        reason: &'static str,
+        configure: impl FnOnce(&mut SourceScope<'_>),
+    ) -> StdResult<Self, (TextRange, &'static str)> {
+        let mut refusal = None;
+        Self::prepare_with(source, kind, |scope| {
+            configure(scope);
+            let value = scope.operand(expr);
+            refusal = scope.refusal;
+            value
+        })
+        .ok_or_else(|| refusal.unwrap_or((expr.range(), reason)))
     }
 
     fn from_scope(value: Expr, scope: SourceScope<'_>) -> Self {
@@ -1578,11 +1596,10 @@ impl<'a> SuitePreparation<'a> {
         &self,
         target: &ast::Expr,
         kind: RegisteredScope,
-        suspended: bool,
         pair_pull: bool,
     ) -> PhysicalBinding {
         let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
-        scope.diagnostic_suspension = Some(suspended);
+        scope.report_child_refusals = true;
         match scope.input_binding(target, pair_pull) {
             Ok((ir::ContextBinding { entered, body }, pair)) => PhysicalBinding::Checked {
                 entered,
@@ -1703,7 +1720,7 @@ impl<'a> SuitePreparation<'a> {
                     target: item
                         .optional_vars
                         .as_ref()
-                        .map(|target| self.physical_binding(target, kind, suspended, false)),
+                        .map(|target| self.physical_binding(target, kind, false)),
                 }
             })
             .collect();
@@ -1726,7 +1743,6 @@ impl<'a> SuitePreparation<'a> {
         let target = self.physical_binding(
             &loop_.target,
             kind,
-            suspended,
             pull == ir::IterNextKind::Generic,
         );
         PreparedFor {
@@ -1888,9 +1904,9 @@ impl<'a> SuitePreparation<'a> {
                     input,
                 );
                 let first_refusal = scope.refusal.take();
-                scope.diagnostic_suspension = Some(suspended);
+                scope.report_child_refusals = true;
                 let targets = scope.assignment_targets(targets, value);
-                scope.diagnostic_suspension = None;
+                scope.report_child_refusals = false;
                 let (effect, targets) = match targets {
                     Ok(targets) => (
                         SourceEffect::Value(ValueStatement::Store(input), vec![frame_value(rhs)]),
@@ -2493,9 +2509,8 @@ struct SourceScope<'a> {
     loop_scope: LoopScope,
     suspending_operands: bool,
     refusal: Option<(TextRange, &'static str)>,
-    // A dictionary reports its first unprepared comprehension. Named expressions, assignment
-    // targets, and lambda bindings preserve terminal operand errors in their enclosing frame.
-    diagnostic_suspension: Option<bool>,
+    // Nested dictionaries own their diagnostic. Other required operands report a refused child.
+    report_child_refusals: bool,
 }
 
 const FORMATTED_STRING_REFUSAL: &str = "cannot compile this formatted string ahead of time";
@@ -2515,34 +2530,19 @@ pub(crate) fn inline_operand(
         | ast::Expr::Set(_)
         | ast::Expr::Dict(_)
         | ast::Expr::Named(_) => {
-            let is_named = expr.is_named_expr();
-            let mut refusal = None;
-            let operand = RegisteredOperand::prepare_with(source, kind, |scope| {
-                if is_named {
-                    scope.diagnostic_suspension = Some(native_suspension);
+            let reason = match expr {
+                ast::Expr::Dict(_) => "cannot compile this dictionary display ahead of time",
+                ast::Expr::Named(_) => "cannot compile this assignment expression ahead of time",
+                _ => "cannot compile this collection display ahead of time",
+            };
+            return RegisteredOperand::prepare_required(expr, source, kind, reason, |scope| {
+                if expr.is_named_expr() {
+                    scope.report_child_refusals = true;
                 } else {
                     scope.suspending_operands = native_suspension;
                 }
-                let value = scope.operand(expr);
-                refusal = scope.refusal;
-                value
-            });
-            return operand.map(Some).ok_or_else(|| {
-                refusal.unwrap_or_else(|| {
-                    (
-                        expr.range(),
-                        match expr {
-                            ast::Expr::Dict(_) => {
-                                "cannot compile this dictionary display ahead of time"
-                            }
-                            ast::Expr::Named(_) => {
-                                "cannot compile this assignment expression ahead of time"
-                            }
-                            _ => "cannot compile this collection display ahead of time",
-                        },
-                    )
-                })
-            });
+            })
+            .map(Some);
         }
         ast::Expr::FString(_) => FORMATTED_STRING_REFUSAL,
         ast::Expr::Generator(_) => GENERATOR_REFUSAL,
@@ -2614,7 +2614,7 @@ impl<'a> SourceScope<'a> {
             loop_scope: LoopScope::Outside,
             suspending_operands: false,
             refusal: None,
-            diagnostic_suspension: None,
+            report_child_refusals: false,
         }
     }
 
@@ -3044,12 +3044,10 @@ impl SourceScope<'_> {
     }
 
     fn lower_operand(&mut self, expr: &ast::Expr, whole: bool) -> Option<Expr> {
-        if expr.is_dict_expr()
-            && let Some(suspended) = self.diagnostic_suspension.take()
-        {
-            // A dictionary owns its own diagnostic, including inside a Named RHS.
+        if expr.is_dict_expr() && self.report_child_refusals {
+            self.report_child_refusals = false;
             let value = self.checked_operand(expr, whole);
-            self.diagnostic_suspension = Some(suspended);
+            self.report_child_refusals = true;
             if value.is_none() {
                 self.refusal.get_or_insert((
                     expr.range(),
@@ -3060,7 +3058,7 @@ impl SourceScope<'_> {
         }
 
         let value = self.checked_operand(expr, whole);
-        if value.is_none() && self.diagnostic_suspension.is_some() {
+        if value.is_none() && self.report_child_refusals {
             let reason = match expr {
                 ast::Expr::FString(_) => FORMATTED_STRING_REFUSAL,
                 ast::Expr::Generator(_) => GENERATOR_REFUSAL,
@@ -3089,26 +3087,25 @@ impl SourceScope<'_> {
             ) {
             self.suspend_operand(kind, value, expr.range())?
         } else if let ast::Expr::TString(template) = expr {
-            match self.with_suspending_operands(|scope| {
+            self.with_suspending_operands(|scope| {
                 scope.source.template(
                     template,
                     matches!(
                         scope.kind,
                         RegisteredScope::Function { .. } | RegisteredScope::Lambda
                     ),
-                    |child| scope.ordinary_operand(child),
+                    |child| {
+                        let value = scope.ordinary_operand(child);
+                        if value.is_none() && scope.report_child_refusals {
+                            scope.refusal.get_or_insert((
+                                child.range(),
+                                "cannot compile this template field ahead of time",
+                            ));
+                        }
+                        value
+                    },
                 )
-            }) {
-                Ok(value) => value,
-                Err(reason) => {
-                    if self.diagnostic_suspension == Some(true)
-                        && let Some(reason) = reason
-                    {
-                        self.refusal = Some((expr.range(), reason));
-                    }
-                    return None;
-                }
-            }
+            })?
         } else if let ast::Expr::FString(formatted) = expr {
             self.with_suspending_operands(|scope| {
                 fstrings::registered_fstring(formatted, scope.source, |child| {
@@ -3132,7 +3129,7 @@ impl SourceScope<'_> {
             self.suspend_operand(ir::SuspendValue::Await, Some(&awaited.value), expr.range())?
         } else if let ast::Expr::Lambda(lambda) = expr {
             if !values::has_checked_lambda_body(lambda, self.source) {
-                if self.diagnostic_suspension.is_some() {
+                if self.report_child_refusals {
                     self.refusal = Some((
                         expr.range(),
                         "cannot compile this lambda body ahead of time",
