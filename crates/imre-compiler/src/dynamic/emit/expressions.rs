@@ -269,12 +269,9 @@ impl Function<'_, '_> {
             ast::Expr::FString(_) => {
                 self.build_diagnostic("cannot compile this formatted string ahead of time")
             }
-            ast::Expr::Generator(generator)
-                if self.source.generators.contains_key(&generator.range()) =>
-            {
-                self.prepared_generator(generator)
+            ast::Expr::Generator(_) => {
+                self.build_diagnostic("cannot compile this generator expression ahead of time")
             }
-            ast::Expr::Generator(generator) => self.residual_generator(generator),
             ast::Expr::DictComp(display) if display.key.is_none() => {
                 self.unsupported("dict unpacking comprehension")
             }

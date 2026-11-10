@@ -3,7 +3,7 @@ mod declarations;
 use super::sites::{CompiledDefinition, CompiledProvider};
 
 use super::FrameEmitter;
-use crate::ir::{ItemUpdate, Statement};
+use crate::ir::{ItemUpdate, IteratorOp, Statement};
 use crate::llvm::registered::Place;
 use crate::llvm::registered::context::{ContextEmitter, ContextRegion};
 use imre_ast::code_flags;
@@ -395,7 +395,18 @@ impl<'p> Function<'_, 'p> {
                 }
                 ast::Stmt::If(v) => self.conditional_fragments(v),
                 ast::Stmt::For(v) => {
-                    let iter = self.iteration_cursor(&v.iter, v.is_async);
+                    let iter = self.iteration_result(|code| {
+                        let value = code.expr(&v.iter);
+                        if code.native_suspension {
+                            code.call_position(v.iter.range());
+                        }
+                        let operation = if v.is_async {
+                            IteratorOp::Async(v.iter.range())
+                        } else {
+                            IteratorOp::Loop
+                        };
+                        code.op(operation.runtime_op(), &[&value])
+                    });
                     self.loop_body(&v.body, &v.orelse, Some(&iter), |f, yes, no| {
                         f.frame.retained_loop_header(v.start());
                         f.enter_iteration(
@@ -760,10 +771,8 @@ impl<'p> Function<'_, 'p> {
             // generator() binds the implicit .0 argument without calling the step function.
             signature["positional"] = json!([".0"]);
         }
-        // Residual synchronous expressions still use the stateless step entry.
         let entry = match generator_flags {
             0 => Entry::Compiled,
-            code_flags::GENERATOR if matches!(body, Body::Generator(..)) => Entry::Compiled,
             _ => Entry::Suspended,
         };
         let scopes = &self.source.scopes;
@@ -784,9 +793,7 @@ impl<'p> Function<'_, 'p> {
                 Some(&class.namespace)
             }
             Body::AliasEvaluator(_) => Some(&scopes.aliases[&start]),
-            Body::Generator(site, _) | Body::CheckedGenerator(site, _) => {
-                Some(&scopes.generators[site])
-            }
+            Body::CheckedGenerator(site, _) => Some(&scopes.generators[site]),
             _ => None,
         };
         if let Some(facts) = scope_facts {

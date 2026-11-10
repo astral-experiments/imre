@@ -10,6 +10,16 @@ pub(super) struct Namespace {
 }
 
 impl SourceScope<'_> {
+    pub(super) fn creating_iterable<T>(&mut self, lower: impl FnOnce(&mut Self) -> T) -> T {
+        if matches!(self.kind, RegisteredScope::Function { .. } | RegisteredScope::Lambda)
+            && self.loop_scope != LoopScope::WithCursor
+        {
+            self.with_suspending_operands(lower)
+        } else {
+            lower(self)
+        }
+    }
+
     pub(super) fn eager_comprehension(&mut self, expression: &ast::Expr) -> Option<Expr> {
         let plan = Plan::from_expr(expression)?;
         if plan.body_suspends() && !matches!(self.kind, RegisteredScope::Function { is_async: true }) {
@@ -19,14 +29,7 @@ impl SourceScope<'_> {
         let first_private = self.locals.len();
         // The first iterable belongs to the creating frame and runs before this cursor exists.
         let first = &plan.clauses[0];
-        let mut input = if matches!(self.kind, RegisteredScope::Function { .. })
-            && self.loop_scope != LoopScope::WithCursor
-        {
-            self.with_suspending_operands(|scope| scope.input(first))
-        } else {
-            self.input(first)
-        }
-        .ok()?;
+        let mut input = self.creating_iterable(|scope| scope.input(first)).ok()?;
         let mut prefix = std::mem::take(&mut input.evaluate);
         prefix.append(&mut input.acquire);
         let namespace = self.hidden(Type::PythonObject);
