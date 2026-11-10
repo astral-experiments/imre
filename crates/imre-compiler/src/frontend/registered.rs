@@ -6,7 +6,7 @@ mod eager;
 mod lambdas;
 pub(crate) use lambdas::RegisteredLambda;
 mod templates;
-pub(crate) use templates::{prepare_templates, template_segments};
+pub(crate) use templates::{PreparedStrings, prepare_strings};
 pub(super) mod type_alias;
 pub(super) mod values;
 

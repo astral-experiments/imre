@@ -134,6 +134,31 @@ impl<'a> ObjectOperation<'a> {
     }
 }
 
+/// Recover the source code points and reject a retained docstring that Python cannot encode.
+pub(crate) fn module_literal_replacements(
+    source: &str,
+    parsed: &ruff_python_parser::Parsed<ast::ModModule>,
+    keep_docstrings: bool,
+) -> StdResult<HashMap<TextRange, Vec<u32>>, String> {
+    let replacements = literal_replacements(source, parsed.tokens());
+    if keep_docstrings
+        && !replacements.is_empty()
+        && let Some(range) = imre_ast::strings::find_docstring(&parsed.syntax().body, true, |doc| {
+            doc.value
+                .iter()
+                .map(Ranged::range)
+                .find(|range| replacements.contains_key(range))
+        })
+    {
+        return Err(diagnostic_message(
+            source,
+            &range,
+            "surrogate string escapes are unsupported in docstrings",
+        ));
+    }
+    Ok(replacements)
+}
+
 pub(crate) fn literal_replacements(
     source: &str,
     tokens: &ast::token::Tokens,

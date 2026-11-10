@@ -182,14 +182,8 @@ impl Function<'_, '_> {
                 for part in v.value.iter() {
                     match part {
                         ast::FStringPartRef::Literal(lit) => {
-                            if !lit.value.is_empty() {
-                                let value = crate::frontend::registered_string(
-                                    &lit.value,
-                                    std::iter::once(lit),
-                                    &self.source.replacements,
-                                    self.source.has_templates,
-                                );
-                                parts.push(self.registered_value(&value));
+                            if let Some(value) = self.source.strings.literals.get(&lit.range()) {
+                                parts.push(self.registered_value(value));
                             }
                         }
                         ast::FStringPartRef::FString(s) => {
@@ -333,23 +327,24 @@ impl Function<'_, '_> {
 
     /// A residual field keeps its whole template on the original literal-spec path.
     fn residual_template(&mut self, template: &ast::ExprTString) -> String {
-        let Some(segments) = crate::frontend::template_segments(
-            template,
-            self.source.registered_source(),
-            &self.source.template_fields,
-        ) else {
+        let Some(plan) = self
+            .source
+            .strings
+            .residual_templates
+            .get(&template.range())
+        else {
             return self.unsupported("t-string expression spelling");
         };
-        let strings = self.emit_string_tuple(segments);
+        let strings = self.emit_string_tuple(plan.segments.clone());
         let parts = self.op("list", &[]);
-        for field in template
+        for (field, spec) in template
             .value
             .iter()
             .flat_map(|t| t.elements.interpolations())
+            .zip(&plan.specs)
         {
-            let spec = match imre_ast::strings::template_format_spec(field) {
-                Ok(Some(literal)) => self.format_literal(literal),
-                Ok(None) => self.text(""),
+            let spec = match spec {
+                Ok(value) => self.registered_value(value),
                 Err(reason) => return self.unsupported(reason),
             };
             let Some(spelling) = self.source.template_fields.get(&field.start()) else {
@@ -375,11 +370,15 @@ impl Function<'_, '_> {
     ) {
         for element in elements {
             let value = match element {
-                ast::InterpolatedStringElement::Literal(lit) if lit.value.is_empty() => continue,
-                ast::InterpolatedStringElement::Literal(lit) => self.format_literal(lit),
+                ast::InterpolatedStringElement::Literal(lit) => {
+                    let Some(value) = self.source.strings.literals.get(&lit.range()) else {
+                        continue;
+                    };
+                    self.registered_value(value)
+                }
                 ast::InterpolatedStringElement::Interpolation(field) => {
-                    if let Some(debug) = &field.debug_text {
-                        parts.push(self.text(debug.as_str()));
+                    if let Some(prefix) = self.source.strings.literals.get(&field.range()) {
+                        parts.push(self.registered_value(prefix));
                     }
                     let mut value = self.expr(&field.expression);
                     if let Some(conversion) = imre_ast::strings::interpolation_conversion(field) {
