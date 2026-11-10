@@ -57,68 +57,27 @@ pub(crate) enum Selection {
 pub(crate) struct PhysicalInputs {
     pub(crate) operation: ir::Expr,
     pub(crate) position: TextSize,
-    children: Box<[Option<CheckedChild>]>,
-    /// A subscript with an incomplete slice key evaluates its receiver and then
-    /// the individual bounds. Other expressions consume their immediate children.
-    split_slice: bool,
+    children: Box<[SourceOperand<ir::Expr, ResidualInput>]>,
+}
+
+struct ResidualInput {
+    expression: Box<ast::Expr>,
+    // The same site can be emitted in an ordinary or a suspended activation.
+    suspended: Option<ir::Expr>,
 }
 
 fn site(node: &ast::Expr) -> (TextRange, ast::NodeKind) {
     (node.range(), ast::AnyNodeRef::from(node).kind())
 }
 
-fn physical_children(node: &ast::Expr, split_slice: bool) -> Vec<&ast::Expr> {
-    #[derive(Default)]
-    struct Inputs<'a>(Vec<&'a ast::Expr>);
-    impl<'a> Visitor<'a> for Inputs<'a> {
-        fn visit_expr(&mut self, child: &'a ast::Expr) {
-            self.0.push(child);
-        }
-    }
-    let mut inputs = Inputs::default();
-    if split_slice {
-        let index = node.as_subscript_expr().expect("prepared subscript");
-        inputs.visit_expr(&index.value);
-        visitor::walk_expr(&mut inputs, &index.slice);
-    } else {
-        visitor::walk_expr(&mut inputs, node);
-    }
-    inputs.0
-}
-
 impl PhysicalInputs {
-    pub(crate) fn operands<'a>(
-        &'a self,
-        node: &'a ast::Expr,
-        suspended: bool,
-    ) -> impl Iterator<Item = BorrowedOperand<'a>> + 'a {
-        let mut physical = None;
-        self.children.iter().enumerate().map(move |(i, child)| {
-            if let Some(value) = child.as_ref().and_then(|child| child.value(suspended)) {
-                SourceOperand::Checked(value)
-            } else if let ir::ExprKind::Builtin(ir::Builtin::RegisteredCall(call), _) =
-                &self.operation.kind
-            {
-                // A method consumes its receiver. The frame performs descriptor lookup
-                // before it starts unpacking arguments.
-                let original = node.as_call_expr().expect("prepared call");
-                let input = if i != 0 {
-                    values::registered_argument_at(&original.arguments, i - 1)
-                } else if matches!(call.target, ir::RegisteredCallTarget::Method { .. }) {
-                    &original
-                        .func
-                        .as_attribute_expr()
-                        .expect("prepared method")
-                        .value
-                } else {
-                    &original.func
-                };
-                SourceOperand::Residual(input)
-            } else {
-                SourceOperand::Residual(
-                    physical.get_or_insert_with(|| physical_children(node, self.split_slice))[i],
-                )
-            }
+    pub(crate) fn operands(&self, suspended: bool) -> impl Iterator<Item = BorrowedOperand<'_>> {
+        self.children.iter().map(move |child| match child {
+            SourceOperand::Checked(value) => SourceOperand::Checked(value),
+            SourceOperand::Residual(input) => BorrowedOperand::prepared(
+                &input.expression,
+                input.suspended.as_ref().filter(|_| suspended),
+            ),
         })
     }
 }
@@ -130,14 +89,7 @@ pub(crate) struct CheckedChild {
 
 impl CheckedChild {
     fn prepare(node: &ast::Expr, source: RegisteredSource<'_>) -> Option<Self> {
-        Self::from_ordinary(node, source, values::registered_value(node, source))
-    }
-
-    fn from_ordinary(
-        node: &ast::Expr,
-        source: RegisteredSource<'_>,
-        ordinary: Option<ir::Expr>,
-    ) -> Option<Self> {
+        let ordinary = values::registered_value(node, source);
         let requires_suspension = ordinary.is_none();
         let value = ordinary.or_else(|| values::suspended_operand(node, source))?;
         Some(Self {
@@ -221,6 +173,22 @@ impl ExpressionSites {
             BorrowedOperand::prepared(child, value)
         });
         Some((&cmp.ops, operands))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn replace_residual_input(&mut self, node: &ast::Expr, at: usize, value: ir::Expr) {
+        let Some(
+            Selection::Inputs(inputs)
+            | Selection::Mixed {
+                physical: Some(inputs),
+                ..
+            },
+        ) = self.selected.get_mut(&site(node))
+        else {
+            panic!("expected prepared mixed operands");
+        };
+        assert!(matches!(inputs.children[at], SourceOperand::Residual(_)));
+        inputs.children[at] = SourceOperand::Checked(value);
     }
 
     pub(crate) fn physical(&self, node: &ast::Expr) -> Option<&PhysicalInputs> {
@@ -437,10 +405,9 @@ impl PhysicalPreparation<'_, '_> {
                 operands
                     .into_iter()
                     .map(|child| (child, values::registered_value(child, source))),
-                false,
             )
         } else if let Some(index) = values::index_operands(node, source) {
-            self.inputs(node, index.value, index.inputs, index.split_slice)
+            self.inputs(node, index.value, index.inputs)
         } else if let Some(object) = source.object_operation(node) {
             let children = std::iter::once(object.target)
                 .chain(object.arguments())
@@ -455,7 +422,6 @@ impl PhysicalPreparation<'_, '_> {
                 children
                     .into_iter()
                     .map(|child| (child, values::registered_value(child, source))),
-                false,
             )
         } else {
             visitor::walk_expr(self, node);
@@ -478,19 +444,19 @@ impl PhysicalPreparation<'_, '_> {
         node: &ast::Expr,
         operation: ir::Expr,
         inputs: impl IntoIterator<Item = (&'a ast::Expr, Option<ir::Expr>)>,
-        split_slice: bool,
     ) -> Selection {
         let children = inputs
             .into_iter()
             .map(|(child, ordinary)| {
-                let checked = CheckedChild::from_ordinary(child, self.source, ordinary);
-                if checked
-                    .as_ref()
-                    .is_none_or(|value| value.requires_suspension)
-                {
-                    self.visit_expr(child);
+                if let Some(value) = ordinary {
+                    return SourceOperand::Checked(value);
                 }
-                checked
+                let suspended = values::suspended_operand(child, self.source);
+                self.visit_expr(child);
+                SourceOperand::Residual(ResidualInput {
+                    expression: Box::new(child.clone()),
+                    suspended,
+                })
             })
             .collect();
         Selection::Inputs(Box::new(PhysicalInputs {
@@ -501,7 +467,6 @@ impl PhysicalPreparation<'_, '_> {
                 self.source.private_names,
             ),
             children,
-            split_slice,
         }))
     }
 }

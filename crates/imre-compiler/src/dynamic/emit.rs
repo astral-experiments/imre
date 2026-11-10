@@ -1355,6 +1355,15 @@ mod tests {
         value
     }
 
+    fn replace_residual_input(prepared: &mut PreparedBody<'_, '_>, index: usize) {
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        prepared
+            .source
+            .statement_sites
+            .expressions
+            .replace_residual_input(value, index, crate::ir::Expr::none());
+    }
+
     #[test]
     fn a_class_keeps_the_annotation_body_prepared_from_its_declarations() {
         use crate::frontend::AnnotationValue;
@@ -2789,7 +2798,7 @@ mod tests {
             sites
                 .physical(value)
                 .unwrap()
-                .operands(value, false)
+                .operands(false)
                 .collect::<Vec<_>>()
                 .as_slice(),
             [Checked(_), Checked(_), Residual(_), Checked(_)]
@@ -2804,7 +2813,7 @@ mod tests {
             sites
                 .physical(read)
                 .unwrap()
-                .operands(read, false)
+                .operands(false)
                 .collect::<Vec<_>>()
                 .as_slice(),
             [Checked(_), Checked(_), Residual(_)]
@@ -2842,6 +2851,8 @@ mod tests {
             .as_mut()
             .unwrap();
         erase(&mut residual.as_call_expr_mut().unwrap().func);
+        assert_eq!(prepared.standalone().unwrap(), original);
+        replace_residual_input(&mut prepared, 2);
         assert_ne!(prepared.standalone().unwrap(), original);
     }
 
@@ -2885,7 +2896,7 @@ mod tests {
             .physical(value)
             .unwrap();
         assert!(matches!(
-            inputs.operands(value, false).collect::<Vec<_>>().as_slice(),
+            inputs.operands(false).collect::<Vec<_>>().as_slice(),
             [Residual(_), Checked(_)]
         ));
         let binary = value.as_bin_op_expr_mut().unwrap();
@@ -2896,6 +2907,8 @@ mod tests {
         let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let binary = value.as_bin_op_expr_mut().unwrap();
         erase(&mut binary.left.as_call_expr_mut().unwrap().func);
+        assert_eq!(prepared.standalone().unwrap(), original);
+        replace_residual_input(&mut prepared, 0);
         assert_ne!(prepared.standalone().unwrap(), original);
     }
 
@@ -2920,7 +2933,7 @@ mod tests {
             .expressions
             .physical(value)
             .unwrap();
-        let operands = inputs.operands(value, false).collect::<Vec<_>>();
+        let operands = inputs.operands(false).collect::<Vec<_>>();
         assert!(
             matches!(operands.as_slice(), [Checked(_), Checked(_), Residual(arg), Checked(_)]
             if arg.range() == value.as_call_expr().unwrap().arguments.keywords[0].value.range())
@@ -2946,6 +2959,8 @@ mod tests {
         let call = value.as_call_expr_mut().unwrap();
         let residual = &mut call.arguments.keywords[0].value;
         erase(&mut residual.as_call_expr_mut().unwrap().func);
+        assert_eq!(prepared.standalone().unwrap(), original);
+        replace_residual_input(&mut prepared, 2);
         assert_ne!(prepared.standalone().unwrap(), original);
     }
 
@@ -3025,9 +3040,15 @@ mod tests {
         let [crate::frontend::PhysicalOperand::Source(call)] = inputs.as_mut_slice() else {
             panic!("expected the residual call");
         };
-        // Keep the prepared call's argument slot and pass its lambda without invoking it.
+        let site = call.clone();
         let arg = &mut call.as_call_expr_mut().unwrap().arguments.args[0];
         *arg = (*arg.as_call_expr().unwrap().func).clone();
+        assert_eq!(prepared.standalone().unwrap(), original);
+        prepared.source.statement_sites.expressions.replace_residual_input(
+            &site,
+            1,
+            crate::ir::Expr::none(),
+        );
         assert_ne!(prepared.standalone().unwrap(), original);
     }
 
@@ -3112,7 +3133,14 @@ mod tests {
 
         let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let branch = value.as_if_expr_mut().unwrap();
+        let site = branch.orelse.clone();
         erase(&mut branch.orelse.as_call_expr_mut().unwrap().func);
+        assert_eq!(prepared.standalone().unwrap(), original);
+        prepared.source.statement_sites.expressions.replace_residual_input(
+            &site,
+            0,
+            crate::ir::Expr::none(),
+        );
         assert_ne!(prepared.standalone().unwrap(), original);
     }
 
@@ -4426,14 +4454,20 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             node_index: Default::default(),
         });
         assert_eq!(prepared.standalone().unwrap(), original);
-        let call = residual_value_mut(prepared.source.nested_bodies.get_mut(&child_start).unwrap())
-            .as_call_expr_mut()
-            .unwrap();
+        let value = residual_value_mut(prepared.source.nested_bodies.get_mut(&child_start).unwrap());
+        let site = value.clone();
+        let call = value.as_call_expr_mut().unwrap();
         let inner = call.arguments.args[0].as_call_expr_mut().unwrap();
         *inner.func = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
             range: inner.func.range(),
             node_index: Default::default(),
         });
+        assert_eq!(prepared.standalone().unwrap(), original);
+        prepared.source.statement_sites.expressions.replace_residual_input(
+            &site,
+            1,
+            crate::ir::Expr::none(),
+        );
         assert_ne!(prepared.standalone().unwrap(), original);
     }
 
@@ -4857,7 +4891,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let sites = &prepared.source.statement_sites.expressions;
         let inputs = sites.physical(value).unwrap();
-        let parts = inputs.operands(value, false).collect::<Vec<_>>();
+        let parts = inputs.operands(false).collect::<Vec<_>>();
         let call = value.as_call_expr().unwrap();
         let [Checked(_), Residual(first), Checked(_), Residual(dictionary)] = parts.as_slice() else {
             panic!("expected the nested call and dictionary to use their own operand plans");
@@ -4883,6 +4917,8 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             range: call.func.range(),
             node_index: Default::default(),
         });
+        assert_eq!(prepared.standalone().unwrap(), original);
+        replace_residual_input(&mut prepared, 1);
         assert_ne!(prepared.standalone().unwrap(), original);
     }
 
@@ -5401,7 +5437,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let inputs = sites.physical(value).unwrap();
         assert!(matches!(
-            inputs.operands(value, false).collect::<Vec<_>>().as_slice(),
+            inputs.operands(false).collect::<Vec<_>>().as_slice(),
             [
                 SourceOperand::Checked(_),
                 SourceOperand::Residual(_),
@@ -5424,6 +5460,8 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             range: callee.range(),
             node_index: Default::default(),
         });
+        assert_eq!(prepared.standalone().unwrap(), original);
+        replace_residual_input(&mut prepared, 2);
         assert_ne!(prepared.standalone().unwrap(), original);
     }
 }
