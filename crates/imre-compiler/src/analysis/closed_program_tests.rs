@@ -845,6 +845,44 @@ fn registered_generators_require_a_linked_source_body() {
 }
 
 #[test]
+fn captured_generator_keeps_its_source_requirement_through_a_helper() {
+    let project = tempdir().unwrap();
+    let provider = (
+        "producer".to_owned(),
+        project.path().join("producer.py"),
+        "def rows():\n    yield eval(input())\n".to_owned(),
+    );
+    fs::write(&provider.1, &provider.2).unwrap();
+    let check = |tail: &str| {
+        let entry = (
+            "__main__".to_owned(),
+            project.path().join("main.py"),
+            format!(
+                "from producer import rows\ndef run():\n    for row in rows(): print(row)\n{tail}\nrun()\n"
+            ),
+        );
+        fs::write(&entry.1, &entry.2).unwrap();
+        let mut main = RegisteredSource::new(&entry, true, None);
+        main.initial = true;
+        main.main_body = true;
+        super::check_registered_project(
+            project.path(),
+            &[],
+            [main, RegisteredSource::new(&provider, true, None)],
+            None,
+            None,
+            None,
+        )
+    };
+    let error = check("if False: globals()").unwrap_err();
+    assert!(
+        error.contains("producer.py:2:16") && error.contains("builtins.eval without a linked body"),
+        "{error}"
+    );
+    check("def safe(): yield 7\nglobals()['rows'] = safe").unwrap();
+}
+
+#[test]
 fn earlier_unlinked_source_precedes_a_later_initializer_argument() {
     let project = tempdir().unwrap();
     let main = project.path().join("main.py");
