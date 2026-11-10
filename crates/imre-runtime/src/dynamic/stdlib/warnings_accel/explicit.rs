@@ -286,7 +286,7 @@ fn raise_warning(ctx: &mut Context, category: Id, message: Id) -> Result<Id> {
     }
     let actual = ctx.exact_type(message)?;
     if ctx.direct_subclass(actual, base) && ctx.python_subclass_check(actual, category)? {
-        return ctx.op("raise", message, NONE, NONE);
+        return ctx.raise_normalized(message);
     }
     let args = if message == NONE {
         Vec::new()
@@ -307,7 +307,7 @@ fn raise_warning(ctx: &mut Context, category: Id, message: Id) -> Result<Id> {
         ))
     });
     match result {
-        Ok(exception) => ctx.op("raise", exception, NONE, NONE),
+        Ok(exception) => ctx.raise_normalized(exception),
         Err(error) => {
             let exception = ctx.raised_instance(error);
             ctx.heap.keep(exception);
