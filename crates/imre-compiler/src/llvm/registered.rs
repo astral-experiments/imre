@@ -3,7 +3,7 @@
 mod abi;
 pub(crate) mod context;
 mod frame;
-pub(crate) mod handlers;
+mod handlers;
 pub(crate) mod patterns;
 mod sequences;
 pub(crate) mod sites;

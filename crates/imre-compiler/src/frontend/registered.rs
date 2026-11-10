@@ -1014,8 +1014,6 @@ pub(crate) enum SourceEffect {
     Region(Box<PreparedRegion>),
     /// Patterns, guards and case suites belong to the same evaluation of the subject.
     Match(TextRange, Box<patterns::SourceMatch>),
-    /// Exception matchers and all control-flow children belong to this protected region.
-    Try(Box<PreparedTry>),
     /// A loop whose checked lowering left one or more physical inputs or suites.
     For(Box<PreparedFor>),
 }
@@ -1037,6 +1035,19 @@ pub(crate) struct PreparedRegion {
 }
 
 impl PreparedRegion {
+    pub(crate) fn child_suite(&self, body: &[Statement]) -> Option<&RegisteredSuite> {
+        let [
+            Statement::Expr(Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredSuite(index), _),
+                ..
+            }),
+        ] = body
+        else {
+            return None;
+        };
+        Some(&self.suites[*index])
+    }
+
     fn new(checked: RegisteredFunction) -> Self {
         Self {
             checked,
@@ -1113,21 +1124,6 @@ pub(crate) struct StatementSites {
     pub(crate) expressions: booleans::ExpressionSites,
     omit_assertions: bool,
     pub(crate) contexts: HashMap<TextRange, Vec<ir::ContextSite>>,
-}
-
-pub(crate) struct PreparedTry {
-    pub(crate) range: TextRange,
-    pub(crate) is_star: bool,
-    pub(crate) body: RegisteredSuite,
-    pub(crate) handlers: Vec<PreparedHandler>,
-    pub(crate) otherwise: RegisteredSuite,
-    pub(crate) finalbody: Option<RegisteredSuite>,
-}
-
-pub(crate) struct PreparedHandler {
-    pub(crate) matcher: Option<(TextRange, PhysicalOperand)>,
-    pub(crate) name: Option<String>,
-    pub(crate) body: RegisteredSuite,
 }
 
 fn for_pull(loop_: &ast::StmtFor) -> Option<ir::AsyncPull> {
@@ -1375,34 +1371,38 @@ impl<'a> SuitePreparation<'a> {
             }
             offset = run.at;
             let preceding = self.refusal.take();
-            let effect =
-                match run.effect {
-                    PendingEffect::Prepared(effect) => Ok(effect),
-                    PendingEffect::Refused(refusal) => Err(refusal),
-                    PendingEffect::Source(stmt) => {
-                        match stmt {
-                            ast::Stmt::If(branch) => {
-                                Ok(self.prepare_if(branch, kind, child_selection, suspended))
-                            }
-                            ast::Stmt::While(loop_) => {
-                                Ok(self.prepare_while(loop_, kind, child_selection, suspended))
-                            }
-                            ast::Stmt::For(loop_) => Ok(SourceEffect::For(Box::new(
-                                self.prepare_for(loop_, kind, child_selection, suspended),
-                            ))),
-                            ast::Stmt::Try(protected) => Ok(SourceEffect::Try(Box::new(
-                                self.prepare_try(protected, kind, child_selection, suspended),
-                            ))),
-                            ast::Stmt::With(with) => {
-                                Ok(self.prepare_context(with, kind, child_selection, suspended))
-                            }
-                            ast::Stmt::Match(branch) => self
-                                .prepare_match(branch, kind, suspended)
-                                .map(|site| SourceEffect::Match(branch.range(), Box::new(site))),
-                            _ => Err((stmt.range(), "cannot compile this statement ahead of time")),
-                        }
+            let effect = match run.effect {
+                PendingEffect::Prepared(effect) => Ok(effect),
+                PendingEffect::Refused(refusal) => Err(refusal),
+                PendingEffect::Source(stmt) => match stmt {
+                    ast::Stmt::If(branch) => {
+                        Ok(self.prepare_if(branch, kind, child_selection, suspended))
                     }
-                };
+                    ast::Stmt::While(loop_) => {
+                        Ok(self.prepare_while(loop_, kind, child_selection, suspended))
+                    }
+                    ast::Stmt::For(loop_) => Ok(SourceEffect::For(Box::new(self.prepare_for(
+                        loop_,
+                        kind,
+                        child_selection,
+                        suspended,
+                    )))),
+                    ast::Stmt::Try(protected) => Ok(self.prepare_try(
+                        protected,
+                        checkpoint(stmt),
+                        kind,
+                        child_selection,
+                        suspended,
+                    )),
+                    ast::Stmt::With(with) => {
+                        Ok(self.prepare_context(with, kind, child_selection, suspended))
+                    }
+                    ast::Stmt::Match(branch) => self
+                        .prepare_match(branch, kind, suspended)
+                        .map(|site| SourceEffect::Match(branch.range(), Box::new(site))),
+                    _ => Err((stmt.range(), "cannot compile this statement ahead of time")),
+                },
+            };
             let selected = match &effect {
                 Err(refusal) => Some(*refusal),
                 Ok(SourceEffect::Value(_, inputs)) => {
@@ -1424,14 +1424,6 @@ impl<'a> SuitePreparation<'a> {
                 Ok(SourceEffect::Value(statement, _)) => !matches!(
                     statement.as_ref(),
                     Statement::Return(_) | Statement::Raise(_)
-                ),
-                Ok(SourceEffect::Try(region)) => try_continues(
-                    region.body.falls_through,
-                    !region.handlers.is_empty(),
-                    region
-                        .finalbody
-                        .as_ref()
-                        .is_none_or(|suite| suite.falls_through),
                 ),
                 Ok(SourceEffect::Region(region)) => !region.terminates,
                 _ => true,
@@ -1613,49 +1605,67 @@ impl<'a> SuitePreparation<'a> {
     fn prepare_try(
         &mut self,
         stmt: &ast::StmtTry,
+        checkpoint: Statement,
         kind: RegisteredScope,
         selection: SuiteSelection,
         suspended: bool,
-    ) -> PreparedTry {
-        // Check and build report the first refusal from the body, entered else
-        // suite, handlers and finally suite in preparation order.
+    ) -> SourceEffect {
+        let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
+        let names: Vec<_> = stmt
+            .handlers
+            .iter()
+            .map(|ast::ExceptHandler::ExceptHandler(handler)| {
+                handler.name.as_ref().map(|name| scope.slot(name.as_str()))
+            })
+            .collect();
+        let mut region = PreparedRegion::new(scope.finish(vec![checkpoint]));
+
+        // Preserve the first refusal from the body, entered else, handlers and finally.
         let body = self.physical_suite(&stmt.body, kind, selection, suspended);
-        // A skipped else still owns its lexical sites for module annotation placement.
         let otherwise = self.selected_suite(&stmt.orelse, kind, selection, selection, suspended);
         if body.falls_through {
             self.refusal = self.refusal.or(otherwise.refusal);
         }
-        let handlers = stmt
-            .handlers
-            .iter()
-            .map(|ast::ExceptHandler::ExceptHandler(handler)| {
-                let matcher = handler.type_.as_deref().map(|class| {
-                    let range = if stmt.is_star {
-                        handler.range()
-                    } else {
-                        class.range()
-                    };
-                    (
-                        range,
-                        self.physical_operand(class, kind, selection, suspended),
-                    )
-                });
-                PreparedHandler {
-                    matcher,
-                    name: handler.name.as_ref().map(|name| name.as_str().to_owned()),
-                    body: self.physical_suite(&handler.body, kind, selection, suspended),
-                }
-            })
-            .collect();
-        PreparedTry {
-            range: stmt.range(),
-            is_star: stmt.is_star,
+        let body_continues = body.falls_through;
+        let body = region.child(body);
+        let orelse = region.child(otherwise);
+        let mut handlers = Vec::with_capacity(stmt.handlers.len());
+        for (ast::ExceptHandler::ExceptHandler(handler), name) in stmt.handlers.iter().zip(names) {
+            let matcher = exception_matcher(
+                stmt.is_star,
+                handler.range(),
+                handler.type_.as_deref(),
+                |class, site| {
+                    let operand = self.physical_operand(class, kind, selection, suspended);
+                    Some(values::located(
+                        site,
+                        class.start(),
+                        region.operand(operand, Type::PythonObject),
+                    ))
+                },
+            )
+            .expect("prepared exception matcher");
+            handlers.push(ir::ExceptHandler {
+                matcher,
+                name,
+                body: region.child(self.physical_suite(&handler.body, kind, selection, suspended)),
+            });
+        }
+        let (finalbody, final_continues) = if stmt.finalbody.is_empty() {
+            (Vec::new(), true)
+        } else {
+            let suite = self.physical_suite(&stmt.finalbody, kind, selection, suspended);
+            let continues = suite.falls_through;
+            (region.child(suite), continues)
+        };
+        region.terminates = !try_continues(body_continues, !handlers.is_empty(), final_continues);
+        region.checked.function.body.push(Statement::Try {
             body,
             handlers,
-            otherwise,
-            finalbody: (!stmt.finalbody.is_empty())
-                .then(|| self.physical_suite(&stmt.finalbody, kind, selection, suspended)),
-        }
+            orelse,
+            finalbody,
+        });
+        SourceEffect::Region(Box::new(region))
     }
 
     fn prepare_context(
@@ -2117,6 +2127,24 @@ impl<'a> SuitePreparation<'a> {
     }
 }
 
+fn exception_matcher(
+    is_star: bool,
+    handler: TextRange,
+    class: Option<&ast::Expr>,
+    operand: impl FnOnce(&ast::Expr, TextRange) -> Option<Expr>,
+) -> Option<ir::ExceptionMatcher> {
+    let Some(class) = class else {
+        return Some(ir::ExceptionMatcher::Categories(Vec::new()));
+    };
+    let site = if is_star { handler } else { class.range() };
+    let operand = Box::new(operand(class, site)?);
+    Some(if is_star {
+        ir::ExceptionMatcher::Subgroup(site, operand)
+    } else {
+        ir::ExceptionMatcher::Object(site, operand)
+    })
+}
+
 /// Registered handler dispatch places a join after all arms, including the exceptional
 /// entry. A terminating final suite closes that edge as well as the body's normal edge.
 fn try_continues(body: bool, has_handlers: bool, finalbody: bool) -> bool {
@@ -2433,17 +2461,13 @@ impl statements::StatementLowering for SourceScope<'_> {
                 let (body, body_continues) = self.block(&region.body)?;
                 let mut handlers = Vec::with_capacity(region.handlers.len());
                 for ast::ExceptHandler::ExceptHandler(handler) in &region.handlers {
-                    let matcher = match handler.type_.as_deref() {
-                        None => ir::ExceptionMatcher::Categories(Vec::new()),
-                        Some(class) => {
-                            let operand = Box::new(self.frame_value(class).ok_or(())?);
-                            if region.is_star {
-                                ir::ExceptionMatcher::Subgroup(handler.range(), operand)
-                            } else {
-                                ir::ExceptionMatcher::Object(class.range(), operand)
-                            }
-                        }
-                    };
+                    let matcher = exception_matcher(
+                        region.is_star,
+                        handler.range(),
+                        handler.type_.as_deref(),
+                        |class, _| self.frame_value(class),
+                    )
+                    .ok_or(())?;
                     handlers.push(ir::ExceptHandler {
                         matcher,
                         name: handler.name.as_ref().map(|name| self.slot(name.as_str())),

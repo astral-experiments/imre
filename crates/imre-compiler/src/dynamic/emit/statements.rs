@@ -58,11 +58,6 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                 self.simple_call = None;
                 self.prepared_match(site);
             }
-            SourceEffect::Try(region) => {
-                self.checkpoint(&region.range);
-                self.simple_call = None;
-                self.prepared_try(region);
-            }
             SourceEffect::For(region) => self.prepared_for(region),
             SourceEffect::Region(region) => {
                 crate::llvm::registered::Frame::emit_region(self, region)
@@ -517,33 +512,5 @@ impl<'p> Function<'_, 'p> {
                 }
             }),
         );
-    }
-
-    fn protected_suite(&mut self, region: &'p crate::frontend::PreparedTry) {
-        crate::llvm::registered::handlers::protected(
-            self,
-            &region.body,
-            &region.handlers,
-            &region.otherwise,
-            region.is_star,
-            |code, handler| {
-                let class = handler.matcher.as_ref().map(|(range, input)| {
-                    code.checkpoint(range);
-                    code.physical_operand(input)
-                });
-                (class, handler.name.as_deref(), &handler.body)
-            },
-            |code, body| emit_prepared_suite(code, body),
-        );
-    }
-
-    fn prepared_try(&mut self, region: &'p crate::frontend::PreparedTry) {
-        let Some(suite) = &region.finalbody else {
-            self.protected_suite(region);
-            return;
-        };
-        crate::llvm::registered::handlers::finalized(self, Finally::Prepared(suite), |code| {
-            code.protected_suite(region)
-        });
     }
 }

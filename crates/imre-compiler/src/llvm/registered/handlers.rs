@@ -28,7 +28,7 @@ impl RegisteredFrame<'_, '_> {
 }
 
 /// Install the prepared suite for abrupt exits and emit it on the normal and error edges.
-pub(crate) fn finalized<'a, 'p, E: RegionEmitter<'a, 'p>>(
+fn finalized<'a, 'p, E: RegionEmitter<'a, 'p>>(
     code: &mut E,
     body: Finally<'p>,
     protected: impl FnOnce(&mut E),
@@ -124,7 +124,7 @@ fn arm<'a, 'p, E: RegionEmitter<'a, 'p>, S, N: AsRef<str>>(
 }
 
 /// Run else outside the protected body, then dispatch the pending exception.
-pub(crate) fn protected<'a, 'p, 'h, E, H, S, N>(
+fn protected<'a, 'p, 'h, E, H, S, N>(
     code: &mut E,
     body: S,
     handlers: &'h [H],
@@ -268,7 +268,14 @@ pub(super) fn supported(handlers: &[ExceptHandler], finalbody: &[Statement]) -> 
         })
 }
 
-impl Frame<'_, '_, '_> {
+impl<'p> Frame<'_, '_, 'p> {
+    fn prepared_child(&self, body: &[Statement]) -> Option<&'p crate::frontend::RegisteredSuite> {
+        let super::FrameInputs::Region(region) = self.inputs else {
+            return None;
+        };
+        region.child_suite(body)
+    }
+
     pub(in crate::llvm) fn try_region(
         &mut self,
         body: &[Statement],
@@ -301,14 +308,28 @@ impl Frame<'_, '_, '_> {
                         .map(|slot| names.expect("registered scope")[&slot].name.as_str());
                     (class, name, handler.body.as_slice())
                 },
-                |f, body| f.emit_suite(body),
+                |f, body| {
+                    // Module providers retain annotation sites even in an unentered else.
+                    if f.body.terminated
+                        && let Some(child) = f.prepared_child(body)
+                    {
+                        super::emit_prepared_suite(f.code.prepared_owner(), child);
+                    } else {
+                        f.emit_suite(body);
+                    }
+                },
             );
         };
         if finalbody.is_empty() {
             run(self);
             return;
         }
-        finalized(self, Finally::Checked(finalbody.into()), run);
+        // A child can transfer from another prepared scope. Resolve the owned
+        // final suite here, before that child changes the active inputs.
+        let cleanup = self
+            .prepared_child(finalbody)
+            .map_or_else(|| Finally::Checked(finalbody.into()), Finally::Prepared);
+        finalized(self, cleanup, run);
     }
 
     pub(crate) fn emit_suite(&mut self, suite: &[Statement]) {
