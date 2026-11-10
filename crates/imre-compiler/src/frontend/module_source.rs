@@ -5,7 +5,7 @@ use std::path::Path;
 
 use ruff_python_ast as ast;
 use ruff_python_parser::Parsed;
-use ruff_text_size::TextRange;
+use ruff_text_size::{TextRange, TextSize};
 
 /// Text and syntax in the same coordinate system. Discovery normalizes physical newlines.
 pub(crate) struct ParsedModule<'a> {
@@ -70,25 +70,57 @@ impl<'a> ParsedModule<'a> {
     }
 }
 
-/// Registered operands use one-based byte columns for both ends of their diagnostic.
+/// The source bytes and line starts used to report locations in a compilation unit.
+pub(crate) struct SourceFile<'a> {
+    path: &'a Path,
+    pub(crate) text: &'a str,
+    newlines: Vec<usize>,
+}
+
+impl<'a> SourceFile<'a> {
+    pub(crate) fn new(path: &'a Path, text: &'a str) -> Self {
+        Self {
+            path,
+            text,
+            newlines: text.match_indices('\n').map(|(offset, _)| offset).collect(),
+        }
+    }
+
+    pub(crate) fn line(&self, offset: TextSize) -> usize {
+        self.newlines.partition_point(|&n| n < usize::from(offset)) + 1
+    }
+
+    pub(crate) fn line_and_column(&self, offset: TextSize) -> (usize, usize) {
+        let line = self.line(offset);
+        let start = if line == 1 {
+            0
+        } else {
+            self.newlines[line - 2] + 1
+        };
+        (line, usize::from(offset) - start)
+    }
+
+    /// Registered operands use one-based byte columns for both ends of a diagnostic.
+    pub(crate) fn diagnostic_at(&self, range: TextRange, reason: &str) -> String {
+        let (first_line, first_column) = self.line_and_column(range.start());
+        let (last_line, last_column) = self.line_and_column(range.end());
+        format!(
+            "{}:{first_line}:{}: {reason} (through {last_line}:{})",
+            self.path.display(),
+            first_column + 1,
+            last_column + 1
+        )
+    }
+}
+
+/// Report a failure before a code-generation frame needs a line index.
 pub(crate) fn operand_diagnostic(
     path: &Path,
     source: &str,
     range: TextRange,
     reason: &str,
 ) -> String {
-    let position = |offset: ruff_text_size::TextSize| {
-        let prefix = &source[..usize::from(offset)];
-        let line = prefix.bytes().filter(|&byte| byte == b'\n').count() + 1;
-        let column = prefix.rsplit('\n').next().unwrap_or_default().len() + 1;
-        (line, column)
-    };
-    let (line, col) = position(range.start());
-    let (end_line, end_col) = position(range.end());
-    format!(
-        "{}:{line}:{col}: {reason} (through {end_line}:{end_col})",
-        path.display()
-    )
+    SourceFile::new(path, source).diagnostic_at(range, reason)
 }
 
 /// Check syntax and prepare the literal escapes that this module can emit.

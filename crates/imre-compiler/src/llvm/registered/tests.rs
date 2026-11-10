@@ -1,7 +1,22 @@
 use super::CheckedSites;
 use super::{Output, RegisteredFrame, SourcePositions};
 use crate::modules::SourceGraph;
-use ruff_text_size::TextSize;
+use ruff_text_size::{TextRange, TextSize};
+use std::path::Path;
+
+#[test]
+fn frame_diagnostics_use_the_original_path_and_byte_columns() {
+    let mut output = Output::default();
+    let file = output.data(b"<frozen sample>");
+    let positions = SourcePositions::new(Path::new("sample.py"), "α = value\né + operand\n", &file);
+    let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
+    frame.refuse_at(TextRange::new(5.into(), 23.into()), "first error");
+    frame.refuse_at(TextRange::default(), "later error");
+    assert_eq!(
+        frame.output.diagnostic.as_deref(),
+        Some("sample.py:1:6: first error (through 2:13)")
+    );
+}
 
 fn emit_captured_body(source: &str) -> Output {
     let graph = SourceGraph::single(source).unwrap();
@@ -14,7 +29,7 @@ fn emit_captured_body(source: &str) -> Output {
 fn emit_registered_body(source: &str, function: &crate::frontend::RegisteredFunction) -> Output {
     let mut output = Output::default();
     let file = output.data(b"app.py");
-    let positions = SourcePositions::new(source, &file);
+    let positions = SourcePositions::new(Path::new("app.py"), source, &file);
     let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
     RegisteredFrame::checked_body(&mut frame, function, &CheckedSites::default());
     frame.finish_callable(None);
@@ -276,7 +291,7 @@ fn placed_multiplication_keeps_the_exact_integer_guard_and_python_protocol() {
         let placed = crate::frontend::place_fixed_function(function, frame);
         let mut output = Output::default();
         let file = output.data(b"product.py");
-        let positions = SourcePositions::new(&source, &file);
+        let positions = SourcePositions::new(Path::new("product.py"), &source, &file);
         let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
         frame.checked_body(&placed, &CheckedSites::default());
         frame.finish_callable(None);
@@ -317,7 +332,7 @@ fn captured_unpack_roots_its_private_slot_in_the_function_frame() {
 fn checkpoints_preserve_the_selected_roots_of_nested_regions() {
     let mut output = Output::default();
     let file = output.data(b"nested.py");
-    let positions = SourcePositions::new("", &file);
+    let positions = SourcePositions::new(Path::new("nested.py"), "", &file);
     let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
     frame.live_slots = vec![2, 3];
     frame.checkpoint(Default::default());
@@ -343,7 +358,7 @@ fn checkpoints_preserve_the_selected_roots_of_nested_regions() {
 fn checkpoint_batches_active_slots_after_the_register_prefix() {
     let mut output = Output::default();
     let file = output.data(b"nested.py");
-    let positions = SourcePositions::new("", &file);
+    let positions = SourcePositions::new(Path::new("nested.py"), "", &file);
     let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
     frame.live.push("%exception".into());
     frame.live_slots = vec![0, 1, 4, 5, 6];
@@ -373,7 +388,7 @@ fn checked_assertion_message_and_raise_use_the_failure_edge() {
 
     let mut output = Output::default();
     let file = output.data(b"app.py");
-    let positions = SourcePositions::new("assert (\nFalse), message", &file);
+    let positions = SourcePositions::new(Path::new("app.py"), "assert (\nFalse), message", &file);
     let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
     frame.body.error_target = "caught".into();
 
@@ -444,7 +459,11 @@ fn async_pull_parks_the_iterator_returned_by_the_protocol_once() {
 
     let mut output = Output::default();
     let file = output.data(b"stream.py");
-    let source = SourcePositions::new("async for item in stream:\n    pass", &file);
+    let source = SourcePositions::new(
+        Path::new("stream.py"),
+        "async for item in stream:\n    pass",
+        &file,
+    );
     let mut frame = RegisteredFrame::new(&mut output, &source, true, 0, 0.into());
     frame.body.error_target = "outer".into();
     let pull = AsyncPull {
@@ -475,7 +494,7 @@ fn async_pull_parks_the_iterator_returned_by_the_protocol_once() {
 fn inner_handler_preserves_the_enclosing_cursor_slot() {
     let mut output = Output::default();
     let file = output.data(b"stream.py");
-    let positions = SourcePositions::new("", &file);
+    let positions = SourcePositions::new(Path::new("stream.py"), "", &file);
     let mut code = RegisteredFrame::new(&mut output, &positions, true, 0, 0.into());
     let sites = CheckedSites::default();
     let mut frame = super::Frame::for_expression(&mut code, &sites);

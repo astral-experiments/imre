@@ -630,7 +630,7 @@ impl<'a> PreparedBody<'a> {
             }
             _ => file.to_owned(),
         };
-        let positions = SourcePositions::new(&self.source.text, &code_file);
+        let positions = SourcePositions::new(self.source.path, &self.source.text, &code_file);
         let mut frame =
             RegisteredFrame::new(output, &positions, false, unit, self.source.module_start);
         let initializer = self.initializer();
@@ -874,17 +874,6 @@ impl SourceMap<'_> {
         }
     }
 
-    fn diagnostic_at(&self, range: TextRange, reason: &str) -> String {
-        let (line, col) = self.positions.line_and_column(range.start());
-        let (end_line, end_col) = self.positions.line_and_column(range.end());
-        format!(
-            "{}:{line}:{}: {reason} (through {end_line}:{})",
-            self.path.display(),
-            col + 1,
-            end_col + 1
-        )
-    }
-
     fn emit_checked_body<'a, 'p>(
         &'p self,
         mut frame: RegisteredFrame<'a, 'p>,
@@ -992,10 +981,7 @@ impl SourceMap<'_> {
                         in_function,
                     ),
                     Err((range, reason)) => {
-                        frame
-                            .output
-                            .diagnostic
-                            .get_or_insert_with(|| self.diagnostic_at(*range, reason));
+                        frame.refuse_at(*range, reason);
                         frame
                     }
                 }

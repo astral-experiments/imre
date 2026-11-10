@@ -81,7 +81,7 @@ fn template_children_use_their_eager_bindings_after_source_is_dropped() {
 
     let mut output = Output::default();
     let file = output.data(b"lexical.py");
-    let positions = SourcePositions::new("", &file);
+    let positions = SourcePositions::new(std::path::Path::new("lexical.py"), "", &file);
     let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
     frame.prepared_operand(&operand, &CheckedSites::default(), false);
     frame.finish_callable(None);

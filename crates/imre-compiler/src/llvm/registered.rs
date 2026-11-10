@@ -286,7 +286,6 @@ pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
         &mut self,
         effect: &'p crate::frontend::SourceEffect,
     ) -> Option<(&'p Statement, &'p [crate::frontend::PhysicalOperand])>;
-    fn refuse_at(&mut self, range: ruff_text_size::TextRange, reason: &str);
 }
 
 /// Evaluate an operand in its lexical activation, with the same demand used by

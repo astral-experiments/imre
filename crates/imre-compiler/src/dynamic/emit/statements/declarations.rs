@@ -86,7 +86,7 @@ impl CallableSites<'_, '_> {
             info: &body.scope,
             callable_code: Default::default(),
             unit: self.source.unit,
-            positions: &super::super::SourcePositions::new(text, &file),
+            positions: &super::super::SourcePositions::new(body.scope.path, text, &file),
         };
         let code = location.code(
             self.output,
@@ -303,7 +303,7 @@ impl CallableSites<'_, '_> {
             let mut fields = Vec::with_capacity(parameter.fields.len());
             for (field, provider) in &parameter.fields {
                 let body = provider.body.as_ref().ok_or_else(|| {
-                    self.source.diagnostic_at(
+                    self.source.positions.diagnostic_at(
                         provider.range,
                         "type parameter evaluator has no checked expression operand",
                     )
@@ -465,6 +465,7 @@ impl CallableSites<'_, '_> {
             Err(range) => {
                 self.output.diagnostic.get_or_insert_with(|| {
                     self.source
+                        .positions
                         .diagnostic_at(*range, "type alias value has no checked expression operand")
                 });
                 None
@@ -509,7 +510,7 @@ mod tests {
             info: &module.source,
             callable_code: Default::default(),
             unit: 0,
-            positions: &SourcePositions::new(text, &file),
+            positions: &SourcePositions::new(module.source.path, text, &file),
         };
         let mut frame = RegisteredFrame::new(
             &mut output,
@@ -589,7 +590,7 @@ mod tests {
                 info: &module.source,
                 callable_code: Default::default(),
                 unit: 0,
-                positions: &SourcePositions::new(&text, &file),
+                positions: &SourcePositions::new(module.source.path, &text, &file),
             };
             let mut frame = RegisteredFrame::new(
                 &mut output,
@@ -739,7 +740,11 @@ mod tests {
             let range = parameter.range;
             let outcome = module.standalone();
             if reachable {
-                let positions = crate::dynamic::emit::SourcePositions::new(&source, "stream.py");
+                let positions = crate::dynamic::emit::SourcePositions::new(
+                    module.source.path,
+                    &source,
+                    "stream.py",
+                );
                 let (line, col) = positions.line_and_column(range.start());
                 let (end_line, end_col) = positions.line_and_column(range.end());
                 assert_eq!(

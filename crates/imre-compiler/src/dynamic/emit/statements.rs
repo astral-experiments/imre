@@ -74,13 +74,6 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         }
         None
     }
-
-    fn refuse_at(&mut self, range: ruff_text_size::TextRange, reason: &str) {
-        self.frame
-            .output
-            .diagnostic
-            .get_or_insert_with(|| self.source.diagnostic_at(range, reason));
-    }
 }
 
 impl<'a, 'p> RegionEmitter<'a, 'p> for Function<'a, 'p> {

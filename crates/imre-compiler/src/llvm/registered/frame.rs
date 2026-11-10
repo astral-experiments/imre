@@ -6,6 +6,7 @@ use super::{
 };
 use super::{ReadKey, suspension::Suspension};
 use crate::frontend::function_scope::ClassBindings;
+use crate::frontend::module_source::SourceFile;
 use crate::frontend::push_codepoints;
 use crate::ir;
 use crate::ir::{Builtin, Constant, DisplayKind, Expr};
@@ -15,35 +16,28 @@ use indexmap::IndexSet;
 use ruff_text_size::{TextRange, TextSize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
+use std::path::Path;
 
-/// Source bytes and byte offsets shared by both forms of registered body.
+/// Python's emitted filename may differ from the source path used in build diagnostics.
 pub(crate) struct SourcePositions<'a> {
-    pub(crate) text: &'a str,
+    source: SourceFile<'a>,
     pub(crate) file: &'a str,
-    newlines: Vec<usize>,
 }
 
 impl<'a> SourcePositions<'a> {
-    pub(crate) fn new(text: &'a str, file: &'a str) -> Self {
+    pub(crate) fn new(path: &'a Path, text: &'a str, file: &'a str) -> Self {
         Self {
-            text,
+            source: SourceFile::new(path, text),
             file,
-            newlines: text.match_indices('\n').map(|(offset, _)| offset).collect(),
         }
     }
+}
 
-    pub(crate) fn line(&self, offset: TextSize) -> usize {
-        self.newlines.partition_point(|&n| n < usize::from(offset)) + 1
-    }
+impl<'a> std::ops::Deref for SourcePositions<'a> {
+    type Target = SourceFile<'a>;
 
-    pub(crate) fn line_and_column(&self, offset: TextSize) -> (usize, usize) {
-        let line = self.line(offset);
-        let start = if line == 1 {
-            0
-        } else {
-            self.newlines[line - 2] + 1
-        };
-        (line, usize::from(offset) - start)
+    fn deref(&self) -> &Self::Target {
+        &self.source
     }
 }
 
@@ -166,6 +160,12 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             position: SourcePosition::statement(0),
             native_suspension,
         }
+    }
+
+    pub(crate) fn refuse_at(&mut self, range: TextRange, reason: &str) {
+        self.output
+            .diagnostic
+            .get_or_insert_with(|| self.positions.diagnostic_at(range, reason));
     }
 
     pub(crate) fn begin_module(
