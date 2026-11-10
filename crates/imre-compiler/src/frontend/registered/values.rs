@@ -714,7 +714,7 @@ pub(super) fn checked_binding(
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum Region {
+pub(in crate::frontend) enum Region {
     /// Residual expressions encounter a prepared lambda binding at the source site.
     Residual,
     SuspendedOperand,
@@ -724,7 +724,11 @@ pub(super) enum Region {
 }
 
 impl Region {
-    pub(super) fn operand(self, node: &ast::Expr, source: RegisteredSource<'_>) -> Option<Expr> {
+    pub(in crate::frontend) fn operand(
+        self,
+        node: &ast::Expr,
+        source: RegisteredSource<'_>,
+    ) -> Option<Expr> {
         if node.is_slice_expr() {
             return index_key(node, &mut |child| self.operand(child, source).ok_or(())).ok();
         }

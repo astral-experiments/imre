@@ -1,6 +1,7 @@
 //! Resolve declaration and annotation code sites before emitting the checked block.
-use super::super::sites::{CheckedSites, CompiledAlias, CompiledDefinition, Declaration};
+use super::super::sites::{AnnotationString, CompiledAlias, CompiledDefinition, Declaration};
 use super::super::{AliasValue, Body, DefinitionName, DefinitionSite, Entry, Function};
+use crate::frontend::{AnnotationCode, PreparedAnnotation};
 use crate::ir::{self, Builtin, Expr, ExprKind, Statement};
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextSize};
@@ -19,80 +20,83 @@ impl<'s> Body<'s> {
 }
 
 impl Function<'_, '_> {
-    /// Compile each source-local child once. Repeated markers can bind the same
-    /// entry on independent execution paths through a module's annotation provider.
-    pub(in crate::dynamic::emit) fn prepare_annotation_children(
+    pub(in crate::dynamic::emit) fn place_annotation_string(
         &mut self,
-        entries: &[&crate::frontend::DeferredModuleAnnotation],
+        site: ruff_text_size::TextSize,
     ) {
-        for entry in entries {
-            let crate::frontend::AnnotationValue::Bound(child) = &entry.value else {
-                continue;
-            };
-            if self.frame.annotation_children.contains_key(&child.id) {
-                continue;
-            }
-            let file = self.frame.output.data(b"<string>");
-            let positions = super::super::SourcePositions::new(&child.text, &file);
-            let mut frame = super::super::RegisteredFrame::new(
-                self.frame.output,
-                &positions,
-                false,
-                self.source.unit,
-                TextSize::default(),
-            );
-            super::super::RegisteredFrame::checked_body(
-                &mut frame,
-                &child.body,
-                &CheckedSites::default(),
-            );
-            let code = frame.finish(false);
-            self.frame.annotation_children.insert(child.id, code);
+        let Some(PreparedAnnotation::String { text, body }) =
+            self.source.annotation_operands.get(&site)
+        else {
+            return;
+        };
+        if self.sites.annotation_strings.contains_key(&site) {
+            return;
         }
+        let code = body.as_ref().and_then(|body| {
+            let unit = self.source.unit;
+            let file = self.frame.output.data(b"<string>");
+            let location = super::super::SourceMap {
+                info: &body.scope,
+                lambda_code: Default::default(),
+                definitions: None,
+                unit,
+                positions: super::super::SourcePositions::new(text, &file),
+            };
+            match &body.code {
+                AnnotationCode::Checked(function) => Some(location.code(
+                    self.frame.output,
+                    String::new(),
+                    Body::CheckedExpression(function),
+                    false,
+                    None,
+                )),
+                AnnotationCode::Residual(expr) => self.frame.output.try_native_body(|output| {
+                    location.code(output, String::new(), Body::Expression(expr), false, None)
+                }),
+            }
+        });
+        self.sites.annotation_strings.insert(
+            site,
+            AnnotationString {
+                text: text.clone(),
+                code,
+            },
+        );
     }
 
-    pub(in crate::dynamic::emit) fn prepare_checked_value(&mut self, value: &Expr) -> CheckedSites {
-        let mut sites = CheckedSites::default();
-        ir::walk_operand_expressions(value, &mut |expr| self.prepare_site(expr, &mut sites));
-        sites
+    pub(in crate::dynamic::emit) fn prepare_checked_value(&mut self, value: &Expr) {
+        ir::walk_operand_expressions(value, &mut |expr| self.prepare_site(expr));
     }
 
-    pub(in crate::dynamic::emit) fn prepare_checked_sites(
-        &mut self,
-        statements: &[Statement],
-    ) -> CheckedSites {
-        let mut sites = CheckedSites::default();
-        self.prepare_declarations(statements, &mut sites);
-        sites
+    pub(in crate::dynamic::emit) fn prepare_checked_sites(&mut self, statements: &[Statement]) {
+        self.prepare_declarations(statements);
     }
 
     /// A block stops emitting after a transfer. Unreachable declaration bodies must
     /// not compile (or raise diagnostics) merely because their identity is in the IR.
-    fn prepare_declarations(&mut self, statements: &[Statement], sites: &mut CheckedSites) -> bool {
+    fn prepare_declarations(&mut self, statements: &[Statement]) -> bool {
         for stmt in statements {
             match stmt {
                 Statement::If(test, yes, no) => {
-                    ir::walk_operand_expressions(test, &mut |e| self.prepare_site(e, sites));
-                    let yes_continues = self.prepare_declarations(yes, sites);
-                    let no_continues = self.prepare_declarations(no, sites);
+                    ir::walk_operand_expressions(test, &mut |e| self.prepare_site(e));
+                    let yes_continues = self.prepare_declarations(yes);
+                    let no_continues = self.prepare_declarations(no);
                     if !yes_continues && !no_continues {
                         return false;
                     }
                 }
                 Statement::While(test, body, otherwise) => {
-                    ir::walk_operand_expressions(test, &mut |e| self.prepare_site(e, sites));
-                    self.prepare_declarations(body, sites);
-                    self.prepare_declarations(otherwise, sites);
+                    ir::walk_operand_expressions(test, &mut |e| self.prepare_site(e));
+                    self.prepare_declarations(body);
+                    self.prepare_declarations(otherwise);
                 }
                 Statement::Scope { body, .. } => {
-                    if !self.prepare_declarations(body, sites) {
+                    if !self.prepare_declarations(body) {
                         return false;
                     }
                 }
                 _ => {
-                    ir::walk_expressions(std::slice::from_ref(stmt), &mut |e| {
-                        self.prepare_site(e, sites)
-                    });
+                    ir::walk_expressions(std::slice::from_ref(stmt), &mut |e| self.prepare_site(e));
                     if matches!(
                         stmt,
                         Statement::Return(_)
@@ -170,28 +174,39 @@ impl Function<'_, '_> {
         }
     }
 
-    fn prepare_site(&mut self, expression: &Expr, sites: &mut CheckedSites) {
+    fn prepare_site(&mut self, expression: &Expr) {
         if let ExprKind::Builtin(Builtin::RegisteredTypeAlias(site), _) = &expression.kind {
-            sites.aliases.entry(*site).or_insert_with(|| {
+            if !self.sites.aliases.contains_key(site) {
                 let body = self.source.type_aliases[site]
                     .body
                     .as_ref()
                     .expect("checked alias value");
-                self.compile_type_alias(*site, AliasValue::Checked(body))
-            });
+                let alias = self.compile_type_alias(*site, AliasValue::Checked(body));
+                self.sites.aliases.insert(*site, alias);
+            }
             return;
         }
         if let ExprKind::Builtin(Builtin::RegisteredLambda(site, _), _) = &expression.kind {
-            sites.lambdas.entry(*site).or_insert_with(|| {
+            if !self.sites.lambdas.contains_key(site) {
                 let body = self.source.lambdas[site].body.as_ref().expect("checked lambda body");
-                self.compile_lambda(*site, Body::CheckedExpression(body))
-            });
+                let lambda = self.compile_lambda(*site, Body::CheckedExpression(body));
+                self.sites.lambdas.insert(*site, lambda);
+            }
+            return;
+        }
+        if let ExprKind::Builtin(
+            Builtin::RegisteredModuleAnnotation(ir::ModuleAnnotation::String { site, .. })
+            | Builtin::BindAnnotationExpression(site),
+            _,
+        ) = &expression.kind
+        {
+            self.place_annotation_string(*site);
             return;
         }
         let ExprKind::Builtin(Builtin::RegisteredDefinition(site), _) = &expression.kind else {
             return;
         };
-        sites.definitions.entry(*site).or_insert_with(|| {
+        if !self.sites.definitions.contains_key(site) {
             let syntax = self.source.definitions.as_ref().expect("registered scope")[site];
             let (definition, decorators, class) = match syntax {
                 DefinitionSite::Function(def) => (
@@ -227,12 +242,13 @@ impl Function<'_, '_> {
                 .iter()
                 .map(|d| self.source.positions.line(d.expression.start()))
                 .collect();
-            Declaration {
+            let declaration = Declaration {
                 definition,
                 decorator_lines,
                 class,
-            }
-        });
+            };
+            self.sites.definitions.insert(*site, declaration);
+        }
     }
 }
 
@@ -243,7 +259,7 @@ mod tests {
 
     #[test]
     fn forward_annotations_bind_the_compiled_child_and_preserve_residual_expressions() {
-        let source = "checked: 'select(Child)'\nresidual: '(lambda: Child)()'\ninvalid: 'Child['\n";
+        let source = "checked: 'select(Child)'\nclosure: '(lambda: Child)()'\nresidual: '(x for x in Child)'\ninvalid: 'Child['\n";
         let body = PreparedBody::module(
             "example",
             Path::new("example.py"),
@@ -252,6 +268,26 @@ mod tests {
             ModuleOrigin::Provider,
         )
         .unwrap();
+        let child = |quoted: &str| {
+            let site = u32::try_from(source.find(quoted).unwrap()).unwrap().into();
+            let Some(crate::frontend::PreparedAnnotation::String {
+                body: Some(child), ..
+            }) = body.source.annotation_operands.get(&site)
+            else {
+                panic!("missing prepared annotation {quoted}")
+            };
+            child
+        };
+        let closure = child("'(lambda");
+        assert!(matches!(
+            closure.code,
+            crate::frontend::AnnotationCode::Checked(_)
+        ));
+        assert!(closure.scope.lambdas[&1.into()].body.is_some());
+        assert!(matches!(
+            child("'(x for").code,
+            crate::frontend::AnnotationCode::Residual(_)
+        ));
         let mut output = Output::default();
         let filename = output.data(b"example.py");
         body.emit(&mut output, 0, &filename).unwrap();
@@ -261,7 +297,7 @@ mod tests {
             .filter(|line| line.contains("call void @imre_dyn_bind_expression("))
             .map(|line| line.rsplit_once("ptr ").unwrap().1.trim_end_matches(')'))
             .collect();
-        assert_eq!(children.len(), 2);
+        assert_eq!(children.len(), 3);
         assert_ne!(children[0], children[1]);
         for child in children {
             assert_eq!(

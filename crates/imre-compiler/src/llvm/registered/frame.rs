@@ -11,7 +11,7 @@ use crate::ir;
 use crate::ir::{Builtin, Constant, DisplayKind, Expr};
 use crate::llvm::body::FunctionBody;
 use ruff_text_size::{TextRange, TextSize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 pub(crate) enum Place {
@@ -62,7 +62,6 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) async_generator: bool,
     pub(crate) class_locals: Option<ClassBindings>,
     pub(crate) annotation_values: Option<String>,
-    pub(crate) annotation_children: HashMap<ir::AnnotationCodeId, String>,
     pub(crate) module_annotation_sites: Option<Vec<TextSize>>,
     pub(crate) body: FunctionBody,
     id: u32,
@@ -110,7 +109,6 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             async_generator: false,
             class_locals: None,
             annotation_values: None,
-            annotation_children: HashMap::new(),
             module_annotation_sites: None,
             id,
             body: FunctionBody::new(if native_suspension { "start" } else { "entry" }, "failed"),
