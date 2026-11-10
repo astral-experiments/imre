@@ -193,7 +193,9 @@ pub(super) fn capture(
     globals: &ModuleValues,
     retain_live_parameters: bool,
 ) {
-    let mut registered = HashMap::<ModuleId, HashMap<TextSize, RegisteredFunction>>::new();
+    if retain_live_parameters {
+        graph.clear_registered_functions();
+    }
     let mut sources = HashMap::new();
     let mut checks = SourceChecks::default();
     for (&owner, signature) in signatures {
@@ -207,35 +209,34 @@ pub(super) fn capture(
         else {
             continue;
         };
+        // The owning definition may already have closed this body and its private helpers.
+        if graph
+            .native_functions
+            .borrow()
+            .get(&id)
+            .is_some_and(|bodies| bodies.contains_key(&function.start()))
+        {
+            continue;
+        }
+        let helpers = Helpers::new(inference.len());
+        let checker = || Checker::new(graph, id, signatures, classes, types, &helpers, globals);
         let Some(signature) = inference.registered_signature(signature) else {
             if let Some(signature) = inference.checked_signature(signature) {
-                let helpers = Helpers::new(inference.len());
-                let checker =
-                    Checker::new(graph, id, signatures, classes, types, &helpers, globals);
-                retained::capture(checker, function, &signature, inference.len(), false);
+                retained::capture(checker(), function, &signature, inference.len(), false);
             }
             continue;
         };
         if !retain_live_parameters {
             continue;
         }
-        let helpers = Helpers::new(inference.len());
-        let checker = Checker::new(graph, id, signatures, classes, types, &helpers, globals);
         let literals = sources
             .entry(id)
             .or_insert_with(|| values::ModuleSource::new(module));
-        if let Ok(body) = lower_definition(checker, function, &signature, literals) {
-            if !checks.accepts(graph, id, function) {
-                continue;
-            }
-            registered
-                .entry(id)
-                .or_default()
-                .insert(function.start(), body);
+        if let Ok(body) = lower_definition(checker(), function, &signature, literals)
+            && checks.accepts(graph, id, function)
+        {
+            graph.register_function(id, function.start(), body);
         }
-    }
-    if retain_live_parameters {
-        graph.set_registered_functions(registered);
     }
 }
 

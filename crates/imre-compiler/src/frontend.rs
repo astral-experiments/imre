@@ -1001,7 +1001,7 @@ fn lower_graph(
     let mut literals = HashMap::new();
     let mut source_checks = registered::SourceChecks::default();
     if needs_registered_entry {
-        graph.set_registered_functions(HashMap::new());
+        graph.clear_registered_functions();
         // A checked body or a real function-value read can establish the registered binding.
         globals.missing_bindings.borrow_mut().extend(
             registered_parameters

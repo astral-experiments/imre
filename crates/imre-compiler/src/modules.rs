@@ -3197,12 +3197,8 @@ impl SourceGraph {
         result
     }
 
-    /// Keep the checked bodies that can execute with the registered calling convention.
-    pub(crate) fn set_registered_functions(
-        &self,
-        modules: HashMap<ModuleId, crate::dynamic::CheckedFunctions>,
-    ) {
-        self.registered_functions.replace(modules);
+    pub(crate) fn clear_registered_functions(&self) {
+        self.registered_functions.borrow_mut().clear();
     }
 
     pub(crate) fn register_function(
