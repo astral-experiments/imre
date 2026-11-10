@@ -2124,9 +2124,7 @@ impl statements::StatementLowering for SourceScope<'_> {
                 Ok((vec![self.store(name.id.as_str(), value)], true))
             }
             ast::Stmt::Raise(raise) => Ok((
-                vec![raised(raise, |value| {
-                    self.ordinary_operand(value).ok_or(())
-                })?],
+                vec![raised(raise, |value| self.frame_value(value).ok_or(()))?],
                 false,
             )),
             ast::Stmt::Match(branch) => self.match_statement(branch),

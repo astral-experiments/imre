@@ -1599,12 +1599,13 @@ mod tests {
 
     #[test]
     fn only_mixed_fixed_pair_loops_test_the_acquired_cursor() {
-        let mixed = concat!(
+        let checked_raise = concat!(
             "        try:\n",
             "            raise (yield 'send-error')\n",
             "        except ValueError:\n",
             "            pass",
         );
+        let mixed = "        del sink[(yield 1)]";
         let annotated = "        sink[0]: int = 1";
         let checked_default = "        def resume(answer=(yield 1)):\n            return answer";
         let checked = "        publish(x, y)";
@@ -1613,6 +1614,7 @@ mod tests {
             (pair_header, mixed, true),
             ("def f():\n    for x, y in (yield 'rows'):", checked, false),
             (pair_header, annotated, false),
+            (pair_header, checked_raise, false),
             (pair_header, checked, false),
             (pair_header, checked_default, false),
             ("def f(table):\n    for x in table.items():", mixed, false),
@@ -1704,7 +1706,7 @@ mod tests {
         def twice[U](value):
             return 2 * value
     try:
-        raise (yield 'send-error')
+        del sink[(yield 1)]
     except ValueError:
         pass
     return define
@@ -2754,8 +2756,8 @@ mod tests {
     }
 
     #[test]
-    fn physical_raise_retains_its_two_suspending_operands() {
-        use crate::frontend::{PhysicalOperand, SourceEffect, ValueStatement};
+    fn checked_raise_retains_its_two_suspending_operands() {
+        use crate::ir::{self, Builtin, ExprKind, Statement, SuspendValue};
 
         let mut prepared = PreparedBody::module_with_syntax(
             "example",
@@ -2771,15 +2773,23 @@ mod tests {
         let plan = prepared.source.function_bodies[&def.start()]
             .suite()
             .unwrap();
-        let Some(SourceEffect::Value(ValueStatement::Raise, inputs)) =
-            plan.residual.first().map(|run| &run.effect)
-        else {
-            panic!("expected a physical exception and cause")
+        assert!(plan.fully_checked());
+        let Some(Statement::Raise(Some(value))) = plan.checked.function.body.last() else {
+            panic!("expected a terminal raise");
         };
-        assert!(matches!(
-            inputs.as_slice(),
-            [PhysicalOperand::Checked(_), PhysicalOperand::Checked(_)]
-        ));
+        let (exception, cause) = value.explicit_cause().unwrap();
+        for operand in [exception, cause] {
+            let mut awaits = 0;
+            ir::walk_operand_expressions(operand, &mut |expr| {
+                if matches!(
+                    expr.kind,
+                    ExprKind::Builtin(Builtin::RegisteredSuspend(SuspendValue::Await, _), _)
+                ) {
+                    awaits += 1;
+                }
+            });
+            assert_eq!(awaits, 1);
+        }
         let before = prepared.standalone().unwrap();
         let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
@@ -3185,8 +3195,8 @@ mod tests {
     }
 
     #[test]
-    fn mixed_async_if_owns_its_awaited_guards() {
-        use crate::frontend::{PhysicalOperand, SourceEffect};
+    fn checked_async_if_owns_its_awaited_guards_and_raise() {
+        use crate::ir::{self, Builtin, ExprKind, SuspendValue};
 
         let source = concat!(
             "async def choose(flag, predicate):\n",
@@ -3209,22 +3219,21 @@ mod tests {
         let suite = prepared.source.function_bodies[&def.start()]
             .suite()
             .unwrap();
-        let SourceEffect::If { arms, .. } = &suite.residual[0].effect else {
-            panic!("expected a mixed if");
-        };
-        assert!(matches!(
-            arms.as_slice(),
-            [
-                (Some(PhysicalOperand::Checked(_)), _),
-                (Some(PhysicalOperand::Checked(_)), _)
-            ]
-        ));
-        let branch = def.body[0].as_if_stmt_mut().unwrap();
-        *branch.test = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
-            range: branch.test.range(),
-            node_index: Default::default(),
+        assert!(suite.fully_checked());
+        let mut awaits = 0;
+        ir::walk_nodes(&suite.checked.function.body, &mut |node, _| {
+            if let ir::Node::Expression(expr) = node
+                && matches!(
+                    expr.kind,
+                    ExprKind::Builtin(Builtin::RegisteredSuspend(SuspendValue::Await, _), _)
+                )
+            {
+                awaits += 1;
+            }
         });
-        branch.elif_else_clauses.clear();
+        assert_eq!(awaits, 3);
+        crate::verify::registered(suite.checked.region()).unwrap();
+        def.body.clear();
         assert_eq!(prepared.standalone().unwrap(), original);
     }
 
@@ -3371,9 +3380,13 @@ mod tests {
 
     #[test]
     fn checked_and_physical_matches_own_their_suspended_subject() {
-        for (body, physical) in [("return item", false), ("raise await failure(item)", true)] {
+        for (body, physical) in [
+            ("return item", false),
+            ("raise await failure(item)", false),
+            ("del table[await key(item)]", true),
+        ] {
             let source = format!(
-                "async def evaluate(seed):\n    match sink(await gate(), second=left() + table()[(lambda: seed)()]):\n        case item: {body}\nstate: int\n"
+                "async def evaluate(seed):\n    match sink(await gate(), second=left() + table()[(lambda: seed)()]):\n        case prior if decline(prior): return prior\n        case item: {body}\nstate: int\n"
             );
             let mut prepared = PreparedBody::module_with_syntax(
                 "example",
@@ -3394,11 +3407,7 @@ mod tests {
             let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
                 .as_function_def_stmt_mut()
                 .unwrap();
-            let branch = function.body[0].as_match_stmt_mut().unwrap();
-            *branch.subject = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
-                range: branch.subject.range(),
-                node_index: Default::default(),
-            });
+            function.body.clear();
             assert_eq!(prepared.standalone().unwrap(), original);
             if physical {
                 let suite = test_function_suite(&mut prepared.source, start);
@@ -5627,9 +5636,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
-    fn physical_raise_uses_the_prepared_tuple_after_its_elements_are_erased() {
-        use crate::frontend::{PhysicalOperand, SourceEffect, ValueStatement};
-
+    fn checked_raise_uses_the_prepared_tuple_after_its_elements_are_erased() {
         let source = concat!(
             "def factory(seed):\n",
             "    async def evaluate():\n",
@@ -5653,10 +5660,11 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let suite = prepared.source.function_bodies[&evaluate.start()]
             .suite()
             .unwrap();
-        let SourceEffect::Value(ValueStatement::Raise, inputs) = &suite.residual[0].effect else {
-            panic!("expected a physical raise");
-        };
-        assert!(matches!(inputs.as_slice(), [PhysicalOperand::Checked(_)]));
+        assert!(suite.fully_checked());
+        assert!(matches!(
+            suite.checked.function.body.last(),
+            Some(crate::ir::Statement::Raise(Some(_)))
+        ));
         let raise = evaluate.body[0].as_raise_stmt_mut().unwrap();
         let call = raise
             .exc
