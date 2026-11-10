@@ -422,7 +422,7 @@ pub(crate) fn check_native_syntax<'a>(
             let session = &graph.session;
             let file = session.files[id];
             (graph.modules[id].path == *path
-                && ruff_db::source::source_text(&session.db, file).as_str() == input.text.as_ref())
+                && session.matches_parser_input(id, &input.text))
             .then_some((session, file))
         });
         let (session, file) = if let Some(cached) = cached {
@@ -939,6 +939,10 @@ impl Session {
             .write_file_all(path, source)
             .map_err(|error| error.to_string())?;
         system_path_to_file(&self.db, path).map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn matches_parser_input(&self, module: usize, text: &str) -> bool {
+        ruff_db::source::source_text(&self.db, self.files[module]).as_str() == text
     }
 
     fn parsed(&self, file: File) -> ParsedModuleRef {

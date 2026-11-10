@@ -301,7 +301,8 @@ pub(super) fn check(
             None => ParsedModule::parse(path, source.as_str().into())?,
         };
         check_parsed_source(path, &module.text, &module.parsed, keep_docstrings)?;
-        module_source::lower(path, &module.text, &mut module.parsed.into_syntax().body)?;
+        let mut body = module_source::into_body(module.parsed);
+        module_source::lower(path, &module.text, &mut body)?;
     }
     Ok(())
 }
@@ -439,7 +440,7 @@ impl<'a> PreparedBody<'a> {
             .map(Ranged::start)
             .collect();
         let mut body = match input {
-            Input::Module(parsed) => parsed.into_syntax().body,
+            Input::Module(parsed) => module_source::into_body(parsed),
             Input::Expression(syntax, _) => syntax.body,
         };
         let method_imports = imre_ast::module_imports(&body);
@@ -706,7 +707,7 @@ impl<'a> PreparedBody<'a> {
 }
 
 enum Input<'a> {
-    Module(ruff_python_parser::Parsed<ast::ModModule>),
+    Module(Cow<'a, ruff_python_parser::Parsed<ast::ModModule>>),
     Expression(ast::ModModule, &'a ast::token::Tokens),
 }
 
