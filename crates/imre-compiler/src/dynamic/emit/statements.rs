@@ -237,6 +237,24 @@ impl<'p> Function<'_, 'p> {
                 self.prepared_try(region);
             }
             SourceEffect::For(region) => self.prepared_for(region),
+            SourceEffect::If { range, arms } => {
+                self.checkpoint(range);
+                self.simple_call = None;
+                crate::llvm::operations::choose(
+                    self,
+                    |code| {
+                        code.flush_check();
+                        &mut code.frame.body
+                    },
+                    arms.iter().map(|(test, suite)| (test.as_ref(), suite)),
+                    |code, test, yes, no| match test {
+                        PhysicalOperand::Checked(operand) => code.branch_operand(operand, yes, no),
+                        PhysicalOperand::Source(expr) => code.branch_expr(expr, yes, no),
+                    },
+                    Self::physical_suite,
+                    true,
+                );
+            }
             SourceEffect::While(condition) => {
                 let source = suite[run.statements.start]
                     .as_while_stmt()
@@ -257,13 +275,7 @@ impl<'p> Function<'_, 'p> {
                         SourceGuard::Literal(taken) => {
                             code.branch(if *taken { "true" } else { "false" }, yes, no);
                         }
-                        SourceGuard::Checked(operand) => {
-                            code.prepare_checked_value(&operand.value);
-                            let bit = code.test_with_temporaries(|code| {
-                                code.frame.prepared_operand(operand, &code.sites, true)
-                            });
-                            code.branch(&bit, yes, no);
-                        }
+                        SourceGuard::Checked(operand) => code.branch_operand(operand, yes, no),
                         SourceGuard::Residual => code.branch_expr(&source.test, yes, no),
                     },
                     |code, edges, ()| {
@@ -353,6 +365,18 @@ impl<'p> Function<'_, 'p> {
         );
     }
 
+    fn branch_operand(
+        &mut self,
+        operand: &crate::frontend::RegisteredOperand,
+        yes: &str,
+        no: &str,
+    ) {
+        self.prepare_checked_value(&operand.value);
+        let bit = self
+            .test_with_temporaries(|code| code.frame.prepared_operand(operand, &code.sites, true));
+        self.branch(&bit, yes, no);
+    }
+
     fn physical_operand(&mut self, input: &PhysicalOperand) -> String {
         match input {
             PhysicalOperand::Checked(value) => {
@@ -416,44 +440,6 @@ impl<'p> Function<'_, 'p> {
             }
             self.checkpoint(&stmt.range());
             self.simple_call = imre_ast::unhighlighted_call(stmt);
-            if let Some(site) = self.source.statement_sites.ifs.get(&stmt.range()) {
-                let source = stmt.as_if_stmt().expect("prepared conditional");
-                let arms = site
-                    .arms(self.native_suspension)
-                    .map(|(guard, arm)| (guard.map(|guard| (guard, arm)), arm));
-                crate::llvm::operations::choose(
-                    self,
-                    |code| {
-                        code.flush_check();
-                        &mut code.frame.body
-                    },
-                    arms,
-                    |code, (guard, arm), yes, no| match guard {
-                        SourceGuard::Literal(taken) => {
-                            code.branch(if *taken { "true" } else { "false" }, yes, no);
-                        }
-                        SourceGuard::Checked(value) => {
-                            code.prepare_checked_value(value);
-                            code.frame.registered_branch(value, &code.sites, yes, no);
-                        }
-                        SourceGuard::Residual => code.branch_expr(arm.test(source), yes, no),
-                    },
-                    |code, arm| {
-                        if let Some(plan) = arm
-                            .body_start
-                            .and_then(|at| code.source.nested_bodies.get(&at))
-                        {
-                            code.checked_runs(plan, |code, run| {
-                                code.source_run(arm.body(source), run);
-                            });
-                        } else {
-                            code.source_statements(arm.body(source));
-                        }
-                    },
-                    true,
-                );
-                continue;
-            }
             if let Some(site) = self.source.statement_sites.matches.get(&stmt.range()) {
                 if let Some(site) = site {
                     self.emit_match_inputs(site, stmt.as_match_stmt().unwrap());

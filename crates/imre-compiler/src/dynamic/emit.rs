@@ -1828,34 +1828,45 @@ mod tests {
             .unwrap();
         let body = &mut def.body[0].as_while_stmt_mut().unwrap().body;
         let (branch, tail) = body.split_at_mut(1);
+        let branch_range = branch[0].range();
         let skip = &mut branch[0].as_if_stmt_mut().unwrap().body[1];
+        let skip_range = skip.range();
+        let stop_range = tail[1].range();
         for keyword in [skip, &mut tail[1]] {
-            let range = keyword.range();
-            assert!(module.source.nested_bodies.values().any(|suite| suite.residual.iter().any(
-                |run| matches!(run.effect, Some(SourceEffect::LoopTransfer(site, _)) if site == range)
-            )));
             *keyword = ast::StmtPass {
-                range,
+                range: keyword.range(),
                 node_index: Default::default(),
             }
             .into();
         }
         assert_eq!(module.standalone().unwrap().unwrap(), original);
-        let transfer = module
+
+        let suite = module
             .source
             .nested_bodies
-            .values_mut()
-            .flat_map(|suite| &mut suite.residual)
-            .find_map(|run| match &mut run.effect {
-                Some(SourceEffect::LoopTransfer(_, op))
-                    if matches!(op, crate::ir::Statement::Continue) =>
-                {
-                    Some(op)
-                }
-                _ => None,
-            })
+            .get_mut(&branch_range.start())
             .unwrap();
-        *transfer = &crate::ir::Statement::Break;
+        let Some(SourceEffect::LoopTransfer(site, crate::ir::Statement::Break)) =
+            &suite.residual.last().unwrap().effect
+        else {
+            panic!("expected break at the end of the while body");
+        };
+        assert_eq!(*site, stop_range);
+        let Some(SourceEffect::If { range, arms }) = &mut suite.residual[0].effect else {
+            panic!("expected the if at the start of the while body");
+        };
+        assert_eq!(*range, branch_range);
+        let [(Some(_), arm)] = arms.as_mut_slice() else {
+            panic!("expected one guarded arm");
+        };
+        let Some(SourceEffect::LoopTransfer(site, op)) =
+            &mut arm.plan.residual.last_mut().unwrap().effect
+        else {
+            panic!("expected continue at the end of the if arm");
+        };
+        assert_eq!(*site, skip_range);
+        assert!(matches!(op, crate::ir::Statement::Continue));
+        *op = &crate::ir::Statement::Break;
         assert_ne!(module.standalone().unwrap().unwrap(), original);
     }
 
@@ -2966,18 +2977,17 @@ mod tests {
     }
 
     #[test]
-    fn mixed_if_emits_only_the_unprepared_guard_and_statements_from_source() {
-        fn branch<'a>(prepared: &'a mut PreparedBody<'_, '_>) -> &'a mut ast::StmtIf {
-            prepared.syntax.as_mut().unwrap().to_mut()[0]
-                .as_if_stmt_mut()
-                .unwrap()
-        }
+    fn mixed_if_owns_its_guards_and_residual_arm_after_source_erasure() {
+        use crate::frontend::{PhysicalOperand, PhysicalSuite, SourceEffect};
 
-        fn erased(expr: &ast::Expr) -> ast::Expr {
-            ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
-                range: expr.range(),
-                node_index: Default::default(),
-            })
+        fn middle_arm<'a>(
+            prepared: &'a mut PreparedBody<'_, '_>,
+        ) -> &'a mut (Option<PhysicalOperand>, PhysicalSuite) {
+            let initializer = prepared.source.initializer.as_mut().unwrap();
+            let Some(SourceEffect::If { arms, .. }) = &mut initializer.residual[0].effect else {
+                unreachable!()
+            };
+            &mut arms[1]
         }
 
         let source = concat!(
@@ -2996,42 +3006,63 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert!(
-            !prepared
-                .source
-                .initializer
-                .as_ref()
-                .unwrap()
-                .fully_checked()
-        );
+
+        let initializer = prepared.source.initializer.as_ref().unwrap();
+        let [run] = initializer.residual.as_slice() else {
+            panic!("expected only the mixed if");
+        };
+        let Some(SourceEffect::If { arms, .. }) = &run.effect else {
+            panic!("expected a prepared if");
+        };
+        let [
+            (Some(PhysicalOperand::Checked(_)), first),
+            (Some(PhysicalOperand::Checked(_)), middle),
+            (None, last),
+        ] = arms.as_slice()
+        else {
+            panic!("expected two guarded arms and an else");
+        };
+        assert!(first.plan.fully_checked() && last.plan.fully_checked());
+        assert!(first.sources.is_empty() && last.sources.is_empty());
+        assert!(matches!(
+            middle.sources.as_slice(),
+            [ast::Stmt::AnnAssign(_)]
+        ));
+
         let original = prepared.standalone().unwrap().unwrap();
-        let stmt = prepared.syntax.as_ref().unwrap()[0].as_if_stmt().unwrap();
-        let suites = &prepared.source.nested_bodies;
-        assert!(suites[&stmt.body[0].start()].fully_checked());
-        let mixed = &suites[&stmt.elif_else_clauses[0].body[0].start()];
-        assert_eq!(mixed.residual.len(), 1);
-        assert_eq!(mixed.residual[0].statements, 1..2);
-
-        let stmt = branch(&mut prepared);
-        *stmt.test = erased(&stmt.test);
-        stmt.body.clear();
-        stmt.elif_else_clauses[1].body.clear();
-        assert!(prepared.standalone().unwrap().unwrap() == original);
-
-        let clause = &mut branch(&mut prepared).elif_else_clauses[0];
-        let guard = clause
+        let syntax = prepared.syntax.as_mut().unwrap().to_mut();
+        let guard = syntax[0].as_if_stmt_mut().unwrap().elif_else_clauses[0]
             .test
-            .replace(erased(clause.test.as_ref().unwrap()))
+            .take()
             .unwrap();
-        assert!(prepared.standalone().unwrap().unwrap() != original);
-        let clause = &mut branch(&mut prepared).elif_else_clauses[0];
-        clause.test = Some(guard);
-        let body = &mut clause.body;
-        body[1] = ast::Stmt::Pass(ast::StmtPass {
-            range: body[1].range(),
+        syntax.clear();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+
+        // Exercise a residual guard using the original elif expression.
+        let checked = middle_arm(&mut prepared)
+            .0
+            .replace(PhysicalOperand::Source(Box::new(guard)));
+        let physical = prepared.standalone().unwrap().unwrap();
+        let Some(PhysicalOperand::Source(guard)) = &mut middle_arm(&mut prepared).0 else {
+            unreachable!()
+        };
+        **guard = ast::ExprNoneLiteral {
+            range: guard.range(),
             node_index: Default::default(),
-        });
-        assert!(prepared.standalone().unwrap().unwrap() != original);
+        }
+        .into();
+        assert_ne!(prepared.standalone().unwrap().unwrap(), physical);
+        middle_arm(&mut prepared).0 = checked;
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+
+        // The retained source still supplies the one physical annotated assignment.
+        let stmt = &mut middle_arm(&mut prepared).1.sources[0];
+        *stmt = ast::StmtPass {
+            range: stmt.range(),
+            node_index: Default::default(),
+        }
+        .into();
+        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
     }
 
     #[test]
