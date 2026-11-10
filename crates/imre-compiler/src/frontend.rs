@@ -1065,7 +1065,9 @@ fn lower_graph(
         );
         let result =
             Initialization::lower(checker, &mut available, range).inspect_err(capture_on_object);
-        if let Some(body) = checked_region(result, graph, module_id, &mut unavailable)? {
+        if let Some(body) = checked_region(result, graph, module_id, &mut unavailable)?
+            && !needs_registered_entry
+        {
             initializations.push(body);
         }
     }
@@ -1165,6 +1167,11 @@ fn lower_graph(
         else {
             continue;
         };
+        if needs_registered_entry {
+            // The fixed-layout checks have supplied their diagnostics. Registered
+            // definitions and the registered initializer already own this program.
+            continue;
+        }
         let LoweredBody {
             function,
             calls,
@@ -1233,7 +1240,7 @@ fn lower_graph(
                 entry_site: None,
             }));
             let _ = graph.try_registered_body(module_id, || {
-                checker.block(&statements).ok().map(drop)
+                checker.lower_block(&statements, None).ok().map(drop)
             });
             if let Some((statement, call)) =
                 checker.observed_definition.and_then(|seen| seen.entry_site)
@@ -1242,13 +1249,12 @@ fn lower_graph(
             }
             return Err(report);
         }
-        let result = checker.block(&statements);
+        let mut fixed_entry = (!needs_registered_entry).then(Vec::new);
+        let result = checker.lower_block(&statements, fixed_entry.as_mut());
         let result = checker.finish_region(result).inspect_err(capture_on_object);
-        let Some((mut body, _)) = checked_region(result, graph, module_id, &mut unavailable)?
-        else {
-            continue;
-        };
-        if module_id == graph.entry {
+        if checked_region(result, graph, module_id, &mut unavailable)?.is_some()
+            && let Some(mut body) = fixed_entry
+        {
             let mut startup = (0..initializations.len())
                 .map(|index| {
                     Statement::Expr(Expr {
@@ -5028,23 +5034,38 @@ impl<'a> Checker<'a> {
 
     /// Checks dead syntax too, but merges definite assignment only from reachable exits.
     fn block(&mut self, statements: &[ast::Stmt]) -> Result<(Vec<Statement>, bool), String> {
+        let mut body = Vec::new();
+        let falls_through = self.lower_block(statements, Some(&mut body))?;
+        Ok((body, falls_through))
+    }
+
+    /// Keep binding, flow and diagnostic evidence for every statement. Only the
+    /// owner of an executable body collects instructions and frame checkpoints.
+    fn lower_block(
+        &mut self,
+        statements: &[ast::Stmt],
+        mut output: Option<&mut Vec<Statement>>,
+    ) -> Result<bool, String> {
         if let Some(reason) = statements.first().and_then(|first| {
             self.graph
                 .entry_profile
                 .excluded(self.module, first.start())
         }) {
-            let message = Expr {
-                ty: Type::Str,
-                kind: ExprKind::Str(reason.to_owned()),
-            };
-            let exception = Expr {
-                ty: Type::Exception,
-                kind: ExprKind::Exception {
-                    kind: exception_kind("ValueError").unwrap(),
-                    message: Some(Box::new(message)),
-                },
-            };
-            return Ok((vec![Statement::Raise(Some(exception))], false));
+            if let Some(body) = output {
+                let message = Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Str(reason.to_owned()),
+                };
+                let exception = Expr {
+                    ty: Type::Exception,
+                    kind: ExprKind::Exception {
+                        kind: exception_kind("ValueError").unwrap(),
+                        message: Some(Box::new(message)),
+                    },
+                };
+                body.push(Statement::Raise(Some(exception)));
+            }
+            return Ok(false);
         }
 
         if self.block_depth == 0 && !self.module_scope {
@@ -5081,7 +5102,6 @@ impl<'a> Checker<'a> {
             }
         }
         self.block_depth += 1;
-        let mut body = Vec::new();
         let mut falls_through = true;
         let reachable = self.reachable;
         let enclosing_sum = self.zip_sum_rhs;
@@ -5162,19 +5182,21 @@ impl<'a> Checker<'a> {
             {
                 lowered.push(Statement::Assign(*flag, Expr::boolean(true)));
             }
-            if self.registered.is_some() {
-                // Even a pass has a Python frame checkpoint for pending signals and exceptions.
-                body.push(registered::checkpoint(statement));
-            } else if !lowered.is_empty() && self.fault_enabled() {
-                body.push(self.fault_line(statement));
+            if let Some(body) = output.as_deref_mut() {
+                if self.registered.is_some() {
+                    // Even a pass has a Python frame checkpoint for pending signals and exceptions.
+                    body.push(registered::checkpoint(statement));
+                } else if !lowered.is_empty() && self.fault_enabled() {
+                    body.push(self.fault_line(statement));
+                }
+                body.extend(lowered);
             }
-            body.extend(lowered);
             falls_through &= continues;
         }
         self.reachable = reachable;
         self.zip_sum_rhs = enclosing_sum;
         self.block_depth -= 1;
-        Ok((body, falls_through))
+        Ok(falls_through)
     }
 
     fn require_registered_operation(&self, site: &impl Ranged) {

@@ -752,6 +752,20 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         ));
     }
 
+    pub(crate) fn positioned_call(
+        &mut self,
+        callable: &str,
+        operands: CallArguments,
+        mark: &str,
+        range: TextRange,
+        callee_end: TextSize,
+        scope: &str,
+    ) -> String {
+        let span = self.expression_range_span(range, callee_end, b'(');
+        self.call_position(range);
+        self.call_in_scope(callable, operands, mark, span, scope)
+    }
+
     /// Pass the caller's temporary root boundary and optional traceback position.
     pub(crate) fn call_at(
         &mut self,
@@ -1633,9 +1647,7 @@ pub(crate) trait FrameEmitter<'a, 'p>:
                 CallArguments::Packed { args, kwargs }
             }),
         };
-        let span = self.expression_range_span(call.range, callee_end, b'(');
-        self.call_position(call.range);
-        self.call_in_scope(&callable, operands, &mark, span, &scope)
+        self.positioned_call(&callable, operands, &mark, call.range, callee_end, &scope)
     }
 
     /// Execute a descriptor operation at the original target, using the same live receiver

@@ -3192,6 +3192,7 @@ impl Emitter<'_, '_> {
             | ExprKind::None
             | ExprKind::Local(_)
             | ExprKind::Bind(..)
+            | ExprKind::Invoke { .. }
             | ExprKind::Binary(..)
             | ExprKind::Boolean(..)
             | ExprKind::BooleanValue(..)
@@ -3287,9 +3288,6 @@ impl Emitter<'_, '_> {
             }
             ExprKind::Callable { function, receiver } => {
                 self.callable_value(expression.ty, *function, receiver.as_deref())
-            }
-            ExprKind::Invoke { callable, args } => {
-                self.invoke_callable(callable, args, expression.ty)
             }
             ExprKind::Construct { initializer, args } => {
                 // A type call keeps its own arguments while __init__ runs.

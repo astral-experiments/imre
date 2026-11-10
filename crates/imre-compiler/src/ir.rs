@@ -624,6 +624,41 @@ pub(crate) struct Expr {
 }
 
 impl Expr {
+    /// The registered binder loads this callable by name at its original operand site.
+    pub(crate) fn registered_local_range(&self) -> Option<ruff_text_size::TextRange> {
+        let ExprKind::Builtin(Builtin::RegisteredLocation(range, _), inputs) = &self.kind else {
+            return None;
+        };
+        (self.ty == Type::PythonObject
+            && matches!(
+                inputs.as_slice(),
+                [Expr {
+                    ty: Type::PythonObject,
+                    kind: ExprKind::Local(_)
+                }]
+            ))
+        .then_some(*range)
+    }
+
+    /// A Python invocation uses its enclosing call location and source-ordered positional operands.
+    pub(crate) fn is_registered_invoke(&self, parent: Option<&Expr>) -> bool {
+        let ExprKind::Invoke { callable, args } = &self.kind else {
+            return false;
+        };
+        let Some(Expr {
+            kind: ExprKind::Builtin(Builtin::RegisteredLocation(call, _), _),
+            ..
+        }) = parent
+        else {
+            return false;
+        };
+        self.ty == Type::PythonObject
+            && callable
+                .registered_local_range()
+                .is_some_and(|name| call.contains_range(name))
+            && args.order.iter().copied().eq(0..args.values.len())
+    }
+
     pub(crate) fn unrepresented() -> Self {
         Self {
             ty: Type::PythonObject,

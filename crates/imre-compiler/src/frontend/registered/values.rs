@@ -1065,15 +1065,31 @@ impl Checker<'_> {
             let value = self.lower_display(node, &plan, None)?;
             return Ok(Some(source.located(node, value)));
         }
-        // A checked local with a fixed callable layout uses its original call checker.
         if let ast::Expr::Call(call) = node
             && let Some(name) = call.func.as_name_expr()
-            && self
-                .names
-                .get(name.id.as_str())
-                .is_some_and(|&slot| self.locals[slot] != Type::PythonObject)
+            && let Some(&slot) = self.names.get(name.id.as_str())
         {
-            return Ok(None);
+            if self.locals[slot] != Type::PythonObject {
+                // The fixed call checker binds the positional signature and result type.
+                return Ok(None);
+            }
+            if !self.module_scope && self.namespace.is_none() && fixed_positional_arguments(call) {
+                let callable = self.expr(&call.func)?;
+                let values = call
+                    .arguments
+                    .args
+                    .iter()
+                    .map(|arg| self.expr(arg))
+                    .collect::<Result<_, _>>()?;
+                let invoke = Expr {
+                    ty: Type::PythonObject,
+                    kind: ExprKind::Invoke {
+                        callable: Box::new(callable),
+                        args: ir::CallArgs::positional(values),
+                    },
+                };
+                return Ok(Some(source.located(node, invoke)));
+            }
         }
         if let ast::Expr::BinOp(binary) = node {
             let value = self.binary_operation(binary)?;
