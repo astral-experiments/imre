@@ -2710,6 +2710,7 @@ struct Checker<'a> {
     /// The first operation whose execution requires a different representation. All
     /// later source operations still see the facts from the ordinary checker.
     unrepresented: std::cell::RefCell<Option<Failure>>,
+    supplied_argparse_classes: Vec<argparse::SuppliedClass>,
     namespace_calls: HashSet<ruff_text_size::TextRange>,
     module_namespace: assignments::ModuleNamespace,
     /// The actual namespace supplied to Python calls in the current lexical region.
@@ -2795,6 +2796,7 @@ impl<'a> Checker<'a> {
             observed_definition: None,
             registered: None,
             unrepresented: Default::default(),
+            supplied_argparse_classes: Vec::new(),
             namespace_calls: HashSet::new(),
             module_namespace: Default::default(),
             namespace: None,
@@ -5067,6 +5069,7 @@ impl<'a> Checker<'a> {
         let enclosing_sum = self.zip_sum_rhs;
         let mut previous_sum = false;
         let mut length_guard = None;
+        let parsed_classes = self.supplied_argparse_classes.len();
         for (index, statement) in statements.iter().enumerate() {
             let mut fresh = None;
             if let ast::Stmt::Assign(assignment) = statement
@@ -5128,6 +5131,12 @@ impl<'a> Checker<'a> {
                 self.statement(statement)?
             };
             self.fixed_tuple = enclosing_tuple;
+            if self.reachable
+                && continues
+                && let Some(class) = self.parsed_class(statement)
+            {
+                self.supplied_argparse_classes.push(class);
+            }
             if !self.module_scope
                 && let Some((name, rhs)) = fresh
             {
@@ -5152,6 +5161,8 @@ impl<'a> Checker<'a> {
             falls_through &= continues;
         }
         self.reachable = reachable;
+        // A parse in a nested suite may never execute on this suite's successor.
+        self.supplied_argparse_classes.truncate(parsed_classes);
         self.zip_sum_rhs = enclosing_sum;
         self.block_depth -= 1;
         Ok((body, falls_through))

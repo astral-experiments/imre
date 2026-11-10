@@ -35,6 +35,29 @@ struct Parser {
     description: Option<ast::Expr>,
 }
 
+pub(super) struct SuppliedClass {
+    class: usize,
+    parser_class: usize,
+}
+
+fn supplied_namespace(call: &ast::ExprCall) -> Option<&ast::Expr> {
+    let args = &call.arguments;
+    if args.args.iter().any(ast::Expr::is_starred_expr) {
+        return None;
+    }
+    match (args.args.as_ref(), args.keywords.as_ref()) {
+        ([_, namespace], []) => Some(namespace),
+        ([] | [_], [keyword]) if keyword.arg.as_deref() == Some("namespace") => {
+            Some(&keyword.value)
+        }
+        ([], [_, _]) => {
+            args.find_keyword("args")?;
+            Some(&args.find_keyword("namespace")?.value)
+        }
+        _ => None,
+    }
+}
+
 struct OptionField {
     name: String,
     annotation: ast::Expr,
@@ -1510,6 +1533,49 @@ impl Parsers {
 }
 
 impl Checker<'_> {
+    /// A direct parse can populate these destinations on its normal successor.
+    pub(super) fn parsed_class(&self, statement: &ast::Stmt) -> Option<SuppliedClass> {
+        let expression = match statement {
+            ast::Stmt::Expr(expr) => &expr.value,
+            ast::Stmt::Assign(assign) => &assign.value,
+            ast::Stmt::AnnAssign(assign) if assign.target.is_name_expr() => {
+                assign.value.as_ref()?
+            }
+            _ => return None,
+        };
+        let call = expression.as_call_expr()?;
+        let method = call.func.as_attribute_expr()?.attr.as_str();
+        if !matches!(method, "parse_args" | "parse_known_args") {
+            return None;
+        }
+        let parser = self
+            .classes
+            .parsers
+            .calls
+            .get(&(self.module, call.range()))?;
+        let namespace = supplied_namespace(call)?;
+        let name = namespace.as_name_expr()?.id.as_str();
+        if !self.has_static_namespace_root(namespace) || self.local_classes.contains_key(name) {
+            return None;
+        }
+        let class = self.class_reference(namespace)?;
+        Some(SuppliedClass {
+            class,
+            parser_class: parser.class,
+        })
+    }
+
+    /// Match root destinations for a runtime lookup on the actual class.
+    pub(super) fn parsed_class_member(&self, class: usize, member: &str) -> bool {
+        self.supplied_argparse_classes.iter().any(|supplied| {
+            supplied.class == class
+                && self.classes.declarations.definitions[supplied.parser_class]
+                    .fields
+                    .iter()
+                    .any(|field| field.name == member)
+        })
+    }
+
     pub(super) fn parse_args(
         &mut self,
         call: &ast::ExprCall,
@@ -1626,18 +1692,7 @@ impl Checker<'_> {
             ([], [keyword]) if keyword.arg.as_ref().is_some_and(|name| name == "args") => {
                 Some(&keyword.value)
             }
-            (args, keywords)
-                if !args.iter().any(ast::Expr::is_starred_expr)
-                    && match (args.len(), keywords.len()) {
-                        (2, 0) => true,
-                        (0 | 1, 1) => keywords[0].arg.as_deref() == Some("namespace"),
-                        (0, 2) => {
-                            call.arguments.find_keyword("args").is_some()
-                                && call.arguments.find_keyword("namespace").is_some()
-                        }
-                        _ => false,
-                    } =>
-            {
+            _ if supplied_namespace(call).is_some() => {
                 // A supplied namespace keeps its identity and existing attributes.
                 return Err(self.scoped_builtin_error(method, call));
             }

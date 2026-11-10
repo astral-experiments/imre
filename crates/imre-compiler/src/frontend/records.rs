@@ -1113,6 +1113,9 @@ impl Checker<'_> {
         let signature = self.classes.methods[class]
             .get(attribute.attr.as_str())
             .ok_or_else(|| {
+                if receiver.is_none() && self.parsed_class_member(class, attribute.attr.as_str()) {
+                    return self.scoped_builtin_error("argparse namespace destination", attribute);
+                }
                 self.missing_class_member(
                     class,
                     attribute.attr.as_str(),

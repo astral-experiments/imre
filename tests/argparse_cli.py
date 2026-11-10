@@ -146,6 +146,7 @@ CASES = {
                      ["-v=f", "--help"], ["--help", "--off=x"], ["-f", "extra"]],
     "method_args": [[]],
     "supplied_namespace": [[]],
+    "supplied_class_command": [[]],
     "known_args": [
         [], ["--help"], ["--foo", "F", "--bar", "--baz"], ["--foo"],
         ["one", "two", "--unknown", "-v", "three"], ["-vvv", "π", "one", "两"],
@@ -350,8 +351,31 @@ def main():
         checked = subprocess.run([args.compiler, "check", source], capture_output=True)
         if checked.returncode == 0 or b"argparse.Namespace requires" not in checked.stderr:
             raise AssertionError(checked.stderr)
+        source = Path(directory) / "supplied_class_members.py"
+        prelude = (
+            "from argparse import ArgumentParser\n"
+            "class Target: pass\n"
+            "class Other: pass\n"
+            "def expects_int(value: int) -> int: return value\n"
+            "def read(enabled: bool):\n"
+            "    parser = ArgumentParser()\n"
+            "    parser.add_argument('--count', type=int, default=11)\n"
+        )
+        parse = "parser.parse_known_args(['--extra'], namespace=Target)"
+        invalid_supplied_class_reads = [
+            (f"    {parse}\n    print(Other.count)", b"unknown class member"),
+            (f"    {parse}\n    print(Target.extra)", b"unknown class member"),
+            (f"    if enabled:\n        {parse}\n    print(Target.count)", b"unknown class member"),
+            (f"    {parse}\n    print(Target.count, expects_int('x'))", b"expected int, got str"),
+        ]
+        for statement, diagnostic in invalid_supplied_class_reads:
+            source.write_text(prelude + statement + "\nread(False)\n")
+            checked = subprocess.run([args.compiler, "check", source], capture_output=True)
+            if checked.returncode == 0 or diagnostic not in checked.stderr:
+                raise AssertionError((statement, checked.stderr))
     print(
-        f"Validated {checks} argparse process comparisons and {len(REJECTED) + len(invalid_field_reads) + 5} compile-time rejections"
+        f"Validated {checks} argparse process comparisons and "
+        f"{len(REJECTED) + len(invalid_field_reads) + len(invalid_supplied_class_reads) + 5} compile-time rejections"
     )
 
 
