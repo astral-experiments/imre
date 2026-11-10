@@ -185,7 +185,7 @@ mod tests {
             method_imports: &Default::default(),
             replacements: &Default::default(),
             has_templates: false,
-            templates: None,
+            template_fields: None,
             lambdas: None,
             private_names: None,
         };
@@ -253,7 +253,7 @@ mod tests {
             method_imports: &Default::default(),
             replacements: &Default::default(),
             has_templates: false,
-            templates: None,
+            template_fields: None,
             lambdas: None,
             private_names: None,
         };
