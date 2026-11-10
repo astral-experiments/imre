@@ -550,9 +550,9 @@ impl<'p> Function<'_, 'p> {
         } else {
             format!("{}{name}", self.prefix)
         };
-        // A generic function's immediate lexical parent is its type-parameter scope,
-        // even when lowering does not materialize a separate parameter frame.
-        let generic = function.is_some_and(|f| f.type_params.is_some());
+        // A generic declaration's immediate lexical parent is its type-parameter scope.
+        let generic = function.is_some_and(|f| f.type_params.is_some())
+            || type_alias && self.source.type_aliases[&start].parameters.is_some();
         let nested = self.in_function || generic;
         let class_header = class.map(|class| class.range);
         let prefix = if let Some(class) = class {
@@ -598,7 +598,8 @@ impl<'p> Function<'_, 'p> {
                     self.class_locals.is_some()
                         && self.annotation_values.is_none()
                         && class_header.is_none()
-                        && !generic,
+                        && !generic
+                        && !type_alias,
                 );
                 if doc.is_some() {
                     flags |= code_flags::HAS_DOCSTRING;
@@ -714,6 +715,9 @@ impl<'p> Function<'_, 'p> {
         // A type alias thunk has an implicit default for its format parameter.
         if type_alias {
             signature["posonly"] = json!([".format"]);
+            if self.class_locals.is_some() {
+                signature["annotation_class"] = json!(true);
+            }
         }
         let mut default_names = Vec::new();
         let in_function = self.in_function || !matches!(body, Body::Namespace);

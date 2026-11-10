@@ -153,8 +153,8 @@ impl CompiledDefinition {
             defaults,
         } = operands;
         let code = &self.code;
-        let header = self.class_header.is_some();
-        frame.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {scope}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 {header})"))
+        let annotation_scope = self.class_header.is_some() || self.type_alias;
+        frame.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {scope}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {qualname}, i64 {doc}, i64 {annotate}, i1 {annotation_scope})"))
     }
 }
 

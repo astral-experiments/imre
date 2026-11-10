@@ -88,6 +88,8 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) class_locals: Option<ClassBindings>,
     pub(crate) annotation_values: Option<String>,
     pub(crate) annotation_scope: AnnotationScope,
+    /// Class-scoped evaluators read the live class dictionary before lexical names.
+    annotation_names: Option<(ClassBindings, String)>,
     annotation_active: Option<String>,
     pub(crate) module_annotation_sites: Option<Vec<TextSize>>,
     pub(crate) body: FunctionBody,
@@ -140,6 +142,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             class_locals: None,
             annotation_values: None,
             annotation_scope: AnnotationScope::Plain,
+            annotation_names: None,
             annotation_active: None,
             module_annotation_sites: None,
             id,
@@ -932,16 +935,27 @@ impl RegisteredFrame<'_, '_> {
     }
 
     pub(crate) fn lookup(&mut self, name: &str) -> String {
-        let op = match &self.class_locals {
-            Some(class) if self.annotation_values.is_some() && class.globals.contains(name) => {
+        // The alias evaluator's implicit format parameter belongs to its call frame.
+        if name != ".format"
+            && let Some((class, scope)) = &self.annotation_names
+        {
+            let op = if class.globals.contains(name) {
                 "lookup_annotation_global"
-            }
-            Some(class) if self.annotation_values.is_some() && class.locals.contains(name) => {
+            } else if class.locals.contains(name) {
                 "lookup_class_annotation_global"
-            }
-            Some(_) if self.annotation_values.is_some() => "lookup_class_annotation",
-            Some(class) if class.locals.contains(name) => "lookup_class_local",
-            _ => "lookup",
+            } else {
+                "lookup_class_annotation"
+            };
+            return self.named_op(op, &scope.clone(), name, "0");
+        }
+        let op = if self
+            .class_locals
+            .as_ref()
+            .is_some_and(|class| class.locals.contains(name))
+        {
+            "lookup_class_local"
+        } else {
+            "lookup"
         };
         self.named_op(op, &self.scope.clone(), name, "0")
     }
@@ -1000,6 +1014,11 @@ impl RegisteredFrame<'_, '_> {
         ))
     }
 
+    pub(crate) fn use_class_annotation_names(&mut self, class: ClassBindings) {
+        let scope = self.op("annotation_scope", &[&self.scope.clone()]);
+        self.annotation_names = Some((class, scope));
+    }
+
     pub(crate) fn begin_annotations(&mut self) {
         // The format argument belongs to this callback, even if the class also defines it.
         let format = self.lookup("format");
@@ -1023,11 +1042,16 @@ impl RegisteredFrame<'_, '_> {
                 (local, result)
             }
             scope => {
-                if let AnnotationScope::Method(class) = scope {
-                    self.class_locals = Some(class.clone());
-                }
+                let class = match scope {
+                    AnnotationScope::Method(class) => Some(class.clone()),
+                    _ => None,
+                };
                 let result = self.op("dict", &[]);
                 let local = self.op("annotation_scope", &[&self.scope.clone()]);
+                if let Some(class) = class {
+                    self.class_locals = Some(class.clone());
+                    self.annotation_names = Some((class, local.clone()));
+                }
                 (local, result)
             }
         };

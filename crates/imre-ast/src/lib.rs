@@ -331,9 +331,12 @@ pub struct Names {
 impl Names {
     /// A private definition keeps its source name for introspection.
     pub fn definition<'a>(&'a self, name: &'a Identifier) -> &'a str {
-        self.original
-            .get(&name.start())
-            .map_or(name.as_str(), Name::as_str)
+        self.source_name(name.start(), name.as_str())
+    }
+
+    /// Return the original spelling of a potentially mangled name.
+    pub fn source_name<'a>(&'a self, start: TextSize, binding: &'a str) -> &'a str {
+        self.original.get(&start).map_or(binding, Name::as_str)
     }
 
     /// A dotted import binds the top-level module under a possibly private name.
@@ -528,6 +531,11 @@ impl Transformer for Mangler<'_> {
                 }
             }
 
+            ast::Stmt::TypeAlias(alias) => {
+                if let Some(params) = &mut alias.type_params {
+                    self.type_parameter_bindings(params);
+                }
+            }
             ast::Stmt::Global(global) => {
                 for name in &mut global.names {
                     self.rename(&mut name.id);

@@ -3781,6 +3781,8 @@ def report(text):
 
         compare("-B", "-c", "from typing import Protocol as P; print(P.__name__)")
         compare("-B", fixtures / "typing_protocol_import.py")
+        compare("-B", fixtures / "boxed_conditional_class_type_alias.py",
+                extra={"IMREFLAGS": "--opt-level 0"}, native_timeout=300)
         compare("-B", fixtures / "boxed_list_finalization.py")
         compare(
             "-IB", "-c",

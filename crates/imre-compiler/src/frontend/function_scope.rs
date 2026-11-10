@@ -460,14 +460,18 @@ impl<'a, A: FnMut(&'a ast::StmtTypeAlias), E: FnMut(&ast::Expr)> Visitor<'a>
                 self.scope = Scope::Class(start);
             }
             ast::Stmt::TypeAlias(alias) => {
-                if !matches!(self.scope, Scope::Class(_)) {
-                    (self.alias_site)(alias);
-                }
+                (self.alias_site)(alias);
                 let mut names = ClosureNames {
                     string_annotations: strings,
                     ..Default::default()
                 };
-                names.visit_expr(&alias.value);
+                if let Scope::Class(site) = self.scope {
+                    let class = &self.scopes.classes[&site].bindings;
+                    names.reads =
+                        class_metadata::annotation_reads(&[("", &alias.value)], Some(class), false);
+                } else {
+                    names.visit_expr(&alias.value);
+                }
                 names.locals.insert(".format".into());
                 self.scopes
                     .aliases
