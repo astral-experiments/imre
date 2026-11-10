@@ -685,13 +685,30 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         {
             return (format!("%ir_slot{first}"), self.live_slots.len());
         }
-        let mut live = self.live.clone();
-        for i in 0..self.live_slots.len() {
-            let slot = self.live_slots[i];
-            live.push(self.value(&format!("load i64, ptr %ir_slot{slot}")));
+        let (_, prefix) = self.handle_array(&self.live.clone());
+        let mut copied = 0;
+        while let Some(run) = self.live_slots[copied..]
+            .chunk_by(|a, b| *b == *a + 1)
+            .next()
+        {
+            let first = run[0];
+            let len = run.len();
+            let offset = prefix + copied;
+            let dst = self.value(&format!("getelementptr i64, ptr %live, i64 {offset}"));
+            if len == 1 {
+                let value = self.value(&format!("load i64, ptr %ir_slot{first}"));
+                self.line(&format!("store i64 {value}, ptr {dst}"));
+            } else {
+                self.line(&format!(
+                    "call void @llvm.memcpy.p0.p0.i64(ptr {dst}, ptr %ir_slot{first}, i64 {}, i1 false)",
+                    len * 8
+                ));
+            }
+            copied += len;
         }
-        let (ptr, count) = self.handle_array(&live);
-        (ptr.to_owned(), count)
+        let count = prefix + copied;
+        self.max_live = self.max_live.max(count);
+        (if count == 0 { "null" } else { "%live" }.to_owned(), count)
     }
 
     /// Copy evaluated handles into reusable storage in this activation's entry block.
