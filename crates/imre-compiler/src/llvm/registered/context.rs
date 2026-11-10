@@ -189,30 +189,15 @@ impl RegisteredFrame<'_, '_> {
     }
 }
 
-/// Both body emitters use the registered frame's loop targets, roots and caught
-/// exceptions. Only the prepared final suite and its lexical stack belong to the body.
+/// The registered activation owns the exit stack across both statement emitters.
 pub(crate) trait RegionEmitter<'a, 'p>: FrameEmitter<'a, 'p> {
-    type Finally;
-    fn regions(&mut self) -> &mut Vec<Region<Self::Finally>>;
-    fn emit_finally(&mut self, suite: &Self::Finally);
+    fn emit_finally(&mut self, suite: &Finally<'p>);
 
-    /// Root a return across cleanup and forward checked exits to an enclosing physical suite.
     fn return_from_regions(&mut self, value: String) {
         self.live.push(value.clone());
         self.exit_regions(0, Some(&value));
         self.live.pop();
-        if self.body.terminated {
-            return;
-        }
-        if self.cleanup_returns.is_some() {
-            let label = self.name("return_cleanup");
-            self.jump(&label);
-            let site = self.current_range;
-            self.cleanup_returns
-                .as_mut()
-                .unwrap()
-                .push((label, value, site));
-        } else {
+        if !self.body.terminated {
             self.return_value(&value);
         }
     }
@@ -231,16 +216,16 @@ pub(crate) trait RegionEmitter<'a, 'p>: FrameEmitter<'a, 'p> {
     }
 
     fn exit_regions(&mut self, depth: usize, pending_return: Option<&str>) {
-        if self.regions().len() == depth {
+        if self.regions.len() == depth {
             return;
         }
         let target = self.body.error_target.clone();
         let mut left = Vec::new();
         let mut discarded = Vec::new();
-        while self.regions().len() > depth && !self.body.terminated {
+        while self.regions.len() > depth && !self.body.terminated {
             // An exit inside a final suite can override the original transfer. It
             // must see only the regions outside the cleanup currently being run.
-            let region = self.regions().pop().unwrap();
+            let region = self.regions.pop().unwrap();
             match &region {
                 Region::Context { exit, outer } => {
                     self.body.error_target.clone_from(outer);
@@ -259,7 +244,7 @@ pub(crate) trait RegionEmitter<'a, 'p>: FrameEmitter<'a, 'p> {
                     let inner_handlers = self.caught.split_off(*caught);
                     let value = pending_return.filter(|value| *value != "0");
                     if let Some(value) = value {
-                        self.regions().push(Region::Pending {
+                        self.regions.push(Region::Pending {
                             value: value.into(),
                             enclosing: None,
                             outer: outer.clone(),
@@ -267,7 +252,7 @@ pub(crate) trait RegionEmitter<'a, 'p>: FrameEmitter<'a, 'p> {
                     }
                     self.emit_finally(body);
                     if value.is_some() {
-                        self.regions().pop();
+                        self.regions.pop();
                     }
                     self.caught.extend(inner_handlers);
                     self.loops.extend(inner_loops);
@@ -296,7 +281,7 @@ pub(crate) trait RegionEmitter<'a, 'p>: FrameEmitter<'a, 'p> {
         for (slot, owner) in discarded.into_iter().rev() {
             self.live.insert(slot, owner);
         }
-        self.regions().extend(left.into_iter().rev());
+        self.regions.extend(left.into_iter().rev());
         self.body.error_target = target;
     }
 
@@ -322,7 +307,7 @@ pub(crate) trait RegionEmitter<'a, 'p>: FrameEmitter<'a, 'p> {
                 (exit, value, None)
             };
             let (region, outer) = self.begin_context(site, exit);
-            self.regions().push(Region::Context {
+            self.regions.push(Region::Context {
                 exit: region,
                 outer,
             });
@@ -333,7 +318,7 @@ pub(crate) trait RegionEmitter<'a, 'p>: FrameEmitter<'a, 'p> {
         }
         body(self);
         for _ in 0..count {
-            let Some(Region::Context { exit, outer }) = self.regions().pop() else {
+            let Some(Region::Context { exit, outer }) = self.regions.pop() else {
                 unreachable!("active context region")
             };
             self.end_context(exit, outer);
@@ -341,14 +326,19 @@ pub(crate) trait RegionEmitter<'a, 'p>: FrameEmitter<'a, 'p> {
     }
 }
 
-pub(crate) enum Region<B> {
+pub(crate) enum Finally<'p> {
+    Checked(std::rc::Rc<[Statement]>),
+    Prepared(&'p crate::frontend::RegisteredSuite),
+}
+
+pub(crate) enum Region<'p> {
     Slots(Vec<usize>),
     Context {
         exit: ContextRegion,
         outer: String,
     },
     Finally {
-        body: B,
+        body: Finally<'p>,
         outer: String,
         loops: usize,
         caught: usize,
@@ -388,13 +378,10 @@ impl Frame<'_, '_, '_> {
 }
 
 impl<'a, 'p> RegionEmitter<'a, 'p> for Frame<'_, 'a, 'p> {
-    type Finally = std::rc::Rc<[Statement]>;
-
-    fn regions(&mut self) -> &mut Vec<Region<Self::Finally>> {
-        &mut self.code.iteration.scopes
-    }
-
-    fn emit_finally(&mut self, suite: &Self::Finally) {
-        self.emit_suite(suite);
+    fn emit_finally(&mut self, suite: &Finally<'p>) {
+        match suite {
+            Finally::Checked(statements) => self.emit_suite(statements),
+            Finally::Prepared(body) => self.code.emit_prepared(body),
+        }
     }
 }

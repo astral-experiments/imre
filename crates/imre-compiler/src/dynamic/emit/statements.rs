@@ -3,7 +3,7 @@ mod declarations;
 use super::sites::{CheckedSites, CompiledDefinition};
 
 use super::{AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourceMap};
-use crate::llvm::registered::context::{Region, RegionEmitter};
+use crate::llvm::registered::context::{Finally, Region, RegionEmitter};
 use imre_ast::code_flags;
 use ruff_text_size::TextSize;
 use serde_json::json;
@@ -23,14 +23,22 @@ pub(in crate::dynamic::emit) struct CallableSites<'a, 'p> {
     class_locals: Option<&'a crate::frontend::function_scope::ClassBindings>,
 }
 
-impl<'a, 'p> RegionEmitter<'a, 'p> for Function<'a, 'p> {
-    type Finally = &'p crate::frontend::RegisteredSuite;
-
-    fn regions(&mut self) -> &mut Vec<Region<Self::Finally>> {
-        &mut self.exits
+impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<'a, 'p> {
+    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites) {
+        (&mut self.frame, &self.sites)
     }
 
-    fn emit_finally(&mut self, suite: &Self::Finally) {
+    fn emit_prepared(&mut self, suite: &'p crate::frontend::RegisteredSuite) {
+        self.physical_suite(suite);
+    }
+}
+
+impl<'a, 'p> RegionEmitter<'a, 'p> for Function<'a, 'p> {
+    fn emit_finally(&mut self, suite: &Finally<'p>) {
+        // Checked final suites are nested inside the checked run that owns their bindings.
+        let Finally::Prepared(suite) = suite else {
+            unreachable!("checked finally outside its checked run")
+        };
         self.physical_suite(suite);
     }
 }
@@ -171,35 +179,7 @@ impl<'p> Function<'_, 'p> {
         checked: &crate::frontend::RegisteredFunction,
     ) {
         self.prepare_checked_sites(statements);
-        self.checked_region(|code| code.frame.checked_block(statements, checked, &code.sites));
-    }
-
-    /// Route checked returns through the exits surrounding this mixed region.
-    fn checked_region(&mut self, emit: impl FnOnce(&mut Self)) {
-        if self.exits.is_empty() {
-            emit(self);
-            return;
-        }
-        self.cleanup_returns = Some(Vec::new());
-        emit(self);
-        let returns = self.cleanup_returns.take().expect("active cleanup region");
-        if returns.is_empty() {
-            return;
-        }
-        let resume = (!self.body.terminated).then(|| self.name("b"));
-        if let Some(label) = &resume {
-            self.jump(label);
-        }
-        let range = self.current_range;
-        for (label, value, site) in returns {
-            self.label(&label);
-            self.current_range = site;
-            self.return_from_regions(value);
-        }
-        self.current_range = range;
-        if let Some(label) = resume {
-            self.label(&label);
-        }
+        crate::llvm::registered::Frame::in_suite(self, checked).emit_suite(statements);
     }
 
     pub(super) fn registered_value(&mut self, value: &crate::ir::Expr) -> String {
@@ -613,7 +593,7 @@ impl<'p> Function<'_, 'p> {
                 WhileGuard::Operand(test) => code.branch_physical_operand(test, yes, no),
             },
             |code, edges, ()| {
-                let depth = code.exits.len();
+                let depth = code.regions.len();
                 code.push_loop(edges.clone(), depth, depth);
                 code.physical_suite(&region.body);
                 code.loops.pop();
@@ -649,12 +629,13 @@ impl<'p> Function<'_, 'p> {
             }
             _ => None,
         };
-        let enclosing = self.exits.len();
+        let enclosing = self.regions.len();
         self.live.push(cursor.clone());
-        self.exits.push(Region::Pending {
+        let outer = self.body.error_target.clone();
+        self.regions.push(Region::Pending {
             value: cursor.clone(),
             enclosing: None,
-            outer: self.body.error_target.clone(),
+            outer,
         });
         let unwind = self.begin_operand_scope();
 
@@ -697,13 +678,13 @@ impl<'p> Function<'_, 'p> {
                     let item = code.frame.iteration_item(&cursor, pulled);
                     code.physical_binding(&region.target, &item);
                 }
-                code.push_loop(edges.clone(), code.exits.len(), enclosing);
+                code.push_loop(edges.clone(), code.regions.len(), enclosing);
                 code.physical_suite(&region.body);
                 code.loops.pop();
             },
             // Even a loop without an else must release the cursor on exhaustion.
             Some(|code: &mut Self| {
-                code.exits.pop();
+                code.regions.pop();
                 code.live.pop();
                 code.finish_unwind(unwind, |frame| frame.release_target(None));
                 code.release_target(None);
@@ -737,7 +718,7 @@ impl<'p> Function<'_, 'p> {
             self.protected_suite(region);
             return;
         };
-        crate::llvm::registered::handlers::finalized(self, suite, |code| {
+        crate::llvm::registered::handlers::finalized(self, Finally::Prepared(suite), |code| {
             code.protected_suite(region)
         });
     }

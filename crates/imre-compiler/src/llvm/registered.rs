@@ -249,7 +249,6 @@ pub(super) struct IterationState {
     private_slots: Vec<usize>,
     first_slot: usize,
     cursors: HashMap<usize, ir::IterNextKind>,
-    scopes: Vec<Region<std::rc::Rc<[Statement]>>>,
     in_expression: bool,
 }
 
@@ -266,10 +265,63 @@ pub(super) struct ExpressionScope {
     error_targets: (String, String),
 }
 
+/// A checked return can reach a finally prepared by its enclosing suite.
+pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
+    std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>>
+{
+    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites);
+    fn emit_prepared(&mut self, suite: &'p crate::frontend::RegisteredSuite);
+}
+
+/// A checked run borrows its enclosing suite when a return can reach a prepared finally.
+enum FrameOwner<'f, 'a, 'p> {
+    Registered(&'f mut RegisteredFrame<'a, 'p>, &'f CheckedSites),
+    Prepared(&'f mut dyn PreparedSuiteEmitter<'a, 'p>),
+}
+
+impl<'a, 'p> FrameOwner<'_, 'a, 'p> {
+    fn reborrow(&mut self) -> FrameOwner<'_, 'a, 'p> {
+        match self {
+            Self::Registered(code, sites) => FrameOwner::Registered(code, sites),
+            Self::Prepared(owner) => FrameOwner::Prepared(&mut **owner),
+        }
+    }
+
+    fn parts(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites) {
+        match self {
+            Self::Registered(code, sites) => (code, sites),
+            Self::Prepared(owner) => owner.frame_and_sites(),
+        }
+    }
+
+    fn emit_prepared(&mut self, suite: &'p crate::frontend::RegisteredSuite) {
+        let Self::Prepared(owner) = self else {
+            unreachable!("prepared finally outside its owning suite")
+        };
+        owner.emit_prepared(suite);
+    }
+}
+
+impl<'a, 'p> std::ops::Deref for FrameOwner<'_, 'a, 'p> {
+    type Target = RegisteredFrame<'a, 'p>;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Registered(code, _) => code,
+            Self::Prepared(function) => function,
+        }
+    }
+}
+
+impl std::ops::DerefMut for FrameOwner<'_, '_, '_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.parts().0
+    }
+}
+
 /// The registered binder owns the scope, argument identities and frame.
 pub(crate) struct Frame<'f, 'a, 'p> {
-    code: &'f mut RegisteredFrame<'a, 'p>,
-    sites: &'f CheckedSites,
+    code: FrameOwner<'f, 'a, 'p>,
     names: Option<&'f HashMap<usize, LocalBinding>>,
     inputs: &'f [String],
     fixed_sites: Option<(&'f RegisteredFunction, &'f Cell<usize>)>,
@@ -278,13 +330,13 @@ pub(crate) struct Frame<'f, 'a, 'p> {
 impl<'a, 'p> std::ops::Deref for Frame<'_, 'a, 'p> {
     type Target = RegisteredFrame<'a, 'p>;
     fn deref(&self) -> &Self::Target {
-        self.code
+        &self.code
     }
 }
 
 impl std::ops::DerefMut for Frame<'_, '_, '_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.code
+        &mut self.code
     }
 }
 
@@ -297,13 +349,24 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
         self.raise_operands(exception, cause, Self::evaluate_handle);
     }
 
+    pub(crate) fn in_suite(
+        owner: &'f mut dyn PreparedSuiteEmitter<'a, 'p>,
+        checked: &'f RegisteredFunction,
+    ) -> Self {
+        Self {
+            code: FrameOwner::Prepared(owner),
+            names: Some(&checked.local_names),
+            fixed_sites: None,
+            inputs: &[],
+        }
+    }
+
     pub(super) fn for_expression(
         code: &'f mut RegisteredFrame<'a, 'p>,
         sites: &'f CheckedSites,
     ) -> Self {
         Self {
-            code,
-            sites,
+            code: FrameOwner::Registered(code, sites),
             names: None,
             fixed_sites: None,
             inputs: &[],
@@ -312,8 +375,7 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
 
     pub(super) fn reborrow(&mut self) -> Frame<'_, 'a, 'p> {
         Frame {
-            code: self.code,
-            sites: self.sites,
+            code: self.code.reborrow(),
             names: self.names,
             fixed_sites: self.fixed_sites,
             inputs: self.inputs,
@@ -607,16 +669,13 @@ impl Frame<'_, '_, '_> {
 
     pub(crate) fn enter_scope(&mut self, clear: &[usize]) {
         self.unwind_scope(clear);
-        self.code
-            .iteration
-            .scopes
-            .push(Region::Slots(clear.to_vec()));
+        self.code.regions.push(Region::Slots(clear.to_vec()));
     }
     pub(crate) fn leave_scope(&mut self) {
-        self.code.iteration.scopes.pop();
+        self.code.regions.pop();
     }
     pub(crate) fn enter_loop(&mut self, edges: &LoopEdges) {
-        let depth = self.code.iteration.scopes.len();
+        let depth = self.code.regions.len();
         self.push_loop(edges.clone(), depth, depth);
     }
     pub(crate) fn leave_loop(&mut self) {
@@ -914,7 +973,8 @@ impl Frame<'_, '_, '_> {
                 let defaults = operands
                     .map(|value| self.evaluate_eager_handle(value))
                     .collect::<Vec<_>>();
-                self.sites.bind_lambda(self.code, *site, &scope, &defaults)
+                let (code, sites) = self.code.parts();
+                sites.bind_lambda(code, *site, &scope, &defaults)
             }
             (Builtin::RegisteredGenerator(site, scoped), operands) => {
                 let (scope, cursor) =
@@ -926,9 +986,8 @@ impl Frame<'_, '_, '_> {
                 self.unwind_operands(&mark, |frame| {
                     let cursor = frame.evaluate_handle(cursor);
                     frame.keep_operands(&mark, &cursor, "0");
-                    let result = frame
-                        .sites
-                        .bind_generator(frame.code, *site, &scope, &cursor);
+                    let (code, sites) = frame.code.parts();
+                    let result = sites.bind_generator(code, *site, &scope, &cursor);
                     frame.keep_operands(&mark, &result, "0");
                     result
                 })
@@ -957,26 +1016,32 @@ impl Frame<'_, '_, '_> {
                         code.evaluate_handle(&operands[index])
                     })
                 });
-                self.sites
-                    .definition(self.code, site.start(), &header, class_arguments)
+                let (code, sites) = self.code.parts();
+                sites.definition(code, site.start(), &header, class_arguments)
             }
             (Builtin::RegisteredClassNamespace(site, layout), operands) => {
-                let sites = self.sites;
+                let (code, sites) = self.code.parts();
+                let mut frame = Frame {
+                    code: FrameOwner::Registered(code, sites),
+                    names: self.names,
+                    inputs: self.inputs,
+                    fixed_sites: self.fixed_sites,
+                };
                 let (namespace, parameters, range) = &sites.class_namespaces[site];
-                namespace.generic_class(self, parameters, *range, layout, |code, index| {
+                namespace.generic_class(&mut frame, parameters, *range, layout, |code, index| {
                     code.evaluate_handle(&operands[index])
                 })
             }
-            (Builtin::RegisteredTypeAlias(site), []) => match &self.sites.aliases[site] {
-                Ok(alias) => alias.instantiate(self.code),
-                Err(error) => {
-                    self.code
-                        .output
-                        .diagnostic
-                        .get_or_insert_with(|| error.clone());
-                    "0".to_owned()
+            (Builtin::RegisteredTypeAlias(site), []) => {
+                let (code, sites) = self.code.parts();
+                match &sites.aliases[site] {
+                    Ok(alias) => alias.instantiate(code),
+                    Err(error) => {
+                        code.output.diagnostic.get_or_insert_with(|| error.clone());
+                        "0".to_owned()
+                    }
                 }
-            },
+            }
             (Builtin::RegisteredImport(import), []) => {
                 self.code.namespace_import(import);
                 "0".to_owned()
@@ -996,14 +1061,16 @@ impl Frame<'_, '_, '_> {
                 "0".to_owned()
             }
             (Builtin::RegisteredAnnotationInsert(occurrence), [value]) => {
-                let (name, range) = &self.sites.annotation_fields[&occurrence.site];
-                let target = self.code.annotation_target(occurrence.index, name, *range);
+                let (code, sites) = self.code.parts();
+                let (name, range) = &sites.annotation_fields[&occurrence.site];
+                let target = code.annotation_target(occurrence.index, name, *range);
                 let value = self.evaluate_handle(value);
                 self.code.store_annotation(target, &value);
                 "0".to_owned()
             }
             (Builtin::BindAnnotationExpression(site), []) => {
-                self.sites.annotation_string(self.code, *site)
+                let (code, sites) = self.code.parts();
+                sites.annotation_string(code, *site)
             }
             (Builtin::RegisteredAnnotationResult, []) => self.code.take_annotation_result(),
             (
@@ -1022,8 +1089,8 @@ impl Frame<'_, '_, '_> {
             ) => {
                 let key = self.code.code_name(name);
                 let value = self.evaluate_handle(value);
-                self.code
-                    .op("annotate", &[&self.code.scope.clone(), &key, &value]);
+                let scope = self.code.scope.clone();
+                self.code.op("annotate", &[&scope, &key, &value]);
                 "0".to_owned()
             }
             (Builtin::RegisteredDeleteName(name, range), []) => self.code.delete_name(name, *range),
@@ -1320,9 +1387,8 @@ impl RegisteredFrame<'_, '_> {
         let first = self.integer_owners;
         let outer = self.expression_integer_start.replace(first);
         let result = emit(Frame {
-            code: self,
+            code: FrameOwner::Registered(self, sites),
             names,
-            sites,
             fixed_sites: None,
             inputs: &[],
         });
@@ -1360,8 +1426,10 @@ impl RegisteredFrame<'_, '_> {
         inputs: &[String],
         sites: &CheckedSites,
     ) -> String {
-        self.with_checked_frame(sites, None, |frame| {
-            Frame { inputs, ..frame }.evaluate_handle(expression)
+        self.with_checked_frame(sites, None, |mut enclosing| {
+            let mut frame = enclosing.reborrow();
+            frame.inputs = inputs;
+            frame.evaluate_handle(expression)
         })
     }
 
@@ -1473,9 +1541,8 @@ impl RegisteredFrame<'_, '_> {
         sites: &CheckedSites,
     ) {
         CheckedBody::registered(Frame {
-            code: self,
+            code: FrameOwner::Registered(self, sites),
             names: Some(&checked.local_names),
-            sites,
             fixed_sites: None,
             inputs: &[],
         })
@@ -1488,9 +1555,8 @@ impl RegisteredFrame<'_, '_> {
         };
         let next = Cell::new(0);
         CheckedBody::registered(Frame {
-            code: self,
+            code: FrameOwner::Registered(self, sites),
             names: Some(&checked.local_names),
-            sites,
             fixed_sites: (!checked.fixed_sites.is_empty()).then_some((checked, &next)),
             inputs: &[],
         })

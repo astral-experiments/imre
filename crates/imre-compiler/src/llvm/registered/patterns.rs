@@ -159,7 +159,7 @@ impl CheckedBody<'_, '_, '_, '_> {
         let mut regions = self
             .python()
             .start_match(&subject, &mark, MatchCases::Checked(cases));
-        while let Some(region) = regions.next(self.python().code) {
+        while let Some(region) = regions.next(self.python()) {
             match region {
                 MatchRegion::Body(case) => self.emit_block(&cases[case].body),
                 MatchRegion::Guard {
