@@ -205,6 +205,9 @@ impl BuiltinDescriptor {
             Some(("filter", attr)) => Some(("filter", attr, builtins::FILTER_METHODS)),
             Some(("map", attr)) => Some(("map", attr, builtins::ITERATOR_SLOTS)),
             Some(("zip", attr)) => Some(("zip", attr, builtins::ITERATOR_SLOTS)),
+            Some(("set_iterator", attr)) => {
+                Some(("set_iterator", attr, builtins::SET_ITERATOR_METHODS))
+            }
             Some(("list_iterator", attr)) => {
                 Some(("list_iterator", attr, &["__iter__", "__next__"][..]))
             }
@@ -313,7 +316,7 @@ impl BuiltinDescriptor {
                 name,
                 method: !name.starts_with("__")
                     || (name == "__length_hint__"
-                        && (owner == value::STRUCT_UNPACK_ITERATOR
+                        && (matches!(owner, "set_iterator" | value::STRUCT_UNPACK_ITERATOR)
                             || deque::iterator_class(owner).is_some()))
                     || (owner == "type" && name == "__subclasses__")
                     || (owner == "list" && name == "__getitem__")

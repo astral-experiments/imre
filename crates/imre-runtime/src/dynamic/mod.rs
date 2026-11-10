@@ -506,6 +506,7 @@ impl Context {
             | ("int", Value::Int(_) | Value::Bool(_))
             | ("float", Value::Float(_))
             | ("filter", Value::Filter { .. })
+            | ("set_iterator", Value::SetIterator(_))
             | ("map", Value::Map { .. })
             | ("zip", Value::Zip { .. })
             | ("mappingproxy", Value::MappingProxy(_))
@@ -1161,6 +1162,7 @@ impl Context {
                 | Value::DequeIterator { .. }
                 | Value::Scandir(_)
                 | Value::DictIterator(_)
+                | Value::SetIterator(_)
                 | Value::AstWalk { .. }
                 | Value::Map { .. }
                 | Value::Filter { .. }
@@ -1214,6 +1216,7 @@ impl Context {
             }
             Value::Context(_) => return Ok(self.context_iterator(id, "Context.keys")),
             Value::MappingProxy(_) => return self.iterator(self.mapping_proxy_target(id)),
+            Value::Set { .. } => return Ok(self.set_iterator(id)),
             Value::Deque(ref ring) => {
                 let cursor = deque::iterator(id, ring, false, 0);
                 return Ok(self.alloc(cursor));
@@ -1305,6 +1308,11 @@ impl Context {
         })
     }
 
+    fn set_iterator(&mut self, owner: Id) -> Id {
+        let len = self.stored_entries(self.scalar_value(owner)).len();
+        self.alloc(Value::SetIterator(value::SetIterator::new(owner, len)))
+    }
+
     /// Start a cursor at the first entry without copying keys or values.
     fn dict_iterator(&mut self, dict: Id, kind: DictViewKind, ordered: bool, reverse: bool) -> Id {
         let storage = self.dict_storage(dict).expect("dictionary iterator source");
@@ -1345,6 +1353,7 @@ impl Context {
                 | Value::DequeIterator { .. }
                 | Value::Scandir(_)
                 | Value::DictIterator(_)
+                | Value::SetIterator(_)
                 | Value::CallableIterator(_)
                 | Value::Map { .. }
                 | Value::Filter { .. }
@@ -1752,6 +1761,12 @@ impl Context {
             Value::AstWalk { .. } => return stdlib::ast::advance(self, id),
             Value::TemplateIter { .. } => return self.next_template_item(id),
             Value::DictIterator(iter) => return (*iter).next(self, id),
+            Value::SetIterator(cursor) => {
+                let mut cursor = *cursor;
+                let item = cursor.next(self);
+                *self.heap.get_mut(id) = Value::SetIterator(cursor);
+                return item;
+            }
             Value::FormatIterator { .. } => return self.next_format_row(id),
             Value::Enumerate { input, .. } => {
                 let input = *input;
@@ -2155,6 +2170,7 @@ impl Context {
                 | Value::DequeIterator { .. }
                 | Value::Scandir(_)
                 | Value::DictIterator(_)
+                | Value::SetIterator(_)
                 | Value::DictView { .. }
                 | Value::Zip { .. }
                 | Value::CallableIterator(_)
@@ -3311,6 +3327,7 @@ impl Context {
                 "index",
             ],
             "set" | "frozenset" => builtins::set_methods(name),
+            "set_iterator" => builtins::SET_ITERATOR_METHODS,
             "bytearray" => {
                 additional = &["fromhex"];
                 builtins::BYTEARRAY_METHODS
