@@ -1199,24 +1199,6 @@ pub(crate) enum ObjectCall {
     FormatField,
 }
 
-pub(crate) fn required_object_call<'a>(
-    functions: impl Iterator<Item = &'a Function>,
-) -> Option<(usize, ruff_text_size::TextRange, ObjectCall)> {
-    let mut first = None;
-    for function in functions {
-        walk_expressions(&function.body, &mut |expr| {
-            if let ExprKind::Builtin(Builtin::ObjectCall(call, module, span), _) = &expr.kind
-                && first.is_none_or(|(id, range, kind): (_, ruff_text_size::TextRange, _)| {
-                    (*call, *module, span.start()) < (kind, id, range.start())
-                })
-            {
-                first = Some((*module, *span, *call));
-            }
-        });
-    }
-    first
-}
-
 /// Unary protocol to invoke on a materialized Python object.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ObjectUnary {
