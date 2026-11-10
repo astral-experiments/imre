@@ -410,6 +410,7 @@ impl Checker<'_> {
         }
         let boxed = callback_parameter(definition);
         if !boxed
+            && definition.type_params.is_none()
             && definition
                 .parameters
                 .iter_non_variadic_params()
@@ -438,6 +439,9 @@ impl Checker<'_> {
         if wraps.is_none() && self.generic_awaitable_wrapper(definition) {
             self.local_functions.get_mut(name).unwrap().generic = Some(Rc::new(definition.clone()));
             return Ok(None);
+        }
+        if definition.type_params.is_some() {
+            return Err(self.scoped_builtin_error("a generic local function", definition));
         }
         let policy = self.local_cache_policy(definition)?;
         let decorator = self.local_dispatch_decorator(definition)?;

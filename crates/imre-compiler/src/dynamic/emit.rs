@@ -489,6 +489,7 @@ impl<'a> PreparedBody<'a> {
             }
             let header = scopes.functions.get_mut(&start).expect("named function");
             header.type_params = site.parameters.unwrap_or_default();
+            header.parameter_providers = site.parameter_providers;
             if let Some(annotations) = sites.parameter_annotations.get(&header.parameters) {
                 header.integer_sign_parameters = header
                     .metadata
@@ -713,7 +714,11 @@ enum Input<'a> {
 enum DefinitionName<'a> {
     Binding(&'a ast::Identifier),
     Generator(TextRange),
-    TypeAlias(&'a str),
+    Evaluator {
+        name: &'a str,
+        scope: &'a crate::frontend::function_scope::FunctionScope,
+        type_parameter_scope: bool,
+    },
     ClassHeader(&'a str),
 }
 
@@ -1323,7 +1328,7 @@ mod tests {
     #[test]
     fn mixed_function_header_keeps_its_binding_after_erasing_the_declaration() {
         use crate::frontend::{PhysicalOperand, SourceEffect, ValueStatement};
-        let text = "@decorate\ndef choose[T](first=checked(), *, last=(lambda: item)()):\n    return T, first, last\n";
+        let text = "@decorate\ndef choose[T: bound() = fallback()](first=checked(), *, last=(lambda: item)()):\n    return T, first, last\n";
         let mut module = PreparedBody::module_with_syntax(
             "case",
             Path::new("case.py"),
@@ -1348,6 +1353,7 @@ mod tests {
         // The decorator and positional default are checked. Only the keyword default needs source.
         assert_eq!(inputs, [true, true, false]);
         let original = module.standalone().unwrap();
+        assert!(original.1.contains("type_parameter_evaluator"));
         module.syntax = None;
         assert_eq!(module.standalone().unwrap(), original);
     }

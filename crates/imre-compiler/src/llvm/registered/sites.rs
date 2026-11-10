@@ -18,7 +18,7 @@ pub(crate) struct CompiledDefinition {
     pub(crate) provider: Option<Box<Self>>,
     pub(crate) annotation_scope: bool,
     pub(crate) default_names: std::sync::Arc<[String]>,
-    pub(crate) type_alias: bool,
+    pub(crate) format_evaluator: bool,
     pub(crate) class_header: Option<TextRange>,
 }
 
@@ -53,7 +53,7 @@ impl CompiledDefinition {
             doc: None,
             provider: None,
             default_names: Default::default(),
-            type_alias: false,
+            format_evaluator: false,
             class_header: None,
         }
     }
@@ -117,12 +117,12 @@ impl CompiledDefinition {
             |provider| provider.bind_defaults(frame, scope, &[]),
         );
         let qualname = frame.text(&self.qualname);
-        let defaults = if self.type_alias || !self.default_names.is_empty() {
+        let defaults = if self.format_evaluator || !self.default_names.is_empty() {
             frame.op("dict", &[])
         } else {
             "0".into()
         };
-        if self.type_alias {
+        if self.format_evaluator {
             let format = frame.text(".format");
             let value = frame.integer(1);
             frame.op("put", &[&defaults, &format, &value]);
@@ -197,10 +197,35 @@ impl CompiledAlias {
     }
 }
 
+pub(crate) struct CompiledParameterProvider {
+    pub(crate) parameter: usize,
+    pub(crate) field: imre_ast::TypeParameterField,
+    pub(crate) evaluator: CompiledDefinition,
+}
+
+impl CompiledParameterProvider {
+    pub(crate) fn install(
+        &self,
+        frame: &mut RegisteredFrame<'_, '_>,
+        scope: &str,
+        parameters: &[RegisteredTypeParameter],
+    ) {
+        let binding = frame.code_name(&parameters[self.parameter].binding);
+        let parameter = frame.op("lookup", &[scope, &binding]);
+        let field = frame.code_name(self.field.as_str());
+        let evaluator = self.evaluator.bind_defaults(frame, scope, &[]);
+        frame.op(
+            "type_parameter_evaluator",
+            &[&parameter, &field, &evaluator],
+        );
+    }
+}
+
 pub(crate) struct Declaration {
     pub(crate) definition: CompiledDefinition,
     pub(crate) decorator_lines: Vec<usize>,
     pub(crate) type_params: Vec<RegisteredTypeParameter>,
+    pub(crate) parameter_providers: Result<Vec<CompiledParameterProvider>, String>,
 }
 
 pub(crate) struct AnnotationString {
@@ -337,6 +362,7 @@ impl CheckedSites {
             definition,
             decorator_lines,
             type_params,
+            parameter_providers,
         } = &self.definitions[&site];
         let (decorators, defaults) = header.split_at(decorator_lines.len());
         let scope = frame.scope.clone();
@@ -352,7 +378,18 @@ impl CheckedSites {
             let scope = if type_params.is_empty() {
                 scope
             } else {
-                frame.checked_parameter_scope(&scope, type_params, false)
+                let scope = frame.parameter_scope(&scope, type_params, false);
+                let providers = match parameter_providers {
+                    Ok(providers) => providers,
+                    Err(error) => {
+                        frame.output.diagnostic.get_or_insert_with(|| error.clone());
+                        return "0".into();
+                    }
+                };
+                for provider in providers {
+                    provider.install(frame, &scope, type_params);
+                }
+                scope
             };
             let function = definition.bind_defaults(frame, &scope, defaults);
             if !type_params.is_empty() {
@@ -384,12 +421,21 @@ impl RegisteredFrame<'_, '_> {
         params: &[RegisteredTypeParameter],
         class: bool,
     ) -> String {
+        if !self.native_suspension && params.iter().any(|p| p.has_bound_or_default) {
+            let message = self.text("class type parameter bounds and defaults");
+            self.op("unsupported", &[&message]);
+        }
+        self.parameter_scope(outer, params, class)
+    }
+
+    fn parameter_scope(
+        &mut self,
+        outer: &str,
+        params: &[RegisteredTypeParameter],
+        class: bool,
+    ) -> String {
         let names = self.op("dict", &[]);
         for param in params {
-            if param.has_bound_or_default && !self.native_suspension {
-                let message = self.text("class type parameter bounds and defaults");
-                self.op("unsupported", &[&message]);
-            }
             let binding = self.code_name(&param.binding);
             let name = self.code_name(&param.name);
             let declaration = match param.kind {

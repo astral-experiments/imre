@@ -177,6 +177,12 @@ def current():
         assert parameter.has_default() is (default is not NoDefault)
         assert parameter.evaluate_default(Format.VALUE) is default
     assert variable.evaluate_default(Format.VALUE) is NoDefault
+    assert variable.evaluate_bound is variable.evaluate_constraints is None
+    bounded = TypeVar("B", bound=int)
+    assert bounded.evaluate_bound(Format.VALUE) is int
+    assert bounded.evaluate_bound is not bounded.evaluate_bound
+    constrained = TypeVar("C", int, str)
+    assert constrained.evaluate_constraints(Format.VALUE) is constrained.__constraints__
 
     from typing import Generic
 

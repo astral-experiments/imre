@@ -408,7 +408,14 @@ impl CallableSites<'_, '_> {
         name: DefinitionName<'_>,
         body: Body<'_>,
     ) -> CompiledDefinition {
-        let type_alias = matches!(name, DefinitionName::TypeAlias(_));
+        let (evaluator_scope, type_parameter_scope) = match name {
+            DefinitionName::Evaluator {
+                scope,
+                type_parameter_scope,
+                ..
+            } => (Some(scope), type_parameter_scope),
+            _ => (None, false),
+        };
         let class = matches!(name, DefinitionName::ClassHeader(_))
             .then(|| &self.source.class_bodies[&start]);
         let (name, global, generator) = match name {
@@ -417,7 +424,7 @@ impl CallableSites<'_, '_> {
                 self.declared_globals.contains(identifier.as_str()),
                 None,
             ),
-            DefinitionName::ClassHeader(name) | DefinitionName::TypeAlias(name) => {
+            DefinitionName::ClassHeader(name) | DefinitionName::Evaluator { name, .. } => {
                 (name, false, None)
             }
             DefinitionName::Generator(site) => ("<genexpr>", false, Some(site)),
@@ -449,9 +456,8 @@ impl CallableSites<'_, '_> {
         });
         let mut signature = json!({});
         if !matches!(body, Body::Namespace) {
-            let nested = self.in_function
-                || type_alias && self.source.type_aliases[&start].parameters.is_some();
-            let method = self.method_scope && class_header.is_none() && !type_alias;
+            let nested = self.in_function || type_parameter_scope;
+            let method = self.method_scope && class_header.is_none() && evaluator_scope.is_none();
             let flags = self.source.function_flags(nested, method);
             signature["code_flags"] = json!(flags | generator_flags);
         }
@@ -477,7 +483,7 @@ impl CallableSites<'_, '_> {
                 }
                 Some(&class.namespace)
             }
-            _ if type_alias => Some(&scopes.aliases[&start]),
+            _ if evaluator_scope.is_some() => evaluator_scope,
             _ => generator.map(|site| &scopes.generators[&site]),
         };
         if let Some(facts) = scope_facts {
@@ -490,10 +496,9 @@ impl CallableSites<'_, '_> {
             signature["scope_complete"] = json!(false);
             signature["scope_locals_complete"] = json!(true);
         }
-        // A type alias thunk has an implicit default for its format parameter.
-        if type_alias {
+        if evaluator_scope.is_some() {
             signature["posonly"] = json!([".format"]);
-            if self.class_locals.is_some() {
+            if matches!(body, Body::Operand(_, _, Some(_))) {
                 signature["annotation_class"] = json!(true);
             }
         }
@@ -503,13 +508,13 @@ impl CallableSites<'_, '_> {
             .definition(self.output, prefix, body, start, in_function, entry);
         CompiledDefinition {
             class_header,
-            type_alias,
+            format_evaluator: evaluator_scope.is_some(),
             ..CompiledDefinition::new(
                 code,
                 signature,
                 name,
                 qualname,
-                class_header.is_some() || type_alias,
+                class_header.is_some() || evaluator_scope.is_some(),
             )
         }
     }

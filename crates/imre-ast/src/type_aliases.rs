@@ -7,6 +7,47 @@ use ruff_text_size::{Ranged, TextRange};
 
 use crate::comprehension::{Output, Plan, Step};
 
+/// The independently evaluated values on a declared type parameter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TypeParameterField {
+    Bound,
+    Constraints,
+    Default,
+}
+
+impl TypeParameterField {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Bound => "bound",
+            Self::Constraints => "constraints",
+            Self::Default => "default",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        [Self::Bound, Self::Constraints, Self::Default]
+            .into_iter()
+            .find(|field| field.as_str() == name)
+    }
+
+    pub fn expressions(param: &ast::TypeParam) -> impl Iterator<Item = (Self, &Expr)> {
+        let bound = match param {
+            ast::TypeParam::TypeVar(var) => var.bound.as_deref().map(|bound| {
+                let field = if bound.is_tuple_expr() {
+                    Self::Constraints
+                } else {
+                    Self::Bound
+                };
+                (field, bound)
+            }),
+            _ => None,
+        };
+        bound
+            .into_iter()
+            .chain(param.default().map(|value| (Self::Default, value)))
+    }
+}
+
 type Error<'a> = (&'a Expr, &'static str);
 
 /// Validate annotation scopes before execution, including nested and untaken declarations.

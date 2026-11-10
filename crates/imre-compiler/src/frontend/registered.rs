@@ -471,6 +471,51 @@ pub(crate) fn type_alias_body(
     Some(code)
 }
 
+pub(crate) struct FunctionParameterProvider {
+    pub(crate) parameter: usize,
+    pub(crate) field: imre_ast::TypeParameterField,
+    pub(crate) range: TextRange,
+    pub(crate) scope: super::function_scope::FunctionScope,
+    pub(crate) body: Option<AnnotationCode>,
+}
+
+pub(crate) fn parameter_evaluator_body(
+    rhs: &ast::Expr,
+    source: values::RegisteredSource<'_>,
+) -> Option<AnnotationCode> {
+    if let ast::Expr::Starred(starred) = rhs {
+        type_alias_body(&starred.value, source).map(|mut code| {
+            code.operand.value = super::annotation_operands::unpack_annotation(code.operand.value);
+            code.range = rhs.range();
+            code
+        })
+    } else {
+        type_alias_body(rhs, source)
+    }
+}
+
+impl FunctionParameterProvider {
+    fn prepare(
+        params: &ast::TypeParams,
+        source: values::RegisteredSource<'_>,
+        class: Option<&super::function_scope::ClassBindings>,
+    ) -> Vec<Self> {
+        let mut providers = Vec::new();
+        for (parameter, param) in params.iter().enumerate() {
+            for (field, rhs) in imre_ast::TypeParameterField::expressions(param) {
+                providers.push(Self {
+                    parameter,
+                    field,
+                    range: rhs.range(),
+                    scope: super::function_scope::FunctionScope::parameter(rhs, class),
+                    body: parameter_evaluator_body(rhs, source),
+                });
+            }
+        }
+        providers
+    }
+}
+
 pub(crate) fn registered_type_alias(site: TextSize) -> Expr {
     operation(
         Builtin::RegisteredTypeAlias(site),
@@ -691,6 +736,7 @@ impl DeferredAnnotation {
 pub(crate) struct FunctionSite<'a> {
     pub(crate) def: &'a ast::StmtFunctionDef,
     pub(crate) parameters: Option<Vec<ir::RegisteredTypeParameter>>,
+    pub(crate) parameter_providers: Vec<FunctionParameterProvider>,
     pub(crate) prepare_entry: bool,
     pub(crate) thread_entry: Option<imre_ast::ThreadEntry>,
 }
@@ -811,24 +857,16 @@ pub(crate) fn registered_sites<'a>(
                             .parameter_annotations
                             .insert(def.parameters.start(), provider);
                     }
-                    let parameters = if matches!(self.scope, RegisteredScope::Function { .. }) {
-                        super::function_scope::function_parameter_header(
-                            def,
-                            self.names.string_annotations,
-                            true,
-                            Some(self.names),
-                        )
-                    } else {
-                        def.type_params.as_deref().filter(|_| {
-                            super::function_scope::type_parameter_scope(
+                    let parameters = def.type_params.as_deref().filter(|_| {
+                        !matches!(self.scope, RegisteredScope::Class)
+                            || super::function_scope::type_parameter_scope(
                                 def,
                                 self.names.string_annotations,
-                                matches!(self.scope, RegisteredScope::Class),
+                                true,
                                 Some(self.names),
                             )
                             .is_some()
-                        })
-                    };
+                    });
                     // Nested ordinary functions of an admitted definition take the
                     // same preparation path as any other lexical function.
                     let unprepared = parameters.is_none()
@@ -839,6 +877,9 @@ pub(crate) fn registered_sites<'a>(
                         def,
                         parameters: parameters
                             .map(|params| registered_type_parameters(params, self.names)),
+                        parameter_providers: parameters.map_or_else(Vec::new, |params| {
+                            FunctionParameterProvider::prepare(params, self.source, None)
+                        }),
                         prepare_entry: !unprepared || worker,
                         thread_entry,
                     });

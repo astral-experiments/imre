@@ -1,6 +1,9 @@
 //! Runtime type parameters and class-base aliases used by imported Python modules.
 
 mod builtin_substitution;
+mod parameter_value;
+
+pub(super) use parameter_value::{ParameterField, ParameterValue, set_parameter_evaluator};
 
 use crate::dynamic::value::SlotStorage;
 use std::collections::{HashMap, HashSet};
@@ -27,9 +30,9 @@ pub(super) enum AliasDefinition {
 pub(super) struct TypeVariable {
     pub name: Id,
     pub module: Id,
-    pub bound: Id,
-    pub constraints: Id,
-    pub default: Id,
+    pub bound: ParameterValue,
+    pub constraints: ParameterValue,
+    pub default: ParameterValue,
     pub covariant: bool,
     pub contravariant: bool,
     pub infer_variance: bool,
@@ -307,7 +310,7 @@ fn check_type_alias_params(ctx: &mut Context, parameters: Id) -> Result<Id> {
                 ));
             }
         };
-        if matches!(ctx.heap.get(default), Value::NoDefault) {
+        if !default.has_default(ctx) {
             if default_seen {
                 let repr = ctx.checked_format(param, true)?;
                 return Err(Error::new(
@@ -1666,9 +1669,8 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         } => match name {
             "__name__" => *label,
             "__module__" => *module,
-            "__default__" => *default,
-            "evaluate_default" if *declared => NONE,
-            "evaluate_default" => ctx.alloc(Value::ConstEvaluator(*default)),
+            "__default__" => return Some(default.read(ctx, value, ParameterField::Default)),
+            "evaluate_default" => default.evaluator(*declared, ParameterField::Default, ctx),
             "has_default" | "__reduce__" | "__iter__" => {
                 let callable = ctx.builtin(&format!("typing.TypeVarTuple.{name}"));
                 ctx.alloc(Value::Method {
@@ -1730,13 +1732,26 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
             _ => return None,
         },
         Value::TypeVar(var) => match name {
-            "evaluate_bound" | "evaluate_constraints" | "evaluate_default" if var.declared => NONE,
+            "evaluate_bound" => var
+                .bound
+                .evaluator(var.declared, ParameterField::Bound, ctx),
+            "evaluate_constraints" => {
+                var.constraints
+                    .evaluator(var.declared, ParameterField::Constraints, ctx)
+            }
             "__name__" => var.name,
             "__module__" => var.module,
-            "__bound__" => var.bound,
-            "__constraints__" => var.constraints,
-            "__default__" => var.default,
-            "evaluate_default" => ctx.alloc(Value::ConstEvaluator(var.default)),
+            "__bound__" => return Some(var.bound.read(ctx, value, ParameterField::Bound)),
+            "__constraints__" => {
+                return Some(
+                    var.constraints
+                        .read(ctx, value, ParameterField::Constraints),
+                );
+            }
+            "__default__" => return Some(var.default.read(ctx, value, ParameterField::Default)),
+            "evaluate_default" => var
+                .default
+                .evaluator(var.declared, ParameterField::Default, ctx),
             "__reduce__" | "__typing_subst__" | "has_default" => {
                 let callable = ctx.builtin(&format!("typing.TypeVar.{name}"));
                 ctx.alloc(Value::Method {
@@ -1888,14 +1903,14 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
     Some(Ok(attr))
 }
 
-/// Create an unbounded compiler-declared pack, whose missing default has no evaluator.
+/// Create a compiler-declared pack before binding its optional default evaluator.
 pub(super) fn declared_pack(ctx: &mut Context, name: Id) -> Id {
     let module = ctx.text("typing");
     let default = no_default(ctx);
     ctx.alloc(Value::TypeVarTuple {
         name,
         module,
-        default,
+        default: ParameterValue::Eager(default),
         declared: true,
     })
 }
@@ -2063,9 +2078,9 @@ fn typevar(
     Ok(ctx.alloc(Value::TypeVar(TypeVariable {
         name,
         module,
-        bound,
-        constraints,
-        default,
+        bound: ParameterValue::Eager(bound),
+        constraints: ParameterValue::Eager(constraints),
+        default: ParameterValue::Eager(default),
         covariant,
         contravariant,
         infer_variance,
@@ -2317,7 +2332,7 @@ pub(super) fn call(
         return Ok(ctx.alloc(Value::TypeVarTuple {
             name,
             module,
-            default,
+            default: ParameterValue::Eager(default),
             declared: false,
         }));
     }
@@ -2471,16 +2486,16 @@ pub(super) fn call(
         ("NoDefault.__reduce__", [value]) if matches!(ctx.heap.get(*value), Value::NoDefault) => {
             Ok(ctx.text("NoDefault"))
         }
-        ("TypeVar.has_default", [var]) if let Value::TypeVar(var) = ctx.heap.get(*var) => Ok(
-            super::builtins::boolean(!matches!(ctx.heap.get(var.default), Value::NoDefault)),
-        ),
+        ("TypeVar.has_default", [var]) if let Value::TypeVar(var) = ctx.heap.get(*var) => {
+            Ok(super::builtins::boolean(var.default.has_default(ctx)))
+        }
         ("TypeVar.has_default", _) => Err(Error::new(
             "TypeError",
             "TypeVar.has_default() takes no arguments",
         )),
-        ("ParamSpec.has_default", [spec]) if let Value::ParamSpec(p) = ctx.heap.get(*spec) => Ok(
-            super::builtins::boolean(!matches!(ctx.heap.get(p.default), Value::NoDefault)),
-        ),
+        ("ParamSpec.has_default", [spec]) if let Value::ParamSpec(p) = ctx.heap.get(*spec) => {
+            Ok(super::builtins::boolean(p.default.has_default(ctx)))
+        }
         ("ParamSpec.__reduce__", [spec]) if let Value::ParamSpec(p) = ctx.heap.get(*spec) => {
             Ok(p.name)
         }
@@ -2515,11 +2530,7 @@ pub(super) fn call(
         ("TypeVarTuple.has_default", [pack])
             if let Value::TypeVarTuple { default, .. } = ctx.heap.get(*pack) =>
         {
-            Ok(if matches!(ctx.heap.get(*default), Value::NoDefault) {
-                FALSE
-            } else {
-                TRUE
-            })
+            Ok(super::builtins::boolean(default.has_default(ctx)))
         }
         ("TypeVarTuple.__reduce__", [pack])
             if let Value::TypeVarTuple { name, .. } = ctx.heap.get(*pack) =>

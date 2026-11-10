@@ -1553,7 +1553,7 @@ pub(super) enum Value {
     TypeVarTuple {
         name: Id,
         module: Id,
-        default: Id,
+        default: super::typing::ParameterValue,
         declared: bool,
     },
     NoDefault,
@@ -2497,8 +2497,15 @@ impl Value {
                 module,
                 default,
                 ..
-            } => visit.extend([*name, *module, *default]),
-            Self::ParamSpec(p) => visit.extend([p.name, p.bound, p.default, p.namespace]),
+            } => {
+                visit.extend([*name, *module]);
+                default.visit(visit);
+            }
+            Self::ParamSpec(p) => {
+                visit.extend([p.name, p.bound]);
+                p.default.visit(visit);
+                visit.push(p.namespace);
+            }
             Self::ParamSpecMarker(_, origin)
             | Self::ConstEvaluator(origin)
             | Self::FractionHash(origin) => visit.push(*origin),
@@ -2518,13 +2525,12 @@ impl Value {
                     }
                 }
             }
-            Self::TypeVar(var) => visit.extend([
-                var.name,
-                var.module,
-                var.bound,
-                var.constraints,
-                var.default,
-            ]),
+            Self::TypeVar(var) => {
+                visit.extend([var.name, var.module]);
+                var.bound.visit(visit);
+                var.constraints.visit(visit);
+                var.default.visit(visit);
+            }
             Self::GenericAlias(alias) => {
                 visit.extend([alias.origin, alias.args, alias.parameters]);
                 visit.extend(alias.name);
