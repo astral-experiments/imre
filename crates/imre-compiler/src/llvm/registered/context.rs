@@ -381,7 +381,7 @@ impl<'a, 'p> RegionEmitter<'a, 'p> for Frame<'_, 'a, 'p> {
     fn emit_finally(&mut self, suite: &Finally<'p>) {
         match suite {
             Finally::Checked(statements) => self.emit_suite(statements),
-            Finally::Prepared(body) => self.code.emit_prepared(body),
+            Finally::Prepared(body) => super::emit_prepared_suite(self.code.prepared_owner(), body),
         }
     }
 }

@@ -73,11 +73,6 @@ impl Function<'_, '_> {
         CheckedSites::visit_operand(value, &mut |site| callables.place_site(site));
     }
 
-    pub(in crate::dynamic::emit) fn prepare_checked_sites(&mut self, statements: &[Statement]) {
-        let mut callables = self.callable_sites();
-        CheckedSites::visit(statements, &mut |site| callables.place_site(site));
-    }
-
     pub(in crate::dynamic::emit) fn callable_sites(&mut self) -> CallableSites<'_, '_> {
         self.source.frame_callables(
             &mut self.frame,
@@ -90,6 +85,10 @@ impl Function<'_, '_> {
 }
 
 impl CallableSites<'_, '_> {
+    pub(in crate::dynamic::emit) fn place_statements(&mut self, statements: &[Statement]) {
+        CheckedSites::visit(statements, &mut |site| self.place_site(site));
+    }
+
     fn place_annotation_string(&mut self, site: TextSize) {
         if self.sites.annotation_strings.contains_key(&site) {
             return;

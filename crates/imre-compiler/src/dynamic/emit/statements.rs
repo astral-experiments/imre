@@ -1,5 +1,5 @@
 use crate::frontend::{ExpressionInput, PhysicalOperand, SourceEffect, SourceOperand};
-use crate::llvm::registered::{PreparedSuiteEmitter, emit_operand};
+use crate::llvm::registered::{PreparedSuiteEmitter, emit_operand, emit_prepared_suite};
 mod declarations;
 use super::sites::{CheckedSites, CompiledDefinition};
 
@@ -34,8 +34,91 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         (&mut self.frame, &self.sites)
     }
 
-    fn emit_prepared(&mut self, suite: &'p crate::frontend::RegisteredSuite) {
-        self.physical_suite(suite);
+    fn place_statements(&mut self, body: &[crate::ir::Statement]) {
+        self.callable_sites().place_statements(body);
+    }
+
+    fn emit_effect(&mut self, effect: &'p SourceEffect) {
+        match effect {
+            SourceEffect::Assertion(site) => self.emit_assertion_inputs(site),
+            SourceEffect::Class {
+                site,
+                layout,
+                inputs,
+            } => {
+                self.mixed_class_definition(*site, layout, inputs);
+            }
+            SourceEffect::Match(range, site) => {
+                self.checkpoint(range);
+                self.simple_call = None;
+                self.prepared_match(site);
+            }
+            SourceEffect::Context(context) => self.prepared_context(context),
+            SourceEffect::Try(region) => {
+                self.checkpoint(&region.range);
+                self.simple_call = None;
+                self.prepared_try(region);
+            }
+            SourceEffect::For(region) => self.prepared_for(region),
+            SourceEffect::If { range, arms } => {
+                self.checkpoint(range);
+                self.simple_call = None;
+                crate::llvm::operations::choose(
+                    self,
+                    |code| {
+                        code.flush_check();
+                        &mut code.frame.body
+                    },
+                    arms.iter().map(|(test, suite)| (test.as_ref(), suite)),
+                    Self::branch_physical_operand,
+                    |code, suite| emit_prepared_suite(code, suite),
+                    true,
+                );
+            }
+            SourceEffect::While(region) => self.prepared_while(region),
+            SourceEffect::Refused(range, reason) => {
+                self.refuse_at(*range, reason);
+            }
+            SourceEffect::Value(output, inputs) => match output {
+                crate::frontend::ValueStatement::Store(slot) => {
+                    let value = self.physical_operand(&inputs[0]);
+                    self.frame.store_private(*slot, &value);
+                }
+                crate::frontend::ValueStatement::Return => {
+                    let value = inputs.first().map_or_else(
+                        || super::permanent::NONE.to_string(),
+                        |input| self.physical_operand(input),
+                    );
+                    self.return_from_regions(value);
+                }
+                crate::frontend::ValueStatement::Expression => {
+                    let value = self.physical_operand(&inputs[0]);
+                    self.discard_handle(&value);
+                }
+                crate::frontend::ValueStatement::Raise => {
+                    self.raise_operands(inputs.first(), inputs.get(1), Self::physical_operand);
+                }
+                crate::frontend::ValueStatement::AugmentName(name, op) => {
+                    let left = self.physical_operand(&inputs[0]);
+                    let right = self.physical_operand(&inputs[1]);
+                    let value = self.inplace(op, &left, &right);
+                    self.bind(name, &value);
+                }
+                crate::frontend::ValueStatement::AugmentItem(op) => {
+                    self.augment_item(
+                        op,
+                        &inputs[0],
+                        &inputs[1],
+                        &inputs[2],
+                        Self::physical_operand,
+                    );
+                }
+            },
+            SourceEffect::ObjectOperation(op, inputs) => {
+                let (receiver, args) = inputs.split_first().expect("object operation receiver");
+                self.object_operation(op, receiver, args.iter(), Self::physical_operand);
+            }
+        }
     }
 
     fn refuse_at(&mut self, range: ruff_text_size::TextRange, reason: &str) {
@@ -52,7 +135,7 @@ impl<'a, 'p> RegionEmitter<'a, 'p> for Function<'a, 'p> {
         let Finally::Prepared(suite) = suite else {
             unreachable!("checked finally outside its checked run")
         };
-        self.physical_suite(suite);
+        emit_prepared_suite(self, suite);
     }
 }
 
@@ -162,132 +245,6 @@ impl<'p> Function<'_, 'p> {
         }
     }
 
-    fn start_statement(&mut self) -> bool {
-        if self.body.terminated {
-            if self.module_annotation_sites.is_none() {
-                return false;
-            }
-            // Unreachable statements still contribute to a module provider's site order.
-            let dead = self.name("b");
-            self.label(&dead);
-        }
-        true
-    }
-
-    fn checked_block(
-        &mut self,
-        statements: &[crate::ir::Statement],
-        checked: &crate::frontend::RegisteredFunction,
-    ) {
-        self.prepare_checked_sites(statements);
-        crate::llvm::registered::Frame::in_suite(self, checked).emit_suite(statements);
-    }
-
-    pub(super) fn physical_suite(&mut self, prepared: &'p crate::frontend::RegisteredSuite) {
-        let Some(enclosing) = self.frame.enter_checked_slots(prepared.checked.region()) else {
-            return;
-        };
-        let body = &prepared.checked.function.body;
-        let mut offset = 0;
-        for run in &prepared.residual {
-            if offset < run.at && self.start_statement() {
-                self.checked_block(&body[offset..run.at], &prepared.checked);
-            }
-            self.emit_effect(&run.effect);
-            offset = run.at;
-        }
-        if offset < body.len() && self.start_statement() {
-            self.checked_block(&body[offset..], &prepared.checked);
-        }
-        self.frame.restore_checked_slots(enclosing);
-    }
-
-    fn emit_effect(&mut self, effect: &'p SourceEffect) {
-        if !self.start_statement() {
-            return;
-        }
-        match effect {
-            SourceEffect::Assertion(site) => self.emit_assertion_inputs(site),
-            SourceEffect::Class {
-                site,
-                layout,
-                inputs,
-            } => {
-                self.mixed_class_definition(*site, layout, inputs);
-            }
-            SourceEffect::Match(range, site) => {
-                self.checkpoint(range);
-                self.simple_call = None;
-                self.prepared_match(site);
-            }
-            SourceEffect::Context(context) => self.prepared_context(context),
-            SourceEffect::Try(region) => {
-                self.checkpoint(&region.range);
-                self.simple_call = None;
-                self.prepared_try(region);
-            }
-            SourceEffect::For(region) => self.prepared_for(region),
-            SourceEffect::If { range, arms } => {
-                self.checkpoint(range);
-                self.simple_call = None;
-                crate::llvm::operations::choose(
-                    self,
-                    |code| {
-                        code.flush_check();
-                        &mut code.frame.body
-                    },
-                    arms.iter().map(|(test, suite)| (test.as_ref(), suite)),
-                    Self::branch_physical_operand,
-                    Self::physical_suite,
-                    true,
-                );
-            }
-            SourceEffect::While(region) => self.prepared_while(region),
-            SourceEffect::Refused(range, reason) => {
-                self.refuse_at(*range, reason);
-            }
-            SourceEffect::Value(output, inputs) => match output {
-                crate::frontend::ValueStatement::Store(slot) => {
-                    let value = self.physical_operand(&inputs[0]);
-                    self.frame.store_private(*slot, &value);
-                }
-                crate::frontend::ValueStatement::Return => {
-                    let value = inputs.first().map_or_else(
-                        || super::permanent::NONE.to_string(),
-                        |input| self.physical_operand(input),
-                    );
-                    self.return_from_regions(value);
-                }
-                crate::frontend::ValueStatement::Expression => {
-                    let value = self.physical_operand(&inputs[0]);
-                    self.discard_handle(&value);
-                }
-                crate::frontend::ValueStatement::Raise => {
-                    self.raise_operands(inputs.first(), inputs.get(1), Self::physical_operand);
-                }
-                crate::frontend::ValueStatement::AugmentName(name, op) => {
-                    let left = self.physical_operand(&inputs[0]);
-                    let right = self.physical_operand(&inputs[1]);
-                    let value = self.inplace(op, &left, &right);
-                    self.bind(name, &value);
-                }
-                crate::frontend::ValueStatement::AugmentItem(op) => {
-                    self.augment_item(
-                        op,
-                        &inputs[0],
-                        &inputs[1],
-                        &inputs[2],
-                        Self::physical_operand,
-                    );
-                }
-            },
-            SourceEffect::ObjectOperation(op, inputs) => {
-                let (receiver, args) = inputs.split_first().expect("object operation receiver");
-                self.object_operation(op, receiver, args.iter(), Self::physical_operand);
-            }
-        }
-    }
-
     fn emit_assertion_inputs(&mut self, site: &'p crate::frontend::AssertionSite) {
         self.checkpoint(&site.test_range);
         self.simple_call = None;
@@ -369,7 +326,7 @@ impl<'p> Function<'_, 'p> {
                         self.branch_input(input.as_input(), matched, failed)
                     }
                 },
-                MatchRegion::Body(case) => self.physical_suite(&site.cases[case].body),
+                MatchRegion::Body(case) => emit_prepared_suite(self, &site.cases[case].body),
             }
         }
     }
@@ -545,7 +502,8 @@ impl<'p> Function<'_, 'p> {
         binding: &'p crate::frontend::RegisteredFunction,
         initialize: impl FnOnce(&mut super::RegisteredFrame<'_, 'p>),
     ) {
-        self.prepare_checked_sites(&binding.function.body);
+        self.callable_sites()
+            .place_statements(&binding.function.body);
         self.frame.checked_binding(binding, &self.sites, initialize);
     }
 
@@ -566,7 +524,7 @@ impl<'p> Function<'_, 'p> {
                     code.physical_binding(target, value);
                 }
             },
-            |code| code.physical_suite(&context.body),
+            |code| emit_prepared_suite(code, &context.body),
         );
     }
 
@@ -574,7 +532,7 @@ impl<'p> Function<'_, 'p> {
         use crate::frontend::WhileGuard;
         if matches!(region.condition, WhileGuard::Literal(false)) {
             if let Some(otherwise) = &region.otherwise {
-                self.physical_suite(otherwise);
+                emit_prepared_suite(self, otherwise);
             }
             return;
         }
@@ -595,13 +553,13 @@ impl<'p> Function<'_, 'p> {
             |code, edges, ()| {
                 let depth = code.regions.len();
                 code.push_loop(edges.clone(), depth, depth);
-                code.physical_suite(&region.body);
+                emit_prepared_suite(code, &region.body);
                 code.loops.pop();
             },
             region
                 .otherwise
                 .as_ref()
-                .map(|otherwise| |code: &mut Self| code.physical_suite(otherwise)),
+                .map(|otherwise| |code: &mut Self| emit_prepared_suite(code, otherwise)),
         );
     }
 
@@ -675,7 +633,7 @@ impl<'p> Function<'_, 'p> {
                     code.physical_binding(&region.target, &item);
                 }
                 code.push_loop(edges.clone(), code.regions.len(), enclosing);
-                code.physical_suite(&region.body);
+                emit_prepared_suite(code, &region.body);
                 code.loops.pop();
             },
             // Even a loop without an else must release the cursor on exhaustion.
@@ -685,7 +643,7 @@ impl<'p> Function<'_, 'p> {
                 code.finish_unwind(unwind, |frame| frame.release_target(None));
                 code.release_target(None);
                 if let Some(otherwise) = &region.otherwise {
-                    code.physical_suite(otherwise);
+                    emit_prepared_suite(code, otherwise);
                 }
             }),
         );
@@ -705,7 +663,7 @@ impl<'p> Function<'_, 'p> {
                 });
                 (class, handler.name.as_deref(), &handler.body)
             },
-            |code, body| code.physical_suite(body),
+            |code, body| emit_prepared_suite(code, body),
         );
     }
 

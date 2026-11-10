@@ -278,7 +278,8 @@ pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
         &mut self,
         operand: Option<&Expr>,
     ) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites);
-    fn emit_prepared(&mut self, suite: &'p crate::frontend::RegisteredSuite);
+    fn place_statements(&mut self, body: &[Statement]);
+    fn emit_effect(&mut self, effect: &'p crate::frontend::SourceEffect);
     fn refuse_at(&mut self, range: ruff_text_size::TextRange, reason: &str);
 }
 
@@ -321,6 +322,33 @@ pub(crate) fn emit_operand<'a, 'p>(
     result
 }
 
+/// Emit checked statements and the operations that interrupt them in one activation.
+pub(crate) fn emit_prepared_suite<'a, 'p>(
+    owner: &mut dyn PreparedSuiteEmitter<'a, 'p>,
+    suite: &'p crate::frontend::RegisteredSuite,
+) {
+    let Some(enclosing) = owner.enter_checked_slots(suite.checked.region()) else {
+        return;
+    };
+    let mut frame = Frame {
+        code: FrameOwner::Prepared(owner),
+        names: Some(&suite.checked.local_names),
+        inputs: FrameInputs::Handles(&[]),
+        fixed_sites: None,
+    };
+    let body = &suite.checked.function.body;
+    let mut offset = 0;
+    for step in &suite.residual {
+        frame.checked_statements(&body[offset..step.at]);
+        if frame.next_statement() {
+            frame.code.prepared_owner().emit_effect(&step.effect);
+        }
+        offset = step.at;
+    }
+    frame.checked_statements(&body[offset..]);
+    frame.restore_checked_slots(enclosing);
+}
+
 /// A checked run borrows its enclosing suite when a return can reach a prepared finally.
 enum FrameOwner<'f, 'a, 'p> {
     Registered(&'f mut RegisteredFrame<'a, 'p>, &'f CheckedSites),
@@ -342,11 +370,11 @@ impl<'a, 'p> FrameOwner<'_, 'a, 'p> {
         }
     }
 
-    fn emit_prepared(&mut self, suite: &'p crate::frontend::RegisteredSuite) {
+    fn prepared_owner(&mut self) -> &mut dyn PreparedSuiteEmitter<'a, 'p> {
         let Self::Prepared(owner) = self else {
-            unreachable!("prepared finally outside its owning suite")
+            unreachable!("prepared operation outside its owning suite")
         };
-        owner.emit_prepared(suite);
+        &mut **owner
     }
 }
 
@@ -403,15 +431,22 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
         self.raise_operands(exception, cause, Self::evaluate_handle);
     }
 
-    pub(crate) fn in_suite(
-        owner: &'f mut dyn PreparedSuiteEmitter<'a, 'p>,
-        checked: &'f RegisteredFunction,
-    ) -> Self {
-        Self {
-            code: FrameOwner::Prepared(owner),
-            names: Some(&checked.local_names),
-            fixed_sites: None,
-            inputs: FrameInputs::Handles(&[]),
+    fn next_statement(&mut self) -> bool {
+        if self.body.terminated {
+            if self.module_annotation_sites.is_none() {
+                return false;
+            }
+            // A module provider still reserves the sites in unreachable statements.
+            let dead = self.name("b");
+            self.label(&dead);
+        }
+        true
+    }
+
+    fn checked_statements(&mut self, body: &[Statement]) {
+        if !body.is_empty() && self.next_statement() {
+            self.code.prepared_owner().place_statements(body);
+            self.emit_suite(body);
         }
     }
 
