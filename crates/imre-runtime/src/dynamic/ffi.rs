@@ -1248,7 +1248,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     let startup_site = ctx.config["executable"].is_string()
         && ctx.config["no_site"] != true
         && (ctx.config["frozen_modules"] != false || ctx.config["sitecustomize"] == true);
-    let result = ctx.startup_sys().and_then(|_| {
+    let frame = ctx.startup_sys().and_then(|_| {
         if ctx.config["path0"] == true && !startup_site {
             ctx.insert_startup_path0()?;
         }
@@ -1288,9 +1288,16 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             }
         }
         let name = ctx.text("__main__");
-        let main = ctx
-            .load_bootstrap_module("__main__", name, None, NONE)?
-            .ok_or_else(|| Context::missing_module("__main__", name))?;
+        ctx.prepare_main_module()?
+            .ok_or_else(|| Context::missing_module("__main__", name))
+    });
+    let main = match frame {
+        // SAFETY: finish owns the boxed context. The loader's borrow has ended and its
+        // rooted frame remains active until the native script returns.
+        Ok(frame) => unsafe { frame.run(&raw mut *ctx) },
+        Err(error) => Err(error),
+    };
+    let result = main.and_then(|main| {
         if let Some(name) = ctx.config["module_entry"].as_str().map(str::to_owned) {
             ctx.run_module_as_main(name)
         } else {
