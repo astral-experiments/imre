@@ -1310,7 +1310,7 @@ mod tests {
     fn inject_residual_child_module(prepared: &mut PreparedBody) {
         use crate::frontend::{RegisteredScope, RegisteredSource, SuitePreparation};
 
-        let mut logicals = prepared.source.statement_sites.expressions.take_templates();
+        let mut logicals = prepared.source.statement_sites.expressions.take_lexical();
         if prepared.syntax.is_none() {
             let parsed = ruff_python_parser::parse_module(&prepared.source.text).unwrap();
             prepared.syntax = Some(Cow::Owned(parsed.into_syntax().body));
@@ -1905,7 +1905,7 @@ mod tests {
         let start = def.start();
         // Withhold template spelling from the suite planner. The physical child can
         // still read the real prepared template, even after its enclosing loop is erased.
-        let templates = module.source.statement_sites.expressions.take_templates();
+        let lexical = module.source.statement_sites.expressions.take_lexical();
         let missing = HashMap::new();
         let source = crate::frontend::RegisteredSource {
             template_fields: Some(&missing),
@@ -1917,7 +1917,7 @@ mod tests {
             &def.body,
             true,
         );
-        physical.sites.expressions = templates;
+        physical.sites.expressions = lexical;
         let body = physical.named_body(
             &def.body,
             crate::frontend::RegisteredScope::Function { is_async: false },
@@ -2017,6 +2017,7 @@ mod tests {
             .unwrap();
         let function_start = function.start();
         // Keep both suites mixed by withholding only the callback descriptors.
+        let lexical = module.source.statement_sites.expressions.take_lexical();
         let missing = HashMap::new();
         let source = RegisteredSource {
             lambdas: Some(&missing),
@@ -2028,6 +2029,7 @@ mod tests {
             &function.body,
             true,
         );
+        plan.sites.expressions = lexical;
         let body = plan.named_body(
             &function.body,
             RegisteredScope::Function { is_async: false },
@@ -3138,6 +3140,7 @@ mod tests {
             .unwrap();
         // Supply a physical function body explicitly so this test is independent of
         // which Python constructs still need that entry in an ordinary compilation.
+        let lexical = prepared.source.statement_sites.expressions.take_lexical();
         let missing = HashMap::new();
         let source = crate::frontend::RegisteredSource {
             lambdas: Some(&missing),
@@ -3149,6 +3152,7 @@ mod tests {
             &function.body,
             true,
         );
+        physical.sites.expressions = lexical;
         let body = physical.named_body(
             &function.body,
             crate::frontend::RegisteredScope::Function { is_async: false },
@@ -4339,6 +4343,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let function_start = function.start();
         // Withhold the descriptors from suite preparation alone so these operands
         // still use their real compiled lambda children during emission.
+        let lexical = module.source.statement_sites.expressions.take_lexical();
         let missing = HashMap::new();
         let values = RegisteredSource {
             lambdas: Some(&missing),
@@ -4350,6 +4355,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             &function.body,
             true,
         );
+        plan.sites.expressions = lexical;
         let body = plan.named_body(
             &function.body,
             RegisteredScope::Function { is_async: true },
@@ -4519,6 +4525,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let function = def.start();
         // Withhold the child descriptor only from suite lowering. The physical
         // message still uses the real compiled child when the assertion fails.
+        let lexical = module.source.statement_sites.expressions.take_lexical();
         let missing = HashMap::new();
         let source = crate::frontend::RegisteredSource {
             lambdas: Some(&missing),
@@ -4530,6 +4537,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             &def.body,
             true,
         );
+        physical.sites.expressions = lexical;
         let body = physical.named_body(
             &def.body,
             crate::frontend::RegisteredScope::Function { is_async: false },
@@ -5274,22 +5282,27 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
-        let lambda = function.body[0]
+        let expr = function.body[0]
             .as_return_stmt_mut()
             .unwrap()
             .value
             .as_deref_mut()
-            .unwrap()
-            .as_lambda_expr_mut()
             .unwrap();
-        let ExpressionSelection::Refused(range, reason) =
-            &prepared.source.lambdas[&lambda.start()].binding
-        else {
+        let sites = &prepared.source.statement_sites.expressions;
+        let lambdas = &prepared.source.lambdas;
+        let binding = sites.selection(expr, lambdas).unwrap();
+        assert!(std::ptr::eq(binding, &lambdas[&expr.start()].binding));
+        let replacement = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+            range: expr.range(),
+            node_index: Default::default(),
+        });
+        assert!(sites.selection(&replacement, lambdas).is_none());
+        let ExpressionSelection::Refused(range, reason) = binding else {
             panic!("the prepared lambda owns the rejected display's range");
         };
         assert_eq!(&source[*range], "[lambda v=await get(x): v for x in rows]");
         assert_eq!(*reason, "cannot compile this comprehension ahead of time");
-        lambda.parameters = None;
+        expr.as_lambda_expr_mut().unwrap().parameters = None;
         assert_eq!(
             prepared.standalone().unwrap_err(),
             "example.py:2:73: cannot compile this comprehension ahead of time (through 2:113)",
@@ -5313,7 +5326,8 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         )
         .unwrap();
         let before = prepared.standalone().unwrap();
-        prepared.source.statement_sites.expressions.take_templates();
+        assert!(prepared.source.lambdas.is_empty());
+        prepared.source.statement_sites.expressions.take_lexical();
         assert_eq!(prepared.standalone().unwrap(), before);
     }
 

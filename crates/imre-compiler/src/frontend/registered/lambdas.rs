@@ -88,6 +88,7 @@ impl RegisteredLambda {
                             self.owner,
                         );
                         self.sites.insert(lambda.start(), plan);
+                        self.expressions.register_lambda(expr);
                     }
                     ast::Expr::TString(_) => {
                         self.expressions.prepare_template(expr, source, self.owner)

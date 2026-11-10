@@ -31,6 +31,8 @@ pub(crate) struct ExpressionSites {
 }
 
 pub(crate) enum Selection {
+    /// The lexical descriptor owns the binding, including any default-expression locals.
+    LambdaBinding,
     Checked(ir::Expr),
     Operand(Box<super::RegisteredOperand>),
     Refused(TextRange, &'static str),
@@ -150,6 +152,22 @@ impl ExpressionSites {
         self.selected.get(&site(node))
     }
 
+    pub(super) fn register_lambda(&mut self, node: &ast::Expr) {
+        self.selected.insert(site(node), Selection::LambdaBinding);
+    }
+
+    pub(crate) fn selection<'a>(
+        &'a self,
+        node: &ast::Expr,
+        lambdas: &'a HashMap<TextSize, super::RegisteredLambda>,
+    ) -> Option<&'a Selection> {
+        let ((range, _), selected) = self.selected.get_key_value(&site(node))?;
+        match selected {
+            Selection::LambdaBinding => lambdas.get(&range.start()).map(|lambda| &lambda.binding),
+            selection => Some(selection),
+        }
+    }
+
     /// A template owns its lexical operand and any refusal in its interpolation.
     pub(super) fn prepare_template(
         &mut self,
@@ -179,11 +197,13 @@ impl ExpressionSites {
     }
 
     #[cfg(test)]
-    pub(crate) fn take_templates(&mut self) -> Self {
+    pub(crate) fn take_lexical(&mut self) -> Self {
         Self {
             selected: self
                 .selected
-                .extract_if(|(_, kind), _| *kind == ast::NodeKind::ExprTString)
+                .extract_if(|(_, kind), _| {
+                    matches!(kind, ast::NodeKind::ExprTString | ast::NodeKind::ExprLambda)
+                })
                 .collect(),
             ..Self::default()
         }
