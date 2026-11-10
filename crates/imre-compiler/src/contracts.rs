@@ -705,12 +705,11 @@ impl Builtin {
             | Self::RegisteredDeleteItem
             | Self::RegisteredEllipsis
             | Self::RegisteredComplex(..)
+            | Self::FormatConversion(_)
+            | Self::FormatField
             | Self::RegisteredString(_)
             | Self::RegisteredTemplate(_)
             | Self::RegisteredInterpolation { .. }
-            | Self::RegisteredFormatConversion(_)
-            | Self::RegisteredFormat
-            | Self::RegisteredFormatJoin
             | Self::RegisteredNamespace(_)
             | Self::RegisteredUnpack { .. }
             | Self::RegisteredIter
@@ -723,6 +722,7 @@ impl Builtin {
             | Self::BinaryRead
             | Self::BinaryReadSize
             | Self::Ndiff
+            | Self::FormatJoin
             | Self::StringListCopy
             | Self::JoinedSplitLines
             | Self::StringListSortSuffix(_)

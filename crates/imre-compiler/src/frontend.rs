@@ -69,6 +69,8 @@ mod fnmatch;
 mod format_cursors;
 mod fractions;
 mod fromkeys;
+mod fstrings;
+use fstrings::FStringLiteral;
 mod fspath;
 mod function_caches;
 pub(crate) mod function_scope;
@@ -137,7 +139,7 @@ pub(crate) use registered::{
     attribute_write, delete_targets, prepare_strings, registered_index_target, registered_sites,
     registered_type_alias, registered_type_parameters,
 };
-pub(crate) use registered::{LocalBinding, RegisteredOperand, RegisteredRegion, eager_operand};
+pub(crate) use registered::{LocalBinding, RegisteredOperand, RegisteredRegion, inline_operand};
 mod sequences;
 mod shutil;
 mod sign_parameters;
@@ -9588,57 +9590,6 @@ impl<'a> Checker<'a> {
             kind => kind,
         };
         Ok(Expr { ty, kind })
-    }
-
-    /// Preserves the complete adjacent-part sequence and converts each field
-    /// before evaluating the next. Sealed conversions never resolve a local `str`.
-    fn fstring(&mut self, value: &ast::ExprFString) -> Result<Expr, String> {
-        let mut parts = Vec::new();
-        for part in value.value.iter() {
-            match part {
-                ast::FStringPartRef::Literal(literal) => {
-                    check_string_literal(literal, self.source)?;
-                    parts.push(Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Str(literal.value.to_string()),
-                    });
-                }
-                ast::FStringPartRef::FString(fstring) => {
-                    for element in &fstring.elements {
-                        let part = match element {
-                            ast::InterpolatedStringElement::Literal(literal) => {
-                                if !matches!(
-                                    fstring.flags.prefix(),
-                                    ast::str_prefix::FStringPrefix::Raw { .. }
-                                ) {
-                                    check_string_escapes(literal.range(), self.source)?;
-                                }
-                                Expr {
-                                    ty: Type::Str,
-                                    kind: ExprKind::Str(literal.value.to_string()),
-                                }
-                            }
-                            ast::InterpolatedStringElement::Interpolation(field) => {
-                                self.formatted_scalar(field)?
-                            }
-                        };
-                        parts.push(part);
-                    }
-                }
-            }
-        }
-        // A formatted string evaluates every interpolation before joining them.
-        Ok(parts
-            .into_iter()
-            .rev()
-            .reduce(|right, left| Expr {
-                ty: Type::Str,
-                kind: ExprKind::Binary(Binary::Concat, Box::new(left), Box::new(right)),
-            })
-            .unwrap_or_else(|| Expr {
-                ty: Type::Str,
-                kind: ExprKind::Str(String::new()),
-            }))
     }
 
     fn call(&mut self, mut call: &ast::ExprCall) -> Result<Expr, String> {

@@ -81,12 +81,9 @@ impl<'a> Visitor<'a> for StringPreparation<'_> {
                     if let ast::FStringPartRef::Literal(literal) = part
                         && !literal.value.is_empty()
                     {
-                        let value = values::registered_string(
-                            &literal.value,
-                            std::iter::once(literal),
-                            self.source.replacements,
-                            self.source.has_templates,
-                        );
+                        let value = self
+                            .source
+                            .string(std::iter::once(FStringLiteral::Adjacent(literal)));
                         self.prepared.literals.insert(literal.range(), value);
                     }
                 }
@@ -212,12 +209,10 @@ impl StringPreparation<'_> {
                     }
                     let mut value = self.operand(&nested.expression)?;
                     if let Some(c) = interpolation_conversion(nested) {
-                        value = object(Builtin::RegisteredFormatConversion(c), vec![value]);
+                        value = object(Builtin::FormatConversion(c), vec![value]);
                     }
-                    object(
-                        Builtin::RegisteredFormat,
-                        vec![value, self.format_spec(nested)?],
-                    )
+                    let value = object(Builtin::FormatField, vec![value, self.format_spec(nested)?]);
+                    object(Builtin::RegisteredLocation(nested.range(), nested.start()), vec![value])
                 }
             };
             parts.push(part);
@@ -225,7 +220,7 @@ impl StringPreparation<'_> {
         match parts.len() {
             0 => Some(text("")),
             1 => parts.pop(),
-            _ => Some(object(Builtin::RegisteredFormatJoin, parts)),
+            _ => Some(object(Builtin::FormatJoin, parts)),
         }
     }
 

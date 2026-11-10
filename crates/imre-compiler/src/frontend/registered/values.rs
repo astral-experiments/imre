@@ -175,32 +175,40 @@ pub(crate) fn push_codepoints(bytes: &mut Vec<u8>, text: &str, replacements: Opt
     debug_assert!(points.next().is_none());
 }
 
-pub(crate) fn registered_string<'a>(
-    text: &str,
-    parts: impl Iterator<Item = &'a ast::StringLiteral> + Clone,
-    replacements: &HashMap<TextRange, Vec<u32>>,
-    has_templates: bool,
-) -> Expr {
-    let kind = if !has_templates
-        && parts
-            .clone()
-            .all(|part| !replacements.contains_key(&part.range()))
-    {
-        ExprKind::Str(text.to_owned())
-    } else {
-        let mut bytes = Vec::new();
-        for part in parts {
-            push_codepoints(
-                &mut bytes,
-                part,
-                replacements.get(&part.range()).map(Vec::as_slice),
-            );
+impl RegisteredSource<'_> {
+    /// Decode adjacent source parts together so ordinary and formatted literals share
+    /// their constant identity, including a surrogate after an ordinary UTF-8 prefix.
+    pub(crate) fn string<'a>(self, pieces: impl Iterator<Item = FStringLiteral<'a>>) -> Expr {
+        let mut text = String::new();
+        let mut encoded = self.has_templates.then(Vec::new);
+        for piece in pieces {
+            let middle;
+            let replacement = match piece {
+                FStringLiteral::Adjacent(lit) => self.replacements.get(&lit.range()),
+                FStringLiteral::Middle(lit, _) => {
+                    middle = self.format_replacements(lit);
+                    middle.as_ref()
+                }
+                FStringLiteral::Text(_) => None,
+            };
+            if replacement.is_some() || encoded.is_some() {
+                let bytes = encoded.get_or_insert_with(|| {
+                    let mut bytes = Vec::new();
+                    push_codepoints(&mut bytes, &text, None);
+                    bytes
+                });
+                push_codepoints(bytes, piece.text(), replacement.map(Vec::as_slice));
+            } else {
+                text.push_str(piece.text());
+            }
         }
-        ExprKind::Builtin(Builtin::RegisteredString(bytes), vec![])
-    };
-    Expr {
-        ty: Type::PythonObject,
-        kind,
+        Expr {
+            ty: Type::PythonObject,
+            kind: match encoded {
+                Some(bytes) => ExprKind::Builtin(Builtin::RegisteredString(bytes), vec![]),
+                None => ExprKind::Str(text),
+            },
+        }
     }
 }
 
@@ -691,12 +699,7 @@ pub(super) fn operation<E>(
                 .cloned());
         }
         ast::Expr::StringLiteral(lit) => {
-            return Ok(Some(registered_string(
-                lit.value.to_str(),
-                lit.value.iter(),
-                source.replacements,
-                source.has_templates,
-            )));
+            return Ok(Some(source.string(lit.value.iter().map(FStringLiteral::Adjacent))));
         }
         ast::Expr::BytesLiteral(lit) => ExprKind::Bytes(lit.value.bytes().collect()),
         ast::Expr::BooleanLiteral(lit) => ExprKind::Bool(lit.value),
@@ -800,6 +803,9 @@ impl Region {
             return index_key(node, &mut |child| self.operand(child, source).ok_or(())).ok();
         }
         let value = match node {
+            ast::Expr::FString(value) if matches!(self, Self::Suite | Self::Lambda) => {
+                fstrings::registered_fstring(value, source, |child| self.operand(child, source).ok_or(())).ok()?
+            }
             ast::Expr::Lambda(lambda)
                 if !matches!(self, Self::Residual | Self::SuspendedOperand) =>
             {

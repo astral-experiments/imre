@@ -133,6 +133,14 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                 uses_python_protocol |= matches!(iteration, Ok(ir::IterationOperands::Iter(..)));
                 iteration.is_ok()
             }
+            ExprKind::Builtin(Builtin::FormatConversion(_), args) => args.len() == 1,
+            ExprKind::Builtin(Builtin::FormatField, args) => {
+                uses_python_protocol |= args
+                    .first()
+                    .is_some_and(|value| value.ty == Type::PythonObject);
+                args.len() == 2
+            }
+            ExprKind::Builtin(Builtin::FormatJoin, parts) => parts.len() >= 2,
             ExprKind::Binary(..) => true,
             ExprKind::List(_) | ExprKind::Tuple(_) | ExprKind::Set { .. } => {
                 uses_python_protocol = true;
@@ -185,12 +193,7 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
             ExprKind::Builtin(Builtin::RegisteredTemplate(segments), fields) => {
                 segments.len() == fields.len() + 1
             }
-            ExprKind::Builtin(
-                Builtin::RegisteredInterpolation { .. } | Builtin::RegisteredFormat,
-                args,
-            ) => args.len() == 2,
-            ExprKind::Builtin(Builtin::RegisteredFormatConversion(_), args) => args.len() == 1,
-            ExprKind::Builtin(Builtin::RegisteredFormatJoin, _) => true,
+            ExprKind::Builtin(Builtin::RegisteredInterpolation { .. }, args) => args.len() == 2,
             ExprKind::Builtin(Builtin::RegisteredDict(entries), operands) => {
                 operands.len()
                     == entries
@@ -815,6 +818,34 @@ impl Frame<'_, '_, '_> {
                     .collect::<Vec<_>>();
                 self.contains_literal(&needle, &items, *negate)
             }
+            (Builtin::FormatConversion(_) | Builtin::FormatField | Builtin::FormatJoin, _) => {
+                let mark = self.temporary_mark();
+                self.unwind_format_operands(&mark, |frame| {
+                    let result = match (op, operands) {
+                        (Builtin::FormatConversion(conversion), [value]) => {
+                            let value = frame.evaluate_handle(value);
+                            frame.keep_operands(&mark, &value, "0");
+                            frame.format_conversion(&value, *conversion)
+                        }
+                        (Builtin::FormatField, [value, spec]) => {
+                            let value = frame.evaluate_handle(value);
+                            frame.keep_operands(&mark, &value, "0");
+                            let spec = frame.evaluate_handle(spec);
+                            frame.format_field(&value, &spec)
+                        }
+                        (Builtin::FormatJoin, parts) => {
+                            let parts = parts
+                                .iter()
+                                .map(|part| frame.evaluate_handle(part))
+                                .collect();
+                            return frame.format_join(&mark, parts);
+                        }
+                        _ => unreachable!("checked format operands"),
+                    };
+                    frame.keep_operands(&mark, &result, "0");
+                    result
+                })
+            }
             (Builtin::RegisteredName(name), []) => self.code.lookup(name),
             (Builtin::RegisteredName(name), [scope]) => {
                 let scope = self.evaluate_handle(scope);
@@ -848,22 +879,6 @@ impl Frame<'_, '_, '_> {
                 let spec = self.evaluate_handle(spec);
                 self.code
                     .interpolation(&value, expression, *conversion, &spec)
-            }
-            (Builtin::RegisteredFormatConversion(conversion), [value]) => {
-                let value = self.evaluate_handle(value);
-                self.code.convert_format_value(&value, *conversion)
-            }
-            (Builtin::RegisteredFormat, [value, spec]) => {
-                let value = self.evaluate_handle(value);
-                let spec = self.evaluate_handle(spec);
-                self.code.format_value(&value, &spec)
-            }
-            (Builtin::RegisteredFormatJoin, parts) => {
-                let parts = parts
-                    .iter()
-                    .map(|part| self.evaluate_handle(part))
-                    .collect();
-                self.code.join_format_parts(parts)
             }
             (Builtin::RegisteredLocation(range, position), [value]) => {
                 let previous_range = std::mem::replace(&mut self.code.current_range, *range);
@@ -1154,23 +1169,6 @@ impl RegisteredFrame<'_, '_> {
                 .collect::<Vec<_>>();
             code.build_sequence(&values, true, Some(&slot))
         })
-    }
-
-    pub(crate) fn convert_format_value(&mut self, value: &str, conversion: char) -> String {
-        let conversion = self.text(&conversion.to_string());
-        self.op("format_conversion", &[value, &conversion])
-    }
-
-    pub(crate) fn format_value(&mut self, value: &str, spec: &str) -> String {
-        self.op("format", &[value, "0", spec])
-    }
-
-    /// Preserve a lone formatted value and bypass string-subclass addition when joining fields.
-    pub(crate) fn join_format_parts(&mut self, parts: Vec<String>) -> String {
-        parts
-            .into_iter()
-            .reduce(|left, right| self.op("format_concat", &[&left, &right]))
-            .unwrap_or_else(|| self.text(""))
     }
 }
 

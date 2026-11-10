@@ -454,6 +454,10 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 }
             },
             ExprKind::Binary(op, left, right) => self.binary_expression(*op, left, right, expr),
+            ExprKind::Builtin(Builtin::FormatJoin, parts) => match &mut self.0 {
+                Entry::Native(emitter) => CheckedValue::owned(emitter.concat(expr)),
+                Entry::Registered(frame) => frame.builtin(&Builtin::FormatJoin, parts),
+            },
             ExprKind::Builtin(
                 op @ (Builtin::RegisteredCall(_) | Builtin::RegisteredAttribute { .. }),
                 args,
