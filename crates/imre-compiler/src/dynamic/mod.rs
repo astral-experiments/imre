@@ -12,6 +12,7 @@ use ruff_python_ast::name::UnqualifiedName;
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
 
+use crate::frontend::module_source::ParsedModule;
 use crate::{CompileOptions, SourceInputs, SourceKind, UnitCompilation};
 
 /// Only a winning file can add a first-party frozen override while walking SDK dependencies.
@@ -606,12 +607,12 @@ fn boxed_function_type_params<'a>(
     (!body.unsupported).then_some(params)
 }
 
-fn scan_imports(
-    source: &str,
-    kind: SourceKind,
-    getter: Option<&mut Imports>,
-    file_alternative: Option<(&Path, bool)>,
-) -> Result<Imports, String> {
+enum ImportSource<'a> {
+    Module(ParsedModule<'a>),
+    Invalid(Box<ModuleSyntaxError>),
+}
+
+fn read_import_source(source: &str, kind: SourceKind) -> Result<ImportSource<'_>, String> {
     let normalized = crate::normalize_source(source, kind)?;
     let input = imre_ast::indentation::prepare(&normalized);
     crate::analysis::check_source_complexity(&input.text).map_err(str::to_owned)?;
@@ -622,32 +623,62 @@ fn scan_imports(
     let parsed = match parsed {
         Ok(parsed) => parsed,
         Err(error) if kind == SourceKind::DecodedFile => {
-            return Ok(Imports {
-                invalid_executable: Some(Box::new(ModuleSyntaxError::from_parser(
-                    &normalized,
-                    error,
-                ))),
-                ..Imports::default()
-            });
+            return Ok(ImportSource::Invalid(Box::new(
+                ModuleSyntaxError::from_parser(&normalized, error),
+            )));
         }
         Err(error) => return Err(error.to_string()),
     };
     crate::analysis::check_form_feeds(&normalized, parsed.tokens())?;
+    Ok(ImportSource::Module(ParsedModule {
+        text: normalized,
+        parsed,
+    }))
+}
+
+fn scan_imports(
+    source: &str,
+    kind: SourceKind,
+    getter: Option<&mut Imports>,
+    file_alternative: Option<(&Path, bool)>,
+) -> Result<Imports, String> {
+    let module = match read_import_source(source, kind)? {
+        ImportSource::Module(module) => module,
+        ImportSource::Invalid(error) => {
+            return Ok(Imports {
+                invalid_executable: Some(error),
+                ..Imports::default()
+            });
+        }
+    };
     if let Some((path, keep_docstrings)) = file_alternative {
-        emit::check_parsed_source(path, &normalized, &parsed, keep_docstrings)?;
+        emit::check_parsed_source(path, &module.text, &module.parsed, keep_docstrings)?;
     }
-    let mut body = parsed.into_syntax().body;
-    let bindings = imre_ast::executable::BindingErrors::check(&body, &normalized);
+    imports_from_body(
+        &module.text,
+        module.parsed.into_syntax().body,
+        getter,
+        file_alternative.map(|(path, _)| path),
+    )
+}
+
+fn imports_from_body(
+    normalized: &str,
+    mut body: ast::Suite,
+    getter: Option<&mut Imports>,
+    file_alternative: Option<&Path>,
+) -> Result<Imports, String> {
+    let bindings = imre_ast::executable::BindingErrors::check(&body, normalized);
     let future = imre_ast::future_import_error(&body);
     let validate_at_origin =
         future.is_none() && bindings.symbol.is_none() && bindings.pattern.is_none();
     let error = bindings
         .first_symbol(future)
-        .map(|(range, reason)| ModuleSyntaxError::new(&normalized, range, reason.to_owned(), false))
+        .map(|(range, reason)| ModuleSyntaxError::new(normalized, range, reason.to_owned(), false))
         .or_else(|| {
             let issue = bindings.handler?;
             let mut error = ModuleSyntaxError::new(
-                &normalized,
+                normalized,
                 issue.location.unwrap_or(issue.range),
                 issue.message.to_owned(),
                 true,
@@ -660,13 +691,13 @@ fn scan_imports(
         })
         .or_else(|| {
             bindings.pattern.map(|(range, reason)| {
-                ModuleSyntaxError::new(&normalized, range, reason.checked().into_owned(), true)
+                ModuleSyntaxError::new(normalized, range, reason.checked().into_owned(), true)
             })
         });
     // The optional file must satisfy the emitter's checks before registration.
     // Use its discovery tree for both checking and collecting the lowered imports.
     let checked_names = file_alternative
-        .map(|(path, _)| emit::lower_source(path, &normalized, &mut body))
+        .map(|path| crate::frontend::module_source::lower(path, normalized, &mut body))
         .transpose()?;
     if let Some(mut diagnostic) = error {
         // Discovery records the error. Only selection as the checked entry diagnoses it here.
@@ -879,17 +910,29 @@ pub(crate) fn compile(
     if !object_hint && !startup_fallback && !ordered_command {
         return Ok(None);
     }
-    let Ok(mut first) = scan_imports(
-        &src,
-        if command.is_some() {
-            SourceKind::Command
-        } else {
-            SourceKind::File
-        },
-        None,
-        None,
-    ) else {
+    let kind = if command.is_some() {
+        SourceKind::Command
+    } else {
+        SourceKind::File
+    };
+    let Ok(ImportSource::Module(module)) = read_import_source(&src, kind) else {
         return Ok(None);
+    };
+    // Discovery lowers names in its own body. Admission needs the original spellings and
+    // tokens, including for diagnostics on code that never reaches the emitter.
+    let (mut first, entry_source) = if in_memory {
+        (
+            imports_from_body(&module.text, module.parsed.into_syntax().body, None, None)?,
+            None,
+        )
+    } else {
+        let imports = imports_from_body(
+            &module.text,
+            module.parsed.syntax().body.clone(),
+            None,
+            None,
+        )?;
+        (imports, Some(module))
     };
     if startup.is_none()
         && let Some(error) = first.invalid_executable.take()
@@ -2069,7 +2112,7 @@ pub(crate) fn compile(
             ));
         }
     }
-    let modules = (sources.as_slice(), builtins.as_slice());
+    let modules = (sources.as_slice(), builtins.as_slice(), entry_source);
     let (units, used_archive) = if matches!(layout, crate::BoxedLayout::Check) {
         emit::check(modules, keep_docstrings, &module_errors)?;
         (Vec::new(), false)
