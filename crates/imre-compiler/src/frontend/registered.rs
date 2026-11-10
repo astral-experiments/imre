@@ -1732,43 +1732,43 @@ impl SourceScope<'_> {
             return self.statement(stmt, body);
         }
         let sync_for = matches!(stmt, ast::Stmt::For(loop_) if !loop_.is_async);
+        let protected = matches!(stmt, ast::Stmt::Try(region) if !region.is_star);
         if !matches!(self.kind, RegisteredScope::Function { .. })
-            || !(stmt.is_if_stmt() || sync_for)
+            || !(stmt.is_if_stmt() || sync_for || protected)
         {
             return Err(());
         }
 
         let begin = body.len();
         let continues = self.statement(stmt, body)?;
-        // The physical activation owns suspension and transfers out of this suite.
-        // A complete for handles its own break, continue and exhaustion edges.
-        let mut falls_through = true;
+        // The physical activation owns suspension. A complete loop owns its loop edges;
+        // a protected region routes raises and returns through the active frame cleanups.
+        let mut self_contained = true;
         ir::walk_nodes(&body[begin..], &mut |node, _| match node {
             // The public named-definition operation still places its physical header.
             ir::Node::Expression(Expr {
                 kind: ExprKind::Builtin(Builtin::RegisteredDefinition(_), _),
                 ..
-            }) if sync_for => falls_through = false,
+            }) if sync_for || protected => self_contained = false,
             ir::Node::Statement(Statement::Break | Statement::Continue | Statement::Exhaust)
                 if !sync_for =>
             {
-                falls_through = false;
+                self_contained = false;
             }
-            ir::Node::Statement(
-                Statement::IterNext {
-                    kind: ir::IterNextKind::Async(_),
-                    ..
-                }
-                | Statement::Return(_)
-                | Statement::Raise(_),
-            )
+            ir::Node::Statement(Statement::Return(_) | Statement::Raise(_)) if !protected => {
+                self_contained = false;
+            }
+            ir::Node::Statement(Statement::IterNext {
+                kind: ir::IterNextKind::Async(_),
+                ..
+            })
             | ir::Node::Expression(Expr {
                 kind: ExprKind::Builtin(Builtin::RegisteredSuspend(..), _),
                 ..
-            }) => falls_through = false,
+            }) => self_contained = false,
             _ => {}
         });
-        if !falls_through {
+        if !self_contained {
             body.truncate(begin);
             return Err(());
         }
