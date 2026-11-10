@@ -2095,7 +2095,10 @@ pub(crate) enum Builtin {
     RegisteredAnnotationFormat,
     RegisteredAnnotationInsert(AnnotationField),
     /// Bind the string operand to a checked child function in this provider.
-    BindAnnotationExpression(ruff_text_size::TextSize),
+    BindAnnotationExpression {
+        site: ruff_text_size::TextSize,
+        spelling: String,
+    },
     RegisteredAnnotationResult,
     /// Delete one current-scope binding, reporting a missing name at its source target.
     RegisteredDeleteName(String, ruff_text_size::TextRange),

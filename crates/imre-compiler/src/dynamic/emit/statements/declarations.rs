@@ -1,7 +1,7 @@
 //! Resolve declaration and annotation code sites before emitting the checked block.
 use super::super::sites::{
-    AnnotationString, CheckedSites, CompiledAlias, CompiledDefinition, CompiledGenerator,
-    CompiledParameterProvider, Declaration, RequiredSite,
+    CheckedSites, CompiledAlias, CompiledDefinition, CompiledGenerator, CompiledParameterProvider,
+    Declaration, RequiredSite,
 };
 use super::super::{
     AnnotationScope, Body, DefinitionName, Entry, Function, RegisteredFrame, SourceInfo, SourceMap,
@@ -111,13 +111,7 @@ impl CallableSites<'_, '_> {
             false,
             None,
         );
-        self.sites.annotation_strings.insert(
-            site,
-            AnnotationString {
-                text: text.to_owned(),
-                code,
-            },
-        );
+        self.sites.annotation_strings.insert(site, code);
     }
 
     pub(in crate::dynamic::emit) fn place_site(&mut self, site: RequiredSite) {

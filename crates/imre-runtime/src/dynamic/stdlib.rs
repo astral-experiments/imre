@@ -706,6 +706,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_no_type_check_member"
             | "_get_alias_kind"
             | "_eval_type_expression"
+            | "_starred_forward_ref"
             | "_validate_forward_ref"
             | "_finish_field_ref"
             | "_get_type_annotations"
