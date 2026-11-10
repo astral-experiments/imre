@@ -224,6 +224,14 @@ impl Logical {
 
 impl CheckedBody<'_, '_, '_, '_> {
     pub(in crate::llvm) fn test_operand(&mut self, expr: &Expr) -> String {
+        self.test_operand_in_scope(expr, false)
+    }
+
+    pub(in crate::llvm) fn test_operand_in_scope(
+        &mut self,
+        expr: &Expr,
+        already_rooted: bool,
+    ) -> String {
         if let ExprKind::Bool(value) = expr.kind {
             return value.to_string();
         }
@@ -243,7 +251,11 @@ impl CheckedBody<'_, '_, '_, '_> {
                 .registered_comparisons(values, ops, true)
                 .into_condition();
         }
-        let mark = self.root_mark();
+        let mark = if already_rooted {
+            None
+        } else {
+            self.root_mark()
+        };
         let value = self.operand(expr);
         let bit = self.operand_truth(expr, &value, None);
         self.release_input(value);
