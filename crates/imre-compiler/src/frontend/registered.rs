@@ -8,10 +8,9 @@ mod generators;
 pub(crate) use generators::RegisteredGenerator;
 mod lambdas;
 pub(crate) use lambdas::RegisteredLambda;
-mod templates;
-pub(crate) use templates::{PreparedStrings, PreparedTemplate};
 pub(super) mod patterns;
 mod placement;
+mod templates;
 pub(crate) use placement::place_fixed_function;
 pub(super) mod values;
 

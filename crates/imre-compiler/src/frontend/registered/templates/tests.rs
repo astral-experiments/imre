@@ -170,7 +170,7 @@ fn template_default_and_body_suspend_in_their_defining_frames() {
             generators: None,
             method_imports: &Default::default(),
         };
-        let mut templates = HashMap::new();
+        let mut templates = ExpressionSites::default();
         let mut body = parsed.into_syntax().body;
         let names = imre_ast::lower(&mut body);
         let mut scopes =
@@ -178,7 +178,7 @@ fn template_default_and_body_suspend_in_their_defining_frames() {
         RegisteredLambda::collect(&body, source, &mut scopes, &mut templates);
         templates
     };
-    let mut sites: Vec<_> = templates.iter().collect();
+    let mut sites: Vec<_> = templates.templates().collect();
     sites.sort_by_key(|(range, _)| range.start());
     assert_eq!(sites.len(), 2);
 
@@ -186,7 +186,7 @@ fn template_default_and_body_suspend_in_their_defining_frames() {
     let mut suspensions = Vec::new();
     let mut formats = 0;
     for (_, operand) in sites {
-        let Ok(operand) = operand else {
+        let ExpressionSelection::Operand(operand) = operand else {
             panic!("expected a complete template operand");
         };
         crate::verify::registered(operand.region()).unwrap();
@@ -265,7 +265,7 @@ fn unavailable_template_child_is_reported_at_its_own_range() {
             |_| {},
             |_| {},
         );
-        let mut sites = HashMap::new();
+        let mut sites = ExpressionSites::default();
         RegisteredLambda::collect(
             &module.body,
             RegisteredSource {
@@ -276,7 +276,7 @@ fn unavailable_template_child_is_reported_at_its_own_range() {
             &mut sites,
         );
         for template in &templates.elts {
-            let result = sites.get(&template.range()).unwrap();
+            let result = sites.get(template).unwrap();
             let tail = template
                 .as_t_string_expr()
                 .unwrap()
@@ -286,7 +286,9 @@ fn unavailable_template_child_is_reported_at_its_own_range() {
                 .nth(1)
                 .unwrap();
             if complete {
-                let operand = result.as_ref().unwrap();
+                let ExpressionSelection::Operand(operand) = result else {
+                    panic!("expected the prepared generator");
+                };
                 crate::verify::registered(operand.region()).unwrap();
                 let mut captures = Vec::new();
                 ir::walk_operand_expressions(&operand.value, &mut |expr| {
@@ -300,12 +302,13 @@ fn unavailable_template_child_is_reported_at_its_own_range() {
                 });
                 assert_eq!(captures, ["mark()", &text[tail.expression.range()]]);
             } else {
+                let ExpressionSelection::Refused(range, reason) = result else {
+                    panic!("expected the unavailable generator");
+                };
+                assert_eq!(*range, tail.expression.range());
                 assert_eq!(
-                    result.as_ref().err(),
-                    Some(&(
-                        tail.expression.range(),
-                        "cannot compile this generator expression ahead of time"
-                    ))
+                    *reason,
+                    "cannot compile this generator expression ahead of time"
                 );
             }
         }

@@ -373,8 +373,7 @@ impl<'a> PreparedBody<'a, '_> {
             |alias| aliases.push(alias),
             |expr| logicals.visit(expr, values),
         );
-        let mut templates = HashMap::new();
-        let lambdas = RegisteredLambda::collect(&body, values, &mut scopes, &mut templates);
+        let lambdas = RegisteredLambda::collect(&body, values, &mut scopes, &mut logicals);
         let values = crate::frontend::RegisteredSource {
             lambdas: Some(&lambdas),
             ..values
@@ -543,10 +542,7 @@ impl<'a> PreparedBody<'a, '_> {
             class_keywords,
             docs,
             has_templates,
-            strings: crate::frontend::PreparedStrings {
-                fields: template_fields,
-                templates,
-            },
+            template_fields,
             replacements,
             method_imports,
             barry_as_flufl: imre_ast::future_import(&body, "barry_as_FLUFL"),
@@ -988,7 +984,7 @@ struct SourceInfo<'a> {
     class_keywords: Vec<ruff_text_size::TextSize>,
     docs: Option<crate::modules::doctest::SealedDocs>,
     has_templates: bool,
-    strings: crate::frontend::PreparedStrings,
+    template_fields: HashMap<TextSize, imre_ast::strings::TemplateFieldText>,
     replacements: HashMap<ruff_text_size::TextRange, Vec<u32>>,
     private_names: imre_ast::Names,
     method_imports: std::collections::BTreeSet<String>,
@@ -1037,7 +1033,7 @@ impl SourceInfo<'_> {
             text: &self.text,
             replacements: &self.replacements,
             has_templates: self.has_templates,
-            template_fields: Some(&self.strings.fields),
+            template_fields: Some(&self.template_fields),
             lambdas: Some(&self.lambdas),
             generators: Some(&self.generators),
             method_imports: &self.method_imports,
@@ -1328,6 +1324,7 @@ mod tests {
     fn inject_residual_child_module(prepared: &mut PreparedBody) {
         use crate::frontend::{RegisteredScope, RegisteredSource, SuitePreparation};
 
+        let mut logicals = prepared.source.statement_sites.expressions.take_templates();
         if prepared.syntax.is_none() {
             let parsed = ruff_python_parser::parse_module(&prepared.source.text).unwrap();
             prepared.syntax = Some(Cow::Owned(parsed.into_syntax().body));
@@ -1343,7 +1340,6 @@ mod tests {
             generators: Some(&generators),
             ..source
         };
-        let mut logicals = crate::frontend::ExpressionSites::default();
         crate::frontend::function_scope::ScopeFacts::prepare(
             body,
             &prepared.source.private_names,
@@ -1924,6 +1920,7 @@ mod tests {
         let start = def.start();
         // Withhold template spelling from the suite planner. The physical child can
         // still read the real prepared template, even after its enclosing loop is erased.
+        let templates = module.source.statement_sites.expressions.take_templates();
         let missing = HashMap::new();
         let source = crate::frontend::RegisteredSource {
             template_fields: Some(&missing),
@@ -1935,6 +1932,7 @@ mod tests {
             &def.body,
             true,
         );
+        physical.sites.expressions = templates;
         let body = physical.named_body(
             &def.body,
             crate::frontend::RegisteredScope::Function { is_async: false },
@@ -3676,7 +3674,15 @@ mod tests {
         let original = r#"q = t"left{(lambda v: v)(xs)!r:>4}right""#;
         let mut prepared =
             PreparedBody::module("field", path, original, 0, ModuleOrigin::Program(None)).unwrap();
-        assert_eq!(prepared.source.strings.templates.len(), 1);
+        assert_eq!(
+            prepared
+                .source
+                .statement_sites
+                .expressions
+                .templates()
+                .count(),
+            1
+        );
         inject_residual_child_module(&mut prepared);
         assert!(!prepared.initializer().plan.fully_checked());
         let emit = |prepared: &PreparedBody<'_, '_>| {
@@ -3794,7 +3800,7 @@ mod tests {
         .unwrap();
         assert!(prepared.initializer().plan.fully_checked());
         assert!(prepared.syntax.is_none());
-        prepared.source.strings.templates.clear();
+        prepared.source.statement_sites.expressions = Default::default();
 
         let mut output = Output::default();
         let filename = output.data(b"query.py");
@@ -3848,7 +3854,13 @@ mod tests {
         assert!(initializer.fully_checked());
         assert_eq!(prepared.source.generators.len(), 1);
         let (site, generator) = prepared.source.generators.iter().next().unwrap();
-        let Ok(template) = prepared.source.strings.templates.values().next().unwrap() else {
+        let Some((_, crate::frontend::ExpressionSelection::Operand(template))) = prepared
+            .source
+            .statement_sites
+            .expressions
+            .templates()
+            .next()
+        else {
             panic!("expected a fully checked template");
         };
         let mut references = Vec::new();
@@ -3866,7 +3878,7 @@ mod tests {
         });
         assert_eq!(pulls, 2);
         prepared.syntax.as_mut().unwrap().to_mut().clear();
-        prepared.source.strings.templates.clear();
+        prepared.source.statement_sites.expressions = Default::default();
 
         let mut output = Output::default();
         let file = output.data(b"scan.py");
@@ -3939,9 +3951,18 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert_eq!(prepared.source.strings.templates.len(), 2);
+        assert_eq!(
+            prepared
+                .source
+                .statement_sites
+                .expressions
+                .templates()
+                .count(),
+            2
+        );
         inject_residual_child_module(&mut prepared);
-        assert_eq!(prepared.source.strings.templates.len(), 2);
+        let sites = &prepared.source.statement_sites.expressions;
+        assert_eq!(sites.templates().count(), 2);
         assert!(!prepared.initializer().plan.fully_checked());
     }
 
@@ -5307,7 +5328,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         )
         .unwrap();
         let before = prepared.standalone().unwrap();
-        prepared.source.strings.templates.clear();
+        prepared.source.statement_sites.expressions.take_templates();
         assert_eq!(prepared.standalone().unwrap(), before);
     }
 

@@ -2,14 +2,6 @@
 use super::*;
 use imre_ast::strings::{TemplateFieldText, interpolation_conversion};
 
-#[derive(Default)]
-pub(crate) struct PreparedStrings {
-    pub(crate) fields: HashMap<TextSize, TemplateFieldText>,
-    pub(crate) templates: HashMap<TextRange, PreparedTemplate>,
-}
-
-pub(crate) type PreparedTemplate = StdResult<RegisteredOperand, (TextRange, &'static str)>;
-
 impl RegisteredSource<'_> {
     pub(crate) fn formatted_literal(self, literal: &ast::InterpolatedStringLiteralElement) -> Expr {
         if let Some(replacements) = self.format_replacements(literal) {
