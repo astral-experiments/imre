@@ -555,7 +555,8 @@ pub(crate) struct DeferredAnnotation {
     pub(crate) value: StdResult<Expr, (TextRange, &'static str)>,
 }
 
-pub(crate) type AnnotationProvider = StdResult<RegisteredFunction, (TextRange, &'static str)>;
+pub(crate) type CheckedProvider = StdResult<RegisteredFunction, (TextRange, &'static str)>;
+pub(crate) type AnnotationProvider = CheckedProvider;
 
 pub(crate) struct ParameterAnnotations {
     pub(crate) body: AnnotationProvider,
@@ -711,9 +712,9 @@ pub(crate) struct RegisteredClass {
 }
 
 /// Decorators use the enclosing activation. Generic bases and keywords use the
-/// type-parameter activation. Each residual operand retains its own expression.
+/// type-parameter activation. Nongeneric bases and keywords use the enclosing operands.
 pub(crate) struct ClassHeader {
-    pub(crate) function: Option<RegisteredFunction>,
+    pub(crate) function: Option<CheckedProvider>,
     pub(crate) parameters: Option<Vec<ir::RegisteredTypeParameter>>,
     pub(crate) layout: ir::PackedArguments,
     pub(crate) operands: Vec<PhysicalOperand>,
@@ -1208,40 +1209,41 @@ impl<'a> SuitePreparation<'a> {
                 let decorators = imre_ast::decorator_expressions(&class.decorator_list)
                     .map(|expr| self.registered_operand(expr, site.enclosing, suspended))
                     .collect();
-                let generic = site.parameters.is_some();
-                let bases_scope = if generic {
-                    RegisteredScope::Function { is_async: false }
-                } else {
-                    site.enclosing
-                };
                 let arguments = class.arguments.as_deref();
                 let layout = arguments.map(packed_arguments).unwrap_or_default();
-                let values = || arguments.into_iter().flat_map(imre_ast::argument_values);
-                let function = if generic {
-                    let mut scope =
-                        SourceScope::new(bases_scope, self.source, self.operations, &self.sites);
-                    values()
-                        .map(|expr| scope.operand(expr))
-                        .collect::<Option<Vec<_>>>()
-                        .map(|args| {
-                            let value = operation(
-                                Builtin::RegisteredClassNamespace(start, layout.clone()),
-                                Type::PythonObject,
-                                args,
-                            );
-                            scope.finish(RegisteredFunction::returning(class.name.range(), value))
-                        })
-                } else {
-                    None
-                };
-                let operands = if function.is_some() {
-                    Vec::new()
-                } else {
-                    values()
+                let values = arguments.into_iter().flat_map(imre_ast::argument_values);
+                let (function, operands) = if site.parameters.is_some() {
+                    let mut scope = SourceScope::new(
+                        RegisteredScope::Function { is_async: false },
+                        self.source,
+                        self.operations,
+                        &self.sites,
+                    );
+                    scope.report_child_refusals = true;
+                    let args = values
                         .map(|expr| {
-                            self.registered_operand(expr, bases_scope, suspended && !generic)
+                            scope.refusal = None;
+                            scope.operand(expr).ok_or_else(|| {
+                                scope
+                                    .refusal
+                                    .unwrap_or((expr.range(), "expression has no checked operand"))
+                            })
                         })
-                        .collect()
+                        .collect::<StdResult<Vec<_>, _>>();
+                    let body = args.map(|args| {
+                        let value = operation(
+                            Builtin::RegisteredClassNamespace(start, layout.clone()),
+                            Type::PythonObject,
+                            args,
+                        );
+                        scope.finish(RegisteredFunction::returning(class.name.range(), value))
+                    });
+                    (Some(body), Vec::new())
+                } else {
+                    let operands = values
+                        .map(|expr| self.registered_operand(expr, site.enclosing, suspended))
+                        .collect();
+                    (None, operands)
                 };
                 let header = ClassHeader {
                     parameters: site.parameters,
