@@ -340,10 +340,7 @@ impl Context {
                 Ok(self.alloc(Value::TypeAlias {
                     name: a,
                     parameters,
-                    definition: typing::AliasDefinition::Lazy {
-                        evaluator: b,
-                        cached: None,
-                    },
+                    definition: typing::AliasDefinition::Lazy(typing::LazyEvaluation::new(b)),
                 }))
             }
             "template_interpolation" => {
