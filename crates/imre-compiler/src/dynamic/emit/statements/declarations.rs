@@ -155,6 +155,7 @@ impl CallableSites<'_, '_> {
                         self.place_alias(site, outer_diagnostic);
                     }
                 }
+                RequiredSite::ClassNamespace(site) => self.place_class_namespace(site),
                 RequiredSite::Definition(site) => self.place_definition(site),
                 _ => return &required[index..],
             }
@@ -267,6 +268,18 @@ impl CallableSites<'_, '_> {
             default_names: metadata.defaults.clone(),
             ..CompiledDefinition::new(code, signature, name, qualname, false)
         }
+    }
+
+    fn place_class_namespace(&mut self, start: TextSize) {
+        if self.sites.class_namespaces.contains_key(&start) {
+            return;
+        }
+        let namespace = self.compile_class_namespace(start);
+        let class = &self.source.class_bodies[&start];
+        let parameters = class.header.parameters.clone().expect("generic class");
+        self.sites
+            .class_namespaces
+            .insert(start, (namespace, parameters, class.range));
     }
 
     pub(super) fn place_definition(&mut self, start: TextSize) {
@@ -512,14 +525,7 @@ impl Function<'_, '_> {
                 return;
             }
             RequiredSite::ClassNamespace(start) => {
-                if !self.sites.class_namespaces.contains_key(&start) {
-                    let class = &self.source.class_bodies[&start];
-                    let namespace = self.callable_sites().compile_class_namespace(start);
-                    let parameters = class.header.parameters.clone().expect("generic class");
-                    self.sites
-                        .class_namespaces
-                        .insert(start, (namespace, parameters, class.range));
-                }
+                self.callable_sites().place_class_namespace(start);
                 return;
             }
             RequiredSite::Definition(start) => start,
