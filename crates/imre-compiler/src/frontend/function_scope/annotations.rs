@@ -7,7 +7,6 @@ use ruff_python_ast::visitor::Visitor;
 use ruff_text_size::{Ranged, TextSize};
 
 use super::{ClassBindings, ClosureNames, class_metadata};
-use crate::ir::AnnotationOccurrence;
 
 #[derive(Default)]
 pub(crate) struct AnnotationScopes {
@@ -94,9 +93,15 @@ impl AnnotationScopes {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ClassAnnotationSite {
+    pub(crate) site: TextSize,
+    pub(crate) index: Option<usize>,
+}
+
 #[derive(Default)]
 pub(crate) struct ClassAnnotations {
-    pub(crate) sites: Vec<AnnotationOccurrence>,
+    pub(crate) sites: Vec<ClassAnnotationSite>,
     pub(crate) body: Option<Box<crate::frontend::AnnotationProvider>>,
     pub(crate) reads: BTreeSet<String>,
     pub(crate) incomplete: bool,
@@ -104,23 +109,16 @@ pub(crate) struct ClassAnnotations {
 
 impl ClassAnnotations {
     /// Compile the lazy provider once its lexical sites and annotation operands are known.
-    pub(crate) fn prepare_body(
-        &mut self,
-        annotations: &HashMap<TextSize, crate::frontend::DeferredAnnotation>,
-        bindings: crate::frontend::RegisteredBindings,
-    ) {
+    pub(crate) fn prepare_body(&mut self, fields: crate::frontend::NamespaceAnnotations) {
         if !self.sites.is_empty() {
-            self.body = Some(Box::new(crate::frontend::DeferredAnnotation::prepare_body(
-                annotations,
-                &self.sites,
-                bindings,
-            )));
+            let sites = self.sites.iter().map(|site| (site.site, site.index));
+            self.body = Some(Box::new(fields.class_body(sites)));
         }
     }
 
     pub(super) fn observe(&mut self, assign: &ast::StmtAnnAssign) {
         if assign.simple && assign.target.is_name_expr() {
-            self.sites.push(AnnotationOccurrence {
+            self.sites.push(ClassAnnotationSite {
                 site: assign.start(),
                 index: None,
             });

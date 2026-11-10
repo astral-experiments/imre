@@ -548,6 +548,7 @@ pub(crate) fn annotation_expression(
     (!expr.is_name_expr() && !expr.is_literal_expr()).then_some(parsed)
 }
 
+#[derive(Clone)]
 pub(crate) struct DeferredAnnotation {
     pub(crate) range: TextRange,
     pub(crate) name: String,
@@ -566,7 +567,6 @@ impl ParameterAnnotations {
         def: &ast::StmtFunctionDef,
         source: values::RegisteredSource<'_>,
         operands: &HashMap<TextSize, PreparedAnnotation<R>>,
-        sites: &mut HashMap<TextSize, DeferredAnnotation>,
     ) -> Option<Self> {
         let annotations = parameter_annotations(&def.parameters, def.returns.as_deref());
         if annotations.is_empty() {
@@ -589,13 +589,12 @@ impl ParameterAnnotations {
                 references.insert(name.to_owned(), reference);
             }
             let value = operands.get(&site).map(|operand| operand.operand(site));
-            sites.insert(
-                site,
+            entries.push((
                 DeferredAnnotation::new(name.to_owned(), expression, value, &mut scope),
-            );
-            entries.push(ir::AnnotationOccurrence { site, index: None });
+                None,
+            ));
         }
-        let body = DeferredAnnotation::prepare_body(sites, &entries, scope.bindings());
+        let body = DeferredAnnotation::prepare_body(entries, scope.bindings());
         Some(Self { body, references })
     }
 }
@@ -647,10 +646,9 @@ impl DeferredAnnotation {
         }
     }
 
-    /// Number already-checked operands in physical marker order, including repeated finally edges.
-    pub(crate) fn prepare_body(
-        sites: &HashMap<TextSize, Self>,
-        entries: &[ir::AnnotationOccurrence],
+    /// Build one provider in the order its checked fields become visible.
+    fn prepare_body(
+        fields: impl IntoIterator<Item = (Self, Option<usize>)>,
         (locals, local_names): RegisteredBindings,
     ) -> AnnotationProvider {
         let mut body = vec![Statement::Expr(operation(
@@ -658,12 +656,15 @@ impl DeferredAnnotation {
             Type::None,
             vec![],
         ))];
-        for occurrence in entries {
-            let value = sites[&occurrence.site].value.clone()?;
+        for (field, index) in fields {
             body.push(Statement::Expr(operation(
-                Builtin::RegisteredAnnotationInsert(*occurrence),
+                Builtin::RegisteredAnnotationInsert(ir::AnnotationField {
+                    name: field.name,
+                    range: field.range,
+                    index,
+                }),
                 Type::None,
-                vec![value],
+                vec![field.value?],
             )));
         }
         body.push(Statement::Return(operation(
@@ -719,22 +720,46 @@ pub(crate) struct ClassHeader {
     pub(crate) decorators: Vec<PhysicalOperand>,
 }
 
+/// Checked field values and private slots belong to one annotation provider.
+#[derive(Default)]
+pub(crate) struct NamespaceAnnotations {
+    fields: HashMap<TextSize, DeferredAnnotation>,
+    bindings: RegisteredBindings,
+}
+
+impl NamespaceAnnotations {
+    pub(crate) fn class_body(
+        mut self,
+        sites: impl Iterator<Item = (TextSize, Option<usize>)>,
+    ) -> AnnotationProvider {
+        let fields = sites.map(|(site, index)| {
+            (
+                self.fields.remove(&site).expect("checked class annotation"),
+                index,
+            )
+        });
+        DeferredAnnotation::prepare_body(fields, self.bindings)
+    }
+
+    /// A finally suite can emit the same marker on several edges. Each occurrence
+    /// has its own visible conditional index in the module's annotation function.
+    pub(crate) fn module_body(&self, sites: &[TextSize]) -> AnnotationProvider {
+        let fields = sites
+            .iter()
+            .enumerate()
+            .map(|(index, site)| (self.fields[site].clone(), Some(index)));
+        DeferredAnnotation::prepare_body(fields, self.bindings.clone())
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct RegisteredSites<'a> {
     pub(crate) operations: HashMap<TextRange, Expr>,
     pub(crate) functions: Vec<FunctionSite<'a>>,
     pub(crate) classes: Vec<ClassSite<'a>>,
-    pub(crate) annotations: HashMap<TextSize, DeferredAnnotation>,
-    pub(crate) annotation_bindings: HashMap<Option<TextSize>, RegisteredBindings>,
+    pub(crate) module_annotations: NamespaceAnnotations,
+    pub(crate) class_annotations: HashMap<TextSize, NamespaceAnnotations>,
     pub(crate) parameter_annotations: HashMap<TextSize, ParameterAnnotations>,
-}
-
-impl RegisteredSites<'_> {
-    fn finish_annotations(&mut self, owner: Option<TextSize>, scope: SourceScope<'_>) {
-        if !scope.locals.is_empty() {
-            self.annotation_bindings.insert(owner, scope.bindings());
-        }
-    }
 }
 
 pub(crate) fn registered_sites<'a, R>(
@@ -749,6 +774,7 @@ pub(crate) fn registered_sites<'a, R>(
         source: values::RegisteredSource<'s>,
         operands: &'s HashMap<TextSize, PreparedAnnotation<R>>,
         annotations: SourceScope<'s>,
+        fields: HashMap<TextSize, DeferredAnnotation>,
         scope: RegisteredScope,
         in_unprepared_generic: bool,
         function: Option<TextSize>,
@@ -778,20 +804,27 @@ pub(crate) fn registered_sites<'a, R>(
                         self.annotations.sites,
                     );
                     let outer_annotations = std::mem::replace(&mut self.annotations, child);
+                    let outer_fields = std::mem::take(&mut self.fields);
                     let function = self.function.take();
                     walk_stmt(self, stmt);
                     self.function = function;
                     self.scope = outer;
                     let child = std::mem::replace(&mut self.annotations, outer_annotations);
-                    self.output.finish_annotations(Some(class.start()), child);
+                    let fields = std::mem::replace(&mut self.fields, outer_fields);
+                    if !fields.is_empty() {
+                        self.output.class_annotations.insert(
+                            class.start(),
+                            NamespaceAnnotations {
+                                fields,
+                                bindings: child.bindings(),
+                            },
+                        );
+                    }
                 }
                 ast::Stmt::FunctionDef(def) => {
-                    if let Some(provider) = ParameterAnnotations::prepare(
-                        def,
-                        self.source,
-                        self.operands,
-                        &mut self.output.annotations,
-                    ) {
+                    if let Some(provider) =
+                        ParameterAnnotations::prepare(def, self.source, self.operands)
+                    {
                         self.output
                             .parameter_annotations
                             .insert(def.parameters.start(), provider);
@@ -860,7 +893,7 @@ pub(crate) fn registered_sites<'a, R>(
                             vec![self.operands[&site].operand(site)],
                         )
                     } else {
-                        self.output.annotations.insert(
+                        self.fields.insert(
                             ann.start(),
                             DeferredAnnotation::new(
                                 name.clone(),
@@ -904,13 +937,17 @@ pub(crate) fn registered_sites<'a, R>(
             &operations,
             &statements,
         ),
+        fields: HashMap::new(),
         scope: RegisteredScope::Module,
         in_unprepared_generic: false,
         function: None,
         output: RegisteredSites::default(),
     };
     sites.visit_body(body);
-    sites.output.finish_annotations(None, sites.annotations);
+    sites.output.module_annotations = NamespaceAnnotations {
+        fields: sites.fields,
+        bindings: sites.annotations.bindings(),
+    };
     sites.output
 }
 
@@ -3274,28 +3311,33 @@ mod tests {
             false,
         );
         let def = stmts[0].as_function_def_stmt().unwrap();
+        assert!(sites.module_annotations.fields.is_empty());
+        assert!(sites.class_annotations.is_empty());
         let provider = &sites.parameter_annotations[&def.parameters.start()];
         let body = &provider.body.as_ref().unwrap().function.body;
         let fields: Vec<_> = body
             .iter()
             .filter_map(|statement| {
                 let Statement::Expr(Expr {
-                    kind: ExprKind::Builtin(Builtin::RegisteredAnnotationInsert(site), _),
+                    kind: ExprKind::Builtin(Builtin::RegisteredAnnotationInsert(field), inputs),
                     ..
                 }) = statement
                 else {
                     return None;
                 };
-                Some(&sites.annotations[&site.site])
+                Some((field, inputs.as_slice()))
             })
             .collect();
-        let names: Vec<_> = fields.iter().map(|field| field.name.as_str()).collect();
+        let names: Vec<_> = fields
+            .iter()
+            .map(|(field, _)| field.name.as_str())
+            .collect();
         assert_eq!(names, ["b", "a", "args", "c", "kw", "return"]);
         assert!(matches!(
-            &fields[0].value,
-            Ok(Expr {
+            fields[0].1,
+            [Expr {
                 kind: ExprKind::Builtin(Builtin::BindAnnotationExpression(site), _), ..
-            }) if *site == fields[0].range.start()
+            }] if *site == fields[0].0.range.start()
         ));
         assert_eq!(provider.references["a"], "mod.T");
         assert_eq!(provider.references["return"], "None");
@@ -3311,19 +3353,14 @@ mod tests {
         let literals = values::ModuleSource::new(module);
         let source = literals.context(text);
         let prepared = |bundled| prepared_sites(stmts, source, bundled);
-        let mut module = prepared(false);
-        let sites = module.annotations;
-        let bindings = module.annotation_bindings.remove(&None).unwrap();
+        let module = prepared(false).module_annotations;
+        let sites = &module.fields;
         let callback = |occurrences: &[usize]| {
-            let entries: Vec<_> = occurrences
+            let sites: Vec<_> = occurrences
                 .iter()
-                .enumerate()
-                .map(|(index, slot)| ir::AnnotationOccurrence {
-                    site: stmts[*slot].start(),
-                    index: Some(index),
-                })
+                .map(|slot| stmts[*slot].start())
                 .collect();
-            DeferredAnnotation::prepare_body(&sites, &entries, bindings.clone())
+            module.module_body(&sites)
         };
         let scoped = callback(&[7, 0, 7]).unwrap();
         assert!(!scoped.region().private_slots().is_empty());
@@ -3361,14 +3398,14 @@ mod tests {
                         panic!("expected a guarded annotation insertion")
                     };
                     assert_eq!(operands.len(), 1);
-                    (occurrence.index, sites[&occurrence.site].name.as_str())
+                    (occurrence.index, occurrence.name.as_str())
                 })
                 .collect();
         assert_eq!(
             numbered,
             [(Some(0), "first"), (Some(1), "second"), (Some(2), "first")]
         );
-        let bundled_sites = prepared(true).annotations;
+        let bundled_sites = prepared(true).module_annotations.fields;
         let quoted_site = stmts[3].start();
         assert!(
             matches!(&sites[&quoted_site].value, Ok(Expr { kind: ExprKind::Builtin(Builtin::BindAnnotationExpression(site), _), .. }) if *site == stmts[3].as_ann_assign_stmt().unwrap().annotation.start())
@@ -3379,7 +3416,7 @@ mod tests {
         let forward = callback(&[3]).unwrap();
         assert!(matches!(&forward.function.body[1],
             Statement::Expr(Expr { kind: ExprKind::Builtin(
-                Builtin::RegisteredAnnotationInsert(ir::AnnotationOccurrence { index: Some(0), .. }), values), .. })
+                Builtin::RegisteredAnnotationInsert(ir::AnnotationField { index: Some(0), .. }), values), .. })
                 if matches!(values.as_slice(), [Expr { kind: ExprKind::Builtin(
                     Builtin::BindAnnotationExpression(site), _), .. }] if *site == stmts[3].as_ann_assign_stmt().unwrap().annotation.start())));
         for slot in [2, 4, 6] {
@@ -3453,8 +3490,7 @@ mod tests {
         };
         let operands = prepared_sites(&stmts, source, false);
         let ops = operands.operations;
-        let annotations = operands.annotations;
-        assert_eq!(annotations.len(), 2);
+        assert_eq!(operands.module_annotations.fields.len(), 2);
         let mut prepare = SuitePreparation::new(&ops, source, &stmts, true);
         let plan = prepare.suite(&stmts, RegisteredScope::Module);
         let [run] = &plan.residual[..] else {

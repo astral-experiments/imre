@@ -1060,10 +1060,10 @@ impl Frame<'_, '_, '_> {
                 self.code.begin_annotations();
                 "0".to_owned()
             }
-            (Builtin::RegisteredAnnotationInsert(occurrence), [value]) => {
-                let (code, sites) = self.code.parts();
-                let (name, range) = &sites.annotation_fields[&occurrence.site];
-                let target = code.annotation_target(occurrence.index, name, *range);
+            (Builtin::RegisteredAnnotationInsert(field), [value]) => {
+                let target = self
+                    .code
+                    .annotation_target(field.index, &field.name, field.range);
                 let value = self.evaluate_handle(value);
                 self.code.store_annotation(target, &value);
                 "0".to_owned()
