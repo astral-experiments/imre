@@ -163,6 +163,28 @@ fn checked_subtraction_selects_integer_arithmetic_in_both_calling_conventions() 
 }
 
 #[test]
+fn integer_product_consumes_its_operands_without_reprojecting_the_sum() {
+    let mut output =
+        emit_captured_body("def publish(scale, value, send):\n    send(scale * (value + 1))\n");
+    let plus = output.data(b"+");
+    let product = output.data(b"*");
+    let body = &output.functions;
+    assert_eq!(
+        body.matches("call i64 @imre_dyn_exact_int_word(").count(),
+        2
+    );
+    assert_eq!(body.matches("call i64 @int_add(").count(), 1);
+    assert_eq!(body.matches("call i64 @int_mul(").count(), 1);
+    for op in [plus, product] {
+        assert_eq!(
+            body.matches(&format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {op},"))
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
 fn captured_float_product_uses_the_registered_multiply_protocol() {
     let mut output =
         emit_captured_body("def deliver(a: float, b: float, send):\n    send(a * b)\n");
