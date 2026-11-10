@@ -46,11 +46,7 @@ impl Function<'_, '_> {
             .source
             .statement_sites
             .expressions
-            .get(expr)
-            .or_else(|| {
-                expr.as_lambda_expr()
-                    .map(|lambda| &self.source.lambdas[&lambda.start()].binding)
-            });
+            .selection(expr, &self.source.lambdas);
         match selected? {
             ExpressionSelection::Checked(value) => {
                 self.prepare_checked_value(value);
