@@ -136,7 +136,7 @@ pub(super) fn emit(
             python_optimization,
             origin,
             Input::Module(module.parsed),
-            |initializer| {
+            |initializer, _| {
                 let registration = initializer.registration(source, builtin, physical, zip);
                 let check_archive = bundled && !providers.is_empty();
                 let separate = split && unit != 0 && !source.is_empty();
@@ -190,6 +190,7 @@ pub(super) fn emit(
 /// Normalized source and lowered names shared by archive, split, and inline placement.
 pub(super) struct PreparedBody<'a, 'tree> {
     name: &'a str,
+    #[cfg(test)]
     syntax: Option<Cow<'tree, ast::Suite>>,
     declarations: Definitions<'tree>,
     docstring: Option<String>,
@@ -270,7 +271,7 @@ impl<'a> PreparedBody<'a, '_> {
             python_optimization,
             origin,
             Input::Module(ParsedModule::parse(path, source.into())?.parsed),
-            use_module,
+            |module, _| use_module(module),
         )
     }
 
@@ -281,7 +282,10 @@ impl<'a> PreparedBody<'a, '_> {
         python_optimization: i32,
         origin: ModuleOrigin<'a>,
         input: Input<'_>,
-        use_module: impl FnOnce(PreparedBody<'a, '_>) -> Result<R, String>,
+        use_module: impl FnOnce(
+            PreparedBody<'a, '_>,
+            Option<crate::frontend::AnnotationCode>,
+        ) -> Result<R, String>,
     ) -> Result<R, String> {
         let keep_docstrings = python_optimization < 2;
         let source = text.as_ref();
@@ -528,7 +532,7 @@ impl<'a> PreparedBody<'a, '_> {
             parameter_annotations: sites.parameter_annotations,
             function_bodies,
             class_bodies,
-            initializer,
+            initializer: initializer.map(|plan| crate::frontend::PhysicalSuite::new(plan, &body)),
             initializer_sites,
             bundled,
             path,
@@ -554,8 +558,8 @@ impl<'a> PreparedBody<'a, '_> {
         let docstring = (!expression && keep_docstrings)
             .then(|| crate::frontend::docstring(&body).or_else(|| source.bundled_docstring("")))
             .flatten();
-        let retain_syntax = source.initializer.as_ref().is_some_and(|suite| {
-            !suite.fully_checked()
+        let retain_declarations = source.initializer.as_ref().is_some_and(|suite| {
+            !suite.plan.fully_checked()
                 || !source.initializer_sites.is_empty()
                     && (declarations.is_empty()
                         || declarations.keys().any(|site| {
@@ -570,44 +574,55 @@ impl<'a> PreparedBody<'a, '_> {
                                 || body.binary_search_by_key(site, Ranged::start).is_err()
                         }))
         });
-        if retain_syntax {
-            use_module(PreparedBody {
-                name,
-                syntax: Some(Cow::Borrowed(&body)),
-                declarations,
-                docstring,
-                source,
-            })
+        let annotation = if expression {
+            let [ast::Stmt::Expr(statement)] = body.as_slice() else {
+                unreachable!("single decoded expression");
+            };
+            crate::frontend::AnnotationCode::prepare(&statement.value, source.registered_source())
+        } else {
+            None
+        };
+        if retain_declarations {
+            use_module(
+                PreparedBody {
+                    name,
+                    #[cfg(test)]
+                    syntax: Some(Cow::Borrowed(&body)),
+                    declarations,
+                    docstring,
+                    source,
+                },
+                annotation,
+            )
         } else {
             drop(declarations);
-            let syntax = if expression {
-                Some(Cow::Owned(body))
-            } else {
-                if !source.initializer_sites.is_empty() {
-                    // A direct graph definition retains its signature and its checked executable body.
-                    for stmt in body {
-                        if let ast::Stmt::FunctionDef(mut def) = stmt
-                            && let Some(CheckedHeader::Declaration { syntax, .. }) = source
-                                .function_bodies
-                                .get_mut(&def.start())
-                                .and_then(PreparedFunction::graph_header_mut)
-                        {
-                            def.body = Default::default();
-                            *syntax = Some(Box::new(def));
-                        }
+            if !source.initializer_sites.is_empty() {
+                // A direct graph definition retains its signature and its checked executable body.
+                for stmt in body {
+                    if let ast::Stmt::FunctionDef(mut def) = stmt
+                        && let Some(CheckedHeader::Declaration { syntax, .. }) = source
+                            .function_bodies
+                            .get_mut(&def.start())
+                            .and_then(PreparedFunction::graph_header_mut)
+                    {
+                        def.body = Default::default();
+                        *syntax = Some(Box::new(def));
                     }
-                } else {
-                    drop(body);
                 }
-                None
-            };
-            use_module(PreparedBody {
-                name,
-                syntax,
-                declarations: HashMap::new(),
-                docstring,
-                source,
-            })
+            } else {
+                drop(body);
+            }
+            use_module(
+                PreparedBody {
+                    name,
+                    #[cfg(test)]
+                    syntax: None,
+                    declarations: HashMap::new(),
+                    docstring,
+                    source,
+                },
+                annotation,
+            )
         }
     }
 
@@ -635,16 +650,7 @@ impl<'a> PreparedBody<'a, '_> {
             python_optimization,
             ModuleOrigin::Program(None),
             Input::Expression(syntax, parsed.tokens()),
-            |prepared| {
-                let Some(ast::Stmt::Expr(statement)) =
-                    prepared.syntax.as_deref().and_then(|body| body.first())
-                else {
-                    unreachable!("single decoded expression")
-                };
-                let code = crate::frontend::AnnotationCode::prepare(
-                    &statement.value,
-                    prepared.source.registered_source(),
-                );
+            |prepared, code| {
                 Ok(code.map(|code| crate::frontend::AnnotationBody {
                     code,
                     scope: Box::new(prepared.source),
@@ -653,6 +659,13 @@ impl<'a> PreparedBody<'a, '_> {
         )
         .ok()
         .flatten()
+    }
+
+    fn initializer(&self) -> &crate::frontend::PhysicalSuite {
+        self.source
+            .initializer
+            .as_ref()
+            .expect("module initializer")
     }
 
     fn linked_declarations(&self) -> Cow<'_, Definitions<'_>> {
@@ -681,11 +694,8 @@ impl<'a> PreparedBody<'a, '_> {
         let positions = SourcePositions::new(&self.source.text, &code_file);
         let mut frame =
             RegisteredFrame::new(output, &positions, false, unit, self.source.module_start);
-        let suite = self
-            .source
-            .initializer
-            .as_ref()
-            .expect("module initializer");
+        let initializer = self.initializer();
+        let suite = &initializer.plan;
         let declarations = self.linked_declarations();
         let location = SourceMap {
             info: &self.source,
@@ -728,9 +738,8 @@ impl<'a> PreparedBody<'a, '_> {
             }
             frame.checked_body(&suite.checked, &sites);
         } else {
-            let stmts = self.syntax.as_deref().expect("physical module statements");
             let mut function = module_function(frame, sites);
-            function.checked_runs(suite, |code, run| code.source_run(stmts, run));
+            function.physical_suite(initializer);
             frame = function.frame;
         }
         let code =
@@ -970,7 +979,7 @@ struct SourceInfo<'a> {
     nested_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
     function_bodies: HashMap<ruff_text_size::TextSize, PreparedFunction<'a>>,
     class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredClass>,
-    initializer: Option<crate::frontend::RegisteredSuite>,
+    initializer: Option<crate::frontend::PhysicalSuite>,
     // Module admission and each output layout use the same ordered site references.
     initializer_sites: Vec<sites::RequiredSite>,
     bundled: bool,
@@ -1358,7 +1367,7 @@ mod tests {
             prepared.source.scopes.functions[&start].suspension_flags != 0
         });
         let (sites, nested) = (suites.sites, suites.nested);
-        prepared.source.initializer = Some(initializer);
+        prepared.source.initializer = Some(crate::frontend::PhysicalSuite::new(initializer, body));
         prepared.source.class_bodies = class_bodies;
         prepared.source.statement_sites = sites;
         prepared.source.nested_bodies.extend(nested);
@@ -1395,7 +1404,7 @@ mod tests {
     }
 
     fn replace_residual_input(prepared: &mut PreparedBody<'_, '_>, index: usize) {
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
         prepared
             .source
             .statement_sites
@@ -1534,7 +1543,7 @@ mod tests {
             0,
             ModuleOrigin::Program(None),
             |mut module| {
-                let initializer = module.source.initializer.as_ref().unwrap();
+                let initializer = &module.initializer().plan;
                 let mut headers = Vec::new();
                 for suite in std::iter::once(initializer).chain(
                     module
@@ -1678,7 +1687,7 @@ mod tests {
         )
         .unwrap();
         assert!(module.syntax.is_none());
-        assert!(module.source.initializer.as_ref().unwrap().fully_checked());
+        assert!(module.initializer().plan.fully_checked());
         let header = module.source.function_header(site).unwrap();
         assert!(header.body.is_empty());
 
@@ -1828,6 +1837,33 @@ mod tests {
                 assert!(llvm.find(test).unwrap() < llvm.find(pull).unwrap());
             }
         }
+    }
+
+    #[test]
+    fn mixed_module_entry_uses_its_stored_inputs_after_source_erasure() {
+        let mut module = PreparedBody::module(
+            "entry",
+            Path::new("entry.py"),
+            "result = record((lambda: value)())
+",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        inject_residual_child_module(&mut module);
+        let initializer = module.source.initializer.as_mut().unwrap();
+        assert!(!initializer.plan.fully_checked());
+        assert!(initializer.sources.is_empty());
+        let call = residual_value_mut(&mut initializer.plan).clone();
+        let before = module.standalone().unwrap();
+        module.syntax = None;
+        assert_eq!(module.standalone().unwrap(), before);
+        module
+            .source
+            .statement_sites
+            .expressions
+            .replace_residual_input(&call, 1, crate::ir::Expr::none());
+        assert_ne!(module.standalone().unwrap(), before);
     }
 
     #[test]
@@ -2275,7 +2311,7 @@ mod tests {
                     ["SupportsAbs", "SupportsRound"]
                 );
                 let mut bindings = Vec::new();
-                let initializer = typing.source.initializer.as_ref().unwrap();
+                let initializer = &typing.source.initializer.as_ref().unwrap().plan;
                 crate::ir::walk_expressions(&initializer.checked.function.body, &mut |expr| {
                     if let ExprKind::Builtin(
                         Builtin::RegisteredDefinition(crate::ir::DefinitionSite::Class {
@@ -2350,6 +2386,7 @@ mod tests {
             .initializer
             .as_ref()
             .unwrap()
+            .plan
             .checked
             .function
             .body;
@@ -2776,7 +2813,7 @@ mod tests {
         let source = "owner.field: Unused\nvalues[(left, right):stop:step, (one, two)]: Unused\n";
         let mut module =
             PreparedBody::module("targets", path, source, 0, ModuleOrigin::Program(None)).unwrap();
-        let suite = module.source.initializer.as_ref().unwrap();
+        let suite = &module.initializer().plan;
         assert!(suite.fully_checked());
         let mut reads = Vec::new();
         let mut discarded = 0;
@@ -2846,7 +2883,7 @@ mod tests {
         .unwrap();
         let before = module.standalone().unwrap();
         assert!(module.syntax.is_none());
-        let suite = module.source.initializer.as_mut().unwrap();
+        let suite = &mut module.source.initializer.as_mut().unwrap().plan;
         assert!(suite.fully_checked());
         let mut stored = 0;
         crate::ir::rewrite_statements(&mut suite.checked.function.body, &mut |statement| {
@@ -2936,7 +2973,7 @@ mod tests {
                 .is_none()
         );
         let sites = &prepared.source.statement_sites.expressions;
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
         assert!(matches!(
             sites
                 .physical(value)
@@ -2973,7 +3010,7 @@ mod tests {
         );
         assert_eq!(prepared.standalone().unwrap(), original);
 
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
         let key = value
             .as_subscript_expr_mut()
             .unwrap()
@@ -3031,7 +3068,7 @@ mod tests {
                 .get(checked)
                 .is_none()
         );
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
         let inputs = prepared
             .source
             .statement_sites
@@ -3047,7 +3084,7 @@ mod tests {
         erase(&mut binary.right);
         assert_eq!(prepared.standalone().unwrap(), original);
 
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
         let binary = value.as_bin_op_expr_mut().unwrap();
         erase(&mut binary.left.as_call_expr_mut().unwrap().func);
         assert_eq!(prepared.standalone().unwrap(), original);
@@ -3069,7 +3106,7 @@ mod tests {
         .unwrap();
         inject_residual_child_module(&mut prepared);
         let original = prepared.standalone().unwrap();
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
         let inputs = prepared
             .source
             .statement_sites
@@ -3098,7 +3135,7 @@ mod tests {
         erase(&mut call.arguments.keywords[1].value);
         assert_eq!(prepared.standalone().unwrap(), original);
 
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
         let call = value.as_call_expr_mut().unwrap();
         let residual = &mut call.arguments.keywords[0].value;
         erase(&mut residual.as_call_expr_mut().unwrap().func);
@@ -3256,7 +3293,7 @@ mod tests {
         inject_residual_child_module(&mut prepared);
 
         let original = prepared.standalone().unwrap();
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
         let Some(ExpressionSelection::Mixed {
             parts: Some(parts), ..
         }) = prepared.source.statement_sites.expressions.get(value)
@@ -3305,7 +3342,7 @@ mod tests {
         .unwrap();
         inject_residual_child_module(&mut prepared);
         let original = prepared.standalone().unwrap();
-        let choice = residual_value_mut(prepared.source.initializer.as_mut().unwrap())
+        let choice = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan)
             .as_if_expr_mut()
             .unwrap();
         assert!(matches!(
@@ -3373,7 +3410,7 @@ mod tests {
         fn middle_arm<'a>(
             prepared: &'a mut PreparedBody<'_, '_>,
         ) -> &'a mut (Option<PhysicalOperand>, PhysicalSuite) {
-            let initializer = prepared.source.initializer.as_mut().unwrap();
+            let initializer = &mut prepared.source.initializer.as_mut().unwrap().plan;
             let Some(SourceEffect::If { arms, .. }) = &mut initializer.residual[0].effect else {
                 unreachable!()
             };
@@ -3398,7 +3435,7 @@ mod tests {
         .unwrap();
 
         inject_residual_child_module(&mut prepared);
-        let [run] = prepared.source.initializer.as_ref().unwrap().residual.as_slice() else {
+        let [run] = prepared.initializer().plan.residual.as_slice() else {
             panic!("expected only the mixed if");
         };
         let Some(SourceEffect::If { arms, .. }) = &run.effect else {
@@ -3521,19 +3558,12 @@ mod tests {
             out.functions
         }
         inject_residual_child_module(&mut prepared);
-        assert!(
-            !prepared
-                .source
-                .initializer
-                .as_ref()
-                .unwrap()
-                .fully_checked()
-        );
+        assert!(!prepared.initializer().plan.fully_checked());
         let original = emit(&prepared);
         let ast::Stmt::Match(branch) = &mut prepared.syntax.as_mut().unwrap().to_mut()[0] else {
             panic!("expected match")
         };
-        let suite = prepared.source.initializer.as_ref().unwrap();
+        let suite = &prepared.source.initializer.as_ref().unwrap().plan;
         let Some(crate::frontend::SourceEffect::Match(_, Some(site))) = &suite.residual[0].effect
         else {
             panic!("expected a mixed match")
@@ -3652,14 +3682,7 @@ mod tests {
             PreparedBody::module("field", path, original, 0, ModuleOrigin::Program(None)).unwrap();
         assert_eq!(prepared.source.strings.templates.len(), 1);
         inject_residual_child_module(&mut prepared);
-        assert!(
-            !prepared
-                .source
-                .initializer
-                .as_ref()
-                .unwrap()
-                .fully_checked()
-        );
+        assert!(!prepared.initializer().plan.fully_checked());
         let emit = |prepared: &PreparedBody<'_, '_>| {
             let mut output = Output::default();
             let file = output.data(b"field.py");
@@ -3773,14 +3796,7 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert!(
-            prepared
-                .source
-                .initializer
-                .as_ref()
-                .unwrap()
-                .fully_checked()
-        );
+        assert!(prepared.initializer().plan.fully_checked());
         assert!(prepared.syntax.is_none());
         prepared.source.strings.templates.clear();
 
@@ -3832,7 +3848,7 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let initializer = prepared.source.initializer.as_ref().unwrap();
+        let initializer = &prepared.initializer().plan;
         assert!(initializer.fully_checked());
         assert_eq!(prepared.source.generators.len(), 1);
         let (site, generator) = prepared.source.generators.iter().next().unwrap();
@@ -3930,14 +3946,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert_eq!(prepared.source.strings.templates.len(), 2);
         inject_residual_child_module(&mut prepared);
         assert_eq!(prepared.source.strings.templates.len(), 2);
-        assert!(
-            !prepared
-                .source
-                .initializer
-                .as_ref()
-                .unwrap()
-                .fully_checked()
-        );
+        assert!(!prepared.initializer().plan.fully_checked());
     }
 
     #[test]
@@ -4124,14 +4133,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert!(
-            prepared
-                .source
-                .initializer
-                .as_ref()
-                .unwrap()
-                .fully_checked()
-        );
+        assert!(prepared.initializer().plan.fully_checked());
         prepared.syntax.as_mut().unwrap().to_mut().clear();
 
         let mut output = Output::default();
@@ -4217,7 +4219,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let initializer = prepared.source.initializer.as_ref().unwrap();
+        let initializer = &prepared.initializer().plan;
         assert!(initializer.fully_checked());
         let [_, Statement::Expr(binding)] = initializer.checked.function.body.as_slice() else {
             panic!("expected one declaration after the statement marker");
@@ -4622,6 +4624,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 .initializer
                 .as_mut()
                 .unwrap()
+                .plan
                 .residual
                 .as_mut_slice()
             else {
@@ -5143,7 +5146,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         .unwrap();
         inject_residual_child_module(&mut prepared);
         let original = prepared.standalone().unwrap();
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
         let sites = &prepared.source.statement_sites.expressions;
         let inputs = sites.physical(value).unwrap();
         let parts = inputs.operands(false).collect::<Vec<_>>();
@@ -5164,7 +5167,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         });
         value.as_dict_expr_mut().unwrap().items.clear();
         assert_eq!(prepared.standalone().unwrap(), original);
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
         let call = value.as_call_expr_mut().unwrap().arguments.args[0]
             .as_call_expr_mut()
             .unwrap();
@@ -5531,7 +5534,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .as_try_stmt_mut()
             .unwrap();
         let branch = protected.finalbody[0].as_match_stmt_mut().unwrap();
-        let suite = prepared.source.initializer.as_ref().unwrap();
+        let suite = &prepared.source.initializer.as_ref().unwrap().plan;
         let Some(crate::frontend::SourceEffect::Try(region)) = &suite.residual[0].effect else {
             panic!("expected a mixed try")
         };
@@ -5572,26 +5575,21 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert!(
-            prepared
-                .source
-                .initializer
-                .as_ref()
-                .unwrap()
-                .fully_checked()
-        );
+        assert!(prepared.initializer().plan.fully_checked());
         inject_residual_child_module(&mut prepared);
         let targets = &prepared.syntax.as_ref().unwrap()[1]
             .as_delete_stmt()
             .unwrap()
             .targets;
         let key_range = targets[1].as_subscript_expr().unwrap().slice.range();
-        let suite = prepared.source.initializer.as_ref().unwrap();
+        let initializer = prepared.initializer();
+        assert!(initializer.sources.is_empty());
+        let suite = &initializer.plan;
         crate::verify::registered(suite.checked.region()).unwrap();
         let [gap] = suite.residual.as_slice() else {
             panic!("only the target with the injected key needs a source input");
         };
-        assert_eq!(gap.statements, 1..2);
+        assert!(gap.statements.is_empty());
         assert_eq!(gap.at, suite.checked.function.body.len());
         let Some(crate::frontend::SourceEffect::ObjectOperation(op, operands)) = &gap.effect else {
             panic!("expected a prepared item deletion");
@@ -5698,7 +5696,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let original = prepared.standalone().unwrap();
 
         let sites = &prepared.source.statement_sites.expressions;
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
         let inputs = sites.physical(value).unwrap();
         assert!(matches!(
             inputs.operands(false).collect::<Vec<_>>().as_slice(),
@@ -5717,7 +5715,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         tuple.as_tuple_expr_mut().unwrap().elts.clear();
         assert_eq!(prepared.standalone().unwrap(), original);
 
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        let value = residual_value_mut(&mut prepared.source.initializer.as_mut().unwrap().plan);
         let residual = &mut value.as_call_expr_mut().unwrap().arguments.args[1];
         let callee = &mut residual.as_call_expr_mut().unwrap().func;
         **callee = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
