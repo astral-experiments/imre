@@ -163,6 +163,52 @@ fn checked_subtraction_selects_integer_arithmetic_in_both_calling_conventions() 
 }
 
 #[test]
+fn checked_integer_remainder_keeps_its_operation_with_a_registered_sibling() {
+    let mut output = emit_captured_body(concat!(
+        "def remainder(a: int, b: int) -> int:\n    return a % b\n",
+        "def publish(send):\n    send(1)\n",
+    ));
+    let modulo = output.data(b"%");
+    let body = &output.functions;
+    assert_eq!(body.matches("call i64 @int_mod(").count(), 1);
+    assert_eq!(
+        body.matches("call i64 @imre_dyn_exact_int_word(").count(),
+        2
+    );
+    assert!(body.contains("icmp ugt i64"));
+    assert_eq!(
+        body.matches(&format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {modulo},"))
+            .count(),
+        1
+    );
+    output.integer_prelude();
+    assert!(output.functions.contains("define internal i64 @int_mod("));
+    assert!(
+        !output
+            .functions
+            .contains("define internal i64 @int_floordiv(")
+    );
+}
+
+#[test]
+fn cached_power_of_two_remainder_needs_no_integer_owner() {
+    let output = emit_captured_body(concat!(
+        "def modulo(a: int) -> int:\n    return a % 8\n",
+        "def publish(send):\n    send(1)\n",
+    ));
+    let eight = super::abi::permanent::small_integer_id(8).unwrap();
+    let body = &output.functions;
+    let call = body
+        .lines()
+        .find(|line| line.contains("call i64 @imre_dyn_masked_remainder("))
+        .unwrap();
+    assert!(call.ends_with(&format!("i64 {eight})")));
+    assert!(!body.contains("int_owner"));
+    assert!(!body.contains("@int_mod("));
+    assert!(!body.contains("@imre_dyn_exact_int_word("));
+}
+
+#[test]
 fn integer_product_consumes_its_operands_without_reprojecting_the_sum() {
     let mut output =
         emit_captured_body("def publish(scale, value, send):\n    send(scale * (value + 1))\n");

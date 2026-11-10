@@ -506,6 +506,14 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         &self.body.current
     }
 
+    pub(crate) fn masked_remainder(&mut self, left: &str, divisor: u64) -> String {
+        // The operation propagates an already pending exception before reading left.
+        self.take_matching_check();
+        self.checked(&format!(
+            "call i64 @imre_dyn_masked_remainder(ptr %ctx, i64 {left}, i64 {divisor})"
+        ))
+    }
+
     pub(crate) fn binary_handles(&mut self, op: ir::Binary, left: &str, right: &str) -> String {
         self.op(op.protocol(), &[left, right])
     }

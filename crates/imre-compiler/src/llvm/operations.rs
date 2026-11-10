@@ -266,12 +266,6 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         }
     }
 
-    fn finish_integer(&mut self, value: Value) -> CheckedValue {
-        match &mut self.0 {
-            Entry::Native(emitter) => CheckedValue::owned(emitter.owned(value)),
-            Entry::Registered(frame) => CheckedValue::frame_integer(value, frame),
-        }
-    }
     fn integer_operand(&mut self, value: &CheckedValue) -> (String, bool) {
         match value {
             CheckedValue::Native(v, _) => (v.value.operand.clone(), false),
@@ -295,31 +289,89 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         CheckedValue::handle(frame.binary_handles(op, &lhs, &rhs))
     }
 
+    /// A positive power-of-two remainder fits in the permanent Python integer
+    /// cache when its mask does. Both edges can then return an ordinary handle.
+    fn cached_remainder(
+        &mut self,
+        left: &CheckedValue,
+        right: &CheckedValue,
+        divisor: &Expr,
+    ) -> Option<CheckedValue> {
+        use super::registered::permanent;
+        let literal = match &divisor.kind {
+            ExprKind::Builtin(Builtin::RegisteredLocation(..), operands) => &operands[0],
+            _ => divisor,
+        };
+        let divisor = literal.tagged_integer_literal()?;
+        let mask = super::remainder_mask(divisor)?;
+        let divisor_id = permanent::small_integer_id(divisor)?;
+        if let CheckedValue::Handle {
+            id,
+            exact_word: None,
+        } = left
+        {
+            let result = self.python().masked_remainder(id, divisor_id);
+            return Some(CheckedValue::handle(result));
+        }
+        // A preceding integer operation already produced a tagged word.
+        // Keep it native until an actual protocol call needs the Python object.
+        let zero = permanent::small_integer_id(0).expect("zero is a permanent integer");
+        let (word, _) = self.integer_operand(left);
+        // Both missing projections and heap integers have a clear low bit.
+        let immediate = self.body().instruction(format!("trunc i64 {word} to i1"));
+        ValueJoin::select(
+            self,
+            Self::body,
+            |code, yes, no| code.body().branch(&immediate, yes, no),
+            |code| {
+                let raw = code.body().instruction(format!("ashr i64 {word}, 1"));
+                let remainder = code.body().masked_remainder(&raw, mask);
+                let id = code
+                    .body()
+                    .instruction(format!("add i64 {remainder}, {zero}"));
+                CheckedValue::handle(id)
+            },
+            |code| code.python_binary(Binary::Modulo, left, right),
+        )
+    }
+
     fn integer_arithmetic(
         &mut self,
         op: Binary,
         left: &CheckedValue,
         right: &CheckedValue,
     ) -> CheckedValue {
-        if let Entry::Registered(frame) = &mut self.0 {
-            frame.declare_integer_arithmetic(op);
-        }
         let (a, check_a) = self.integer_operand(left);
         let (b, check_b) = self.integer_operand(right);
+        match &mut self.0 {
+            Entry::Native(emitter) => {
+                return CheckedValue::owned(emitter.integer_arithmetic(op, &a, &b));
+            }
+            Entry::Registered(frame) => frame.declare_integer_arithmetic(op),
+        }
         let out = self.body();
-        let guard = match (check_a, check_b) {
+        // A declined projection is zero. Integer zero is the tagged word one.
+        // The Python frame owns the exception when a divisor is zero.
+        let right_guard = |out: &mut FunctionBody| {
+            if op == Binary::Modulo {
+                out.instruction(format!("icmp ugt i64 {b}, 1"))
+            } else {
+                out.instruction(format!("icmp ne i64 {b}, 0"))
+            }
+        };
+        let guard = match (check_a, check_b || op == Binary::Modulo) {
             (false, false) => None,
             (true, false) => Some(out.instruction(format!("icmp ne i64 {a}, 0"))),
-            (false, true) => Some(out.instruction(format!("icmp ne i64 {b}, 0"))),
+            (false, true) => Some(right_guard(out)),
             (true, true) => {
                 let x = out.instruction(format!("icmp ne i64 {a}, 0"));
-                let y = out.instruction(format!("icmp ne i64 {b}, 0"));
+                let y = right_guard(out);
                 Some(out.instruction(format!("and i1 {x}, {y}")))
             }
         };
         let exact = |code: &mut Self| {
             let value = code.body().integer_arithmetic(op, &a, &b);
-            code.finish_integer(value)
+            CheckedValue::frame_integer(value, code.python())
         };
         let Some(guard) = guard else {
             return exact(self);
@@ -409,7 +461,8 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         };
         let checked_ints = left.ty == Type::Int && right.ty == Type::Int;
         let arithmetic = matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply)
-            && (fixed_site || expr.ty == Type::PythonObject || checked_ints);
+            && (fixed_site || expr.ty == Type::PythonObject || checked_ints)
+            || op == Binary::Modulo && checked_ints;
         let operand_use = if arithmetic
             && (op == Binary::Multiply || checked_ints || usage == ValueUse::IntegerOperand)
         {
@@ -419,7 +472,13 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         };
         let a = self.operand_for(left, operand_use);
         let b = self.operand_for(right, operand_use);
-        let result = if arithmetic {
+        let result = if op == Binary::Modulo
+            && checked_ints
+            && matches!(self.0, Entry::Registered(_))
+            && let Some(value) = self.cached_remainder(&a, &b, right)
+        {
+            value
+        } else if arithmetic {
             if op == Binary::Multiply || a.can_use_integer_arithmetic(left.ty, &b, right.ty, usage)
             {
                 self.integer_arithmetic(op, &a, &b)

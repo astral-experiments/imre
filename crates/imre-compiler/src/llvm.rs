@@ -3688,6 +3688,14 @@ impl Emitter<'_, '_> {
         }
     }
 
+    fn integer_arithmetic(&mut self, op: Binary, left: &str, right: &str) -> Value {
+        let result = self.body.integer_arithmetic(op, left, right);
+        if op == Binary::Modulo {
+            self.check_error();
+        }
+        self.owned(result)
+    }
+
     fn binary(&mut self, op: Binary, left: &Value, right: &Value) -> Value {
         if left.ty == Type::Float || right.ty == Type::Float {
             let left = self.promote_int_to_float(left);
@@ -3766,15 +3774,11 @@ impl Emitter<'_, '_> {
                 left.ty,
                 &[left, right],
             ),
-            Binary::Add | Binary::Subtract | Binary::Multiply => {
-                let result = self
-                    .body
-                    .integer_arithmetic(op, &left.operand, &right.operand);
-                self.owned(result)
+            Binary::Add | Binary::Subtract | Binary::Multiply | Binary::Modulo => {
+                self.integer_arithmetic(op, &left.operand, &right.operand)
             }
             Binary::Divide => self.call("imre_int_true_divide", Type::Float, &[left, right]),
             Binary::FloorDivide => self.call("int_floordiv", Type::Int, &[left, right]),
-            Binary::Modulo => self.call("int_mod", Type::Int, &[left, right]),
             Binary::BitAnd => self.call("int_and", Type::Int, &[left, right]),
             Binary::BitOr => self.call("int_or", Type::Int, &[left, right]),
             Binary::BitXor => self.call("int_xor", Type::Int, &[left, right]),
@@ -3863,16 +3867,13 @@ impl Emitter<'_, '_> {
                 self.instruction(format!("{instruction} nsw i64 {left}, {right}"))
             }
             Binary::FloorDivide | Binary::Modulo
-                if right_constant
-                    .is_some_and(|value| value > 0 && (value as u64).is_power_of_two()) =>
+                if let Some(mask) = right_constant.and_then(remainder_mask) =>
             {
-                let divisor = right_constant.unwrap() as u64;
-                // Arithmetic right shift already rounds toward negative infinity.
-                // The corresponding nonnegative remainder is the low-bit mask.
                 if matches!(op, Binary::FloorDivide) {
-                    self.instruction(format!("ashr i64 {left}, {}", divisor.trailing_zeros()))
+                    // Arithmetic shift already rounds toward negative infinity.
+                    self.instruction(format!("ashr i64 {left}, {}", (mask + 1).trailing_zeros()))
                 } else {
-                    self.instruction(format!("and i64 {left}, {}", divisor - 1))
+                    self.body.masked_remainder(&left, mask)
                 }
             }
             Binary::FloorDivide | Binary::Modulo
@@ -11833,7 +11834,9 @@ done:
         output.push_str(&integer_arithmetic_helper(op));
     }
     output.push_str(conditionals::INTEGER_ABSOLUTE_HELPER);
-    output.push_str(&division_helpers());
+    for op in [Binary::FloorDivide, Binary::Modulo] {
+        output.push_str(&division_helper(op));
+    }
     output.push_str(&bitwise_helpers());
     output.push_str(
         r#"
@@ -11896,13 +11899,17 @@ big:
     )
 }
 
+/// A power of two has a nonnegative Python remainder even for negative dividends.
+fn remainder_mask(divisor: i64) -> Option<i64> {
+    (divisor > 0 && (divisor as u64).is_power_of_two()).then(|| divisor - 1)
+}
+
 /// Decoded small integers cannot overflow i64 division. Guard zero before any
 /// division, apply Python's floor/sign rule, and promote MIN_SMALL / -1 rather
 /// than wrapping its result back into a tagged integer.
-fn division_helpers() -> String {
-    let mut output = String::new();
-    for (op, number, calculation) in [
-        (
+fn division_helper(op: Binary) -> String {
+    let (op, number, calculation) = match op {
+        Binary::FloorDivide => (
             "floordiv",
             3,
             r#"  %quotient = sdiv i64 %x, %y
@@ -11911,17 +11918,17 @@ fn division_helpers() -> String {
   %over = icmp sgt i64 %result, 4611686018427387903
   br i1 %over, label %slow, label %done"#,
         ),
-        (
+        Binary::Modulo => (
             "mod",
             4,
             r#"  %adjustment = select i1 %adjust, i64 %y, i64 0
   %result = add i64 %remainder, %adjustment
   br label %done"#,
         ),
-    ] {
-        writeln!(
-            output,
-            r#"
+        _ => unreachable!("expected integer floor division or remainder"),
+    };
+    format!(
+        r#"
 define internal i64 @int_{op}(i64 %a, i64 %b) alwaysinline {{
 entry:
   %both = and i64 %a, %b
@@ -11946,11 +11953,9 @@ done:
 slow:
   %fallback = call i64 @imre_int_binary(i64 %a, i64 %b, i32 {number})
   ret i64 %fallback
-}}"#
-        )
-        .unwrap();
-    }
-    output
+}}
+"#
+    )
 }
 
 /// Tagged bitwise results remain small. Shifts guard LLVM's count and signed

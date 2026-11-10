@@ -36,6 +36,7 @@ declare void @imre_dyn_named_assignment(ptr, i64, i64, i64)
 declare void @imre_dyn_unwind_frame(ptr, ptr, i64, i64)
 declare void @imre_dyn_assignment_target(ptr, ptr, i64, i64)
 declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
+declare i64 @imre_dyn_masked_remainder(ptr, i64, i64)
 declare i64 @imre_dyn_get_slice_at(ptr, i64, i64, i64, ptr)
 declare i64 @imre_dyn_get_linked_slice_at(ptr, i64, i64, i64, ptr, ptr)
 declare void @imre_dyn_call_position(ptr, ptr)
@@ -110,6 +111,7 @@ pub(crate) struct Declarations {
     pub(crate) checked_integer_add: bool,
     pub(crate) checked_integer_subtract: bool,
     pub(crate) checked_integer_multiply: bool,
+    pub(crate) checked_integer_modulo: bool,
     pub(crate) reads_exact_int_word: bool,
 }
 
@@ -147,7 +149,7 @@ impl Output {
                 "smul",
             ),
         ];
-        if !helpers.iter().any(|(used, _, _)| *used) {
+        if !self.declarations.checked_integer_modulo && !helpers.iter().any(|(used, _, _)| *used) {
             return;
         }
         self.functions.push_str(concat!(
@@ -158,6 +160,10 @@ impl Output {
             "!0 = !{!\"branch_weights\", i32 1, i32 2000}\n",
             "!1 = !{!\"branch_weights\", i32 2000, i32 1}\n",
         ));
+        if self.declarations.checked_integer_modulo {
+            self.functions
+                .push_str(&crate::llvm::division_helper(Binary::Modulo));
+        }
         for (used, op, intrinsic) in helpers {
             if used {
                 writeln!(

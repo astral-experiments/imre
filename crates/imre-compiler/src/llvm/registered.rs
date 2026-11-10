@@ -775,6 +775,7 @@ impl Frame<'_, '_, '_> {
             Binary::Add => self.code.output.declarations.checked_integer_add = true,
             Binary::Subtract => self.code.output.declarations.checked_integer_subtract = true,
             Binary::Multiply => self.code.output.declarations.checked_integer_multiply = true,
+            Binary::Modulo => self.code.output.declarations.checked_integer_modulo = true,
             _ => unreachable!("expected checked integer operation"),
         }
     }
