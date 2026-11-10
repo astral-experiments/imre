@@ -26,6 +26,9 @@ pub(super) trait StatementLowering {
     fn effect(&mut self, value: &ast::Expr) -> StdResult<(Option<Statement>, bool), Self::Error>;
     fn returned(&mut self, ret: &ast::StmtReturn) -> StdResult<Expr, Self::Error>;
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> StdResult<Block, Self::Error>;
+    fn async_iteration(&self) -> bool {
+        false
+    }
     fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<Block, Self::Error>;
 
     fn attribute_statements(
@@ -49,7 +52,9 @@ pub(super) trait StatementLowering {
             ast::Stmt::Return(ret) if !module => {
                 (Some(Statement::Return(self.returned(ret)?)), false)
             }
-            ast::Stmt::For(loop_) if !loop_.is_async => return self.for_loop(loop_),
+            ast::Stmt::For(loop_) if !loop_.is_async || self.async_iteration() => {
+                return self.for_loop(loop_);
+            }
             ast::Stmt::Pass(_) => (None, true),
             _ => return self.other_statement(stmt),
         };

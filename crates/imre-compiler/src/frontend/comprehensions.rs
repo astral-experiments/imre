@@ -117,7 +117,7 @@ pub(super) trait EagerDisplay: Sized {
     type Error;
 
     fn before_pull(&mut self, _plan: &Plan<'_>, _depth: usize) {}
-    fn input(&mut self, iter: &ast::Expr) -> StdResult<Self::Input, Self::Error>;
+    fn input(&mut self, clause: &ast::Comprehension) -> StdResult<Self::Input, Self::Error>;
     fn with_target(
         &mut self,
         target: &ast::Expr,
@@ -173,8 +173,8 @@ pub(super) trait EagerDisplay: Sized {
                 Step::Emit { output, .. } => {
                     lower.collect(output, destination, result, &conditions)?
                 }
-                Step::Open { iterable, .. } => {
-                    let input = lower.input(iterable)?;
+                Step::Open { depth, .. } => {
+                    let input = lower.input(&plan.clauses[depth])?;
                     lower.eager_loop(plan, next + 1, Some(pc), input, destination, result)?
                 }
                 _ => unreachable!("an accepted input opens an iterator or emits"),
@@ -196,8 +196,8 @@ impl EagerDisplay for Checker<'_> {
         self.forget_comprehension_writes(plan, depth)
     }
 
-    fn input(&mut self, iter: &ast::Expr) -> Result<Iteration, String> {
-        self.iteration_input(iter, None)
+    fn input(&mut self, clause: &ast::Comprehension) -> Result<Iteration, String> {
+        self.iteration_input(&clause.iter, None)
     }
 
     fn with_target(

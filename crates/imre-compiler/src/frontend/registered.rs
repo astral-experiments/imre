@@ -1186,10 +1186,16 @@ impl statements::StatementLowering for SourceScope<'_> {
         }
     }
 
+    fn async_iteration(&self) -> bool {
+        matches!(self.kind, RegisteredScope::Function { is_async: true })
+    }
+
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> StdResult<statements::Block, ()> {
-        let source = self.ordinary_operand(&loop_.iter).ok_or(())?;
-        let cursor = operation(Builtin::RegisteredIter, Type::PythonObject, vec![source]);
-        let input = pipelines::Prepared::cursor(cursor, Type::PythonObject, |ty| self.hidden(ty));
+        let pull = loop_.is_async.then(|| ir::AsyncPull {
+            range: loop_.iter.range(),
+            header: Some(loop_.start()),
+        });
+        let input = self.iteration_input(&loop_.iter, pull).ok_or(())?;
         let binding = unpacking::bind_targets(
             self,
             &loop_.target,
@@ -1618,12 +1624,39 @@ impl SourceScope<'_> {
         }
     }
 
+    fn iteration_input(
+        &mut self,
+        iterable: &ast::Expr,
+        pull: Option<ir::AsyncPull>,
+    ) -> Option<pipelines::Prepared> {
+        let value = self.ordinary_operand(iterable)?;
+        let (op, kind) = match pull {
+            Some(pull) => (
+                Builtin::RegisteredAsyncIter(iterable.range()),
+                ir::IterNextKind::Async(pull),
+            ),
+            None => (Builtin::RegisteredIter, ir::IterNextKind::Generic),
+        };
+        let cursor = operation(op, Type::PythonObject, vec![value]);
+        Some(pipelines::Prepared::pull_cursor(
+            cursor,
+            Type::PythonObject,
+            kind,
+            |ty| self.hidden(ty),
+        ))
+    }
+
     fn ordinary_operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
         let mut value = if matches!(
             expr,
             ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_)
         ) {
             self.eager_comprehension(expr)?
+        } else if self.comprehension.is_some()
+            && matches!(self.kind, RegisteredScope::Function { is_async: true })
+            && let ast::Expr::Await(awaited) = expr
+        {
+            self.suspend_operand(ir::SuspendValue::Await, Some(&awaited.value), expr.range())?
         } else if let ast::Expr::Lambda(lambda) = expr {
             if !values::can_bind(lambda, self.source) {
                 return None;
@@ -1674,6 +1707,23 @@ impl SourceScope<'_> {
         Some(self.source.located(expr, value))
     }
 
+    fn suspend_operand(
+        &mut self,
+        kind: ir::SuspendValue,
+        operand: Option<&ast::Expr>,
+        range: TextRange,
+    ) -> Option<Expr> {
+        let value = match operand {
+            Some(operand) => self.ordinary_operand(operand)?,
+            None => Expr::none(),
+        };
+        Some(operation(
+            Builtin::RegisteredSuspend(kind, range),
+            Type::PythonObject,
+            vec![value],
+        ))
+    }
+
     fn operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
         // The current loop cursor lives in this native activation; a suspension
         // across a pull needs a persisted cursor in the generator frame.
@@ -1687,18 +1737,8 @@ impl SourceScope<'_> {
         {
             // Admit a suspension only at this whole-expression boundary. All previous
             // statements have committed their owners to the observable frame.
-            let value = match value {
-                Some(value) => self.ordinary_operand(value)?,
-                None => Expr::none(),
-            };
-            return Some(self.source.located(
-                expr,
-                operation(
-                    Builtin::RegisteredSuspend(kind, expr.range()),
-                    Type::PythonObject,
-                    vec![value],
-                ),
-            ));
+            let suspended = self.suspend_operand(kind, value, expr.range())?;
+            return Some(self.source.located(expr, suspended));
         }
         self.ordinary_operand(expr)
     }

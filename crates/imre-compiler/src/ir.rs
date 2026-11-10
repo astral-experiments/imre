@@ -1220,7 +1220,7 @@ pub(crate) enum NamespaceAnnotation {
 
 /// Borrow the operands consumed by registered iteration without changing their evaluation order.
 pub(crate) enum IterationOperands<'a> {
-    Iter(&'a Expr),
+    Iter(&'a Expr, Option<ruff_text_size::TextRange>),
     Truth(&'a Expr),
     Get(&'a [Expr; 2]),
     Insert(&'a [Expr; 2]),
@@ -1243,7 +1243,8 @@ impl Builtin {
                 .map_err(|_| "registered iteration operation needs two operands")
         };
         Some(match self {
-            Self::RegisteredIter => one().map(Iter),
+            Self::RegisteredIter => one().map(|value| Iter(value, None)),
+            Self::RegisteredAsyncIter(range) => one().map(|value| Iter(value, Some(*range))),
             Self::Bool => one().map(Truth),
             Self::ListGet => two().map(Get),
             Self::Append | Self::SetAdd => two().map(Insert),
@@ -2004,6 +2005,8 @@ pub(crate) enum Builtin {
     RegisteredFormatJoin,
     /// Acquire an iterator through the Python protocol on the original heap object.
     RegisteredIter,
+    /// Acquire a Python async iterator at the iterable expression.
+    RegisteredAsyncIter(ruff_text_size::TextRange),
     /// Snapshot a sequence for ordered target stores, including the optional starred remainder.
     RegisteredUnpack {
         count: usize,
@@ -3130,10 +3133,18 @@ pub(crate) enum ExceptionMatcher {
     Subgroup(ruff_text_size::TextRange, Box<Expr>),
 }
 
+/// The implicit await position and optional source statement to restore before each pull.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AsyncPull {
+    pub(crate) range: ruff_text_size::TextRange,
+    pub(crate) header: Option<ruff_text_size::TextSize>,
+}
+
 /// Selects the pull ABI for a cursor created by the compiler.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum IterNextKind {
     Generic,
+    Async(AsyncPull),
     /// An owned field from a private single-byte split cursor.
     SplitField,
     String,

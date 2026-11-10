@@ -1205,6 +1205,42 @@ mod tests {
     }
 
     #[test]
+    fn async_method_prepares_its_streaming_display_before_llvm() {
+        let source = r#"class Stream:
+    async def aread(self) -> bytes:
+        """Read and return the response content."""
+        if not hasattr(self, "_content"):
+            self._content = b"".join([part async for part in self.aiter_bytes()])
+        return self._content
+"#;
+        let module = PreparedBody::module(
+            "stream",
+            Path::new("stream.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let start = ruff_text_size::TextSize::try_from(source.find("async def").unwrap()).unwrap();
+        let suite = &module.source.function_bodies[&start];
+        let mut pulls = 0;
+        crate::ir::walk_statements(&suite.checked.function.body, &mut |stmt| {
+            if matches!(
+                stmt,
+                crate::ir::Statement::IterNext {
+                    kind: crate::ir::IterNextKind::Async(_),
+                    ..
+                }
+            ) {
+                pulls += 1;
+            }
+        });
+        assert_eq!(pulls, 1);
+        let (_, llvm) = module.standalone().unwrap().unwrap();
+        assert!(llvm.contains("%ir_slot0 = alloca i64"));
+    }
+
+    #[test]
     fn prepared_format_literals_emit_without_lexical_replacements() {
         let mut prepared = PreparedBody::module(
             "example",

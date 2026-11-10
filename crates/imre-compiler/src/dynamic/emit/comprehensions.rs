@@ -70,19 +70,6 @@ impl Function<'_, '_> {
         })
     }
 
-    /// The activation keeps its live handles until the next Python statement.
-    /// Release the iterable when its cursor exists, and the cursor and local scope
-    /// when the comprehension delivers its result to the enclosing expression.
-    fn iteration_result(&mut self, emit: impl FnOnce(&mut Self) -> String) -> String {
-        if !self.native_suspension {
-            return emit(self);
-        }
-        let mark = self.temporary_mark();
-        let result = self.unwind_operands(&mark, emit);
-        self.keep_operands(&mark, &result, "0");
-        result
-    }
-
     pub(super) fn generator_step(&mut self, plan: &Plan<'_>) {
         // An LLVM suspension resumes inside this same activation. Its first
         // entry reads the already-acquired iterator from the implicit argument.

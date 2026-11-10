@@ -112,7 +112,10 @@ impl CheckedBody<'_, '_, '_, '_> {
                 e.cleanups.push(Cleanup::Slots(clear.to_vec()));
                 None
             }
-            Entry::Registered(f) => Some(f.start_expression()),
+            Entry::Registered(f) => {
+                f.unwind_scope(clear);
+                Some(f.start_expression())
+            }
         };
         self.emit_block(statements);
         if let Entry::Native(e) = &mut self.0
@@ -215,6 +218,11 @@ impl CheckedBody<'_, '_, '_, '_> {
     ) {
         if let Entry::Native(e) = &mut self.0 {
             e.iter_next(iterator, key, value, ready, kind);
+            return;
+        }
+        if let IterNextKind::Async(pull) = kind {
+            debug_assert!(value.is_none());
+            self.python().pull_async(iterator, key, ready, pull);
             return;
         }
         debug_assert!(value.is_none() && matches!(kind, IterNextKind::Generic));

@@ -80,7 +80,7 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                     Statement::If(..) => true,
                     Statement::Match(_, cases) => cases.iter().flat_map(|case| &case.captures).all(has_slot),
                     Statement::IterNext {
-                        kind: ir::IterNextKind::Generic,
+                        kind: ir::IterNextKind::Generic | ir::IterNextKind::Async(_),
                         iterator,
                         key,
                         value: None,
@@ -130,7 +130,7 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
             ExprKind::Conditional(..) | ExprKind::BooleanValue(..) | ExprKind::Boolean(..) => true,
             ExprKind::Dict { entries, .. } => entries.is_empty(),
             ExprKind::Builtin(op, args) if let Some(iteration) = op.iteration_operands(args) => {
-                uses_python_protocol |= matches!(iteration, Ok(ir::IterationOperands::Iter(_)));
+                uses_python_protocol |= matches!(iteration, Ok(ir::IterationOperands::Iter(..)));
                 iteration.is_ok()
             }
             ExprKind::Binary(..) => true,
@@ -525,7 +525,26 @@ impl Frame<'_, '_, '_> {
         self.code
             .line(&format!("store i64 {value}, ptr %ir_slot{slot}"));
     }
+    /// A nested handler inside the scope keeps its cursor. Only a transfer to
+    /// the scope's enclosing error target abandons these physical root words.
+    pub(crate) fn unwind_scope(&mut self, clear: &[usize]) {
+        if clear.is_empty() || self.code.body.error_target == "failed" {
+            return;
+        }
+        let frame = &mut *self.code;
+        let slots = frame
+            .scope_unwinds
+            .entry(frame.body.error_target.clone())
+            .or_default();
+        for slot in clear {
+            if let Ok(index) = frame.iteration.private_slots.binary_search(slot) {
+                slots.insert(frame.iteration.first_slot + index);
+            }
+        }
+    }
+
     pub(crate) fn enter_scope(&mut self, clear: &[usize]) {
+        self.unwind_scope(clear);
         self.code
             .iteration
             .scopes
@@ -571,6 +590,25 @@ impl Frame<'_, '_, '_> {
             "call void @imre_dyn_comprehension_step(ptr %ctx, i64 {mark})"
         ));
     }
+    pub(crate) fn pull_async(
+        &mut self,
+        iterator: usize,
+        key: usize,
+        ready: usize,
+        pull: ir::AsyncPull,
+    ) {
+        let cursor = self.load_private(iterator);
+        let item_block = self.code.name("b");
+        let done = self.code.name("b");
+        self.store_private(ready, &permanent::FALSE.to_string());
+        let item = self.code.async_pull(&cursor, pull, &item_block, &done);
+        self.code.label(&item_block);
+        self.store_private(key, &item);
+        self.store_private(ready, &permanent::TRUE.to_string());
+        self.code.jump(&done);
+        self.code.label(&done);
+    }
+
     pub(crate) fn pull_ready(&mut self, iterator: usize, ready: usize) -> (String, String) {
         let cursor = self.load_private(iterator);
         let has_else = self
@@ -736,7 +774,12 @@ impl Frame<'_, '_, '_> {
             (op, args) if let Some(iteration) = op.iteration_operands(args) => {
                 use ir::IterationOperands::*;
                 match iteration.expect("checked iteration operands") {
-                    Iter(value) => {
+                    Iter(value, Some(range)) => self.iteration_result(|frame| {
+                        let value = frame.evaluate_handle(value);
+                        frame.call_position(range);
+                        frame.op("async_iter", &[&value])
+                    }),
+                    Iter(value, None) => {
                         let value = self.evaluate_handle(value);
                         self.code.op("iter", &[&value])
                     }
