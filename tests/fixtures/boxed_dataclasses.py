@@ -18,6 +18,35 @@ class Key:
     value: str = field(compare=False, repr=False, default="unused")
 
 
+def new_values() -> list[int]:
+    return [1]
+
+
+@dataclass
+class CustomFactory:
+    values: list[int] = field(default_factory=new_values)
+
+
+@dataclass
+class CalledFactory:
+    values: list[int] = field(default_factory=list())  # noqa: C408
+
+
+def default_factories():
+    first = CustomFactory().values
+    second = CustomFactory().values
+    assert first == second == [1] and first is not second
+
+    supplied = [2]
+    assert CalledFactory(supplied).values is supplied
+    try:
+        CalledFactory()
+    except TypeError as exc:
+        print(str(exc))
+    else:
+        raise AssertionError("missing TypeError for a non-callable default factory")
+
+
 def replacement():
     from dataclasses import replace
 
@@ -331,6 +360,7 @@ def current():
     else:
         raise AssertionError("comparison swallowed the field lookup error")
 
+    default_factories()
     replacement()
     mapping_conversion()
     signature_docstrings()
