@@ -1645,6 +1645,57 @@ mod tests {
     }
 
     #[test]
+    fn residual_with_emits_its_region_after_dropping_the_prepared_items() {
+        use crate::frontend::ContextTarget;
+
+        let text = "def entries(path, stream):\n    with guard(), scandir(path) as stream:\n        with (yield stream):\n            pass\n";
+        let mut prepared = PreparedBody::module(
+            "scan",
+            Path::new("scan.py"),
+            text,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let original = prepared.standalone().unwrap().unwrap();
+        let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let context = function.body[0].as_with_stmt_mut().unwrap();
+        let inputs = &prepared.source.statement_sites.contexts[&context.range()];
+        assert!(inputs.iter().all(|input| input.manager.is_some()));
+        assert!(matches!(&inputs[0].target, ContextTarget::Absent));
+        assert!(matches!(&inputs[1].target, ContextTarget::Checked { .. }));
+        context.items.clear();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
+    fn async_with_prepares_its_awaited_manager_and_target() {
+        let mut prepared = PreparedBody::module(
+            "program",
+            Path::new("program.py"),
+            "async def use(provider, sink):\n    async with await provider() as sink.item:\n        return sink.item\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let original = prepared.standalone().unwrap().unwrap();
+        let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let context = function.body[0].as_with_stmt_mut().unwrap();
+        let input = &prepared.source.statement_sites.contexts[&context.range()][0];
+        assert!(input.manager.is_some());
+        assert!(matches!(
+            &input.target,
+            crate::frontend::ContextTarget::Checked { .. }
+        ));
+        context.items.clear();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
     fn scandir_generator_keeps_its_checked_with_body() {
         PreparedBody::with_module(
             "scan",

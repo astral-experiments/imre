@@ -1496,6 +1496,8 @@ impl<'p> Function<'_, 'p> {
     }
 
     fn emit_with_inputs(&mut self, source: &'p ast::StmtWith) {
+        use crate::frontend::ContextTarget;
+
         let inputs = &self.source.statement_sites.contexts[&source.range()];
         self.with_contexts(
             inputs.iter().map(|input| input.site),
@@ -1506,10 +1508,22 @@ impl<'p> Function<'_, 'p> {
                 }),
                 None => code.expr(&source.items[i].context_expr),
             },
-            |code, i, value| {
-                if let Some(target) = &source.items[i].optional_vars {
-                    code.assign(target, value);
+            |code, i, value| match &inputs[i].target {
+                ContextTarget::Checked { entered, binding } => {
+                    code.prepare_checked_sites(&binding.function.body);
+                    code.frame
+                        .checked_binding(binding, *entered, value, &code.sites);
                 }
+                ContextTarget::Residual => {
+                    code.assign(
+                        source.items[i]
+                            .optional_vars
+                            .as_ref()
+                            .expect("context target"),
+                        value,
+                    );
+                }
+                ContextTarget::Absent => {}
             },
             |code| code.statements(&source.body),
         );

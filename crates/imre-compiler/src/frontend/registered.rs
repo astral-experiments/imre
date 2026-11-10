@@ -803,6 +803,40 @@ pub(crate) struct StatementSites {
 pub(crate) struct ContextInput {
     pub(crate) site: ir::ContextSite,
     pub(crate) manager: Option<Expr>,
+    pub(crate) target: ContextTarget,
+}
+
+pub(crate) enum ContextTarget {
+    Absent,
+    Residual,
+    Checked {
+        entered: usize,
+        binding: Box<RegisteredFunction>,
+    },
+}
+
+impl ContextTarget {
+    fn prepare(
+        target: &ast::Expr,
+        source: values::RegisteredSource<'_>,
+        kind: RegisteredScope,
+    ) -> Self {
+        let operations = HashMap::new();
+        let sites = StatementSites::default();
+        let mut scope = SourceScope::new(kind, source, &operations, &sites);
+        let Ok((entered, binding)) = scope.with_binding(target) else {
+            return Self::Residual;
+        };
+        let body = vec![binding];
+        if PhysicalRegion::Fallthrough.accepts(&body) {
+            Self::Checked {
+                entered,
+                binding: Box::new(scope.finish(body)),
+            }
+        } else {
+            Self::Residual
+        }
+    }
 }
 
 /// A residual arm keeps its source test in the source adapter. Compilable tests
@@ -847,6 +881,11 @@ fn statement_sites(
                     .map(|item| ContextInput {
                         site: context_site(self.source.text, &item.context_expr),
                         manager: None,
+                        target: if item.optional_vars.is_some() {
+                            ContextTarget::Residual
+                        } else {
+                            ContextTarget::Absent
+                        },
                     })
                     .collect();
                 self.sites.contexts.insert(stmt.range(), inputs);
@@ -1031,18 +1070,25 @@ impl<'a> SuitePreparation<'a> {
         };
         for run in &plan.residual {
             for stmt in &stmts[run.statements.clone()] {
-                if let ast::Stmt::With(with) = stmt
-                    && !with.is_async
-                {
+                if let ast::Stmt::With(with) = stmt {
                     let inputs = children
                         .prepare
                         .sites
                         .contexts
                         .get_mut(&stmt.range())
                         .expect("with inputs");
+                    let region = match (kind, child_selection) {
+                        (RegisteredScope::Function { .. }, SuiteSelection::Physical) => {
+                            values::Region::SuspendedOperand
+                        }
+                        _ => values::Region::Residual,
+                    };
                     for (input, item) in inputs.iter_mut().zip(&with.items) {
-                        input.manager =
-                            values::registered_value(&item.context_expr, children.prepare.source);
+                        input.manager = region.operand(&item.context_expr, children.prepare.source);
+                        if let Some(target) = &item.optional_vars {
+                            input.target =
+                                ContextTarget::prepare(target, children.prepare.source, kind);
+                        }
                     }
                 }
                 if let ast::Stmt::Match(branch) = stmt
@@ -1718,6 +1764,47 @@ impl<'a> SourceScope<'a> {
     }
 }
 
+/// Which control transfers a checked region can handle inside a physical frame.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PhysicalRegion {
+    Fallthrough,
+    Loop,
+    Protected,
+}
+
+impl PhysicalRegion {
+    fn accepts(self, body: &[Statement]) -> bool {
+        let mut self_contained = true;
+        ir::walk_nodes(body, &mut |node, _| match node {
+            // Named definitions in loops and protected regions still need their source headers.
+            ir::Node::Expression(Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredDefinition(_), _),
+                ..
+            }) if self != Self::Fallthrough => self_contained = false,
+            ir::Node::Statement(Statement::Break | Statement::Continue | Statement::Exhaust)
+                if self != Self::Loop =>
+            {
+                self_contained = false;
+            }
+            ir::Node::Statement(Statement::Return(_) | Statement::Raise(_))
+                if self != Self::Protected =>
+            {
+                self_contained = false;
+            }
+            ir::Node::Statement(Statement::IterNext {
+                kind: ir::IterNextKind::Async(_),
+                ..
+            })
+            | ir::Node::Expression(Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredSuspend(..), _),
+                ..
+            }) => self_contained = false,
+            _ => {}
+        });
+        self_contained
+    }
+}
+
 impl SourceScope<'_> {
     fn assignment_targets(
         &mut self,
@@ -1753,44 +1840,18 @@ impl SourceScope<'_> {
         {
             return self.statement(stmt, body);
         }
-        let sync_for = matches!(stmt, ast::Stmt::For(loop_) if !loop_.is_async);
-        let protected = matches!(stmt, ast::Stmt::Try(region) if !region.is_star);
-        if !matches!(self.kind, RegisteredScope::Function { .. })
-            || !(stmt.is_if_stmt() || sync_for || protected)
-        {
+        if !matches!(self.kind, RegisteredScope::Function { .. }) {
             return Err(());
         }
-
+        let region = match stmt {
+            ast::Stmt::If(_) => PhysicalRegion::Fallthrough,
+            ast::Stmt::For(loop_) if !loop_.is_async => PhysicalRegion::Loop,
+            ast::Stmt::Try(region) if !region.is_star => PhysicalRegion::Protected,
+            _ => return Err(()),
+        };
         let begin = body.len();
         let continues = self.statement(stmt, body)?;
-        // The physical activation owns suspension. A complete loop owns its loop edges;
-        // a protected region routes raises and returns through the active frame cleanups.
-        let mut self_contained = true;
-        ir::walk_nodes(&body[begin..], &mut |node, _| match node {
-            // The public named-definition operation still places its physical header.
-            ir::Node::Expression(Expr {
-                kind: ExprKind::Builtin(Builtin::RegisteredDefinition(_), _),
-                ..
-            }) if sync_for || protected => self_contained = false,
-            ir::Node::Statement(Statement::Break | Statement::Continue | Statement::Exhaust)
-                if !sync_for =>
-            {
-                self_contained = false;
-            }
-            ir::Node::Statement(Statement::Return(_) | Statement::Raise(_)) if !protected => {
-                self_contained = false;
-            }
-            ir::Node::Statement(Statement::IterNext {
-                kind: ir::IterNextKind::Async(_),
-                ..
-            })
-            | ir::Node::Expression(Expr {
-                kind: ExprKind::Builtin(Builtin::RegisteredSuspend(..), _),
-                ..
-            }) => self_contained = false,
-            _ => {}
-        });
-        if !self_contained {
+        if !region.accepts(&body[begin..]) {
             body.truncate(begin);
             return Err(());
         }
@@ -1822,6 +1883,19 @@ impl SourceScope<'_> {
         self.block(stmts).map(|(body, _)| body)
     }
 
+    fn with_binding(&mut self, target: &ast::Expr) -> StdResult<(usize, Statement), ()> {
+        let slot = self.hidden(Type::PythonObject);
+        let body =
+            unpacking::bind_targets(self, target, Expr::local(slot, Type::PythonObject), None)?;
+        Ok((
+            slot,
+            Statement::Scope {
+                body,
+                clear: vec![slot],
+            },
+        ))
+    }
+
     fn with_items(
         &mut self,
         items: &[ast::WithItem],
@@ -1835,13 +1909,8 @@ impl SourceScope<'_> {
         let (input, remaining) = inputs.split_first().expect("with input");
         let mut body = Vec::new();
         let entered = if let Some(target) = &item.optional_vars {
-            let slot = self.hidden(Type::PythonObject);
-            let binding =
-                unpacking::bind_targets(self, target, Expr::local(slot, Type::PythonObject), None)?;
-            body.push(Statement::Scope {
-                body: binding,
-                clear: vec![slot],
-            });
+            let (slot, binding) = self.with_binding(target)?;
+            body.push(binding);
             Some(slot)
         } else {
             None
