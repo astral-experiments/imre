@@ -10,17 +10,6 @@ pub(crate) struct RegisteredGenerator {
 }
 
 impl RegisteredGenerator {
-    /// Select the iterator acquired by the defining frame before the child can escape.
-    pub(crate) fn outer_operation(&self, outer: &ast::Comprehension) -> ir::IteratorOp {
-        if outer.is_async {
-            ir::IteratorOp::Async(outer.iter.range())
-        } else if self.is_async {
-            ir::IteratorOp::Get(outer.iter.range())
-        } else {
-            ir::IteratorOp::Loop
-        }
-    }
-
     pub(super) fn prepare(
         generator: &ast::ExprGenerator,
         source: values::RegisteredSource<'_>,
@@ -42,7 +31,7 @@ impl RegisteredGenerator {
         let outer = imre_ast::comprehension::outer_clause(&generator.generators);
         let (cursor, kind) = match eager::async_pull(outer) {
             Some(pull) => (values::name_binding(".0"), ir::IterNextKind::Async(pull)),
-            None if is_async => (
+            None => (
                 operation(
                     Builtin::RegisteredIter(ir::IteratorOp::LoopCursor),
                     Type::PythonObject,
@@ -50,7 +39,6 @@ impl RegisteredGenerator {
                 ),
                 ir::IterNextKind::Generic,
             ),
-            None => (values::name_binding(".iterator"), ir::IterNextKind::Generic),
         };
         let input = pipelines::Prepared::pull_cursor(
             cursor,

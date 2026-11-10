@@ -1641,7 +1641,6 @@ pub(super) enum Value {
         table: Id,
         marker: Id,
     },
-    Yielded(Id),
     AstWalk {
         queue: std::collections::VecDeque<Id>,
         running: bool,
@@ -2063,8 +2062,7 @@ impl Value {
             | Self::LoopIterator { .. }
             | Self::PythonBufferLease { .. }
             | Self::ProcessPreparation(_)
-            | Self::ProcessHandle { .. }
-            | Self::Yielded(_) => false,
+            | Self::ProcessHandle { .. } => false,
             Self::Weak(reference) if reference.internal => false,
             Self::Tuple(items) => !items.is_empty(),
             _ => true,
@@ -2276,7 +2274,6 @@ impl Value {
                 visit.extend([*context, *variable]);
                 visit.extend(old);
             }
-            Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
             Self::BytesIoStorage(state) => visit.extend(state.snapshot.get()),
             Self::BufferWrapper => {}
