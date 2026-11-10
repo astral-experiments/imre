@@ -818,6 +818,8 @@ pub(crate) enum SourceEffect {
     AssignmentInput(usize),
     /// Evaluate the operands at their place in the operation, in the current frame.
     ObjectOperation(Box<Builtin>, Vec<PhysicalOperand>),
+    /// A mixed loop needs its source suites. A literal false test runs only the else suite.
+    While(SourceGuard<Box<RegisteredOperand>>),
 }
 
 pub(crate) enum PhysicalOperand {
@@ -939,9 +941,9 @@ pub(crate) struct SourceIfArm {
     guard: Option<SourceGuard>,
 }
 
-pub(crate) enum SourceGuard {
+pub(crate) enum SourceGuard<T = Expr> {
     Literal(bool),
-    Checked(Expr),
+    Checked(T),
     Residual,
 }
 
@@ -1213,7 +1215,9 @@ impl<'a> SuitePreparation<'a> {
             kind,
             select: child_selection,
         };
-        for run in plan.residual.iter().filter(|run| run.effect.is_none()) {
+        for run in plan.residual.iter().filter(|run| {
+            matches!(run.effect.as_ref(), None | Some(SourceEffect::While(_)))
+        }) {
             for stmt in &stmts[run.statements.clone()] {
                 if let ast::Stmt::With(with) = stmt {
                     let inputs = children
@@ -1336,6 +1340,24 @@ impl<'a> SuitePreparation<'a> {
                         });
                     }
                 }
+                continue;
+            }
+            if let ast::Stmt::While(loop_) = stmt {
+                let condition = match &*loop_.test {
+                    ast::Expr::BooleanLiteral(value) => SourceGuard::Literal(value.value),
+                    test => RegisteredOperand::prepare_with(self.source, kind, |scope| {
+                        scope.while_condition(test)
+                    })
+                    .map_or(SourceGuard::Residual, |operand| {
+                        SourceGuard::Checked(Box::new(operand))
+                    }),
+                };
+                body.push(checkpoint(stmt));
+                residual.push(SourceRun {
+                    at: body.len(),
+                    statements: i..i + 1,
+                    effect: Some(SourceEffect::While(condition)),
+                });
                 continue;
             }
             SourceRun::record(&mut residual, i, body.len());
@@ -2071,6 +2093,7 @@ impl SourceScope<'_> {
         }
         let region = match stmt {
             ast::Stmt::If(_) => PhysicalRegion::Fallthrough,
+            ast::Stmt::While(_) => PhysicalRegion::Loop,
             ast::Stmt::For(loop_) if !loop_.is_async => PhysicalRegion::Loop,
             ast::Stmt::Try(region) if !region.is_star => PhysicalRegion::Protected,
             _ => return Err(()),
