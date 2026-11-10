@@ -1258,21 +1258,19 @@ impl Function<'_, '_> {
         self.sites.annotation_string(&mut self.frame, site)
     }
 
+    fn build_diagnostic(&mut self, reason: &str) -> String {
+        let (line, col) = self.source.positions.line_and_column(self.current_range.start());
+        let (end_line, end_col) = self.source.positions.line_and_column(self.current_range.end());
+        self.frame.output.diagnostic.get_or_insert_with(|| format!(
+            "{}:{line}:{}: {reason} (through {end_line}:{})",
+            self.source.path.display(), col + 1, end_col + 1
+        ));
+        "0".into()
+    }
+
     fn unsupported(&mut self, what: &str) -> String {
         if self.native_suspension {
-            let (line, col) = self
-                .source
-                .positions
-                .line_and_column(self.current_range.start());
-            let (end_line, end_col) = self
-                .source
-                .positions
-                .line_and_column(self.current_range.end());
-            self.frame.output.diagnostic.get_or_insert_with(|| format!(
-                "{}:{line}:{}: unsupported {what} in a compiled suspended function (through {end_line}:{})",
-                self.source.path.display(), col + 1, end_col + 1
-            ));
-            return "0".into();
+            return self.build_diagnostic(&format!("unsupported {what} in a compiled suspended function"));
         }
         let what = self.text(what);
         self.op("unsupported", &[&what])

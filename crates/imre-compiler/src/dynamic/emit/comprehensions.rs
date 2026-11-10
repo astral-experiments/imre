@@ -1,5 +1,4 @@
-//! Lower the comprehension plan's branches to LLVM. Eager displays keep their
-//! iterators in SSA values. A generator keeps them in its frame across yields.
+//! Emit generator expressions whose child still needs a physical source frame.
 
 use super::FrameEmitter;
 use imre_ast::comprehension::{Output, Plan, Step};
@@ -22,32 +21,18 @@ impl Function<'_, '_> {
         })
     }
 
-    pub(super) fn comprehension(&mut self, expr: &ast::Expr, plan: Plan<'_>) -> String {
-        self.iteration_result(|f| f.emit_comprehension(expr, plan))
-    }
-
-    fn emit_comprehension(&mut self, expr: &ast::Expr, plan: Plan<'_>) -> String {
-        // Eager awaits require a containing coroutine. This emitter handles
-        // ordinary frames and creates separately resumable generator expressions.
-        if !self.native_suspension
-            && !matches!(plan.output, Output::Generator(_))
-            && plan.body_suspends()
-        {
-            return self.unsupported("async comprehension");
-        }
-        let iterator = if matches!(plan.output, Output::Generator(_))
-            && plan.body_suspends()
-            && !plan.outer_async
-        {
-            self.iteration_input(plan.outer, "get_iter")
-        } else {
-            self.iteration_cursor(plan.outer, plan.outer_async)
-        };
-        let targets = self
-            .frame
-            .text(&self.source.scopes.comprehension_targets[&expr.range()]);
-        if let ast::Expr::Generator(generator) = expr {
-            let function = self.define(
+    pub(super) fn residual_generator(&mut self, generator: &ast::ExprGenerator) -> String {
+        let plan = Plan::generator(generator);
+        self.iteration_result(|code| {
+            let iterator = if plan.body_suspends() && !plan.outer_async {
+                code.iteration_input(plan.outer, "get_iter")
+            } else {
+                code.iteration_cursor(plan.outer, plan.outer_async)
+            };
+            let targets = code
+                .frame
+                .text(&code.source.scopes.comprehension_targets[&generator.range()]);
+            let function = code.define(
                 generator.start(),
                 DefinitionName::Plain("<genexpr>"),
                 None,
@@ -55,18 +40,8 @@ impl Function<'_, '_> {
                 None,
                 Body::Generator(generator.range(), &plan),
             );
-            return self.op("generator", &[&function, &iterator, &targets]);
-        }
-        let scope = self
-            .frame
-            .op("comprehension_scope", &[&self.scope.clone(), &targets]);
-        let enclosing = std::mem::replace(&mut self.scope, scope);
-        let class_locals = self.class_locals.take();
-        let output = self.op(plan.output.kind(), &[]);
-        self.comprehension_steps(&plan, iterator, Some(&output));
-        self.class_locals = class_locals;
-        self.scope = enclosing;
-        output
+            code.op("generator", &[&function, &iterator, &targets])
+        })
     }
 
     pub(super) fn iteration_cursor(&mut self, iterable: &ast::Expr, is_async: bool) -> String {
@@ -99,16 +74,11 @@ impl Function<'_, '_> {
         } else {
             outer
         };
-        self.comprehension_steps(plan, outer, None);
-    }
-
-    fn comprehension_steps(&mut self, plan: &Plan<'_>, outer: String, collection: Option<&str>) {
         let labels: Vec<_> = plan.steps.iter().map(|_| self.name("b")).collect();
         let mut iterators = vec![String::new(); plan.depths];
         let mut marks = vec![String::new(); plan.depths];
         let slot = |depth| format!(".iterator.{depth}");
-        let local_cursors = collection.is_some() || self.native_suspension;
-        if local_cursors {
+        if self.native_suspension {
             marks[0] = self.temporary_mark();
         } else if plan.depths > 1 {
             // A yield preserves every active cursor in the frame. Only the
@@ -139,7 +109,7 @@ impl Function<'_, '_> {
                     is_async,
                 } => {
                     let iterator = self.iteration_cursor(iterable, is_async);
-                    if local_cursors {
+                    if self.native_suspension {
                         marks[depth] = self.temporary_mark();
                         iterators[depth] = iterator;
                     } else {
@@ -154,7 +124,7 @@ impl Function<'_, '_> {
                     is_async,
                 } => {
                     let body = self.name("b");
-                    if local_cursors {
+                    if self.native_suspension {
                         self.line(&format!(
                             "call void @imre_dyn_comprehension_step(ptr %ctx, i64 {})",
                             marks[depth]
@@ -193,16 +163,9 @@ impl Function<'_, '_> {
                     self.branch_expr(test, &labels[pc + 1], &labels[reject]);
                 }
                 Step::Emit { output, resume } => {
-                    let key = output.key().map(|expr| self.expr(expr));
+                    debug_assert!(matches!(output, Output::Generator(_)));
                     let value = self.expr(output.value());
-                    if let Some(out) = collection {
-                        if let Some(key) = key {
-                            self.op("put", &[out, &key, &value]);
-                        } else {
-                            self.op("append", &[out, &value]);
-                        }
-                        self.jump(&labels[resume]);
-                    } else if self.native_suspension {
+                    if self.native_suspension {
                         self.suspend_at(
                             &value,
                             super::suspension::Suspension::AsyncYield,
@@ -211,13 +174,12 @@ impl Function<'_, '_> {
                         );
                         self.jump(&labels[resume]);
                     } else {
-                        debug_assert!(matches!(output, Output::Generator(_)));
                         let item = self.op("yielded", &[&value]);
                         self.end(&format!("ret i64 {item}"));
                     }
                 }
                 Step::Close { depth, next } => {
-                    if !local_cursors && depth > 0 {
+                    if !self.native_suspension && depth > 0 {
                         self.bind(&slot(depth), "0");
                     }
                     self.jump(&labels[next]);
