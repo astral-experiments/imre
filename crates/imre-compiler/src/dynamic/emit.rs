@@ -1719,6 +1719,8 @@ mod tests {
             assert_eq!(llvm.matches(pull).count(), usize::from(guarded), "{source}");
             if guarded {
                 assert!(llvm.find(test).unwrap() < llvm.find(pull).unwrap());
+                let ordinary = "call i32 @imre_dyn_list_cursor_pull(";
+                assert_eq!(llvm.matches(ordinary).count(), 1, "{source}");
             }
         }
     }

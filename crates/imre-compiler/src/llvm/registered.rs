@@ -881,17 +881,7 @@ impl Frame<'_, '_, '_> {
             .loops
             .last()
             .is_some_and(|target| target.edges.exhausted != target.edges.done);
-        let item = if kind == ir::IterNextKind::Generic {
-            self.code
-                .checked_sync_item(&cursor, header, has_else, &done)
-        } else {
-            let item_block = self.code.name("b");
-            let pulled =
-                self.code
-                    .iteration_edge(&cursor, kind, header, has_else, &item_block, &done);
-            self.code.label(&item_block);
-            self.code.iteration_item(&cursor, pulled)
-        };
+        let item = self.code.pull_item(&cursor, kind, header, has_else, &done);
         self.store_private(key, &item);
         self.store_private(ready, &permanent::TRUE.to_string());
         self.code.jump(&done);
@@ -1662,7 +1652,7 @@ impl RegisteredFrame<'_, '_> {
     /// A direct pull roots both projections in the same slots as ordinary unpacking.
     pub(crate) fn bind_item_pair(
         &mut self,
-        cursor: &str,
+        row: &str,
         plain_items: &str,
         entered: usize,
         pair: &crate::frontend::PairBinding,
@@ -1682,8 +1672,7 @@ impl RegisteredFrame<'_, '_> {
         self.jump(&bind);
 
         self.label(&ordinary);
-        let row = self.iteration_item(cursor, None);
-        self.store_private(entered, &row);
+        self.store_private(entered, row);
         self.store_private(pair.ordinary, &permanent::TRUE.to_string());
         self.jump(&bind);
         self.label(&bind);

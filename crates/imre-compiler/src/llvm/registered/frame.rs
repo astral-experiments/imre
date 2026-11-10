@@ -1116,29 +1116,30 @@ impl RegisteredFrame<'_, '_> {
         }
     }
 
-    /// Branch before binding the target. An async pull delivers its item while awaiting.
-    pub(crate) fn iteration_edge(
+    /// Leave the item in the current block or branch directly to exhaustion.
+    pub(crate) fn pull_item(
         &mut self,
         cursor: &str,
         kind: ir::IterNextKind,
         header: TextSize,
         has_else: bool,
-        item: &str,
         exhausted: &str,
-    ) -> Option<String> {
+    ) -> String {
         match kind {
-            ir::IterNextKind::Generic => {
-                self.sync_iteration_edge(cursor, header, has_else, None, item, exhausted);
-                None
+            ir::IterNextKind::Generic => self.sync_item(cursor, header, has_else, exhausted),
+            ir::IterNextKind::Async(pull) => {
+                let ready = self.name("b");
+                let item = self.async_pull(cursor, pull, &ready, exhausted);
+                self.label(&ready);
+                item
             }
-            ir::IterNextKind::Async(pull) => Some(self.async_pull(cursor, pull, item, exhausted)),
             _ => unreachable!("registered iterator kind"),
         }
     }
 
-    /// Advance a checked synchronous cursor once. An exact forward list cursor supplies
+    /// Advance a synchronous cursor once. An exact forward list cursor supplies
     /// the rooted item directly. All other cursors keep the ordinary lookahead protocol.
-    pub(super) fn checked_sync_item(
+    fn sync_item(
         &mut self,
         cursor: &str,
         header: TextSize,
@@ -1162,9 +1163,10 @@ impl RegisteredFrame<'_, '_> {
         self.jump(&joined);
 
         self.label(&ordinary);
-        self.more_edge(cursor, has_else, &ordinary_item, exhausted);
+        let more = self.op(if has_else { "more_else" } else { "more" }, &[cursor]);
+        self.branch_on_item(&more, &ordinary_item, exhausted);
         self.label(&ordinary_item);
-        let protocol = self.iteration_item(cursor, None);
+        let protocol = self.op("next", &[cursor]);
         let previous = self.current_block().to_owned();
         self.jump(&joined);
 
@@ -1174,45 +1176,43 @@ impl RegisteredFrame<'_, '_> {
         ))
     }
 
-    /// A plain dictionary-items cursor can deliver two handles in the scratch slots.
-    /// Other cursors buffer a single row for the ordinary target binding.
-    pub(crate) fn sync_iteration_edge(
+    /// A plain dictionary-items cursor fills the two target slots directly.
+    /// Every other cursor supplies its ordinary Python row to the same binding.
+    pub(crate) fn pull_item_pair(
         &mut self,
         cursor: &str,
         header: TextSize,
         has_else: bool,
-        plain_items: Option<&str>,
-        item: &str,
+        plain_items: &str,
         exhausted: &str,
-    ) {
-        self.retained_loop_header(header);
-        if let Some(plain_items) = plain_items {
-            let pair = self.name("b");
-            let ordinary = self.name("b");
-            self.branch(plain_items, &pair, &ordinary);
-            self.label(&pair);
-            self.max_live = self.max_live.max(2);
-            let more = self.checked(&format!(
-                "call i64 @imre_dyn_next_pair(ptr %ctx, i64 {cursor}, ptr %live, i1 {has_else})"
-            ));
-            self.branch_on_item(&more, item, exhausted);
-            self.label(&ordinary);
-        }
-        self.more_edge(cursor, has_else, item, exhausted);
-    }
+    ) -> String {
+        let pair = self.name("b");
+        let direct = self.name("b");
+        let ordinary = self.name("b");
+        let joined = self.name("b");
+        self.branch(plain_items, &pair, &ordinary);
 
-    fn more_edge(&mut self, cursor: &str, has_else: bool, item: &str, exhausted: &str) {
-        let more = self.op(if has_else { "more_else" } else { "more" }, &[cursor]);
-        self.branch_on_item(&more, item, exhausted);
+        self.label(&pair);
+        self.retained_loop_header(header);
+        self.max_live = self.max_live.max(2);
+        let more = self.checked(&format!(
+            "call i64 @imre_dyn_next_pair(ptr %ctx, i64 {cursor}, ptr %live, i1 {has_else})"
+        ));
+        self.branch_on_item(&more, &direct, exhausted);
+        self.label(&direct);
+        self.jump(&joined);
+
+        self.label(&ordinary);
+        let row = self.sync_item(cursor, header, has_else, exhausted);
+        let previous = self.current_block().to_owned();
+        self.jump(&joined);
+        self.label(&joined);
+        self.value(&format!("phi i64 [ 0, %{direct} ], [ {row}, %{previous} ]"))
     }
 
     fn branch_on_item(&mut self, more: &str, item: &str, exhausted: &str) {
         let ready = self.value(&format!("icmp eq i64 {more}, {}", permanent::TRUE));
         self.branch(&ready, item, exhausted);
-    }
-
-    pub(crate) fn iteration_item(&mut self, cursor: &str, pulled: Option<String>) -> String {
-        pulled.unwrap_or_else(|| self.op("next", &[cursor]))
     }
 
     /// Only the implicit __anext__ call and its await can exhaust an async for.
