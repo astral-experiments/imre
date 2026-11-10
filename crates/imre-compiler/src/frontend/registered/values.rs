@@ -967,7 +967,7 @@ pub(super) fn checked_binding(
         let site = sites.get(&lambda.start())?;
         site.body.as_ref()?;
         return match &site.binding {
-            LambdaBinding::Inline(binding) => Some(binding.clone()),
+            ExpressionSelection::Checked(binding) => Some(binding.clone()),
             _ => None,
         };
     }

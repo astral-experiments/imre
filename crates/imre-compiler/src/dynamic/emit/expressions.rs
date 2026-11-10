@@ -3,9 +3,7 @@ use ruff_text_size::Ranged;
 
 use super::FrameEmitter;
 use super::{Function, permanent};
-use crate::frontend::{
-    LambdaBinding, LambdaDefault, PreparedTemplate, SourceOperand, TemplateField, prepare_boolean,
-};
+use crate::frontend::{PreparedTemplate, SourceOperand, TemplateField, prepare_boolean};
 use crate::ir::control::Context as BooleanContext;
 use crate::llvm::operations::branches::{Logical, LogicalEmitter, LogicalInput};
 use crate::llvm::operations::{CheckedBody, CheckedValue, ComparisonChain, ValueJoin};
@@ -43,45 +41,17 @@ impl Function<'_, '_> {
         })
     }
 
-    fn source_lambda(
-        &mut self,
-        lambda: &ast::ExprLambda,
-        operation: &crate::ir::Expr,
-        defaults: &[LambdaDefault],
-    ) -> String {
-        let site = lambda.start();
-        let plan = &self.source.lambdas[&site];
-        let Some(body) = &plan.body else {
-            return self.with_source_range(lambda.body.range(), |code| {
-                code.build_diagnostic("cannot compile this lambda body ahead of time")
-            });
-        };
-        let defaults = defaults
-            .iter()
-            .map(|default| match default {
-                LambdaDefault::Value(value) => {
-                    self.with_operand_source(value, |code| code.registered_value(value))
-                }
-                LambdaDefault::Operand(operand) => {
-                    self.prepare_checked_value(&operand.value);
-                    self.with_operand_source(&operand.value, |code| {
-                        code.frame.prepared_operand(operand, &code.sites, false)
-                    })
-                }
-                LambdaDefault::Source(parameter) => {
-                    let value = parameter.source(lambda);
-                    self.with_source_range(value.range(), |code| code.expr(value))
-                }
-            })
-            .collect::<Vec<_>>();
-        self.place_lambda(site, body, false);
-        self.frame
-            .registered_with_inputs(operation, &defaults, &self.sites)
-    }
-
     fn registered_region(&mut self, expr: &ast::Expr, condition: bool) -> Option<String> {
         use crate::frontend::ExpressionSelection;
-        let selected = self.source.statement_sites.expressions.get(expr);
+        let selected = self
+            .source
+            .statement_sites
+            .expressions
+            .get(expr)
+            .or_else(|| {
+                expr.as_lambda_expr()
+                    .map(|lambda| &self.source.lambdas[&lambda.start()].binding)
+            });
         if let Some(ExpressionSelection::Checked(value)) = selected {
             self.prepare_checked_value(value);
             return Some(
@@ -252,17 +222,6 @@ impl Function<'_, '_> {
             });
         }
         match expr {
-            ast::Expr::Lambda(lambda) => match &self.source.lambdas[&lambda.start()].binding {
-                LambdaBinding::Inline(value) => self.registered_value(value),
-                LambdaBinding::Operand(operand) => {
-                    self.prepare_checked_value(&operand.value);
-                    self.frame.prepared_operand(operand, &self.sites, false)
-                }
-                LambdaBinding::Residual {
-                    operation,
-                    defaults,
-                } => self.source_lambda(lambda, operation, defaults),
-            },
             ast::Expr::TString(_) => self.unsupported("t-string expression spelling"),
             ast::Expr::FString(_) => {
                 self.build_diagnostic("cannot compile this formatted string ahead of time")

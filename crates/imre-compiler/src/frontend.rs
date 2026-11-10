@@ -145,8 +145,8 @@ pub(crate) use registered::{
     registered_type_alias, registered_type_parameters,
 };
 pub(crate) use registered::{
-    LambdaBinding, LambdaDefault, LocalBinding, PreparedTemplate, RegisteredClass,
-    RegisteredOperand, RegisteredRegion, TemplateField,
+    LocalBinding, PreparedTemplate, RegisteredClass, RegisteredOperand, RegisteredRegion,
+    TemplateField,
 };
 pub(crate) use registered::{
     PhysicalBinding, PhysicalSuite, PreparedContext, PreparedFor, PreparedTry, SourceGuard,
