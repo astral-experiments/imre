@@ -8,7 +8,7 @@ pub(crate) mod branches;
 mod join;
 pub(crate) mod sequences;
 use crate::ir::{DisplayKind, ObjectUnary};
-pub(crate) use join::{Choice, ValueJoin};
+pub(crate) use join::{ValueJoin, choose};
 
 use super::records;
 use super::{Binary, Builtin, Expr, ExprKind, Statement, Type};
