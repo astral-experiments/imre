@@ -3115,7 +3115,9 @@ impl<'a> Checker<'a> {
     fn parameter_shadows_binding(&self, name: &str, ty: Type, bound: bool) -> bool {
         self.mapping_class_import(name)
             || match self.graph.modules[self.module].bindings.get(name) {
-                Some(Binding::Value(_) | Binding::TypeAlias(..)) => bound && !self.module_scope,
+                Some(Binding::Value(_) | Binding::ImportedValue(..) | Binding::TypeAlias(..)) => {
+                    bound && !self.module_scope
+                }
                 Some(Binding::Definition(id)) => {
                     matches!(ty, Type::Callable(_)) && self.functions.contains_key(id)
                 }
@@ -5634,9 +5636,20 @@ impl<'a> Checker<'a> {
         if self.classes.parsers.declaration(self.module, statement) {
             return Ok((Vec::new(), true));
         }
-        if self.module_scope
-            && let Some(first) =
-                self.graph.modules[self.module].rebound_target(self.module, statement)
+        let module = &self.graph.modules[self.module];
+        if let ast::Stmt::Global(global) = statement
+            && global.names.iter().all(|name| {
+                matches!(module.bindings.get(name.as_str()), Some(Binding::Value(first))
+                    if first.module == self.module && module.rebound_values.contains(&first.statement))
+            })
+        {
+            return Ok((Vec::new(), true));
+        }
+        if let Some(first) = module.rebound_target(self.module, statement)
+            && (self.module_scope
+                || crate::modules::value_target(statement).is_some_and(|target| {
+                    self.graph.session.explicitly_global(self.module, target)
+                }))
         {
             return Ok((vec![self.replace_global(first, statement)?], true));
         }
@@ -7782,25 +7795,14 @@ impl<'a> Checker<'a> {
         {
             return self.shutil_function_value(op, None, expression);
         }
-        if let Some(Binding::Value(definition)) = self.resolve(expression) {
-            let (slot, ty) = self.globals.read(definition)?.ok_or_else(|| {
-                error(
-                    self.source,
-                    expression,
-                    "module value is not initialized on this path",
-                )
-            })?;
-            let storage = self.globals.slot_value(slot);
-            if self.graph.modules[definition.module]
-                .rebound_values
-                .contains(&definition.statement)
-            {
-                return Ok(Expr {
-                    ty: self.types.element(ty).unwrap(),
-                    kind: ExprKind::Builtin(Builtin::ListGet, vec![storage, Expr::integer(0)]),
-                });
+        match self.resolve(expression) {
+            Some(Binding::Value(definition)) => {
+                return self.read_module_value(definition, None, expression);
             }
-            return Ok(storage);
+            Some(Binding::ImportedValue(definition, member)) => {
+                return self.read_module_value(definition, Some(member), expression);
+            }
+            _ => {}
         }
         if let ast::Expr::Attribute(attr) = expression
             && attr.attr.as_str() == "avoids_symlink_attacks"
@@ -11896,7 +11898,7 @@ impl<'a> Checker<'a> {
             if binding == Binding::Intrinsic(Intrinsic::BuiltinsPrint) {
                 return self.named_builtin_call(call, "print");
             }
-            if let Binding::Value(_) = binding {
+            if matches!(binding, Binding::Value(_) | Binding::ImportedValue(..)) {
                 let callable = self.expr(&call.func)?;
                 return self.invoke(call, callable);
             }
