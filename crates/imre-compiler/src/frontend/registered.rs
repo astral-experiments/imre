@@ -1277,7 +1277,7 @@ impl<'a> SuitePreparation<'a> {
                     Expr::local(input, Type::PythonObject),
                     input,
                 );
-                if let Ok(targets) = scope.assignment_targets(assign, value) {
+                if let Ok(targets) = scope.assignment_targets(&assign.targets, value) {
                     body.push(checkpoint(stmt));
                     residual.push(SourceRun {
                         at: body.len(),
@@ -1519,7 +1519,7 @@ impl statements::StatementLowering for SourceScope<'_> {
 
     fn assignment(&mut self, assign: &ast::StmtAssign) -> StdResult<Vec<Statement>, ()> {
         let value = self.operand(&assign.value).ok_or(())?;
-        self.assignment_targets(assign, value)
+        self.assignment_targets(&assign.targets, value)
     }
 
     fn branch(&mut self, branch: &ast::StmtIf) -> StdResult<statements::Block, ()> {
@@ -2004,10 +2004,10 @@ impl PhysicalRegion {
 impl SourceScope<'_> {
     fn assignment_targets(
         &mut self,
-        assign: &ast::StmtAssign,
+        targets: &[ast::Expr],
         value: Expr,
     ) -> StdResult<Vec<Statement>, ()> {
-        let bind = |scope: &mut Self| unpacking::bind_assignment(scope, &assign.targets, value);
+        let bind = |scope: &mut Self| unpacking::bind_assignment(scope, targets, value);
         if self.loop_scope == LoopScope::WithCursor
             && matches!(self.kind, RegisteredScope::Function { is_async: true })
         {
@@ -2081,8 +2081,12 @@ impl SourceScope<'_> {
 
     fn with_binding(&mut self, target: &ast::Expr) -> StdResult<ir::ContextBinding, ()> {
         let slot = self.hidden(Type::PythonObject);
-        let body =
-            unpacking::bind_targets(self, target, Expr::local(slot, Type::PythonObject), None)?;
+        let value = Expr::local(slot, Type::PythonObject);
+        let body = if pattern_elements(target).is_some() {
+            unpacking::bind_targets(self, target, value, None)?
+        } else {
+            self.assignment_targets(std::slice::from_ref(target), value)?
+        };
         Ok(ir::ContextBinding {
             entered: slot,
             body: vec![Statement::Scope {
