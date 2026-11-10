@@ -26,6 +26,11 @@ def rows(suppress):
     yield "after"
 
 
+def acquire():
+    with Scope((yield "argument")) as value:
+        yield value
+
+
 def drained(iterator):
     try:
         next(iterator)
@@ -53,4 +58,26 @@ def current():
     iterator.close()
     iterator.close()
     assert events[-2:] == ["enter", "GeneratorExit"]
+    events.clear()
+    iterator = acquire()
+    assert next(iterator) == "argument"
+    iterator.close()
+    assert events == []
+
+    iterator = acquire()
+    assert next(iterator) == "argument"
+    error = LookupError("before enter")
+    try:
+        iterator.throw(error)
+    except LookupError as caught:
+        assert caught is error
+    else:
+        raise AssertionError("expected the injected exception")
+    assert events == []
+
+    iterator = acquire()
+    assert next(iterator) == "argument"
+    assert iterator.send(False) == 7
+    iterator.close()
+    assert events == ["enter", "GeneratorExit"]
     print("boxed generator with ok")
