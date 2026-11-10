@@ -3439,6 +3439,10 @@ impl Context {
         if matches!(owner, FrameOwner::Module(_)) && self.pending.is_none() {
             self.register_decimal_class(code, entry, scope);
         }
+        self.finish_native_frame(result)
+    }
+
+    fn finish_native_frame(&mut self, result: Id) -> Result<Id> {
         self.leave_frame(result, self.pending.is_none());
         self.pending.take().map_or(Ok(result), Err)
     }
