@@ -216,8 +216,6 @@ impl Output {
                 .unwrap();
             }
             "hidden "
-        } else if name == "main" {
-            ""
         } else {
             "internal "
         };
