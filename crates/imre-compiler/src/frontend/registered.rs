@@ -894,6 +894,8 @@ pub(crate) enum SourceEffect {
     LoopTransfer(TextRange, &'static Statement),
     /// A mixed loop needs its source suites. A literal false test runs only the else suite.
     While(SourceGuard<Box<RegisteredOperand>>),
+    /// Exception matchers and all control-flow children belong to this protected region.
+    Try(Box<PreparedTry>),
     /// The manager, binding and protected child are prepared together.
     Context(Box<PreparedContext>),
     /// A loop whose checked lowering left one or more physical inputs or suites.
@@ -942,6 +944,7 @@ impl PhysicalSuite {
                 Some(
                     SourceEffect::For(_)
                         | SourceEffect::Context(_)
+                        | SourceEffect::Try(_)
                         | SourceEffect::LoopTransfer(..)
                         | SourceEffect::ObjectOperation(..)
                         | SourceEffect::Discard(_)
@@ -1051,6 +1054,21 @@ pub(crate) struct StatementSites {
     pub(crate) ifs: HashMap<TextRange, SourceConditional>,
     pub(crate) matches: HashMap<TextRange, Option<patterns::SourceMatch>>,
     pub(crate) contexts: HashMap<TextRange, Vec<ir::ContextSite>>,
+}
+
+pub(crate) struct PreparedTry {
+    pub(crate) range: TextRange,
+    pub(crate) is_star: bool,
+    pub(crate) body: PhysicalSuite,
+    pub(crate) handlers: Vec<PreparedHandler>,
+    pub(crate) otherwise: PhysicalSuite,
+    pub(crate) finalbody: Option<PhysicalSuite>,
+}
+
+pub(crate) struct PreparedHandler {
+    pub(crate) matcher: Option<(TextRange, PhysicalOperand)>,
+    pub(crate) name: Option<String>,
+    pub(crate) body: PhysicalSuite,
 }
 
 pub(crate) struct PreparedContext {
@@ -1441,7 +1459,10 @@ impl<'a> SuitePreparation<'a> {
                     }
                     None if !matches!(
                         stmt,
-                        ast::Stmt::Match(_) | ast::Stmt::With(_) | ast::Stmt::For(_)
+                        ast::Stmt::Match(_)
+                            | ast::Stmt::With(_)
+                            | ast::Stmt::For(_)
+                            | ast::Stmt::Try(_)
                     ) =>
                     {
                         sites.prepare_inputs(stmt, source, kind, suspended);
@@ -1469,6 +1490,18 @@ impl<'a> SuitePreparation<'a> {
                         at: run.at,
                         statements: index..index + 1,
                         effect: Some(SourceEffect::For(Box::new(region))),
+                    });
+                    continue;
+                }
+                if let ast::Stmt::Try(protected) = stmt {
+                    let region =
+                        children
+                            .prepare
+                            .prepare_try(protected, kind, child_selection, suspended);
+                    plan.residual.push(SourceRun {
+                        at: run.at,
+                        statements: index..index + 1,
+                        effect: Some(SourceEffect::Try(Box::new(region))),
                     });
                     continue;
                 }
@@ -1593,6 +1626,47 @@ impl<'a> SuitePreparation<'a> {
             self.selected_suite(stmts, kind, selection, selection, suspended),
             stmts,
         )
+    }
+
+    fn prepare_try(
+        &mut self,
+        stmt: &ast::StmtTry,
+        kind: RegisteredScope,
+        selection: SuiteSelection<'_>,
+        suspended: bool,
+    ) -> PreparedTry {
+        let body = self.physical_suite(&stmt.body, kind, selection, suspended);
+        let handlers = stmt
+            .handlers
+            .iter()
+            .map(|ast::ExceptHandler::ExceptHandler(handler)| {
+                let matcher = handler.type_.as_deref().map(|class| {
+                    let range = if stmt.is_star {
+                        handler.range()
+                    } else {
+                        class.range()
+                    };
+                    (
+                        range,
+                        self.physical_operand(class, kind, selection, suspended),
+                    )
+                });
+                PreparedHandler {
+                    matcher,
+                    name: handler.name.as_ref().map(|name| name.as_str().to_owned()),
+                    body: self.physical_suite(&handler.body, kind, selection, suspended),
+                }
+            })
+            .collect();
+        PreparedTry {
+            range: stmt.range(),
+            is_star: stmt.is_star,
+            body,
+            handlers,
+            otherwise: self.physical_suite(&stmt.orelse, kind, selection, suspended),
+            finalbody: (!stmt.finalbody.is_empty())
+                .then(|| self.physical_suite(&stmt.finalbody, kind, selection, suspended)),
+        }
     }
 
     fn prepare_context(
@@ -2542,11 +2616,15 @@ impl PhysicalRegion {
             | ir::Node::Statement(Statement::With {
                 site: ir::ContextSite { is_async: true, .. },
                 ..
-            })
-            | ir::Node::Expression(Expr {
-                kind: ExprKind::Builtin(Builtin::RegisteredSuspend(..), _),
-                ..
             }) => self_contained = false,
+            ir::Node::Expression(Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredSuspend(kind, _), _),
+                ..
+            }) => {
+                // A checked await resumes at the error target of its enclosing try.
+                self_contained &=
+                    self == Self::Protected && matches!(kind, ir::SuspendValue::Await);
+            }
             _ => {}
         });
         self_contained
