@@ -466,6 +466,7 @@ fn registered_import(stmt: &ast::Stmt, private_names: &imre_ast::Names) -> Optio
 pub(crate) enum RegisteredScope {
     Module,
     Class,
+    Lambda,
     Function { is_async: bool },
 }
 
@@ -1897,8 +1898,16 @@ impl SourceScope<'_> {
     }
 
     fn lower_operand(&mut self, expr: &ast::Expr, whole: bool) -> Option<Expr> {
-        let mut value = if (whole || self.suspending_operands)
-            && let RegisteredScope::Function { is_async } = self.kind
+        // A generator lambda can resume within its return expression. Eager
+        // display bodies use their own iteration and operand boundaries.
+        let suspension = match self.kind {
+            RegisteredScope::Function { is_async } if whole || self.suspending_operands => {
+                Some(is_async)
+            }
+            RegisteredScope::Lambda if self.comprehension.is_none() => Some(false),
+            _ => None,
+        };
+        let mut value = if let Some(is_async) = suspension
             && let Some((kind, value)) = ir::SuspendValue::operand(expr)
             // A synchronous generator keeps its enclosing iterator in a private frame slot.
             && (self.suspending_operands || !is_async || self.loop_scope != LoopScope::WithCursor)
@@ -1911,7 +1920,7 @@ impl SourceScope<'_> {
         } else if let ast::Expr::TString(template) = expr {
             self.source.template(
                 template,
-                matches!(self.kind, RegisteredScope::Function { .. }),
+                matches!(self.kind, RegisteredScope::Function { .. } | RegisteredScope::Lambda),
                 |child| self.ordinary_operand(child),
             )?
         } else if let ast::Expr::FString(formatted) = expr {

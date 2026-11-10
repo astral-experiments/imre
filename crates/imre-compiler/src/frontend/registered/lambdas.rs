@@ -232,6 +232,24 @@ impl RegisteredLambda {
         collector.sites
     }
 
+    pub(super) fn body(
+        lambda: &ast::ExprLambda,
+        source: values::RegisteredSource<'_>,
+    ) -> Option<RegisteredFunction> {
+        let expr = &lambda.body;
+        if let Some(value) = values::Region::Lambda.operand(expr, source) {
+            return Some(RegisteredFunction::expression(expr.range(), value));
+        }
+        // Eager displays and named expressions need storage in the lambda's own activation.
+        let operations = HashMap::new();
+        let sites = StatementSites::default();
+        let mut scope = SourceScope::new(RegisteredScope::Lambda, source, &operations, &sites);
+        let value = scope.operand(expr)?;
+        let mut function = RegisteredFunction::expression(expr.range(), value);
+        (function.function.locals, function.local_names) = scope.bindings();
+        Some(function)
+    }
+
     fn prepare(
         lambda: &ast::ExprLambda,
         source: values::RegisteredSource<'_>,
@@ -256,8 +274,7 @@ impl RegisteredLambda {
                 }
             }
         }
-        let body = operand(&lambda.body)
-            .map(|value| RegisteredFunction::expression(lambda.body.range(), value));
+        let body = Self::body(lambda, source);
         Self {
             metadata: LambdaMetadata::new(lambda, scope),
             defaults,
@@ -377,6 +394,43 @@ async def factory(seed, rows, mark):
         let binding = |index: usize| &*factory.body[index].as_assign_stmt().unwrap().value;
         assert!(RegisteredOperand::prepare(binding(0), source, owner).is_some());
         assert!(RegisteredOperand::prepare(binding(1), source, owner).is_none());
+    }
+
+    #[test]
+    fn generator_lambda_owns_its_unpack_and_named_expression_slots() {
+        let text = "lambda: ((yield [(last := value) for _, value in row]) or last)";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let literals = values::ModuleSource::new(module);
+        let source = literals.context(&module.source);
+        let expr = &module.parsed.syntax().body[0].as_expr_stmt().unwrap().value;
+        let lambda = expr.as_lambda_expr().unwrap();
+        assert!(values::has_checked_lambda_body(lambda, source));
+        let plan = RegisteredLambda::prepare(
+            lambda,
+            source,
+            &FunctionScope::lambda(lambda, false),
+            RegisteredScope::Module,
+        );
+        assert!(plan.metadata.generator);
+        let checked = plan.body.unwrap();
+        assert!(
+            checked
+                .local_names
+                .values()
+                .any(|b| b.name == "last" && b.namespace.is_none())
+        );
+        let mut pulls = 0;
+        let mut yields = 0;
+        ir::walk_nodes(&checked.function.body, &mut |node, _| match node {
+            ir::Node::Statement(Statement::IterNext { .. }) => pulls += 1,
+            ir::Node::Expression(Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredSuspend(ir::SuspendValue::Yield, _), _),
+                ..
+            }) => yields += 1,
+            _ => {}
+        });
+        assert_eq!((pulls, yields), (1, 1));
     }
 
     #[test]
