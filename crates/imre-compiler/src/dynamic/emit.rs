@@ -556,8 +556,16 @@ impl<'a> PreparedBody<'a, '_> {
                 initializer_sites.push(site);
             });
         }
+        for annotation in sites.annotations.values() {
+            if let crate::frontend::AnnotationValue::Source(value) = &annotation.value {
+                let value = value.as_starred_expr().map_or(value, |star| star.value.as_ref());
+                prepare.sites.expressions.prepare_input(
+                    value, values, crate::frontend::RegisteredScope::Function { is_async: false }, false,
+                );
+            }
+        }
         let mut function_bodies = HashMap::new();
-        let class_bodies = prepare.class_suites(sites.classes);
+        let class_bodies = prepare.class_suites(sites.classes, |start| scopes.functions[&start].suspension_flags != 0);
         let mut thread_entries = HashMap::new();
         for site in sites.functions {
             let def = site.def;
@@ -577,7 +585,7 @@ impl<'a> PreparedBody<'a, '_> {
                     is_async: def.is_async,
                 };
                 if !site.prepare_entry {
-                    prepare.physical_body(&def.body, kind);
+                    prepare.physical_body(&def.body, kind, suspended);
                     continue;
                 }
                 FunctionBody::Suite(prepare.function_suite(&def.body, kind, suspended))
@@ -1440,7 +1448,7 @@ mod tests {
             SuitePreparation::new(&prepared.source.namespace_operations, source, body, true);
         suites.sites.expressions = logicals;
         let initializer = suites.suite(body, RegisteredScope::Module);
-        let class_bodies = suites.class_suites(classes);
+        let class_bodies = suites.class_suites(classes, |start| prepared.source.scopes.functions[&start].suspension_flags != 0);
         let (sites, nested) = (suites.sites, suites.nested);
         prepared.source.initializer = Some(initializer);
         prepared.source.class_bodies = class_bodies;
@@ -1706,6 +1714,7 @@ mod tests {
         physical.physical_body(
             &def.body,
             crate::frontend::RegisteredScope::Function { is_async: false },
+            false,
         );
         let (sites, nested) = (physical.sites, physical.nested);
         module.source.statement_sites = sites;
@@ -2412,6 +2421,7 @@ mod tests {
         physical.physical_body(
             &function.body,
             crate::frontend::RegisteredScope::Function { is_async: false },
+            false,
         );
         (
             prepared.source.statement_sites,
@@ -2493,39 +2503,34 @@ mod tests {
         let mut prepared = PreparedBody::module(
             "program",
             Path::new("program.py"),
-            "result = yes() if flag() else ((lambda: make(x))() async for x in rows())\n",
+            "target()[lo():(yes() if flag() else (lambda v: v)(make())):step()]: int = rhs()\n",
             0,
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert!(prepared.source.initializer.as_ref().unwrap().fully_checked());
-        inject_residual_child_module(&mut prepared);
-        let suite = prepared.source.initializer.as_ref().unwrap();
-        assert!(!suite.fully_checked());
-        let original = prepared.standalone().unwrap().unwrap();
-        let value = &mut prepared.syntax.as_mut().unwrap().to_mut()[0]
-            .as_assign_stmt_mut()
-            .unwrap()
-            .value;
-        assert!(matches!(
-            prepared.source.statement_sites.expressions.conditional(value),
-            Some([Checked(_), Checked(_), Residual(ast::Expr::Generator(_))])
-        ));
+        fn choice(body: &mut [ast::Stmt]) -> &mut ast::Expr {
+            body[0].as_ann_assign_stmt_mut().unwrap().target.as_subscript_expr_mut().unwrap()
+                .slice.as_slice_expr_mut().unwrap().upper.as_deref_mut().unwrap()
+        }
         fn erase(child: &mut ast::Expr) {
             *child = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
                 range: child.range(),
                 node_index: Default::default(),
             });
         }
-        let choice = value.as_if_expr_mut().unwrap();
-        erase(&mut choice.test);
-        erase(&mut choice.body);
+        assert!(!prepared.source.initializer.as_ref().unwrap().fully_checked());
+        let original = prepared.standalone().unwrap().unwrap();
+        let value = choice(prepared.syntax.as_mut().unwrap().to_mut());
+        assert!(matches!(prepared.source.statement_sites.expressions.conditional(value),
+            Some([Checked(_), Checked(_), Residual(_)])));
+        let branch = value.as_if_expr_mut().unwrap();
+        erase(&mut branch.test);
+        erase(&mut branch.body);
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
-        let value = &mut prepared.syntax.as_mut().unwrap().to_mut()[0]
-            .as_assign_stmt_mut()
-            .unwrap()
-            .value;
-        erase(&mut value.as_if_expr_mut().unwrap().orelse);
+
+        let value = choice(prepared.syntax.as_mut().unwrap().to_mut());
+        let residual = &mut value.as_if_expr_mut().unwrap().orelse;
+        erase(&mut residual.as_call_expr_mut().unwrap().arguments.args[0]);
         assert_ne!(prepared.standalone().unwrap().unwrap(), original);
     }
 
@@ -2546,9 +2551,9 @@ mod tests {
 
         let source = concat!(
             "if ready():\n    accepted()\n",
-            "elif probe((lambda: (value := x))() async for x in rows()):\n",
+            "elif probe((lambda v: v)(make())):\n",
             "    before()\n",
-            "    consume((lambda: (value := y))() async for y in rows())\n",
+            "    target()[lo():(lambda v: v)(hi()) + more():step()]: int = rhs()\n",
             "    after()\n",
             "else:\n    declined()\n",
         );
@@ -2560,8 +2565,7 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert!(prepared.source.initializer.as_ref().unwrap().fully_checked());
-        inject_residual_child_module(&mut prepared);
+        assert!(!prepared.source.initializer.as_ref().unwrap().fully_checked());
         let original = prepared.standalone().unwrap().unwrap();
         let stmt = prepared.syntax.as_ref().unwrap()[0].as_if_stmt().unwrap();
         let suites = &prepared.source.nested_bodies;
@@ -2626,7 +2630,10 @@ mod tests {
             });
             assert_eq!(prepared.standalone().unwrap().unwrap(), original);
             if physical {
-                prepared.source.statement_sites.matches.get_mut(&site).unwrap().as_mut().unwrap().subject = None;
+                let subject = prepared.source.statement_sites.matches.get_mut(&site)
+                    .unwrap().as_mut().unwrap().subject.as_mut().unwrap();
+                subject.value = crate::ir::Expr::none();
+                crate::verify::registered(subject.region()).unwrap();
                 assert_ne!(prepared.standalone().unwrap().unwrap(), original);
             }
         }
@@ -3854,12 +3861,40 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
+    fn a_residual_statement_uses_its_prepared_call_and_inline_operand() {
+        use crate::frontend::ExpressionSelection;
+
+        let mut prepared = PreparedBody::module(
+            "store",
+            Path::new("store.py"),
+            "target()[lo():(lambda v: v)(hi()) + more():step()]: int = {'rows': [f(x) for x in xs]}\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let original = prepared.standalone().unwrap().unwrap();
+        let stmt = prepared.syntax.as_mut().unwrap().to_mut()[0].as_ann_assign_stmt_mut().unwrap();
+        let receiver = &mut stmt.target.as_subscript_expr_mut().unwrap().value;
+        let value = stmt.value.as_deref_mut().unwrap();
+        let sites = &prepared.source.statement_sites.expressions;
+        assert!(matches!(sites.get(receiver), Some(ExpressionSelection::Checked(_))));
+        assert!(matches!(sites.get(value), Some(ExpressionSelection::Operand(_))));
+        let callee = &mut receiver.as_call_expr_mut().unwrap().func;
+        **callee = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+            range: callee.range(),
+            node_index: Default::default(),
+        });
+        value.as_dict_expr_mut().unwrap().items.clear();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
     fn dictionary_reports_its_rejected_comprehension() {
         let source = concat!(
             "async def make():\n",
             "    return {\"items\": [lambda v=await get(x): v for x in [1, 2]]}\n",
         );
-        let prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module(
             "example",
             Path::new("example.py"),
             source,
@@ -3867,6 +3902,14 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
+        let def = prepared.syntax.as_mut().unwrap().to_mut()[0].as_function_def_stmt_mut().unwrap();
+        let value = def.body[0].as_return_stmt_mut().unwrap().value.as_deref_mut().unwrap();
+        let Some(crate::frontend::ExpressionSelection::Refused(range, _)) =
+            prepared.source.statement_sites.expressions.get(value) else {
+            panic!("expected the checked child diagnostic");
+        };
+        assert_eq!(&source[*range], "[lambda v=await get(x): v for x in [1, 2]]");
+        value.as_dict_expr_mut().unwrap().items.clear();
         assert_eq!(
             prepared.standalone().unwrap_err(),
             "example.py:2:22: cannot compile this comprehension ahead of time (through 2:64)",

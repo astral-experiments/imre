@@ -4,7 +4,7 @@ use ruff_text_size::Ranged;
 use super::FrameEmitter;
 use super::{Function, permanent};
 use crate::frontend::{
-    LambdaBinding, LambdaDefault, PreparedTemplate, RegisteredScope, SourceOperand, TemplateField,
+    LambdaBinding, LambdaDefault, PreparedTemplate, SourceOperand, TemplateField,
     prepare_boolean,
 };
 use crate::ir::control::Context as BooleanContext;
@@ -39,15 +39,6 @@ impl LogicalEmitter<SourceOperand<'_>> for Function<'_, '_> {
 impl Function<'_, '_> {
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
         self.with_expression_range(expr.range(), |code| {
-            if let Some(selected) = code.source.statement_sites.expressions.get(expr) {
-                match selected {
-                    crate::frontend::ExpressionSelection::Checked(value) => {
-                        return code.registered_value(value);
-                    }
-                    _ if !code.native_suspension => return code.located_expr(expr),
-                    _ => {}
-                }
-            }
             code.registered_region(expr, false)
                 .unwrap_or_else(|| code.located_expr(expr))
         })
@@ -90,27 +81,24 @@ impl Function<'_, '_> {
     }
 
     fn registered_region(&mut self, expr: &ast::Expr, condition: bool) -> Option<String> {
-        if matches!(
-            self.source.statement_sites.expressions.get(expr),
-            Some(crate::frontend::ExpressionSelection::Comparison(_))
-        ) {
-            return None;
+        use crate::frontend::ExpressionSelection;
+        let selected = self.source.statement_sites.expressions.get(expr);
+        if let Some(ExpressionSelection::Checked(value)) = selected {
+            self.prepare_checked_value(value);
+            return Some(self.frame.registered_expression(value, &self.sites, condition));
         }
-        if let Some(PreparedTemplate::Checked(operand)) = self.source.strings.templates.get(&expr.range()) {
-            self.prepare_checked_value(&operand.value);
-            return Some(self.frame.prepared_operand(operand, &self.sites, condition));
+        if let Some(ExpressionSelection::Refused(range, reason)) = selected {
+            return Some(self.with_expression_range(*range, |code| code.build_diagnostic(reason)));
         }
-        if self.source.statement_sites.expressions.physical(expr).is_some() {
-            return None;
-        }
-        let source = self.source.registered_source();
-        let value = if self.native_suspension {
-            crate::frontend::suspended_operand(expr, source)
-        } else {
-            crate::frontend::registered_value(expr, source)
-        }?;
-        self.prepare_checked_value(&value);
-        Some(self.frame.registered_expression(&value, &self.sites, condition))
+        let operand = match selected {
+            Some(ExpressionSelection::Operand(operand)) => operand.as_ref(),
+            _ => match self.source.strings.templates.get(&expr.range()) {
+                Some(PreparedTemplate::Checked(operand)) => operand,
+                _ => return None,
+            },
+        };
+        self.prepare_checked_value(&operand.value);
+        Some(self.frame.prepared_operand(operand, &self.sites, condition))
     }
 
     pub(super) fn with_expression_range(
@@ -129,30 +117,6 @@ impl Function<'_, '_> {
     }
 
     fn located_operand(&mut self, expr: &ast::Expr, condition: bool) -> String {
-        let kind = if self.class_locals.is_some() {
-            RegisteredScope::Class
-        } else if self.module {
-            RegisteredScope::Module
-        } else {
-            RegisteredScope::Function {
-                is_async: self.is_async,
-            }
-        };
-        match crate::frontend::inline_operand(
-            expr,
-            self.source.registered_source(),
-            kind,
-            self.native_suspension,
-        ) {
-            Ok(Some(operand)) => {
-                self.prepare_checked_value(&operand.value);
-                return self.frame.prepared_operand(&operand, &self.sites, condition);
-            }
-            Err((range, reason)) => {
-                return self.with_expression_range(range, |code| code.build_diagnostic(reason));
-            }
-            Ok(None) => {}
-        }
         let position = imre_ast::expression_position(
             expr,
             &self.source.method_imports,
@@ -187,7 +151,7 @@ impl Function<'_, '_> {
         } else if let Some((edges, inputs)) = self
             .source
             .statement_sites.expressions
-            .value(expr, self.source.registered_source())
+            .value(expr)
         {
             let value = Logical::value(&mut self.frame.body, edges, crate::ir::Type::PythonObject)
                 .emit(self, &inputs)
@@ -203,8 +167,8 @@ impl Function<'_, '_> {
                 },
                 |code, yes, no| match test {
                     SourceOperand::Checked(test) => {
-                        code.prepare_checked_value(&test);
-                        code.frame.registered_branch(&test, &code.sites, yes, no);
+                        code.prepare_checked_value(test);
+                        code.frame.registered_branch(test, &code.sites, yes, no);
                     }
                     SourceOperand::Residual(test) => code.branch_expr(test, yes, no),
                 },
@@ -308,7 +272,7 @@ impl Function<'_, '_> {
 
     fn source_operand(&mut self, operand: SourceOperand<'_>) -> String {
         match operand {
-            SourceOperand::Checked(value) => self.registered_value(&value),
+            SourceOperand::Checked(value) => self.registered_value(value),
             SourceOperand::Residual(expr) => self.expr(expr),
         }
     }
@@ -327,7 +291,6 @@ impl Function<'_, '_> {
         let (edges, inputs) = prepare_boolean(
             expr,
             BooleanContext::Condition,
-            self.source.registered_source(),
             &self.source.statement_sites.expressions,
         );
         Logical::branch(&mut self.frame.body, edges, yes, no).emit(self, &inputs);

@@ -648,6 +648,7 @@ pub(crate) struct FunctionSite<'a> {
 pub(crate) struct ClassSite<'a> {
     pub(crate) def: &'a ast::StmtClassDef,
     enclosing: RegisteredScope,
+    enclosing_function: Option<TextSize>,
     parameters: Option<Vec<ir::RegisteredTypeParameter>>,
 }
 
@@ -685,6 +686,7 @@ pub(crate) fn registered_sites<'a, R>(
         operands: &'s HashMap<TextSize, PreparedAnnotation<R>>,
         scope: RegisteredScope,
         in_unprepared_generic: bool,
+        function: Option<TextSize>,
         output: RegisteredSites<'a>,
     }
     impl<'a, R> StatementVisitor<'a> for Collector<'_, 'a, R> {
@@ -697,13 +699,16 @@ pub(crate) fn registered_sites<'a, R>(
                     self.output.classes.push(ClassSite {
                         def: class,
                         enclosing: self.scope,
+                        enclosing_function: self.function,
                         parameters: class
                             .type_params
                             .as_deref()
                             .map(|params| registered_type_parameters(params, self.names)),
                     });
                     let outer = std::mem::replace(&mut self.scope, RegisteredScope::Class);
+                    let function = self.function.take();
                     walk_stmt(self, stmt);
+                    self.function = function;
                     self.scope = outer;
                 }
                 ast::Stmt::FunctionDef(def) => {
@@ -759,7 +764,9 @@ pub(crate) fn registered_sites<'a, R>(
                             is_async: def.is_async,
                         },
                     );
+                    let function = self.function.replace(def.start());
                     walk_stmt(self, stmt);
+                    self.function = function;
                     self.scope = outer;
                     self.in_unprepared_generic = outer_generic;
                 }
@@ -808,6 +815,7 @@ pub(crate) fn registered_sites<'a, R>(
         operands,
         scope: RegisteredScope::Module,
         in_unprepared_generic: false,
+        function: None,
         output: RegisteredSites::default(),
     };
     sites.visit_body(body);
@@ -1179,11 +1187,13 @@ impl<'a> SuitePreparation<'a> {
     pub(crate) fn class_suites(
         &mut self,
         classes: Vec<ClassSite<'_>>,
+        suspends: impl Fn(TextSize) -> bool,
     ) -> HashMap<TextSize, RegisteredClass> {
         classes
             .into_iter()
             .map(|site| {
                 let class = site.def;
+                let suspended = site.enclosing_function.is_some_and(&suspends);
                 let start = class
                     .decorator_list
                     .first()
@@ -1195,7 +1205,7 @@ impl<'a> SuitePreparation<'a> {
                         let expr = &decorator.expression;
                         let operand = RegisteredOperand::prepare(expr, self.source, site.enclosing);
                         if operand.is_none() {
-                            self.sites.expressions.prepare_input(expr, self.source);
+                            self.sites.expressions.prepare_input(expr, self.source, site.enclosing, suspended);
                         }
                         operand
                     })
@@ -1214,7 +1224,7 @@ impl<'a> SuitePreparation<'a> {
                                 .map(|expr| {
                                     let operand = RegisteredOperand::prepare(expr, self.source, bases_scope);
                                     if operand.is_none() {
-                                        self.sites.expressions.prepare_input(expr, self.source);
+                                        self.sites.expressions.prepare_input(expr, self.source, bases_scope, suspended && site.parameters.is_none());
                                     }
                                     operand
                                 })
@@ -1234,7 +1244,7 @@ impl<'a> SuitePreparation<'a> {
     }
 
     pub(crate) fn suite(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope) -> RegisteredSuite {
-        self.selected_suite(stmts, kind, SuiteSelection::All, SuiteSelection::All)
+        self.selected_suite(stmts, kind, SuiteSelection::All, SuiteSelection::All, false)
     }
 
     /// A residual statement in a suspended function owns its cursor and pending exits.
@@ -1250,18 +1260,18 @@ impl<'a> SuitePreparation<'a> {
         } else {
             SuiteSelection::All
         };
-        self.selected_suite(stmts, kind, SuiteSelection::All, children)
+        self.selected_suite(stmts, kind, SuiteSelection::All, children, suspends)
     }
 
     /// Keep the enclosing physical frame's entry and cleanup. Its complete target effects
     /// share one slot layout per suite, including when another statement must run from source.
-    pub(crate) fn physical_body(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope) {
-        self.nested_suite(stmts, kind, SuiteSelection::Physical);
+    pub(crate) fn physical_body(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope, suspended: bool) {
+        self.nested_suite(stmts, kind, SuiteSelection::Physical, suspended);
     }
 
-    fn nested_suite(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope, select: SuiteSelection) {
+    fn nested_suite(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope, select: SuiteSelection, suspended: bool) {
         if let Some(first) = stmts.first() {
-            let plan = self.selected_suite(stmts, kind, select, select);
+            let plan = self.selected_suite(stmts, kind, select, select, suspended);
             // An optimized-away assertion has no instructions and still owns its source slot.
             if !matches!(plan.residual.as_slice(), [run]
                 if run.effect.is_none() && run.statements == (0..stmts.len()))
@@ -1277,6 +1287,7 @@ impl<'a> SuitePreparation<'a> {
         kind: RegisteredScope,
         select: SuiteSelection,
         child_selection: SuiteSelection,
+        suspended: bool,
     ) -> RegisteredSuite {
         use ast::statement_visitor::{StatementVisitor, walk_stmt};
         let mut plan = self.lower(stmts, kind, select);
@@ -1284,21 +1295,45 @@ impl<'a> SuitePreparation<'a> {
             prepare: &'p mut SuitePreparation<'s>,
             kind: RegisteredScope,
             select: SuiteSelection,
+            suspended: bool,
         }
         impl<'a> StatementVisitor<'a> for Children<'_, '_> {
             fn visit_body(&mut self, stmts: &'a [ast::Stmt]) {
-                self.prepare.nested_suite(stmts, self.kind, self.select);
+                self.prepare.nested_suite(stmts, self.kind, self.select, self.suspended);
             }
         }
         let mut children = Children {
             prepare: self,
             kind,
             select: child_selection,
+            suspended,
         };
         for run in &plan.residual {
+            let source = children.prepare.source;
+            let sites = &mut children.prepare.sites.expressions;
             for stmt in &stmts[run.statements.clone()] {
-                if !stmt.is_match_stmt() {
-                    children.prepare.sites.expressions.prepare_inputs(stmt, children.prepare.source);
+                match &run.effect {
+                    Some(SourceEffect::AssignmentInput(_)) => {
+                        if let ast::Stmt::Assign(assign) = stmt {
+                            sites.prepare_input(&assign.value, source, kind, suspended);
+                        }
+                    }
+                    Some(SourceEffect::ObjectOperation(_, inputs)) => {
+                        for input in inputs {
+                            if let PhysicalOperand::Source(expr) = input {
+                                sites.prepare_input(expr, source, kind, suspended);
+                            }
+                        }
+                    }
+                    Some(SourceEffect::While(SourceGuard::Residual)) => {
+                        if let ast::Stmt::While(loop_) = stmt {
+                            sites.prepare_input(&loop_.test, source, kind, suspended);
+                        }
+                    }
+                    None if !matches!(stmt, ast::Stmt::Match(_) | ast::Stmt::With(_) | ast::Stmt::For(_)) => {
+                        sites.prepare_inputs(stmt, source, kind, suspended);
+                    }
+                    _ => {}
                 }
             }
         }
@@ -1313,7 +1348,7 @@ impl<'a> SuitePreparation<'a> {
             for index in run.statements {
                 let stmt = &stmts[index];
                 if let ast::Stmt::For(loop_) = stmt {
-                    let region = children.prepare.prepare_for(loop_, kind, child_selection);
+                    let region = children.prepare.prepare_for(loop_, kind, child_selection, suspended);
                     plan.residual.push(SourceRun {
                         at: run.at,
                         statements: index..index + 1,
@@ -1337,9 +1372,19 @@ impl<'a> SuitePreparation<'a> {
                     };
                     for (input, item) in inputs.iter_mut().zip(&with.items) {
                         input.manager = region.operand(&item.context_expr, children.prepare.source);
+                        if input.manager.is_none() {
+                            children.prepare.sites.expressions.prepare_input(
+                                &item.context_expr, children.prepare.source, kind, suspended,
+                            );
+                        }
                         if let Some(target) = &item.optional_vars {
                             input.target =
                                 ContextTarget::prepare(target, children.prepare.source, kind);
+                            if matches!(input.target, ContextTarget::Residual) {
+                                children.prepare.sites.expressions.prepare_input(
+                                    target, children.prepare.source, kind, suspended,
+                                );
+                            }
                         }
                     }
                 }
@@ -1357,15 +1402,15 @@ impl<'a> SuitePreparation<'a> {
                         |scope| scope.frame_value(&branch.subject),
                     );
                     if site.subject.is_none() {
-                        children.prepare.sites.expressions.prepare_input(&branch.subject, children.prepare.source);
+                        children.prepare.sites.expressions.prepare_input(&branch.subject, children.prepare.source, kind, suspended);
                     }
                     for (case, input) in site.cases.iter_mut().zip(&branch.cases) {
                         if matches!(case.guard, Some(patterns::MatchGuard::Residual))
                             && let Some(guard) = &input.guard
                         {
-                            children.prepare.sites.expressions.prepare_input(guard, children.prepare.source);
+                            children.prepare.sites.expressions.prepare_input(guard, children.prepare.source, kind, suspended);
                         }
-                        case.body = Some(children.prepare.suite(&input.body, kind));
+                        case.body = Some(children.prepare.selected_suite(&input.body, kind, SuiteSelection::All, SuiteSelection::All, suspended));
                     }
                     children
                         .prepare
@@ -1388,6 +1433,7 @@ impl<'a> SuitePreparation<'a> {
         loop_: &ast::StmtFor,
         kind: RegisteredScope,
         selection: SuiteSelection,
+        suspended: bool,
     ) -> PreparedFor {
         let iterable = RegisteredOperand::prepare_with(self.source, kind, |scope| {
             match (kind, selection) {
@@ -1399,15 +1445,21 @@ impl<'a> SuitePreparation<'a> {
         });
         let iterable = match iterable {
             Some(operand) => PhysicalOperand::Checked(Box::new(operand)),
-            None => PhysicalOperand::Source(loop_.iter.clone()),
+            None => {
+                self.sites.expressions.prepare_input(&loop_.iter, self.source, kind, suspended);
+                PhysicalOperand::Source(loop_.iter.clone())
+            },
         };
         let target = match checked_binding(&loop_.target, self.source, kind) {
             Some((entered, binding)) => LoopBinding::Checked { entered, binding },
-            None => LoopBinding::Source(loop_.target.clone()),
+            None => {
+                self.sites.expressions.prepare_input(&loop_.target, self.source, kind, suspended);
+                LoopBinding::Source(loop_.target.clone())
+            },
         };
         let (acquire, pull) = iteration_protocol(loop_.iter.range(), for_pull(loop_));
         let mut suite = |stmts: &[ast::Stmt]| {
-            LoopSuite::new(self.selected_suite(stmts, kind, selection, selection), stmts)
+            LoopSuite::new(self.selected_suite(stmts, kind, selection, selection, suspended), stmts)
         };
         PreparedFor {
             range: loop_.range(),
