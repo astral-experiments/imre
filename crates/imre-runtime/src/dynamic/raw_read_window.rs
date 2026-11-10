@@ -177,7 +177,7 @@ impl Context {
     }
 }
 
-/// Vectors over pinned Python buffers, including overlapping slices of the same storage.
+/// Reusable scratch space for a single I/O caller's exported spans.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(super) struct IoVectors {
     vectors: Vec<libc::iovec>,
@@ -198,41 +198,110 @@ impl IoVectors {
         Ok(Self { vectors, bases })
     }
 
-    /// Reacquire each backing pointer once after any Python callback; retain allocations on retry.
-    pub(super) fn resolve(
-        &mut self,
-        ctx: &mut Context,
+    pub(super) fn readable<'a>(
+        &'a mut self,
+        ctx: &'a mut Context,
+        spans: &[(Id, Range<usize>)],
+    ) -> Result<BorrowedIoVectors<'a>> {
+        self.borrow(ctx, spans, false)
+    }
+
+    pub(super) fn writable<'a>(
+        &'a mut self,
+        ctx: &'a mut Context,
+        spans: &[(Id, Range<usize>)],
+    ) -> Result<BorrowedIoVectors<'a>> {
+        self.borrow(ctx, spans, true)
+    }
+
+    fn borrow<'a>(
+        &'a mut self,
+        ctx: &'a mut Context,
         spans: &[(Id, Range<usize>)],
         writable: bool,
-    ) -> Result<&mut [libc::iovec]> {
+    ) -> Result<BorrowedIoVectors<'a>> {
         use std::collections::hash_map::Entry;
-        self.vectors.clear();
+        // Safe callers can forget a loan. Always resolve this context's addresses afresh.
         self.bases.clear();
+        self.vectors.clear();
+        let loan = BorrowedIoVectors { scratch: self, ctx };
         for (storage, range) in spans {
-            let (base, length) = match self.bases.entry(*storage) {
+            let (base, length) = match loan.scratch.bases.entry(*storage) {
                 Entry::Occupied(entry) => *entry.get(),
                 Entry::Vacant(entry) => {
-                    let backing = if !writable {
-                        let bytes = ctx.owner_bytes(*storage)?;
-                        (bytes.as_ptr().cast_mut(), bytes.len())
-                    } else {
-                        let bytes = ctx.writable_storage_bytes(*storage)?;
+                    let backing = if writable {
+                        let bytes = loan.ctx.writable_storage_bytes(*storage)?;
                         (bytes.as_mut_ptr(), bytes.len())
+                    } else {
+                        let bytes = loan.ctx.owner_bytes(*storage)?;
+                        (bytes.as_ptr().cast_mut(), bytes.len())
                     };
                     *entry.insert(backing)
                 }
             };
-            if range.end > length {
+            if range.start > range.end || range.end > length {
                 return Err(Error::new(
                     "BufferError",
                     "underlying buffer has changed size",
                 ));
             }
-            self.vectors.push(libc::iovec {
+            loan.scratch.vectors.push(libc::iovec {
                 iov_base: base.wrapping_add(range.start).cast(),
                 iov_len: range.len(),
             });
         }
-        Ok(&mut self.vectors)
+        Ok(loan)
+    }
+}
+
+/// Export roots keep the Python objects alive. This loan also keeps their owning
+/// context exclusively borrowed until native code finishes with the addresses.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) struct BorrowedIoVectors<'a> {
+    scratch: &'a mut IoVectors,
+    ctx: &'a mut Context,
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+impl BorrowedIoVectors<'_> {
+    /// # Safety
+    /// Use the vectors only for synchronous native I/O during this borrow. Do
+    /// not retain the addresses, reenter Python, or write through readable vectors.
+    pub(super) unsafe fn as_raw(&mut self) -> &mut [libc::iovec] {
+        &mut self.scratch.vectors
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+impl Drop for BorrowedIoVectors<'_> {
+    fn drop(&mut self) {
+        self.scratch.vectors.clear();
+        self.scratch.bases.clear();
+    }
+}
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vector_scratch_releases_partial_and_completed_loans() {
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let id = ctx.alloc(Value::ByteArray(vec![1, 2, 3]));
+        let mut scratch = IoVectors::new(2).unwrap();
+        assert!(
+            scratch
+                .writable(&mut ctx, &[(id, 0..2), (id, 1..4)])
+                .is_err()
+        );
+        assert!(scratch.vectors.is_empty() && scratch.bases.is_empty());
+
+        let loan = scratch
+            .readable(&mut ctx, &[(id, 0..2), (id, 1..3)])
+            .unwrap();
+        assert_eq!(loan.scratch.bases.len(), 1);
+        assert_eq!(loan.scratch.vectors.len(), 2);
+        drop(loan);
+        assert!(scratch.vectors.is_empty() && scratch.bases.is_empty());
     }
 }

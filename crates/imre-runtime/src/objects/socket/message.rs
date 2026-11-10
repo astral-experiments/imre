@@ -1,5 +1,5 @@
 //! Vectored socket I/O and control messages using the target's native socket ABI.
-use super::{Deadline, Error, Kind, Object, Result, SocketAddress, SocketName, errno_error, fd};
+use super::{Deadline, Error, Kind, Result, SocketAddress, SocketName, errno_error};
 use super::{socket_call_interruptible, unpack_socket_name};
 use allocator_api2::boxed::Box;
 use std::{io, ptr, slice};
@@ -216,18 +216,33 @@ impl Drop for ReceivedControl {
     }
 }
 
+/// Poll before borrowing the caller's buffers. Only syscall errors participate
+/// in readiness retry; a buffer acquisition or Python conversion error returns
+/// directly to its owner.
+pub(crate) fn when_ready<T, E: From<Error>>(
+    raw: std::os::fd::RawFd,
+    event: i16,
+    until: Option<Deadline>,
+    mut attempt: impl FnMut() -> std::result::Result<io::Result<T>, E>,
+) -> std::result::Result<T, E> {
+    socket_call_interruptible(raw, event, until, || match attempt() {
+        Ok(syscall) => syscall.map(Ok),
+        Err(error) => Ok(Err(error)),
+    })
+    .map_err(errno_error)?
+}
+
 /// Send the supplied vector and optional control records in one syscall.
 ///
 /// # Safety
 /// All iovec pointers must remain readable for their lengths until this call returns.
-pub(crate) unsafe fn send(
+pub(crate) unsafe fn send_once(
     raw: std::os::fd::RawFd,
     iov: &mut [libc::iovec],
     control: &mut Control,
     flags: i32,
     address: Option<&SocketAddress>,
-    until: Option<Deadline>,
-) -> Result<usize> {
+) -> Result<io::Result<usize>> {
     // SAFETY: msghdr contains pointers and integers; only the fields used below are nonzero.
     let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
     if let Some(address) = address {
@@ -241,12 +256,9 @@ pub(crate) unsafe fn send(
         as _;
     msg.msg_control = control.data();
     msg.msg_controllen = control.len as _;
-    socket_call_interruptible(raw, libc::POLLOUT, until, || {
-        // SAFETY: control, address and all caller-owned iovec ranges live through retries.
-        usize::try_from(unsafe { libc::sendmsg(raw, &msg, flags) })
-            .map_err(|_| io::Error::last_os_error())
-    })
-    .map_err(errno_error)
+    // SAFETY: control, address and readable ranges live through this single syscall.
+    Ok(usize::try_from(unsafe { libc::sendmsg(raw, &msg, flags) })
+        .map_err(|_| io::Error::last_os_error()))
 }
 
 /// Receive into the supplied ranges and return the kernel's count, control records, flags and peer.
@@ -254,13 +266,12 @@ pub(crate) unsafe fn send(
 /// # Safety
 /// All iovec ranges must remain writable for their lengths until this call returns.
 /// Ranges may overlap each other, but no Rust reference may be live over their contents.
-pub(crate) unsafe fn recv(
-    socket: &Object,
+pub(crate) unsafe fn recv_once(
+    raw: std::os::fd::RawFd,
     iov: &mut [libc::iovec],
     received: &mut ReceivedControl,
     flags: i32,
-    until: Option<Deadline>,
-) -> Result<(usize, i32, SocketName)> {
+) -> Result<io::Result<(usize, i32, SocketName)>> {
     let control = &mut received.control;
     // SAFETY: zero is a valid empty msghdr and initialized sockaddr_storage.
     let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
@@ -272,20 +283,16 @@ pub(crate) unsafe fn recv(
     msg.msg_iovlen = i32::try_from(iov.len())
         .map_err(|_| Error::new(Kind::OSError, "recvmsg_into() argument 1 is too long"))?
         as _;
-    let raw = fd(socket);
-    let count = socket_call_interruptible(raw, libc::POLLIN, until, || {
-        msg.msg_namelen = size_of_val(&addr) as _;
-        msg.msg_controllen = control.len as _;
-        msg.msg_flags = 0;
-        // SAFETY: msg points into initialized address/control storage and pinned caller buffers.
-        usize::try_from(unsafe { libc::recvmsg(raw, &mut msg, flags) })
-            .map_err(|_| io::Error::last_os_error())
-    })
-    .map_err(errno_error)?;
+    msg.msg_namelen = size_of_val(&addr) as _;
+    msg.msg_controllen = control.len as _;
+    // SAFETY: msg points into initialized control/address storage and writable caller buffers.
+    let Ok(count) = usize::try_from(unsafe { libc::recvmsg(raw, &mut msg, flags) }) else {
+        return Ok(Err(io::Error::last_os_error()));
+    };
     control.len = control.len.min(msg.msg_controllen as usize);
     received.owns_fds = true;
     let peer = unpack_socket_name(&addr, msg.msg_namelen.min(size_of_val(&addr) as _))?;
-    Ok((count, msg.msg_flags, peer))
+    Ok(Ok((count, msg.msg_flags, peer)))
 }
 
 #[cfg(test)]
@@ -329,11 +336,13 @@ mod tests {
             .unwrap();
         // SAFETY: the single iovec is live and accessible for both synchronous calls.
         unsafe {
-            send(super::fd(&tx), &mut iov, &mut outgoing, 0, None, None)
+            send_once(super::super::fd(&tx), &mut iov, &mut outgoing, 0, None)
                 .ok()
+                .expect("message vector")
                 .expect("sendmsg");
-            recv(&rx, &mut iov, &mut control, 0, None)
+            recv_once(super::super::fd(&rx), &mut iov, &mut control, 0)
                 .ok()
+                .expect("message and peer")
                 .expect("recvmsg");
         }
         let (level, kind, data) = control.iter().next().expect("received rights");
