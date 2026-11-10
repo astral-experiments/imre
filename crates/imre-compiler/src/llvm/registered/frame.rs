@@ -12,7 +12,7 @@ use crate::ir::{Builtin, Constant, DisplayKind, Expr};
 use crate::llvm::body::FunctionBody;
 use crate::llvm::operations::CheckedValue;
 use ruff_text_size::{TextRange, TextSize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 pub(crate) enum Place {
@@ -63,6 +63,8 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(crate) async_generator: bool,
     pub(crate) class_locals: Option<ClassBindings>,
     pub(crate) annotation_values: Option<String>,
+    pub(crate) annotation_class: Option<(BTreeSet<String>, bool)>,
+    annotation_active: Option<String>,
     pub(crate) module_annotation_sites: Option<Vec<TextSize>>,
     pub(crate) body: FunctionBody,
     id: u32,
@@ -110,6 +112,8 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             async_generator: false,
             class_locals: None,
             annotation_values: None,
+            annotation_class: None,
+            annotation_active: None,
             module_annotation_sites: None,
             id,
             body: FunctionBody::new(if native_suspension { "start" } else { "entry" }, "failed"),
@@ -799,12 +803,26 @@ impl RegisteredFrame<'_, '_> {
         self.op("annotation_format", &[&format]);
     }
 
-    pub(crate) fn begin_annotations(&mut self, class: Option<ClassBindings>) {
+    pub(crate) fn begin_annotations(&mut self) {
         self.check_annotation_format();
-        self.annotation_values = Some(self.op("dict", &[]));
-        // Annotation expressions resolve outside the provider's public format parameter.
-        self.scope = self.op("annotation_scope", &[&self.scope.clone()]);
-        self.class_locals = class;
+        let Some((globals, conditional)) = self.annotation_class.clone() else {
+            self.annotation_values = Some(self.op("dict", &[]));
+            self.scope = self.op("annotation_scope", &[&self.scope.clone()]);
+            return;
+        };
+        if conditional {
+            self.annotation_active = Some(self.lookup("__conditional_annotations__"));
+        }
+        let dict = self.lookup("__classdict__");
+        let local = self.op("class_annotation_locals", &[&self.scope.clone(), &dict]);
+        for name in globals {
+            let name = self.code_name(&name);
+            self.op("declare_global", &[&local, &name]);
+        }
+        let result = self.op("dict", &[]);
+        self.live.extend([local.clone(), result.clone()]);
+        self.scope = local;
+        self.annotation_values = Some(result);
     }
 
     pub(crate) fn take_annotation_result(&mut self) -> String {
@@ -853,6 +871,194 @@ impl RegisteredFrame<'_, '_> {
     }
 }
 
+pub(crate) struct AnnotationTarget {
+    key: String,
+    after: Option<String>,
+}
+
+impl RegisteredFrame<'_, '_> {
+    pub(crate) fn annotation_target(
+        &mut self,
+        index: Option<usize>,
+        name: &str,
+        range: TextRange,
+    ) -> AnnotationTarget {
+        let after = index.map(|index| {
+            let active = self
+                .annotation_active
+                .clone()
+                .unwrap_or_else(|| self.lookup("__conditional_annotations__"));
+            let index = self.integer(index);
+            let present = self.op("in", &[&index, &active]);
+            let condition = self.truth(&present);
+            let yes = self.name("b");
+            let after = self.name("b");
+            self.branch(&condition, &yes, &after);
+            self.label(&yes);
+            after
+        });
+        let key = self.code_name(name);
+        if self.annotation_class.is_some() {
+            self.checkpoint(range);
+        }
+        AnnotationTarget { key, after }
+    }
+
+    pub(crate) fn store_annotation(&mut self, target: AnnotationTarget, value: &str) {
+        let AnnotationTarget { key, after } = target;
+        let values = self
+            .annotation_values
+            .as_ref()
+            .expect("annotation dictionary")
+            .clone();
+        self.op("put", &[&values, &key, value]);
+        if let Some(after) = after {
+            self.jump(&after);
+            self.label(&after);
+        }
+    }
+}
+
+/// Builds the positional and keyword containers while the caller evaluates each operand.
+pub(crate) struct ArgumentPack<'a> {
+    layout: &'a ir::PackedArguments,
+    callable: Option<&'a str>,
+    positional: String,
+    keywords: String,
+    group: Option<String>,
+    deferred: Option<String>,
+}
+
+pub(crate) enum ArgumentSlot<'a> {
+    Positional,
+    Spread(String),
+    Deferred,
+    Keyword {
+        name: &'a str,
+        last: bool,
+    },
+    Mapping {
+        mark: String,
+        edge: (String, String),
+    },
+}
+
+impl<'a> ArgumentPack<'a> {
+    pub(crate) fn new(
+        frame: &mut RegisteredFrame<'_, '_>,
+        layout: &'a ir::PackedArguments,
+        callable: Option<&'a str>,
+    ) -> Self {
+        // A call converts its lone * operand after the keywords. Class bases expand immediately.
+        let deferred =
+            (callable.is_some() && layout.starred == [true]).then(|| frame.temporary_mark());
+        let positional = if deferred.is_some() {
+            String::new()
+        } else {
+            frame.op("list", &[])
+        };
+        Self {
+            layout,
+            callable,
+            positional,
+            keywords: "0".into(),
+            group: None,
+            deferred,
+        }
+    }
+
+    pub(crate) fn prepare(
+        &mut self,
+        frame: &mut RegisteredFrame<'_, '_>,
+        index: usize,
+    ) -> ArgumentSlot<'a> {
+        if let Some(starred) = self.layout.starred.get(index) {
+            return if self.deferred.is_some() {
+                ArgumentSlot::Deferred
+            } else if *starred {
+                ArgumentSlot::Spread(frame.temporary_mark())
+            } else {
+                ArgumentSlot::Positional
+            };
+        }
+        let index = index - self.layout.starred.len();
+        let keywords = &self.layout.keywords;
+        if index == 0 {
+            self.keywords = frame.op("dict", &[]);
+        }
+        if let Some(name) = &keywords[index] {
+            // Evaluate a group of named operands following ** before checking duplicates.
+            if index > 0 && keywords[index - 1].is_none() {
+                self.group = Some(frame.op("dict", &[]));
+            }
+            ArgumentSlot::Keyword {
+                name,
+                last: keywords.get(index + 1).is_none_or(Option::is_none),
+            }
+        } else {
+            ArgumentSlot::Mapping {
+                mark: frame.temporary_mark(),
+                edge: frame.open_operand_unwind(),
+            }
+        }
+    }
+
+    pub(crate) fn insert(
+        &mut self,
+        frame: &mut RegisteredFrame<'_, '_>,
+        slot: ArgumentSlot<'_>,
+        value: &str,
+    ) {
+        match slot {
+            ArgumentSlot::Positional => {
+                frame.op("append", &[&self.positional, value]);
+            }
+            ArgumentSlot::Deferred => self.positional = value.to_owned(),
+            ArgumentSlot::Spread(mark) => {
+                frame.pack_operand("extend", &[&self.positional, value]);
+                frame.discard_truth(&mark);
+            }
+            ArgumentSlot::Keyword { name, last } => {
+                frame.named_op(
+                    "keyword",
+                    self.group.as_ref().unwrap_or(&self.keywords),
+                    name,
+                    value,
+                );
+                if last && let Some(group) = self.group.take() {
+                    self.merge(frame, &group);
+                }
+            }
+            ArgumentSlot::Mapping { mark, edge } => {
+                self.merge(frame, value);
+                frame.discard_truth(&mark);
+                frame.close_unwind(edge, |frame| frame.discard_truth(&mark));
+            }
+        }
+    }
+
+    fn merge(&self, frame: &mut RegisteredFrame<'_, '_>, value: &str) {
+        let (operation, callable) = self
+            .callable
+            .map_or(("class_keywords", "0"), |c| ("keywords", c));
+        frame.pack_operand(operation, &[&self.keywords, value, callable]);
+    }
+
+    pub(crate) fn finish(self, frame: &mut RegisteredFrame<'_, '_>) -> (String, String) {
+        let positional = if let Some(mark) = self.deferred {
+            let values = frame.pack_operand(
+                "spread_arguments",
+                &[&self.positional, self.callable.unwrap()],
+            );
+            frame.keep_operands(&mark, &values, &self.keywords);
+            values
+        } else {
+            self.positional
+        };
+        (positional, self.keywords)
+    }
+}
+
 /// Share operand ordering and unwind edges while each caller supplies its own operand emitter.
 pub(crate) trait FrameEmitter<'a, 'p>:
     std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>> + Sized
@@ -895,37 +1101,6 @@ pub(crate) trait FrameEmitter<'a, 'p>:
 
     fn unwind_operands<T>(&mut self, mark: &str, body: impl FnOnce(&mut Self) -> T) -> T {
         self.unwind_with(|f| f.discard_truth(mark), body)
-    }
-
-    fn insert_annotation(
-        &mut self,
-        index: Option<usize>,
-        name: &str,
-        evaluate: impl FnOnce(&mut Self) -> String,
-    ) {
-        let after = index.map(|index| {
-            let active = self.lookup("__conditional_annotations__");
-            let index = self.integer(index);
-            let present = self.op("in", &[&index, &active]);
-            let condition = self.truth(&present);
-            let yes = self.name("b");
-            let after = self.name("b");
-            self.branch(&condition, &yes, &after);
-            self.label(&yes);
-            after
-        });
-        let key = self.code_name(name);
-        let value = evaluate(self);
-        let values = self
-            .annotation_values
-            .as_ref()
-            .expect("annotation dictionary")
-            .clone();
-        self.op("put", &[&values, &key, &value]);
-        if let Some(after) = after {
-            self.jump(&after);
-            self.label(&after);
-        }
     }
 
     fn suspend_value(
@@ -1212,113 +1387,19 @@ pub(crate) trait FrameEmitter<'a, 'p>:
                 }
             }
             RegisteredArguments::Packed(pack) => self.unwind_operands(&mark, |f| {
-                let (args, kwargs) = f.argument_pack(pack, args, Some(&callable), &mut evaluate);
+                let mut values = ArgumentPack::new(f, pack, Some(&callable));
+                for (index, arg) in args.enumerate() {
+                    let slot = values.prepare(f, index);
+                    let value = evaluate(f, arg);
+                    values.insert(f, slot, &value);
+                }
+                let (args, kwargs) = values.finish(f);
                 CallArguments::Packed { args, kwargs }
             }),
         };
         let span = self.expression_range_span(call.range, callee_end, b'(');
         self.call_position(call.range);
         self.call_in_scope(&callable, operands, &mark, span, &scope)
-    }
-
-    /// Python calls convert a lone starred operand after the keywords. Class bases
-    /// and mixed positional operands are expanded before the following operand.
-    fn argument_pack<'e, T: 'e>(
-        &mut self,
-        layout: &ir::PackedArguments,
-        mut args: impl Iterator<Item = &'e T>,
-        callable: Option<&str>,
-        evaluate: &mut impl FnMut(&mut Self, &T) -> String,
-    ) -> (String, String) {
-        let (positional, deferred) =
-            if let Some(callee) = callable.filter(|_| layout.starred.as_slice() == [true]) {
-                let mark = self.temporary_mark();
-                let iterable = evaluate(self, args.next().expect("single starred operand"));
-                (iterable, Some((callee, mark)))
-            } else {
-                let values = self.op("list", &[]);
-                self.pack_positionals(
-                    &values,
-                    layout.starred.iter().copied().zip(&mut args),
-                    evaluate,
-                );
-                (values, None)
-            };
-        let kwargs = self.pack_keywords(
-            layout.keywords.iter().map(Option::as_deref).zip(args),
-            callable,
-            evaluate,
-        );
-        if let Some((callee, mark)) = deferred {
-            let values = self.pack_operand("spread_arguments", &[&positional, callee]);
-            self.keep_operands(&mark, &values, &kwargs);
-            (values, kwargs)
-        } else {
-            (positional, kwargs)
-        }
-    }
-
-    fn pack_positionals<'e, T: 'e>(
-        &mut self,
-        list: &str,
-        args: impl Iterator<Item = (bool, &'e T)>,
-        evaluate: &mut impl FnMut(&mut Self, &T) -> String,
-    ) {
-        for (starred, operand) in args {
-            if starred {
-                self.extend_operand(list, |f| evaluate(f, operand));
-            } else {
-                let value = evaluate(self, operand);
-                self.op("append", &[list, &value]);
-            }
-        }
-    }
-
-    /// Each explicit group after ** is evaluated before merging and checking for duplicates.
-    fn pack_keywords<'n, 'e, T: 'e>(
-        &mut self,
-        keywords: impl Iterator<Item = (Option<&'n str>, &'e T)>,
-        callable: Option<&str>,
-        evaluate: &mut impl FnMut(&mut Self, &T) -> String,
-    ) -> String {
-        let mut keywords = keywords.peekable();
-        if keywords.peek().is_none() {
-            return "0".into();
-        }
-        let (merge, callable) = match callable {
-            Some(callable) => ("keywords", callable),
-            None => ("class_keywords", "0"),
-        };
-        let kwargs = self.op("dict", &[]);
-        let mut unpacked = false;
-        while let Some((name, _)) = keywords.peek() {
-            if name.is_none() {
-                let (_, operand) = keywords.next().unwrap();
-                let mark = self.temporary_mark();
-                self.unwind_operands(&mark, |f| {
-                    let value = evaluate(f, operand);
-                    f.pack_operand(merge, &[&kwargs, &value, callable]);
-                    // The merged dictionary now owns the keyword values.
-                    f.discard_truth(&mark);
-                });
-                unpacked = true;
-            } else {
-                let group = if unpacked {
-                    self.op("dict", &[])
-                } else {
-                    kwargs.clone()
-                };
-                while let Some((Some(name), operand)) = keywords.next_if(|(name, _)| name.is_some())
-                {
-                    let value = evaluate(self, operand);
-                    self.named_op("keyword", &group, name, &value);
-                }
-                if unpacked {
-                    self.pack_operand(merge, &[&kwargs, &group, callable]);
-                }
-            }
-        }
-        kwargs
     }
 
     /// Execute a descriptor operation at the original target, using the same live receiver
@@ -1394,14 +1475,6 @@ pub(crate) trait FrameEmitter<'a, 'p>:
             code.write_attribute(&receiver, name, range, Some(value));
             code.discard_truth(&mark);
         });
-    }
-
-    fn extend_operand(&mut self, target: &str, evaluate: impl FnOnce(&mut Self) -> String) {
-        let mark = self.temporary_mark();
-        let value = evaluate(self);
-        self.pack_operand("extend", &[target, &value]);
-        // The target owns the expanded items. Drop the iterable before the next operand.
-        self.discard_truth(&mark);
     }
 
     fn unwind_with<T>(
@@ -1706,6 +1779,26 @@ impl RegisteredFrame<'_, '_> {
         } else {
             (self.named_op("method", receiver, name, "0"), None)
         }
+    }
+
+    pub(super) fn open_operand_unwind(&mut self) -> (String, String) {
+        let failed = self.name("b");
+        let outer = std::mem::replace(&mut self.body.error_target, failed.clone());
+        (failed, outer)
+    }
+
+    pub(super) fn close_unwind(
+        &mut self,
+        (failed, outer): (String, String),
+        release: impl FnOnce(&mut Self),
+    ) {
+        let ready = self.name("b");
+        self.jump(&ready);
+        self.label(&failed);
+        release(self);
+        self.jump(&outer);
+        self.label(&ready);
+        self.body.error_target = outer;
     }
 
     pub(crate) fn pack_operand(&mut self, operation: &str, args: &[&str]) -> String {

@@ -24,6 +24,22 @@ pub(crate) enum PreparedAnnotation<R> {
     Value(Expr),
 }
 
+impl<R> PreparedAnnotation<R> {
+    pub(super) fn operand(&self, site: TextSize) -> Expr {
+        match self {
+            Self::Value(value) => value.clone(),
+            Self::String { text, body } => Expr {
+                ty: Type::Str,
+                kind: if body.is_some() {
+                    ExprKind::Builtin(Builtin::BindAnnotationExpression(site), Vec::new())
+                } else {
+                    ExprKind::Str(text.clone())
+                },
+            },
+        }
+    }
+}
+
 pub(crate) struct AnnotationBody<R> {
     pub(crate) code: AnnotationCode,
     pub(crate) scope: R,

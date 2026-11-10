@@ -596,6 +596,7 @@ pub(super) fn operation<E>(
     node: &ast::Expr,
     source: RegisteredSource<'_>,
     local: Option<Expr>,
+    class_namespace: bool,
     dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
     mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
 ) -> StdResult<Option<Expr>, E> {
@@ -631,7 +632,7 @@ pub(super) fn operation<E>(
             return Ok(None);
         }
         let target = child(selected.target)?;
-        if target.ty != Type::PythonObject {
+        if target.ty != Type::PythonObject && !class_namespace {
             return Ok(None);
         }
         let mut operands = vec![target];
@@ -816,6 +817,7 @@ impl Region {
                 node,
                 source,
                 None,
+                false,
                 |_| true,
                 |child| self.operand(child, source).ok_or(()),
             )
@@ -1021,6 +1023,7 @@ impl Checker<'_> {
             node,
             source,
             local,
+            false,
             |receiver| graph.session.is_dynamic_receiver(owner, receiver),
             |child| self.expr(child),
         )?

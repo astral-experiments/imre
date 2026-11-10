@@ -1,11 +1,12 @@
 //! Lexical bindings and code-object metadata for prepared Python functions.
 
 mod annotations;
+pub(crate) use annotations::ClassAnnotations;
 mod class_metadata;
 pub(crate) mod classes;
 mod type_parameters;
 
-pub(crate) use type_parameters::check_nonlocals;
+pub(crate) use type_parameters::{boxed_function_type_params, check_nonlocals};
 
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
@@ -352,6 +353,7 @@ impl FunctionScope {
 
 #[derive(Default)]
 pub(crate) struct ScopeFacts {
+    pub(crate) module_annotations: bool,
     pub(crate) functions: HashMap<TextSize, FunctionScope>,
     pub(crate) lambdas: HashMap<TextSize, FunctionScope>,
     pub(crate) aliases: HashMap<TextSize, FunctionScope>,
@@ -385,7 +387,7 @@ impl ScopeFacts {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Scope {
     Module,
-    Class,
+    Class(TextSize),
     Function,
 }
 
@@ -414,17 +416,17 @@ impl<'a, A: FnMut(&ast::StmtTypeAlias), E: FnMut(&ast::Expr)> Visitor<'a> for Co
                 self.scope = Scope::Function;
             }
             ast::Stmt::ClassDef(class) => {
-                self.scopes.classes.insert(
-                    class
-                        .decorator_list
-                        .first()
-                        .map_or(class.start(), Ranged::start),
-                    classes::ClassScope::prepare(class, self.names),
-                );
-                self.scope = Scope::Class;
+                let start = class
+                    .decorator_list
+                    .first()
+                    .map_or(class.start(), Ranged::start);
+                self.scopes
+                    .classes
+                    .insert(start, classes::ClassScope::prepare(class, self.names));
+                self.scope = Scope::Class(start);
             }
             ast::Stmt::TypeAlias(alias) => {
-                if self.scope != Scope::Class {
+                if !matches!(self.scope, Scope::Class(_)) {
                     (self.alias_site)(alias);
                 }
                 let mut names = ClosureNames {
@@ -442,12 +444,28 @@ impl<'a, A: FnMut(&ast::StmtTypeAlias), E: FnMut(&ast::Expr)> Visitor<'a> for Co
                     .module_globals
                     .extend(global.names.iter().map(ToString::to_string));
             }
-            ast::Stmt::AnnAssign(assign) if self.scope == Scope::Class && !strings => {
-                self.scopes.annotations.assignment(assign)
-            }
+            ast::Stmt::AnnAssign(assign) => match self.scope {
+                Scope::Module => self.scopes.module_annotations = true,
+                Scope::Class(site) if !strings => {
+                    self.scopes.annotations.assignment(assign);
+                    self.scopes
+                        .classes
+                        .get_mut(&site)
+                        .unwrap()
+                        .annotations
+                        .observe(assign);
+                }
+                _ => {}
+            },
             _ => {}
         }
         visitor::walk_stmt(self, stmt);
+        if let (ast::Stmt::ClassDef(class), Scope::Class(start)) = (stmt, self.scope) {
+            let scope = self.scopes.classes.get_mut(&start).unwrap();
+            scope
+                .annotations
+                .finish(class, &self.scopes.annotations, &scope.bindings);
+        }
         self.scope = parent;
     }
 

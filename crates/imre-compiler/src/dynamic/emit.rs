@@ -462,7 +462,16 @@ impl<'a> PreparedBody<'a> {
             templates: Some(&strings.templates),
             ..values
         };
-        let sites = crate::frontend::registered_sites(&body, &private_names);
+        let mut namespace_annotations = HashMap::new();
+        let annotation_operands = crate::frontend::annotation_operands(
+            &body,
+            private_names.string_annotations,
+            values,
+            bundled,
+            |text, parsed| Self::prepare_annotation(text, parsed, python_optimization).ok(),
+            &mut namespace_annotations,
+        );
+        let sites = crate::frontend::registered_sites(&body, &private_names, &annotation_operands);
         let mut operations = sites.operations;
         let mut type_aliases = HashMap::new();
         let mut logicals = crate::frontend::LogicalSites::default();
@@ -500,21 +509,6 @@ impl<'a> PreparedBody<'a> {
             lambdas: Some(&lambdas),
             ..values
         };
-        let mut namespace_annotations = HashMap::new();
-        let annotation_operands = crate::frontend::annotation_operands(
-            &body,
-            private_names.string_annotations,
-            values,
-            bundled,
-            |text, parsed| Self::prepare_annotation(text, parsed, python_optimization).ok(),
-            &mut namespace_annotations,
-        );
-        let module_annotations = crate::frontend::module_annotations(
-            &body,
-            private_names.string_annotations,
-            &mut operations,
-            &annotation_operands,
-        );
         let mut prepare = crate::frontend::SuitePreparation::new(
             &operations,
             values,
@@ -524,16 +518,13 @@ impl<'a> PreparedBody<'a> {
         let initializer =
             (!expression).then(|| prepare.suite(&body, crate::frontend::RegisteredScope::Module));
         let mut function_bodies = HashMap::new();
-        let mut class_bodies = HashMap::new();
-        let prepare_classes = !bundled
-            || initializer
-                .as_ref()
-                .is_some_and(|body| body.fully_checked());
+        let class_bodies = prepare.class_suites(&sites.classes);
         if !expression {
             for (start, site) in definition_sites(&body) {
                 match site {
                     DefinitionSite::Function(def)
-                        if def.type_params.is_none()
+                        if (def.type_params.is_none()
+                            || operations.contains_key(&def.name.range()))
                             && !program_bodies.is_some_and(|sites| sites.contains_key(&start)) =>
                     {
                         let kind = crate::frontend::RegisteredScope::Function {
@@ -546,13 +537,6 @@ impl<'a> PreparedBody<'a> {
                             }
                         } else {
                             function_bodies.insert(start, prepare.suite(&def.body, kind));
-                        }
-                    }
-                    DefinitionSite::Class(class) if prepare_classes => {
-                        if let Some(first) = class.body.first()
-                            && let Some(suite) = prepare.class_body(class)
-                        {
-                            class_bodies.insert(first.start(), suite);
                         }
                     }
                     _ => {}
@@ -599,7 +583,7 @@ impl<'a> PreparedBody<'a> {
             lambdas,
             namespace_operations: operations,
             type_aliases,
-            module_annotations,
+            annotations: sites.annotations,
             function_bodies,
             class_bodies,
             initializer,
@@ -737,11 +721,11 @@ enum Body<'a> {
     Statements(&'a [ast::Stmt]),
     /// A suspended suite and its generator, coroutine, or async generator code flag.
     GeneratorFunction(&'a [ast::Stmt], u32),
-    ModuleAnnotations(
+    NamespaceAnnotations(
         &'a crate::frontend::RegisteredSuite,
-        &'a [&'a crate::frontend::DeferredModuleAnnotation],
+        &'a [crate::ir::AnnotationOccurrence],
+        Option<&'a BTreeSet<String>>,
     ),
-    ClassAnnotations(Vec<statements::class_annotations::Site>, BTreeSet<String>),
     Annotations(
         Vec<(&'a str, &'a ast::Expr)>,
         Option<crate::frontend::function_scope::ClassBindings>,
@@ -849,8 +833,7 @@ struct SourceInfo<'a> {
     statement_sites: crate::frontend::StatementSites,
     checked_deletions: HashMap<ruff_text_size::TextRange, crate::frontend::RegisteredFunction>,
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
-    module_annotations:
-        HashMap<ruff_text_size::TextSize, crate::frontend::DeferredModuleAnnotation>,
+    annotations: HashMap<ruff_text_size::TextSize, crate::frontend::DeferredAnnotation>,
     nested_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
     function_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
     class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
@@ -982,12 +965,16 @@ impl SourceMap<'_> {
                     .clone(),
             );
         }
+        if let Body::NamespaceAnnotations(_, entries, Some(globals)) = &body {
+            frame.annotation_class = Some((
+                (*globals).clone(),
+                entries.iter().any(|entry| entry.index.is_some()),
+            ));
+        }
         let module = matches!(body, Body::Namespace(..)) && prefix.is_empty();
         let prepared = match body {
             Body::Namespace(..) if module => self.initializer.as_ref(),
-            Body::Namespace(stmts) => stmts
-                .first()
-                .and_then(|stmt| self.class_bodies.get(&stmt.start())),
+            Body::Namespace(_) => Some(&self.class_bodies[&start.expect("class definition")]),
             Body::Statements(_) | Body::GeneratorFunction(..) => {
                 start.and_then(|key| self.function_bodies.get(&key))
             }
@@ -998,7 +985,6 @@ impl SourceMap<'_> {
             prepare_nested_suites: prepared.is_some_and(|plan| !plan.fully_checked()),
             frame,
             source: self,
-            class_sites: None,
             in_function,
             module,
             declared_globals: Default::default(),
@@ -1010,16 +996,6 @@ impl SourceMap<'_> {
             Body::Annotations(entries, _) => {
                 for (_, expression) in entries {
                     f.place_annotation_string(expression.start());
-                }
-            }
-            Body::ClassAnnotations(entries, _) => {
-                for entry in entries {
-                    f.place_annotation_string(entry.expression.start());
-                }
-            }
-            Body::ModuleAnnotations(_, entries) => {
-                for entry in *entries {
-                    f.place_annotation_string(entry.site);
                 }
             }
             Body::Namespace(_) => {
@@ -1043,7 +1019,7 @@ impl SourceMap<'_> {
             Body::Namespace(stmts)
             | Body::Statements(stmts)
             | Body::GeneratorFunction(stmts, _) => {
-                if module && imre_ast::annotations::has_variable_annotation(stmts) {
+                if module && self.scopes.module_annotations {
                     if self.string_annotations {
                         f.frame
                             .op("setup_module_string_annotations", &[&f.scope.clone()]);
@@ -1073,10 +1049,12 @@ impl SourceMap<'_> {
                 f.declare_globals(globals);
                 if let Some(prepared) = prepared {
                     f.prepared_function(prepared, |code, run| code.source_statements(&stmts[run]));
-                } else if f.class_locals.is_some() && !self.string_annotations {
-                    f.annotated_class_body(stmts);
                 } else {
                     f.statements(stmts);
+                }
+                if matches!(body, Body::Namespace(_)) && !module {
+                    let class = &self.scopes.classes[&start.expect("class definition")];
+                    f.finish_class_annotations(&class.annotations, &class.bindings.globals);
                 }
                 if let Some(sites) = f.module_annotation_sites.take() {
                     f.end("ret i64 0");
@@ -1086,12 +1064,11 @@ impl SourceMap<'_> {
                 }
             }
             Body::ClassParameters(class) => f.parameterized_class(class),
-            Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
             Body::Annotations(entries, class) => f.annotations(&entries, class),
-            Body::ModuleAnnotations(plan, entries) => {
+            Body::NamespaceAnnotations(plan, entries, _) => {
                 f.prepared_function(plan, |code, run| {
                     for index in run {
-                        code.unprepared_annotation(index, entries[index]);
+                        code.unprepared_annotation(entries[index]);
                     }
                 });
             }
@@ -1126,7 +1103,6 @@ struct Function<'a, 'p> {
     declared_globals: std::collections::BTreeSet<String>,
     in_function: bool,
     module: bool,
-    class_sites: Option<statements::class_annotations::ClassSites>,
     loops: Vec<LoopTarget>,
     exits: Vec<(Cleanup, String)>,
 }
@@ -1201,6 +1177,34 @@ impl Function<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundled_generic_method_uses_the_prepared_class_suite() {
+        let source = include_str!("../../stdlib/typing.py");
+        let module = PreparedBody::module(
+            "typing",
+            Path::new("<imre stdlib>/typing.py"),
+            source,
+            0,
+            ModuleOrigin::Bundled,
+        )
+        .unwrap();
+        let class = source.find("class _IdentityCallable(Protocol):").unwrap();
+        let method = class + source[class..].find("def __call__[T]").unwrap();
+        let start = |offset: usize| ruff_text_size::TextSize::try_from(offset).unwrap();
+        let body = &module.source.class_bodies[&start(class)];
+        assert!(body.fully_checked());
+        let mut bindings = Vec::new();
+        crate::ir::walk_expressions(&body.checked.function.body, &mut |value| {
+            if let crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredDefinition(site), _) =
+                &value.kind
+            {
+                bindings.push(site.start());
+            }
+        });
+        assert_eq!(bindings, [start(method)]);
+        assert!(module.source.function_bodies.contains_key(&start(method)));
+    }
 
     #[test]
     fn prepared_format_literals_emit_without_lexical_replacements() {

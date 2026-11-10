@@ -194,35 +194,41 @@ impl Function<'_, '_> {
             }
             return;
         }
-        if let ExprKind::Builtin(
-            Builtin::RegisteredModuleAnnotation(ir::ModuleAnnotation::String { site, .. })
-            | Builtin::BindAnnotationExpression(site),
-            _,
-        ) = &expression.kind
-        {
+        if let ExprKind::Builtin(Builtin::BindAnnotationExpression(site), _) = &expression.kind {
             self.place_annotation_string(*site);
+            return;
+        }
+        if let ExprKind::Builtin(Builtin::RegisteredAnnotationInsert(occurrence), _) =
+            &expression.kind
+        {
+            let decl = &self.source.annotations[&occurrence.site];
+            self.sites
+                .annotation_fields
+                .entry(occurrence.site)
+                .or_insert_with(|| (decl.name.clone(), decl.range));
             return;
         }
         let ExprKind::Builtin(Builtin::RegisteredDefinition(site), _) = &expression.kind else {
             return;
         };
-        if !self.sites.definitions.contains_key(site) {
-            let syntax = self.source.definitions.as_ref().expect("registered scope")[site];
-            let (definition, decorators, class) = match syntax {
-                DefinitionSite::Function(def) => (
-                    self.compile_definition(
+        let start = site.start();
+        if !self.sites.definitions.contains_key(&start) {
+            let syntax = self.source.definitions.as_ref().expect("registered scope")[&start];
+            let (definition, decorators, type_params) = match syntax {
+                DefinitionSite::Function(def) => {
+                    let params = self.method_type_parameters(def);
+                    let definition = self.compile_definition(
                         def.decorator_list
                             .first()
                             .map_or(def.start(), Ranged::start),
                         DefinitionName::Binding(&def.name),
                         Some(&def.parameters),
                         Some(def),
-                        None,
+                        params,
                         Body::function(def),
-                    ),
-                    &def.decorator_list,
-                    false,
-                ),
+                    );
+                    (definition, &def.decorator_list, params)
+                }
                 DefinitionSite::Class(def) => (
                     self.compile_definition(
                         def.decorator_list
@@ -235,7 +241,7 @@ impl Function<'_, '_> {
                         Body::Namespace(&def.body),
                     ),
                     &def.decorator_list,
-                    true,
+                    None,
                 ),
             };
             let decorator_lines = decorators
@@ -245,9 +251,11 @@ impl Function<'_, '_> {
             let declaration = Declaration {
                 definition,
                 decorator_lines,
-                class,
+                type_params: type_params.map_or_else(Vec::new, |params| {
+                    crate::frontend::registered_type_parameters(params, &self.source.private_names)
+                }),
             };
-            self.sites.definitions.insert(*site, declaration);
+            self.sites.definitions.insert(start, declaration);
         }
     }
 }

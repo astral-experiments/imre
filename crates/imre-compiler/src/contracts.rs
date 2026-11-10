@@ -679,10 +679,10 @@ impl Builtin {
             | Self::RegisteredImport(_)
             | Self::RegisteredSuspend(..)
             | Self::RegisteredAssertionFailure { .. }
-            | Self::RegisteredModuleAnnotation(_)
+            | Self::RegisteredNamespaceAnnotation(_)
             | Self::RegisteredAnnotationStart
             | Self::RegisteredAnnotationFormat
-            | Self::RegisteredAnnotationInsert { .. }
+            | Self::RegisteredAnnotationInsert(_)
             | Self::BindAnnotationExpression(_)
             | Self::RegisteredAnnotationResult
             | Self::RegisteredDeleteName(..)

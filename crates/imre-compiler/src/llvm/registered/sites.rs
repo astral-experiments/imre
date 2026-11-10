@@ -1,9 +1,9 @@
 //! Compiled code identities and operands for declarations in a registered frame.
-use ruff_text_size::TextSize;
+use ruff_text_size::{TextRange, TextSize};
 use std::collections::HashMap;
 
 use super::RegisteredFrame;
-use crate::ir::{ModuleAnnotation, RegisteredTypeParameter, TypeParameterKind};
+use crate::ir::{DefinitionSite, RegisteredTypeParameter, TypeParameterKind};
 
 /// The body's identity is compiled once. Defaults, decorators and the defining scope
 /// are the current activation's handles each time the declaration executes.
@@ -138,11 +138,9 @@ impl CompiledAlias {
 pub(crate) struct Declaration {
     pub(crate) definition: CompiledDefinition,
     pub(crate) decorator_lines: Vec<usize>,
-    pub(crate) class: bool,
+    pub(crate) type_params: Vec<RegisteredTypeParameter>,
 }
 
-/// Only compiled identities, physical decorator positions, and literal operands cross
-/// from source preparation to the ordinary frame.
 pub(crate) struct AnnotationString {
     pub(crate) text: String,
     pub(crate) code: Option<String>,
@@ -154,6 +152,7 @@ pub(crate) struct CheckedSites {
     pub(crate) definitions: HashMap<TextSize, Declaration>,
     pub(crate) lambdas: HashMap<TextSize, CompiledDefinition>,
     pub(crate) aliases: HashMap<TextSize, CompiledAlias>,
+    pub(crate) annotation_fields: HashMap<TextSize, (String, TextRange)>,
 }
 
 impl CheckedSites {
@@ -183,26 +182,45 @@ impl CheckedSites {
     pub(crate) fn definition(
         &self,
         frame: &mut RegisteredFrame<'_, '_>,
-        site: TextSize,
+        site: &DefinitionSite,
         header: &[String],
+        class_arguments: Option<(String, String)>,
     ) -> String {
         let Declaration {
             definition,
             decorator_lines,
-            class,
-        } = &self.definitions[&site];
+            type_params,
+        } = &self.definitions[&site.start()];
         let (decorators, defaults) = header.split_at(decorator_lines.len());
-        let bases = class.then(|| frame.op("list", &[]));
-        let scope = frame.scope.clone();
+        let mut scope = frame.scope.clone();
+        if !type_params.is_empty() {
+            scope = frame.checked_parameter_scope(&scope, type_params, false);
+        }
         let mut value = definition.bind_defaults(frame, &scope, defaults);
-        if let Some(bases) = bases {
-            value = frame.op("class", &["0", &bases, &value]);
+        if !type_params.is_empty() {
+            frame.publish_type_parameters(&scope, &value);
+        }
+        if let Some((bases, kwargs)) = class_arguments {
+            value = frame.op("class", &[&kwargs, &bases, &value]);
         }
         frame.decorate(decorators, decorator_lines.iter().copied(), value)
     }
 }
 
 impl RegisteredFrame<'_, '_> {
+    pub(crate) fn mark_annotation(&mut self, site: TextSize, name: &str) {
+        let key = self.code_name(name);
+        if let Some(sites) = &mut self.module_annotation_sites {
+            let index = sites.len();
+            sites.push(site);
+            let index = self.integer(index);
+            self.op("mark_module_annotation", &[&self.scope.clone(), &index]);
+        } else {
+            let offset = site.to_u32();
+            self.checked(&format!("call i64 @imre_dyn_mark_class_annotation(ptr %ctx, i64 {}, i64 {key}, i32 {offset})", self.scope));
+        }
+    }
+
     pub(crate) fn checked_parameter_scope(
         &mut self,
         outer: &str,
@@ -232,30 +250,11 @@ impl RegisteredFrame<'_, '_> {
         self.op(op, &[outer, &names])
     }
 
-    pub(crate) fn module_annotation(
-        &mut self,
-        annotation: &ModuleAnnotation,
-        checked: &CheckedSites,
-    ) {
-        match annotation {
-            ModuleAnnotation::Deferred { site, name } => {
-                self.code_name(name);
-                let sites = self
-                    .module_annotation_sites
-                    .as_mut()
-                    .expect("module annotation provider");
-                // A finally suite can emit the same declaration on several independent paths.
-                let index = sites.len();
-                sites.push(*site);
-                let index = self.integer(index);
-                self.op("mark_module_annotation", &[&self.scope.clone(), &index]);
-            }
-            ModuleAnnotation::String { name, site } => {
-                let name = self.code_name(name);
-                let value = checked.annotation_string(self, *site);
-                self.op("annotate", &[&self.scope.clone(), &name, &value]);
-            }
-        }
+    pub(crate) fn publish_type_parameters(&mut self, scope: &str, function: &str) {
+        let key = self.code_name(".type_params");
+        let params = self.op("lookup", &[scope, &key]);
+        let key = self.code_name("__type_params__");
+        self.op("setattr", &[function, &key, &params]);
     }
 
     pub(crate) fn decorate(

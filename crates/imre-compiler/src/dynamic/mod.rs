@@ -536,75 +536,12 @@ pub(crate) fn function_type_params<'a>(
     if nested && !string_annotations {
         return None;
     }
-    boxed_function_type_params(function, string_annotations, nested, private_names)
-}
-
-/// A synchronous boxed function with one body scope can capture its unbounded type parameters.
-fn boxed_function_type_params<'a>(
-    function: &'a ast::StmtFunctionDef,
-    string_annotations: bool,
-    nested: bool,
-    private_names: Option<&imre_ast::Names>,
-) -> Option<&'a ast::TypeParams> {
-    use ast::AnyNodeRef::*;
-    use ast::visitor::source_order::{SourceOrderVisitor, TraversalSignal};
-
-    let params = function.type_params.as_deref()?;
-    let mut names = HashSet::new();
-    if function.is_async
-        || !params.iter().all(|p| {
-            let name = private_names.map_or(p.name().as_str(), |names| names.definition(p.name()));
-            p.default().is_none()
-                && match p {
-                    ast::TypeParam::TypeVar(v) => v.bound.is_none(),
-                    ast::TypeParam::TypeVarTuple(_) | ast::TypeParam::ParamSpec(_) => {
-                        string_annotations
-                    }
-                }
-                && !matches!(name, "__classdict__" | "__debug__")
-                && (!nested || !name.starts_with("__"))
-                && names.insert(p.name().as_str())
-        })
-    {
-        return None;
-    }
-
-    struct BodyScope {
-        nested: bool,
-        unsupported: bool,
-    }
-    impl<'a> SourceOrderVisitor<'a> for BodyScope {
-        fn enter_node(&mut self, node: ast::AnyNodeRef<'a>) -> TraversalSignal {
-            self.unsupported |= matches!(
-                node,
-                StmtFunctionDef(_)
-                    | StmtClassDef(_)
-                    | StmtTypeAlias(_)
-                    | StmtNonlocal(_)
-                    | ExprLambda(_)
-                    | ExprGenerator(_)
-                    | ExprListComp(_)
-                    | ExprSetComp(_)
-                    | ExprDictComp(_)
-                    | ExprYield(_)
-                    | ExprYieldFrom(_)
-            );
-            // Nested declarations with a class cell need a different capture path.
-            self.unsupported |= self.nested
-                && matches!(node, ExprName(n) if matches!(n.id.as_str(), "__class__" | "super"));
-            if self.unsupported {
-                TraversalSignal::Skip
-            } else {
-                TraversalSignal::Traverse
-            }
-        }
-    }
-    let mut body = BodyScope {
+    crate::frontend::function_scope::boxed_function_type_params(
+        function,
+        string_annotations,
         nested,
-        unsupported: false,
-    };
-    body.visit_body(&function.body);
-    (!body.unsupported).then_some(params)
+        private_names,
+    )
 }
 
 enum ImportSource<'a> {
