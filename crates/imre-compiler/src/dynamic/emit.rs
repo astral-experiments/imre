@@ -1337,7 +1337,7 @@ mod tests {
         let mut suites =
             SuitePreparation::new(&prepared.source.namespace_operations, source, body, true);
         let initializer = suites.suite(body, RegisteredScope::Module);
-        let class_bodies = suites.class_suites(&classes);
+        let class_bodies = suites.class_suites(classes);
         let (sites, nested) = (suites.sites, suites.nested);
         prepared.source.initializer = Some(initializer);
         prepared.source.class_bodies = class_bodies;
@@ -2830,7 +2830,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        assert!(prepared.source.class_bodies.values().all(|suite| suite.fully_checked()));
+        assert!(prepared.source.class_bodies.values().all(|class| class.body.fully_checked()));
         inject_residual_child_module(&mut prepared);
         let outer = prepared.syntax.as_ref().unwrap()[0]
             .as_function_def_stmt()
