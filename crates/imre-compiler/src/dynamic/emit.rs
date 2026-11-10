@@ -2222,7 +2222,7 @@ mod tests {
     }
 
     #[test]
-    fn checked_with_owns_its_single_yielding_target() {
+    fn checked_with_owns_single_and_grouped_yielding_targets() {
         let source = concat!(
             "def receive(cm, sink):\n",
             "    with cm as sink[(yield 'key')]:\n",
@@ -2241,21 +2241,16 @@ mod tests {
         .unwrap();
         let original = prepared.standalone().unwrap().unwrap();
         let syntax = prepared.syntax.as_mut().unwrap().to_mut();
-        let unpack = syntax[1].as_function_def_stmt().unwrap();
-        assert!(
-            !prepared.source.function_bodies[&unpack.start()]
-                .suite()
-                .unwrap()
-                .fully_checked()
-        );
-        let receive = syntax[0].as_function_def_stmt_mut().unwrap();
-        assert!(
-            prepared.source.function_bodies[&receive.start()]
-                .suite()
-                .unwrap()
-                .fully_checked()
-        );
-        receive.body.clear();
+        for statement in syntax {
+            let function = statement.as_function_def_stmt_mut().unwrap();
+            assert!(
+                prepared.source.function_bodies[&function.start()]
+                    .suite()
+                    .unwrap()
+                    .fully_checked()
+            );
+            function.body.clear();
+        }
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
     }
 
@@ -4741,7 +4736,6 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             "\n",
             r#"    a = table[(saved := 17 if ok else t"{(*x for x in xs)=}")] = 41"#,
             "\n    return earlier, first, saved, rest, a\n",
-            // Retain the module syntax so the assignment targets can be withdrawn.
             "state: int = 0\n",
         );
         let mut prepared = PreparedBody::module(
@@ -4753,9 +4747,12 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         )
         .unwrap();
         let before = prepared.standalone().unwrap().unwrap();
-        let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
-            .as_function_def_stmt_mut()
-            .unwrap();
+        assert!(prepared.syntax.is_none());
+        let mut syntax = ruff_python_parser::parse_module(source)
+            .unwrap()
+            .into_syntax()
+            .body;
+        let def = syntax[0].as_function_def_stmt_mut().unwrap();
         assert!(
             prepared.source.function_bodies[&def.start()]
                 .suite()
@@ -4765,6 +4762,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         for assignment in &mut def.body[..2] {
             assignment.as_assign_stmt_mut().unwrap().targets.clear();
         }
+        prepared.syntax = Some(Cow::Owned(syntax));
         assert_eq!(prepared.standalone().unwrap().unwrap(), before);
     }
 
