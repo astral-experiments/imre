@@ -1377,7 +1377,7 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let before = prepared.standalone().unwrap().unwrap();
+        let before = prepared.standalone().unwrap();
         let field = prepared
             .source
             .annotations
@@ -1393,7 +1393,7 @@ mod tests {
         };
         crate::verify::registered(input.region()).unwrap();
         **unpack = crate::ir::Expr::local(0, crate::ir::Type::PythonObject);
-        assert_ne!(prepared.standalone().unwrap().unwrap(), before);
+        assert_ne!(prepared.standalone().unwrap(), before);
     }
 
     #[test]
