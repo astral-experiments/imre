@@ -1513,7 +1513,7 @@ struct SourceScope<'a> {
     comprehension: Option<eager::Namespace>,
     locals: Vec<Type>,
     loop_scope: LoopScope,
-    in_format: bool,
+    suspending_operands: bool,
 }
 
 /// Prepare an inline expression that can require private slots in the enclosing activation.
@@ -1588,7 +1588,7 @@ impl<'a> SourceScope<'a> {
             comprehension: None,
             locals: Vec::new(),
             loop_scope: LoopScope::Outside,
-            in_format: false,
+            suspending_operands: false,
         }
     }
 
@@ -1882,16 +1882,24 @@ impl SourceScope<'_> {
         self.lower_operand(expr, true)
     }
 
+    fn with_suspending_operands<T>(&mut self, lower: impl FnOnce(&mut Self) -> T) -> T {
+        let previous = std::mem::replace(&mut self.suspending_operands, true);
+        let value = lower(self);
+        self.suspending_operands = previous;
+        value
+    }
+
     fn ordinary_operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
         self.lower_operand(expr, false)
     }
 
     fn lower_operand(&mut self, expr: &ast::Expr, whole: bool) -> Option<Expr> {
-        let mut value = if whole
+        let mut value = if (whole || self.suspending_operands)
             && let RegisteredScope::Function { is_async } = self.kind
             && let Some((kind, value)) = ir::SuspendValue::operand(expr)
             // A plain generator keeps its live iterator in a private frame slot.
-            && (self.loop_scope != LoopScope::WithCursor
+            && (self.suspending_operands
+                || self.loop_scope != LoopScope::WithCursor
                 || matches!((kind, is_async), (ir::SuspendValue::Yield, false)))
             && !matches!(
                 (kind, is_async),
@@ -1906,22 +1914,12 @@ impl SourceScope<'_> {
                 |child| self.ordinary_operand(child),
             )?
         } else if let ast::Expr::FString(formatted) = expr {
-            let previous = std::mem::replace(&mut self.in_format, true);
-            let value = fstrings::registered_fstring(formatted, self.source, |child| {
-                self.ordinary_operand(child).ok_or(())
-            });
-            self.in_format = previous;
-            value.ok()?
-        } else if self.in_format && let Some((kind, child)) = ir::SuspendValue::operand(expr) {
-            let child = match child {
-                Some(child) => self.ordinary_operand(child)?,
-                None => Expr::none(),
-            };
-            operation(
-                Builtin::RegisteredSuspend(kind, expr.range()),
-                Type::PythonObject,
-                vec![child],
-            )
+            self.with_suspending_operands(|scope| {
+                fstrings::registered_fstring(formatted, scope.source, |child| {
+                    scope.ordinary_operand(child).ok_or(())
+                })
+            })
+            .ok()?
         } else if matches!(expr, ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_)) {
             self.eager_comprehension(expr)?
         } else if self.comprehension.is_some()
@@ -2627,6 +2625,22 @@ mod tests {
         let operand = prepare(true).unwrap();
         crate::verify::registered(operand.region()).unwrap();
         assert!(operand.local_names.values().any(|binding| binding.name == "saved"));
+    }
+
+    #[test]
+    fn eager_first_iterable_can_delegate_before_the_cursor_exists() {
+        let text = "def gather():\n    return [value for value in ((yield from rows) or ())]\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let function = module.parsed.syntax().body[0].as_function_def_stmt().unwrap();
+        let expr = function.body[0].as_return_stmt().unwrap().value.as_deref().unwrap();
+        let literals = values::ModuleSource::new(module);
+        let source = literals.context(text);
+        let value = inline_operand(expr, source, RegisteredScope::Function { is_async: false })
+            .expect("the creating generator owns the outer yield");
+        crate::verify::registered(value.region()).unwrap();
+        assert!(inline_operand(expr, source, RegisteredScope::Module).is_none());
+        assert!(inline_operand(expr, source, RegisteredScope::Function { is_async: true }).is_none());
     }
 
     #[test]
