@@ -850,7 +850,6 @@ enum Body<'a> {
         ruff_text_size::TextRange,
         &'a crate::frontend::RegisteredOperand,
     ),
-    Expression(&'a ast::Expr),
     AliasEvaluator(AliasValue<'a>),
     CheckedGenerator(TextRange, &'a crate::frontend::RegisteredGenerator),
 }
@@ -1199,11 +1198,6 @@ impl SourceMap<'_> {
                 f.checkpoint(expr);
                 let format = f.lookup(".format");
                 f.op("annotation_format", &[&format]);
-                let value = f.expr(expr);
-                f.return_value(&value);
-            }
-            Body::Expression(expr) => {
-                f.checkpoint(expr);
                 let value = f.expr(expr);
                 f.return_value(&value);
             }

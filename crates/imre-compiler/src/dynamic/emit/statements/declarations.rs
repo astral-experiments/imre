@@ -68,7 +68,7 @@ impl Function<'_, '_> {
     pub(in crate::dynamic::emit) fn place_lambda(
         &mut self,
         site: TextSize,
-        body: Body<'_>,
+        body: &crate::frontend::RegisteredFunction,
         comprehension: bool,
     ) {
         if self.sites.lambdas.contains_key(&site) {
@@ -82,7 +82,7 @@ impl Function<'_, '_> {
             let code = self.source.definition(
                 self.frame.output,
                 format!("{qualname}.<locals>."),
-                body,
+                Body::CheckedExpression(body),
                 site,
                 true,
                 entry,
@@ -178,7 +178,7 @@ impl Function<'_, '_> {
             }
             RequiredSite::Lambda(site, scoped) => {
                 let body = self.source.lambdas[&site].body.as_ref().expect("checked lambda body");
-                self.place_lambda(site, Body::CheckedExpression(body), scoped);
+                self.place_lambda(site, body, scoped);
                 return;
             }
             RequiredSite::AnnotationString(site) => {
