@@ -984,12 +984,14 @@ impl Session {
         !self.tuple_spreads[module].is_empty()
     }
 
-    fn write_file(&self, path: &str, source: &str) -> Result<File, String> {
+    fn write_file(&mut self, path: &str, source: &str) -> Result<File, String> {
         self.db
             .system
             .fs()
             .write_file_all(path, source)
             .map_err(|error| error.to_string())?;
+        // Earlier package resolution may have cached a directory before this child existed.
+        File::sync_path(&mut self.db, path.as_ref());
         system_path_to_file(&self.db, path).map_err(|error| error.to_string())
     }
 
@@ -3243,6 +3245,29 @@ impl Db for Database {
 #[cfg(test)]
 mod diagnostic_mode_tests {
     use super::*;
+
+    #[test]
+    fn adding_a_package_child_refreshes_an_earlier_import_lookup() {
+        let root = Path::new("/project");
+        let mut session = Session::new(root, &[]).unwrap();
+        session
+            .add(
+                &root.join("pkg/__init__.py"),
+                "from .child import value\n",
+                crate::SourceKind::File,
+            )
+            .unwrap();
+        let missing = session.check_scopes(None, &[]).unwrap_err();
+        assert!(missing.contains("unresolved-import"), "{missing}");
+        session
+            .add(
+                &root.join("pkg/child.py"),
+                "value = 37\n",
+                crate::SourceKind::File,
+            )
+            .unwrap();
+        session.check_scopes(None, &[]).unwrap();
+    }
 
     #[test]
     fn named_calls_check_imported_functions_and_leave_method_dispatch_to_the_provider() {
