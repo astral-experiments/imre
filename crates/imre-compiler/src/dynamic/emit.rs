@@ -971,28 +971,47 @@ impl SourceMap<'_> {
             self.module_start,
         );
         frame.async_generator = suspension == imre_ast::code_flags::ASYNC_GENERATOR;
-        if let Body::Namespace = body {
-            frame.class_locals = Some(
-                self.scopes.classes[&start.expect("class definition")]
-                    .bindings
-                    .clone(),
+        let source_function = |frame, sites, prefix| {
+            let mut f = self.function(frame, sites, prefix, in_function);
+            f.is_async = matches!(
+                suspension,
+                imre_ast::code_flags::COROUTINE | imre_ast::code_flags::ASYNC_GENERATOR
             );
-        }
-        let mut f = self.function(frame, sites::CheckedSites::default(), prefix, in_function);
-        f.is_async = matches!(
-            suspension,
-            imre_ast::code_flags::COROUTINE | imre_ast::code_flags::ASYNC_GENERATOR
-        );
-        if matches!(body, Body::Namespace)
-            && let Some(entries) = self.namespace_annotations.get(&start)
-        {
-            for site in entries {
-                self.place_annotation_string(f.frame.output, &mut f.sites, *site);
+            f
+        };
+        let mut sites = sites::CheckedSites::default();
+        let frame = match body {
+            Body::Checked(checked, globals) => {
+                let empty = BTreeSet::new();
+                let globals = globals.unwrap_or(&empty);
+                for name in globals {
+                    frame.declare_global(name);
+                }
+                let mut required = Vec::new();
+                sites::CheckedSites::visit(&checked.function.body, &mut |site| required.push(site));
+                let remaining = self
+                    .frame_callables(&mut frame, &mut sites, &prefix, globals, in_function)
+                    .place_callables(&required);
+                if !remaining.is_empty() {
+                    let mut f = source_function(frame, sites, prefix);
+                    f.declared_globals.clone_from(globals);
+                    for &site in remaining {
+                        f.prepare_site(site);
+                    }
+                    (frame, sites) = (f.frame, f.sites);
+                }
+                frame.checked_body(checked, &sites);
+                frame
             }
-        }
-        match body {
             Body::Namespace => {
                 let site = start.expect("class definition");
+                frame.class_locals = Some(self.scopes.classes[&site].bindings.clone());
+                if let Some(entries) = self.namespace_annotations.get(&start) {
+                    for &site in entries {
+                        self.place_annotation_string(frame.output, &mut sites, site);
+                    }
+                }
+                let mut f = source_function(frame, sites, prefix);
                 let prepared = &self.class_bodies[&site];
                 if f.output.keep_docstrings
                     && let Some(doc) = prepared.doc.as_deref().or_else(|| {
@@ -1008,13 +1027,17 @@ impl SourceMap<'_> {
                 f.declare_globals(&class.bindings.globals);
                 f.physical_suite(&prepared.body);
                 f.finish_class_annotations(&class.annotations, &class.bindings.globals);
+                f.frame
             }
             Body::Suite(suite) => {
+                let mut f = source_function(frame, sites, prefix);
                 let globals = &self.scopes.functions[&start.expect("function definition")].globals;
                 f.declare_globals(globals);
                 f.physical_suite(suite);
+                f.frame
             }
             Body::AnnotationProvider(provider, scope) => {
+                let mut f = source_function(frame, sites, prefix);
                 f.frame.annotation_scope = scope;
                 match provider {
                     Ok(function) => f.checked_function(function),
@@ -1022,8 +1045,10 @@ impl SourceMap<'_> {
                         f.with_expression_range(*range, |code| code.build_diagnostic(reason));
                     }
                 }
+                f.frame
             }
             Body::Operand(range, operand) => {
+                let mut f = source_function(frame, sites, prefix);
                 f.checkpoint(&range);
                 let value = match operand {
                     ReturnOperand::Prepared(operand, class) => {
@@ -1047,15 +1072,10 @@ impl SourceMap<'_> {
                     }
                 };
                 f.return_value(&value);
+                f.frame
             }
-            Body::Checked(checked, globals) => {
-                if let Some(globals) = globals {
-                    f.declare_globals(globals);
-                }
-                f.checked_function(checked);
-            }
-        }
-        f.frame.finish(false)
+        };
+        frame.finish(false)
     }
 }
 

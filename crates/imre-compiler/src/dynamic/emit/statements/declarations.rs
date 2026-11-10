@@ -4,8 +4,8 @@ use super::super::sites::{
     Declaration, RequiredSite,
 };
 use super::super::{
-    AnnotationScope, Body, DefinitionName, Entry, Function, Output, ReturnOperand, SourceInfo,
-    SourceMap,
+    AnnotationScope, Body, DefinitionName, Entry, Function, Output, RegisteredFrame, ReturnOperand,
+    SourceInfo, SourceMap,
 };
 use super::CallableSites;
 use crate::frontend::PreparedAnnotation;
@@ -33,8 +33,27 @@ enum Callable<'a> {
     Named(&'a NamedFunction),
 }
 
-impl SourceMap<'_> {
-    /// Place checked declarations in lexical order up to the first site that needs its frame.
+impl<'p> SourceMap<'p> {
+    pub(in crate::dynamic::emit) fn frame_callables<'a>(
+        &'a self,
+        frame: &'a mut RegisteredFrame<'_, '_>,
+        sites: &'a mut CheckedSites,
+        prefix: &'a str,
+        declared_globals: &'a std::collections::BTreeSet<String>,
+        in_function: bool,
+    ) -> CallableSites<'a, 'p> {
+        CallableSites {
+            source: self,
+            output: frame.output,
+            sites,
+            prefix,
+            declared_globals,
+            in_function,
+            class_locals: frame.class_locals.as_ref(),
+            method_scope: frame.class_locals.is_some() && frame.annotation_values.is_none(),
+        }
+    }
+
     pub(in crate::dynamic::emit) fn place_module_callables<'s>(
         &self,
         output: &mut Output,
@@ -51,24 +70,7 @@ impl SourceMap<'_> {
             method_scope: false,
             class_locals: None,
         };
-        for (index, &site) in required.iter().enumerate() {
-            match site {
-                RequiredSite::Lambda(site, scoped) => callables.place_checked_lambda(site, scoped),
-                RequiredSite::Alias(site) => {
-                    let alias = &self.type_aliases[&site];
-                    if alias.parameters.is_some() || alias.body.is_err() {
-                        return &required[index..];
-                    }
-                    if !callables.sites.aliases.contains_key(&site) {
-                        let outer_diagnostic = callables.output.diagnostic.take();
-                        callables.place_alias(site, outer_diagnostic);
-                    }
-                }
-                RequiredSite::Definition(site) => callables.place_definition(site),
-                _ => return &required[index..],
-            }
-        }
-        &[]
+        callables.place_callables(required)
     }
 
     pub(in crate::dynamic::emit) fn place_annotation_string(
@@ -124,21 +126,42 @@ impl Function<'_, '_> {
     }
 
     pub(in crate::dynamic::emit) fn callable_sites(&mut self) -> CallableSites<'_, '_> {
-        CallableSites {
-            source: self.source,
-            sites: &mut self.sites,
-            output: self.frame.output,
-            prefix: &self.prefix,
-            declared_globals: &self.declared_globals,
-            in_function: self.in_function,
-            class_locals: self.frame.class_locals.as_ref(),
-            method_scope: self.frame.class_locals.is_some()
-                && self.frame.annotation_values.is_none(),
-        }
+        self.source.frame_callables(
+            &mut self.frame,
+            &mut self.sites,
+            &self.prefix,
+            &self.declared_globals,
+            self.in_function,
+        )
     }
 }
 
 impl CallableSites<'_, '_> {
+    /// Place checked declarations in lexical order up to the first site that needs its frame.
+    pub(in crate::dynamic::emit) fn place_callables<'s>(
+        &mut self,
+        required: &'s [RequiredSite],
+    ) -> &'s [RequiredSite] {
+        for (index, &site) in required.iter().enumerate() {
+            match site {
+                RequiredSite::Lambda(site, scoped) => self.place_checked_lambda(site, scoped),
+                RequiredSite::Alias(site) => {
+                    let alias = &self.source.type_aliases[&site];
+                    if alias.parameters.is_some() || alias.body.is_err() {
+                        return &required[index..];
+                    }
+                    if !self.sites.aliases.contains_key(&site) {
+                        let outer_diagnostic = self.output.diagnostic.take();
+                        self.place_alias(site, outer_diagnostic);
+                    }
+                }
+                RequiredSite::Definition(site) => self.place_definition(site),
+                _ => return &required[index..],
+            }
+        }
+        &[]
+    }
+
     /// Python creates a fresh callable at each execution of the binding while the
     /// underlying code object belongs to one lexical lambda.
     fn place_checked_lambda(&mut self, site: TextSize, comprehension: bool) {
