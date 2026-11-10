@@ -271,6 +271,7 @@ pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
 {
     fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites);
     fn emit_prepared(&mut self, suite: &'p crate::frontend::RegisteredSuite);
+    fn source_operand(&mut self, input: crate::frontend::BorrowedOperand<'_>) -> String;
 }
 
 /// A checked run borrows its enclosing suite when a return can reach a prepared finally.
@@ -319,11 +320,17 @@ impl std::ops::DerefMut for FrameOwner<'_, '_, '_> {
     }
 }
 
+#[derive(Clone, Copy)]
+enum FrameInputs<'f> {
+    Handles(&'f [String]),
+    Prepared(&'f crate::frontend::PhysicalInputs),
+}
+
 /// The registered binder owns the scope, argument identities and frame.
 pub(crate) struct Frame<'f, 'a, 'p> {
     code: FrameOwner<'f, 'a, 'p>,
     names: Option<&'f HashMap<usize, LocalBinding>>,
-    inputs: &'f [String],
+    inputs: FrameInputs<'f>,
     fixed_sites: Option<(&'f RegisteredFunction, &'f Cell<usize>)>,
 }
 
@@ -357,8 +364,22 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
             code: FrameOwner::Prepared(owner),
             names: Some(&checked.local_names),
             fixed_sites: None,
-            inputs: &[],
+            inputs: FrameInputs::Handles(&[]),
         }
+    }
+
+    /// Read the owned operands when the checked operation requests its local slots.
+    pub(crate) fn prepared_operation(
+        owner: &'f mut dyn PreparedSuiteEmitter<'a, 'p>,
+        inputs: &'f crate::frontend::PhysicalInputs,
+    ) -> String {
+        Self {
+            code: FrameOwner::Prepared(owner),
+            names: None,
+            fixed_sites: None,
+            inputs: FrameInputs::Prepared(inputs),
+        }
+        .evaluate_handle(&inputs.operation)
     }
 
     pub(super) fn for_expression(
@@ -369,7 +390,7 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
             code: FrameOwner::Registered(code, sites),
             names: None,
             fixed_sites: None,
-            inputs: &[],
+            inputs: FrameInputs::Handles(&[]),
         }
     }
 
@@ -483,8 +504,15 @@ impl Frame<'_, '_, '_> {
     }
 
     pub(crate) fn lookup_local(&mut self, slot: usize) -> String {
-        if !self.inputs.is_empty() {
-            return self.inputs[slot].clone();
+        match self.inputs {
+            FrameInputs::Handles([]) => {}
+            FrameInputs::Handles(inputs) => return inputs[slot].clone(),
+            FrameInputs::Prepared(inputs) => {
+                let FrameOwner::Prepared(owner) = &mut self.code else {
+                    unreachable!("prepared inputs belong to their enclosing suite")
+                };
+                return owner.source_operand(inputs.operand(slot));
+            }
         }
         if self
             .code
@@ -1390,16 +1418,10 @@ impl RegisteredFrame<'_, '_> {
             code: FrameOwner::Registered(self, sites),
             names,
             fixed_sites: None,
-            inputs: &[],
+            inputs: FrameInputs::Handles(&[]),
         });
         self.expression_integer_start = outer;
         result
-    }
-
-    pub(crate) fn unary_handle(&mut self, op: ir::ObjectUnary, operand: String) -> CheckedValue {
-        self.with_checked_frame(&CheckedSites::default(), None, |frame| {
-            CheckedBody::registered(frame).unary_value(op, CheckedValue::handle(operand), false)
-        })
     }
 
     pub(crate) fn registered_branch(
@@ -1428,7 +1450,7 @@ impl RegisteredFrame<'_, '_> {
     ) -> String {
         self.with_checked_frame(sites, None, |mut enclosing| {
             let mut frame = enclosing.reborrow();
-            frame.inputs = inputs;
+            frame.inputs = FrameInputs::Handles(inputs);
             frame.evaluate_handle(expression)
         })
     }
@@ -1544,7 +1566,7 @@ impl RegisteredFrame<'_, '_> {
             code: FrameOwner::Registered(self, sites),
             names: Some(&checked.local_names),
             fixed_sites: None,
-            inputs: &[],
+            inputs: FrameInputs::Handles(&[]),
         })
         .emit_block(statements);
     }
@@ -1558,7 +1580,7 @@ impl RegisteredFrame<'_, '_> {
             code: FrameOwner::Registered(self, sites),
             names: Some(&checked.local_names),
             fixed_sites: (!checked.fixed_sites.is_empty()).then_some((checked, &next)),
-            inputs: &[],
+            inputs: FrameInputs::Handles(&[]),
         })
         .emit_function(&checked.function);
         self.restore_checked_slots(enclosing);

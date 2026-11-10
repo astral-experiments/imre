@@ -348,12 +348,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         self.unary_value(op, value, direct)
     }
 
-    pub(crate) fn unary_value(
-        &mut self,
-        op: ObjectUnary,
-        value: CheckedValue,
-        direct: bool,
-    ) -> CheckedValue {
+    fn unary_value(&mut self, op: ObjectUnary, value: CheckedValue, direct: bool) -> CheckedValue {
         match value {
             CheckedValue::Native(input, None) => {
                 let emitter = self.fixed();

@@ -3,12 +3,11 @@ use ruff_text_size::TextRange;
 
 use super::FrameEmitter;
 use super::Function;
-use crate::frontend::{
-    BorrowedOperand, ExpressionInput, ExpressionSelection, LogicalOperand, SourceOperand,
-};
+use crate::frontend::{ExpressionInput, ExpressionSelection, LogicalOperand, SourceOperand};
 use crate::ir::control::Context as BooleanContext;
 use crate::llvm::operations::branches::{Logical, LogicalEmitter, LogicalInput};
 use crate::llvm::operations::{CheckedBody, CheckedValue, ComparisonChain, ValueJoin};
+use crate::llvm::registered::PreparedSuiteEmitter;
 
 impl LogicalEmitter<LogicalOperand> for Function<'_, '_> {
     fn logical_input<'a>(
@@ -149,11 +148,8 @@ impl Function<'_, '_> {
         use crate::ir::{Builtin, ExprKind};
         let mut operands = inputs.operands();
         match &inputs.operation.kind {
-            ExprKind::Builtin(Builtin::RegisteredUnary(op), _) => {
-                let scope = self.begin_unary();
-                let operand = self.source_operand(operands.next().expect("unary operand"));
-                let result = self.frame.unary_handle(*op, operand);
-                self.finish_unary(scope, *op, result).into_handle()
+            ExprKind::Builtin(Builtin::RegisteredUnary(_), _) => {
+                crate::llvm::registered::Frame::prepared_operation(self, inputs)
             }
             ExprKind::Builtin(
                 op @ (Builtin::RegisteredCall(_) | Builtin::RegisteredAttribute { .. }),
@@ -170,13 +166,6 @@ impl Function<'_, '_> {
                 self.frame
                     .registered_with_inputs(&inputs.operation, &handles, &self.sites)
             }
-        }
-    }
-
-    fn source_operand(&mut self, operand: BorrowedOperand<'_>) -> String {
-        match operand {
-            SourceOperand::Checked(value) => self.registered_value(value),
-            SourceOperand::Residual(input) => self.input_value(input),
         }
     }
 
