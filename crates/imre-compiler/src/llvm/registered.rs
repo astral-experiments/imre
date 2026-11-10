@@ -86,13 +86,14 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                         cases.iter().flat_map(|case| &case.captures).all(has_slot)
                     }
                     Statement::IterNext {
-                        kind: ir::IterNextKind::Generic | ir::IterNextKind::Async(_),
+                        kind: kind @ (ir::IterNextKind::Generic | ir::IterNextKind::Async(_)),
                         iterator,
                         key,
-                        value: None,
+                        value,
                         ready,
                     } => {
                         checked.function.locals[*iterator] == Type::PythonObject
+                            && value.is_none_or(|slot| *kind == ir::IterNextKind::Generic && private.contains(&slot))
                             && [iterator, key, ready]
                                 .into_iter()
                                 .all(|slot| private.contains(slot))
@@ -937,6 +938,7 @@ impl Frame<'_, '_, '_> {
         &mut self,
         iterator: usize,
         key: usize,
+        second: Option<usize>,
         ready: usize,
         kind: ir::IterNextKind,
     ) {
@@ -949,8 +951,15 @@ impl Frame<'_, '_, '_> {
             .loops
             .last()
             .is_some_and(|target| target.edges.exhausted != target.edges.done);
-        let item = self.code.pull_item(&cursor, kind, header, has_else, &done);
-        self.store_private(key, &item);
+        if let Some(second) = second {
+            let available = self.code.name("b");
+            self.code.next_item_pair(&cursor, header, has_else, &available, &done);
+            self.code.label(&available);
+            self.code.store_item_pair([key, second]);
+        } else {
+            let item = self.code.pull_item(&cursor, kind, header, has_else, &done);
+            self.store_private(key, &item);
+        }
         self.store_private(ready, &permanent::TRUE.to_string());
         self.code.jump(&done);
         self.code.label(&done);
@@ -1092,6 +1101,11 @@ impl Frame<'_, '_, '_> {
                 match iteration.expect("checked iteration operands") {
                     Iter(value, op) => {
                         self.acquire_iterator(op, |frame| frame.evaluate_handle(value))
+                    }
+                    PairNeedsRow(value) => {
+                        let cursor = self.evaluate_handle(value);
+                        let plain = self.code.plain_items_cursor(&cursor);
+                        return self.code.boolean_result(&plain, true);
                     }
                     Truth(value) => {
                         let value = self.evaluate_handle(value);
@@ -1724,6 +1738,14 @@ impl RegisteredFrame<'_, '_> {
         self.restore_checked_slots(enclosing);
     }
 
+    fn store_item_pair(&mut self, items: [usize; 2]) {
+        let key = self.value("load i64, ptr %live");
+        let slot = self.value("getelementptr i64, ptr %live, i64 1");
+        let value = self.value(&format!("load i64, ptr {slot}"));
+        self.store_private(items[0], &key);
+        self.store_private(items[1], &value);
+    }
+
     /// A direct pull roots both projections in the same slots as ordinary unpacking.
     pub(crate) fn bind_item_pair(
         &mut self,
@@ -1738,11 +1760,7 @@ impl RegisteredFrame<'_, '_> {
         self.branch(plain_items, &direct, &ordinary);
 
         self.label(&direct);
-        let key = self.value("load i64, ptr %live");
-        let slot = self.value("getelementptr i64, ptr %live, i64 1");
-        let value = self.value(&format!("load i64, ptr {slot}"));
-        self.store_private(pair.items[0], &key);
-        self.store_private(pair.items[1], &value);
+        self.store_item_pair(pair.items);
         self.store_private(pair.ordinary, &permanent::FALSE.to_string());
         self.jump(&bind);
 

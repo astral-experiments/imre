@@ -4880,6 +4880,7 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredNamespace(_)
             | Builtin::RegisteredUnpack { .. }
             | Builtin::RegisteredIter(_)
+            | Builtin::RegisteredPairNeedsRow
             | Builtin::RegisteredCall(..)
             | Builtin::RegisteredName(_)
             | Builtin::RegisteredUnary(_)

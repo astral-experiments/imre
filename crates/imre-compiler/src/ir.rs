@@ -1335,6 +1335,7 @@ impl IteratorOp {
 /// Borrow the operands consumed by registered iteration without changing their evaluation order.
 pub(crate) enum IterationOperands<'a> {
     Iter(&'a Expr, IteratorOp),
+    PairNeedsRow(&'a Expr),
     Truth(&'a Expr),
     Get(&'a [Expr; 2]),
     Insert(&'a [Expr; 2]),
@@ -1363,6 +1364,7 @@ impl Builtin {
         };
         Some(match self {
             Self::RegisteredIter(op) => one().map(|value| Iter(value, *op)),
+            Self::RegisteredPairNeedsRow => one().map(PairNeedsRow),
             Self::Bool => one().map(Truth),
             Self::ListGet => two().map(Get),
             Self::Append | Self::SetAdd => two().map(Insert),
@@ -2155,6 +2157,8 @@ pub(crate) enum Builtin {
     },
     /// Acquire or adapt an iterator through its corresponding Python protocol.
     RegisteredIter(IteratorOp),
+    /// Whether two-target binding needs an ordinary row from this acquired cursor.
+    RegisteredPairNeedsRow,
     /// Snapshot a sequence for ordered target stores, including the optional starred remainder.
     RegisteredUnpack {
         count: usize,

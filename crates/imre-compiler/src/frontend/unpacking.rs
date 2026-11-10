@@ -211,7 +211,7 @@ pub(super) fn bind_input<B: PatternBinder>(
     let PatternSnapshot {
         root,
         mut body,
-        mut clear,
+        clear,
         items,
     } = binder.pattern_snapshot(target, targets, star, value, stable)?;
     body.push(Statement::Clear(root));
@@ -220,7 +220,7 @@ pub(super) fn bind_input<B: PatternBinder>(
         && let &[first, second] = items.as_slice()
     {
         let ordinary = binder.pattern_hidden(Type::Bool);
-        clear.push(ordinary);
+        // The loop owns the cursor predicate across iterations.
         // A direct pull initializes both projected items before the common target stores.
         let from_row = builtin(
             Type::Bool,

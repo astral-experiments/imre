@@ -1622,7 +1622,7 @@ mod tests {
     }
 
     #[test]
-    fn only_mixed_fixed_pair_loops_test_the_acquired_cursor() {
+    fn fixed_pair_loops_project_only_plain_dictionary_item_cursors() {
         let checked_raise = concat!(
             "        try:\n",
             "            raise (yield 'send-error')\n",
@@ -1636,11 +1636,12 @@ mod tests {
         let checked_default = "        def resume(answer=(yield 1)):\n            return answer";
         let checked = "        publish(x, y)";
         let pair_header = "def f(rows):\n    for x, y in rows:";
-        for (header, body, guarded) in [
+        let yielded_rows = "def f():\n    for x, y in (yield 'rows'):";
+        for (header, body, partial_pair) in [
             (pair_header, deletion, false),
             (pair_header, manager, false),
             (pair_header, mixed, true),
-            ("def f():\n    for x, y in (yield 'rows'):", checked, false),
+            (yielded_rows, checked, false),
             (pair_header, annotated, false),
             (pair_header, checked_raise, false),
             (pair_header, checked, false),
@@ -1690,7 +1691,7 @@ mod tests {
             if body == annotated {
                 assert!(plan.fully_checked() && module.syntax.is_none(), "{source}");
             }
-            if guarded {
+            if partial_pair {
                 let [run] = plan.residual.as_slice() else {
                     panic!("expected one mixed loop in {source}");
                 };
@@ -1715,9 +1716,10 @@ mod tests {
             let (_, llvm) = module.standalone().unwrap();
             let test = "call i1 @imre_dyn_plain_items_cursor(";
             let pull = "call i64 @imre_dyn_next_pair(";
-            assert_eq!(llvm.matches(test).count(), usize::from(guarded), "{source}");
-            assert_eq!(llvm.matches(pull).count(), usize::from(guarded), "{source}");
-            if guarded {
+            let projects_pair = header == pair_header || header == yielded_rows;
+            assert_eq!(llvm.matches(test).count(), usize::from(projects_pair), "{source}");
+            assert_eq!(llvm.matches(pull).count(), usize::from(projects_pair), "{source}");
+            if projects_pair {
                 assert!(llvm.find(test).unwrap() < llvm.find(pull).unwrap());
                 let ordinary = "call i32 @imre_dyn_list_cursor_pull(";
                 assert_eq!(llvm.matches(ordinary).count(), 1, "{source}");
