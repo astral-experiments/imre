@@ -1908,12 +1908,24 @@ mod tests {
             panic!("expected the prepared while");
         };
         let suite = &mut region.body;
-        let SourceEffect::LoopTransfer(site, crate::ir::Statement::Break) =
-            &suite.residual.last().unwrap().effect
-        else {
-            panic!("expected break at the end of the while body");
-        };
-        assert_eq!(*site, stop_range);
+        fn transfer(
+            suite: &mut crate::frontend::RegisteredSuite,
+            range: TextRange,
+        ) -> &mut crate::ir::Statement {
+            use crate::ir::{Builtin, ExprKind, Statement};
+            let [.., Statement::Expr(mark), transfer] = suite.checked.function.body.as_mut_slice()
+            else {
+                panic!("expected a source checkpoint and a loop transfer");
+            };
+            assert!(
+                matches!(&mark.kind, ExprKind::Builtin(Builtin::RegisteredStatement(site, _), _) if *site == range)
+            );
+            transfer
+        }
+        assert!(matches!(
+            transfer(suite, stop_range),
+            crate::ir::Statement::Break
+        ));
         let SourceEffect::If { range, arms } = &mut suite.residual[0].effect else {
             panic!("expected the if at the start of the while body");
         };
@@ -1921,13 +1933,9 @@ mod tests {
         let [(Some(_), arm)] = arms.as_mut_slice() else {
             panic!("expected one guarded arm");
         };
-        let SourceEffect::LoopTransfer(site, op) = &mut arm.residual.last_mut().unwrap().effect
-        else {
-            panic!("expected continue at the end of the if arm");
-        };
-        assert_eq!(*site, skip_range);
+        let op = transfer(arm, skip_range);
         assert!(matches!(op, crate::ir::Statement::Continue));
-        *op = &crate::ir::Statement::Break;
+        *op = crate::ir::Statement::Break;
         assert_ne!(module.standalone().unwrap(), original);
     }
 

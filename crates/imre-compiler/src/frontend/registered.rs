@@ -1003,8 +1003,6 @@ pub(crate) enum SourceEffect {
     Refused(TextRange, &'static str),
     /// Evaluate the operands at their place in the operation, in the current frame.
     ObjectOperation(Box<Builtin>, Vec<PhysicalOperand>),
-    /// The enclosing loop supplies the destination and cleanup depth.
-    LoopTransfer(TextRange, &'static Statement),
     /// Re-evaluate the guard in the enclosing frame on each trip through the loop.
     While(Box<PreparedWhile>),
     /// Each test and its child suite are prepared in their enclosing frame.
@@ -1022,10 +1020,10 @@ pub(crate) enum SourceEffect {
     For(Box<PreparedFor>),
 }
 
-fn loop_transfer(stmt: &ast::Stmt) -> Option<&'static Statement> {
+fn loop_transfer(stmt: &ast::Stmt) -> Option<Statement> {
     match stmt {
-        ast::Stmt::Break(_) => Some(&Statement::Break),
-        ast::Stmt::Continue(_) => Some(&Statement::Continue),
+        ast::Stmt::Break(_) => Some(Statement::Break),
+        ast::Stmt::Continue(_) => Some(Statement::Continue),
         _ => None,
     }
 }
@@ -1619,11 +1617,7 @@ impl<'a> SuitePreparation<'a> {
         };
         for stmt in stmts {
             if let Some(transfer) = loop_transfer(stmt) {
-                residual.push(PendingStatement {
-                    at: body.len(),
-                    source: stmt,
-                    effect: Some(SourceEffect::LoopTransfer(stmt.range(), transfer)),
-                });
+                body.extend([checkpoint(stmt), transfer]);
                 continue;
             }
             let slots_before = scope.locals.len();
@@ -2133,7 +2127,7 @@ impl statements::StatementLowering for SourceScope<'_> {
     fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<statements::Block, ()> {
         if let Some(transfer) = loop_transfer(stmt) {
             return (self.loop_scope != LoopScope::Outside)
-                .then(|| (vec![transfer.clone()], false))
+                .then(|| (vec![transfer], false))
                 .ok_or(());
         }
         match stmt {
