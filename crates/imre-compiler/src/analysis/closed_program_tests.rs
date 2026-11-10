@@ -805,6 +805,28 @@ fn a_linked_signature_requires_a_reaching_initializer_call() {
 }
 
 #[test]
+fn registered_generators_require_a_linked_source_body() {
+    let project = tempdir().unwrap();
+    let path = project.path().join("main.py");
+    let source = "def rows():\n    yield eval(input())\nfor row in rows(): print(row)\n";
+    fs::write(&path, source).unwrap();
+    let module = ("__main__".to_owned(), path, source.to_owned());
+    let error = super::check_registered_project(
+        project.path(),
+        &[],
+        std::iter::once(RegisteredSource::new(&module, true, None)),
+        None,
+        None,
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("main.py:2:16") && error.contains("builtins.eval without a linked body"),
+        "{error}"
+    );
+}
+
+#[test]
 fn earlier_unlinked_source_precedes_a_later_initializer_argument() {
     let project = tempdir().unwrap();
     let main = project.path().join("main.py");

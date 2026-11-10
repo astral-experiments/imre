@@ -174,6 +174,36 @@ pub(crate) struct LocalBinding {
 }
 
 /// Lower a definition whose binder supplies Python object handles in its normal function scope.
+/// A call to a generator returns its resumable frame. Keep the actual checked body
+/// so emission can bind the same instructions that established this calling convention.
+pub(super) fn generator_body(
+    module: &crate::modules::SourceModule,
+    definition: &ast::StmtFunctionDef,
+    optimization: i32,
+    source: &values::ModuleSource,
+) -> Option<RegisteredFunction> {
+    let physical = module.parsed.syntax().body.iter().find_map(|stmt| {
+        stmt.as_function_def_stmt()
+            .filter(|original| original.start() == definition.start())
+    })?;
+    if physical.is_async || !imre_ast::code_flags::is_generator(&physical.body) {
+        return None;
+    }
+    let operations = HashMap::new();
+    let preparation = SuitePreparation::new(
+        &operations,
+        source.context(&module.source),
+        &physical.body,
+        optimization == 0,
+    );
+    preparation
+        .complete(
+            &physical.body,
+            RegisteredScope::Function { is_async: false },
+        )
+        .map(|suite| suite.checked)
+}
+
 pub(super) fn lower_definition<'a>(
     mut checker: Checker<'a>,
     definition: &ast::StmtFunctionDef,
@@ -2856,6 +2886,43 @@ mod tests {
             report.contains("types.new_class requires native Python object operations"),
             "{report}"
         );
+    }
+
+    #[test]
+    fn ordinary_generator_calls_retain_their_checked_body_and_typed_neighbor() {
+        let graph = SourceGraph::single(concat!(
+            "def bump(value: int) -> int:\n",
+            "    return value + 1\n",
+            "def values():\n",
+            "    for item in (1, 2):\n",
+            "        yield item\n",
+            "for value in values(): print(bump(5), value)\n",
+        ))
+        .unwrap();
+        let _ = super::super::lower(&graph);
+        let module = &graph.modules[graph.entry];
+        let table = graph.registered_functions();
+        let bodies = &table[&graph.entry];
+        let body = &bodies[&module.parsed.syntax().body[1].start()]
+            .function
+            .body;
+        let mut suspension = false;
+        ir::walk_expressions(body, &mut |expr| {
+            suspension |= matches!(
+                expr.kind,
+                ExprKind::Builtin(Builtin::RegisteredSuspend(..), _)
+            )
+        });
+        assert!(suspension);
+        let body = &bodies[&module.parsed.syntax().body[0].start()]
+            .function
+            .body;
+        let mut addition = false;
+        ir::walk_expressions(body, &mut |expr| {
+            addition |=
+                expr.ty == Type::Int && matches!(expr.kind, ExprKind::Binary(ir::Binary::Add, ..))
+        });
+        assert!(addition);
     }
 
     #[test]

@@ -386,6 +386,7 @@ pub(super) struct Solution {
     pub(super) registered_parameters: HashMap<usize, Diagnostic>,
     /// Definitions checked to completion with the final input and return types.
     pub(super) checked_bodies: HashSet<usize>,
+    pub(super) registered_generators: HashSet<usize>,
 }
 
 impl Inference {
@@ -707,6 +708,8 @@ impl Inference {
     ) -> std::result::Result<Solution, Diagnostic> {
         let mut registered = HashMap::new();
         let mut checked_bodies = HashSet::new();
+        let mut registered_generators = HashSet::new();
+        let mut generator_checks = registered::SourceChecks::default();
         loop {
             let widened = self.widened.replace(false);
             if !widened && !self.unresolved() {
@@ -772,6 +775,10 @@ impl Inference {
                     )
                 };
                 if !ready {
+                    continue;
+                }
+                if registered_generators.contains(&signature.id) {
+                    checked_bodies.insert(signature.id);
                     continue;
                 }
                 // Calls earlier in this round can have supplied new parameters.
@@ -841,6 +848,30 @@ impl Inference {
                     Ok::<_, Failure>(())
                 })();
                 if let Err(diagnostic) = checker.finish_region(result) {
+                    if matches!(&diagnostic, Failure::Diagnostic(report) if report.kind == Kind::GeneratorSuspension)
+                        && signature.method.is_none()
+                        && graph.modules[*module].is_program_source()
+                        && !function.is_async
+                        && generator_checks.accepts(graph, *module, function)
+                        && let Some(body) = registered::generator_body(
+                            &graph.modules[*module],
+                            function,
+                            graph.python_optimization(),
+                            literals.entry(*module).or_insert_with(|| {
+                                registered::values::ModuleSource::new(&graph.modules[*module])
+                            }),
+                        )
+                    {
+                        graph.register_function(*module, function.start(), body);
+                        registered_generators.insert(signature.id);
+                        checked_bodies.insert(signature.id);
+                        if infer_return {
+                            self.pending.borrow_mut()[signature.id].returns =
+                                Some(Type::PythonObject);
+                            self.revision.set(self.revision.get() + 1);
+                        }
+                        continue;
+                    }
                     if self.pending.borrow()[signature.id].returns.is_none()
                         && diagnostic.is_representation()
                         && graph.modules[*module].is_program_source()
@@ -998,6 +1029,7 @@ impl Inference {
         Ok(Solution {
             registered_parameters: registered,
             checked_bodies,
+            registered_generators,
         })
     }
 }
