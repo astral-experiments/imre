@@ -952,7 +952,7 @@ pub(super) fn checked_binding(
     if let Some(sites) = source.lambdas {
         let site = sites.get(&lambda.start())?;
         site.body.as_ref()?;
-        return match &site.binding {
+        return match site.binding.as_ref() {
             ExpressionSelection::Checked(binding) => Some(binding.clone()),
             _ => None,
         };

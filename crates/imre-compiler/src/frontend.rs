@@ -124,7 +124,7 @@ mod records;
 mod regex;
 mod registered;
 pub(crate) use registered::booleans::{
-    BorrowedOperand, ExpressionSites, LogicalOperand, PhysicalInputs,
+    BorrowedOperand, ExpressionInput, ExpressionSites, LogicalOperand, PhysicalInputs,
     Selection as ExpressionSelection, SourceOperand,
 };
 pub(crate) use registered::patterns::SourceMatch;
@@ -138,14 +138,15 @@ pub(crate) use registered::values::{
 pub(crate) use registered::{
     AnnotationProvider, AssertionSite, DeferredAnnotation, ParameterAnnotations, PhysicalOperand,
     RegisteredBindings, RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope,
-    RegisteredSuite, SourceEffect, StatementSites, SuitePreparation, ValueStatement,
-    annotation_expression, place_fixed_function, registered_sites, registered_type_alias,
-    registered_type_parameters,
+    RegisteredSuite, SourceEffect, SuitePreparation, ValueStatement, annotation_expression,
+    place_fixed_function, registered_sites, registered_type_alias, registered_type_parameters,
 };
 pub(crate) use registered::{LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion};
 pub(crate) use registered::{
     PhysicalBinding, PreparedContext, PreparedFor, PreparedTry, PreparedWhile, WhileGuard,
 };
+#[cfg(test)]
+pub(crate) use registered::{StatementSites, booleans::OwnedExpression};
 pub(crate) use unpacking::PairBinding;
 mod sequences;
 mod shutil;
