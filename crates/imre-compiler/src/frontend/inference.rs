@@ -325,6 +325,8 @@ struct Pending {
     inferred_params: Vec<bool>,
     params: Vec<Option<Type>>,
     none_defaults: Vec<usize>,
+    document_parameters: Vec<usize>,
+    document_return: Option<Type>,
     returns: Option<Type>,
     discovery: ReturnDiscovery,
 }
@@ -376,6 +378,7 @@ impl Pending {
 #[derive(Default)]
 pub(super) struct Inference {
     pending: RefCell<Vec<Pending>>,
+    document_fields: RefCell<HashSet<(usize, usize)>>,
     /// Physical first-party definitions still awaiting a recoverable checked body.
     pub(super) pending_bodies: RefCell<Option<Vec<DefinitionId>>>,
     revision: Cell<usize>,
@@ -408,6 +411,8 @@ impl Inference {
             inferred_params: params.iter().map(Option::is_none).collect(),
             params,
             none_defaults,
+            document_parameters: Vec::new(),
+            document_return: None,
             returns,
             discovery: if returns.is_some() {
                 ReturnDiscovery::Declared
@@ -416,6 +421,86 @@ impl Inference {
             },
         });
         id
+    }
+
+    pub(super) fn document_annotations(
+        &self,
+        id: usize,
+        parameters: Vec<usize>,
+        returns: Option<Type>,
+    ) {
+        if !parameters.is_empty() || returns.is_some() {
+            self.widened.set(true);
+            let pending = &mut self.pending.borrow_mut()[id];
+            pending.document_parameters = parameters;
+            pending.document_return = returns;
+        }
+    }
+
+    /// A fresh annotated list has no initializer element to settle its storage.
+    pub(super) fn discover_list_elements(
+        &self,
+        graph: &SourceGraph,
+        module: ModuleId,
+        function: Option<&ast::StmtFunctionDef>,
+    ) {
+        if !self.widened.get()
+            && graph
+                .session
+                .has_annotated_empty_list(module, function, |annotation| {
+                    documents::collects_lists(graph, module, annotation)
+                })
+        {
+            self.widened.set(true);
+        }
+    }
+
+    // Use the bound argument's storage before coercion. A map child still needs
+    // its ordinary shape check, while an Any parameter retains the tagged owner.
+    fn document_parameter(&self, id: usize, index: usize, expected: Type, actual: Type) -> Type {
+        if !matches!(actual, documents::ANY | documents::MAP | documents::LIST)
+            || !self.pending.borrow()[id]
+                .document_parameters
+                .contains(&index)
+        {
+            return expected;
+        }
+        let ty = match expected {
+            Type::ObjectValue => documents::ANY,
+            Type::JsonObject => documents::MAP,
+            Type::List(_) => documents::LIST,
+            _ => return expected,
+        };
+        self.widen_parameter(id, index, ty);
+        ty
+    }
+
+    pub(super) fn document_field(&self, class: usize, field: usize) {
+        self.document_fields.borrow_mut().insert((class, field));
+    }
+
+    fn apply_document_fields(&self, classes: &mut ClassInfo) {
+        let stores = self.document_fields.take();
+        if stores.is_empty() {
+            return;
+        }
+        // An inherited prefix has one storage layout for every concrete receiver.
+        let declarations = &classes.declarations.definitions;
+        for (mut owner, field) in stores {
+            while let Some(parent) = declarations[owner].storage_base
+                && field < declarations[parent].fields.len()
+            {
+                owner = parent;
+            }
+            for (id, layout) in classes.fields.iter_mut().enumerate() {
+                if std::iter::successors(Some(id), |&id| declarations[id].storage_base)
+                    .any(|base| base == owner)
+                {
+                    layout[field] = documents::MAP;
+                }
+            }
+        }
+        self.layout_changed();
     }
 
     pub(super) fn len(&self) -> usize {
@@ -464,6 +549,22 @@ impl Inference {
         for (parameter, ty) in signature.params.iter_mut().zip(&inferred.params) {
             if let Some(ty) = ty {
                 parameter.ty = *ty;
+                if *ty == documents::ANY
+                    && let Some(default) = &mut parameter.default
+                    && matches!(&default.kind, ExprKind::Builtin(Builtin::BoxValue, values)
+                        if matches!(values.as_slice(), [value] if value.ty == Type::None))
+                {
+                    *default = documents::op(ir::DocumentOp::Null, documents::ANY, vec![]);
+                }
+                if *ty == documents::MAP
+                    && let Some(default) = &mut parameter.default
+                    && matches!(
+                        &default.kind,
+                        ExprKind::Builtin(Builtin::JsonEmptyObject, _)
+                    )
+                {
+                    *default = documents::op(ir::DocumentOp::EmptyMap, documents::MAP, vec![]);
+                }
                 if matches!(ty, Type::Optional(_))
                     && let Some(default) = &mut parameter.default
                     && default.ty == Type::None
@@ -520,9 +621,12 @@ impl Inference {
     }
 
     fn widen_parameter(&self, id: usize, index: usize, ty: Type) {
-        let mut pending = self.pending.borrow_mut();
-        pending[id].params[index] = Some(ty);
-        for function in &mut *pending {
+        self.pending.borrow_mut()[id].params[index] = Some(ty);
+        self.layout_changed();
+    }
+
+    pub(super) fn layout_changed(&self) {
+        for function in &mut *self.pending.borrow_mut() {
             if !matches!(function.discovery, ReturnDiscovery::Declared) {
                 function.returns = None;
             }
@@ -710,6 +814,13 @@ impl Inference {
         classes: &mut ClassInfo,
         types: &Types,
     ) -> std::result::Result<Solution, Diagnostic> {
+        if classes
+            .fields
+            .iter()
+            .any(|fields| fields.contains(&Type::JsonObject))
+        {
+            self.widened.set(true);
+        }
         let mut registered = HashMap::new();
         let mut checked_bodies = HashSet::new();
         let mut registered_generators = HashSet::new();
@@ -803,7 +914,10 @@ impl Inference {
                 checker.asynchronous = signature.asynchronous;
                 checker.method_context(signature.method);
                 checker.generator_item = classes.producer_items.get(&signature.id).copied();
-                checker.inferred_returns = infer_return.then(Vec::new);
+                checker.discover_document_return =
+                    self.pending.borrow()[signature.id].document_return;
+                checker.inferred_returns =
+                    (infer_return || checker.discover_document_return.is_some()).then(Vec::new);
                 let mut checked_return = false;
                 let result = (|| {
                     for (parameter, signature) in
@@ -825,7 +939,19 @@ impl Inference {
                     ) {
                         return Ok(());
                     }
-                    if let Some(mut returns) = checker.inferred_returns.take() {
+                    if let Some(document) = checker.discover_document_return {
+                        let returns = checker.inferred_returns.take().unwrap();
+                        if !falls_through
+                            && !returns.is_empty()
+                            && returns.iter().all(|&ty| ty == document)
+                        {
+                            let mut pending = self.pending.borrow_mut();
+                            pending[signature.id].returns = Some(document);
+                            pending[signature.id].document_return = None;
+                            drop(pending);
+                            self.layout_changed();
+                        }
+                    } else if let Some(mut returns) = checker.inferred_returns.take() {
                         if falls_through || returns.is_empty() {
                             returns.push(Type::None);
                         }
@@ -947,6 +1073,7 @@ impl Inference {
             if let Err(diagnostic) = checker.finish_region(result) {
                 errors.push((graph.entry, diagnostic));
             }
+            self.apply_document_fields(classes);
             if self.revision.get() == before {
                 // Reproduce the canonical diagnostic pass if discovery stalls.
                 if skipped && self.unresolved() {
@@ -1272,6 +1399,7 @@ impl Checker<'_> {
                         })
                     {
                         let supplied = argument.value(checker)?;
+                        let ty = inference.document_parameter(signature.id, index, ty, supplied.ty);
                         if supplied.ty == Type::None
                             && ty != Type::None
                             && checker.types.payload(ty).is_none()
@@ -1348,6 +1476,12 @@ impl Checker<'_> {
                             ty,
                             parameter.sign_only,
                             |checker, value, expected, site| {
+                                let expected = inference.document_parameter(
+                                    signature.id,
+                                    index,
+                                    expected,
+                                    value.ty,
+                                );
                                 // The bound operand supplies storage evidence for this parameter.
                                 if value.ty == Type::PythonObject
                                     && expected != Type::PythonObject

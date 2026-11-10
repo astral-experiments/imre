@@ -326,6 +326,12 @@ impl ClassInfo {
                             Some(class_id),
                         )
                         .and_then(|ty| {
+                            // The resolved TOML hash projection serializes these fields together.
+                            let ty = if class.toml_hash && ty == Type::JsonObject {
+                                documents::MAP
+                            } else {
+                                ty
+                            };
                             if class.dataclass.is_some_and(|d| d.value_struct)
                                 && !matches!(ty, Type::Float | Type::Bool)
                             {
@@ -704,6 +710,9 @@ fn lower_graph(
     // callable has a Type::Class receiver. Without classes no definition transfers.
     let can_transfer_frames = !classes.declarations.definitions.is_empty();
     for (module_id, module) in graph.modules.iter().enumerate() {
+        if !module.executable.is_empty() {
+            inference.discover_list_elements(graph, module_id, None);
+        }
         for (name, binding) in &module.bindings {
             if reserved(name)
                 && graph.builtin_function_shadow(name, *binding).is_none()
@@ -1870,6 +1879,7 @@ fn signature(
     let mut params = Vec::new();
     let mut parameter_types = Vec::new();
     let mut none_defaults = Vec::new();
+    let mut document_parameters = Vec::new();
     for (index, parameter) in function.parameters.iter_non_variadic_params().enumerate() {
         let origin = defaults
             .forwarded
@@ -1951,12 +1961,13 @@ fn signature(
                             owner,
                         )?;
                         Ok(types.list(element))
-                    } else if !graph.mutable_documents
-                        && graph.resolve_type(module, value)
-                            == Some(Binding::Intrinsic(Intrinsic::Any))
-                    {
-                        // Store supported arguments in the same heterogeneous view as object.
-                        Ok(Type::ObjectValue)
+                    } else if let Some(layout) = documents::annotation(graph, module, value) {
+                        document_parameters.push(index);
+                        Ok(if layout == documents::LIST {
+                            types.list(Type::ObjectValue)
+                        } else {
+                            Type::ObjectValue
+                        })
                     } else {
                         annotation_in_class(value, graph, module, classes, types, owner)
                     }
@@ -1984,6 +1995,9 @@ fn signature(
             )
         {
             none_defaults.push(index);
+        }
+        if ty == Some(Type::JsonObject) {
+            document_parameters.push(index);
         }
         parameter_types.push(ty);
         // Unresolved types exist only in the discarded discovery pass. solve()
@@ -2107,6 +2121,10 @@ fn signature(
             graph.deferred_name(module, name.range());
         }
     }
+    let document_return = function
+        .returns
+        .as_deref()
+        .and_then(|value| documents::annotation(graph, module, value));
     let returns = function
         .returns
         .as_deref()
@@ -2121,6 +2139,8 @@ fn signature(
             {
                 annotation_in_class(&subscript.slice, graph, module, classes, types, owner)
                     .map(|element| types.list(element))
+            } else if document_return == Some(documents::ANY) {
+                Ok(Type::ObjectValue)
             } else {
                 annotation_in_class(value, graph, module, classes, types, owner).or_else(|error| {
                     graph
@@ -2153,6 +2173,17 @@ fn signature(
             _ => None,
         });
     let id = inference.register(parameter_types, returns, none_defaults);
+    let document_return = if inert {
+        None
+    } else if returns == Some(Type::JsonObject) {
+        Some(documents::MAP)
+    } else {
+        document_return
+    };
+    inference.document_annotations(id, document_parameters, document_return);
+    if !inert && graph.modules[module].archive.is_none() {
+        inference.discover_list_elements(graph, module, Some(function));
+    }
     Ok(Signature {
         id,
         physical_frame: false,
@@ -2361,9 +2392,6 @@ fn annotation_with_aliases(
                     "Self is supported only inside a fixed class",
                 )
             });
-        }
-        Some(Binding::Intrinsic(Intrinsic::Any)) if graph.mutable_documents => {
-            return Ok(documents::ANY);
         }
         Some(Binding::Intrinsic(Intrinsic::Readiness(ir::Readiness::New))) => {
             return Ok(Type::Poll);
@@ -2717,12 +2745,14 @@ fn annotation_with_aliases(
                 nested(&value.slice)
             }
             ast::Expr::Name(name) if name.id == "list" => {
-                let element = nested(&value.slice)?;
-                Ok(if element == documents::ANY {
-                    documents::LIST
+                let element = if graph.resolve_type(module, &value.slice)
+                    == Some(Binding::Intrinsic(Intrinsic::Any))
+                {
+                    Type::ObjectValue
                 } else {
-                    types.list(element)
-                })
+                    nested(&value.slice)?
+                };
+                Ok(types.list(element))
             }
             ast::Expr::Name(name)
                 if name.id == "frozenset" && nested(&value.slice)? == Type::Str =>
@@ -2768,11 +2798,7 @@ fn annotation_with_aliases(
                     && key_type == Type::Str
                     && graph.resolve_type(module, value) == Some(Binding::Intrinsic(Intrinsic::Any))
                 {
-                    return Ok(if graph.mutable_documents {
-                        documents::MAP
-                    } else {
-                        Type::JsonObject
-                    });
+                    return Ok(Type::JsonObject);
                 }
                 if !types.hashable_key(key_type) {
                     return Err(diagnostic_message(
@@ -2955,6 +2981,7 @@ struct Checker<'a> {
     globals: &'a ModuleValues,
     inference: Option<&'a inference::Inference>,
     inferred_returns: Option<Vec<Type>>,
+    discover_document_return: Option<Type>,
     comprehension_targets: HashSet<String>,
     comprehension_depth: usize,
     comprehension_exports: HashMap<String, usize>,
@@ -2971,6 +2998,8 @@ struct Checker<'a> {
     returns: Type,
     /// Inferred containers can acquire a new storage layout at an outermost plain assignment.
     inferred_containers: HashSet<usize>,
+    /// Fresh annotated lists whose inner lists may come from a document.
+    document_list_sites: HashMap<usize, u32>,
     nullable_assignments: HashMap<String, Type>,
     bound_flags: HashMap<String, usize>,
     omitted_assert_locals: HashMap<String, unbound_locals::Binding>,
@@ -3042,6 +3071,7 @@ impl<'a> Checker<'a> {
             globals,
             inference: None,
             inferred_returns: None,
+            discover_document_return: None,
             comprehension_targets: HashSet::new(),
             comprehension_depth: 0,
             comprehension_exports: HashMap::new(),
@@ -3056,6 +3086,7 @@ impl<'a> Checker<'a> {
             captured_process_errors: Vec::new(),
             returns: Type::None,
             inferred_containers: HashSet::new(),
+            document_list_sites: HashMap::new(),
             nullable_assignments: HashMap::new(),
             bound_flags: HashMap::new(),
             omitted_assert_locals: HashMap::new(),
@@ -5628,17 +5659,50 @@ impl<'a> Checker<'a> {
                 let ast::Expr::Name(name) = &*assign.target else {
                     return Err(error(self.source, statement, "only names may be annotated"));
                 };
-                let ty = annotation_in_class(
-                    &assign.annotation,
-                    self.graph,
-                    self.module,
-                    &self.classes.declarations,
-                    self.types,
-                    self.class,
-                )?;
+                let document = documents::annotation(self.graph, self.module, &assign.annotation);
+                let ty = if document == Some(documents::ANY) {
+                    Type::ObjectValue
+                } else {
+                    annotation_in_class(
+                        &assign.annotation,
+                        self.graph,
+                        self.module,
+                        &self.classes.declarations,
+                        self.types,
+                        self.class,
+                    )?
+                };
                 if let Some(slot) = self.names.get(name.id.as_str()) {
                     self.inferred_containers.remove(slot);
                 }
+                let document = if ty == Type::JsonObject {
+                    Some(documents::MAP)
+                } else {
+                    document
+                };
+                let list_site = (!self.names.contains_key(name.id.as_str())
+                    && matches!(assign.value.as_deref(), Some(ast::Expr::List(list)) if list.elts.is_empty())
+                    && self.types.element(ty) == Some(self.types.list(Type::ObjectValue))
+                    && documents::collects_lists(self.graph, self.module, &assign.annotation))
+                    .then(|| assign.start().to_u32());
+                let ty = if list_site.is_some_and(|site| {
+                    self.types
+                        .collects_document_lists(self.module, site, self.class)
+                }) {
+                    self.types.list(documents::LIST)
+                } else {
+                    ty
+                };
+                let checked = match (assign.value.as_deref(), document) {
+                    (Some(rhs), Some(document)) => {
+                        Some(self.document_annotation_value(rhs, ty, document)?)
+                    }
+                    _ => None,
+                };
+                let ty = checked.as_ref().map_or(ty, |value| value.ty);
+                let check_value = |checker: &mut Self, rhs: &ast::Expr| {
+                    checked.map_or_else(|| checker.expr_expected(rhs, ty), Ok)
+                };
                 // A new outermost annotation dominates every subsequent read.
                 // Evaluate its RHS with the old binding; closures and nested
                 // suites keep their fixed slots across calls and control flow.
@@ -5649,12 +5713,17 @@ impl<'a> Checker<'a> {
                     && self.locals[old] != ty
                     && let Some(rhs) = &assign.value
                 {
-                    let value = self.expr_expected(rhs, ty)?;
+                    let value = check_value(self, rhs)?;
                     return Ok((self.replace_local(name.id.as_str(), old, ty, value), true));
                 }
                 let slot = self.declare(name.id.as_str(), ty, statement)?;
+                if let Some(site) = list_site {
+                    self.document_list_sites.insert(slot, site);
+                } else {
+                    self.document_list_sites.remove(&slot);
+                }
                 if let Some(value) = &assign.value {
-                    let value = self.expr_expected(value, ty)?;
+                    let value = check_value(self, value)?;
                     self.assigned_value(slot, &value);
                     Some(Statement::Assign(slot, value))
                 } else {
@@ -8289,11 +8358,10 @@ impl<'a> Checker<'a> {
                 return self.comprehension(expression, None);
             }
             ast::Expr::Dict(dict) => {
-                if self.graph.mutable_documents
-                    && dict
-                        .items
-                        .iter()
-                        .any(|item| item.key.is_none() && self.probe_document(&item.value))
+                if dict
+                    .items
+                    .iter()
+                    .any(|item| item.key.is_none() && self.probe_document(&item.value))
                 {
                     return Ok(self.document_literal(expression, documents::MAP)?.unwrap());
                 }
@@ -12661,7 +12729,26 @@ impl<'a> Checker<'a> {
             let mut args = vec![receiver];
             let (builtin, ty) = match attribute.attr.as_str() {
                 "append" if call.arguments.args.len() == 1 => {
-                    args.push(self.expr_expected(&call.arguments.args[0], element)?);
+                    let arg = &call.arguments.args[0];
+                    let value = if let ExprKind::Local(slot) = args[0].kind
+                        && let Some(&site) = self.document_list_sites.get(&slot)
+                        && let Some(inference) = self.inference
+                        && element != documents::LIST
+                    {
+                        let value =
+                            self.expr_expected_if(arg, element, |_, ty| ty == documents::LIST)?;
+                        if value.ty == documents::LIST
+                            && self
+                                .types
+                                .record_document_lists(self.module, site, self.class)
+                        {
+                            inference.layout_changed();
+                        }
+                        self.coerce(value, element, arg)?
+                    } else {
+                        self.expr_expected(arg, element)?
+                    };
+                    args.push(value);
                     (append, Type::None)
                 }
                 "pop" if call.arguments.args.is_empty() => (Builtin::Pop, element),

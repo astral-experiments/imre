@@ -3156,7 +3156,6 @@ pub(crate) struct LoweringBaseline {
     needs_object_runtime: bool,
     deferred_object_error: Option<Diagnostic>,
     reachable: Option<Arc<reachability::Reachable>>,
-    mutable_documents: bool,
     traceback_objects: bool,
 }
 
@@ -3190,7 +3189,6 @@ pub(crate) struct SourceGraph {
     pub(crate) has_checked_only_import: bool,
     pub(crate) deferred_object_error: std::cell::RefCell<Option<Diagnostic>>,
     pub(crate) entry_profile: entry_profile::Profile,
-    pub(crate) mutable_documents: bool,
     pub(crate) mutable_builtin_len: bool,
     reachable: Option<Arc<reachability::Reachable>>,
     required_library: Option<(ModuleId, reachability::Reachable)>,
@@ -3225,7 +3223,6 @@ impl SourceGraph {
             needs_object_runtime: self.needs_object_runtime.get(),
             deferred_object_error: self.deferred_object_error.borrow().clone(),
             reachable: self.reachable.clone(),
-            mutable_documents: self.mutable_documents,
             traceback_objects: self.traceback_objects,
         }
     }
@@ -3247,7 +3244,6 @@ impl SourceGraph {
             .get_mut()
             .clone_from(&baseline.deferred_object_error);
         self.reachable.clone_from(&baseline.reachable);
-        self.mutable_documents = baseline.mutable_documents;
         self.traceback_objects = baseline.traceback_objects;
         for (proofs, &count) in self
             .checked_diagnostics
@@ -3493,57 +3489,6 @@ impl SourceGraph {
         (inputs, paths)
     }
 
-    /// Keep read-only JSON views in programs that never parse or modify a TOML document.
-    fn uses_mutable_documents(&self) -> bool {
-        use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
-        struct Scan<'a> {
-            graph: &'a SourceGraph,
-            id: usize,
-            found: bool,
-        }
-        impl<'ast> Visitor<'ast> for Scan<'_> {
-            fn visit_stmt(&mut self, stmt: &'ast ast::Stmt) {
-                if let ast::Stmt::FunctionDef(method) = stmt
-                    && !self.graph.includes_method(self.id, method)
-                    && !self.graph.modules[self.id]
-                        .bindings
-                        .contains_key(method.name.as_str())
-                {
-                    return;
-                }
-                walk_stmt(self, stmt);
-            }
-            fn visit_expr(&mut self, e: &'ast ast::Expr) {
-                if matches!(
-                    self.graph.resolve(self.id, e),
-                    Some(Binding::Intrinsic(
-                        Intrinsic::TomliLoads | Intrinsic::TomliLoad | Intrinsic::TomliDump
-                    ))
-                ) {
-                    self.found = true;
-                } else {
-                    walk_expr(self, e);
-                }
-            }
-        }
-        self.modules.iter().enumerate().any(|(id, m)| {
-            let mut scan = Scan {
-                graph: self,
-                id,
-                found: false,
-            };
-            for (statement, node) in m.parsed.syntax().body.iter().enumerate() {
-                if self.includes(DefinitionId {
-                    module: id,
-                    statement,
-                }) || !matches!(node, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_))
-                {
-                    scan.visit_stmt(node);
-                }
-            }
-            scan.found
-        })
-    }
     /// A write affects bare len calls in every module, including earlier definitions.
     fn writes_builtin_len(&self) -> bool {
         use ruff_python_ast::visitor::{Visitor, walk_expr};
@@ -3598,12 +3543,10 @@ impl SourceGraph {
         self.reachable = Some(Arc::new(reachability::Reachable::collect_with_reprs(
             self, false, owners,
         )));
-        self.refresh_reachable_state();
+        self.refresh_traceback_objects();
     }
 
-    /// Both decisions depend on the methods included in this source graph.
-    fn refresh_reachable_state(&mut self) {
-        self.mutable_documents = self.uses_mutable_documents();
+    fn refresh_traceback_objects(&mut self) {
         if self.handled_tracebacks {
             self.traceback_objects = self.reachable.as_ref().map_or_else(
                 || reachability::Reachable::collect(self, false).traceback_objects,
@@ -4976,7 +4919,6 @@ impl<'a> Loader<'a> {
                 .map(|p| entry_profile::Profile::load(p, &self.modules, &mut self.fs))
                 .transpose()?
                 .unwrap_or_default(),
-            mutable_documents: false,
             mutable_builtin_len: false,
             reachable: None,
             required_library: None,
@@ -5006,7 +4948,7 @@ impl<'a> Loader<'a> {
                 Some((library, reachability::Reachable::collect(&graph, true)));
         }
         graph.empty_keywords = empty_keywords::EmptyKeywords::collect(&graph);
-        graph.refresh_reachable_state();
+        graph.refresh_traceback_objects();
         graph.mutable_builtin_len = graph.writes_builtin_len();
         Ok(graph)
     }

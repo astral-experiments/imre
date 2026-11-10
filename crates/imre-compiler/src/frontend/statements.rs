@@ -193,6 +193,13 @@ impl StatementLowering for Checker<'_> {
                 } else {
                     self.coerce(value, Type::Str, ret)?
                 }
+            } else if let Some(document) = self.discover_document_return {
+                if documents::fresh_display(value, document) {
+                    // This checked literal can take either layout during final lowering.
+                    // Only an already existing mutable owner selects the document ABI.
+                    return self.expr_expected(value, document);
+                }
+                self.document_annotation_value(value, self.returns, document)?
             } else if self.inferred_returns.is_some() {
                 self.expr(value)?
             } else {

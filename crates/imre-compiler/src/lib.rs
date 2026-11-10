@@ -1838,6 +1838,29 @@ print("result", call(b=2, a=1))
     }
 
     #[test]
+    fn mutable_document_arguments_preserve_independent_any_parameters() {
+        let source = r#"from numbers import Number
+from typing import Any
+from tomli import loads
+from tomli_w import dumps
+
+def is_number(value: Any) -> bool:
+    return isinstance(value, Number)
+
+def update(table: dict[str, Any]) -> dict[str, Any]:
+    table["name"] = "new"
+    return table
+
+doc = loads('name = "old"')
+print(dumps(update(doc)))
+print(is_number(3))
+"#;
+        let llvm = super::compile(source, &CompileOptions::default()).unwrap();
+        assert!(llvm.contains("call i32 @imre_system_exit_code_kind("));
+        assert!(llvm.contains("call i64 @imre_document("));
+    }
+
+    #[test]
     fn unsupported_handle_comparisons_are_diagnosed_before_lowering() {
         for source in [
             "import tomli\nv = tomli.loads('x = 1')\nprint(v == v != v)\n",

@@ -236,6 +236,45 @@ pub(crate) fn check_registered_project<'a>(
 }
 
 impl Session {
+    /// Query the already indexed declarations in this physical scope.
+    pub(crate) fn has_annotated_empty_list(
+        &self,
+        module: usize,
+        function: Option<&ruff_python_ast::StmtFunctionDef>,
+        matches_annotation: impl Fn(&Expr) -> bool,
+    ) -> bool {
+        use ty_python_core::definition::DefinitionKind;
+        use ty_python_core::scope::NodeWithScopeRef;
+        let file = self.db.program_file(self.files[module]);
+        let index = ty_python_core::semantic_index(&self.db, file);
+        let scope = match function {
+            Some(function) => {
+                let Some(scope) = index.try_node_scope(NodeWithScopeRef::Function(function)) else {
+                    return false;
+                };
+                scope
+            }
+            None => FileScopeId::global(),
+        };
+        let places = index.place_table(scope);
+        let parsed = self.parsed(self.files[module]);
+        let definitions = index.use_def_map(scope);
+        places
+            .symbols()
+            .filter(|symbol| symbol.is_declared())
+            .any(|symbol| {
+                let id = places.symbol_id(symbol.name()).expect("indexed symbol");
+                definitions
+                    .reachable_symbol_declarations(id)
+                    .filter_map(|item| item.declaration.definition())
+                    .any(|def| {
+                        matches!(def.kind(&self.db), DefinitionKind::AnnotatedAssignment(a)
+                    if matches!(a.value(&parsed), Some(Expr::List(list)) if list.elts.is_empty())
+                        && matches_annotation(a.annotation(&parsed)))
+                    })
+            })
+    }
+
     /// A module operand follows the statement's normal continuation if they have
     /// the same use-def condition. Calls before the statement may themselves raise.
     pub(crate) fn unconditional_module_operand(
