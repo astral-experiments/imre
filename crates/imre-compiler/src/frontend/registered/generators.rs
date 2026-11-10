@@ -10,7 +10,41 @@ pub(crate) struct RegisteredGenerator {
 }
 
 impl RegisteredGenerator {
-    pub(super) fn prepare(
+    /// Bind inner generator activations before any enclosing operand refers to them.
+    pub(crate) fn collect(
+        body: &[ast::Stmt],
+        source: values::RegisteredSource<'_>,
+    ) -> HashMap<TextRange, Self> {
+        use ast::visitor::{Visitor, walk_expr};
+        struct Collector<'a> {
+            source: values::RegisteredSource<'a>,
+            sites: HashMap<TextRange, RegisteredGenerator>,
+        }
+        impl<'a> Visitor<'a> for Collector<'_> {
+            fn visit_expr(&mut self, expr: &'a ast::Expr) {
+                stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || walk_expr(self, expr));
+                if let ast::Expr::Generator(generator) = expr
+                    && let Some(child) = RegisteredGenerator::prepare(
+                        generator,
+                        values::RegisteredSource {
+                            generators: Some(&self.sites),
+                            ..self.source
+                        },
+                    )
+                {
+                    self.sites.insert(generator.range(), child);
+                }
+            }
+        }
+        let mut collector = Collector {
+            source,
+            sites: HashMap::new(),
+        };
+        collector.visit_body(body);
+        collector.sites
+    }
+
+    fn prepare(
         generator: &ast::ExprGenerator,
         source: values::RegisteredSource<'_>,
     ) -> Option<Self> {
@@ -106,7 +140,7 @@ mod tests {
         let graph = SourceGraph::single("result = (item async for item in rows if item)\n").unwrap();
         let module = &graph.modules[graph.entry];
         let literals = values::ModuleSource::new(module);
-        let (_, sites) = prepare_expression_sites(
+        let sites = RegisteredGenerator::collect(
             &module.parsed.syntax().body,
             literals.context(&module.source),
         );
@@ -139,7 +173,7 @@ mod tests {
         .unwrap();
         let module = &graph.modules[graph.entry];
         let literals = values::ModuleSource::new(module);
-        let (_, sites) = prepare_expression_sites(
+        let sites = RegisteredGenerator::collect(
             &module.parsed.syntax().body,
             literals.context(&module.source),
         );
@@ -173,7 +207,7 @@ mod tests {
         .unwrap();
         let module = &graph.modules[graph.entry];
         let literals = values::ModuleSource::new(module);
-        let (_, sites) = prepare_expression_sites(
+        let sites = RegisteredGenerator::collect(
             &module.parsed.syntax().body,
             literals.context(&module.source),
         );
@@ -217,7 +251,7 @@ mod tests {
         let graph = SourceGraph::single("list((y for y in x) for x in rows)\n").unwrap();
         let module = &graph.modules[graph.entry];
         let literals = values::ModuleSource::new(module);
-        let (_, sites) = prepare_expression_sites(
+        let sites = RegisteredGenerator::collect(
             &module.parsed.syntax().body,
             literals.context(&module.source),
         );

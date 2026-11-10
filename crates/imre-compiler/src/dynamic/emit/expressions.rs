@@ -4,7 +4,8 @@ use ruff_text_size::Ranged;
 use super::FrameEmitter;
 use super::{Function, permanent};
 use crate::frontend::{
-    LambdaBinding, LambdaDefault, RegisteredScope, SourceOperand, prepare_boolean,
+    LambdaBinding, LambdaDefault, PreparedTemplate, RegisteredScope, SourceOperand, TemplateField,
+    prepare_boolean,
 };
 use crate::ir::control::Context as BooleanContext;
 use crate::llvm::operations::branches::{Logical, LogicalEmitter, LogicalInput};
@@ -95,7 +96,7 @@ impl Function<'_, '_> {
         ) {
             return None;
         }
-        if let Some(operand) = self.source.strings.templates.get(&expr.range()) {
+        if let Some(PreparedTemplate::Checked(operand)) = self.source.strings.templates.get(&expr.range()) {
             self.prepare_checked_value(&operand.value);
             return Some(self.frame.prepared_operand(operand, &self.sites, condition));
         }
@@ -234,20 +235,30 @@ impl Function<'_, '_> {
     }
 
     fn expr_inner(&mut self, expr: &ast::Expr) -> String {
-        if let Some(operands) = crate::frontend::template_operands(expr) {
-            let Some(plan) = self.source.strings.residual_templates.get(&expr.range()) else {
-                return self.unsupported("t-string expression spelling");
-            };
-            let template = self.frame.begin_template(plan.segments.clone());
-            for (operand, field) in operands.zip(&plan.fields) {
-                let interpolation = match template.field(&mut self.frame, field, &self.sites) {
-                    Ok(interpolation) => interpolation,
-                    Err(reason) => return self.unsupported(reason),
+        if let Some(PreparedTemplate::Mixed { segments, fields }) =
+            self.source.strings.templates.get(&expr.range())
+        {
+            return self.template(segments, fields, |code, field| {
+                use std::ops::ControlFlow;
+                let value = match field {
+                    TemplateField::Checked(operand) => {
+                        code.prepare_checked_value(&operand.value);
+                        code.frame.prepared_operand(operand, &code.sites, false)
+                    }
+                    TemplateField::External {
+                        value,
+                        interpolation,
+                    } => {
+                        let input = code.expr(value);
+                        code.frame
+                            .registered_with_inputs(interpolation, &[input], &code.sites)
+                    }
+                    TemplateField::Unsupported(reason) => {
+                        return ControlFlow::Break(code.unsupported(reason));
+                    }
                 };
-                let value = self.expr(operand);
-                interpolation.capture(&mut self.frame, &value);
-            }
-            return template.finish(&mut self.frame);
+                ControlFlow::Continue(value)
+            });
         }
         if self.native_suspension
             && let Some((kind, value)) = crate::ir::SuspendValue::operand(expr)
@@ -278,6 +289,7 @@ impl Function<'_, '_> {
                     self.source_lambda(lambda, operation, defaults)
                 }
             },
+            ast::Expr::TString(_) => self.unsupported("t-string expression spelling"),
             ast::Expr::FString(_) => {
                 self.build_diagnostic("cannot compile this formatted string ahead of time")
             }

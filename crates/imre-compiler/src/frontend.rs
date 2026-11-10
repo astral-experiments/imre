@@ -135,13 +135,13 @@ pub(crate) use registered::values::{
 pub(crate) use registered::{
     AnnotationValue, DeferredAnnotation, ParameterAnnotations, PhysicalOperand, PreparedStrings, RegisteredFunction,
     RegisteredGenerator, RegisteredLambda, RegisteredScope, RegisteredSites, RegisteredSuite,
-    ResidualField, SourceEffect, SourceRun, StatementSites, SuitePreparation,
-    annotation_expression, attribute_write, prepare_expression_sites,
-    registered_sites, registered_type_alias, registered_type_parameters, template_operands,
+    SourceEffect, SourceRun, StatementSites, SuitePreparation, annotation_expression, attribute_write,
+    registered_sites, registered_type_alias, registered_type_parameters,
 };
 pub(crate) use registered::{ContextTarget, LoopBinding, LoopSuite, PreparedFor, SourceGuard};
 pub(crate) use registered::{
-    LambdaBinding, LambdaDefault, LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion, inline_operand,
+    LambdaBinding, LambdaDefault, LocalBinding, PreparedTemplate, RegisteredClass, RegisteredOperand,
+    RegisteredRegion, TemplateField, inline_operand,
 };
 mod sequences;
 mod shutil;
