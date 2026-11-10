@@ -401,7 +401,7 @@ impl<'a> PreparedBody<'a, '_> {
                 alias.start(),
                 TypeAliasDefinition {
                     range: alias.range(),
-                    name: name.id.to_string(),
+                    name: private_names.source_name(name.start(), &name.id).to_owned(),
                     body: crate::frontend::type_alias_body(&alias.value, values)
                         .ok_or(alias.value.range()),
                     parameters: alias.type_params.as_deref().map(|params| {
@@ -782,7 +782,10 @@ enum DefinitionName<'a> {
 }
 
 enum ReturnOperand<'a> {
-    Prepared(&'a crate::frontend::RegisteredOperand),
+    Prepared(
+        &'a crate::frontend::RegisteredOperand,
+        Option<crate::frontend::function_scope::ClassBindings>,
+    ),
     ClassArguments(TextSize),
 }
 
@@ -1191,7 +1194,10 @@ impl SourceMap<'_> {
             Body::Operand(range, operand) => {
                 f.checkpoint(&range);
                 let value = match operand {
-                    ReturnOperand::Prepared(operand) => {
+                    ReturnOperand::Prepared(operand, class) => {
+                        if let Some(class) = class {
+                            f.frame.use_class_annotation_names(class);
+                        }
                         f.prepare_checked_value(&operand.value);
                         f.frame.prepared_operand(operand, &f.sites, false)
                     }

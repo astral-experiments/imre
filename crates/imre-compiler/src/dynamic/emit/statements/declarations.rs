@@ -89,7 +89,10 @@ impl SourceMap<'_> {
             location.code(
                 output,
                 String::new(),
-                Body::Operand(body.code.range, ReturnOperand::Prepared(&body.code.operand)),
+                Body::Operand(
+                    body.code.range,
+                    ReturnOperand::Prepared(&body.code.operand, None),
+                ),
                 false,
                 None,
             )
@@ -279,7 +282,10 @@ impl Function<'_, '_> {
                     None,
                     None,
                     None,
-                    Body::Operand(code.range, ReturnOperand::Prepared(&code.operand)),
+                    Body::Operand(
+                        code.range,
+                        ReturnOperand::Prepared(&code.operand, self.class_locals.clone()),
+                    ),
                 ),
                 parameters: alias.parameters.clone(),
             }),
