@@ -156,6 +156,12 @@ impl<'p> Function<'_, 'p> {
             return;
         }
         match effect {
+            SourceEffect::Assertion(site) => {
+                let source = suite[run.statements.start]
+                    .as_assert_stmt()
+                    .expect("external assertion input");
+                self.emit_assertion_inputs(site, source);
+            }
             SourceEffect::For(region) => self.prepared_for(region),
             SourceEffect::While(condition) => {
                 let source = suite[run.statements.start]
@@ -217,6 +223,48 @@ impl<'p> Function<'_, 'p> {
                 });
             }
         }
+    }
+
+    fn emit_assertion_inputs(
+        &mut self,
+        site: &crate::frontend::AssertionSite,
+        source: &'p ast::StmtAssert,
+    ) {
+        let [checkpoint, Statement::If(test, yes, no)] = site.body.as_slice() else {
+            unreachable!("prepared assertion")
+        };
+        self.checked_statement(checkpoint);
+        crate::llvm::operations::choose(
+            self,
+            |code| {
+                code.flush_check();
+                &mut code.frame.body
+            },
+            [(Some(test), yes), (None, no)],
+            |code, test, yes, no| {
+                if site.external_test {
+                    code.branch_expr(&source.test, yes, no);
+                } else {
+                    code.prepare_checked_value(test);
+                    code.frame.registered_branch(test, &code.sites, yes, no);
+                }
+            },
+            |code, statements| {
+                for statement in statements {
+                    if site.external_message {
+                        let message = code.expr(source.msg.as_deref().expect("external message"));
+                        code.frame.checked_statement_with_inputs(
+                            statement,
+                            &code.sites,
+                            &[message],
+                        );
+                    } else {
+                        code.checked_statement(statement);
+                    }
+                }
+            },
+            false,
+        );
     }
 
     /// Supply only the source operands requested by the registered matcher.
@@ -289,10 +337,7 @@ impl<'p> Function<'_, 'p> {
             if !self.start_statement() {
                 break;
             }
-            let position = stmt
-                .as_assert_stmt()
-                .map_or_else(|| stmt.range(), |assertion| assertion.test.range());
-            self.checkpoint(&position);
+            self.checkpoint(&stmt.range());
             self.simple_call = imre_ast::unhighlighted_call(stmt);
             if let Some(site) = self.source.statement_sites.ifs.get(&stmt.range()) {
                 let source = stmt.as_if_stmt().expect("prepared conditional");
@@ -446,16 +491,6 @@ impl<'p> Function<'_, 'p> {
                 ast::Stmt::Try(v) => self.protected_statement(v),
                 ast::Stmt::With(v) if !v.is_async || self.native_suspension => {
                     self.emit_with_inputs(v);
-                }
-                ast::Stmt::Assert(v) => {
-                    let pass = self.name("b");
-                    let fail = self.name("b");
-                    self.branch_expr(&v.test, &pass, &fail);
-                    self.label(&fail);
-                    let message = v.msg.as_deref().map(|expr| self.expr(expr));
-                    self.frame
-                        .assertion_failure(v.start(), v.test.start(), message.as_deref());
-                    self.label(&pass);
                 }
                 _ => {
                     self.unsupported(&format!("{:?}", ast::AnyNodeRef::from(stmt).kind()));

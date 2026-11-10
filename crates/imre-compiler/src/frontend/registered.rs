@@ -833,6 +833,8 @@ pub(crate) struct SourceRun {
 pub(crate) enum SourceEffect {
     /// Evaluate the RHS once for the following checked assignment targets.
     AssignmentInput(usize),
+    /// The enclosing suite owns any source inputs on their test or failure edge.
+    Assertion(Box<AssertionSite>),
     /// Evaluate the operands at their place in the operation, in the current frame.
     ObjectOperation(Box<Builtin>, Vec<PhysicalOperand>),
     /// A mixed loop needs its source suites. A literal false test runs only the else suite.
@@ -916,40 +918,63 @@ impl RegisteredSuite {
     }
 }
 
-fn checked_assertion(
-    stmt: &ast::StmtAssert,
-    mut operand: impl FnMut(&ast::Expr) -> Option<Expr>,
-) -> Option<Vec<Statement>> {
-    let condition = operand(&stmt.test)?;
-    let message = match stmt.msg.as_deref() {
-        Some(message) => vec![operand(message)?],
-        None => Vec::new(),
-    };
-    let test = operation(Builtin::Bool, Type::Bool, vec![condition]);
-    let failure = operation(
-        Builtin::RegisteredAssertionFailure {
-            statement: stmt.start(),
-            test: stmt.test.start(),
-        },
-        Type::None,
-        message,
-    );
-    // The implicit truth conversion can call Python on the test's physical line.
-    Some(vec![
-        Statement::Expr(operation(
-            Builtin::RegisteredStatement(stmt.test.range(), None),
+pub(crate) struct AssertionSite {
+    pub(crate) body: Vec<Statement>,
+    pub(crate) external_test: bool,
+    pub(crate) external_message: bool,
+}
+
+impl AssertionSite {
+    fn prepare(
+        stmt: &ast::StmtAssert,
+        mut operand: impl FnMut(&ast::Expr) -> Option<Expr>,
+    ) -> Self {
+        let condition = operand(&stmt.test);
+        let external_test = condition.is_none();
+        let message = stmt.msg.as_deref().map(&mut operand);
+        let external_message = matches!(message, Some(None));
+        let input = || Expr::local(0, Type::PythonObject);
+        let test = operation(
+            Builtin::Bool,
+            Type::Bool,
+            vec![condition.unwrap_or_else(input)],
+        );
+        let failure = operation(
+            Builtin::RegisteredAssertionFailure {
+                statement: stmt.start(),
+                test: stmt.test.start(),
+            },
             Type::None,
-            vec![],
-        )),
-        Statement::If(test, Vec::new(), vec![Statement::Expr(failure)]),
-    ])
+            message
+                .into_iter()
+                .map(|value| value.unwrap_or_else(input))
+                .collect(),
+        );
+        // The implicit truth conversion can call Python on the test's physical line.
+        Self {
+            body: vec![
+                Statement::Expr(operation(
+                    Builtin::RegisteredStatement(stmt.test.range(), None),
+                    Type::None,
+                    vec![],
+                )),
+                Statement::If(test, Vec::new(), vec![Statement::Expr(failure)]),
+            ],
+            external_test,
+            external_message,
+        }
+    }
+
+    pub(crate) fn complete(&self) -> bool {
+        !self.external_test && !self.external_message
+    }
 }
 
 /// Physical source locations and semantic operations shared by complete and residual suites.
 #[derive(Default)]
 pub(crate) struct StatementSites {
     pub(crate) expressions: booleans::ExpressionSites,
-    pub(crate) assertions: HashMap<TextRange, Vec<Statement>>,
+    omit_assertions: bool,
     pub(crate) ifs: HashMap<TextRange, SourceConditional>,
     pub(crate) matches: HashMap<TextRange, Option<patterns::SourceMatch>>,
     pub(crate) contexts: HashMap<TextRange, Vec<ContextInput>>,
@@ -1084,23 +1109,11 @@ fn statement_sites(
 
     struct Collector<'a> {
         source: values::RegisteredSource<'a>,
-        assertions_enabled: bool,
         sites: StatementSites,
     }
 
     impl<'a> StatementVisitor<'a> for Collector<'_> {
         fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-            if let ast::Stmt::Assert(assertion) = stmt {
-                // An assertion with an unprepared operand remains in its physical suite.
-                if !self.assertions_enabled {
-                    self.sites.assertions.insert(stmt.range(), Vec::new());
-                } else if let Some(body) = checked_assertion(assertion, |expr| {
-                    values::registered_value(expr, self.source)
-                }) {
-                    self.sites.assertions.insert(stmt.range(), body);
-                }
-                return;
-            }
             if let ast::Stmt::With(with) = stmt {
                 let inputs = with
                     .items
@@ -1148,8 +1161,10 @@ fn statement_sites(
 
     let mut collector = Collector {
         source,
-        assertions_enabled,
-        sites: StatementSites::default(),
+        sites: StatementSites {
+            omit_assertions: !assertions_enabled,
+            ..StatementSites::default()
+        },
     };
     collector.visit_body(body);
     collector.sites
@@ -1483,6 +1498,21 @@ impl<'a> SuitePreparation<'a> {
         let mut body = Vec::new();
         let mut residual: Vec<SourceRun> = Vec::new();
         for (i, stmt) in stmts.iter().enumerate() {
+            if let ast::Stmt::Assert(assertion) = stmt {
+                if !self.sites.omit_assertions {
+                    let site = scope.assertion(assertion);
+                    if site.complete() {
+                        body.extend(site.body);
+                    } else {
+                        residual.push(SourceRun {
+                            at: body.len(),
+                            statements: i..i + 1,
+                            effect: Some(SourceEffect::Assertion(Box::new(site))),
+                        });
+                    }
+                }
+                continue;
+            }
             let slots_before = scope.locals.len();
             let lowered = match select {
                 SuiteSelection::All => scope.statement(stmt, &mut body),
@@ -2277,7 +2307,6 @@ impl SourceScope<'_> {
             || stmt.is_delete_stmt()
             || stmt.is_aug_assign_stmt()
             || stmt.is_raise_stmt()
-            || self.sites.assertions.contains_key(&stmt.range())
             || attribute_write(stmt).is_some()
         {
             return self.statement(stmt, body);
@@ -2301,14 +2330,25 @@ impl SourceScope<'_> {
         Ok(continues)
     }
 
+    fn assertion(&mut self, stmt: &ast::StmtAssert) -> AssertionSite {
+        AssertionSite::prepare(stmt, |expr| {
+            let before = self.locals.len();
+            let value = self.operand(expr);
+            if value.is_none() {
+                self.truncate_locals(before);
+            }
+            value
+        })
+    }
+
     fn statement(&mut self, stmt: &ast::Stmt, body: &mut Vec<Statement>) -> StdResult<bool, ()> {
         if let ast::Stmt::Assert(assertion) = stmt {
-            if let Some(statements) = self.sites.assertions.get(&stmt.range()) {
-                body.extend_from_slice(statements);
-            } else {
-                // A prepared activation can also supply storage for named expressions
-                // and admit suspension at a whole operand's boundary.
-                body.extend(checked_assertion(assertion, |expr| self.operand(expr)).ok_or(())?);
+            if !self.sites.omit_assertions {
+                let site = self.assertion(assertion);
+                if !site.complete() {
+                    return Err(());
+                }
+                body.extend(site.body);
             }
             return Ok(true);
         }
@@ -2771,7 +2811,7 @@ mod tests {
 
     #[test]
     fn assertion_admission_keeps_the_message_on_the_failure_edge() {
-        let text = "assert (lost := probe()), f'{(item for item in values)}'\nassert (selected := [value][0]), [message(), values[1:]]\n";
+        let text = "assert (early := probe()), f'{(unused := 1)}{(item for item in values)}'\nassert (selected := [value][0]), [message(), values[1:]]\n";
         let graph = SourceGraph::single(text).unwrap();
         let module = &graph.modules[graph.entry];
         let body = &module.parsed.syntax().body;
@@ -2782,13 +2822,18 @@ mod tests {
                 .suite(body, RegisteredScope::Function { is_async: false })
         };
         let plan = prepare(true);
-        assert_eq!(plan.checked.local_names.len(), 1);
-        assert_eq!(plan.checked.local_names[&0].name, "selected");
+        assert_eq!(plan.checked.local_names.len(), 2);
+        assert_eq!(plan.checked.local_names[&0].name, "early");
+        assert_eq!(plan.checked.local_names[&1].name, "selected");
         let [physical] = plan.residual.as_slice() else {
             panic!("expected the generator-expression message to remain physical");
         };
         assert_eq!(physical.at, 0);
         assert_eq!(physical.statements, 0..1);
+        assert!(matches!(
+            &physical.effect,
+            Some(SourceEffect::Assertion(site)) if !site.external_test && site.external_message
+        ));
         let [_, Statement::If(test, succeeds, fails)] = plan.checked.function.body.as_slice()
         else {
             panic!("expected only the checked assertion checkpoint and branch");

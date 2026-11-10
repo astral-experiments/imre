@@ -3427,6 +3427,66 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
+    fn physical_assertion_retains_its_test_before_a_suspending_message() {
+        let mut module = PreparedBody::module(
+            "proof",
+            Path::new("proof.py"),
+            "def verify(check, message):\n    assert check(), (yield (lambda: message())())\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let def = module.syntax.as_ref().unwrap()[0].as_function_def_stmt().unwrap();
+        let function = def.start();
+        let body_start = def.body[0].start();
+        // Withhold the child descriptor only from suite lowering. The physical
+        // message still uses the real compiled child when the assertion fails.
+        let missing = HashMap::new();
+        let source = crate::frontend::RegisteredSource {
+            lambdas: Some(&missing),
+            ..module.source.registered_source()
+        };
+        let mut physical = crate::frontend::SuitePreparation::new(
+            &module.source.namespace_operations, source, &def.body, true,
+        );
+        physical.physical_body(
+            &def.body,
+            crate::frontend::RegisteredScope::Function { is_async: false },
+        );
+        let (sites, nested) = (physical.sites, physical.nested);
+        module.source.statement_sites = sites;
+        module.source.nested_bodies.extend(nested);
+        module.source.function_bodies.remove(&function);
+        let [run] = module.source.nested_bodies[&body_start].residual.as_slice() else {
+            panic!("expected the assertion's external message");
+        };
+        let Some(crate::frontend::SourceEffect::Assertion(site)) = &run.effect else {
+            panic!("expected a mixed assertion");
+        };
+        assert!(!site.external_test && site.external_message);
+        let original = module.standalone().unwrap().unwrap();
+        let def = module.syntax.as_mut().unwrap().to_mut()[0].as_function_def_stmt_mut().unwrap();
+
+        fn erase(value: &mut ast::Expr) {
+            *value = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+                range: value.range(),
+                node_index: Default::default(),
+            });
+        }
+
+        let assertion = def.body[0].as_assert_stmt_mut().unwrap();
+        erase(&mut assertion.test);
+        assert_eq!(module.standalone().unwrap().unwrap(), original);
+
+        let def = module.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let assertion = def.body[0].as_assert_stmt_mut().unwrap();
+        erase(assertion.msg.as_deref_mut().unwrap());
+        assert_ne!(module.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
     fn mixed_while_keeps_its_checked_guard_and_reads_its_physical_body() {
         let mut prepared = PreparedBody::module(
             "example",
