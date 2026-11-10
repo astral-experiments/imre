@@ -2448,6 +2448,20 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         compare("application", "tail")
         compare("-I", "./application/sub", "-h")
 
+        site = root / "build-site"
+        site.mkdir()
+        dependency = site / "installed_price.py"
+        dependency.write_text("def price(n: int) -> int: return n * 7\n")
+        caller = root / "invoice.py"
+        caller.write_text("from installed_price import price\nprint(price(9))\n")
+        invoice = root / "invoice"
+        built = run(imre, "build", caller, "-o", invoice, extra={"PYTHONPATH": str(site)})
+        assert built.returncode == 0, built.stderr
+        dependency.unlink()
+        caller.unlink()
+        result = run(invoice)
+        assert (result.returncode, result.stdout, result.stderr) == (0, b"63\n", b""), result
+
         namespace_package = root / "namespace_plugin"
         namespace_package.mkdir()
         (namespace_package / "helper.py").write_text("globals()['answer'] = 42\n")

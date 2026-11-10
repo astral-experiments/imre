@@ -68,6 +68,7 @@ impl BuildOptions {
             options.read(command, &mut environment_flags()?.into_iter(), false)?;
         }
         options.read(command, args, true)?;
+        options.add_pythonpath();
         Ok(options)
     }
 
@@ -88,28 +89,8 @@ impl BuildOptions {
                 false,
             )?;
         }
-        if !flags.ignore_environment
-            && let Some(paths) = env::var_os("PYTHONPATH").filter(|value| !value.is_empty())
-        {
-            let start = options.compile.extension_paths.len();
-            for path in env::split_paths(&paths) {
-                let path = if path.as_os_str().is_empty() {
-                    PathBuf::from(".")
-                } else {
-                    path
-                };
-                if !path.is_dir() {
-                    if !imre_compiler::is_zip_path(&path) {
-                        continue;
-                    }
-                    options
-                        .compile
-                        .python_archive_indices
-                        .push(options.compile.extension_paths.len());
-                }
-                options.compile.extension_paths.push(path);
-            }
-            options.compile.pythonpath = start..options.compile.extension_paths.len();
+        if !flags.ignore_environment {
+            options.add_pythonpath();
         }
         if options.module_root.is_some() {
             return Err(
@@ -210,6 +191,31 @@ impl BuildOptions {
         options.compile.stdlib_dir = stdlib;
         options.compile.site_dirs = site_dirs;
         Ok(options)
+    }
+
+    /// Append Python import roots after the explicit compiler search paths.
+    fn add_pythonpath(&mut self) {
+        let Some(paths) = env::var_os("PYTHONPATH").filter(|value| !value.is_empty()) else {
+            return;
+        };
+        let start = self.compile.extension_paths.len();
+        for path in env::split_paths(&paths) {
+            let path = if path.as_os_str().is_empty() {
+                PathBuf::from(".")
+            } else {
+                path
+            };
+            if !path.is_dir() {
+                if !imre_compiler::is_zip_path(&path) {
+                    continue;
+                }
+                self.compile
+                    .python_archive_indices
+                    .push(self.compile.extension_paths.len());
+            }
+            self.compile.extension_paths.push(path);
+        }
+        self.compile.pythonpath = start..self.compile.extension_paths.len();
     }
 
     fn read(
