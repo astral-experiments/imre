@@ -162,6 +162,7 @@ impl<'p> Function<'_, 'p> {
                     .expect("external assertion input");
                 self.emit_assertion_inputs(site, source);
             }
+            SourceEffect::Context(context) => self.prepared_context(context),
             SourceEffect::For(region) => self.prepared_for(region),
             SourceEffect::While(condition) => {
                 let source = suite[run.statements.start]
@@ -487,9 +488,6 @@ impl<'p> Function<'_, 'p> {
                     }
                 }
                 ast::Stmt::Try(v) => self.protected_statement(v),
-                ast::Stmt::With(v) if !v.is_async || self.native_suspension => {
-                    self.emit_with_inputs(v);
-                }
                 _ => {
                     self.unsupported(&format!("{:?}", ast::AnyNodeRef::from(stmt).kind()));
                 }
@@ -1190,19 +1188,43 @@ impl<'p> Function<'_, 'p> {
         self.assign(right, &second);
     }
 
-    fn prepared_for(&mut self, region: &'p crate::frontend::PreparedFor) {
-        use crate::frontend::LoopBinding;
+    fn physical_binding(&mut self, target: &'p crate::frontend::PhysicalBinding, value: &str) {
+        use crate::frontend::PhysicalBinding;
+        match target {
+            PhysicalBinding::Checked { entered, binding } => {
+                self.prepare_checked_sites(&binding.function.body);
+                self.frame
+                    .checked_binding(binding, *entered, value, &self.sites);
+            }
+            PhysicalBinding::Source(target) => self.assign(target, value),
+        }
+    }
 
+    fn prepared_context(&mut self, context: &'p crate::frontend::PreparedContext) {
+        self.checkpoint(&context.range);
+        self.simple_call = None;
+        let inputs = &context.inputs;
+        self.with_contexts(
+            inputs.iter().map(|input| input.site),
+            |code, i| {
+                code.with_expression_range(inputs[i].site.range, |code| {
+                    code.physical_operand(&inputs[i].manager)
+                })
+            },
+            |code, i, value| {
+                if let Some(target) = &inputs[i].target {
+                    code.physical_binding(target, value);
+                }
+            },
+            |code| code.physical_suite(&context.body),
+        );
+    }
+
+    fn prepared_for(&mut self, region: &'p crate::frontend::PreparedFor) {
         self.checkpoint(&region.range);
         self.simple_call = None;
         let cursor = self.iteration_result(|code| {
-            let value = match &region.iterable {
-                PhysicalOperand::Checked(input) => {
-                    code.prepare_checked_value(&input.value);
-                    code.frame.prepared_operand(input, &code.sites, false)
-                }
-                PhysicalOperand::Source(input) => code.expr(input),
-            };
+            let value = code.physical_operand(&region.iterable);
             if code.native_suspension {
                 code.call_position(region.iterable_range);
             }
@@ -1240,19 +1262,12 @@ impl<'p> Function<'_, 'p> {
             },
             |code, edges, pulled| {
                 let item = code.frame.iteration_item(&cursor, pulled);
-                match &region.target {
-                    LoopBinding::Checked { entered, binding } => {
-                        code.prepare_checked_sites(&binding.function.body);
-                        code.frame
-                            .checked_binding(binding, *entered, &item, &code.sites);
-                    }
-                    LoopBinding::Source(target) => code.assign(target, &item),
-                }
+                code.physical_binding(&region.target, &item);
                 code.loops.push(LoopTarget {
                     step: (edges.step.clone(), code.exits.len()),
                     done: (edges.done.clone(), enclosing),
                 });
-                code.loop_suite(&region.body);
+                code.physical_suite(&region.body);
                 code.loops.pop();
             },
             // Even a loop without an else must release the cursor on exhaustion.
@@ -1262,13 +1277,13 @@ impl<'p> Function<'_, 'p> {
                 code.finish_unwind(unwind, |frame| frame.release_target(None));
                 code.release_target(None);
                 if let Some(otherwise) = &region.otherwise {
-                    code.loop_suite(otherwise);
+                    code.physical_suite(otherwise);
                 }
             }),
         );
     }
 
-    fn loop_suite(&mut self, suite: &'p crate::frontend::LoopSuite) {
+    fn physical_suite(&mut self, suite: &'p crate::frontend::PhysicalSuite) {
         self.checked_runs(&suite.plan, |code, run| {
             code.source_run(&suite.sources, run);
         });
@@ -1429,38 +1444,5 @@ impl<'p> Function<'_, 'p> {
             self.live.insert(slot, value);
         }
         self.exits.extend(left.into_iter().rev());
-    }
-
-    fn emit_with_inputs(&mut self, source: &'p ast::StmtWith) {
-        use crate::frontend::ContextTarget;
-
-        let inputs = &self.source.statement_sites.contexts[&source.range()];
-        self.with_contexts(
-            inputs.iter().map(|input| input.site),
-            |code, i| match &inputs[i].manager {
-                Some(manager) => code.with_expression_range(inputs[i].site.range, |code| {
-                    code.registered_value(manager)
-                }),
-                None => code.expr(&source.items[i].context_expr),
-            },
-            |code, i, value| match &inputs[i].target {
-                ContextTarget::Checked { entered, binding } => {
-                    code.prepare_checked_sites(&binding.function.body);
-                    code.frame
-                        .checked_binding(binding, *entered, value, &code.sites);
-                }
-                ContextTarget::Residual => {
-                    code.assign(
-                        source.items[i]
-                            .optional_vars
-                            .as_ref()
-                            .expect("context target"),
-                        value,
-                    );
-                }
-                ContextTarget::Absent => {}
-            },
-            |code| code.statements(&source.body),
-        );
     }
 }

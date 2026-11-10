@@ -841,6 +841,8 @@ pub(crate) enum SourceEffect {
     ObjectOperation(Box<Builtin>, Vec<PhysicalOperand>),
     /// A mixed loop needs its source suites. A literal false test runs only the else suite.
     While(SourceGuard<Box<RegisteredOperand>>),
+    /// The manager, binding and protected child are prepared together.
+    Context(Box<PreparedContext>),
     /// A loop whose checked lowering left one or more physical inputs or suites.
     For(Box<PreparedFor>),
 }
@@ -851,12 +853,12 @@ pub(crate) struct PreparedFor {
     pub(crate) acquire: ir::IteratorOp,
     pub(crate) pull: ir::IterNextKind,
     pub(crate) iterable: PhysicalOperand,
-    pub(crate) target: LoopBinding,
-    pub(crate) body: LoopSuite,
-    pub(crate) otherwise: Option<LoopSuite>,
+    pub(crate) target: PhysicalBinding,
+    pub(crate) body: PhysicalSuite,
+    pub(crate) otherwise: Option<PhysicalSuite>,
 }
 
-pub(crate) enum LoopBinding {
+pub(crate) enum PhysicalBinding {
     Checked {
         entered: usize,
         binding: Box<RegisteredFunction>,
@@ -864,12 +866,12 @@ pub(crate) enum LoopBinding {
     Source(Box<ast::Expr>),
 }
 
-pub(crate) struct LoopSuite {
+pub(crate) struct PhysicalSuite {
     pub(crate) plan: RegisteredSuite,
     pub(crate) sources: Vec<ast::Stmt>,
 }
 
-impl LoopSuite {
+impl PhysicalSuite {
     fn new(mut plan: RegisteredSuite, stmts: &[ast::Stmt]) -> Self {
         let mut sources = Vec::new();
         for run in &mut plan.residual {
@@ -878,6 +880,7 @@ impl LoopSuite {
                 run.effect,
                 Some(
                     SourceEffect::For(_)
+                        | SourceEffect::Context(_)
                         | SourceEffect::ObjectOperation(..)
                         | SourceEffect::Discard(_)
                 )
@@ -983,35 +986,19 @@ pub(crate) struct StatementSites {
     omit_assertions: bool,
     pub(crate) ifs: HashMap<TextRange, SourceConditional>,
     pub(crate) matches: HashMap<TextRange, Option<patterns::SourceMatch>>,
-    pub(crate) contexts: HashMap<TextRange, Vec<ContextInput>>,
+    pub(crate) contexts: HashMap<TextRange, Vec<ir::ContextSite>>,
+}
+
+pub(crate) struct PreparedContext {
+    pub(crate) range: TextRange,
+    pub(crate) inputs: Vec<ContextInput>,
+    pub(crate) body: PhysicalSuite,
 }
 
 pub(crate) struct ContextInput {
     pub(crate) site: ir::ContextSite,
-    pub(crate) manager: Option<Expr>,
-    pub(crate) target: ContextTarget,
-}
-
-pub(crate) enum ContextTarget {
-    Absent,
-    Residual,
-    Checked {
-        entered: usize,
-        binding: Box<RegisteredFunction>,
-    },
-}
-
-impl ContextTarget {
-    fn prepare(
-        target: &ast::Expr,
-        source: values::RegisteredSource<'_>,
-        kind: RegisteredScope,
-    ) -> Self {
-        match checked_binding(target, source, kind) {
-            Some((entered, binding)) => Self::Checked { entered, binding },
-            None => Self::Residual,
-        }
-    }
+    pub(crate) manager: PhysicalOperand,
+    pub(crate) target: Option<PhysicalBinding>,
 }
 
 /// Bind one externally supplied value with the scope and slot layout of its target.
@@ -1127,15 +1114,7 @@ fn statement_sites(
                 let inputs = with
                     .items
                     .iter()
-                    .map(|item| ContextInput {
-                        site: context_site(self.source.text, &item.context_expr, with.is_async),
-                        manager: None,
-                        target: if item.optional_vars.is_some() {
-                            ContextTarget::Residual
-                        } else {
-                            ContextTarget::Absent
-                        },
-                    })
+                    .map(|item| context_site(self.source.text, &item.context_expr, with.is_async))
                     .collect();
                 self.sites.contexts.insert(stmt.range(), inputs);
             }
@@ -1425,44 +1404,19 @@ impl<'a> SuitePreparation<'a> {
                     });
                     continue;
                 }
-                SourceRun::record(&mut plan.residual, index, run.at);
                 if let ast::Stmt::With(with) = stmt {
-                    let inputs = children
-                        .prepare
-                        .sites
-                        .contexts
-                        .get_mut(&stmt.range())
-                        .expect("with inputs");
-                    let region = match (kind, child_selection) {
-                        (RegisteredScope::Function { .. }, SuiteSelection::Physical) => {
-                            values::Region::SuspendedOperand
-                        }
-                        _ => values::Region::Residual,
-                    };
-                    for (input, item) in inputs.iter_mut().zip(&with.items) {
-                        input.manager = region.operand(&item.context_expr, children.prepare.source);
-                        if input.manager.is_none() {
-                            children.prepare.sites.expressions.prepare_input(
-                                &item.context_expr,
-                                children.prepare.source,
-                                kind,
-                                suspended,
-                            );
-                        }
-                        if let Some(target) = &item.optional_vars {
-                            input.target =
-                                ContextTarget::prepare(target, children.prepare.source, kind);
-                            if matches!(input.target, ContextTarget::Residual) {
-                                children.prepare.sites.expressions.prepare_input(
-                                    target,
-                                    children.prepare.source,
-                                    kind,
-                                    suspended,
-                                );
-                            }
-                        }
-                    }
+                    let context =
+                        children
+                            .prepare
+                            .prepare_context(with, kind, child_selection, suspended);
+                    plan.residual.push(SourceRun {
+                        at: run.at,
+                        statements: index..index + 1,
+                        effect: Some(SourceEffect::Context(Box::new(context))),
+                    });
+                    continue;
                 }
+                SourceRun::record(&mut plan.residual, index, run.at);
                 if let ast::Stmt::Match(branch) = stmt
                     && let Some(mut site) = children
                         .prepare
@@ -1518,6 +1472,89 @@ impl<'a> SuitePreparation<'a> {
         plan
     }
 
+    fn physical_operand(
+        &mut self,
+        expr: &ast::Expr,
+        kind: RegisteredScope,
+        selection: SuiteSelection,
+        suspended: bool,
+    ) -> PhysicalOperand {
+        let operand =
+            RegisteredOperand::prepare_with(self.source, kind, |scope| match (kind, selection) {
+                (RegisteredScope::Function { .. }, SuiteSelection::Physical) => scope.operand(expr),
+                _ => scope.ordinary_operand(expr),
+            });
+        match operand {
+            Some(operand) => PhysicalOperand::Checked(Box::new(operand)),
+            None => {
+                self.sites
+                    .expressions
+                    .prepare_input(expr, self.source, kind, suspended);
+                PhysicalOperand::Source(Box::new(expr.clone()))
+            }
+        }
+    }
+
+    fn physical_binding(
+        &mut self,
+        target: &ast::Expr,
+        kind: RegisteredScope,
+        suspended: bool,
+    ) -> PhysicalBinding {
+        match checked_binding(target, self.source, kind) {
+            Some((entered, binding)) => PhysicalBinding::Checked { entered, binding },
+            None => {
+                self.sites
+                    .expressions
+                    .prepare_input(target, self.source, kind, suspended);
+                PhysicalBinding::Source(Box::new(target.clone()))
+            }
+        }
+    }
+
+    fn physical_suite(
+        &mut self,
+        stmts: &[ast::Stmt],
+        kind: RegisteredScope,
+        selection: SuiteSelection,
+        suspended: bool,
+    ) -> PhysicalSuite {
+        PhysicalSuite::new(
+            self.selected_suite(stmts, kind, selection, selection, suspended),
+            stmts,
+        )
+    }
+
+    fn prepare_context(
+        &mut self,
+        stmt: &ast::StmtWith,
+        kind: RegisteredScope,
+        selection: SuiteSelection,
+        suspended: bool,
+    ) -> PreparedContext {
+        let inputs = stmt
+            .items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                let site = self.sites.contexts[&stmt.range()][index];
+                ContextInput {
+                    site,
+                    manager: self.physical_operand(&item.context_expr, kind, selection, suspended),
+                    target: item
+                        .optional_vars
+                        .as_ref()
+                        .map(|target| self.physical_binding(target, kind, suspended)),
+                }
+            })
+            .collect();
+        PreparedContext {
+            range: stmt.range(),
+            inputs,
+            body: self.physical_suite(&stmt.body, kind, selection, suspended),
+        }
+    }
+
     fn prepare_for(
         &mut self,
         loop_: &ast::StmtFor,
@@ -1525,38 +1562,9 @@ impl<'a> SuitePreparation<'a> {
         selection: SuiteSelection,
         suspended: bool,
     ) -> PreparedFor {
-        let iterable =
-            RegisteredOperand::prepare_with(self.source, kind, |scope| match (kind, selection) {
-                (RegisteredScope::Function { .. }, SuiteSelection::Physical) => {
-                    scope.operand(&loop_.iter)
-                }
-                _ => scope.ordinary_operand(&loop_.iter),
-            });
-        let iterable = match iterable {
-            Some(operand) => PhysicalOperand::Checked(Box::new(operand)),
-            None => {
-                self.sites
-                    .expressions
-                    .prepare_input(&loop_.iter, self.source, kind, suspended);
-                PhysicalOperand::Source(loop_.iter.clone())
-            }
-        };
-        let target = match checked_binding(&loop_.target, self.source, kind) {
-            Some((entered, binding)) => LoopBinding::Checked { entered, binding },
-            None => {
-                self.sites
-                    .expressions
-                    .prepare_input(&loop_.target, self.source, kind, suspended);
-                LoopBinding::Source(loop_.target.clone())
-            }
-        };
+        let iterable = self.physical_operand(&loop_.iter, kind, selection, suspended);
+        let target = self.physical_binding(&loop_.target, kind, suspended);
         let (acquire, pull) = iteration_protocol(loop_.iter.range(), for_pull(loop_));
-        let mut suite = |stmts: &[ast::Stmt]| {
-            LoopSuite::new(
-                self.selected_suite(stmts, kind, selection, selection, suspended),
-                stmts,
-            )
-        };
         PreparedFor {
             range: loop_.range(),
             iterable_range: loop_.iter.range(),
@@ -1564,8 +1572,9 @@ impl<'a> SuitePreparation<'a> {
             pull,
             iterable,
             target,
-            body: suite(&loop_.body),
-            otherwise: (!loop_.orelse.is_empty()).then(|| suite(&loop_.orelse)),
+            body: self.physical_suite(&loop_.body, kind, selection, suspended),
+            otherwise: (!loop_.orelse.is_empty())
+                .then(|| self.physical_suite(&loop_.orelse, kind, selection, suspended)),
         }
     }
 
@@ -2528,7 +2537,7 @@ impl SourceScope<'_> {
     fn with_items(
         &mut self,
         items: &[ast::WithItem],
-        inputs: &[ContextInput],
+        inputs: &[ir::ContextSite],
         suite: &[ast::Stmt],
     ) -> StdResult<Vec<Statement>, ()> {
         let Some((item, rest)) = items.split_first() else {
@@ -2544,7 +2553,7 @@ impl SourceScope<'_> {
         let body = self.with_items(rest, remaining, suite)?;
         Ok(vec![Statement::With {
             manager,
-            site: input.site,
+            site: *input,
             binding,
             body,
         }])
@@ -4593,8 +4602,7 @@ mod tests {
             .contexts
             .values()
             .flatten()
-            .map(|input| {
-                let site = input.site;
+            .map(|site| {
                 (
                     &text[site.range],
                     &text[site.range.start().to_usize()..site.anchor.to_usize()],

@@ -1768,7 +1768,7 @@ mod tests {
         ));
         assert!(matches!(
             region.target,
-            crate::frontend::LoopBinding::Checked { .. }
+            crate::frontend::PhysicalBinding::Checked { .. }
         ));
         assert!(!region.body.plan.fully_checked());
         let original = module.standalone().unwrap().unwrap();
@@ -2121,8 +2121,6 @@ mod tests {
 
     #[test]
     fn residual_with_emits_its_region_after_dropping_the_prepared_items() {
-        use crate::frontend::ContextTarget;
-
         let text = "def entries(path, stream):\n    with guard(), scandir(path) as stream:\n        with (yield stream):\n            pass\n";
         let mut prepared = PreparedBody::module(
             "scan",
@@ -2136,12 +2134,11 @@ mod tests {
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
-        let context = function.body[0].as_with_stmt_mut().unwrap();
-        let inputs = &prepared.source.statement_sites.contexts[&context.range()];
-        assert!(inputs.iter().all(|input| input.manager.is_some()));
-        assert!(matches!(&inputs[0].target, ContextTarget::Absent));
-        assert!(matches!(&inputs[1].target, ContextTarget::Checked { .. }));
-        context.items.clear();
+        function.body[0] = ast::StmtPass {
+            range: function.body[0].range(),
+            node_index: Default::default(),
+        }
+        .into();
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
     }
 
@@ -2225,14 +2222,11 @@ mod tests {
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
-        let context = function.body[0].as_with_stmt_mut().unwrap();
-        let input = &prepared.source.statement_sites.contexts[&context.range()][0];
-        assert!(input.manager.is_some());
-        assert!(matches!(
-            &input.target,
-            crate::frontend::ContextTarget::Checked { .. }
-        ));
-        context.items.clear();
+        function.body[0] = ast::StmtPass {
+            range: function.body[0].range(),
+            node_index: Default::default(),
+        }
+        .into();
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
     }
 
@@ -2606,7 +2600,7 @@ mod tests {
     #[test]
     fn residual_with_reads_its_prepared_manager_after_erasing_the_call() {
         // The module annotation retains the physical suite for this residual-input test.
-        let text = "def read(open_stream, path, record):\n    with open_stream(path) as stream:\n        record(stream)\nstate: int\n";
+        let text = "def read(open_stream, path, record):\n    with open_stream(path) as stream:\n        record((lambda: stream)())\nstate: int\n";
         let mut prepared = PreparedBody::module(
             "scan",
             Path::new("scan.py"),
@@ -2620,9 +2614,14 @@ mod tests {
             .unwrap();
         // Supply a physical function body explicitly so this test is independent of
         // which Python constructs still need that entry in an ordinary compilation.
+        let missing = HashMap::new();
+        let source = crate::frontend::RegisteredSource {
+            lambdas: Some(&missing),
+            ..prepared.source.registered_source()
+        };
         let mut physical = crate::frontend::SuitePreparation::new(
             &prepared.source.namespace_operations,
-            prepared.source.registered_source(),
+            source,
             &function.body,
             true,
         );
@@ -2636,35 +2635,43 @@ mod tests {
             prepared.source.nested_bodies,
         ) = (physical.sites, physical.nested);
         prepared.source.function_bodies.remove(&function.start());
-        let context = function.body[0].as_with_stmt().unwrap();
-        let site = context.range();
-        let inputs = &prepared.source.statement_sites.contexts[&site];
-        assert!(matches!(inputs.as_slice(), [input] if input.manager.is_some()));
+        let position = function.body[0].start();
+        let suite = &prepared.source.nested_bodies[&position];
+        let [run] = suite.residual.as_slice() else {
+            panic!("expected a mixed context")
+        };
+        let Some(crate::frontend::SourceEffect::Context(context)) = &run.effect else {
+            panic!("expected a prepared context")
+        };
+        assert!(
+            matches!(context.inputs.as_slice(), [input] if matches!(input.manager, crate::frontend::PhysicalOperand::Checked(_))
+            && matches!(input.target, Some(crate::frontend::PhysicalBinding::Checked { .. })))
+        );
+        assert_eq!(context.body.sources.len(), 1);
         let original = prepared.standalone().unwrap().unwrap();
 
-        fn with_statement(body: &mut [ast::Stmt]) -> &mut ast::StmtWith {
-            body[0].as_function_def_stmt_mut().unwrap().body[0]
-                .as_with_stmt_mut()
-                .unwrap()
-        }
-        let call = with_statement(prepared.syntax.as_mut().unwrap().to_mut()).items[0]
-            .context_expr
-            .as_call_expr_mut()
+        let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
             .unwrap();
-        *call.func = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
-            range: call.func.range(),
+        function.body[0] = ast::StmtPass {
+            range: function.body[0].range(),
             node_index: Default::default(),
-        });
+        }
+        .into();
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
 
-        // Removing the prepared manager exposes the erased call to the source run.
-        prepared
-            .source
-            .statement_sites
-            .contexts
-            .get_mut(&site)
-            .unwrap()[0]
-            .manager = None;
+        // The source block retains just the operation that needs its lambda child.
+        let suite = prepared.source.nested_bodies.get_mut(&position).unwrap();
+        let Some(crate::frontend::SourceEffect::Context(context)) = &mut suite.residual[0].effect
+        else {
+            panic!("expected the mixed context");
+        };
+        let child = &mut context.body.sources[0];
+        *child = ast::StmtPass {
+            range: child.range(),
+            node_index: Default::default(),
+        }
+        .into();
         assert_ne!(prepared.standalone().unwrap().unwrap(), original);
     }
 
