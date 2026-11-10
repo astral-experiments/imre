@@ -121,6 +121,26 @@ impl ExpressionSites {
         std::mem::take(self)
     }
 
+    /// Evaluate discarded target operands at their original positions in the checked operation.
+    pub(super) fn discarded_target(
+        &self,
+        target: &ast::Expr,
+        operands: Vec<&ast::Expr>,
+        source: RegisteredSource<'_>,
+        scope: super::RegisteredScope,
+        suspended: bool,
+    ) -> OwnedExpression {
+        let mut preparation = PhysicalPreparation::new(self, source, scope, suspended);
+        preparation.occurrence(target, |preparation, target| {
+            Some(Selection::Inputs(preparation.slotted_operation(
+                target,
+                ir::Builtin::RegisteredDiscard,
+                ir::Type::None,
+                operands.into_iter(),
+            )))
+        })
+    }
+
     pub(super) fn owned_input(
         &self,
         expr: &ast::Expr,
@@ -163,7 +183,7 @@ impl PhysicalPreparation<'_, '_> {
     fn occurrence(
         &mut self,
         node: &ast::Expr,
-        select: fn(&mut Self, &ast::Expr) -> Option<Selection>,
+        select: impl FnOnce(&mut Self, &ast::Expr) -> Option<Selection>,
     ) -> OwnedExpression {
         // Lexical bindings and template fields have already been compiled in their own scope.
         let kind = ast::AnyNodeRef::from(node).kind();
@@ -271,6 +291,7 @@ impl PhysicalPreparation<'_, '_> {
             return Some(Selection::Inputs(self.slotted_operation(
                 node,
                 ir::Builtin::RegisteredCompare(cmp.ops.to_vec()),
+                ir::Type::PythonObject,
                 cmp.operands.iter(),
             )));
         }
@@ -301,6 +322,7 @@ impl PhysicalPreparation<'_, '_> {
             return Some(Selection::Inputs(self.slotted_operation(
                 node,
                 object.opcode,
+                ir::Type::PythonObject,
                 operands,
             )));
         } else {
@@ -318,13 +340,14 @@ impl PhysicalPreparation<'_, '_> {
         &mut self,
         node: &ast::Expr,
         opcode: ir::Builtin,
+        result: ir::Type,
         operands: impl Iterator<Item = &'n ast::Expr>,
     ) -> Box<PhysicalInputs> {
         let children: Box<[_]> = operands.map(|child| self.ordinary_input(child)).collect();
         let slots = (0..children.len())
             .map(|slot| ir::Expr::local(slot, ir::Type::PythonObject))
             .collect();
-        let operation = super::operation(opcode, ir::Type::PythonObject, slots);
+        let operation = super::operation(opcode, result, slots);
         self.inputs(node, operation, children, InputEvaluation::AtUse)
     }
 
@@ -398,6 +421,29 @@ pub(crate) type BorrowedOperand<'a> = SourceOperand<&'a ir::Expr, ExpressionInpu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_partial_bare_target_evaluates_each_bound_under_its_discard_mark() {
+        let text = "owner()[start():stop()]: Unused\n";
+        let graph = crate::modules::SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let ann = module.parsed.syntax().body[0].as_ann_assign_stmt().unwrap();
+        let source = values::ModuleSource::new(module);
+        let input = ExpressionSites::default().discarded_target(
+            &ann.target,
+            values::bare_target_operands(&ann.target).unwrap(),
+            source.context(text),
+            super::super::RegisteredScope::Module,
+            false,
+        );
+        let Selection::Inputs(inputs) = input.selected.as_ref() else {
+            panic!("expected the retained target operands");
+        };
+        assert!(
+            matches!(&inputs.operation.kind, ir::ExprKind::Builtin(ir::Builtin::RegisteredDiscard, operands) if operands.len() == 3)
+        );
+        assert!(inputs.eager_operands().is_none());
+    }
 
     #[test]
     fn forwarded_names_sharing_a_source_range_keep_their_own_selected_inputs() {

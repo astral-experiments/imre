@@ -282,11 +282,6 @@ impl<'p> Function<'_, 'p> {
                     );
                 }
             },
-            SourceEffect::Discard(inputs) => {
-                for input in inputs {
-                    self.discard_operand(|code| code.physical_operand(input));
-                }
-            }
             SourceEffect::ObjectOperation(op, inputs) => {
                 let (receiver, args) = inputs.split_first().expect("object operation receiver");
                 self.object_operation(op, receiver, args.iter(), Self::physical_operand);
