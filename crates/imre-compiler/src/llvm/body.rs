@@ -2,6 +2,7 @@
 
 use std::fmt::Write as _;
 
+#[derive(Clone)]
 pub(crate) struct FunctionBody {
     pub(crate) code: String,
     pub(crate) current: String,
@@ -22,6 +23,21 @@ impl FunctionBody {
             next_value: 0,
             next_label: 0,
         }
+    }
+
+    /// Open the process entry in its owning unit. Only programs that consume
+    /// the process arguments need them in the LLVM signature.
+    pub(super) fn start_main(&mut self, argv: bool, attrs: &str) {
+        let params = if argv { "i32 %argc, ptr %argv" } else { "" };
+        writeln!(self.code, "define i32 @main({params}){attrs} {{").unwrap();
+        self.start("entry");
+    }
+
+    /// The final runtime operation supplies the executable's exit status.
+    pub(super) fn finish_main(&mut self, call: &str) {
+        self.line(format!("%status = call i32 {call}"));
+        self.end("ret i32 %status");
+        self.code.push_str("}\n");
     }
 
     pub(super) fn reset_names(&mut self) {

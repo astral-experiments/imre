@@ -625,6 +625,12 @@ fn emit_program(
         .iter()
         .filter_map(|m| m.repr_method)
         .collect();
+    // Keep native function entries aligned to a cache line as the linked runtime changes.
+    let attrs = if sanitize {
+        " sanitize_address"
+    } else {
+        " align 64"
+    };
     let mut bodies = Vec::with_capacity(module.functions.len() + 1);
     for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
         let entry = id == module.functions.len();
@@ -638,8 +644,8 @@ fn emit_program(
             emitter.body.reset_names();
         }
         let frame = function_source_frame(module, &repr_methods, id);
-        let params = emitter.function(function, entry, frame, &borrows[id])?;
-        bodies.push((params, std::mem::take(&mut emitter.body.code)));
+        emitter.function(function, entry.then_some(attrs), frame, &borrows[id])?;
+        bodies.push(std::mem::take(&mut emitter.body.code));
     }
     emitter
         .output
@@ -786,39 +792,35 @@ fn emit_program(
     }
     emitter.enum_table();
     emitter.literal_pool();
-    write_function_bodies(emitter.output, module, bodies, sanitize);
+    write_function_bodies(emitter.output, module, bodies, attrs);
     // Layout hints never replace the representation, overflow, or error guards.
     emitter.output.common().push_str(BRANCH_WEIGHTS);
     Ok(())
 }
 
-fn write_function_bodies(
-    output: &mut Output,
-    module: &Module,
-    bodies: Vec<(String, String)>,
-    sanitize: bool,
-) {
-    for (id, (params, body)) in bodies.into_iter().enumerate() {
-        let (owner, name, returns) = if let Some(f) = module.functions.get(id) {
-            (
-                output.function_owner(id),
-                output.function_name(id),
-                f.returns.llvm(),
-            )
-        } else {
-            (output.entry, "main".to_owned(), "i32")
-        };
-        // Keep native function entries aligned to a cache line as the linked runtime changes.
-        let attrs = if sanitize {
-            " sanitize_address"
-        } else {
-            " align 64"
-        };
+fn write_function_bodies(output: &mut Output, module: &Module, mut bodies: Vec<String>, attrs: &str) {
+    let main = bodies.pop().expect("program has an entry");
+    for (id, (f, body)) in module.functions.iter().zip(bodies).enumerate() {
+        let params = f
+            .params
+            .iter()
+            .enumerate()
+            .map(|(i, &slot)| format!("{} %arg{i}", f.locals[slot].llvm()))
+            .collect::<Vec<_>>()
+            .join(", ");
         output.common().push('\n');
-        output
-            .function(owner, &name, returns, &params, attrs)
-            .push_str(&body);
+        let definition = output.function(
+            output.function_owner(id),
+            &output.function_name(id),
+            f.returns.llvm(),
+            &params,
+            attrs,
+        );
+        definition.push_str(&body);
+        definition.push_str("}\n");
     }
+    output.common().push('\n');
+    output.entry_buffer().push_str(&main);
 }
 
 struct Emitter<'a, 'module> {
@@ -2239,10 +2241,11 @@ impl Emitter<'_, '_> {
     fn function(
         &mut self,
         function: &Function,
-        entry: bool,
+        main_attrs: Option<&str>,
         frame: Option<&ir::SourceFrame>,
         borrows: &FunctionBorrows,
-    ) -> Result<String, Unsupported> {
+    ) -> Result<(), Unsupported> {
+        let entry = main_attrs.is_some();
         self.uses_regex_positions =
             self.module_reads_regex_positions && regex_positions_may_escape(self.module, function);
         self.entry_allocas.clear();
@@ -2296,24 +2299,11 @@ impl Emitter<'_, '_> {
         self.loops.clear();
         self.temporaries.clear();
         self.cleanups.clear();
-        let params = function
-            .params
-            .iter()
-            .enumerate()
-            .map(|(i, &slot)| format!("{} %arg{i}", function.locals[slot].llvm()))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let params = if entry && self.uses_sys_argv {
-            "i32 %argc, ptr %argv".to_owned()
+        if let Some(attrs) = main_attrs {
+            self.body.start_main(self.uses_sys_argv, attrs);
         } else {
-            params
-        };
-        let returns = if entry {
-            "i32"
-        } else {
-            function.returns.llvm()
-        };
-        self.start("entry");
+            self.start("entry");
+        }
         for &slot in &function.params {
             if self.cached_string_lengths.contains(&slot) {
                 self.line(format!("%str_count{slot} = alloca i64"));
@@ -2653,8 +2643,7 @@ impl Emitter<'_, '_> {
             let status = self.instruction(format!("call i32 @imre_finish_unhandled(ptr {exit})"));
             self.body.end(format!("ret i32 {status}"));
             self.start(&flush);
-            let status = self.instruction("call i32 @imre_finish_stdio()");
-            self.body.end(format!("ret i32 {status}"));
+            self.body.finish_main("@imre_finish_stdio()");
         } else if function.returns == Type::None {
             self.body.end("ret i8 0");
         } else {
@@ -2662,9 +2651,9 @@ impl Emitter<'_, '_> {
                 "load {}, ptr %function_return",
                 function.returns.llvm()
             ));
-            self.body.end(format!("ret {returns} {value}"));
+            self.body
+                .end(format!("ret {} {value}", function.returns.llvm()));
         }
-        self.body.code.push_str("}\n");
         // Mapping calls transfer their output words before another call can reuse them.
         for name in ["%mapping_key_word", "%mapping_value_word"]
             .into_iter()
@@ -2699,7 +2688,7 @@ impl Emitter<'_, '_> {
                 "Imre: finally cleanup expansion exceeds the compiler limit",
             ));
         }
-        Ok(params)
+        Ok(())
     }
 
     fn block(&mut self, statements: &[Statement]) {

@@ -1,5 +1,6 @@
 //! Link checked module registrations to their native initializers.
 
+use super::body::FunctionBody;
 use super::registered::{ABI, Output};
 use crate::CodegenUnit;
 use crate::ir::{ModuleLoader, ModuleRegistration, PhysicalModuleKind};
@@ -17,7 +18,7 @@ const ERROR: &str = "imre_dyn_register_module_error";
 #[derive(Clone)]
 pub(crate) struct ModuleLauncher {
     pub(crate) output: Output,
-    main: String,
+    main: FunctionBody,
     declarations: HashSet<String>,
 }
 
@@ -37,9 +38,12 @@ impl ModuleLauncher {
         // Keep entry-only declarations out of standalone provider fingerprints.
         let source_args = "ptr, ptr, ptr, ptr, i64, ptr";
         let physical_args = "ptr, ptr, ptr, ptr, i32, ptr";
-        let main = format!(
-            "declare void @{SOURCE}({source_args})\n\ndefine i32 @main(i32 %argc, ptr %argv) {{\nentry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
-        );
+        let mut main = FunctionBody::new("entry", "");
+        writeln!(main.code, "declare void @{SOURCE}({source_args})\n").unwrap();
+        main.start_main(true, "");
+        main.line(format!(
+            "%ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})"
+        ));
         writeln!(output.functions, "declare void @{FILE}({physical_args})").unwrap();
         if has_zip {
             writeln!(output.functions, "declare void @{ZIP}({physical_args})").unwrap();
@@ -108,7 +112,7 @@ impl ModuleLauncher {
         let hash = digest.map_or_else(|| "null".into(), |digest| self.output.data(digest));
         let error_kind = if parse_error { 2 } else { u8::from(in_args) };
         writeln!(
-            self.main,
+            self.main.code,
             "  call void @{ERROR}(ptr %ctx, ptr {name}, ptr {file}, ptr {text}, i64 {}, ptr {message}, ptr {position}, i8 {error_kind}, ptr {hash})",
             source.len(),
         )
@@ -117,13 +121,12 @@ impl ModuleLauncher {
 
     pub(crate) fn finish(mut self) -> CodegenUnit {
         self.output.integer_prelude();
-        self.main
-            .push_str("  %status = call i32 @imre_dyn_finish(ptr %ctx)\n  ret i32 %status\n}\n");
+        self.main.finish_main("@imre_dyn_finish(ptr %ctx)");
         CodegenUnit {
             name: "__main__".into(),
             llvm_ir: format!(
                 "{ABI}\n{}\n{}\n{}",
-                self.output.constants, self.output.functions, self.main
+                self.output.constants, self.output.functions, self.main.code
             ),
         }
     }
@@ -167,7 +170,7 @@ impl ModuleOperands<'_> {
             }
         };
         writeln!(
-            launcher.main,
+            launcher.main.code,
             "  call void @{function}(ptr %ctx, ptr {name}, ptr {file}, ptr {data}, {argument}, ptr {code})"
         )
         .unwrap();
