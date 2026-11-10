@@ -689,7 +689,7 @@ impl<'p> Function<'_, 'p> {
             format!("{qualname}.<locals>.")
         };
         let statements = match &body {
-            Body::Statements(stmts) | Body::GeneratorFunction(stmts, _) => Some(*stmts),
+            Body::Function(stmts, _) => Some(*stmts),
             _ => None,
         };
         let doc = statements
@@ -777,9 +777,7 @@ impl<'p> Function<'_, 'p> {
         };
         let scopes = &self.source.scopes;
         let scope_facts = match &body {
-            Body::Statements(_) | Body::GeneratorFunction(..) => {
-                Some(&scopes.functions[&start].lexical)
-            }
+            Body::Function(..) => Some(&scopes.functions[&start].lexical),
             Body::Namespace(_) => {
                 let class = &scopes.classes[&start];
                 signature["postponed_annotations"] = json!(class.postponed_annotations);
@@ -798,7 +796,7 @@ impl<'p> Function<'_, 'p> {
         };
         if let Some(facts) = scope_facts {
             facts.write_signature(&mut signature);
-            let callable = matches!(body, Body::Statements(_) | Body::GeneratorFunction(..));
+            let callable = matches!(body, Body::Function(..));
             if callable && facts.captures_class {
                 signature["class_cell"] = json!(true);
             }

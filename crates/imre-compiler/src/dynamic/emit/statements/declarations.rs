@@ -11,12 +11,7 @@ use ruff_text_size::{Ranged, TextRange, TextSize};
 
 impl SourceInfo<'_> {
     pub(super) fn function_body<'s>(&self, def: &'s ast::StmtFunctionDef) -> Body<'s> {
-        let suspension_flags = self.scopes.function(def).suspension_flags;
-        if suspension_flags == 0 {
-            Body::Statements(&def.body)
-        } else {
-            Body::GeneratorFunction(&def.body, suspension_flags)
-        }
+        Body::Function(&def.body, self.scopes.function(def).suspension_flags)
     }
 }
 

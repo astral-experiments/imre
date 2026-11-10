@@ -569,15 +569,9 @@ impl<'a> PreparedBody<'a, '_> {
             let kind = crate::frontend::RegisteredScope::Function {
                 is_async: def.is_async,
             };
-            let plan = if !site.prepare_entry {
-                None
-            } else if scopes.function(def).suspension_flags != 0 {
-                prepare.complete(&def.body, kind)
-            } else {
-                Some(prepare.suite(&def.body, kind))
-            };
-            if let Some(plan) = plan {
-                function_bodies.insert(start, plan);
+            if site.prepare_entry {
+                let suspends = scopes.function(def).suspension_flags != 0;
+                function_bodies.insert(start, prepare.function_suite(&def.body, kind, suspends));
             } else {
                 prepare.physical_body(&def.body, kind);
             }
@@ -840,9 +834,8 @@ enum DefinitionName<'a> {
 enum Body<'a> {
     Namespace(&'a [ast::Stmt]),
     ClassParameters(&'a ast::StmtClassDef),
-    Statements(&'a [ast::Stmt]),
-    /// A suspended suite and its generator, coroutine, or async generator code flag.
-    GeneratorFunction(&'a [ast::Stmt], u32),
+    /// A function suite and its suspension flags, shared by complete and mixed frames.
+    Function(&'a [ast::Stmt], u32),
     NamespaceAnnotations(
         &'a crate::frontend::RegisteredSuite,
         &'a [crate::ir::AnnotationOccurrence],
@@ -870,7 +863,7 @@ impl Body<'_> {
     fn generator_flags(&self) -> u32 {
         use imre_ast::code_flags::{ASYNC_GENERATOR, GENERATOR};
         match self {
-            Self::GeneratorFunction(_, flags) => *flags,
+            Self::Function(_, flags) => *flags,
             Self::CheckedGenerator(_, child) if child.is_async => ASYNC_GENERATOR,
             Self::CheckedGenerator(..) => GENERATOR,
             _ => 0,
@@ -1090,7 +1083,7 @@ impl SourceMap<'_> {
         let native_suspension = matches!(definition, Some((_, Entry::Suspended)));
         let start = definition.map(|(start, _)| start);
         let checked = start
-            .filter(|_| matches!(body, Body::Statements(_)))
+            .filter(|_| matches!(body, Body::Function(..)))
             .and_then(|key| self.program_bodies?.get(&key));
         let mut frame = RegisteredFrame::new(
             output,
@@ -1115,14 +1108,12 @@ impl SourceMap<'_> {
         }
         let prepared = match body {
             Body::Namespace(_) => Some(&self.class_bodies[&start.expect("class definition")].body),
-            Body::Statements(_) | Body::GeneratorFunction(..) => {
-                start.and_then(|key| self.function_bodies.get(&key))
-            }
+            Body::Function(..) => start.and_then(|key| self.function_bodies.get(&key)),
             _ => None,
         };
         let mut f = self.function(frame, prefix, in_function, false);
         f.is_async = match body {
-            Body::GeneratorFunction(_, flags) => matches!(
+            Body::Function(_, flags) => matches!(
                 flags,
                 imre_ast::code_flags::COROUTINE | imre_ast::code_flags::ASYNC_GENERATOR
             ),
@@ -1155,9 +1146,7 @@ impl SourceMap<'_> {
             return f.frame.finish(false);
         }
         match body {
-            Body::Namespace(stmts)
-            | Body::Statements(stmts)
-            | Body::GeneratorFunction(stmts, _) => {
+            Body::Namespace(stmts) | Body::Function(stmts, _) => {
                 if matches!(body, Body::Namespace(..))
                     && f.output.keep_docstrings
                     && let Some(doc) = self.docstring(f.prefix.trim_end_matches('.'), stmts)
@@ -1358,7 +1347,7 @@ mod tests {
     }
 
     #[test]
-    fn physical_coroutine_emits_sync_for_without_its_source() {
+    fn mixed_coroutine_emits_sync_for_without_its_source() {
         let mut module = PreparedBody::module(
             "async_groups",
             Path::new("async_groups.py"),
@@ -1376,8 +1365,7 @@ mod tests {
             })
             .unwrap();
         let main = syntax[definition].as_function_def_stmt().unwrap();
-        assert!(!module.source.function_bodies.contains_key(&main.start()));
-        let suite = &module.source.nested_bodies[&main.body[0].start()];
+        let suite = &module.source.function_bodies[&main.start()];
         let index = main
             .body
             .iter()
@@ -1405,6 +1393,92 @@ mod tests {
         }
         .into();
         assert!(module.standalone().unwrap().unwrap() == before);
+    }
+
+    #[test]
+    fn retained_program_generator_emits_after_erasing_its_suspensions() {
+        let source = concat!(
+            "def values():\n",
+            "    yield 0\n",
+            "    def choose(value): return value\n",
+            "    transform = lambda x: x + 1\n",
+            "    for item in (1, 2): yield transform(choose(item))\n",
+            "for item in values(): print(item)\n",
+        );
+        let graph = crate::modules::SourceGraph::single(source).unwrap();
+        let _ = crate::frontend::lower(&graph);
+        let table = graph.registered_functions();
+        let bodies = &table[&graph.entry];
+        let retained = &bodies[&ruff_text_size::TextSize::default()];
+        use sites::RequiredSite;
+        let mut required = Vec::new();
+        sites::CheckedSites::visit(&retained.function.body, &mut |site| match site {
+            RequiredSite::Definition(_) => required.push("definition"),
+            RequiredSite::Lambda(..) => required.push("lambda"),
+            _ => {}
+        });
+        assert_eq!(required, ["definition", "lambda"]);
+        let mut module = PreparedBody::module(
+            "__main__",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(Some(bodies)),
+        )
+        .unwrap();
+        let before = module.standalone().unwrap().unwrap();
+        let def = module.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        // The nested declaration still supplies its signature and code site.
+        def.body.retain(ast::Stmt::is_function_def_stmt);
+        assert_eq!(def.body.len(), 1);
+        assert_eq!(module.standalone().unwrap().unwrap().1, before.1);
+    }
+
+    #[test]
+    fn suspending_functions_keep_their_single_residual_child() {
+        for (name, text, definition, child) in [
+            (
+                "os",
+                include_str!("../../stdlib/os.py"),
+                "def _fwalk(",
+                None,
+            ),
+            (
+                "asyncio.base_events",
+                include_str!("../../stdlib/asyncio/base_events.py"),
+                "async def create_datagram_endpoint(",
+                Some("if sock is not None:"),
+            ),
+        ] {
+            let module =
+                PreparedBody::module(name, Path::new("module.py"), text, 0, ModuleOrigin::Bundled)
+                    .unwrap();
+            let start = ruff_text_size::TextSize::try_from(text.find(definition).unwrap()).unwrap();
+            let sites = module.linked_declarations();
+            let DefinitionSite::Function(def) = sites[&start] else {
+                unreachable!()
+            };
+            let suite = &module.source.function_bodies[&start];
+            if let Some(child) = child {
+                let [run] = suite.residual.as_slice() else {
+                    panic!("expected one residual in {name}")
+                };
+                assert_eq!(run.statements.len(), 1);
+                assert!(text[def.body[run.statements.start].range()].starts_with(child));
+            } else {
+                assert!(suite.fully_checked());
+            }
+            let mut suspends = false;
+            crate::ir::walk_expressions(&suite.checked.function.body, &mut |expr| {
+                suspends |= matches!(
+                    expr.kind,
+                    crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredSuspend(..), _)
+                );
+            });
+            assert!(suspends);
+        }
     }
 
     #[test]
@@ -2444,7 +2518,8 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                     prepared
                         .source
                         .function_bodies
-                        .contains_key(&def.start())
+                        .get(&def.start())
+                        .is_some_and(crate::frontend::RegisteredSuite::fully_checked)
                         .then_some(def.name.as_str())
                 })
                 .collect();

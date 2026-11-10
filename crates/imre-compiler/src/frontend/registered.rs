@@ -964,7 +964,23 @@ impl<'a> SuitePreparation<'a> {
     }
 
     pub(crate) fn suite(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope) -> RegisteredSuite {
-        self.selected_suite(stmts, kind, SuiteSelection::All)
+        self.selected_suite(stmts, kind, SuiteSelection::All, SuiteSelection::All)
+    }
+
+    /// A residual statement in a suspended function owns its cursor and pending exits.
+    /// Its child suites retain their physical-frame contract while its siblings use checked runs.
+    pub(crate) fn function_suite(
+        &mut self,
+        stmts: &[ast::Stmt],
+        kind: RegisteredScope,
+        suspends: bool,
+    ) -> RegisteredSuite {
+        let children = if suspends {
+            SuiteSelection::Physical
+        } else {
+            SuiteSelection::All
+        };
+        self.selected_suite(stmts, kind, SuiteSelection::All, children)
     }
 
     /// Keep the enclosing physical frame's entry and cleanup. Its complete target effects
@@ -975,7 +991,7 @@ impl<'a> SuitePreparation<'a> {
 
     fn nested_suite(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope, select: SuiteSelection) {
         if let Some(first) = stmts.first() {
-            let plan = self.selected_suite(stmts, kind, select);
+            let plan = self.selected_suite(stmts, kind, select, select);
             // An optimized-away assertion has no instructions and still owns its source slot.
             if !matches!(plan.residual.as_slice(), [run]
                 if run.assignment_input.is_none() && run.statements == (0..stmts.len()))
@@ -990,6 +1006,7 @@ impl<'a> SuitePreparation<'a> {
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
         select: SuiteSelection,
+        child_selection: SuiteSelection,
     ) -> RegisteredSuite {
         use ast::statement_visitor::{StatementVisitor, walk_stmt};
         let plan = self.lower(stmts, kind, select);
@@ -1006,7 +1023,7 @@ impl<'a> SuitePreparation<'a> {
         let mut children = Children {
             prepare: self,
             kind,
-            select,
+            select: child_selection,
         };
         for run in &plan.residual {
             for stmt in &stmts[run.statements.clone()] {
