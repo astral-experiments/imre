@@ -149,6 +149,7 @@ struct Storage {
     named_tuples: HashMap<DefinitionId, Rc<NamedTuple>>,
     cache_adapters: HashMap<usize, CachePolicy>,
     source_sites: HashMap<(usize, u32), Rc<FunctionSite>>,
+    document_list_sites: HashSet<(usize, u32, Option<usize>)>,
     function_sites: HashMap<usize, Rc<FunctionSite>>,
     coroutine_targets: HashMap<usize, CoroutineTarget>,
     plain_callbacks: HashSet<Type>,
@@ -175,6 +176,30 @@ pub(crate) struct Types(RefCell<Storage>);
 pub(crate) struct ShapePrefix(Vec<Shape>);
 
 impl Types {
+    pub(crate) fn collects_document_lists(
+        &self,
+        module: usize,
+        site: u32,
+        class: Option<usize>,
+    ) -> bool {
+        self.0
+            .borrow()
+            .document_list_sites
+            .contains(&(module, site, class))
+    }
+
+    pub(crate) fn record_document_lists(
+        &self,
+        module: usize,
+        site: u32,
+        class: Option<usize>,
+    ) -> bool {
+        self.0
+            .borrow_mut()
+            .document_list_sites
+            .insert((module, site, class))
+    }
+
     pub(crate) fn shape_count(&self) -> usize {
         self.0.borrow().shapes.len()
     }

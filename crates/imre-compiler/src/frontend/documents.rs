@@ -9,6 +9,60 @@ pub(super) const SCALAR: Type = Type::Document(Shape::Scalar);
 pub(super) const MAP: Type = Type::Document(Shape::Map);
 pub(super) const LIST: Type = Type::Document(Shape::List);
 
+/// The number of list wrappers around a resolved Any, including type aliases.
+fn list_depth(
+    graph: &SourceGraph,
+    module: ModuleId,
+    expr: &ast::Expr,
+    depth: usize,
+) -> Option<usize> {
+    if depth >= 32 {
+        return None;
+    }
+    match graph.resolve_type(module, expr) {
+        Some(Binding::Intrinsic(Intrinsic::Any)) => return Some(0),
+        Some(Binding::TypeAlias(origin, index)) => {
+            let source = &graph.modules[origin];
+            return list_depth(
+                graph,
+                origin,
+                source.aliases[index].annotation_value(source)?,
+                depth + 1,
+            );
+        }
+        _ => {}
+    }
+    match expr {
+        ast::Expr::StringLiteral(text) => {
+            let parsed = ruff_python_parser::parse_expression(text.value.to_str()).ok()?;
+            list_depth(graph, module, parsed.expr(), depth + 1)
+        }
+        ast::Expr::Subscript(sub)
+            if sub
+                .value
+                .as_name_expr()
+                .is_some_and(|name| name.id == "list")
+                && graph.resolve_type(module, &sub.value).is_none() =>
+        {
+            Some(list_depth(graph, module, &sub.slice, depth + 1)? + 1)
+        }
+        _ => None,
+    }
+}
+
+/// The annotation permits this layout when an actual mutable document reaches it.
+pub(super) fn annotation(graph: &SourceGraph, module: ModuleId, expr: &ast::Expr) -> Option<Type> {
+    match list_depth(graph, module, expr, 0)? {
+        0 => Some(ANY),
+        1 => Some(LIST),
+        _ => None,
+    }
+}
+
+pub(super) fn collects_lists(graph: &SourceGraph, module: ModuleId, expr: &ast::Expr) -> bool {
+    list_depth(graph, module, expr, 0) == Some(2)
+}
+
 /// A string-keyed display with different literal value types needs a tag on each
 /// value. Homogeneous displays keep their ordinary unboxed storage.
 pub(super) fn mixed_scalar_fields(dict: &ast::ExprDict) -> bool {
@@ -55,6 +109,14 @@ pub(super) fn constant(expr: &ast::Expr) -> bool {
     }
 }
 
+/// A fresh literal has no container owner before its destination chooses storage.
+pub(super) fn fresh_display(expr: &ast::Expr, document: Type) -> bool {
+    matches!(
+        (expr, document),
+        (ast::Expr::Dict(_), MAP | ANY) | (ast::Expr::List(_), LIST | ANY)
+    ) && constant(expr)
+}
+
 pub(super) fn op(op: Op, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
         ty,
@@ -63,6 +125,42 @@ pub(super) fn op(op: Op, ty: Type, args: Vec<Expr>) -> Expr {
 }
 
 impl Checker<'_> {
+    /// Carry an existing document owner across an annotation. Other values keep
+    /// the ordinary annotation context, including JSON projections and fresh displays.
+    pub(super) fn document_annotation_value(
+        &mut self,
+        rhs: &ast::Expr,
+        ordinary: Type,
+        document: Type,
+    ) -> Result<Expr, String> {
+        if let ast::Expr::If(branch) = rhs {
+            // Check the bound arm first so its owner supplies the context for a fresh display.
+            let mut sibling = ordinary;
+            return self.conditional_with(
+                branch,
+                fresh_display(&branch.body, document),
+                |checker, arm| {
+                    let value = if sibling == document && fresh_display(arm, document) {
+                        checker.expr_expected(arm, document)?
+                    } else {
+                        checker.document_annotation_value(arm, ordinary, document)?
+                    };
+                    sibling = value.ty;
+                    Ok(value)
+                },
+            );
+        }
+        let retained = |actual| {
+            actual == document || actual == ANY || document == ANY && matches!(actual, LIST | MAP)
+        };
+        let value = self.expr_expected_if(rhs, ordinary, |_, ty| retained(ty))?;
+        if retained(value.ty) {
+            self.document_coerce(value, document, rhs)
+        } else {
+            Ok(value)
+        }
+    }
+
     /// A spread's declared type decides the representation of its fresh outer table.
     /// Inspect only field/local bindings here; evaluation happens once inside the display.
     pub(super) fn probe_document(&self, expr: &ast::Expr) -> bool {

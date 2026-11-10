@@ -259,6 +259,20 @@ impl Checker<'_> {
         }
     }
 
+    fn assignment_rhs(
+        &mut self,
+        target: &ast::Expr,
+        value: &ast::Expr,
+        expected: Type,
+    ) -> Result<Expr, String> {
+        if self.inference.is_some() && expected == Type::JsonObject && target.is_attribute_expr() {
+            // Keep a mutable owner until the resolved target decides its storage.
+            self.document_annotation_value(value, expected, documents::MAP)
+        } else {
+            self.expr_expected(value, expected)
+        }
+    }
+
     /// Yields the captured value and clears its slot before evaluating the next target.
     fn take_temporary(&self, slot: usize) -> Expr {
         take_pattern_temporary(self.local(slot), slot)
@@ -358,7 +372,7 @@ impl Checker<'_> {
                     Self::rebindable_container,
                 )?
             } else if let Some(expected) = context {
-                self.expr_expected(&assignment.value, expected)?
+                self.assignment_rhs(target, &assignment.value, expected)?
             } else {
                 self.typed_expr(&assignment.value)?
             };
@@ -384,12 +398,12 @@ impl Checker<'_> {
             }
             return Ok(vec![statement]);
         }
-        let context = assignment
-            .targets
-            .iter()
-            .find_map(|target| self.target_context(target, Some(&assignment.value)));
-        let value = if let Some(expected) = context {
-            assignments::unpromoted(self.expr_expected(&assignment.value, expected)?)
+        let context = assignment.targets.iter().find_map(|target| {
+            self.target_context(target, Some(&assignment.value))
+                .map(|ty| (target, ty))
+        });
+        let value = if let Some((target, expected)) = context {
+            assignments::unpromoted(self.assignment_rhs(target, &assignment.value, expected)?)
         } else {
             let target = assignment
                 .targets
@@ -791,7 +805,15 @@ impl Checker<'_> {
                 }
                 let mock_effect = self.native_mock_instance(receiver.ty)
                     && attribute.attr.as_str() == "side_effect";
-                let (receiver, field, ty) = self.writable_field_value(attribute, receiver)?;
+                let (receiver, field, mut ty) = self.writable_field_value(attribute, receiver)?;
+                if let Some(inference) = self.inference
+                    && let Type::Class(class) = receiver.ty
+                    && ty == Type::JsonObject
+                    && matches!(value.ty, documents::ANY | documents::MAP)
+                {
+                    inference.document_field(class, field);
+                    ty = documents::MAP;
+                }
                 let value = self.coerce(value, ty, target).map_err(|error| {
                     if mock_effect {
                         self.object_runtime_export(
@@ -944,7 +966,7 @@ impl Checker<'_> {
         }
         if let Some(expected) = self.target_context(target, Some(value)) {
             return self
-                .expr_expected(value, expected)
+                .assignment_rhs(target, value, expected)
                 .map(assignments::unpromoted);
         }
         self.expr(value)
