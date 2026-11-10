@@ -1195,7 +1195,10 @@ impl Frame<'_, '_, '_> {
     pub(crate) fn augment_item(&mut self, receiver: &Expr, key: &Expr, op: &str, rhs: &Expr) {
         let receiver = self.evaluate_handle(receiver);
         let key = self.evaluate_handle(key);
-        self.update_item(receiver, key, op, |code| code.evaluate_handle(rhs));
+        let left = self.op("get", &[&receiver, &key]);
+        let right = self.evaluate_handle(rhs);
+        let value = self.inplace(op, &left, &right);
+        self.put_item(&receiver, &key, &value);
     }
 }
 

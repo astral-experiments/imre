@@ -1432,16 +1432,6 @@ pub(crate) trait FrameEmitter<'a, 'p>:
         }
     }
 
-    fn read(&mut self, place: &Place) -> String {
-        match place {
-            Place::Name(n) => {
-                let scope = self.scope.clone();
-                self.op("lookup", &[&scope, n])
-            }
-            Place::Item(v, k) => self.op("get", &[v, k]),
-        }
-    }
-
     fn write(&mut self, place: &Place, value: &str) {
         match place {
             Place::Name(n) => {
@@ -1454,23 +1444,6 @@ pub(crate) trait FrameEmitter<'a, 'p>:
 
     fn inplace(&mut self, op: &str, left: &str, right: &str) -> String {
         self.op(&format!("inplace:{op}"), &[left, right])
-    }
-
-    fn update_place(&mut self, place: &Place, op: &str, rhs: impl FnOnce(&mut Self) -> String) {
-        let left = self.read(place);
-        let right = rhs(self);
-        let value = self.inplace(op, &left, &right);
-        self.write(place, &value);
-    }
-
-    fn update_item(
-        &mut self,
-        receiver: String,
-        key: String,
-        op: &str,
-        rhs: impl FnOnce(&mut Self) -> String,
-    ) {
-        self.update_place(&Place::Item(receiver, key), op, rhs)
     }
 
     fn delete_item(&mut self, receiver: &str, key: &str) -> String {
