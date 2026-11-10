@@ -839,6 +839,10 @@ impl<'a> SuitePreparation<'a> {
     /// share one slot layout per suite, including when another statement must run from source.
     pub(crate) fn physical_body(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope) {
         self.nested_suite(stmts, kind, |sites, stmt| {
+            if let ast::Stmt::Assign(assign) = stmt {
+                // A physical generator keeps its suspension and live operands in the source frame.
+                return ir::SuspendValue::operand(&assign.value).is_none();
+            }
             stmt.is_delete_stmt()
                 || sites.assertions.contains_key(&stmt.range())
                 || attribute_effects(stmt).is_some()
