@@ -232,7 +232,7 @@ enum Storage {
     ContextVar(Rc<contextvars::Variable>),
     ContextToken(Rc<contextvars::Token>),
     TokenMissing,
-    Socket(socket::Socket),
+    Socket(allocator_api2::boxed::Box<socket::Socket>),
     StrDescriptor(u32),
     Sequence(Words),
     JoinBuffer(allocator_api2::boxed::Box<join_buffer::JoinBuffer>),

@@ -35,7 +35,9 @@ impl Socket {
     }
 
     fn into_owner(self) -> Result<crate::ObjectOwner> {
-        crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::Socket(self))))
+        let socket =
+            allocator_api2::boxed::Box::try_new(self).map_err(|_| Error::memory_error())?;
+        crate::ObjectOwner::try_new(Object(StorageCell::new(Storage::Socket(socket))))
             .map_err(|_| Error::memory_error())
     }
 
@@ -2491,6 +2493,33 @@ pub extern "C" fn imre_socket_getsockopt(s: &Object, level: usize, name: usize) 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn socket_closes_after_its_last_object_owner_drops() {
+        use std::io::{ErrorKind, Read};
+        use std::os::fd::IntoRawFd;
+        use std::os::unix::net::UnixStream;
+
+        let (socket, mut peer) = UnixStream::pair().unwrap();
+        peer.set_nonblocking(true).unwrap();
+        let owner = super::handle(
+            socket.into_raw_fd(),
+            true,
+            libc::AF_UNIX,
+            libc::SOCK_STREAM,
+            0,
+        )
+        .ok()
+        .expect("socket handle");
+        let alias = owner.clone();
+        drop(owner);
+        let mut byte = [0];
+        assert_eq!(
+            peer.read(&mut byte).unwrap_err().kind(),
+            ErrorKind::WouldBlock
+        );
+        drop(alias);
+        assert_eq!(peer.read(&mut byte).unwrap(), 0);
+    }
 
     #[cfg(target_os = "linux")]
     #[test]

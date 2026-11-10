@@ -2,7 +2,7 @@ use crate::frontend::{PhysicalOperand, SourceEffect, SourceGuard};
 mod declarations;
 use super::sites::{CompiledDefinition, CompiledProvider};
 
-use super::{AnnotationScope, FrameEmitter};
+use super::{AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourceMap};
 use crate::ir::Statement;
 use crate::llvm::registered::Place;
 use crate::llvm::registered::context::{ContextEmitter, ContextRegion};
@@ -11,7 +11,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use serde_json::json;
 
-use super::{Body, CheckedHeader, Cleanup, DefinitionName, Entry, FinallySuite, Function};
+use super::{Body, CheckedHeader, Cleanup, DefinitionName, Entry, Function};
 
 impl<'a, 'p> ContextEmitter<'a, 'p> for Function<'a, 'p> {
     fn push_context(&mut self, exit: ContextRegion, outer: String) {
@@ -23,6 +23,59 @@ impl<'a, 'p> ContextEmitter<'a, 'p> for Function<'a, 'p> {
             unreachable!("active context region")
         };
         (context, outer)
+    }
+}
+
+impl SourceMap<'_> {
+    /// Publish a module's provider before its first statement. Every simple
+    /// annotation, including an unconditional one, becomes visible only after
+    /// execution reaches its assignment.
+    pub(super) fn define_module_annotations(
+        &self,
+        frame: &mut RegisteredFrame<'_, '_>,
+        sites: &[TextSize],
+    ) {
+        let entries: Vec<_> = sites
+            .iter()
+            .enumerate()
+            .map(|(index, site)| crate::ir::AnnotationOccurrence {
+                site: *site,
+                index: Some(index),
+            })
+            .collect();
+        let signature = frame.text(
+            &json!({
+                "posonly": ["format"], "scope_complete": true, "scope_locals_complete": true,
+                "code_flags": self.function_flags(None, false, false),
+            })
+            .to_string(),
+        );
+        let code = self.annotation_body(frame.output, &entries, None, self.module_start);
+        let name = frame.text("__annotate__");
+        let provider = frame.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {signature}, i64 0, i64 {name}, i64 0, i64 0, i1 true)", frame.scope));
+        frame.bind("__annotate__", &provider);
+    }
+
+    fn annotation_body(
+        &self,
+        output: &mut Output,
+        entries: &[crate::ir::AnnotationOccurrence],
+        globals: Option<&std::collections::BTreeSet<String>>,
+        start: TextSize,
+    ) -> String {
+        let plan = crate::frontend::DeferredAnnotation::prepare_body(&self.annotations, entries);
+        let scope = globals.map_or(AnnotationScope::Plain, |globals| AnnotationScope::Class {
+            globals: globals.clone(),
+            conditional: entries.iter().any(|entry| entry.index.is_some()),
+        });
+        self.definition(
+            output,
+            String::new(),
+            Body::AnnotationProvider(&plan, entries, scope),
+            start,
+            false,
+            Entry::Compiled,
+        )
     }
 }
 
@@ -130,15 +183,23 @@ impl<'p> Function<'_, 'p> {
         self.frame.restore_checked_slots(enclosing);
     }
 
-    pub(super) fn statements(&mut self, suite: &'p [ast::Stmt]) {
-        if let Some(plan) = suite
-            .first()
-            .and_then(|s| self.source.nested_bodies.get(&s.start()))
-        {
-            self.checked_runs(plan, |code, run| code.source_run(suite, run));
+    fn emit_suite(
+        &mut self,
+        plan: Option<&'p crate::frontend::RegisteredSuite>,
+        source: &'p [ast::Stmt],
+    ) {
+        if let Some(plan) = plan {
+            self.checked_runs(plan, |code, run| code.source_run(source, run));
         } else {
-            self.source_statements(suite);
+            self.source_statements(source);
         }
+    }
+
+    pub(super) fn statements(&mut self, source: &'p [ast::Stmt]) {
+        let plan = source
+            .first()
+            .and_then(|stmt| self.source.nested_bodies.get(&stmt.start()));
+        self.emit_suite(plan, source);
     }
 
     pub(super) fn source_run(
@@ -170,6 +231,11 @@ impl<'p> Function<'_, 'p> {
                 self.emit_assertion_inputs(site, source);
             }
             SourceEffect::Context(context) => self.prepared_context(context),
+            SourceEffect::Try(region) => {
+                self.checkpoint(&region.range);
+                self.simple_call = None;
+                self.prepared_try(region);
+            }
             SourceEffect::For(region) => self.prepared_for(region),
             SourceEffect::While(condition) => {
                 let source = suite[run.statements.start]
@@ -453,7 +519,6 @@ impl<'p> Function<'_, 'p> {
                     let function = self.function_definition(v);
                     self.bind(v.name.as_str(), &function);
                 }
-                ast::Stmt::Try(v) => self.protected_statement(v),
                 _ => {
                     self.unsupported(&format!("{:?}", ast::AnyNodeRef::from(stmt).kind()));
                 }
@@ -921,35 +986,6 @@ impl<'p> Function<'_, 'p> {
         }
     }
 
-    /// Publish a module's provider before its first statement. Every simple
-    /// annotation, including an unconditional one, becomes visible only after
-    /// execution reaches its assignment.
-    pub(super) fn setup_deferred_module_annotations(&mut self, sites: &[TextSize]) {
-        if !sites.is_empty() {
-            let entries: Vec<_> = sites
-                .iter()
-                .enumerate()
-                .map(|(index, site)| crate::ir::AnnotationOccurrence {
-                    site: *site,
-                    index: Some(index),
-                })
-                .collect();
-            let signature = self.frame.text(
-                &json!({
-                    "posonly": ["format"], "scope_complete": true, "scope_locals_complete": true,
-                    "code_flags": self.source.function_flags(None, false, false),
-                })
-                .to_string(),
-            );
-            let code = self.annotation_body(&entries, None, self.source.module_start);
-            let name = self.text("__annotate__");
-            let provider = self.frame.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {signature}, i64 0, i64 {name}, i64 0, i64 0, i1 true)", self.scope));
-            self.bind("__annotate__", &provider);
-        }
-        self.frame
-            .op("setup_module_annotations", &[&self.scope.clone()]);
-    }
-
     pub(in crate::dynamic::emit) fn finish_class_annotations(
         &mut self,
         plan: &crate::frontend::ClassAnnotations,
@@ -975,7 +1011,9 @@ impl<'p> Function<'_, 'p> {
             "posonly": ["format"], "scope_complete": !plan.incomplete, "scope_reads": plan.reads,
             "code_flags": self.source.function_flags(None, self.in_function, false),
         }).to_string());
-        let code = self.annotation_body(&plan.sites, Some(globals), first.site);
+        let code =
+            self.source
+                .annotation_body(self.frame.output, &plan.sites, Some(globals), first.site);
         let environment = self.frame.op(
             "class_annotation_environment",
             &[&self.scope.clone(), &offsets],
@@ -985,28 +1023,6 @@ impl<'p> Function<'_, 'p> {
         let defaults = self.op("dict", &[]);
         let function = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {environment}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {qualname}, i64 0, i64 0, i1 false)"));
         self.bind("__annotate_func__", &function);
-    }
-
-    fn annotation_body(
-        &mut self,
-        entries: &[crate::ir::AnnotationOccurrence],
-        globals: Option<&std::collections::BTreeSet<String>>,
-        start: TextSize,
-    ) -> String {
-        let plan =
-            crate::frontend::DeferredAnnotation::prepare_body(&self.source.annotations, entries);
-        let scope = globals.map_or(AnnotationScope::Plain, |globals| AnnotationScope::Class {
-            globals: globals.clone(),
-            conditional: entries.iter().any(|entry| entry.index.is_some()),
-        });
-        self.source.definition(
-            self.frame.output,
-            String::new(),
-            Body::AnnotationProvider(&plan, entries, scope),
-            start,
-            false,
-            Entry::Compiled,
-        )
     }
 
     pub(super) fn unprepared_annotation(&mut self, occurrence: crate::ir::AnnotationOccurrence) {
@@ -1127,7 +1143,9 @@ impl<'p> Function<'_, 'p> {
                 self.frame
                     .checked_binding(binding, *entered, value, &self.sites);
             }
-            PhysicalBinding::Source(target) => self.assign_target(target, value),
+            PhysicalBinding::Refused(range, reason) => {
+                self.with_expression_range(*range, |code| code.build_diagnostic(reason));
+            }
         }
     }
 
@@ -1212,40 +1230,29 @@ impl<'p> Function<'_, 'p> {
     }
 
     fn physical_suite(&mut self, suite: &'p crate::frontend::PhysicalSuite) {
-        self.checked_runs(&suite.plan, |code, run| {
-            code.source_run(&suite.sources, run);
-        });
+        self.emit_suite(Some(&suite.plan), &suite.sources);
     }
 
-    fn protected_suite(&mut self, stmt: &'p ast::StmtTry) {
+    fn protected_suite(&mut self, region: &'p crate::frontend::PreparedTry) {
         crate::llvm::registered::handlers::protected(
             self,
-            &stmt.body,
-            &stmt.handlers,
-            &stmt.orelse,
-            stmt.is_star,
-            |code, ast::ExceptHandler::ExceptHandler(handler)| {
-                let class = handler.type_.as_deref().map(|class| {
-                    let site = if stmt.is_star {
-                        handler.range()
-                    } else {
-                        class.range()
-                    };
-                    code.checkpoint(&site);
-                    code.expr(class)
+            &region.body,
+            &region.handlers,
+            &region.otherwise,
+            region.is_star,
+            |code, handler| {
+                let class = handler.matcher.as_ref().map(|(range, input)| {
+                    code.checkpoint(range);
+                    code.physical_operand(input)
                 });
-                (
-                    class,
-                    handler.name.as_ref().map(|name| name.as_str()),
-                    handler.body.as_slice(),
-                )
+                (class, handler.name.as_deref(), &handler.body)
             },
             |code, body, cleanup| {
                 if let Some((name, outer)) = cleanup {
                     code.exits
                         .push((Cleanup::ExceptionName(name.into()), outer.into()));
                 }
-                code.statements(body);
+                code.physical_suite(body);
                 if cleanup.is_some() {
                     code.exits.pop();
                 }
@@ -1253,29 +1260,10 @@ impl<'p> Function<'_, 'p> {
         );
     }
 
-    fn emit_finally(&mut self, suite: FinallySuite<'p>) {
-        match suite {
-            FinallySuite::Checked(checked) => {
-                let Some(enclosing) = self.frame.enter_checked_slots(checked.region()) else {
-                    return;
-                };
-                if !checked.function.body.is_empty() && self.start_statement() {
-                    self.checked_block(&checked.function.body, checked);
-                }
-                self.frame.restore_checked_slots(enclosing);
-            }
-            FinallySuite::Residual(source) => self.statements(source),
-        }
-    }
-
-    fn protected_statement(&mut self, stmt: &'p ast::StmtTry) {
-        if stmt.finalbody.is_empty() {
-            self.protected_suite(stmt);
+    fn prepared_try(&mut self, region: &'p crate::frontend::PreparedTry) {
+        let Some(suite) = &region.finalbody else {
+            self.protected_suite(region);
             return;
-        }
-        let suite = match self.source.nested_bodies.get(&stmt.finalbody[0].start()) {
-            Some(plan) if plan.fully_checked() => FinallySuite::Checked(&plan.checked),
-            _ => FinallySuite::Residual(&stmt.finalbody),
         };
         crate::llvm::registered::handlers::finalized(
             self,
@@ -1288,7 +1276,7 @@ impl<'p> Function<'_, 'p> {
                     },
                     enclosing.into(),
                 ));
-                code.protected_suite(stmt);
+                code.protected_suite(region);
                 code.exits.pop();
             },
             |code, pending| {
@@ -1301,7 +1289,7 @@ impl<'p> Function<'_, 'p> {
                         code.body.error_target.clone(),
                     ));
                 }
-                code.emit_finally(suite);
+                code.physical_suite(suite);
                 if pending.is_some() {
                     code.exits.pop();
                 }
@@ -1357,7 +1345,7 @@ impl<'p> Function<'_, 'p> {
                             outer.clone(),
                         ));
                     }
-                    self.emit_finally(*body);
+                    self.physical_suite(body);
                     if pending.is_some() {
                         self.exits.pop();
                     }

@@ -1950,21 +1950,19 @@ pub(crate) fn compile(
                 .get("runpy")
                 .is_none_or(|(root, _)| root == Path::new(bundled_root)));
     // Borrow the winners once discovery has finished growing the emitter's source table.
-    let checked_functions = checked_graph.map(|graph| graph.registered_functions());
+    let checking = matches!(layout, crate::BoxedLayout::Check);
+    let mut checked_units = Vec::new();
     let selected_sources: Vec<_> = selected_sources
         .into_iter()
         .enumerate()
         .map(|(index, (id, program, module))| {
             let application = !registrations.python_providers.contains(&id);
-            if application && let (Some(graph), Some(module_id)) = (checked_graph, module) {
-                let checked = &graph.modules[module_id];
-                if checked.original_source() == sources[id].2
-                    && let Some(functions) = checked_functions
-                        .as_ref()
-                        .and_then(|all| all.get(&module_id))
-                {
-                    registrations.program_bodies.insert(id, functions);
-                }
+            if !checking
+                && application
+                && let (Some(graph), Some(module_id)) = (checked_graph, module)
+                && graph.modules[module_id].original_source() == sources[id].2
+            {
+                checked_units.push((id, module_id));
             }
             // Emit the selected application's signature. Preserve the existing checker
             // scope: owning a declaration does not prove that a call will reach it.
@@ -2070,10 +2068,19 @@ pub(crate) fn compile(
         }
     }
     let modules = (sources.as_slice(), builtins.as_slice(), entry_source);
-    let (units, used_archive) = if matches!(layout, crate::BoxedLayout::Check) {
+    let (units, used_archive) = if checking {
         emit::check(modules, keep_docstrings, &module_errors)?;
         (Vec::new(), false)
     } else {
+        // Admission may have given a fixed definition to its registered frame.
+        let checked_functions = checked_graph.map(|graph| graph.registered_functions());
+        if let Some(functions) = &checked_functions {
+            for (unit, module) in checked_units {
+                if let Some(bodies) = functions.get(&module) {
+                    registrations.program_bodies.insert(unit, bodies);
+                }
+            }
+        }
         let providers = options
             .bundled_provider_archive
             .as_deref()

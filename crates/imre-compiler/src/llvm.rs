@@ -338,7 +338,8 @@ pub(crate) fn emit(
     ranges: &RangeFacts<'_>,
     sanitize: bool,
 ) -> Result<String, Unsupported> {
-    emit_file(module, ranges, sanitize, analyze_program(module)?)
+    let program = analyze_program(module, &mut Default::default())?;
+    emit_file(module, ranges, sanitize, program)
 }
 
 pub(crate) fn emit_file(
@@ -361,32 +362,58 @@ pub(crate) struct NativeProgram {
     function_link_types: HashSet<Type>,
 }
 
-pub(crate) fn analyze_program(module: &Module) -> Result<NativeProgram, Unsupported> {
+pub(crate) fn analyze_program(
+    module: &Module,
+    sites: &mut crate::FixedFrameSources,
+) -> Result<NativeProgram, Unsupported> {
     let mut function_link_types = HashSet::new();
     let mut link_owners = BTreeMap::<usize, Vec<&Expr>>::new();
     let mut declared_caches = HashSet::new();
     let mut object_call = None;
-    let callable_targets = crate::callables::Targets::analyze_with(module, |id, expr| {
-        let ExprKind::Builtin(builtin, args) = &expr.kind else {
-            return;
-        };
-        match builtin {
-            Builtin::ObjectCall(kind, ..)
-                if object_call.is_none_or(|previous| *kind < previous) =>
-            {
-                object_call = Some(*kind);
+    let mut targets = crate::callables::TargetCollector::default();
+    for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
+        // The tags are needed only for this post-specialization inventory.
+        // A valid frame keeps the original position table through admission.
+        let operations = sites
+            .get_mut(&id)
+            .filter(|(_, source)| source.local_names.len() == function.locals.len())
+            .map(|(_, source)| std::mem::take(&mut source.operations));
+        let mut remaining = operations.as_deref();
+        ir::walk_nodes(&function.body, &mut |node, _| {
+            remaining = remaining.and_then(|operations| {
+                let (expected, rest) = operations.split_first()?;
+                let expected = (*expected)?;
+                (crate::frontend::FixedNode::checked(&node) == Some(expected)).then_some(rest)
+            });
+            let ir::Node::Expression(expr) = node else {
+                return;
+            };
+            targets.inspect(&module.types, expr);
+            let ExprKind::Builtin(builtin, args) = &expr.kind else {
+                return;
+            };
+            match builtin {
+                Builtin::ObjectCall(kind, ..)
+                    if object_call.is_none_or(|previous| *kind < previous) =>
+                {
+                    object_call = Some(*kind);
+                }
+                Builtin::FunctionWrappedSet | Builtin::FunctionWrappedGet => {
+                    let owner = &args[0];
+                    function_link_types.insert(owner.ty);
+                    link_owners.entry(id).or_default().push(owner);
+                }
+                Builtin::ModuleCache(id) => {
+                    declared_caches.insert(*id);
+                }
+                _ => {}
             }
-            Builtin::FunctionWrappedSet | Builtin::FunctionWrappedGet => {
-                let owner = &args[0];
-                function_link_types.insert(owner.ty);
-                link_owners.entry(id).or_default().push(owner);
-            }
-            Builtin::ModuleCache(id) => {
-                declared_caches.insert(*id);
-            }
-            _ => {}
+        });
+        if !matches!(remaining, Some([])) {
+            sites.remove(&id);
         }
-    });
+    }
+    let callable_targets = targets.finish();
     if function_link_types.iter().any(|&ty| {
         let targets = callable_targets.get(ty);
         module.types.dispatcher(ty).is_some()

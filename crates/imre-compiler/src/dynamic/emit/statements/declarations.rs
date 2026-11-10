@@ -3,7 +3,9 @@ use super::super::sites::{
     AnnotationString, CheckedSites, CompiledAlias, CompiledDefinition, CompiledGenerator,
     Declaration, RequiredSite,
 };
-use super::super::{Body, DefinitionName, DefinitionSite, Entry, Function, SourceInfo};
+use super::super::{
+    Body, DefinitionName, DefinitionSite, Entry, Function, Output, SourceInfo, SourceMap,
+};
 use crate::frontend::PreparedAnnotation;
 use crate::frontend::function_scope::OrdinaryFunction;
 use crate::ir::{Expr, Statement};
@@ -32,22 +34,23 @@ enum Callable<'a> {
     Ordinary(&'a OrdinaryFunction),
 }
 
-impl Function<'_, '_> {
+impl SourceMap<'_> {
     pub(in crate::dynamic::emit) fn place_annotation_string(
-        &mut self,
+        &self,
+        output: &mut Output,
+        sites: &mut CheckedSites,
         site: ruff_text_size::TextSize,
     ) {
-        let Some(PreparedAnnotation::String { text, body }) =
-            self.source.annotation_operands.get(&site)
+        let Some(PreparedAnnotation::String { text, body }) = self.annotation_operands.get(&site)
         else {
             return;
         };
-        if self.sites.annotation_strings.contains_key(&site) {
+        if sites.annotation_strings.contains_key(&site) {
             return;
         }
         let code = body.as_ref().map(|body| {
-            let unit = self.source.unit;
-            let file = self.frame.output.data(b"<string>");
+            let unit = self.unit;
+            let file = output.data(b"<string>");
             let location = super::super::SourceMap {
                 info: &body.scope,
                 callable_code: Default::default(),
@@ -56,14 +59,14 @@ impl Function<'_, '_> {
                 positions: &super::super::SourcePositions::new(text, &file),
             };
             location.code(
-                self.frame.output,
+                output,
                 String::new(),
                 Body::AnnotationOperand(&body.code),
                 false,
                 None,
             )
         });
-        self.sites.annotation_strings.insert(
+        sites.annotation_strings.insert(
             site,
             AnnotationString {
                 text: text.clone(),
@@ -71,7 +74,9 @@ impl Function<'_, '_> {
             },
         );
     }
+}
 
+impl Function<'_, '_> {
     pub(in crate::dynamic::emit) fn prepare_checked_value(&mut self, value: &Expr) {
         CheckedSites::visit_operand(value, &mut |site| self.prepare_site(site));
     }
@@ -282,7 +287,8 @@ impl Function<'_, '_> {
                 return;
             }
             RequiredSite::AnnotationString(site) => {
-                self.place_annotation_string(site);
+                self.source
+                    .place_annotation_string(self.frame.output, &mut self.sites, site);
                 return;
             }
             RequiredSite::AnnotationField(site) => {
