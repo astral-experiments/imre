@@ -565,6 +565,7 @@ impl Frame<'_, '_, '_> {
     pub(crate) fn declare_integer_arithmetic(&mut self, op: Binary) {
         match op {
             Binary::Add => self.code.output.declarations.checked_integer_add = true,
+            Binary::Subtract => self.code.output.declarations.checked_integer_subtract = true,
             Binary::Multiply => self.code.output.declarations.checked_integer_multiply = true,
             _ => unreachable!("expected checked integer operation"),
         }

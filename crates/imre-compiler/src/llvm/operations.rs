@@ -66,10 +66,10 @@ impl CheckedValue {
         }
     }
 
-    /// Keep an available native result through the next addition. Two rooted
+    /// Keep an available native result through addition or subtraction. Two rooted
     /// handles need either two known words or a checked integer whose word
     /// still needs a guard. One known word alone cannot justify probing its peer.
-    fn use_integer_add(&self, left: Type, other: &Self, right: Type) -> bool {
+    fn can_use_integer_arithmetic(&self, left: Type, other: &Self, right: Type) -> bool {
         match (self, other) {
             (Self::Handle { exact_word: a, .. }, Self::Handle { exact_word: b, .. }) => {
                 (a.is_some() && b.is_some())
@@ -327,10 +327,11 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             return value;
         }
         let (a, b) = (self.operand(left), self.operand(right));
-        let result = if matches!(op, Binary::Add | Binary::Multiply)
+        let result = if matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply)
             && (expr.ty == Type::PythonObject || left.ty == Type::Int && right.ty == Type::Int)
         {
-            if matches!(op, Binary::Multiply) || a.use_integer_add(left.ty, &b, right.ty) {
+            if matches!(op, Binary::Multiply) || a.can_use_integer_arithmetic(left.ty, &b, right.ty)
+            {
                 self.integer_arithmetic(op, &a, &b)
             } else {
                 self.python_binary(op, &a, &b)

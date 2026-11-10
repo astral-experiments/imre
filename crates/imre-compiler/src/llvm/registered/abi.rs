@@ -102,6 +102,7 @@ pub(crate) struct Declarations {
     pub(crate) emitted_guarded_named_op: bool,
     pub(crate) registered_expression: bool,
     pub(crate) checked_integer_add: bool,
+    pub(crate) checked_integer_subtract: bool,
     pub(crate) checked_integer_multiply: bool,
     pub(crate) reads_exact_int_word: bool,
 }
@@ -126,7 +127,20 @@ impl Output {
         if self.declarations.reads_exact_int_word {
             self.functions.push_str("declare i64 @imre_dyn_exact_int_word(ptr, i64)\n");
         }
-        if !self.declarations.checked_integer_add && !self.declarations.checked_integer_multiply {
+        let helpers = [
+            (self.declarations.checked_integer_add, Binary::Add, "sadd"),
+            (
+                self.declarations.checked_integer_subtract,
+                Binary::Subtract,
+                "ssub",
+            ),
+            (
+                self.declarations.checked_integer_multiply,
+                Binary::Multiply,
+                "smul",
+            ),
+        ];
+        if !helpers.iter().any(|(used, _, _)| *used) {
             return;
         }
         self.functions.push_str(concat!(
@@ -137,14 +151,7 @@ impl Output {
             "!0 = !{!\"branch_weights\", i32 1, i32 2000}\n",
             "!1 = !{!\"branch_weights\", i32 2000, i32 1}\n",
         ));
-        for (used, op, intrinsic) in [
-            (self.declarations.checked_integer_add, Binary::Add, "sadd"),
-            (
-                self.declarations.checked_integer_multiply,
-                Binary::Multiply,
-                "smul",
-            ),
-        ] {
+        for (used, op, intrinsic) in helpers {
             if used {
                 writeln!(
                     self.functions,
