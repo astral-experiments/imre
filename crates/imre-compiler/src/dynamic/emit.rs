@@ -508,12 +508,7 @@ impl<'a> PreparedBody<'a, '_> {
             |expr| logicals.visit(expr, values),
         );
         let mut templates = HashMap::new();
-        let lambdas = RegisteredLambda::collect(
-            &body,
-            values,
-            std::mem::take(&mut scopes.lambdas),
-            &mut templates,
-        );
+        let lambdas = RegisteredLambda::collect(&body, values, &mut scopes, &mut templates);
         let values = crate::frontend::RegisteredSource {
             lambdas: Some(&lambdas),
             ..values
@@ -4728,6 +4723,48 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert_eq!(
             prepared.standalone().unwrap_err(),
             "example.py:2:22: cannot compile this comprehension ahead of time (through 2:64)",
+        );
+    }
+
+    #[test]
+    fn rejected_lambda_default_keeps_its_span_after_parameter_erasure() {
+        use crate::frontend::ExpressionSelection;
+
+        let source = concat!(
+            "async def make(rows):\n",
+            "    return lambda a=take(await first(), [x for x in rows]), ",
+            "b={'items': [lambda v=await get(x): v for x in rows]}: a\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let lambda = function.body[0]
+            .as_return_stmt_mut()
+            .unwrap()
+            .value
+            .as_deref_mut()
+            .unwrap()
+            .as_lambda_expr_mut()
+            .unwrap();
+        let ExpressionSelection::Refused(range, reason) =
+            &prepared.source.lambdas[&lambda.start()].binding
+        else {
+            panic!("the prepared lambda owns the rejected display's range");
+        };
+        assert_eq!(&source[*range], "[lambda v=await get(x): v for x in rows]");
+        assert_eq!(*reason, "cannot compile this comprehension ahead of time");
+        lambda.parameters = None;
+        assert_eq!(
+            prepared.standalone().unwrap_err(),
+            "example.py:2:73: cannot compile this comprehension ahead of time (through 2:113)",
         );
     }
 

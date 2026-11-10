@@ -418,11 +418,8 @@ impl<'a> Visitor<'a> for PhysicalPreparation<'_, '_> {
             }
             Ok(None) => {}
         }
-        if let ast::Expr::Lambda(lambda) = node {
-            // The lambda body has its own compiled activation. Defaults run here.
-            for default in values::lambda_defaults(lambda) {
-                self.visit_expr(default);
-            }
+        // The lambda site owns the complete binding or its build diagnostic.
+        if node.is_lambda_expr() {
             return;
         }
         self.residual(node);

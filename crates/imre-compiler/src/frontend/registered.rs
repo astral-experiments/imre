@@ -7,7 +7,7 @@ mod eager;
 mod generators;
 pub(crate) use generators::RegisteredGenerator;
 mod lambdas;
-pub(crate) use lambdas::{LambdaBinding, LambdaDefault, RegisteredLambda};
+pub(crate) use lambdas::RegisteredLambda;
 mod templates;
 pub(crate) use templates::{PreparedStrings, PreparedTemplate, TemplateField};
 pub(super) mod patterns;
@@ -2411,8 +2411,8 @@ struct SourceScope<'a> {
     loop_scope: LoopScope,
     suspending_operands: bool,
     refusal: Option<(TextRange, &'static str)>,
-    // A dictionary reports its first unprepared comprehension. Named expressions and assignment
-    // targets preserve terminal operand errors in their enclosing frame.
+    // A dictionary reports its first unprepared comprehension. Named expressions, assignment
+    // targets, and lambda bindings preserve terminal operand errors in their enclosing frame.
     diagnostic_suspension: Option<bool>,
 }
 
@@ -2915,11 +2915,21 @@ impl SourceScope<'_> {
         value
     }
 
-    fn lambda_binding(&mut self, lambda: &ast::ExprLambda) -> Option<Expr> {
+    fn lambda_binding(
+        &mut self,
+        lambda: &ast::ExprLambda,
+    ) -> StdResult<Expr, (TextRange, &'static str)> {
         let defaults = values::lambda_defaults(lambda)
-            .map(|default| self.ordinary_operand(default))
-            .collect::<Option<_>>()?;
-        Some(values::lambda_binding(lambda, defaults))
+            .map(|default| {
+                self.ordinary_operand(default).ok_or_else(|| {
+                    self.refusal.unwrap_or((
+                        default.range(),
+                        "cannot compile this lambda default ahead of time",
+                    ))
+                })
+            })
+            .collect::<StdResult<_, _>>()?;
+        Ok(values::lambda_binding(lambda, defaults))
     }
 
     fn ordinary_operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
@@ -3026,7 +3036,10 @@ impl SourceScope<'_> {
                 }
                 return None;
             }
-            let binding = self.lambda_binding(lambda)?;
+            let binding = self
+                .lambda_binding(lambda)
+                .inspect_err(|&error| self.refusal = Some(error))
+                .ok()?;
             // A generator expression retains its own clause cursors across an awaited default.
             if self.loop_scope != LoopScope::Outside && !self.generator_expression {
                 let mut suspends = false;
