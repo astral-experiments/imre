@@ -3152,6 +3152,31 @@ mod tests {
     }
 
     #[test]
+    fn awaited_branch_conditions_keep_the_enclosing_loop_checked() {
+        let source = include_str!("../../../../tests/fixtures/boxed_source_coroutine.py");
+        let module = PreparedBody::module(
+            "boxed_source_coroutine",
+            Path::new("boxed_source_coroutine.py"),
+            source,
+            0,
+            ModuleOrigin::Provider,
+        )
+        .unwrap();
+        let start = TextSize::try_from(source.find("async def choose(").unwrap()).unwrap();
+        let function = &module.source.function_bodies[&start];
+        assert!(function.fully_checked());
+        assert!(
+            function
+                .checked()
+                .function
+                .body
+                .iter()
+                .any(|statement| { matches!(statement, crate::ir::Statement::While(..)) })
+        );
+        crate::verify::registered(function.checked().region()).unwrap();
+    }
+
+    #[test]
     fn mixed_async_if_owns_its_awaited_guards() {
         use crate::frontend::{PhysicalOperand, SourceEffect};
 
