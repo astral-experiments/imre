@@ -445,6 +445,14 @@ impl<'a> PreparedBody<'a, '_> {
         let class_bodies = prepare.class_suites(sites.classes, &class_keywords, |start| {
             scopes.functions[&start].suspension_flags != 0
         });
+        for start in class_bodies.keys() {
+            scopes
+                .classes
+                .get_mut(start)
+                .expect("registered class scope")
+                .annotations
+                .prepare_body(&sites.annotations);
+        }
         let mut thread_entries = HashMap::new();
         // The collector visits a definition before its children. Prepare the children first
         // so a physical enclosing suite can bind their already checked declarations.
@@ -1329,6 +1337,64 @@ mod tests {
         prepared.source.class_bodies = class_bodies;
         prepared.source.statement_sites = sites;
         prepared.source.nested_bodies.extend(nested);
+    }
+
+    #[test]
+    fn a_class_keeps_the_annotation_body_prepared_from_its_declarations() {
+        use crate::frontend::AnnotationValue;
+        use crate::ir::{Builtin, ExprKind, Statement};
+
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            "class Row:\n    first: int\n    second: str\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let original = prepared.standalone().unwrap().unwrap();
+        let owner = ruff_text_size::TextSize::new(0);
+        let [first, second] = prepared.source.scopes.classes[&owner]
+            .annotations
+            .sites
+            .as_slice()
+        else {
+            panic!("expected the class annotations in declaration order");
+        };
+        let (first, second) = (first.site, second.site);
+        let AnnotationValue::Checked(second) = &prepared.source.annotations[&second].value else {
+            panic!("expected a checked annotation");
+        };
+        let second = second.clone();
+        prepared.source.annotations.get_mut(&first).unwrap().value =
+            AnnotationValue::Checked(second.clone());
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+
+        let provider = prepared
+            .source
+            .scopes
+            .classes
+            .get_mut(&owner)
+            .unwrap()
+            .annotations
+            .body
+            .as_mut()
+            .unwrap();
+        assert!(provider.fully_checked());
+        let mut operands = provider.checked.function.body.iter_mut().filter_map(|stmt| {
+            if let Statement::Expr(crate::ir::Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredAnnotationInsert(occurrence), inputs), ..
+            }) = stmt && occurrence.site == first {
+                Some(inputs)
+            } else {
+                None
+            }
+        });
+        let [value] = operands.next().unwrap().as_mut_slice() else {
+            panic!("expected the first annotation value");
+        };
+        *value = second;
+        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
     }
 
     #[test]

@@ -97,11 +97,25 @@ impl AnnotationScopes {
 #[derive(Default)]
 pub(crate) struct ClassAnnotations {
     pub(crate) sites: Vec<AnnotationOccurrence>,
+    pub(crate) body: Option<Box<crate::frontend::RegisteredSuite>>,
     pub(crate) reads: BTreeSet<String>,
     pub(crate) incomplete: bool,
 }
 
 impl ClassAnnotations {
+    /// Compile the lazy provider once its lexical sites and annotation operands are known.
+    pub(crate) fn prepare_body(
+        &mut self,
+        annotations: &HashMap<TextSize, crate::frontend::DeferredAnnotation>,
+    ) {
+        if !self.sites.is_empty() {
+            self.body = Some(Box::new(crate::frontend::DeferredAnnotation::prepare_body(
+                annotations,
+                &self.sites,
+            )));
+        }
+    }
+
     pub(super) fn observe(&mut self, assign: &ast::StmtAnnAssign) {
         if assign.simple && assign.target.is_name_expr() {
             self.sites.push(AnnotationOccurrence {
