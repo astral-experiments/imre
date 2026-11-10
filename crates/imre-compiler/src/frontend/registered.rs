@@ -2562,10 +2562,7 @@ mod tests {
         let call_count = |operand| {
             let mut calls = 0;
             ir::walk_operand_expressions(operand, &mut |expr| {
-                calls += usize::from(matches!(
-                    expr.kind,
-                    ExprKind::Builtin(Builtin::RegisteredCall(_), _)
-                ));
+                calls += usize::from(expr.is_registered_invoke());
             });
             calls
         };
@@ -2601,9 +2598,7 @@ mod tests {
         for operand in [exception, cause] {
             let mut calls = 0;
             ir::walk_operand_expressions(operand, &mut |value| {
-                if matches!(value.kind, ExprKind::Builtin(Builtin::RegisteredCall(_), _)) {
-                    calls += 1;
-                }
+                calls += usize::from(value.is_registered_invoke());
             });
             assert_eq!(calls, 1);
         }
@@ -2862,7 +2857,7 @@ mod tests {
             ExprKind::Invoke { .. } => counts[5] += 1,
             _ => {}
         });
-        assert_eq!(counts, [1, 1, 2, 1, 1, 2]);
+        assert_eq!(counts, [1, 1, 2, 1, 0, 3]);
     }
 
     #[test]
@@ -3300,7 +3295,7 @@ mod tests {
         let mut advances = 0;
         ir::walk_expressions(body, &mut |expr| match &expr.kind {
             ExprKind::Binary(Binary::Multiply, ..) => multiplies += 1,
-            ExprKind::Builtin(Builtin::RegisteredCall(_), _) => calls += 1,
+            ExprKind::Builtin(Builtin::RegisteredCall(_), _) | ExprKind::Invoke { .. } => calls += 1,
             _ => {}
         });
         ir::walk_statements(body, &mut |stmt| {
@@ -4049,7 +4044,10 @@ mod tests {
         .expect("function-local annotations need no execution-time provider");
         let mut calls = 0;
         ir::walk_expressions(&checked.function.body, &mut |value| {
-            calls += usize::from(matches!(value.kind, ExprKind::Builtin(Builtin::RegisteredCall(_), _)));
+            calls += usize::from(matches!(
+                value.kind,
+                ExprKind::Invoke { .. } | ExprKind::Builtin(Builtin::RegisteredCall(_), _)
+            ));
         });
         assert_eq!(calls, 0);
     }
