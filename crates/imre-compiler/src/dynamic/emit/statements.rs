@@ -321,21 +321,13 @@ impl<'p> Function<'_, 'p> {
 
     fn branch_physical_operand(&mut self, test: &PhysicalOperand, yes: &str, no: &str) {
         match test {
-            PhysicalOperand::Checked(operand) => self.branch_operand(operand, yes, no),
+            PhysicalOperand::Checked(operand) => {
+                self.prepare_checked_value(&operand.value);
+                let bit = self.frame.prepared_test(operand, &self.sites);
+                self.branch(&bit, yes, no);
+            }
             PhysicalOperand::Residual(input) => self.branch_input(input.as_input(), yes, no),
         }
-    }
-
-    fn branch_operand(
-        &mut self,
-        operand: &crate::frontend::RegisteredOperand,
-        yes: &str,
-        no: &str,
-    ) {
-        self.prepare_checked_value(&operand.value);
-        let bit = self
-            .test_with_temporaries(|code| code.frame.prepared_operand(operand, &code.sites, true));
-        self.branch(&bit, yes, no);
     }
 
     pub(super) fn physical_operand(&mut self, input: &PhysicalOperand) -> String {

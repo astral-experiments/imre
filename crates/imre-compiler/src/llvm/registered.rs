@@ -462,7 +462,15 @@ impl Frame<'_, '_, '_> {
         self.materialize(&value)
     }
 
-    pub(crate) fn evaluate_test(&mut self, expr: &Expr) -> String {
+    fn evaluate_operand(&mut self, expr: &Expr, condition: bool) -> String {
+        if condition {
+            self.evaluate_test(expr, false)
+        } else {
+            self.evaluate_handle(expr)
+        }
+    }
+
+    fn evaluate_test(&mut self, expr: &Expr, already_rooted: bool) -> String {
         let mut inner = expr;
         while let ExprKind::Builtin(Builtin::RegisteredLocation(..), operands) = &inner.kind {
             inner = &operands[0];
@@ -490,7 +498,9 @@ impl Frame<'_, '_, '_> {
             .expect("logical test has a normal successor")
             .into_condition();
         }
-        CheckedBody::registered(self.reborrow()).test_operand(expr)
+        // A single leaf can use the enclosing test's mark. Short-circuit operands
+        // above still release their own temporaries before evaluating the next one.
+        CheckedBody::registered(self.reborrow()).test_operand_in_scope(expr, already_rooted)
     }
 
     fn evaluate_eager_handle(&mut self, expr: &Expr) -> String {
@@ -1452,22 +1462,8 @@ impl RegisteredFrame<'_, '_> {
         sites: &CheckedSites,
         condition: bool,
     ) -> String {
-        self.registered_operand(value, sites, condition, None)
-    }
-
-    fn registered_operand(
-        &mut self,
-        value: &Expr,
-        sites: &CheckedSites,
-        condition: bool,
-        names: Option<&HashMap<usize, LocalBinding>>,
-    ) -> String {
-        self.with_checked_frame(sites, names, |mut frame| {
-            if condition {
-                frame.evaluate_test(value)
-            } else {
-                frame.evaluate_handle(value)
-            }
+        self.with_checked_frame(sites, None, |mut frame| {
+            frame.evaluate_operand(value, condition)
         })
     }
 
@@ -1477,11 +1473,33 @@ impl RegisteredFrame<'_, '_> {
         sites: &CheckedSites,
         condition: bool,
     ) -> String {
+        self.with_prepared_operand(operand, sites, |frame| {
+            frame.evaluate_operand(&operand.value, condition)
+        })
+    }
+
+    pub(crate) fn prepared_test(
+        &mut self,
+        operand: &RegisteredOperand,
+        sites: &CheckedSites,
+    ) -> String {
+        self.with_prepared_operand(operand, sites, |frame| {
+            frame.test_with_temporaries(|frame| frame.evaluate_test(&operand.value, true))
+        })
+    }
+
+    fn with_prepared_operand(
+        &mut self,
+        operand: &RegisteredOperand,
+        sites: &CheckedSites,
+        emit: impl FnOnce(&mut Frame<'_, '_, '_>) -> String,
+    ) -> String {
         let Some(enclosing) = self.enter_checked_slots(operand.region()) else {
             return "0".to_owned();
         };
-        let result =
-            self.registered_operand(&operand.value, sites, condition, Some(&operand.local_names));
+        let result = self.with_checked_frame(sites, Some(&operand.local_names), |mut frame| {
+            emit(&mut frame)
+        });
         self.restore_checked_slots(enclosing);
         result
     }
