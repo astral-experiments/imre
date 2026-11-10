@@ -1240,10 +1240,11 @@ pub(crate) enum TypeParameterKind {
     ParamSpec,
 }
 
-/// The source declaration or future spelling of one simple module annotation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct AnnotationOccurrence {
-    pub(crate) site: ruff_text_size::TextSize,
+/// The name, location, and guard of a checked annotation value.
+#[derive(Clone)]
+pub(crate) struct AnnotationField {
+    pub(crate) name: String,
+    pub(crate) range: ruff_text_size::TextRange,
     pub(crate) index: Option<usize>,
 }
 
@@ -2047,7 +2048,7 @@ pub(crate) enum Builtin {
     RegisteredNamespaceAnnotation(NamespaceAnnotation),
     RegisteredAnnotationStart,
     RegisteredAnnotationFormat,
-    RegisteredAnnotationInsert(AnnotationOccurrence),
+    RegisteredAnnotationInsert(AnnotationField),
     /// Bind the string operand to a checked child function in this provider.
     BindAnnotationExpression(ruff_text_size::TextSize),
     RegisteredAnnotationResult,

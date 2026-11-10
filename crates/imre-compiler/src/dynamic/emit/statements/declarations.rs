@@ -141,7 +141,6 @@ impl CallableSites<'_, '_> {
                 self.source
                     .place_annotation_string(self.output, self.sites, site);
             }
-            RequiredSite::AnnotationField(site) => self.place_annotation_field(site),
             RequiredSite::Generator(site) => self.place_generator(site),
             RequiredSite::Alias(site) => {
                 if !self.sites.aliases.contains_key(&site) {
@@ -152,14 +151,6 @@ impl CallableSites<'_, '_> {
             RequiredSite::ClassNamespace(site) => self.place_class_namespace(site),
             RequiredSite::Definition(site) => self.place_definition(site),
         }
-    }
-
-    fn place_annotation_field(&mut self, site: TextSize) {
-        let field = &self.source.annotations[&site];
-        self.sites
-            .annotation_fields
-            .entry(site)
-            .or_insert_with(|| (field.name.clone(), field.range));
     }
 
     /// Python creates a fresh callable at each execution of the binding while the

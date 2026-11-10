@@ -217,7 +217,6 @@ pub(crate) enum RequiredSite {
     Generator(TextRange),
     Alias(TextSize),
     AnnotationString(TextSize),
-    AnnotationField(TextSize),
 }
 
 fn visit_expression_site(expr: &Expr, visit: &mut impl FnMut(RequiredSite)) {
@@ -231,9 +230,6 @@ fn visit_expression_site(expr: &Expr, visit: &mut impl FnMut(RequiredSite)) {
         Builtin::RegisteredGenerator(site, _) => RequiredSite::Generator(*site),
         Builtin::RegisteredTypeAlias(site) => RequiredSite::Alias(*site),
         Builtin::BindAnnotationExpression(site) => RequiredSite::AnnotationString(*site),
-        Builtin::RegisteredAnnotationInsert(occurrence) => {
-            RequiredSite::AnnotationField(occurrence.site)
-        }
         _ => return,
     });
 }
@@ -247,7 +243,6 @@ pub(crate) struct CheckedSites {
     pub(crate) lambdas: HashMap<TextSize, CompiledDefinition>,
     pub(crate) generators: HashMap<TextRange, CompiledGenerator>,
     pub(crate) aliases: HashMap<TextSize, Result<CompiledAlias, String>>,
-    pub(crate) annotation_fields: HashMap<TextSize, (String, TextRange)>,
 }
 
 impl CheckedSites {

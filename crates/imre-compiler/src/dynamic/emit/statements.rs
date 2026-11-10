@@ -123,19 +123,7 @@ impl SourceMap<'_> {
         frame: &mut RegisteredFrame<'_, '_>,
         sites: &[TextSize],
     ) {
-        let entries: Vec<_> = sites
-            .iter()
-            .enumerate()
-            .map(|(index, site)| crate::ir::AnnotationOccurrence {
-                site: *site,
-                index: Some(index),
-            })
-            .collect();
-        let body = crate::frontend::DeferredAnnotation::prepare_body(
-            &self.annotations,
-            &entries,
-            self.module_annotation_bindings.clone(),
-        );
+        let body = self.module_annotations.module_body(sites);
         let compiled = self.annotation_provider(
             frame.output,
             &body,

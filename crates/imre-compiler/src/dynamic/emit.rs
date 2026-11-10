@@ -471,13 +471,7 @@ impl<'a> PreparedBody<'a> {
                 .get_mut(start)
                 .expect("registered class scope")
                 .annotations
-                .prepare_body(
-                    &sites.annotations,
-                    sites
-                        .annotation_bindings
-                        .remove(&Some(*start))
-                        .unwrap_or_default(),
-                );
+                .prepare_body(sites.class_annotations.remove(start).unwrap_or_default());
         }
         let mut thread_entries = HashMap::new();
         for site in sites.functions.into_iter().rev() {
@@ -541,8 +535,7 @@ impl<'a> PreparedBody<'a> {
             #[cfg(test)]
             namespace_operations: operations,
             type_aliases,
-            annotations: sites.annotations,
-            module_annotation_bindings: sites.annotation_bindings.remove(&None).unwrap_or_default(),
+            module_annotations: sites.module_annotations,
             parameter_annotations: sites.parameter_annotations,
             function_bodies,
             class_bodies,
@@ -820,8 +813,7 @@ struct SourceInfo<'a> {
     statement_sites: crate::frontend::StatementSites,
     #[cfg(test)]
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
-    annotations: HashMap<ruff_text_size::TextSize, crate::frontend::DeferredAnnotation>,
-    module_annotation_bindings: crate::frontend::RegisteredBindings,
+    module_annotations: crate::frontend::NamespaceAnnotations,
     parameter_annotations: HashMap<ruff_text_size::TextSize, crate::frontend::ParameterAnnotations>,
     function_bodies: HashMap<ruff_text_size::TextSize, PreparedFunction<'a>>,
     class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredClass>,
@@ -1249,7 +1241,7 @@ mod tests {
         use crate::ir::{Builtin, Expr, ExprKind, Statement};
 
         let source = "def f(*items: *[row for row in rows()]): pass\n";
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "example",
             Path::new("example.py"),
             source,
@@ -1258,8 +1250,7 @@ mod tests {
         )
         .unwrap();
         let before = prepared.standalone().unwrap();
-        let field = prepared.source.annotations.values_mut().next().unwrap();
-        field.value = Ok(Expr::none());
+        prepared.syntax.as_mut().unwrap().to_mut().clear();
         assert_eq!(prepared.standalone().unwrap(), before);
 
         let provider = prepared
@@ -1300,7 +1291,7 @@ mod tests {
     fn a_class_keeps_the_annotation_body_prepared_from_its_declarations() {
         use crate::ir::{Builtin, ExprKind, Statement};
 
-        let mut prepared = PreparedBody::module(
+        let mut prepared = PreparedBody::module_with_syntax(
             "example",
             Path::new("example.py"),
             "class Row:\n    first: [item for item in types]\n    second: str\n",
@@ -1310,19 +1301,7 @@ mod tests {
         .unwrap();
         let original = prepared.standalone().unwrap();
         let owner = ruff_text_size::TextSize::new(0);
-        let [first, second] = prepared.source.scopes.classes[&owner]
-            .annotations
-            .sites
-            .as_slice()
-        else {
-            panic!("expected the class annotations in declaration order");
-        };
-        let (first, second) = (first.site, second.site);
-        let Ok(second) = &prepared.source.annotations[&second].value else {
-            panic!("expected a checked annotation");
-        };
-        let second = second.clone();
-        prepared.source.annotations.get_mut(&first).unwrap().value = Ok(second.clone());
+        prepared.syntax.as_mut().unwrap().to_mut().clear();
         assert_eq!(prepared.standalone().unwrap(), original);
 
         let provider = prepared
@@ -1338,22 +1317,24 @@ mod tests {
         let provider = provider.as_mut().as_mut().unwrap();
         assert!(!provider.region().private_slots().is_empty());
         crate::verify::registered(provider.region()).unwrap();
-        let mut operands = provider.function.body.iter_mut().filter_map(|stmt| {
+        let mut fields = provider.function.body.iter_mut().filter_map(|stmt| {
             if let Statement::Expr(crate::ir::Expr {
-                kind: ExprKind::Builtin(Builtin::RegisteredAnnotationInsert(occurrence), inputs),
+                kind: ExprKind::Builtin(Builtin::RegisteredAnnotationInsert(field), inputs),
                 ..
             }) = stmt
-                && occurrence.site == first
             {
-                Some(inputs)
+                Some((field.name.as_str(), inputs))
             } else {
                 None
             }
         });
-        let [value] = operands.next().unwrap().as_mut_slice() else {
-            panic!("expected the first annotation value");
+        let (first, values) = fields.next().unwrap();
+        let (second, replacements) = fields.next().unwrap();
+        assert_eq!((first, second), ("first", "second"));
+        let ([value], [replacement]) = (values.as_mut_slice(), replacements.as_slice()) else {
+            panic!("each annotation has one checked value");
         };
-        *value = second;
+        *value = replacement.clone();
         assert_ne!(prepared.standalone().unwrap(), original);
     }
 
