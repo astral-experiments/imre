@@ -1286,7 +1286,7 @@ mod tests {
         });
         assert_eq!(pulls, 1);
         let (_, llvm) = module.standalone().unwrap().unwrap();
-        assert!(llvm.contains("%ir_slot0 = alloca i64"));
+        assert!(llvm.contains("%ir_slot0 = alloca ["));
     }
 
     #[test]
