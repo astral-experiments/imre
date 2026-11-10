@@ -1518,7 +1518,7 @@ mod tests {
         let mut graph = crate::modules::SourceGraph::single(source).unwrap();
         assert!(matches!(
             crate::checked_lower(&mut graph).unwrap(),
-            crate::CheckedProgram::Registered
+            crate::CheckedProgram::Registered(_)
         ));
         let bodies = graph.registered_functions();
         let functions = &bodies[&graph.entry];
@@ -2115,7 +2115,9 @@ mod tests {
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
-        let plan = &prepared.source.function_bodies[&function.start()];
+        let plan = prepared.source.function_bodies[&function.start()]
+            .suite()
+            .unwrap();
         let ret = function.body[0].as_return_stmt_mut().unwrap();
         let value = ret.value.as_deref_mut().unwrap();
         assert!(plan.fully_checked());
@@ -3105,7 +3107,12 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         ).unwrap();
         let before = prepared.standalone().unwrap().unwrap();
         let def = prepared.syntax.as_mut().unwrap().to_mut()[0].as_function_def_stmt_mut().unwrap();
-        assert!(prepared.source.function_bodies[&def.start()].fully_checked());
+        assert!(
+            prepared.source.function_bodies[&def.start()]
+                .suite()
+                .unwrap()
+                .fully_checked()
+        );
         let loop_ = def.body[0].as_while_stmt_mut().unwrap();
         *loop_.test = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
             range: loop_.test.range(), node_index: Default::default(),
