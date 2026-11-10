@@ -832,18 +832,15 @@ pub(super) fn builtin_format(
         Some(id) => ctx.str_value(id)?,
         None => "",
     };
+    if owner == "object" {
+        crate::objects::scalar_format::check_object_spec(spec, ctx.type_name(value))?;
+    }
     if spec.is_empty() {
         if let Value::Int(number) = ctx.heap.get(value) {
             let text = super::super::operators::rendered_integer(number)?;
             return Ok(ctx.text(text.into_string()));
         }
         return super::call(ctx, "str", &[value], &[]);
-    }
-    if owner == "object" {
-        return Err(type_error(format!(
-            "unsupported format string passed to {}.__format__",
-            ctx.type_name(value)
-        )));
     }
     if let Some(storage) = ctx.string_storage(value) {
         let (field, precision) = crate::objects::scalar_format::string_field(

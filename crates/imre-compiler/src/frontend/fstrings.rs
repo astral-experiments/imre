@@ -173,7 +173,7 @@ impl Checker<'_> {
         let op = match flag {
             's' if value.ty == Type::Str => return value,
             's' if value.ty.is_format_scalar()
-                || matches!(value.ty, Type::StrLiteral(_) | Type::Bytes | Type::None) =>
+                || matches!(value.ty, Type::StrLiteral(_) | Type::None) =>
             {
                 Builtin::Str
             }
@@ -323,13 +323,31 @@ print(fixed(2.75), render('é', input()))
         crate::check(source).unwrap();
         crate::compile(source, &options).unwrap();
 
-        let unsupported = "def render(data: bytes, spec: str) -> str:
+        let bytes = "def render(data: bytes, spec: str) -> str:
     return f'{data:{spec}}'
 
 print(render(b'ok', input()))
 ";
         let directory = tempfile::tempdir().unwrap();
         let app = directory.path().join("app.py");
+        std::fs::write(&app, bytes).unwrap();
+        crate::check(bytes).unwrap();
+        crate::check_file(&app, None).unwrap();
+        for llvm in [
+            crate::compile(bytes, &options).unwrap(),
+            crate::compile_file(&app, None, &options).unwrap().llvm_ir,
+        ] {
+            assert_eq!(
+                llvm.matches("call ptr @imre_format_scalar(i32 8,").count(),
+                1
+            );
+        }
+
+        let unsupported = "def render(data: list[int], spec: str) -> str:
+    return f'{data:{spec}}'
+
+print(render([7], input()))
+";
         std::fs::write(&app, unsupported).unwrap();
         let message = "2:14: Imre: this f-string field requires native Python object operations";
         for error in [

@@ -321,7 +321,10 @@ impl Type {
     }
 
     pub(crate) fn is_format_scalar(self) -> bool {
-        matches!(self, Self::Bool | Self::Int | Self::Float | Self::Str)
+        matches!(
+            self,
+            Self::Bool | Self::Int | Self::Float | Self::Str | Self::Bytes
+        )
     }
 }
 
