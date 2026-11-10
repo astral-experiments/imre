@@ -33,6 +33,18 @@ pub(super) struct Callback {
     finalizing: Arc<std::sync::atomic::AtomicBool>,
 }
 
+pub(super) struct WorkerCall {
+    function: Id,
+    arguments: Vec<Id>,
+    keywords: Vec<(String, Id)>,
+}
+
+impl WorkerCall {
+    pub(super) fn invoke(self, worker: &mut Context) -> Result<Id> {
+        worker.call(self.function, self.arguments, self.keywords)
+    }
+}
+
 fn unsupported() -> Error {
     Error::new(
         "NotImplementedError",
@@ -122,16 +134,17 @@ impl Callback {
             _ => (target, None),
         };
         let Value::Function {
-            code,
+            code: code_id,
             scope,
             defaults,
+            kwdefaults,
             closure,
             ..
         } = *ctx.heap.get(function)
         else {
             return Ok(None);
         };
-        let code = ctx.code_object(code);
+        let code = ctx.code_object(code_id);
         // Heap-local code operands do not cross the isolated worker interpreter.
         if matches!(code.body, Body::Native(_, operands) if operands != NONE)
             || code.is_coroutine()
@@ -269,48 +282,82 @@ impl Callback {
         {
             return Ok(None);
         }
-        let Some(names) = meta["thread_parameters"].as_array() else {
-            return Ok(None);
+        let legacy = meta["thread_parameters"].as_array();
+        let lock_only = match meta["thread_lock_only"].as_bool() {
+            Some(lock_only) => lock_only,
+            None if legacy.is_some() => meta["thread_worker_locks"].as_array() == legacy,
+            None => return Ok(None),
         };
-        if high_level && meta["thread_worker_locks"].as_array() != Some(names) {
+        if high_level && !lock_only {
+            return Ok(None);
+        }
+        let parameters = ctx.parsed_parameters(code_id)?;
+        let shape = parameters.shape();
+        if shape.varargs || shape.kwargs {
+            return Ok(None);
+        }
+        // Earlier producers repeated the positional signature in the admission proof.
+        if let Some(names) = legacy
+            && (!shape.keyword_only.is_empty()
+                || !names
+                    .iter()
+                    .map(|name| name.as_str())
+                    .eq(shape.positional.iter().map(|name| Some(name.as_str()))))
+        {
             return Ok(None);
         }
         let kw = kwargs
             .and_then(|id| ctx.dict_entries(id))
             .unwrap_or_default();
-        if pos.len() > names.len() {
-            return Err(unsupported());
-        }
-        let posonly = meta["posonly"].as_array().map_or(0, Vec::len);
-        let mut bound = Vec::new();
-        bound
-            .try_reserve_exact(names.len())
+        let mut keys = smallvec::SmallVec::<[&str; 8]>::new();
+        keys.try_reserve(kw.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
-        bound.extend(pos.iter().copied().map(Some));
-        bound.resize(names.len(), None);
-        for &(key, value) in kw.iter() {
+        for &(key, _) in kw {
             let Value::Str(key) = ctx.heap.get(key) else {
                 return Err(unsupported());
             };
-            let index = names
-                .iter()
-                .position(|n| n.as_str() == Some(key))
-                .ok_or_else(unsupported)?;
-            if index < posonly || bound[index].replace(value).is_some() {
-                return Err(unsupported());
-            }
+            keys.push(key);
         }
-        if let Value::Tuple(defaults) = ctx.heap.get(defaults) {
-            for (slot, default) in bound.iter_mut().rev().zip(defaults.iter().rev()) {
-                slot.get_or_insert(*default);
-            }
+        let defaults = match ctx.heap.get(defaults) {
+            Value::Tuple(values) => values.as_slice(),
+            _ => &[],
+        };
+        let binding = shape
+            .bind(
+                ctx.str_value(code.name)?,
+                pos.len(),
+                &keys,
+                defaults.len(),
+                |name| ctx.dict_named_item(kwdefaults, name).is_some(),
+            )
+            .map_err(|error| match error {
+                crate::source_arguments::Error::Memory => Error::new("MemoryError", ""),
+                crate::source_arguments::Error::Type(_) => unsupported(),
+            })?;
+        let positional = shape.positional.len();
+        let count = positional + shape.keyword_only.len();
+        let mut bound = Vec::new();
+        bound
+            .try_reserve_exact(count)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        bound.extend_from_slice(pos);
+        bound.resize(count, NONE);
+        for (&(_, value), slot) in kw.iter().zip(binding.keywords) {
+            bound[slot.expect("nonvariadic keyword")] = value;
+        }
+        for slot in binding.defaults {
+            bound[slot] = if slot < positional {
+                defaults[slot + defaults.len() - positional]
+            } else {
+                ctx.dict_named_item(kwdefaults, shape.parameter(slot))
+                    .expect("bound keyword default")
+            };
         }
         let mut values = Vec::new();
         values
-            .try_reserve_exact(bound.len())
+            .try_reserve_exact(count)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for slot in bound {
-            let id = slot.ok_or_else(unsupported)?;
+        for id in bound {
             let value = match ctx.heap.get(id) {
                 Value::PrimitiveLock(lock) => Argument::Lock(Arc::clone(lock)),
                 Value::HandlerLock(lock) => Argument::RLock(Arc::clone(lock)),
@@ -372,7 +419,7 @@ impl Callback {
         self.receiver.is_some()
     }
 
-    pub(super) fn load(self) -> Result<(Context, Id, Vec<Id>)> {
+    pub(super) fn load(self) -> Result<(Context, WorkerCall)> {
         let mut heap = super::Heap::with_worker_stack(Some(self.frames));
         heap.allocation_traces = self.allocation_traces;
         let mut ctx = ffi::new_context_with_heap(self.config, std::iter::empty::<String>(), heap);
@@ -427,6 +474,28 @@ impl Callback {
             };
             args.push(id);
         }
-        Ok((ctx, function, args))
+        let parameters = ctx.parsed_parameters(code)?;
+        if args.len() != parameters.positional.len() + parameters.keyword_only.len() {
+            return Err(unsupported());
+        }
+        let mut keywords = Vec::new();
+        keywords
+            .try_reserve_exact(parameters.keyword_only.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        for (name, id) in parameters
+            .keyword_only
+            .iter()
+            .zip(args.drain(parameters.positional.len()..))
+        {
+            keywords.push((copy_label(name)?, id));
+        }
+        Ok((
+            ctx,
+            WorkerCall {
+                function,
+                arguments: args,
+                keywords,
+            },
+        ))
     }
 }

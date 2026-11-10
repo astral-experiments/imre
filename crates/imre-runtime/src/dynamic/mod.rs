@@ -307,6 +307,16 @@ struct CallParameters {
 }
 
 impl CallParameters {
+    fn shape(&self) -> crate::source_arguments::Shape<'_, String> {
+        crate::source_arguments::Shape {
+            positional: &self.positional,
+            positional_only: self.positional_only,
+            keyword_only: &self.keyword_only,
+            varargs: self.varargs.is_some(),
+            kwargs: self.kwargs.is_some(),
+        }
+    }
+
     /// Decode both compiled and runtime-created function metadata once per definition.
     fn from_metadata(mut metadata: serde_json::Value) -> Result<Self> {
         let names = |key: &str| -> Result<Vec<String>> {

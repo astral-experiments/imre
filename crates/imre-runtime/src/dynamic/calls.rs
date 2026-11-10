@@ -8966,25 +8966,11 @@ impl Context {
                     frame.closure.nonlocals.insert(copy_label(name)?);
                 }
                 let pos = &sig.positional;
-                let shape = crate::source_arguments::Shape {
-                    positional: pos,
-                    positional_only: sig.positional_only,
-                    keyword_only: &sig.keyword_only,
-                    varargs: sig.varargs.is_some(),
-                    kwargs: sig.kwargs.is_some(),
-                };
+                let shape = sig.shape();
                 let default_values = if defaults == NONE {
                     Vec::new()
                 } else {
                     self.items(defaults)?
-                };
-                let kwdefault = |ctx: &Self, n: &str| {
-                    ctx.dict_entries(kwdefaults).and_then(|entries| {
-                        entries.iter().find_map(|&(key, value)| {
-                            matches!(ctx.heap.get(key), Value::Str(text) if text == n)
-                                .then_some(value)
-                        })
-                    })
                 };
                 let mut keys = smallvec::SmallVec::<[&str; 8]>::new();
                 keys.try_reserve(kwargs.len())
@@ -8992,7 +8978,7 @@ impl Context {
                 keys.extend(kwargs.iter().map(|(key, _)| key.as_str()));
                 let binding = shape
                     .bind(&name, args.len(), &keys, default_values.len(), |n| {
-                        kwdefault(self, n).is_some()
+                        self.dict_named_item(kwdefaults, n).is_some()
                     })
                     .map_err(|e| match e {
                         crate::source_arguments::Error::Memory => Error::new("MemoryError", ""),
@@ -9030,7 +9016,8 @@ impl Context {
                     let value = if slot < pos.len() {
                         default_values[slot + default_values.len() - pos.len()]
                     } else {
-                        kwdefault(self, n).expect("bound keyword default")
+                        self.dict_named_item(kwdefaults, n)
+                            .expect("bound keyword default")
                     };
                     self.bind_argument(local, n, value)?;
                 }

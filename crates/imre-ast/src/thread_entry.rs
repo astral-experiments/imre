@@ -5,7 +5,7 @@ use ruff_python_ast as ast;
 /// A static admission proof. The runtime validates the actual objects before starting the worker.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ThreadEntry {
-    Parameters { names: Vec<String>, lock_only: bool },
+    Parameters { lock_only: bool },
     Captured(Vec<String>),
     Bound(String),
 }
@@ -16,11 +16,8 @@ pub fn thread_entry(def: &ast::StmtFunctionDef) -> Option<ThreadEntry> {
         return None;
     }
     let (stmts, params) = (&def.body, &def.parameters);
-    if let Some((names, lock_only)) = parameters(stmts, params) {
-        Some(ThreadEntry::Parameters {
-            names: names.into_iter().map(str::to_owned).collect(),
-            lock_only,
-        })
+    if let Some(lock_only) = parameters(stmts, params) {
+        Some(ThreadEntry::Parameters { lock_only })
     } else if let Some(names) = captured_thread_locks(stmts, params) {
         Some(ThreadEntry::Captured(
             names.into_iter().map(str::to_owned).collect(),
@@ -111,15 +108,17 @@ impl Proof<'_> {
     }
 }
 
-fn parameters<'a>(
-    stmts: &[ast::Stmt],
-    params: &'a ast::Parameters,
-) -> Option<(Vec<&'a str>, bool)> {
-    if params.vararg.is_some() || params.kwarg.is_some() || !params.kwonlyargs.is_empty() {
+fn parameters(stmts: &[ast::Stmt], params: &ast::Parameters) -> Option<bool> {
+    if params.vararg.is_some() || params.kwarg.is_some() {
         return None;
     }
     let mut names = Vec::new();
-    for param in params.posonlyargs.iter().chain(&params.args) {
+    for param in params
+        .posonlyargs
+        .iter()
+        .chain(&params.args)
+        .chain(&params.kwonlyargs)
+    {
         let name = param.name().as_str();
         if param.parameter.annotation.is_some() || name.starts_with("__") {
             return None;
@@ -130,11 +129,7 @@ fn parameters<'a>(
         params: &names,
         lock_only: true,
     };
-    if !proof.suite(stmts) {
-        return None;
-    }
-    let lock_only = proof.lock_only;
-    Some((names, lock_only))
+    proof.suite(stmts).then_some(proof.lock_only)
 }
 
 /// The only heap lookup in this method precedes the blocking native acquire.
@@ -220,17 +215,15 @@ mod tests {
     fn retains_joinable_and_detached_admission() {
         assert_eq!(
             entry("def wait(lock, /):\n while not lock.acquire(False):\n  continue"),
-            Some(ThreadEntry::Parameters {
-                names: vec!["lock".into()],
-                lock_only: true,
-            })
+            Some(ThreadEntry::Parameters { lock_only: true })
+        );
+        assert_eq!(
+            entry("def wait(*, lock): lock.acquire()"),
+            Some(ThreadEntry::Parameters { lock_only: true })
         );
         assert_eq!(
             entry("def work(op, lock):\n try:\n  op(1)\n except:\n  lock.release()"),
-            Some(ThreadEntry::Parameters {
-                names: vec!["op".into(), "lock".into()],
-                lock_only: false,
-            })
+            Some(ThreadEntry::Parameters { lock_only: false })
         );
         assert_eq!(
             entry("def wait():\n first.release()\n last.acquire()"),
@@ -250,10 +243,7 @@ mod tests {
             );
             assert_eq!(
                 entry(&source),
-                Some(ThreadEntry::Parameters {
-                    names: vec!["op".into()],
-                    lock_only: false,
-                }),
+                Some(ThreadEntry::Parameters { lock_only: false }),
                 "{operation}"
             );
         }
@@ -265,7 +255,8 @@ mod tests {
         for source in [
             "def wait(lock: Lock): lock.acquire()",
             "def wait(lock) -> bool: lock.acquire()",
-            "def wait(*, lock): lock.acquire()",
+            "def wait(*, lock: Lock): lock.acquire()",
+            "def wait(*args, lock): lock.acquire()",
             "def wait(lock): lock.acquire(blocking=False)",
             "def wait(lock): lock.acquire(other())",
             "def wait(self): self.__private.acquire()",
