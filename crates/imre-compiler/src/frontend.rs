@@ -125,7 +125,7 @@ mod records;
 mod regex;
 mod registered;
 pub(crate) use registered::booleans::{
-    BorrowedOperand, ExpressionInput, ExpressionSites, LogicalOperand, PhysicalInputs,
+    BorrowedOperand, ExpressionInput, ExpressionSites, PhysicalInputs,
     Selection as ExpressionSelection, SourceOperand,
 };
 pub(crate) use registered::patterns::SourceMatch;
