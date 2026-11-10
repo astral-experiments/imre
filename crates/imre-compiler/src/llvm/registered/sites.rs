@@ -2,7 +2,7 @@
 use ruff_text_size::{TextRange, TextSize};
 use std::collections::HashMap;
 
-use super::RegisteredFrame;
+use super::{FrameEmitter, RegisteredFrame};
 use crate::ir::{
     self, Builtin, Expr, ExprKind, RegisteredTypeParameter, Statement, TypeParameterKind,
 };
@@ -41,6 +41,27 @@ impl DefinitionOperands {
 }
 
 impl CompiledDefinition {
+    /// Evaluate bases in the parameter frame with the enclosing class dictionary
+    /// visible, then bind the namespace to the parameters alone.
+    pub(crate) fn generic_class<'a, 'p, E: FrameEmitter<'a, 'p>>(
+        &self,
+        frame: &mut E,
+        parameters: &[RegisteredTypeParameter],
+        range: TextRange,
+        layout: &ir::PackedArguments,
+        operand: impl FnMut(&mut E, usize) -> String,
+    ) -> String {
+        frame.set_source_range(Some(range));
+        let enclosing = frame.scope.clone();
+        let outer = frame.op("annotation_scope", &[&enclosing]);
+        let scope = frame.checked_parameter_scope(&enclosing, parameters, true);
+        frame.scope = frame.op("class_base_scope", &[&scope, &outer]);
+        frame.set_source_range(None);
+        let arguments = frame.class_arguments(layout, operand);
+        frame.scope = scope;
+        self.instantiate_class(frame, arguments, Some(range))
+    }
+
     pub(crate) fn instantiate_class(
         &self,
         frame: &mut RegisteredFrame<'_, '_>,
@@ -179,6 +200,7 @@ pub(crate) struct AnnotationString {
 #[derive(Clone, Copy)]
 pub(crate) enum RequiredSite {
     Definition(TextSize),
+    ClassNamespace(TextSize),
     Lambda(TextSize, bool),
     Generator(TextRange),
     Alias(TextSize),
@@ -192,6 +214,7 @@ fn visit_expression_site(expr: &Expr, visit: &mut impl FnMut(RequiredSite)) {
     };
     visit(match op {
         Builtin::RegisteredDefinition(site) => RequiredSite::Definition(site.start()),
+        Builtin::RegisteredClassNamespace(site, _) => RequiredSite::ClassNamespace(*site),
         Builtin::RegisteredLambda(site, scoped) => RequiredSite::Lambda(*site, *scoped),
         Builtin::RegisteredGenerator(site, _) => RequiredSite::Generator(*site),
         Builtin::RegisteredTypeAlias(site) => RequiredSite::Alias(*site),
@@ -207,6 +230,8 @@ fn visit_expression_site(expr: &Expr, visit: &mut impl FnMut(RequiredSite)) {
 pub(crate) struct CheckedSites {
     pub(crate) annotation_strings: HashMap<TextSize, AnnotationString>,
     pub(crate) definitions: HashMap<TextSize, Declaration>,
+    pub(crate) class_namespaces:
+        HashMap<TextSize, (CompiledDefinition, Vec<RegisteredTypeParameter>, TextRange)>,
     pub(crate) lambdas: HashMap<TextSize, CompiledDefinition>,
     pub(crate) generators: HashMap<TextRange, CompiledGenerator>,
     pub(crate) aliases: HashMap<TextSize, Result<CompiledAlias, String>>,

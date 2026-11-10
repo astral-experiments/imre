@@ -135,7 +135,7 @@ pub(crate) use registered::type_alias_body;
 pub(crate) use registered::values::registered_value;
 pub(crate) use registered::values::{
     RegisteredSource, literal_replacements, module_literal_replacements, packed_arguments,
-    push_codepoints, registered_argument_at, registered_arguments,
+    push_codepoints, registered_arguments,
 };
 pub(crate) use registered::{
     AnnotationValue, AssertionSite, DeferredAnnotation, ParameterAnnotations, PhysicalOperand,

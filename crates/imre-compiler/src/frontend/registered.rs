@@ -142,12 +142,7 @@ pub(crate) struct RegisteredFunction {
 
 impl RegisteredFunction {
     pub(super) fn expression(range: TextRange, value: Expr) -> Self {
-        let checkpoint = operation(
-            Builtin::RegisteredStatement(range, None),
-            Type::None,
-            vec![],
-        );
-        let body = vec![Statement::Expr(checkpoint), Statement::Return(value)];
+        let body = Self::returning(range, value);
         Self {
             fixed_sites: Vec::new(),
             function: ir::Function {
@@ -158,6 +153,15 @@ impl RegisteredFunction {
             },
             local_names: HashMap::new(),
         }
+    }
+
+    fn returning(range: TextRange, value: Expr) -> Vec<Statement> {
+        let checkpoint = operation(
+            Builtin::RegisteredStatement(range, None),
+            Type::None,
+            vec![],
+        );
+        vec![Statement::Expr(checkpoint), Statement::Return(value)]
     }
 
     pub(crate) fn region(&self) -> RegisteredRegion<'_> {
@@ -684,17 +688,22 @@ pub(crate) struct ClassSite<'a> {
 }
 
 pub(crate) struct RegisteredClass {
-    pub(crate) body: RegisteredSuite,
+    pub(crate) name: ast::Identifier,
+    pub(crate) range: TextRange,
+    pub(crate) doc: Option<String>,
+    pub(crate) decorator_offsets: Vec<TextSize>,
+    pub(crate) body: PhysicalSuite,
     pub(crate) header: ClassHeader,
 }
 
 /// Decorators use the enclosing activation. Generic bases and keywords use the
-/// type-parameter activation. A missing operand keeps its individual source callback.
+/// type-parameter activation. Each residual operand retains its own expression.
 pub(crate) struct ClassHeader {
+    pub(crate) function: Option<RegisteredFunction>,
     pub(crate) parameters: Option<Vec<ir::RegisteredTypeParameter>>,
     pub(crate) layout: ir::PackedArguments,
-    pub(crate) operands: Vec<Option<RegisteredOperand>>,
-    pub(crate) decorators: Vec<Option<RegisteredOperand>>,
+    pub(crate) operands: Vec<PhysicalOperand>,
+    pub(crate) decorators: Vec<PhysicalOperand>,
 }
 
 #[derive(Default)]
@@ -880,6 +889,8 @@ pub(crate) enum ValueStatement {
 }
 
 pub(crate) enum SourceEffect {
+    /// Bind the prepared class after evaluating its decorators and header operands.
+    Class(TextSize),
     /// Transfer control or discard a value using operands prepared in this frame.
     Value(ValueStatement, Vec<PhysicalOperand>),
     /// Evaluate and release each operand of an annotation without an assigned value.
@@ -947,7 +958,8 @@ impl PhysicalSuite {
             if !matches!(
                 run.effect,
                 Some(
-                    SourceEffect::If { .. }
+                    SourceEffect::Class(_)
+                        | SourceEffect::If { .. }
                         | SourceEffect::For(_)
                         | SourceEffect::Context(_)
                         | SourceEffect::Try(_)
@@ -1198,6 +1210,7 @@ impl<'a> SuitePreparation<'a> {
     pub(crate) fn class_suites(
         &mut self,
         classes: Vec<ClassSite<'_>>,
+        class_keywords: &[TextSize],
         suspends: impl Fn(TextSize) -> bool,
     ) -> HashMap<TextSize, RegisteredClass> {
         classes
@@ -1205,62 +1218,70 @@ impl<'a> SuitePreparation<'a> {
             .map(|site| {
                 let class = site.def;
                 let suspended = site.enclosing_function.is_some_and(&suspends);
-                let start = class
-                    .decorator_list
-                    .first()
-                    .map_or(class.start(), Ranged::start);
+                let start = class.start();
                 let decorators = class
                     .decorator_list
                     .iter()
                     .map(|decorator| {
-                        let expr = &decorator.expression;
-                        let operand = RegisteredOperand::prepare(expr, self.source, site.enclosing);
-                        if operand.is_none() {
-                            self.sites.expressions.prepare_input(
-                                expr,
-                                self.source,
-                                site.enclosing,
-                                suspended,
-                            );
-                        }
-                        operand
+                        self.class_operand(&decorator.expression, site.enclosing, suspended)
                     })
                     .collect();
-                let bases_scope = if site.parameters.is_some() {
+                let generic = site.parameters.is_some();
+                let bases_scope = if generic {
                     RegisteredScope::Function { is_async: false }
                 } else {
                     site.enclosing
                 };
-                let (layout, operands) =
-                    class
-                        .arguments
-                        .as_deref()
-                        .map_or_else(Default::default, |args| {
-                            let operands = registered_arguments(args)
-                                .map(|expr| {
-                                    let operand =
-                                        RegisteredOperand::prepare(expr, self.source, bases_scope);
-                                    if operand.is_none() {
-                                        self.sites.expressions.prepare_input(
-                                            expr,
-                                            self.source,
-                                            bases_scope,
-                                            suspended && site.parameters.is_none(),
-                                        );
-                                    }
-                                    operand
-                                })
-                                .collect();
-                            (packed_arguments(args), operands)
-                        });
+                let arguments = class.arguments.as_deref();
+                let layout = arguments.map(packed_arguments).unwrap_or_default();
+                let values = || arguments.into_iter().flat_map(registered_arguments);
+                let function = if generic {
+                    let mut scope =
+                        SourceScope::new(bases_scope, self.source, self.operations, &self.sites);
+                    values()
+                        .map(|expr| scope.operand(expr))
+                        .collect::<Option<Vec<_>>>()
+                        .map(|args| {
+                            let value = operation(
+                                Builtin::RegisteredClassNamespace(start, layout.clone()),
+                                Type::PythonObject,
+                                args,
+                            );
+                            scope.finish(RegisteredFunction::returning(class.name.range(), value))
+                        })
+                } else {
+                    None
+                };
+                let operands = if function.is_some() {
+                    Vec::new()
+                } else {
+                    values()
+                        .map(|expr| self.class_operand(expr, bases_scope, suspended && !generic))
+                        .collect()
+                };
                 let header = ClassHeader {
                     parameters: site.parameters,
                     layout,
                     operands,
                     decorators,
+                    function,
                 };
+                let keyword = class_keywords.partition_point(|&p| p < class.name.start()) - 1;
+                let range = TextRange::new(class_keywords[keyword], class.end());
                 let body = self.suite(&class.body, RegisteredScope::Class);
-                (start, RegisteredClass { body, header })
+                let class = RegisteredClass {
+                    name: class.name.clone(),
+                    range,
+                    doc: docstring(&class.body),
+                    decorator_offsets: class
+                        .decorator_list
+                        .iter()
+                        .map(|d| d.expression.start())
+                        .collect(),
+                    body: PhysicalSuite::new(body, &class.body),
+                    header,
+                };
+                (start, class)
             })
             .collect()
     }
@@ -1526,6 +1547,26 @@ impl<'a> SuitePreparation<'a> {
                 }
                 _ => scope.ordinary_operand(expr),
             });
+        self.retain_operand(expr, kind, suspended, operand)
+    }
+
+    fn class_operand(
+        &mut self,
+        expr: &ast::Expr,
+        kind: RegisteredScope,
+        suspended: bool,
+    ) -> PhysicalOperand {
+        let operand = RegisteredOperand::prepare(expr, self.source, kind);
+        self.retain_operand(expr, kind, suspended, operand)
+    }
+
+    fn retain_operand(
+        &mut self,
+        expr: &ast::Expr,
+        kind: RegisteredScope,
+        suspended: bool,
+        operand: Option<RegisteredOperand>,
+    ) -> PhysicalOperand {
         match operand {
             Some(operand) => PhysicalOperand::Checked(Box::new(operand)),
             None => {
@@ -1757,6 +1798,15 @@ impl<'a> SuitePreparation<'a> {
                 continue;
             }
             scope.truncate_locals(slots_before);
+            if let ast::Stmt::ClassDef(class) = stmt {
+                body.push(checkpoint(stmt));
+                residual.push(SourceRun {
+                    at: body.len(),
+                    statements: i..i + 1,
+                    effect: Some(SourceEffect::Class(class.start())),
+                });
+                continue;
+            }
             let output = match stmt {
                 ast::Stmt::Return(ret) => {
                     Some((ValueStatement::Return, [ret.value.as_deref(), None]))

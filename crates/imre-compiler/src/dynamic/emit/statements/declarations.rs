@@ -4,7 +4,7 @@ use super::super::sites::{
     Declaration, RequiredSite,
 };
 use super::super::{
-    Body, DefinitionName, DefinitionSite, Entry, Function, Output, SourceInfo, SourceMap,
+    Body, DefinitionName, Entry, Function, Output, ReturnOperand, SourceInfo, SourceMap,
 };
 use crate::frontend::PreparedAnnotation;
 use crate::frontend::function_scope::OrdinaryFunction;
@@ -61,7 +61,7 @@ impl SourceMap<'_> {
             location.code(
                 output,
                 String::new(),
-                Body::AnnotationOperand(&body.code),
+                Body::Operand(body.code.range, ReturnOperand::Prepared(&body.code.operand)),
                 false,
                 None,
             )
@@ -225,7 +225,7 @@ impl Function<'_, '_> {
                     None,
                     None,
                     None,
-                    Body::AnnotationOperand(code),
+                    Body::Operand(code.range, ReturnOperand::Prepared(&code.operand)),
                 ),
                 parameters: alias.parameters.clone(),
             }),
@@ -299,64 +299,83 @@ impl Function<'_, '_> {
                     .or_insert_with(|| (decl.name.clone(), decl.range));
                 return;
             }
+            RequiredSite::ClassNamespace(start) => {
+                if !self.sites.class_namespaces.contains_key(&start) {
+                    let class = &self.source.class_bodies[&start];
+                    let namespace = self.compile_class_namespace(start);
+                    let parameters = class.header.parameters.clone().expect("generic class");
+                    self.sites
+                        .class_namespaces
+                        .insert(start, (namespace, parameters, class.range));
+                }
+                return;
+            }
             RequiredSite::Definition(start) => start,
         };
         self.prepare_definition(start);
     }
 
     pub(super) fn prepare_definition(&mut self, start: TextSize) {
-        if !self.prepare_ordinary_function(start) && !self.sites.definitions.contains_key(&start) {
-            let syntax = self
+        if self.prepare_ordinary_function(start) || self.sites.definitions.contains_key(&start) {
+            return;
+        }
+        let declaration = if let Some(class) = self.source.class_bodies.get(&start) {
+            let definition = if class.header.parameters.is_some() {
+                let name = format!("<generic parameters of {}>", class.name);
+                let body = class.header.function.as_ref().map_or_else(
+                    || Body::Operand(class.name.range(), ReturnOperand::ClassArguments(start)),
+                    |checked| Body::Checked(checked, None),
+                );
+                self.compile_definition(
+                    start,
+                    DefinitionName::ClassHeader(&name),
+                    None,
+                    None,
+                    None,
+                    body,
+                )
+            } else {
+                self.compile_class_namespace(start)
+            };
+            Declaration {
+                definition,
+                decorator_lines: class
+                    .decorator_offsets
+                    .iter()
+                    .map(|&offset| self.source.positions.line(offset))
+                    .collect(),
+                type_params: Vec::new(),
+            }
+        } else {
+            let def = self
                 .source
                 .function_header(start)
-                .map(DefinitionSite::Function)
                 .or_else(|| self.source.definitions?.get(&start).copied())
-                .expect("prepared declaration site");
-            let (definition, decorators, type_params) = match syntax {
-                DefinitionSite::Function(def) => {
-                    let params = self.namespace_type_parameters(def);
-                    let definition = self.compile_definition(
-                        def.decorator_list
-                            .first()
-                            .map_or(def.start(), Ranged::start),
-                        DefinitionName::Binding(&def.name),
-                        Some(&def.parameters),
-                        Some(def),
-                        params,
-                        self.source.function_body(def),
-                    );
-                    (definition, &def.decorator_list, params)
-                }
-                DefinitionSite::Class(def) => {
-                    let definition = if self.source.class(def).header.parameters.is_some() {
-                        let name = format!("<generic parameters of {}>", def.name);
-                        self.compile_definition(
-                            def.start(),
-                            DefinitionName::Plain(&name),
-                            None,
-                            None,
-                            None,
-                            Body::ClassParameters(def),
-                        )
-                    } else {
-                        self.compile_class_namespace(def)
-                    };
-                    (definition, &def.decorator_list, None)
-                }
-            };
-            let decorator_lines = decorators
-                .iter()
-                .map(|d| self.source.positions.line(d.expression.start()))
-                .collect();
-            let declaration = Declaration {
+                .expect("prepared function declaration");
+            let params = self.namespace_type_parameters(def);
+            let definition = self.compile_definition(
+                def.decorator_list
+                    .first()
+                    .map_or(def.start(), Ranged::start),
+                DefinitionName::Binding(&def.name),
+                Some(&def.parameters),
+                Some(def),
+                params,
+                self.source.function_body(def),
+            );
+            Declaration {
                 definition,
-                decorator_lines,
-                type_params: type_params.map_or_else(Vec::new, |params| {
+                decorator_lines: def
+                    .decorator_list
+                    .iter()
+                    .map(|d| self.source.positions.line(d.expression.start()))
+                    .collect(),
+                type_params: params.map_or_else(Vec::new, |params| {
                     crate::frontend::registered_type_parameters(params, &self.source.private_names)
                 }),
-            };
-            self.sites.definitions.insert(start, declaration);
-        }
+            }
+        };
+        self.sites.definitions.insert(start, declaration);
     }
 }
 

@@ -230,6 +230,7 @@ impl<'p> Function<'_, 'p> {
                     .expect("external assertion input");
                 self.emit_assertion_inputs(site, source);
             }
+            SourceEffect::Class(site) => self.mixed_class_definition(*site),
             SourceEffect::Context(context) => self.prepared_context(context),
             SourceEffect::Try(region) => {
                 self.checkpoint(&region.range);
@@ -377,7 +378,7 @@ impl<'p> Function<'_, 'p> {
         self.branch(&bit, yes, no);
     }
 
-    fn physical_operand(&mut self, input: &PhysicalOperand) -> String {
+    pub(super) fn physical_operand(&mut self, input: &PhysicalOperand) -> String {
         match input {
             PhysicalOperand::Checked(value) => {
                 self.prepare_checked_value(&value.value);
@@ -448,15 +449,6 @@ impl<'p> Function<'_, 'p> {
                 }
                 continue;
             }
-            if let Some(super::DefinitionSite::Class(class)) = self
-                .source
-                .definitions
-                .as_ref()
-                .and_then(|sites| sites.get(&stmt.start()))
-            {
-                self.mixed_class_definition(class);
-                continue;
-            }
             if !stmt.is_assign_stmt()
                 && let Some(effect) = crate::frontend::attribute_write(stmt)
             {
@@ -499,97 +491,35 @@ impl<'p> Function<'_, 'p> {
         }
     }
 
-    fn class_range(&self, class: &ast::StmtClassDef) -> TextRange {
-        let index = self
-            .source
-            .class_keywords
-            .partition_point(|&p| p < class.name.start());
-        TextRange::new(self.source.class_keywords[index - 1], class.end())
-    }
-
-    fn mixed_class_definition(&mut self, class: &ast::StmtClassDef) {
-        let header = &self.source.class(class).header;
+    fn mixed_class_definition(&mut self, site: TextSize) {
+        let class = &self.source.class_bodies[&site];
+        let header = &class.header;
         let decorators = header
             .decorators
             .iter()
-            .enumerate()
-            .map(|(index, operand)| {
-                self.class_operand(operand.as_ref(), || &class.decorator_list[index].expression)
-            })
+            .map(|operand| self.physical_operand(operand))
             .collect::<Vec<_>>();
-        let arguments = header
-            .parameters
-            .is_none()
-            .then(|| self.class_arguments(class));
-        self.prepare_definition(class.start());
+        let arguments = header.parameters.is_none().then(|| {
+            self.class_arguments(&header.layout, |code, index| {
+                code.physical_operand(&header.operands[index])
+            })
+        });
+        self.prepare_definition(site);
         let value = self
             .sites
-            .definition(&mut self.frame, class.start(), &decorators, arguments);
+            .definition(&mut self.frame, site, &decorators, arguments);
         self.bind(class.name.as_str(), &value);
     }
 
-    fn class_operand<'a>(
-        &mut self,
-        prepared: Option<&crate::frontend::RegisteredOperand>,
-        residual: impl FnOnce() -> &'a ast::Expr,
-    ) -> String {
-        if let Some(operand) = prepared {
-            self.prepare_checked_value(&operand.value);
-            self.frame.prepared_operand(operand, &self.sites, false)
-        } else {
-            self.expr(residual())
-        }
-    }
-
-    fn class_arguments(&mut self, class: &ast::StmtClassDef) -> (String, String) {
-        let header = &self.source.class(class).header;
-        let mut pack = crate::llvm::registered::ArgumentPack::new(self, &header.layout, None);
-        for (index, operand) in header.operands.iter().enumerate() {
-            let slot = pack.prepare(self, index);
-            let value = self.class_operand(operand.as_ref(), || {
-                crate::frontend::registered_argument_at(
-                    class.arguments.as_deref().expect("class argument"),
-                    index,
-                )
-            });
-            pack.insert(self, slot, &value);
-        }
-        pack.finish(self)
-    }
-
-    fn compile_class_namespace(&mut self, class: &ast::StmtClassDef) -> CompiledDefinition {
+    pub(super) fn compile_class_namespace(&mut self, site: TextSize) -> CompiledDefinition {
         self.compile_definition(
-            class
-                .decorator_list
-                .first()
-                .map_or(class.start(), Ranged::start),
-            DefinitionName::Binding(&class.name),
+            site,
+            DefinitionName::Binding(&self.source.class_bodies[&site].name),
             None,
             None,
             None,
-            Body::Namespace(&class.body),
+            Body::Namespace,
         )
-    }
-
-    pub(super) fn parameterized_class(&mut self, class: &ast::StmtClassDef) {
-        let header = &self.source.class(class).header;
-        let parameters = header
-            .parameters
-            .as_deref()
-            .expect("generic class declaration");
-        let range = self.class_range(class);
-        self.checkpoint(&class.name);
-        self.frame.set_source_range(Some(range));
-        let frame = self.scope.clone();
-        let outer = self.op("annotation_scope", &[&frame]);
-        let scope = self.frame.checked_parameter_scope(&frame, parameters, true);
-        self.scope = self.op("class_base_scope", &[&scope, &outer]);
-        self.frame.set_source_range(None);
-        let args = self.class_arguments(class);
-        self.scope = scope;
-        let definition = self.compile_class_namespace(class);
-        let result = definition.instantiate_class(&mut self.frame, args, Some(range));
-        self.end(&format!("ret i64 {result}"));
     }
 
     fn function_parameter_scope(&mut self, outer: &str, params: &ast::TypeParams) -> String {
@@ -709,13 +639,17 @@ impl<'p> Function<'_, 'p> {
         body: Body<'_>,
     ) -> CompiledDefinition {
         let type_alias = matches!(name, DefinitionName::TypeAlias(_));
+        let class = matches!(name, DefinitionName::ClassHeader(_))
+            .then(|| &self.source.class_bodies[&start]);
         let (name, global, generator) = match name {
             DefinitionName::Binding(identifier) => (
                 self.source.private_names.definition(identifier),
                 self.declared_globals.contains(identifier.as_str()),
                 None,
             ),
-            DefinitionName::Plain(name) | DefinitionName::TypeAlias(name) => (name, false, None),
+            DefinitionName::ClassHeader(name) | DefinitionName::TypeAlias(name) => {
+                (name, false, None)
+            }
             DefinitionName::Generator(site) => ("<genexpr>", false, Some(site)),
         };
         let qualname = if global {
@@ -727,17 +661,14 @@ impl<'p> Function<'_, 'p> {
         // even when lowering does not materialize a separate parameter frame.
         let generic = function.is_some_and(|f| f.type_params.is_some());
         let nested = self.in_function || generic;
-        let class_header = match &body {
-            Body::ClassParameters(class) => Some(self.class_range(class)),
-            _ => None,
-        };
-        let prefix = if let Body::ClassParameters(class) = &body {
+        let class_header = class.map(|class| class.range);
+        let prefix = if let Some(class) = class {
             if self.declared_globals.contains(class.name.as_str()) {
                 String::new()
             } else {
                 self.prefix.clone()
             }
-        } else if matches!(body, Body::Namespace(..)) || generator.is_some() {
+        } else if matches!(body, Body::Namespace) || generator.is_some() {
             // Nested code in a comprehension uses its name without a <locals> segment.
             format!("{qualname}.")
         } else {
@@ -778,7 +709,7 @@ impl<'p> Function<'_, 'p> {
             _ => named_scope.map_or(0, |scope| scope.suspension_flags),
         };
         let flags = match &body {
-            Body::Namespace(..) => None,
+            Body::Namespace => None,
             _ => {
                 let mut flags = self.source.function_flags(
                     params,
@@ -848,7 +779,7 @@ impl<'p> Function<'_, 'p> {
         };
         let scopes = &self.source.scopes;
         let scope_facts = match &body {
-            Body::Namespace(_) => {
+            Body::Namespace => {
                 let class = &scopes.classes[&start];
                 signature["postponed_annotations"] = json!(class.postponed_annotations);
                 signature["needs_class_cell"] = json!(class.needs_class_cell);
@@ -904,7 +835,7 @@ impl<'p> Function<'_, 'p> {
             signature["posonly"] = json!([".format"]);
         }
         let mut default_names = Vec::new();
-        let in_function = self.in_function || !matches!(body, Body::Namespace(..));
+        let in_function = self.in_function || !matches!(body, Body::Namespace);
         // A generator call returns a suspended frame, before it yields or returns a value.
         let scalar = |slot: &str| {
             if self.source.python_annotations {
@@ -1202,7 +1133,7 @@ impl<'p> Function<'_, 'p> {
         );
     }
 
-    fn physical_suite(&mut self, suite: &'p crate::frontend::PhysicalSuite) {
+    pub(super) fn physical_suite(&mut self, suite: &'p crate::frontend::PhysicalSuite) {
         self.emit_suite(Some(&suite.plan), &suite.sources);
     }
 
