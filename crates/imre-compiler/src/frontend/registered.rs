@@ -1984,8 +1984,6 @@ impl SourceScope<'_> {
         };
         let mut value = if let Some(is_async) = suspension
             && let Some((kind, value)) = ir::SuspendValue::operand(expr)
-            // A synchronous generator keeps its enclosing iterator in a private frame slot.
-            && (self.suspending_operands || !is_async || self.loop_scope != LoopScope::WithCursor)
             && !matches!(
                 (kind, is_async),
                 (ir::SuspendValue::Await, false) | (ir::SuspendValue::Delegate, true)
@@ -3731,6 +3729,17 @@ mod tests {
             "        received = yield row\n",
             "        yield from received\n",
         );
+        assert_cursor_suspensions(source, &["yield row", "yield from received"]);
+    }
+
+    #[test]
+    fn awaited_calls_retain_the_checked_loop_cursor() {
+        let source =
+            "async def visit(rows, call):\n    for row in rows:\n        await call(row)\n";
+        assert_cursor_suspensions(source, &["await call(row)"]);
+    }
+
+    fn assert_cursor_suspensions(source: &str, expected: &[&str]) {
         let graph = SourceGraph::single(source).unwrap();
         let module = &graph.modules[graph.entry];
         let definition = module.parsed.syntax().body[0]
@@ -3738,29 +3747,28 @@ mod tests {
             .unwrap();
         let checked = registered_suite(
             &definition.body,
-            RegisteredScope::Function { is_async: false },
+            RegisteredScope::Function {
+                is_async: definition.is_async,
+            },
             values::ModuleSource::new(module).context(&module.source),
         )
-        .expect("complete generator body");
+        .expect("complete suspended body");
         let mut cursors = Vec::new();
-        let mut yields = Vec::new();
+        let mut suspensions = Vec::new();
         ir::walk_statements(&checked.function.body, &mut |stmt| {
             if let Statement::IterNext { iterator, .. } = stmt {
                 cursors.push(*iterator);
             }
         });
         ir::walk_expressions(&checked.function.body, &mut |expr| {
-            if let ExprKind::Builtin(
-                Builtin::RegisteredSuspend(ir::SuspendValue::Yield | ir::SuspendValue::Delegate, range),
-                _,
-            ) = &expr.kind
-            {
-                yields.push(&source[*range]);
+            if let ExprKind::Builtin(Builtin::RegisteredSuspend(kind, range), _) = &expr.kind {
+                assert_eq!(matches!(kind, ir::SuspendValue::Await), definition.is_async);
+                suspensions.push(&source[*range]);
             }
         });
         assert_eq!(cursors.len(), 1);
         assert!(checked.region().private_slots().contains(&cursors[0]));
-        assert_eq!(yields, ["yield row", "yield from received"]);
+        assert_eq!(suspensions, expected);
     }
 
     #[test]
