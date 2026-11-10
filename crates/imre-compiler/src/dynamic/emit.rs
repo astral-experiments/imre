@@ -669,7 +669,7 @@ impl<'a> PreparedBody<'a> {
             function
                 .declared_globals
                 .clone_from(&self.source.scopes.module_globals);
-            function.physical_suite(initializer);
+            crate::llvm::registered::emit_prepared_suite(&mut function, initializer);
             frame = function.frame;
         }
         let code =
@@ -953,11 +953,8 @@ impl SourceMap<'_> {
         for name in globals {
             frame.declare_global(name);
         }
-        let mut callables =
-            self.frame_callables(&mut frame, &mut sites, prefix, globals, in_function);
-        sites::CheckedSites::visit(&checked.function.body, &mut |site| {
-            callables.place_site(site)
-        });
+        self.frame_callables(&mut frame, &mut sites, prefix, globals, in_function)
+            .place_statements(&checked.function.body);
         frame.checked_body(checked, &sites);
         frame
     }
@@ -1023,7 +1020,7 @@ impl SourceMap<'_> {
                 } else {
                     let mut f = source_function(frame, sites, prefix.clone());
                     f.declare_globals(globals);
-                    f.physical_suite(&prepared.body);
+                    crate::llvm::registered::emit_prepared_suite(&mut f, &prepared.body);
                     f.frame
                 };
                 self.finish_class_annotations(
@@ -1039,7 +1036,7 @@ impl SourceMap<'_> {
                 let mut f = source_function(frame, sites, prefix);
                 let globals = &self.scopes.functions[&start.expect("function definition")].globals;
                 f.declare_globals(globals);
-                f.physical_suite(suite);
+                crate::llvm::registered::emit_prepared_suite(&mut f, suite);
                 f.frame
             }
             Body::CheckedProvider(provider, scope) => {
