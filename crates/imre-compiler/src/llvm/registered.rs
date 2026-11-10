@@ -279,7 +279,11 @@ pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
         operand: Option<&Expr>,
     ) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites);
     fn place_statements(&mut self, body: &[Statement]);
-    fn emit_effect(&mut self, effect: &'p crate::frontend::SourceEffect);
+    /// Return an ordinary checked statement for the enclosing frame to emit with its inputs.
+    fn emit_effect(
+        &mut self,
+        effect: &'p crate::frontend::SourceEffect,
+    ) -> Option<(&'p Statement, &'p [crate::frontend::PhysicalOperand])>;
     fn refuse_at(&mut self, range: ruff_text_size::TextRange, reason: &str);
 }
 
@@ -322,6 +326,24 @@ pub(crate) fn emit_operand<'a, 'p>(
     result
 }
 
+/// A statement operand may own a checked region with its own local bindings.
+pub(crate) fn emit_physical_operand<'a, 'p>(
+    owner: &mut dyn PreparedSuiteEmitter<'a, 'p>,
+    operand: &crate::frontend::PhysicalOperand,
+) -> String {
+    match operand {
+        crate::frontend::PhysicalOperand::Checked(value) => {
+            let (frame, sites) = owner.frame_and_sites(Some(&value.value));
+            frame.prepared_operand(value, sites, false)
+        }
+        crate::frontend::PhysicalOperand::Residual(input) => emit_operand(
+            owner,
+            crate::frontend::SourceOperand::Residual(input.as_input()),
+            false,
+        ),
+    }
+}
+
 /// Emit checked statements and the operations that interrupt them in one activation.
 pub(crate) fn emit_prepared_suite<'a, 'p>(
     owner: &mut dyn PreparedSuiteEmitter<'a, 'p>,
@@ -340,8 +362,10 @@ pub(crate) fn emit_prepared_suite<'a, 'p>(
     let mut offset = 0;
     for step in &suite.residual {
         frame.checked_statements(&body[offset..step.at]);
-        if frame.next_statement() {
-            frame.code.prepared_owner().emit_effect(&step.effect);
+        if frame.next_statement()
+            && let Some((statement, inputs)) = frame.code.prepared_owner().emit_effect(&step.effect)
+        {
+            frame.emit_with_operands(statement, inputs);
         }
         offset = step.at;
     }
@@ -368,6 +392,13 @@ impl<'a, 'p> FrameOwner<'_, 'a, 'p> {
             Self::Registered(code, sites) => (code, sites),
             Self::Prepared(owner) => owner.frame_and_sites(None),
         }
+    }
+
+    fn prepared(&mut self) -> &mut dyn PreparedSuiteEmitter<'a, 'p> {
+        let Self::Prepared(owner) = self else {
+            unreachable!("physical inputs and suites require their enclosing emitter")
+        };
+        &mut **owner
     }
 
     fn prepared_owner(&mut self) -> &mut dyn PreparedSuiteEmitter<'a, 'p> {
@@ -399,6 +430,7 @@ impl std::ops::DerefMut for FrameOwner<'_, '_, '_> {
 enum FrameInputs<'f> {
     Handles(&'f [String]),
     Prepared(&'f crate::frontend::PhysicalInputs),
+    Statement(&'f [crate::frontend::PhysicalOperand]),
 }
 
 /// The registered binder owns the scope, argument identities and frame.
@@ -448,6 +480,17 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
             self.code.prepared_owner().place_statements(body);
             self.emit_suite(body);
         }
+    }
+
+    fn emit_with_operands(
+        &mut self,
+        statement: &Statement,
+        inputs: &[crate::frontend::PhysicalOperand],
+    ) {
+        let mut statement_frame = self.reborrow();
+        statement_frame.names = None;
+        statement_frame.inputs = FrameInputs::Statement(inputs);
+        CheckedBody::registered(statement_frame).emit_statement(statement);
     }
 
     /// Bind the owned occurrence slots used by the checked operation.
@@ -613,10 +656,10 @@ impl Frame<'_, '_, '_> {
             FrameInputs::Handles([]) => {}
             FrameInputs::Handles(inputs) => return inputs[slot].clone(),
             FrameInputs::Prepared(inputs) => {
-                let FrameOwner::Prepared(owner) = &mut self.code else {
-                    unreachable!("prepared inputs belong to their enclosing suite")
-                };
-                return emit_operand(&mut **owner, inputs.operand(slot), false);
+                return emit_operand(self.code.prepared(), inputs.operand(slot), false);
+            }
+            FrameInputs::Statement(inputs) => {
+                return emit_physical_operand(self.code.prepared(), &inputs[slot]);
             }
         }
         if self
