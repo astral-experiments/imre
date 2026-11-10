@@ -65,24 +65,6 @@ pub(super) fn boxed_source(name: &str) -> Option<(&'static str, &'static str)> {
         // CPython 3.14.5 Lib/linecache.py. See licenses/CPython.txt.
         "linecache" => bundled_source!("linecache.py"),
         "bisect" => bundled_source!("bisect.py"),
-        "email.errors" => Some((
-            "email/errors.py",
-            include_str!(
-                "../../../../benchmarks/cpython_stdlib/full/email/upstream/Lib/email/errors.py"
-            ),
-        )),
-        "email._encoded_words" => Some((
-            "email/_encoded_words.py",
-            include_str!(
-                "../../../../benchmarks/cpython_stdlib/full/email/upstream/Lib/email/_encoded_words.py"
-            ),
-        )),
-        "email._header_value_parser" => Some((
-            "email/_header_value_parser.py",
-            include_str!(
-                "../../../../benchmarks/cpython_stdlib/full/email/upstream/Lib/email/_header_value_parser.py"
-            ),
-        )),
         "urllib.error" => bundled_source!("urllib/error.py"),
         "urllib.request" => bundled_source!("urllib/request.py"),
         // CPython 3.14.5 Lib/urllib/robotparser.py. See licenses/CPython.txt.
