@@ -2787,9 +2787,29 @@ impl IntrinsicModule {
     }
 }
 
-pub(crate) struct TypeAlias {
-    pub(crate) value: ast::Expr,
-    pub(crate) constructor: bool,
+pub(crate) enum TypeAlias {
+    Expression(ast::Expr),
+    NewType(ast::Expr),
+    /// A PEP 695 declaration. The checked initializer creates the lazy alias object.
+    Declaration(usize),
+}
+
+impl TypeAlias {
+    pub(crate) fn annotation_value<'a>(
+        &'a self,
+        module: &'a SourceModule,
+    ) -> Option<&'a ast::Expr> {
+        match self {
+            Self::Expression(value) | Self::NewType(value) => Some(value),
+            Self::Declaration(statement) => {
+                let declaration = module.parsed.syntax().body[*statement].as_type_alias_stmt()?;
+                declaration
+                    .type_params
+                    .is_none()
+                    .then_some(&declaration.value)
+            }
+        }
+    }
 }
 
 pub(crate) struct SourceModule {
@@ -5050,7 +5070,7 @@ impl<'a> Loader<'a> {
                     self.modules[id].type_guards.push(index);
                     for stmt in &guard.body {
                         if let (Some(name), Some(value)) = (value_name(stmt), module_value(stmt)) {
-                            let known = self.add_alias(id, value, false);
+                            let known = self.add_alias(id, TypeAlias::Expression(value.clone()));
                             self.modules[id]
                                 .type_bindings
                                 .insert(name.to_owned(), known);
@@ -5076,6 +5096,13 @@ impl<'a> Loader<'a> {
                 }
                 _ if self.alias_declaration(id, statement)? => {
                     self.modules[id].type_guards.push(index);
+                }
+                ast::Stmt::TypeAlias(alias) if let Some(name) = alias.name.as_name_expr() => {
+                    let binding = self.add_alias(id, TypeAlias::Declaration(index));
+                    self.bind(id, name.id.as_str(), binding, statement)?;
+                    // Its initializer binds the object in source order. The alias
+                    // body can first run when an ordinary operand reads __value__.
+                    self.modules[id].executable.push(index);
                 }
                 ast::Stmt::FunctionDef(function) => {
                     definition_prefix |= self.partial_source(id);
@@ -5736,6 +5763,16 @@ impl<'a> Loader<'a> {
                                     ready
                                 }
                                 Binding::Value(def) => package && self.initialized(def),
+                                Binding::TypeAlias(owner, index)
+                                    if let TypeAlias::Declaration(statement) =
+                                        self.modules[owner].aliases[index] =>
+                                {
+                                    package
+                                        && self.initialized(DefinitionId {
+                                            module: owner,
+                                            statement,
+                                        })
+                                }
                                 Binding::ConditionalValue | Binding::RuntimeClass => false,
                                 _ => package,
                             };
