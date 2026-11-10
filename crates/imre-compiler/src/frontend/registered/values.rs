@@ -724,9 +724,16 @@ fn literal_membership(cmp: &ast::ExprCompare) -> Option<(&ast::Expr, &[ast::Expr
 }
 
 /// The Python operand order is also used when a child still needs its source emitter.
-pub(crate) fn binary_operands(node: &ast::Expr) -> Option<(Binary, [&ast::Expr; 2])> {
+pub(super) fn binary_operands(node: &ast::Expr) -> Option<(Binary, [&ast::Expr; 2])> {
     let binary = node.as_bin_op_expr()?;
     Some((binary.op.into(), [&binary.left, &binary.right]))
+}
+
+pub(super) fn binary(op: Binary, left: Expr, right: Expr) -> Expr {
+    Expr {
+        ty: Type::PythonObject,
+        kind: ExprKind::Binary(op, Box::new(left), Box::new(right)),
+    }
 }
 
 /// Select one registered-frame operation before requesting its operands in source order.
@@ -739,10 +746,7 @@ pub(super) fn operation<E>(
     mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
 ) -> StdResult<Option<Expr>, E> {
     if let Some((op, [left, right])) = binary_operands(node) {
-        return Ok(Some(Expr {
-            ty: Type::PythonObject,
-            kind: ExprKind::Binary(op, Box::new(child(left)?), Box::new(child(right)?)),
-        }));
+        return Ok(Some(binary(op, child(left)?, child(right)?)));
     }
     if let Some((items, display)) = display_elements(node) {
         let values = display_operands(items, source, &mut child)?;
@@ -999,7 +1003,7 @@ pub(crate) enum ValueStatement<'a> {
 pub(crate) fn value_statement<'a>(
     stmt: &'a ast::Stmt,
     source: RegisteredSource<'_>,
-    logicals: &super::booleans::LogicalSites,
+    logicals: &super::booleans::ExpressionSites,
 ) -> Option<ValueStatement<'a>> {
     let operand = |value: &ast::Expr| match logicals.get(value) {
         Some(super::booleans::Selection::Checked(value)) => Some(value.clone()),

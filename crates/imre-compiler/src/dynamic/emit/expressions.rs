@@ -38,9 +38,9 @@ impl LogicalEmitter<SourceOperand<'_>> for Function<'_, '_> {
 impl Function<'_, '_> {
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
         self.with_expression_range(expr.range(), |code| {
-            if let Some(selected) = code.source.logicals.get(expr) {
+            if let Some(selected) = code.source.statement_sites.expressions.get(expr) {
                 match selected {
-                    crate::frontend::LogicalSelection::Checked(value) => {
+                    crate::frontend::ExpressionSelection::Checked(value) => {
                         return code.registered_value(value);
                     }
                     _ if !code.native_suspension => return code.located_expr(expr),
@@ -90,14 +90,17 @@ impl Function<'_, '_> {
 
     fn registered_region(&mut self, expr: &ast::Expr, condition: bool) -> Option<String> {
         if matches!(
-            self.source.logicals.get(expr),
-            Some(crate::frontend::LogicalSelection::Comparison(_))
+            self.source.statement_sites.expressions.get(expr),
+            Some(crate::frontend::ExpressionSelection::Comparison(_))
         ) {
             return None;
         }
         if let Some(operand) = self.source.strings.templates.get(&expr.range()) {
             self.prepare_checked_value(&operand.value);
             return Some(self.frame.prepared_operand(operand, &self.sites, condition));
+        }
+        if self.source.statement_sites.expressions.physical(expr).is_some() {
+            return None;
         }
         let source = self.source.registered_source();
         let value = if self.native_suspension {
@@ -157,7 +160,7 @@ impl Function<'_, '_> {
         let previous = self.enter_expression(expr.range(), position);
         let comparison = self
             .source
-            .logicals
+            .statement_sites.expressions
             .comparison(expr, self.native_suspension);
         let value = if let Some((ops, inputs)) = comparison {
             let result = ComparisonChain::emit_registered(
@@ -185,13 +188,14 @@ impl Function<'_, '_> {
                 .collect::<Vec<_>>();
             self.frame
                 .registered_with_inputs(&index.value, &inputs, &self.sites)
-        } else if let Some((op, [left, right])) = crate::frontend::binary_operands(expr) {
-            let left = self.expr(left);
-            let right = self.expr(right);
-            self.binary_handles(op, &left, &right)
+        } else if let Some(inputs) = self.source.statement_sites.expressions.physical(expr) {
+            let handles = inputs.operands(expr, self.native_suspension)
+                .map(|child| self.source_operand(child))
+                .collect::<Vec<_>>();
+            self.frame.registered_with_inputs(&inputs.operation, &handles, &self.sites)
         } else if let Some((edges, inputs)) = self
             .source
-            .logicals
+            .statement_sites.expressions
             .value(expr, self.source.registered_source())
         {
             let value = Logical::value(&mut self.frame.body, edges, crate::ir::Type::PythonObject)
@@ -199,7 +203,7 @@ impl Function<'_, '_> {
                 .expect("a selected operand reaches the join");
             self.frame
                 .with_checked_frame(&self.sites, None, |mut frame| frame.materialize(&value))
-        } else if let Some([test, yes, no]) = self.source.logicals.conditional(expr) {
+        } else if let Some([test, yes, no]) = self.source.statement_sites.expressions.conditional(expr) {
             ValueJoin::select(
                 self,
                 |code| {
@@ -310,8 +314,8 @@ impl Function<'_, '_> {
     /// The enclosing source operation supplies evaluated leaves. Its branch graph
     /// and ownership policy are the same ones used by a wholly checked suite.
     pub(super) fn branch_expr(&mut self, expr: &ast::Expr, yes: &str, no: &str) {
-        if let Some(crate::frontend::LogicalSelection::Checked(condition)) =
-            self.source.logicals.get(expr)
+        if let Some(crate::frontend::ExpressionSelection::Checked(condition)) =
+            self.source.statement_sites.expressions.get(expr)
         {
             self.prepare_checked_value(condition);
             self.frame
@@ -322,7 +326,7 @@ impl Function<'_, '_> {
             expr,
             BooleanContext::Condition,
             self.source.registered_source(),
-            &self.source.logicals,
+            &self.source.statement_sites.expressions,
         );
         Logical::branch(&mut self.frame.body, edges, yes, no).emit(self, &inputs);
     }
