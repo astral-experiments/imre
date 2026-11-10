@@ -273,45 +273,6 @@ pub(super) fn emit(
     Ok((units, used_archive))
 }
 
-pub(super) fn check_parsed_source(
-    path: &Path,
-    source: &str,
-    parsed: &ruff_python_parser::Parsed<ast::ModModule>,
-    keep_docstrings: bool,
-) -> Result<HashMap<ruff_text_size::TextRange, Vec<u32>>, String> {
-    module_source::validate_syntax(path, source, parsed)?;
-    crate::frontend::module_literal_replacements(source, parsed, keep_docstrings)
-        .map_err(|error| format!("{}:{error}", path.display()))
-}
-
-/// Validate the executable bodies. Discovery already recorded the malformed modules.
-pub(super) fn check(
-    (files, builtins, mut entry_source): (
-        &[ModuleSource],
-        &[ModuleSource],
-        Option<ParsedModule<'_>>,
-    ),
-    keep_docstrings: bool,
-    module_errors: &HashMap<PathBuf, Box<super::ModuleSyntaxError>>,
-) -> Result<(), String> {
-    for (_, path, source) in files.iter().chain(builtins) {
-        let discovered = entry_source.take();
-        if module_errors.contains_key(path) {
-            continue;
-        }
-        // This check reports offsets in the registration's original text. A CRLF file
-        // has different physical offsets from its normalized executable body.
-        let module = match discovered.filter(|entry| entry.text == source.as_str()) {
-            Some(entry) => entry,
-            None => ParsedModule::parse(path, source.as_str().into())?,
-        };
-        check_parsed_source(path, &module.text, &module.parsed, keep_docstrings)?;
-        let mut body = module_source::into_body(module.parsed);
-        module_source::lower(path, &module.text, &mut body)?;
-    }
-    Ok(())
-}
-
 /// Normalized source and lowered names shared by archive, split, and inline placement.
 pub(super) struct PreparedBody<'a, 'tree> {
     name: &'a str,
@@ -421,7 +382,7 @@ impl<'a> PreparedBody<'a, '_> {
             Input::Module(parsed) => (
                 parsed.syntax(),
                 parsed.tokens(),
-                check_parsed_source(path, source, parsed, keep_docstrings)?,
+                module_source::validate(path, source, parsed, keep_docstrings)?,
             ),
             Input::Expression(syntax, tokens) => (
                 syntax,
