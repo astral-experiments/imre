@@ -4,7 +4,6 @@ use super::sites::{CompiledDefinition, CompiledProvider};
 
 use super::{AnnotationScope, FrameEmitter, RegisteredFrame, SourceMap};
 use crate::ir::Statement;
-use crate::llvm::registered::Place;
 use crate::llvm::registered::context::{ContextEmitter, ContextRegion};
 use imre_ast::code_flags;
 use ruff_python_ast as ast;
@@ -423,37 +422,7 @@ impl<'p> Function<'_, 'p> {
                 }
                 continue;
             }
-            if !stmt.is_assign_stmt()
-                && let Some(effect) = crate::frontend::attribute_write(stmt)
-            {
-                self.attribute_operation(
-                    effect.action,
-                    effect.field.attr.as_str(),
-                    effect.field.range(),
-                    effect.operands(),
-                    |code, node| code.expr(node),
-                );
-                continue;
-            }
             match stmt {
-                ast::Stmt::AnnAssign(v) => {
-                    if let Some(value) = &v.value {
-                        let value = self.expr(value);
-                        if let ast::Expr::Name(target) = &*v.target {
-                            let name = self.code_name(target.id.as_str());
-                            let scope = self.scope.clone();
-                            self.assign_owned_name(&scope, &name, &value, None);
-                        } else {
-                            self.assign_target(&v.target, &value);
-                        }
-                    }
-                    if (self.module || self.class_locals.is_some())
-                        && let Some(marker) =
-                            self.source.namespace_operations.get(&v.target.range())
-                    {
-                        self.registered_value(marker);
-                    }
-                }
                 ast::Stmt::FunctionDef(v) => {
                     let function = self.function_definition(v);
                     self.bind(v.name.as_str(), &function);
@@ -942,84 +911,6 @@ impl<'p> Function<'_, 'p> {
             .iter()
             .map(|d| self.source.positions.line(d.expression.start()));
         self.frame.decorate(decorators, lines, value)
-    }
-
-    fn place(&mut self, target: &ast::Expr) -> Option<Place> {
-        Some(match target {
-            ast::Expr::Name(n) => Place::Name(self.code_name(n.id.as_str())),
-            ast::Expr::Subscript(s) => {
-                let obj = self.expr(&s.value);
-                Place::Item(obj, self.expr(&s.slice))
-            }
-            _ => {
-                self.unsupported("assignment target");
-                return None;
-            }
-        })
-    }
-
-    fn assign_target(&mut self, target: &ast::Expr, value: &str) {
-        let elements = match target {
-            ast::Expr::Tuple(t) => &t.elts,
-            ast::Expr::List(l) => &l.elts,
-            ast::Expr::Attribute(field) => {
-                self.store_attribute(field.attr.as_str(), field.range(), value, |code| {
-                    code.expr(&field.value)
-                });
-                return;
-            }
-            _ => {
-                if let Some(p) = self.place(target) {
-                    self.write(&p, value);
-                }
-                return;
-            }
-        };
-        if let Some([left, right]) = Self::pair_target(target) {
-            self.max_live = self.max_live.max(2);
-            self.checked(&format!(
-                "call i64 @imre_dyn_unpack_pair(ptr %ctx, i64 {value}, ptr %live)"
-            ));
-            self.assign_pair_slots(left, right);
-            return;
-        }
-        let count = self.integer(elements.len());
-        let star = elements
-            .iter()
-            .position(|v| matches!(v, ast::Expr::Starred(_)))
-            .map_or_else(|| "0".into(), |i| self.integer(i));
-        let sequence = self.op("unpack_read", &[value, &count, &star]);
-        for (index, target) in elements.iter().enumerate() {
-            let i = self.integer(index);
-            let item = self.op("get", &[&sequence, &i]);
-            let target = if let ast::Expr::Starred(s) = target {
-                &s.value
-            } else {
-                target
-            };
-            self.assign_target(target, &item);
-        }
-    }
-
-    fn pair_target(target: &ast::Expr) -> Option<[&ast::Expr; 2]> {
-        let elements = match target {
-            ast::Expr::Tuple(t) => &t.elts,
-            ast::Expr::List(l) => &l.elts,
-            _ => return None,
-        };
-        let [left, right] = elements.as_slice() else {
-            return None;
-        };
-        (!left.is_starred_expr() && !right.is_starred_expr()).then_some([left, right])
-    }
-
-    fn assign_pair_slots(&mut self, left: &ast::Expr, right: &ast::Expr) {
-        // Target expressions may make calls that reuse the scratch slots.
-        let first = self.value("load i64, ptr %live");
-        let second_slot = self.value("getelementptr i64, ptr %live, i64 1");
-        let second = self.value(&format!("load i64, ptr {second_slot}"));
-        self.assign_target(left, &first);
-        self.assign_target(right, &second);
     }
 
     fn physical_binding(&mut self, target: &'p crate::frontend::PhysicalBinding, value: &str) {

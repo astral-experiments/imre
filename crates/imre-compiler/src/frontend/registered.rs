@@ -891,7 +891,7 @@ pub(crate) enum ValueStatement {
 pub(crate) enum SourceEffect {
     /// Bind the prepared class after evaluating its decorators and header operands.
     Class(TextSize),
-    /// Transfer control or discard a value using operands prepared in this frame.
+    /// Consume this statement's value operands in the frame that owns them.
     Value(ValueStatement, Vec<PhysicalOperand>),
     /// Evaluate and release each operand of an annotation without an assigned value.
     Discard(Vec<PhysicalOperand>),
@@ -1828,27 +1828,52 @@ impl<'a> SuitePreparation<'a> {
             }
             if let ast::Stmt::AnnAssign(ann) = stmt
                 && ann.value.is_none()
-                && let Some(inputs) = values::bare_target_operands(&ann.target)
+            {
+                body.push(checkpoint(stmt));
+                if let Some(inputs) = values::bare_target_operands(&ann.target) {
+                    residual.push(SourceRun {
+                        at: body.len(),
+                        statements: i..i + 1,
+                        effect: Some(SourceEffect::Discard(
+                            inputs
+                                .into_iter()
+                                .map(|expr| {
+                                    match RegisteredOperand::prepare(expr, self.source, kind) {
+                                        Some(value) => PhysicalOperand::Checked(Box::new(value)),
+                                        None => PhysicalOperand::Source(Box::new(expr.clone())),
+                                    }
+                                })
+                                .collect(),
+                        )),
+                    });
+                }
+                continue;
+            }
+            if !stmt.is_assign_stmt()
+                && let Some(effect) = attribute_write(stmt)
             {
                 body.push(checkpoint(stmt));
                 residual.push(SourceRun {
                     at: body.len(),
                     statements: i..i + 1,
-                    effect: Some(SourceEffect::Discard(
-                        inputs
-                            .into_iter()
-                            .map(
-                                |expr| match RegisteredOperand::prepare(expr, self.source, kind) {
-                                    Some(value) => PhysicalOperand::Checked(Box::new(value)),
-                                    None => PhysicalOperand::Source(Box::new(expr.clone())),
-                                },
-                            )
-                            .collect(),
+                    effect: Some(SourceEffect::ObjectOperation(
+                        Box::new(attribute_opcode(effect.action, effect.field)),
+                        effect.operands().map(frame_value).collect(),
                     )),
                 });
                 continue;
             }
-            if let ast::Stmt::Assign(assign) = stmt {
+            let assignment = match stmt {
+                ast::Stmt::Assign(assign) => {
+                    Some((assign.targets.as_slice(), assign.value.as_ref()))
+                }
+                ast::Stmt::AnnAssign(ann) => ann
+                    .value
+                    .as_deref()
+                    .map(|value| (std::slice::from_ref(ann.target.as_ref()), value)),
+                _ => None,
+            };
+            if let Some((targets, rhs)) = assignment {
                 let input = scope.hidden(Type::PythonObject);
                 let value = unpacking::take_pattern_temporary(
                     Expr::local(input, Type::PythonObject),
@@ -1856,20 +1881,17 @@ impl<'a> SuitePreparation<'a> {
                 );
                 let first_refusal = scope.refusal.take();
                 scope.diagnostic_suspension = Some(suspended);
-                let targets = scope.assignment_targets(&assign.targets, value);
+                let targets = scope.assignment_targets(targets, value);
                 scope.diagnostic_suspension = None;
                 let (effect, targets) = match targets {
                     Ok(targets) => (
-                        SourceEffect::Value(
-                            ValueStatement::Store(input),
-                            vec![frame_value(&assign.value)],
-                        ),
+                        SourceEffect::Value(ValueStatement::Store(input), vec![frame_value(rhs)]),
                         targets,
                     ),
                     Err(()) => {
                         scope.truncate_locals(slots_before);
                         let (range, reason) = scope.refusal.or(first_refusal).unwrap_or((
-                            assign.range(),
+                            stmt.range(),
                             "cannot compile this assignment target ahead of time",
                         ));
                         (
@@ -1885,6 +1907,13 @@ impl<'a> SuitePreparation<'a> {
                     effect: Some(effect),
                 });
                 body.extend(targets);
+                if let ast::Stmt::AnnAssign(ann) = stmt
+                    && ann.simple
+                    && !matches!(kind, RegisteredScope::Function { .. })
+                    && let Some(marker) = self.operations.get(&ann.target.range())
+                {
+                    body.push(Statement::Expr(marker.clone()));
+                }
                 continue;
             } else if let ast::Stmt::Delete(delete) = stmt {
                 // A missing operand keeps its place between the other targets' checked effects.
@@ -2031,7 +2060,7 @@ fn context_site(source: &str, manager: &ast::Expr, is_async: bool) -> ir::Contex
     }
 }
 
-pub(crate) fn attribute_write(stmt: &ast::Stmt) -> Option<AttributeEffect<'_>> {
+fn attribute_write(stmt: &ast::Stmt) -> Option<AttributeEffect<'_>> {
     use ir::AttributeAction::{InPlace, Store};
     let (target, action, value) = match stmt {
         ast::Stmt::Assign(assign) => {
@@ -2103,7 +2132,7 @@ impl statements::StatementLowering for SourceScope<'_> {
     type Error = ();
 
     fn attribute_statements(&mut self, stmt: &ast::Stmt) -> StdResult<Option<Vec<Statement>>, ()> {
-        if stmt.is_assign_stmt() {
+        if !stmt.is_aug_assign_stmt() {
             return Ok(None);
         }
         let Some(effect) = attribute_write(stmt) else {
@@ -2346,12 +2375,12 @@ impl statements::StatementLowering for SourceScope<'_> {
                     let effect = operation(Builtin::RegisteredDiscard, Type::None, operands);
                     return Ok((vec![Statement::Expr(effect)], true));
                 }
-                let name = ann.target.as_name_expr().ok_or(())?;
-                let mut body = Vec::new();
-                if let Some(value) = &ann.value {
-                    let value = self.operand(value).ok_or(())?;
-                    body.push(self.store(name.id.as_str(), value));
-                }
+                let mut body = if let Some(value) = &ann.value {
+                    let value = self.frame_value(value).ok_or(())?;
+                    self.assignment_targets(std::slice::from_ref(ann.target.as_ref()), value)?
+                } else {
+                    Vec::new()
+                };
                 // A function-local annotation has no runtime operand. A simple
                 // namespace annotation records its declaration for later evaluation.
                 if !matches!(self.kind, RegisteredScope::Function { .. }) && ann.simple {
@@ -2712,13 +2741,10 @@ impl SourceScope<'_> {
             || stmt.is_return_stmt()
             || stmt.is_expr_stmt()
             || stmt.is_delete_stmt()
-            || stmt
-                .as_ann_assign_stmt()
-                .is_some_and(|ann| ann.value.is_none() && !ann.target.is_name_expr())
+            || stmt.is_ann_assign_stmt()
             || stmt.is_aug_assign_stmt()
             || stmt.is_raise_stmt()
             || stmt.is_function_def_stmt() && has_ordinary_header(stmt.start())
-            || attribute_write(stmt).is_some()
         {
             return self.statement(stmt, body);
         }
@@ -3553,12 +3579,16 @@ mod tests {
         let [run] = &plan.residual[..] else {
             panic!("expected one source range")
         };
-        // Only the annotated list assignment remains in the source run. The branch
-        // now owns the delete operation, and the last import still follows the run.
+        // Only the generator RHS needs an external operand. After storing it, the
+        // namespace records y's annotation before executing the final import.
+        assert!(matches!(
+            run.effect,
+            Some(SourceEffect::Value(ValueStatement::Store(_), _))
+        ));
         assert_eq!(run.statements, 3..4);
         let (before, after) = plan.checked.function.body.split_at(run.at);
-        let Some(Statement::If(_, yes, no)) = before.last() else {
-            panic!("expected the checked conditional immediately before y")
+        let [.., Statement::If(_, yes, no), _] = before else {
+            panic!("expected the checked conditional before the checkpoint for y")
         };
         assert!(no.is_empty());
         assert!(matches!(yes.as_slice(), [_, Statement::Expr(Expr {
@@ -3567,6 +3597,14 @@ mod tests {
         assert!(matches!(
             after,
             [
+                Statement::Expr(Expr {
+                    kind: ExprKind::Builtin(Builtin::GlobalSet(_), _),
+                    ..
+                }),
+                Statement::Expr(Expr {
+                    kind: ExprKind::Builtin(Builtin::RegisteredNamespaceAnnotation(_), _),
+                    ..
+                }),
                 _,
                 Statement::Expr(Expr {
                     kind: ExprKind::Builtin(Builtin::RegisteredImport(_), _),

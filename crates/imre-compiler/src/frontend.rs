@@ -141,7 +141,7 @@ pub(crate) use registered::{
     AnnotationValue, AssertionSite, DeferredAnnotation, ParameterAnnotations, PhysicalOperand,
     PreparedStrings, RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope,
     RegisteredSites, RegisteredSuite, SourceEffect, SourceRun, StatementSites, SuitePreparation,
-    ValueStatement, annotation_expression, attribute_write, place_fixed_function, registered_sites,
+    ValueStatement, annotation_expression, place_fixed_function, registered_sites,
     registered_type_alias, registered_type_parameters,
 };
 pub(crate) use registered::{

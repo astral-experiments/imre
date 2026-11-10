@@ -15,11 +15,6 @@ use ruff_text_size::{TextRange, TextSize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-pub(crate) enum Place {
-    Name(String),
-    Item(String, String),
-}
-
 /// Source bytes and byte offsets shared by both forms of registered body.
 pub(crate) struct SourcePositions<'a> {
     pub(crate) text: &'a str,
@@ -1538,16 +1533,6 @@ pub(crate) trait FrameEmitter<'a, 'p>:
                 }
             }
         }
-    }
-
-    fn write(&mut self, place: &Place, value: &str) {
-        match place {
-            Place::Name(n) => {
-                let scope = self.scope.clone();
-                self.op("assign", &[&scope, n, value])
-            }
-            Place::Item(v, k) => self.put_item(v, k, value),
-        };
     }
 
     fn inplace(&mut self, op: &str, left: &str, right: &str) -> String {
