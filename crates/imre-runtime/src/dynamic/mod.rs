@@ -4847,6 +4847,14 @@ impl Context {
             "_tracemalloc" => stdlib::tracemalloc::install(self, module, scope),
             "time" => stdlib::time::install_timezone(self, scope)?,
             "struct" => stdlib::structure::install(self, scope)?,
+            "marshal" => {
+                for name in ["dumps", "loads"] {
+                    let function = self.alloc(Value::Native(format!("marshal.{name}")));
+                    self.bind(scope, name, function);
+                }
+                let version = self.int(i64::from(imre_ast::MARSHAL_VERSION));
+                self.bind(scope, "version", version);
+            }
             "_pickle" => stdlib::pickle::install(self, module, scope)?,
             "urllib.parse" => stdlib::urllib::initialize(self, scope),
             "_io" => stdlib::io::install_native(self, scope, module),

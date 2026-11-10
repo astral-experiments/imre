@@ -982,7 +982,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("random", "choice" | "choices" | "shuffle" | "randint")
         | ("codecs", "register_error" | "lookup_error")
         | ("gc", "collect")
-        | ("marshal", "loads")
         | (
             "re",
             "match" | "fullmatch" | "search" | "compile" | "_compile_scanner" | "split" | "findall"
@@ -3104,6 +3103,9 @@ pub(super) fn call(
         };
         let reclaimed = ctx.collect_generation(generation)?;
         return Ok(ctx.int(reclaimed as i64));
+    }
+    if name == "marshal.dumps" {
+        return marshal::dumps(ctx, args, kwargs);
     }
     if name == "marshal.loads" {
         return marshal::loads(ctx, args, kwargs);
