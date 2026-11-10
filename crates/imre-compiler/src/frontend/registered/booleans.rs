@@ -91,7 +91,7 @@ impl PhysicalInputs {
         &'a self,
         node: &'a ast::Expr,
         suspended: bool,
-    ) -> impl Iterator<Item = SourceOperand<'a>> + 'a {
+    ) -> impl Iterator<Item = BorrowedOperand<'a>> + 'a {
         let mut physical = None;
         self.children.iter().enumerate().map(move |(i, child)| {
             if let Some(value) = child.as_ref().and_then(|child| child.value(suspended)) {
@@ -151,9 +151,11 @@ impl CheckedChild {
     }
 }
 
+pub(crate) type LogicalOperand = SourceOperand<ir::Expr, Box<ast::Expr>>;
+
 pub(crate) struct PreparedSteps {
-    edges: Edges,
-    operands: Vec<Option<ir::Expr>>,
+    pub(crate) edges: Edges,
+    pub(crate) operands: Vec<LogicalOperand>,
 }
 
 impl PreparedSteps {
@@ -161,33 +163,12 @@ impl PreparedSteps {
         let (edges, leaves) = edges(node, context, Depth::All);
         let operands = leaves
             .into_iter()
-            .map(|leaf| values::registered_value(leaf, source))
+            .map(|leaf| match values::registered_value(leaf, source) {
+                Some(value) => SourceOperand::Checked(value),
+                None => SourceOperand::Residual(Box::new(leaf.clone())),
+            })
             .collect();
         Self { edges, operands }
-    }
-
-    /// Find the original, explicitly residual leaves at this operation. No syntax
-    /// is stored in the plan or used to reconstruct its edges or its checked values.
-    fn inputs<'a>(
-        &'a self,
-        node: &'a ast::Expr,
-        context: Context,
-    ) -> Option<Vec<SourceOperand<'a>>> {
-        let mut pending = vec![node];
-        let mut inputs = Vec::with_capacity(self.operands.len());
-        while let Some(node) = pending.pop() {
-            match node.split(context) {
-                Split::Operands(_, children) => pending.extend(children),
-                Split::Pair(_, left, right) => pending.extend([left, right]),
-                Split::Conditional(test, yes, no) => pending.extend([test, yes, no]),
-                Split::Not(child) => pending.push(child),
-                Split::Leaf => inputs.push(SourceOperand::prepared(
-                    node,
-                    self.operands.get(inputs.len())?.as_ref(),
-                )),
-            }
-        }
-        (inputs.len() == self.operands.len()).then_some(inputs)
     }
 }
 
@@ -201,15 +182,10 @@ impl ExpressionSites {
         self.selected.get(&site(node))
     }
 
-    pub(crate) fn value<'a>(
+    pub(crate) fn conditional<'a>(
         &'a self,
         node: &'a ast::Expr,
-    ) -> Option<(Edges, Vec<SourceOperand<'a>>)> {
-        matches!(node.split(Context::Value), Split::Operands(..))
-            .then(|| prepare_boolean(node, Context::Value, self))
-    }
-
-    pub(crate) fn conditional<'a>(&'a self, node: &'a ast::Expr) -> Option<[SourceOperand<'a>; 3]> {
+    ) -> Option<[BorrowedOperand<'a>; 3]> {
         let children = conditional_parts(node)?;
         Some(match self.selected.get(&site(node)) {
             Some(Selection::Checked(value)) => {
@@ -217,7 +193,9 @@ impl ExpressionSites {
             }
             Some(Selection::Mixed {
                 parts: Some(parts), ..
-            }) => std::array::from_fn(|i| SourceOperand::prepared(children[i], parts[i].as_ref())),
+            }) => {
+                std::array::from_fn(|i| BorrowedOperand::prepared(children[i], parts[i].as_ref()))
+            }
             _ => children.map(SourceOperand::Residual),
         })
     }
@@ -228,7 +206,7 @@ impl ExpressionSites {
         suspended: bool,
     ) -> Option<(
         &'a [ast::CmpOp],
-        impl Iterator<Item = SourceOperand<'a>> + 'a,
+        impl Iterator<Item = BorrowedOperand<'a>> + 'a,
     )> {
         let cmp = node.as_compare_expr()?;
         let inputs = match self.get(node) {
@@ -240,7 +218,7 @@ impl ExpressionSites {
                 .get(index)
                 .and_then(Option::as_ref)
                 .and_then(|v| v.value(suspended));
-            SourceOperand::prepared(child, value)
+            BorrowedOperand::prepared(child, value)
         });
         Some((&cmp.ops, operands))
     }
@@ -528,46 +506,20 @@ impl PhysicalPreparation<'_, '_> {
     }
 }
 
+/// Checked operations and their irreducible inputs, owned by a plan or borrowed at a site.
 #[derive(Clone, Copy)]
-pub(crate) enum SourceOperand<'a> {
-    Checked(&'a ir::Expr),
-    Residual(&'a ast::Expr),
+pub(crate) enum SourceOperand<C, S> {
+    Checked(C),
+    Residual(S),
 }
 
-impl<'a> SourceOperand<'a> {
+pub(crate) type BorrowedOperand<'a> = SourceOperand<&'a ir::Expr, &'a ast::Expr>;
+
+impl<'a> BorrowedOperand<'a> {
     fn prepared(node: &'a ast::Expr, value: Option<&'a ir::Expr>) -> Self {
         match value {
             Some(value) => Self::Checked(value),
             None => Self::Residual(node),
         }
     }
-}
-
-/// The source adapter owns each irreducible operation. Only successor indices and
-/// evaluated values cross into the LLVM frame.
-pub(crate) fn prepare_boolean<'a>(
-    expression: &'a ast::Expr,
-    context: Context,
-    sites: &'a ExpressionSites,
-) -> (Edges, Vec<SourceOperand<'a>>) {
-    if let Some(Selection::Mixed { branch, value, .. }) = sites.get(expression) {
-        let plan = match context {
-            Context::Condition => Some(branch),
-            Context::Value => value.as_ref(),
-        };
-        if let Some(plan) = plan
-            && let Some(inputs) = plan.inputs(expression, context)
-        {
-            return (plan.edges.clone(), inputs);
-        }
-    }
-    let (edges, leaves) = edges(expression, context, Depth::All);
-    let leaves = leaves
-        .into_iter()
-        .map(|leaf| match sites.get(leaf) {
-            Some(Selection::Checked(value)) => SourceOperand::Checked(value),
-            _ => SourceOperand::Residual(leaf),
-        })
-        .collect();
-    (edges, leaves)
 }

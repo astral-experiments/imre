@@ -3119,6 +3119,35 @@ mod tests {
     }
 
     #[test]
+    fn a_mixed_condition_keeps_its_prepared_edges_and_inputs() {
+        let mut prepared = PreparedBody::module(
+            "program",
+            Path::new("program.py"),
+            "result = yes() if first() and (lambda: second())() else no()\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        inject_residual_child_module(&mut prepared);
+        let original = prepared.standalone().unwrap().unwrap();
+        let choice = residual_value_mut(prepared.source.initializer.as_mut().unwrap())
+            .as_if_expr_mut()
+            .unwrap();
+        assert!(matches!(
+            prepared
+                .source
+                .statement_sites
+                .expressions
+                .get(&choice.test),
+            Some(crate::frontend::ExpressionSelection::Mixed { .. })
+        ));
+        let guard = choice.test.as_bool_op_expr_mut().unwrap();
+        guard.op = ast::BoolOp::Or;
+        guard.values = Default::default();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
     fn mixed_if_owns_its_guards_and_residual_arm_after_source_erasure() {
         use crate::frontend::{PhysicalOperand, PhysicalSuite, SourceEffect};
 
