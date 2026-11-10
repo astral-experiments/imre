@@ -617,23 +617,20 @@ fn slice_key<'a, E>(
 
 /// Only the input producers may need the enclosing source adapter. The operation
 /// itself uses ordinary checked IR with positional inputs, independent of Python locals.
-pub(crate) struct IndexOperands<'a> {
-    pub(crate) value: Expr,
-    pub(crate) inputs: Vec<super::booleans::SourceOperand<'a>>,
+pub(super) struct IndexOperands<'a> {
+    pub(super) value: Expr,
+    pub(super) inputs: Vec<(&'a ast::Expr, Option<Expr>)>,
+    pub(super) split_slice: bool,
 }
 
-pub(crate) fn index_operands<'a>(
+pub(super) fn index_operands<'a>(
     node: &'a ast::Expr,
     source: RegisteredSource<'_>,
 ) -> Option<IndexOperands<'a>> {
-    use super::booleans::SourceOperand;
     let mut inputs = Vec::new();
     let mut input = |expr: &'a ast::Expr, value: Option<Expr>| {
         let slot = inputs.len();
-        inputs.push(match value {
-            Some(value) => SourceOperand::Checked(std::borrow::Cow::Owned(value)),
-            None => SourceOperand::Residual(expr),
-        });
+        inputs.push((expr, value));
         Expr::local(slot, Type::PythonObject)
     };
     let (read, key) = match node {
@@ -653,6 +650,7 @@ pub(crate) fn index_operands<'a>(
     } else {
         registered_index_key(key, source)
     };
+    let split_slice = read.is_some() && slice.is_some() && checked.is_none();
     let value = if let Some(checked) = checked {
         input(key, Some(checked))
     } else if let Some(slice) = slice {
@@ -669,7 +667,7 @@ pub(crate) fn index_operands<'a>(
         Some((index, receiver)) => subscript(index, receiver, value, source.text),
         None => value,
     };
-    Some(IndexOperands { value, inputs })
+    Some(IndexOperands { value, inputs, split_slice })
 }
 
 fn display_operands<E>(
@@ -1528,8 +1526,8 @@ mod index_constant_tests {
         let expr = &entry.parsed.syntax().body[0].as_expr_stmt().unwrap().value;
         let plan = index_operands(expr, module.context(source)).unwrap();
         let mut residual = Vec::new();
-        for input in &plan.inputs {
-            if let super::booleans::SourceOperand::Residual(child) = input {
+        for (child, value) in &plan.inputs {
+            if value.is_none() {
                 residual.push(&source[child.range()]);
             }
         }

@@ -2284,6 +2284,54 @@ mod tests {
     }
 
     #[test]
+    fn a_physical_subscript_retains_its_receiver_and_individual_slice_bounds() {
+        use crate::frontend::SourceOperand::{Checked, Residual};
+
+        let mut prepared = PreparedBody::module(
+            "store",
+            Path::new("store.py"),
+            "good = complete()[key()]\ntarget()[lo():receiver()[begin():(lambda v: v)(hi())]:step()]: int = rhs()\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        fn slice(body: &mut [ast::Stmt]) -> &mut ast::Expr {
+            &mut body[1].as_ann_assign_stmt_mut().unwrap().target
+                .as_subscript_expr_mut().unwrap().slice
+        }
+        fn erase(node: &mut ast::Expr) {
+            *node = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+                range: node.range(),
+                node_index: Default::default(),
+            });
+        }
+
+        let original = prepared.standalone().unwrap().unwrap();
+        let adjacent = &prepared.syntax.as_deref().unwrap()[0].as_assign_stmt().unwrap().value;
+        assert!(prepared.source.statement_sites.expressions.get(adjacent).is_none());
+        let sites = &prepared.source.statement_sites.expressions;
+        let key = slice(prepared.syntax.as_mut().unwrap().to_mut());
+        assert!(matches!(sites.physical(key).unwrap().operands(key, false).collect::<Vec<_>>()
+            .as_slice(), [Checked(_), Residual(_), Checked(_)]));
+        let key = key.as_slice_expr_mut().unwrap();
+        erase(key.lower.as_deref_mut().unwrap());
+        erase(key.step.as_deref_mut().unwrap());
+        let read = key.upper.as_deref_mut().unwrap();
+        assert!(matches!(sites.physical(read).unwrap().operands(read, false).collect::<Vec<_>>()
+            .as_slice(), [Checked(_), Checked(_), Residual(_)]));
+        let read = read.as_subscript_expr_mut().unwrap();
+        erase(&mut read.value);
+        erase(read.slice.as_slice_expr_mut().unwrap().lower.as_deref_mut().unwrap());
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+
+        let key = slice(prepared.syntax.as_mut().unwrap().to_mut()).as_slice_expr_mut().unwrap();
+        let read = key.upper.as_deref_mut().unwrap().as_subscript_expr_mut().unwrap();
+        let residual = read.slice.as_slice_expr_mut().unwrap().upper.as_deref_mut().unwrap();
+        erase(&mut residual.as_call_expr_mut().unwrap().arguments.args[0]);
+        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
     fn a_physical_binary_keeps_its_operation_and_checked_input() {
         use crate::frontend::SourceOperand::{Checked, Residual};
 

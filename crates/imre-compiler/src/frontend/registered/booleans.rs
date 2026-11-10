@@ -52,14 +52,17 @@ pub(crate) enum Selection {
 /// A physical owner supplies any remaining inputs before the checked operation runs.
 pub(crate) struct PhysicalInputs {
     pub(crate) operation: ir::Expr,
-    children: [Option<CheckedChild>; 2],
+    children: Box<[Option<CheckedChild>]>,
+    /// A subscript with an incomplete slice key evaluates its receiver and then
+    /// the individual bounds. Other expressions consume their immediate children.
+    split_slice: bool,
 }
 
 fn site(node: &ast::Expr) -> (TextRange, ast::NodeKind) {
     (node.range(), ast::AnyNodeRef::from(node).kind())
 }
 
-fn direct_inputs<'a>(node: &'a ast::Expr) -> Vec<&'a ast::Expr> {
+fn physical_children(node: &ast::Expr, split_slice: bool) -> Vec<&ast::Expr> {
     #[derive(Default)]
     struct Inputs<'a>(Vec<&'a ast::Expr>);
     impl<'a> Visitor<'a> for Inputs<'a> {
@@ -68,7 +71,13 @@ fn direct_inputs<'a>(node: &'a ast::Expr) -> Vec<&'a ast::Expr> {
         }
     }
     let mut inputs = Inputs::default();
-    visitor::walk_expr(&mut inputs, node);
+    if split_slice {
+        let index = node.as_subscript_expr().expect("prepared subscript");
+        inputs.visit_expr(&index.value);
+        visitor::walk_expr(&mut inputs, &index.slice);
+    } else {
+        visitor::walk_expr(&mut inputs, node);
+    }
     inputs.0
 }
 
@@ -83,7 +92,7 @@ impl PhysicalInputs {
             if let Some(value) = child.as_ref().and_then(|child| child.value(suspended)) {
                 SourceOperand::Checked(Cow::Borrowed(value))
             } else {
-                SourceOperand::Residual(physical.get_or_insert_with(|| direct_inputs(node))[i])
+                SourceOperand::Residual(physical.get_or_insert_with(|| physical_children(node, self.split_slice))[i])
             }
         })
     }
@@ -96,7 +105,14 @@ pub(crate) struct CheckedChild {
 
 impl CheckedChild {
     fn prepare(node: &ast::Expr, source: RegisteredSource<'_>) -> Option<Self> {
-        let ordinary = values::registered_value(node, source);
+        Self::from_ordinary(node, source, values::registered_value(node, source))
+    }
+
+    fn from_ordinary(
+        node: &ast::Expr,
+        source: RegisteredSource<'_>,
+        ordinary: Option<ir::Expr>,
+    ) -> Option<Self> {
         let requires_suspension = ordinary.is_none();
         let value = ordinary.or_else(|| values::suspended_operand(node, source))?;
         Some(Self {
@@ -282,7 +298,11 @@ impl<'a> Visitor<'a> for PhysicalPreparation<'_, '_> {
             return;
         }
         let Some((op, physical)) = values::binary_operands(node) else {
-            visitor::walk_expr(self, node);
+            if let Some(selected) = self.index(node) {
+                self.0.selected.insert(site(node), selected);
+            } else {
+                visitor::walk_expr(self, node);
+            }
             return;
         };
         let inputs = physical.map(|child| CheckedChild::prepare(child, self.1));
@@ -307,11 +327,41 @@ impl<'a> Visitor<'a> for PhysicalPreparation<'_, '_> {
                         ir::Expr::local(0, ir::Type::PythonObject),
                         ir::Expr::local(1, ir::Type::PythonObject),
                     ),
-                    children,
+                    children: Box::new(children),
+                    split_slice: false,
                 }))
             }
         };
         self.0.selected.insert(site(node), selected);
+    }
+}
+
+impl PhysicalPreparation<'_, '_> {
+    fn index(&mut self, node: &ast::Expr) -> Option<Selection> {
+        let checked = match node {
+            ast::Expr::Subscript(index) if index.ctx == ast::ExprContext::Load => {
+                values::registered_value(node, self.1)
+            }
+            ast::Expr::Slice(_) => values::registered_index_key(node, self.1),
+            _ => return None,
+        };
+        if let Some(value) = checked {
+            return Some(Selection::Checked(value));
+        }
+        let index = values::index_operands(node, self.1)?;
+        let mut children = Vec::with_capacity(index.inputs.len());
+        for (child, ordinary) in index.inputs {
+            let checked = CheckedChild::from_ordinary(child, self.1, ordinary);
+            if checked.as_ref().is_none_or(|value| value.requires_suspension) {
+                self.visit_expr(child);
+            }
+            children.push(checked);
+        }
+        Some(Selection::Inputs(Box::new(PhysicalInputs {
+            operation: index.value,
+            children: children.into_boxed_slice(),
+            split_slice: index.split_slice,
+        })))
     }
 }
 

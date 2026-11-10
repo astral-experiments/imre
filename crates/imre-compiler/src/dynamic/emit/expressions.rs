@@ -178,16 +178,6 @@ impl Function<'_, '_> {
             }
         } else if let Some((items, display)) = crate::frontend::display_elements(expr) {
             self.sequence_display(items, display, None, ast_spread, Self::expr)
-        } else if let Some(index) =
-            crate::frontend::index_operands(expr, self.source.registered_source())
-        {
-            let inputs = index
-                .inputs
-                .into_iter()
-                .map(|operand| self.source_operand(operand))
-                .collect::<Vec<_>>();
-            self.frame
-                .registered_with_inputs(&index.value, &inputs, &self.sites)
         } else if let Some(inputs) = self.source.statement_sites.expressions.physical(expr) {
             let handles = inputs.operands(expr, self.native_suspension)
                 .map(|child| self.source_operand(child))
