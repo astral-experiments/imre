@@ -410,14 +410,12 @@ impl<'a> PreparedBody<'a> {
             ..values
         };
         // Annotation providers use the completed lambda sites for this source unit.
-        let mut namespace_annotations = HashMap::new();
         let annotation_operands = crate::frontend::annotation_operands(
             &body,
             private_names.string_annotations,
             values,
             bundled,
             |text, parsed| Self::prepare_annotation(text, parsed, python_optimization),
-            &mut namespace_annotations,
         );
         let mut sites =
             crate::frontend::registered_sites(&body, &private_names, values, &annotation_operands);
@@ -471,7 +469,13 @@ impl<'a> PreparedBody<'a> {
                 .get_mut(start)
                 .expect("registered class scope")
                 .annotations
-                .prepare_body(sites.class_annotations.remove(start).unwrap_or_default());
+                .prepare_body(
+                    &mut sites.class_annotations,
+                    sites
+                        .class_annotation_bindings
+                        .remove(start)
+                        .unwrap_or_default(),
+                );
         }
         let mut thread_entries = HashMap::new();
         for site in sites.functions.into_iter().rev() {
@@ -522,9 +526,17 @@ impl<'a> PreparedBody<'a> {
                 },
             );
         }
+        let annotation_children = annotation_operands
+            .into_iter()
+            .filter_map(|(site, annotation)| match annotation {
+                crate::frontend::PreparedAnnotation::String {
+                    body: Some(body), ..
+                } => Some((site, body)),
+                _ => None,
+            })
+            .collect();
         let source = SourceInfo {
-            annotation_operands,
-            namespace_annotations,
+            annotation_children,
             scopes,
             thread_entries,
             #[cfg(test)]
@@ -645,11 +657,6 @@ impl<'a> PreparedBody<'a> {
             positions: &positions,
         };
         let mut sites = sites::CheckedSites::default();
-        if let Some(entries) = self.source.namespace_annotations.get(&None) {
-            for &site in entries {
-                location.place_annotation_string(frame.output, &mut sites, site);
-            }
-        }
         frame.begin_module(
             self.source.scopes.module_annotations,
             self.source.string_annotations,
@@ -794,11 +801,8 @@ impl PreparedFunction<'_> {
 }
 
 struct SourceInfo<'a> {
-    annotation_operands: HashMap<
-        ruff_text_size::TextSize,
-        crate::frontend::PreparedAnnotation<Box<SourceInfo<'static>>>,
-    >,
-    namespace_annotations: HashMap<Option<ruff_text_size::TextSize>, Vec<ruff_text_size::TextSize>>,
+    annotation_children:
+        HashMap<TextSize, crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>>,
     scopes: crate::frontend::function_scope::ScopeFacts,
     thread_entries: HashMap<ruff_text_size::TextSize, imre_ast::ThreadEntry>,
     lambdas: HashMap<ruff_text_size::TextSize, RegisteredLambda>,
@@ -809,7 +813,7 @@ struct SourceInfo<'a> {
     statement_sites: crate::frontend::StatementSites,
     #[cfg(test)]
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
-    module_annotations: crate::frontend::NamespaceAnnotations,
+    module_annotations: crate::frontend::ModuleAnnotations,
     parameter_annotations: HashMap<ruff_text_size::TextSize, crate::frontend::ParameterAnnotations>,
     function_bodies: HashMap<ruff_text_size::TextSize, PreparedFunction<'a>>,
     class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredClass>,
@@ -995,11 +999,6 @@ impl SourceMap<'_> {
                 let class = &self.scopes.classes[&site];
                 let prepared = &self.class_bodies[&site];
                 frame.class_locals = Some(class.bindings.clone());
-                if let Some(entries) = self.namespace_annotations.get(&start) {
-                    for &site in entries {
-                        self.place_annotation_string(frame.output, &mut sites, site);
-                    }
-                }
                 if frame.output.keep_docstrings
                     && let Some(doc) = prepared.doc.as_deref().or_else(|| {
                         self.docs
@@ -1147,11 +1146,20 @@ mod tests {
             generators: Some(&generators),
             ..source
         };
+        let annotations = crate::frontend::annotation_operands(
+            body,
+            prepared.source.string_annotations,
+            source,
+            prepared.source.bundled,
+            |text, parsed| {
+                PreparedBody::prepare_annotation(text, parsed, prepared.source.python_optimization)
+            },
+        );
         let classes = crate::frontend::registered_sites(
             body,
             &prepared.source.private_names,
             source,
-            &prepared.source.annotation_operands,
+            &annotations,
         )
         .classes;
         let mut suites =
@@ -3506,7 +3514,7 @@ mod tests {
 
     #[test]
     fn decoded_template_annotation_keeps_its_checked_interpolation() {
-        use crate::frontend::{AnnotationBody, AnnotationCode, PreparedAnnotation};
+        use crate::frontend::{AnnotationBody, AnnotationCode};
         use crate::ir::{Builtin, ExprKind};
 
         let prepared = PreparedBody::module(
@@ -3517,13 +3525,9 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let mut sites = prepared.source.annotation_operands.values();
-        let Some(PreparedAnnotation::String {
-            body:
-                Some(AnnotationBody {
-                    code: AnnotationCode { operand: child, .. },
-                    ..
-                }),
+        let mut sites = prepared.source.annotation_children.values();
+        let Some(AnnotationBody {
+            code: AnnotationCode { operand: child, .. },
             ..
         }) = sites.next()
         else {

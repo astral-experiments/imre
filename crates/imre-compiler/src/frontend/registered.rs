@@ -648,7 +648,7 @@ impl DeferredAnnotation {
     }
 
     /// Build one provider in the order its checked fields become visible.
-    fn prepare_body(
+    pub(crate) fn prepare_body(
         fields: impl IntoIterator<Item = (Self, Option<usize>)>,
         (locals, local_names): RegisteredBindings,
     ) -> AnnotationProvider {
@@ -721,27 +721,14 @@ pub(crate) struct ClassHeader {
     pub(crate) decorators: Vec<PhysicalOperand>,
 }
 
-/// Checked field values and private slots belong to one annotation provider.
+/// The module retains its checked fields until its physical marker order is known.
 #[derive(Default)]
-pub(crate) struct NamespaceAnnotations {
+pub(crate) struct ModuleAnnotations {
     fields: HashMap<TextSize, DeferredAnnotation>,
     bindings: RegisteredBindings,
 }
 
-impl NamespaceAnnotations {
-    pub(crate) fn class_body(
-        mut self,
-        sites: impl Iterator<Item = (TextSize, Option<usize>)>,
-    ) -> AnnotationProvider {
-        let fields = sites.map(|(site, index)| {
-            (
-                self.fields.remove(&site).expect("checked class annotation"),
-                index,
-            )
-        });
-        DeferredAnnotation::prepare_body(fields, self.bindings)
-    }
-
+impl ModuleAnnotations {
     /// A finally suite can emit the same marker on several edges. Each occurrence
     /// has its own visible conditional index in the module's annotation function.
     pub(crate) fn module_body(&self, sites: &[TextSize]) -> AnnotationProvider {
@@ -758,8 +745,9 @@ pub(crate) struct RegisteredSites<'a> {
     pub(crate) operations: HashMap<TextRange, Expr>,
     pub(crate) functions: Vec<FunctionSite<'a>>,
     pub(crate) classes: Vec<ClassSite<'a>>,
-    pub(crate) module_annotations: NamespaceAnnotations,
-    pub(crate) class_annotations: HashMap<TextSize, NamespaceAnnotations>,
+    pub(crate) module_annotations: ModuleAnnotations,
+    pub(crate) class_annotations: HashMap<TextSize, DeferredAnnotation>,
+    pub(crate) class_annotation_bindings: HashMap<TextSize, RegisteredBindings>,
     pub(crate) parameter_annotations: HashMap<TextSize, ParameterAnnotations>,
 }
 
@@ -775,7 +763,6 @@ pub(crate) fn registered_sites<'a, R>(
         source: values::RegisteredSource<'s>,
         operands: &'s HashMap<TextSize, PreparedAnnotation<R>>,
         annotations: SourceScope<'s>,
-        fields: HashMap<TextSize, DeferredAnnotation>,
         scope: RegisteredScope,
         in_unprepared_generic: bool,
         function: Option<TextSize>,
@@ -805,21 +792,15 @@ pub(crate) fn registered_sites<'a, R>(
                         self.annotations.sites,
                     );
                     let outer_annotations = std::mem::replace(&mut self.annotations, child);
-                    let outer_fields = std::mem::take(&mut self.fields);
                     let function = self.function.take();
                     walk_stmt(self, stmt);
                     self.function = function;
                     self.scope = outer;
                     let child = std::mem::replace(&mut self.annotations, outer_annotations);
-                    let fields = std::mem::replace(&mut self.fields, outer_fields);
-                    if !fields.is_empty() {
-                        self.output.class_annotations.insert(
-                            class.start(),
-                            NamespaceAnnotations {
-                                fields,
-                                bindings: child.bindings(),
-                            },
-                        );
+                    if !child.locals.is_empty() {
+                        self.output
+                            .class_annotation_bindings
+                            .insert(class.start(), child.bindings());
                     }
                 }
                 ast::Stmt::FunctionDef(def) => {
@@ -894,7 +875,12 @@ pub(crate) fn registered_sites<'a, R>(
                             vec![self.operands[&site].operand(site)],
                         )
                     } else {
-                        self.fields.insert(
+                        let fields = if matches!(self.scope, RegisteredScope::Module) {
+                            &mut self.output.module_annotations.fields
+                        } else {
+                            &mut self.output.class_annotations
+                        };
+                        fields.insert(
                             ann.start(),
                             DeferredAnnotation::new(
                                 name.clone(),
@@ -938,17 +924,13 @@ pub(crate) fn registered_sites<'a, R>(
             &operations,
             &statements,
         ),
-        fields: HashMap::new(),
         scope: RegisteredScope::Module,
         in_unprepared_generic: false,
         function: None,
         output: RegisteredSites::default(),
     };
     sites.visit_body(body);
-    sites.output.module_annotations = NamespaceAnnotations {
-        fields: sites.fields,
-        bindings: sites.annotations.bindings(),
-    };
+    sites.output.module_annotations.bindings = sites.annotations.bindings();
     sites.output
 }
 
@@ -3069,7 +3051,6 @@ mod tests {
             source,
             bundled,
             crate::frontend::annotation_operands::test_annotation_body,
-            &mut HashMap::new(),
         );
         registered_sites(stmts, names, source, &strings)
     }

@@ -137,10 +137,11 @@ pub(crate) use registered::values::{
     push_codepoints,
 };
 pub(crate) use registered::{
-    AnnotationProvider, AssertionSite, CheckedProvider, NamespaceAnnotations, ParameterAnnotations,
-    PhysicalOperand, RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope,
-    RegisteredSuite, SourceEffect, SuitePreparation, ValueStatement, annotation_expression,
-    place_fixed_function, registered_sites, registered_type_alias, registered_type_parameters,
+    AnnotationProvider, AssertionSite, CheckedProvider, DeferredAnnotation, ModuleAnnotations,
+    ParameterAnnotations, PhysicalOperand, RegisteredBindings, RegisteredFunction,
+    RegisteredGenerator, RegisteredLambda, RegisteredScope, RegisteredSuite, SourceEffect,
+    SuitePreparation, ValueStatement, annotation_expression, place_fixed_function,
+    registered_sites, registered_type_alias, registered_type_parameters,
 };
 pub(crate) use registered::{LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion};
 pub(crate) use registered::{

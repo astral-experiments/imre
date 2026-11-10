@@ -4,11 +4,9 @@ use super::super::sites::{
     Declaration, RequiredSite,
 };
 use super::super::{
-    AnnotationScope, Body, DefinitionName, Entry, Function, Output, RegisteredFrame, SourceInfo,
-    SourceMap,
+    AnnotationScope, Body, DefinitionName, Entry, Function, RegisteredFrame, SourceInfo, SourceMap,
 };
 use super::CallableSites;
-use crate::frontend::PreparedAnnotation;
 use crate::frontend::function_scope::NamedFunction;
 use crate::ir::{Expr, Statement};
 use ruff_text_size::{TextRange, TextSize};
@@ -67,45 +65,6 @@ impl<'p> SourceMap<'p> {
             callables.place_site(site);
         }
     }
-
-    pub(in crate::dynamic::emit) fn place_annotation_string(
-        &self,
-        output: &mut Output,
-        sites: &mut CheckedSites,
-        site: ruff_text_size::TextSize,
-    ) {
-        let Some(PreparedAnnotation::String { text, body }) = self.annotation_operands.get(&site)
-        else {
-            return;
-        };
-        if sites.annotation_strings.contains_key(&site) {
-            return;
-        }
-        let code = body.as_ref().map(|body| {
-            let unit = self.unit;
-            let file = output.data(b"<string>");
-            let location = super::super::SourceMap {
-                info: &body.scope,
-                callable_code: Default::default(),
-                unit,
-                positions: &super::super::SourcePositions::new(text, &file),
-            };
-            location.code(
-                output,
-                String::new(),
-                Body::Operand(body.code.range, &body.code.operand, None),
-                false,
-                None,
-            )
-        });
-        sites.annotation_strings.insert(
-            site,
-            AnnotationString {
-                text: text.clone(),
-                code,
-            },
-        );
-    }
 }
 
 impl Function<'_, '_> {
@@ -131,13 +90,39 @@ impl Function<'_, '_> {
 }
 
 impl CallableSites<'_, '_> {
+    fn place_annotation_string(&mut self, site: TextSize) {
+        if self.sites.annotation_strings.contains_key(&site) {
+            return;
+        }
+        let body = &self.source.annotation_children[&site];
+        let text = body.scope.text.as_ref();
+        let file = self.output.data(b"<string>");
+        let location = SourceMap {
+            info: &body.scope,
+            callable_code: Default::default(),
+            unit: self.source.unit,
+            positions: &super::super::SourcePositions::new(text, &file),
+        };
+        let code = location.code(
+            self.output,
+            String::new(),
+            Body::Operand(body.code.range, &body.code.operand, None),
+            false,
+            None,
+        );
+        self.sites.annotation_strings.insert(
+            site,
+            AnnotationString {
+                text: text.to_owned(),
+                code,
+            },
+        );
+    }
+
     pub(in crate::dynamic::emit) fn place_site(&mut self, site: RequiredSite) {
         match site {
             RequiredSite::Lambda(site, scoped) => self.place_checked_lambda(site, scoped),
-            RequiredSite::AnnotationString(site) => {
-                self.source
-                    .place_annotation_string(self.output, self.sites, site);
-            }
+            RequiredSite::AnnotationString(site) => self.place_annotation_string(site),
             RequiredSite::Generator(site) => self.place_generator(site),
             RequiredSite::Alias(site) => {
                 if !self.sites.aliases.contains_key(&site) {
@@ -744,10 +729,7 @@ invalid: 'Child['
         .unwrap();
         let child = |quoted: &str| {
             let site = u32::try_from(source.find(quoted).unwrap()).unwrap().into();
-            let Some(crate::frontend::PreparedAnnotation::String {
-                body: Some(child), ..
-            }) = body.source.annotation_operands.get(&site)
-            else {
+            let Some(child) = body.source.annotation_children.get(&site) else {
                 panic!("missing prepared annotation {quoted}")
             };
             child

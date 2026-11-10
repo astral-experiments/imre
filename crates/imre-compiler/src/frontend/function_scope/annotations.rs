@@ -109,10 +109,21 @@ pub(crate) struct ClassAnnotations {
 
 impl ClassAnnotations {
     /// Compile the lazy provider once its lexical sites and annotation operands are known.
-    pub(crate) fn prepare_body(&mut self, fields: crate::frontend::NamespaceAnnotations) {
+    pub(crate) fn prepare_body(
+        &mut self,
+        fields: &mut HashMap<TextSize, crate::frontend::DeferredAnnotation>,
+        bindings: crate::frontend::RegisteredBindings,
+    ) {
         if !self.sites.is_empty() {
-            let sites = self.sites.iter().map(|site| (site.site, site.index));
-            self.body = Some(Box::new(fields.class_body(sites)));
+            let fields = self.sites.iter().map(|site| {
+                (
+                    fields.remove(&site.site).expect("checked class annotation"),
+                    site.index,
+                )
+            });
+            self.body = Some(Box::new(crate::frontend::DeferredAnnotation::prepare_body(
+                fields, bindings,
+            )));
         }
     }
 
