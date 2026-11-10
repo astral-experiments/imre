@@ -2428,6 +2428,43 @@ mod tests {
     }
 
     #[test]
+    fn physical_raise_retains_its_two_suspending_operands() {
+        use crate::frontend::{PhysicalOperand, SourceEffect, ValueStatement};
+
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            "async def throw_after(error, cause):\n    raise await error() from await cause()\nstate: int\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let def = prepared.syntax.as_ref().unwrap()[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let plan = prepared.source.function_bodies[&def.start()]
+            .suite()
+            .unwrap();
+        let Some(SourceEffect::Value(ValueStatement::Raise, inputs)) =
+            plan.residual.iter().find_map(|run| run.effect.as_ref())
+        else {
+            panic!("expected a physical exception and cause")
+        };
+        assert!(matches!(
+            inputs.as_slice(),
+            [PhysicalOperand::Checked(_), PhysicalOperand::Checked(_)]
+        ));
+        let before = prepared.standalone().unwrap().unwrap();
+        let def = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let raise = def.body[0].as_raise_stmt_mut().unwrap();
+        raise.exc = None;
+        raise.cause = None;
+        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+    }
+
+    #[test]
     fn a_physical_subscript_retains_its_receiver_and_individual_slice_bounds() {
         use crate::frontend::SourceOperand::{Checked, Residual};
 
@@ -2914,7 +2951,7 @@ mod tests {
         let source = concat!(
             "match subject():\n",
             "    case 1 as item if allow(item):\n        keep(item)\n",
-            "    case other:\n        before(other)\n        consume((lambda: x)() async for x in other)\n        after(other)\n",
+            "    case other:\n        before(other)\n        target()[lo():(lambda v: v)(hi()) + more():step()]: int = other\n        after(other)\n",
         );
         let mut prepared = PreparedBody::module(
             "example",
@@ -2931,14 +2968,13 @@ mod tests {
             out.functions
         }
         assert!(
-            prepared
+            !prepared
                 .source
                 .initializer
                 .as_ref()
                 .unwrap()
                 .fully_checked()
         );
-        inject_residual_child_module(&mut prepared);
         let original = emit(&prepared);
         let ast::Stmt::Match(branch) = &mut prepared.syntax.as_mut().unwrap().to_mut()[0] else {
             panic!("expected match")
@@ -3831,12 +3867,11 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let mut prepared = PreparedBody::module(
             "example",
             Path::new("example.py"),
-            "while ready:\n    take(lambda: item)\nelse:\n    finish()\n",
+            "while ready:\n    target()[lo():(lambda v: v)(hi()) + more():step()]: int = item\nelse:\n    finish()\n",
             0,
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        inject_residual_child_module(&mut prepared);
         let plan = prepared.source.initializer.as_ref().unwrap();
         assert!(matches!(
             plan.residual.as_slice(),

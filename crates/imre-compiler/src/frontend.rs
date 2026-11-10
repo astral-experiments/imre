@@ -131,16 +131,15 @@ pub(crate) use registered::type_alias_body;
 #[cfg(test)]
 pub(crate) use registered::values::registered_value;
 pub(crate) use registered::values::{
-    RegisteredSource, ValueStatement, display_elements, literal_replacements,
-    module_literal_replacements, packed_arguments, push_codepoints, registered_argument_at,
-    registered_arguments, value_statement,
+    RegisteredSource, display_elements, literal_replacements, module_literal_replacements,
+    packed_arguments, push_codepoints, registered_argument_at, registered_arguments,
 };
 pub(crate) use registered::{
     AnnotationValue, AssertionSite, DeferredAnnotation, ParameterAnnotations, PhysicalOperand,
     PreparedStrings, RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope,
     RegisteredSites, RegisteredSuite, SourceEffect, SourceRun, StatementSites, SuitePreparation,
-    annotation_expression, attribute_write, registered_sites, registered_type_alias,
-    registered_type_parameters,
+    ValueStatement, annotation_expression, attribute_write, registered_sites,
+    registered_type_alias, registered_type_parameters,
 };
 pub(crate) use registered::{
     LambdaBinding, LambdaDefault, LocalBinding, PreparedTemplate, RegisteredClass,
