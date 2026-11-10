@@ -16,6 +16,7 @@ class Defaults:
     alias = values
     names = {"red", "blue"}
     numbers = {"first": 1}
+    items = (["initial"],)
 
 
 class Inherited(Defaults):
@@ -98,6 +99,9 @@ left = Defaults()
 right = Inherited()
 print(events)
 print(left.values is right.values)
+print(Defaults.items[0][0])
+left.items[0].append("shared")
+print(Defaults.items[0][1], Inherited.items[0][1], right.items[0][1])
 right.values.append(7)
 print(Defaults.alias)
 print(Replaced.alias is Defaults.values)
