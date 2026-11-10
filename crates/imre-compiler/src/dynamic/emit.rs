@@ -3813,10 +3813,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             (
                 include_str!("../../../../tests/fixtures/boxed_threading_tcp_server.py"),
                 "def acquire_on_worker(",
-                ThreadEntry::Parameters {
-                    names: vec!["started".into(), "gate".into()],
-                    lock_only: true,
-                },
+                ThreadEntry::Parameters { lock_only: true },
                 2,
                 "def handle(",
             ),

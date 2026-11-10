@@ -386,11 +386,8 @@ impl CallableSites<'_, '_> {
     ) {
         if let Some(entry) = self.source.thread_entries.get(&site) {
             match entry {
-                imre_ast::ThreadEntry::Parameters { names, lock_only } => {
-                    signature["thread_parameters"] = json!(names);
-                    if *lock_only {
-                        signature["thread_worker_locks"] = json!(names);
-                    }
+                imre_ast::ThreadEntry::Parameters { lock_only } => {
+                    signature["thread_lock_only"] = json!(lock_only);
                 }
                 imre_ast::ThreadEntry::Captured(names) => {
                     signature["thread_captured_locks"] = json!(names);

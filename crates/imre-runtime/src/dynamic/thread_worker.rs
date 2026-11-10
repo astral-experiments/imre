@@ -546,14 +546,14 @@ fn launch(
         let mut update = None;
         let (python, acquire) = match operation {
             Operation::Python(callback) => match callback.load() {
-                Ok((mut worker, function, arguments)) => {
+                Ok((mut worker, call)) => {
                     worker
                         .heap
                         .observe_fault_workers(fault_workers.as_ref().expect("Python worker"));
                     worker.threads.count = Arc::clone(&count);
                     worker.threads.private_context = true;
                     worker.threads.acquire_bound = operand_bound;
-                    (Some((worker, function, arguments)), None)
+                    (Some((worker, call)), None)
                 }
                 Err(error) => {
                     let _ = ready.send(Err(error.to_string()));
@@ -584,8 +584,8 @@ fn launch(
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         let native_id = None;
         if ready.send(Ok((thread_ident(), native_id))).is_ok() {
-            if let Some((mut worker, function, arguments)) = python {
-                if let Err(error) = worker.call(function, arguments, Vec::new()) {
+            if let Some((mut worker, call)) = python {
+                if let Err(error) = call.invoke(&mut worker) {
                     if let Some(label) = detached_label {
                         if error.kind != "SystemExit" {
                             let _ = writeln!(
