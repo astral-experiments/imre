@@ -7,7 +7,7 @@ mod eager;
 mod lambdas;
 pub(crate) use lambdas::RegisteredLambda;
 mod templates;
-pub(crate) use templates::{PreparedStrings, prepare_strings};
+pub(crate) use templates::{PreparedStrings, ResidualField, prepare_strings, template_operands};
 pub(super) mod patterns;
 pub(super) mod type_alias;
 pub(super) mod values;
@@ -1761,7 +1761,13 @@ impl SourceScope<'_> {
     }
 
     fn ordinary_operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
-        let mut value = if let ast::Expr::FString(formatted) = expr {
+        let mut value = if let ast::Expr::TString(template) = expr {
+            self.source.template(
+                template,
+                matches!(self.kind, RegisteredScope::Function { .. }),
+                |child| self.ordinary_operand(child),
+            )?
+        } else if let ast::Expr::FString(formatted) = expr {
             let previous = std::mem::replace(&mut self.in_format, true);
             let value = fstrings::registered_fstring(formatted, self.source, |child| {
                 self.ordinary_operand(child).ok_or(())
@@ -1826,11 +1832,7 @@ impl SourceScope<'_> {
             .ok()??
         };
         if let Some(scope) = &self.comprehension {
-            values::in_namespace(
-                expr,
-                &mut value,
-                Expr::local(scope.slot, Type::PythonObject),
-            );
+            values::in_namespace(&mut value, Expr::local(scope.slot, Type::PythonObject));
         }
         Some(self.source.located(expr, value))
     }
@@ -1939,7 +1941,7 @@ mod tests {
             Some(ast::Expr::FString(_))
         ));
         let source = RegisteredSource {
-            templates: None,
+            template_fields: None,
             lambdas: None,
             text,
             private_names: None,
@@ -2169,7 +2171,7 @@ mod tests {
         let replacements = HashMap::new();
         let imports = imre_ast::module_imports(&stmts);
         let source = RegisteredSource {
-            templates: None,
+            template_fields: None,
             lambdas: None,
             text,
             private_names: Some(&names),
@@ -3336,7 +3338,7 @@ mod tests {
                 .find(|def| def.name.as_str() == name)
                 .unwrap();
             let source = RegisteredSource {
-                templates: None,
+                template_fields: None,
                 lambdas: None,
                 text,
                 private_names: None,

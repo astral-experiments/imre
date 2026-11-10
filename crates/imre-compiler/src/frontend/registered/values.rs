@@ -22,7 +22,7 @@ impl ModuleSource {
     }
     pub(super) fn context<'a>(&'a self, text: &'a str) -> RegisteredSource<'a> {
         RegisteredSource {
-            templates: None,
+            template_fields: None,
             lambdas: None,
             text,
             replacements: &self.replacements,
@@ -38,7 +38,7 @@ pub(crate) struct RegisteredSource<'a> {
     pub(crate) text: &'a str,
     pub(crate) replacements: &'a HashMap<TextRange, Vec<u32>>,
     pub(crate) has_templates: bool,
-    pub(crate) templates: Option<&'a HashMap<TextRange, Expr>>,
+    pub(crate) template_fields: Option<&'a HashMap<TextSize, imre_ast::strings::TemplateFieldText>>,
     pub(crate) lambdas: Option<&'a HashMap<TextSize, RegisteredLambda>>,
     pub(crate) method_imports: &'a BTreeSet<String>,
     pub(crate) private_names: Option<&'a imre_ast::Names>,
@@ -692,12 +692,6 @@ pub(super) fn operation<E>(
             return Ok(Some(name_binding(&name.id)));
         }
         ast::Expr::NumberLiteral(lit) => number_literal(&lit.value, false),
-        ast::Expr::TString(_) => {
-            return Ok(source
-                .templates
-                .and_then(|sites| sites.get(&node.range()))
-                .cloned());
-        }
         ast::Expr::StringLiteral(lit) => {
             return Ok(Some(source.string(lit.value.iter().map(FStringLiteral::Adjacent))));
         }
@@ -803,6 +797,9 @@ impl Region {
             return index_key(node, &mut |child| self.operand(child, source).ok_or(())).ok();
         }
         let value = match node {
+            ast::Expr::TString(template) => {
+                source.template(template, false, |child| self.operand(child, source))?
+            }
             ast::Expr::FString(value) if matches!(self, Self::Suite | Self::Lambda) => {
                 fstrings::registered_fstring(value, source, |child| self.operand(child, source).ok_or(())).ok()?
             }
@@ -877,21 +874,7 @@ pub(crate) fn suspended_operand(node: &ast::Expr, source: RegisteredSource<'_>) 
 }
 
 /// A deferred callable and a name lookup observe the lexical namespace of the display.
-pub(super) fn in_namespace(source: &ast::Expr, value: &mut Expr, namespace: Expr) {
-    if matches!(source, ast::Expr::TString(_)) {
-        // A prepared template reuses its already-lowered interpolation operands.
-        // Their calls and names need the lexical environment at this use site.
-        fn scope_template(value: &mut Expr, namespace: &Expr) {
-            ir::children_mut(value, |child| scope_template(child, namespace));
-            bind_namespace(value, namespace.clone());
-        }
-        scope_template(value, &namespace);
-    } else {
-        bind_namespace(value, namespace);
-    }
-}
-
-fn bind_namespace(value: &mut Expr, namespace: Expr) {
+pub(super) fn in_namespace(value: &mut Expr, namespace: Expr) {
     match &mut value.kind {
         ExprKind::Builtin(Builtin::RegisteredCall(call), args) => {
             args.insert(0, namespace);
@@ -982,7 +965,7 @@ impl Checker<'_> {
                 .collect::<Result<_, _>>()?;
             let mut value = lambda_binding(lambda, defaults);
             if let Some(slot) = self.namespace {
-                in_namespace(node, &mut value, self.local(slot));
+                in_namespace(&mut value, self.local(slot));
             }
             return Ok(Some(source.located(node, value)));
         }
@@ -1045,7 +1028,7 @@ impl Checker<'_> {
             return Ok(None);
         };
         if let Some(slot) = self.namespace {
-            in_namespace(node, &mut value, self.local(slot));
+            in_namespace(&mut value, self.local(slot));
         }
         // Checked locals and exact literals keep their known types in the registered frame.
         value.ty = match &value.kind {
@@ -1090,7 +1073,7 @@ mod tests {
         let parsed = imre_ast::indentation::prepare(text).parse_module().unwrap();
         let imports = imre_ast::module_imports(&parsed.syntax().body);
         let source = RegisteredSource {
-            templates: None,
+            template_fields: None,
             lambdas: None,
             text,
             replacements: &HashMap::new(),
@@ -1152,7 +1135,7 @@ mod tests {
         let text = "obj.emit(value, named=arg)\nf(first=a, *items, **mapping, last=b)\n";
         let parsed = imre_ast::indentation::prepare(text).parse_module().unwrap();
         let source = RegisteredSource {
-            templates: None,
+            template_fields: None,
             lambdas: None,
             text,
             replacements: &HashMap::new(),
@@ -1218,7 +1201,7 @@ mod tests {
         };
         let call = assign.value.as_call_expr().unwrap();
         let source = RegisteredSource {
-            templates: None,
+            template_fields: None,
             lambdas: None,
             text,
             replacements: &HashMap::new(),
@@ -1254,7 +1237,7 @@ mod tests {
                 panic!("expected expression")
             };
             let source = RegisteredSource {
-                templates: None,
+                template_fields: None,
                 lambdas: None,
                 text: &text,
                 replacements: &replacements,
@@ -1288,7 +1271,7 @@ mod tests {
                 panic!("expected expression")
             };
             let source = RegisteredSource {
-                templates: None,
+                template_fields: None,
                 lambdas: None,
                 text,
                 replacements: &replacements,

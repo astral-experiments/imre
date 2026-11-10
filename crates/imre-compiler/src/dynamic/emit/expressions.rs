@@ -54,6 +54,10 @@ impl Function<'_, '_> {
     }
 
     fn registered_region(&mut self, expr: &ast::Expr, condition: bool) -> Option<String> {
+        if let Some(operand) = self.source.strings.templates.get(&expr.range()) {
+            self.prepare_checked_value(&operand.value);
+            return Some(self.frame.prepared_operand(operand, &self.sites, condition));
+        }
         let source = self.source.registered_source();
         let value = if self.native_suspension {
             crate::frontend::suspended_operand(expr, source)
@@ -122,6 +126,21 @@ impl Function<'_, '_> {
     }
 
     fn expr_inner(&mut self, expr: &ast::Expr) -> String {
+        if let Some(operands) = crate::frontend::template_operands(expr) {
+            let Some(plan) = self.source.strings.residual_templates.get(&expr.range()) else {
+                return self.unsupported("t-string expression spelling");
+            };
+            let template = self.frame.begin_template(plan.segments.clone());
+            for (operand, field) in operands.zip(&plan.fields) {
+                let interpolation = match template.field(&mut self.frame, field, &self.sites) {
+                    Ok(interpolation) => interpolation,
+                    Err(reason) => return self.unsupported(reason),
+                };
+                let value = self.expr(operand);
+                interpolation.capture(&mut self.frame, &value);
+            }
+            return template.finish(&mut self.frame);
+        }
         if self.native_suspension
             && let Some((kind, value)) = crate::ir::SuspendValue::operand(expr)
         {
@@ -178,7 +197,6 @@ impl Function<'_, '_> {
                 value
             }
             ast::Expr::Lambda(lambda) => self.source_lambda(lambda),
-            ast::Expr::TString(template) => self.residual_template(template),
             ast::Expr::FString(value) => {
                 let mark = self.temporary_mark();
                 self.unwind_format_operands(&mark, |code| {
@@ -346,43 +364,6 @@ impl Function<'_, '_> {
             }
         }
         unreachable!("a comparison has a final link")
-    }
-
-    /// A residual field keeps its whole template on the original literal-spec path.
-    fn residual_template(&mut self, template: &ast::ExprTString) -> String {
-        let Some(plan) = self
-            .source
-            .strings
-            .residual_templates
-            .get(&template.range())
-        else {
-            return self.unsupported("t-string expression spelling");
-        };
-        let strings = self.emit_string_tuple(plan.segments.clone());
-        let parts = self.op("list", &[]);
-        for (field, spec) in template
-            .value
-            .iter()
-            .flat_map(|t| t.elements.interpolations())
-            .zip(&plan.specs)
-        {
-            let spec = match spec {
-                Ok(value) => self.registered_value(value),
-                Err(reason) => return self.unsupported(reason),
-            };
-            let Some(spelling) = self.source.template_fields.get(&field.start()) else {
-                return self.unsupported("t-string expression spelling");
-            };
-            let value = self.expr(&field.expression);
-            let part = self.interpolation(
-                &value,
-                &spelling.expression,
-                field.conversion.to_char(),
-                &spec,
-            );
-            self.op("append", &[&parts, &part]);
-        }
-        self.op("build_template", &[&strings, &parts])
     }
 
     /// Evaluate the fields and their conversions in source order before joining their text.

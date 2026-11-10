@@ -387,16 +387,22 @@ impl<'a> PreparedBody<'a> {
             ModuleOrigin::Program(bodies) => bodies,
             _ => None,
         };
-        let (syntax, tokens, replacements) = match &input {
+        let (syntax, tokens, replacements, template_fields) = match &input {
             Input::Module(parsed) => (
                 parsed.syntax(),
                 parsed.tokens(),
                 check_parsed_source(path, source, parsed, keep_docstrings)?,
+                Cow::Owned(imre_ast::strings::template_fields(
+                    source,
+                    parsed.tokens(),
+                    parsed.syntax(),
+                )),
             ),
-            Input::Expression(syntax, tokens) => (
+            Input::Expression(syntax, tokens, fields) => (
                 syntax,
                 *tokens,
                 crate::frontend::literal_replacements(source, tokens),
+                Cow::Borrowed(*fields),
             ),
         };
         let docs = if keep_docstrings && name == "collections" && bundled {
@@ -411,7 +417,6 @@ impl<'a> PreparedBody<'a> {
             || tokens
                 .iter()
                 .any(|token| token.kind() == ast::token::TokenKind::FStringStart);
-        let template_fields = imre_ast::strings::template_fields(source, tokens, syntax);
         // CPython starts the module provider at the first statement, excluding its decorators.
         let module_start = syntax
             .body
@@ -441,7 +446,7 @@ impl<'a> PreparedBody<'a> {
             .collect();
         let mut body = match input {
             Input::Module(parsed) => module_source::into_body(parsed),
-            Input::Expression(syntax, _) => syntax.body,
+            Input::Expression(syntax, ..) => syntax.body,
         };
         let method_imports = imre_ast::module_imports(&body);
         let private_names = module_source::lower(path, source, &mut body)?;
@@ -451,17 +456,8 @@ impl<'a> PreparedBody<'a> {
             replacements: &replacements,
             has_templates,
             method_imports: &method_imports,
-            templates: None,
+            template_fields: Some(&template_fields),
             lambdas: None,
-        };
-        let strings = if has_interpolation {
-            crate::frontend::prepare_strings(&body, values, &template_fields)
-        } else {
-            Default::default()
-        };
-        let values = crate::frontend::RegisteredSource {
-            templates: Some(&strings.templates),
-            ..values
         };
         let mut namespace_annotations = HashMap::new();
         let annotation_operands = crate::frontend::annotation_operands(
@@ -509,6 +505,11 @@ impl<'a> PreparedBody<'a> {
         let values = crate::frontend::RegisteredSource {
             lambdas: Some(&lambdas),
             ..values
+        };
+        let strings = if has_interpolation {
+            crate::frontend::prepare_strings(&body, values)
+        } else {
+            Default::default()
         };
         let mut prepare = crate::frontend::SuitePreparation::new(
             &operations,
@@ -573,7 +574,6 @@ impl<'a> PreparedBody<'a> {
             docs,
             has_templates,
             strings,
-            template_fields,
             replacements,
             method_imports,
             barry_as_flufl: imre_ast::future_import(&body, "barry_as_FLUFL"),
@@ -601,20 +601,24 @@ impl<'a> PreparedBody<'a> {
             range: expression.range(),
             body: std::iter::once(stmt).collect(),
         };
+        let fields = imre_ast::strings::template_fields(text, parsed.tokens(), expression);
         let mut prepared = PreparedBody::prepare(
             "",
             Path::new("<string>"),
             Cow::Owned(text.to_owned()),
             python_optimization,
             ModuleOrigin::Program(None),
-            Input::Expression(syntax, parsed.tokens()),
+            Input::Expression(syntax, parsed.tokens(), &fields),
         )?;
         let Some(ast::Stmt::Expr(statement)) = prepared.body.pop() else {
             unreachable!("single decoded expression")
         };
         let code = crate::frontend::AnnotationCode::prepare(
             statement.value,
-            prepared.source.registered_source(),
+            crate::frontend::RegisteredSource {
+                template_fields: Some(&fields),
+                ..prepared.source.registered_source()
+            },
         );
         Ok(crate::frontend::AnnotationBody {
             code,
@@ -682,7 +686,11 @@ impl<'a> PreparedBody<'a> {
 
 enum Input<'a> {
     Module(Cow<'a, ruff_python_parser::Parsed<ast::ModModule>>),
-    Expression(ast::ModModule, &'a ast::token::Tokens),
+    Expression(
+        ast::ModModule,
+        &'a ast::token::Tokens,
+        &'a HashMap<ruff_text_size::TextSize, imre_ast::strings::TemplateFieldText>,
+    ),
 }
 
 enum DefinitionName<'a> {
@@ -818,7 +826,6 @@ struct SourceInfo<'a> {
     docs: Option<crate::modules::doctest::SealedDocs>,
     has_templates: bool,
     strings: crate::frontend::PreparedStrings,
-    template_fields: HashMap<ruff_text_size::TextSize, imre_ast::strings::TemplateFieldText>,
     replacements: HashMap<ruff_text_size::TextRange, Vec<u32>>,
     private_names: imre_ast::Names,
     method_imports: std::collections::BTreeSet<String>,
@@ -833,7 +840,7 @@ impl SourceInfo<'_> {
             text: &self.text,
             replacements: &self.replacements,
             has_templates: self.has_templates,
-            templates: Some(&self.strings.templates),
+            template_fields: None,
             lambdas: Some(&self.lambdas),
             method_imports: &self.method_imports,
             private_names: Some(&self.private_names),
@@ -1402,6 +1409,78 @@ mod tests {
     }
 
     #[test]
+    fn decoded_template_annotation_keeps_its_checked_interpolation() {
+        use crate::frontend::{AnnotationBody, AnnotationCode, PreparedAnnotation};
+        use crate::ir::{Builtin, ExprKind};
+
+        let prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            r#"def example(x: "t'{capture(x)!r:>{width}}'"): pass"#,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let mut sites = prepared.source.annotation_operands.values();
+        let Some(PreparedAnnotation::String {
+            body:
+                Some(AnnotationBody {
+                    code: AnnotationCode::Checked(child),
+                    ..
+                }),
+            ..
+        }) = sites.next()
+        else {
+            panic!("decoded template annotation needs a checked child");
+        };
+        assert!(sites.next().is_none());
+        let mut captures = Vec::new();
+        crate::ir::walk_expressions(&child.function.body, &mut |value| {
+            if let ExprKind::Builtin(
+                Builtin::RegisteredInterpolation {
+                    expression,
+                    conversion,
+                },
+                _,
+            ) = &value.kind
+            {
+                captures.push((expression.as_str(), *conversion));
+            }
+        });
+        assert_eq!(captures, [("capture(x)", Some('r'))]);
+    }
+
+    #[test]
+    fn residual_source_supplies_only_the_interpolation_value() {
+        let path = Path::new("field.py");
+        let original = r#"q = t"left{(v for v in xs)!r:>4}right""#;
+        let mut prepared =
+            PreparedBody::module("field", path, original, 0, ModuleOrigin::Program(None)).unwrap();
+        assert!(prepared.source.strings.templates.is_empty());
+        assert_eq!(prepared.source.strings.residual_templates.len(), 1);
+        let emit = |prepared: &PreparedBody<'_>| {
+            let mut output = Output::default();
+            let file = output.data(b"field.py");
+            prepared.emit(&mut output, 0, &file).unwrap();
+            (output.constants, output.functions)
+        };
+        let expected = emit(&prepared);
+
+        // Keep the original operand and its range. All literal parts, conversions
+        // and format specs used by the frame must already come from preparation.
+        let replace_body = |text| {
+            ruff_python_parser::parse_module(text)
+                .unwrap()
+                .into_syntax()
+                .body
+        };
+        prepared.body = replace_body(r#"q = t"xxxx{(v for v in xs)!s:^9}yyyyy""#);
+        assert_eq!(emit(&prepared), expected);
+        prepared.body = replace_body(r#"q = t"xxxx{(v for v in ys)!s:^9}yyyyy""#);
+        assert_ne!(emit(&prepared), expected);
+    }
+
+    #[test]
     fn prepared_template_emits_after_source_body_is_dropped() {
         let mut prepared = PreparedBody::module(
             "query",
@@ -1423,7 +1502,6 @@ mod tests {
         assert!(prepared.source.strings.literals.is_empty());
         assert!(prepared.source.strings.residual_templates.is_empty());
         prepared.source.strings.templates.clear();
-        prepared.source.template_fields.clear();
 
         let mut output = Output::default();
         let filename = output.data(b"query.py");

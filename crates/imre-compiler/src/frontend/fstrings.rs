@@ -246,7 +246,7 @@ mod tests {
             panic!("expected an f-string");
         };
         let source = RegisteredSource {
-            templates: None,
+            template_fields: None,
             lambdas: None,
             text,
             replacements: &literal_replacements(text, module.parsed.tokens()),

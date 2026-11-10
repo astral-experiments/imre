@@ -8,7 +8,9 @@ pub(crate) mod patterns;
 mod sequences;
 pub(crate) mod sites;
 pub(crate) mod suspension;
-use crate::frontend::{LocalBinding, RegisteredFunction, RegisteredOperand, RegisteredRegion};
+use crate::frontend::{
+    LocalBinding, RegisteredFunction, RegisteredOperand, RegisteredRegion, ResidualField,
+};
 use crate::ir::DisplayKind;
 use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Statement, Type};
 use crate::llvm::body::FunctionBody;
@@ -242,6 +244,55 @@ pub(super) struct ExpressionScope {
     mark: String,
     outer_expression: bool,
     error_targets: (String, String),
+}
+
+/// Live objects under construction at a single template literal.
+pub(crate) struct TemplateBuilder {
+    strings: String,
+    parts: String,
+}
+
+/// The spec is loaded before the physical owner evaluates the interpolation value.
+pub(crate) struct ReadyInterpolation<'a> {
+    template: &'a TemplateBuilder,
+    field: &'a ResidualField,
+    spec: String,
+}
+
+impl ReadyInterpolation<'_> {
+    pub(crate) fn capture(self, frame: &mut RegisteredFrame<'_, '_>, value: &str) {
+        let interpolation = frame.interpolation(
+            value,
+            &self.field.expression,
+            self.field.conversion,
+            &self.spec,
+        );
+        self.template.push(frame, &interpolation);
+    }
+}
+
+impl TemplateBuilder {
+    pub(crate) fn field<'a>(
+        &'a self,
+        frame: &mut RegisteredFrame<'_, '_>,
+        metadata: &'a Result<ResidualField, &'static str>,
+        sites: &CheckedSites,
+    ) -> Result<ReadyInterpolation<'a>, &'static str> {
+        let field = metadata.as_ref().map_err(|&reason| reason)?;
+        Ok(ReadyInterpolation {
+            template: self,
+            field,
+            spec: frame.registered_value(&field.spec, sites),
+        })
+    }
+
+    fn push(&self, frame: &mut RegisteredFrame<'_, '_>, interpolation: &str) {
+        frame.op("append", &[&self.parts, interpolation]);
+    }
+
+    pub(crate) fn finish(self, frame: &mut RegisteredFrame<'_, '_>) -> String {
+        frame.op("build_template", &[&self.strings, &self.parts])
+    }
 }
 
 /// The registered binder owns the scope, argument identities and frame.
@@ -860,13 +911,12 @@ impl Frame<'_, '_, '_> {
                 .lit(4, &[real.to_le_bytes(), imag.to_le_bytes()].concat()),
             (Builtin::RegisteredString(points), []) => self.code.linked_string(points.clone()),
             (Builtin::RegisteredTemplate(segments), fields) => {
-                let strings = self.code.emit_string_tuple(segments.clone());
-                let parts = self.code.op("list", &[]);
+                let template = self.code.begin_template(segments.clone());
                 for field in fields {
                     let part = self.evaluate_handle(field);
-                    self.code.op("append", &[&parts, &part]);
+                    template.push(self.code, &part);
                 }
-                self.code.op("build_template", &[&strings, &parts])
+                template.finish(self.code)
             }
             (
                 Builtin::RegisteredInterpolation {
@@ -1141,8 +1191,15 @@ impl RegisteredFrame<'_, '_> {
         ));
     }
 
+    pub(crate) fn begin_template(&mut self, segments: Vec<Vec<u8>>) -> TemplateBuilder {
+        TemplateBuilder {
+            strings: self.emit_string_tuple(segments),
+            parts: self.op("list", &[]),
+        }
+    }
+
     /// Construct an interpolation from evaluated handles and its constant source spelling.
-    pub(crate) fn interpolation(
+    fn interpolation(
         &mut self,
         value: &str,
         expression: &str,
@@ -1157,7 +1214,7 @@ impl RegisteredFrame<'_, '_> {
         self.op("template_interpolation", &[value, &expression, &metadata])
     }
 
-    pub(crate) fn emit_string_tuple(&mut self, segments: Vec<Vec<u8>>) -> String {
+    fn emit_string_tuple(&mut self, segments: Vec<Vec<u8>>) -> String {
         let slot = self.constant_slot(ir::Constant::Tuple(
             segments.iter().cloned().map(ir::Constant::Text).collect(),
         ));
