@@ -154,6 +154,10 @@ pub(crate) struct RegisteredFunction {
     /// Physical positions for the unchanged fixed operations, in checked node order.
     pub(crate) fixed_sites: Vec<TextRange>,
     /// Descriptor names and token positions for placed fixed-layout field reads.
+    #[expect(
+        clippy::box_collection,
+        reason = "keep the optional field map one word per registered function"
+    )]
     pub(crate) fixed_fields: Option<Box<HashMap<TextRange, FixedField>>>,
     pub(crate) function: ir::Function,
     pub(crate) local_names: HashMap<usize, LocalBinding>,
