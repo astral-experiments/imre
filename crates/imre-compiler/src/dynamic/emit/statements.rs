@@ -172,13 +172,6 @@ impl<'p> Function<'_, 'p> {
         self.frame.restore_checked_slots(enclosing);
     }
 
-    pub(super) fn statements(&mut self, source: &'p [ast::Stmt]) {
-        if let Some(first) = source.first() {
-            let plan = &self.source.nested_bodies[&first.start()];
-            self.checked_runs(plan, |code, run| code.source_run(source, run));
-        }
-    }
-
     pub(super) fn source_run(
         &mut self,
         suite: &'p [ast::Stmt],
