@@ -81,25 +81,12 @@ impl Context {
         Ok(result)
     }
 
-    /// Normalize an explicit raise after the cause is visible on its original instance.
-    fn normalize_raised(&mut self, requested: Id, exception: Id) -> Result<Id> {
-        let Value::Raised(error) = self.heap.get(exception) else {
-            unreachable!("raise requires an exception instance")
-        };
-        let class = if requested == exception {
-            let Some(class) = error.class() else {
-                return Ok(exception);
-            };
-            class
-        } else {
-            requested
-        };
+    /// Normalize against the class selected by raise, even if constructing the cause
+    /// changed the original instance's class.
+    fn normalize_raised(&mut self, class: Id, exception: Id) -> Result<Id> {
+        let actual = self.exact_type(exception)?;
         let metaclass = self.heap.get(class).instance_class();
         let custom_type = metaclass.is_some_and(|meta| self.builtins.get("type") != Some(&meta));
-        if !custom_type && (requested == exception || error.class() == Some(class)) {
-            return Ok(exception);
-        }
-        let actual = self.exact_type(exception)?;
         let accepted = if custom_type {
             self.python_subclass_check(actual, class)?
         } else {
@@ -137,13 +124,24 @@ impl Context {
             if let Ok(note) = self.concat_strings(prefix, args) {
                 let _ = self.add_exception_note(failure, note);
             }
-            let Value::Raised(error) = self.heap.get(failure) else {
-                unreachable!("normalization failure")
-            };
-            let mut error = error.clone();
-            error.tracing().instance = Some(failure);
-            error
+            self.error_from_instance(failure)
         })
+    }
+
+    fn error_from_instance(&self, instance: Id) -> Error {
+        let Value::Raised(error) = self.heap.get(instance) else {
+            unreachable!("expected a normalized exception instance")
+        };
+        let mut error = error.clone();
+        error.tracing().instance = Some(instance);
+        error
+    }
+
+    /// Propagate an already normalized instance with the active exception as context.
+    pub(super) fn raise_normalized(&mut self, instance: Id) -> Result<Id> {
+        let mut error = self.error_from_instance(instance);
+        self.chain_raised_instance(&mut error);
+        Err(error)
     }
 
     /// Check the mapping and its length before evaluating the pattern's key expressions.
@@ -735,35 +733,35 @@ impl Context {
                 if op == "reraise" && a == NONE {
                     return Err(Error::new("RuntimeError", "No active exception to reraise"));
                 }
-                let mut exception = self.instantiate_exception_class(a)?;
+                let exception = self.instantiate_exception_class(a)?;
                 if !matches!(self.heap.get(exception), Value::Raised(_)) {
                     return Err(Error::new(
                         "TypeError",
                         "exceptions must derive from BaseException",
                     ));
                 }
-                if op == "raise" {
-                    if c == TRUE {
-                        let cause = self.instantiate_exception_class(b)?;
-                        if cause != NONE && !matches!(self.heap.get(cause), Value::Raised(_)) {
-                            return Err(Error::new(
-                                "TypeError",
-                                "exception causes must derive from BaseException",
-                            ));
-                        }
-                        self.set_exception_cause(exception, cause)?;
-                    }
-                    exception = self.normalize_raised(a, exception)?;
+                if op == "reraise" {
+                    return Err(self.error_from_instance(exception));
                 }
-                let Value::Raised(error) = self.heap.get(exception) else {
-                    unreachable!("normalized exception instance")
+                let class = if a == exception {
+                    self.exact_type(exception)?
+                } else {
+                    a
                 };
-                let mut error = error.clone();
-                error.tracing().instance = Some(exception);
-                if op == "raise" {
-                    self.chain_raised_instance(&mut error);
+                // The cause constructor can mutate __class__ and collect its old value.
+                self.heap.keep(class);
+                if c == TRUE {
+                    let cause = self.instantiate_exception_class(b)?;
+                    if cause != NONE && !matches!(self.heap.get(cause), Value::Raised(_)) {
+                        return Err(Error::new(
+                            "TypeError",
+                            "exception causes must derive from BaseException",
+                        ));
+                    }
+                    self.set_exception_cause(exception, cause)?;
                 }
-                Err(error)
+                let normalized = self.normalize_raised(class, exception)?;
+                self.raise_normalized(normalized)
             }
             "unsupported" => Err(Error::new("NotImplementedError", self.str_value(a)?)),
             _ => match op.strip_prefix("inplace:") {
