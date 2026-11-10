@@ -3514,14 +3514,19 @@ mod tests {
         let beyond_index = BigInt::from(1) << 160usize;
         for count in [beyond_index.clone(), -beyond_index] {
             let count = Int::new(count);
-            // SAFETY: both operands remain live through the call.
-            assert!(unsafe { imre_list_repeat(&empty, count.0) }.is_null());
-            let (kind, message) = objects::exceptions::take_plain_pending().unwrap();
-            assert_eq!(kind, "OverflowError");
-            assert_eq!(
-                message.unwrap().as_str(),
-                "cannot fit 'int' into an index-sized integer"
-            );
+            // SAFETY: both operands are live. Taking the error transfers its owner.
+            unsafe {
+                assert!(imre_list_repeat(&empty, count.0).is_null());
+                let error = imre_error_take();
+                assert!(!error.is_null());
+                assert_eq!(imre_exception_matches(error, Kind::OverflowError as u32), 1);
+                let message = StrOwner::from_raw(imre_exception_message(error));
+                assert_eq!(
+                    message.as_str(),
+                    "cannot fit 'int' into an index-sized integer"
+                );
+                objects::imre_object_release(error);
+            }
         }
         let count = Int::from(1i64 << 60);
         // SAFETY: the empty list produces an owned empty result; the nonempty
@@ -3532,10 +3537,13 @@ mod tests {
             assert_eq!(imre_list_len(result), Int::from(0).0);
             imre_list_release(result);
             assert!(imre_list_repeat(&elements, count.0).is_null());
+            let error = imre_error_take();
+            assert!(!error.is_null());
+            assert_eq!(imre_exception_matches(error, Kind::MemoryError as u32), 1);
+            let message = StrOwner::from_raw(imre_exception_message(error));
+            assert!(message.is_empty());
+            objects::imre_object_release(error);
         }
-        let (kind, message) = objects::exceptions::take_plain_pending().unwrap();
-        assert_eq!(kind, "MemoryError");
-        assert!(message.is_none());
     }
 
     #[test]

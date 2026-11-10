@@ -117,7 +117,6 @@ mod record_inputs;
 mod records;
 mod regex;
 mod registered;
-mod retained;
 pub(crate) use registered::type_alias::type_alias_body;
 pub(crate) use registered::values::{
     RegisteredSource, ValueStatement, binary_operands, display_elements, lambda_defaults, literal_membership,
@@ -131,7 +130,6 @@ pub(crate) use registered::{
     delete_targets, module_annotations, prepare_templates, registered_index_target,
     registered_sites, registered_type_alias, registered_type_parameters, template_segments,
 };
-pub(crate) use retained::RegisteredNative;
 mod sequences;
 mod shutil;
 mod sign_parameters;
@@ -657,7 +655,7 @@ fn lower_graph(
     mut cache: Option<&mut CallerCache>,
     key_reprs: &mut HashSet<DefinitionId>,
 ) -> StdResult<crate::CheckedProgram, Diagnostic> {
-    graph.native_functions.borrow_mut().clear();
+    graph.clear_registered_functions();
     let types = Types::default();
     typing::collect_sites(graph, &types);
     namedtuples::collect(graph, &types)?;
@@ -941,7 +939,7 @@ fn lower_graph(
             inference.discover_packed_arguments();
         }
     }
-    let registered_parameters = inference.solve(
+    let inference::Solution { registered_parameters, checked_bodies } = inference.solve(
         graph,
         &mut definitions,
         &mut signatures,
@@ -1026,7 +1024,6 @@ fn lower_graph(
     let mut literals = HashMap::new();
     let mut source_checks = registered::SourceChecks::default();
     if needs_registered_entry {
-        graph.clear_registered_functions();
         // A checked body or a real function-value read can establish the registered binding.
         globals.missing_bindings.borrow_mut().extend(
             registered_parameters
@@ -1054,7 +1051,7 @@ fn lower_graph(
             initializations.push(body);
         }
     }
-    if graph.registered_startup && !needs_registered_entry {
+    if graph.registered_startup || needs_registered_entry {
         capture();
     }
     if let Some(cache) = cache.as_deref_mut() {
@@ -1123,29 +1120,16 @@ fn lower_graph(
             }
             continue;
         }
+        // This graph will emit registered frames. Inference already checked this exact
+        // definition with the settled signature; recovery owns its executable checked body.
         if needs_registered_entry
-            && module.is_program_source()
-            && signature.method.is_none()
-            && let Some(original) = module.parsed.syntax().body
-                [callable_definitions[signature.id].statement]
-                .as_function_def_stmt()
+            && checked_bodies.contains(&signature.id)
+            && module.parsed.syntax().body[callable_definitions[signature.id].statement]
+                .as_function_def_stmt() == Some(definition)
+            && graph.registered_functions().get(module_id)
+                .is_some_and(|bodies| bodies.contains_key(&definition.start()))
         {
-            let private = Helpers::new(inference.len());
-            let owner = Checker::new(
-                graph,
-                *module_id,
-                &signatures,
-                &classes,
-                &types,
-                &private,
-                &globals,
-            );
-            let same_body = original == definition;
-            if retained::capture(owner, original, signature, inference.len(), same_body)
-                && same_body
-            {
-                continue;
-            }
+            continue;
         }
         let result = match cache.as_deref_mut() {
             Some(cache) if signature.method.is_none() => cache.body(checker, definition, signature),
@@ -1227,7 +1211,7 @@ fn lower_graph(
                 definition,
                 entry_site: None,
             }));
-            let _ = graph.try_complete_body(module_id, false, || {
+            let _ = graph.try_registered_body(module_id, || {
                 checker.block(&statements).ok().map(drop)
             });
             if let Some((statement, call)) =
@@ -1528,10 +1512,7 @@ fn lower_function(
     signature: &Signature,
     registered_locals: Option<&mut HashMap<usize, registered::LocalBinding>>,
 ) -> BodyResult {
-    debug_assert_eq!(
-        checker.registered.is_some(),
-        registered_locals.is_some() && !checker.native_activation
-    );
+    debug_assert_eq!(checker.registered.is_some(), registered_locals.is_some());
     #[cfg(test)]
     caller_cache::record_lowering(definition.name.as_str());
     let module = &checker.graph.modules[checker.module];
@@ -2725,8 +2706,6 @@ struct Checker<'a> {
     unrepresented: std::cell::RefCell<Option<Failure>>,
     namespace_calls: HashSet<ruff_text_size::TextRange>,
     module_namespace: assignments::ModuleNamespace,
-    /// Keep source checkpoints while lowering the ordinary fixed-layout operations.
-    native_activation: bool,
     /// The actual namespace supplied to Python calls in the current lexical region.
     namespace: Option<usize>,
     namespace_bindings: HashMap<usize, registered::LocalBinding>,
@@ -2812,7 +2791,6 @@ impl<'a> Checker<'a> {
             unrepresented: Default::default(),
             namespace_calls: HashSet::new(),
             module_namespace: Default::default(),
-            native_activation: false,
             namespace: None,
             namespace_bindings: HashMap::new(),
             interactive_names: false,
@@ -5158,7 +5136,7 @@ impl<'a> Checker<'a> {
             {
                 lowered.push(Statement::Assign(*flag, Expr::boolean(true)));
             }
-            if self.registered.is_some() || self.native_activation {
+            if self.registered.is_some() {
                 // Even a pass has a Python frame checkpoint for pending signals and exceptions.
                 body.push(registered::checkpoint(statement));
             } else if !lowered.is_empty() && self.fault_enabled() {

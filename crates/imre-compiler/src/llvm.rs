@@ -341,53 +341,6 @@ pub(crate) fn emit_file(
     Ok((std::mem::take(output.entry_buffer()), prefer_objects))
 }
 
-pub(crate) struct RegisteredCode {
-    pub(crate) symbol: String,
-    pub(crate) definitions: String,
-}
-
-/// Emit the compact, specialized root and its owned helpers with the usual checked LLVM generator.
-/// A registered caller already has a running Python context, so it cannot run a native program initializer.
-pub(crate) fn registered_native(
-    module: &Module,
-    site: usize,
-    sanitize: bool,
-    frame_lists: &[(usize, String)],
-    line_of: impl Fn(ruff_text_size::TextSize) -> usize,
-) -> Result<RegisteredCode, Unsupported> {
-    let ranges = crate::ranges::analyze(module);
-    let mut output = Output::new(&vec![0; module.functions.len()], 1, 0, false);
-    output.registered = Some(site);
-    for (slot, name) in frame_lists {
-        let label = format!("imre_registered_{site}_name_{slot}");
-        output.byte_constant(0, &label, name.as_bytes());
-        output.frame_lists.push((*slot, label, name.len()));
-    }
-    crate::ir::walk_expressions(&module.functions[0].body, &mut |expr| {
-        if let ExprKind::Builtin(Builtin::RegisteredStatement(range, _), _) = &expr.kind {
-            output
-                .statement_lines
-                .insert(range.start(), line_of(range.start()));
-        }
-    });
-    let symbol = output.function_name(0);
-    emit_program(module, &ranges, sanitize, &mut output)?;
-    Ok(RegisteredCode {
-        symbol,
-        definitions: std::mem::take(output.entry_buffer()),
-    })
-}
-
-pub(crate) fn registered_native_prelude() -> String {
-    let mut ir = String::new();
-    write_declarations(&mut ir);
-    ir.push_str("declare void @imre_dyn_native_frame_int_list(ptr, i64, ptr, i64, ptr)\n");
-    ir.push_str(&integer_helpers());
-    ir.push_str(&nullable_pointer_helpers());
-    ir.push_str(BRANCH_WEIGHTS);
-    ir
-}
-
 const BRANCH_WEIGHTS: &str = "\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n!1 = !{!\"branch_weights\", i32 2000, i32 1}\n";
 
 fn emit_program(
@@ -605,8 +558,7 @@ fn emit_program(
         .filter_map(|m| m.repr_method)
         .collect();
     let mut bodies = Vec::with_capacity(module.functions.len() + 1);
-    let entry = emitter.output.registered.is_none().then_some(&module.entry);
-    for (id, function) in module.functions.iter().chain(entry).enumerate() {
+    for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
         let entry = id == module.functions.len();
         emitter.output.current = if entry {
             emitter.output.entry
@@ -618,45 +570,8 @@ fn emit_program(
             emitter.body.reset_names();
         }
         let frame = function_source_frame(module, &repr_methods, id);
-        // Only the source root has a registered frame. Helpers unwind into that root.
-        let frame_lists = std::mem::take(&mut emitter.output.frame_lists);
-        let mut params = emitter.function(function, entry, frame, &borrows[id], &frame_lists)?;
-        if id == 0 && emitter.output.registered.is_some() {
-            let names = "ptr %ctx, i64 %scope, ptr %file";
-            params = if params.is_empty() {
-                names.to_owned()
-            } else {
-                format!("{names}, {params}")
-            };
-        }
+        let params = emitter.function(function, entry, frame, &borrows[id])?;
         bodies.push((params, std::mem::take(&mut emitter.body.code)));
-    }
-    if emitter.output.registered.is_some() {
-        // These resources depend on program startup, static layout tables or object pools.
-        // Keep their existing registered operations until they can share those owners.
-        if !emitter.strings.is_empty()
-            || !module.globals.is_empty()
-            || !module.class_metadata.is_empty()
-            || !emitter.json_schema_roots.is_empty()
-            || !emitter.async_frames.is_empty()
-            || !emitter.async_invoke_frames.is_empty()
-            || !emitter.static_functions.is_empty()
-            || !emitter.callable_uses.is_empty()
-            || !emitter.output.record_types.is_empty()
-            || emitter.output.has_local_helpers()
-            || emitter.uses_sequence_layout
-            || emitter.uses_append_windows
-            || emitter.uses_byte_output_windows
-            || emitter.uses_forward_cursors
-            || emitter.uses_percent_tuple
-            || !extension_modules.is_empty()
-        {
-            return Err(Unsupported(
-                "Imre: retained code requires native module initialization or private helpers",
-            ));
-        }
-        write_function_bodies(emitter.output, module, bodies, sanitize);
-        return Ok(false);
     }
     emitter
         .output
@@ -2246,7 +2161,6 @@ impl Emitter<'_, '_> {
         entry: bool,
         frame: Option<&ir::SourceFrame>,
         borrows: &FunctionBorrows,
-        frame_lists: &[(usize, String, usize)],
     ) -> Result<String, Unsupported> {
         self.uses_regex_positions =
             self.module_reads_regex_positions && regex_positions_may_escape(self.module, function);
@@ -2367,7 +2281,7 @@ impl Emitter<'_, '_> {
             })
             .collect();
         self.directory_slot_count = directory_slots.len();
-        let separate_exits = entry || !directory_slots.is_empty() || !frame_lists.is_empty();
+        let separate_exits = entry || !directory_slots.is_empty();
         self.return_exit = self.label();
         self.body.error_target = if separate_exits {
             self.label()
@@ -2585,13 +2499,6 @@ impl Emitter<'_, '_> {
             let cleanup = self.label();
             self.jump(&cleanup);
             self.start(&self.body.error_target.clone());
-            for (slot, name, len) in frame_lists {
-                let list = self.borrow_slot(*slot);
-                self.line(format!(
-                    "call void @imre_dyn_native_frame_int_list(ptr %ctx, i64 %scope, ptr @{name}, i64 {len}, ptr {})",
-                    list.operand
-                ));
-            }
             self.with_directory_frame(|out, frame| {
                 for &slot in &directory_slots {
                     let value = out.borrow_slot(slot);
@@ -3652,12 +3559,13 @@ impl Emitter<'_, '_> {
                 left.ty,
                 &[left, right],
             ),
-            Binary::Add => {
-                let result = self.body.add_int(&left.operand, &right.operand);
+            Binary::Add | Binary::Multiply => {
+                let result = self
+                    .body
+                    .integer_arithmetic(op, &left.operand, &right.operand);
                 self.owned(result)
             }
             Binary::Subtract => self.call("int_sub", Type::Int, &[left, right]),
-            Binary::Multiply => self.call("int_mul", Type::Int, &[left, right]),
             Binary::Divide => self.call("imre_int_true_divide", Type::Float, &[left, right]),
             Binary::FloorDivide => self.call("int_floordiv", Type::Int, &[left, right]),
             Binary::Modulo => self.call("int_mod", Type::Int, &[left, right]),
@@ -4788,13 +4696,6 @@ impl Emitter<'_, '_> {
             })
             .collect::<Vec<_>>();
         let result = match builtin {
-            Builtin::RegisteredStatement(range, _) if self.output.registered.is_some() => {
-                let line = self.output.statement_lines[&range.start()];
-                self.line(format!("call void @imre_dyn_statement_with_exception(ptr %ctx, ptr null, i64 0, ptr %file, i32 {line}, i64 0)"));
-                let failed = self.instruction("call i1 @imre_dyn_failed(ptr %ctx)");
-                self.check_failed(&failed);
-                none()
-            }
             Builtin::RegisteredImport(_)
             | Builtin::RegisteredSuspend(..)
             | Builtin::RegisteredAssertionFailure { .. }
@@ -11961,32 +11862,6 @@ slow:
 #[cfg(test)]
 mod tests {
     use crate::{CompileOptions, compile};
-
-    #[test]
-    fn registered_code_keeps_the_checked_reduction_and_its_private_helper() {
-        let source = "def total(text: str) -> int:\n    digits = list(map(int, text))\n    return sum([x * (x + 1) for x in digits])\nprint(total(input()))\n";
-        let mut graph = crate::modules::SourceGraph::single(source).unwrap();
-        let (mut module, _) = crate::frontend::lower_with_owners(&mut graph).unwrap();
-        crate::specialize(&mut module).unwrap();
-        let native =
-            super::registered_native(&module, 2, false, &[(1, "digits".into())], |_| 1).unwrap();
-        assert_eq!(native.symbol, "imre_registered_2_0");
-        assert_eq!(
-            native
-                .definitions
-                .matches("call void @imre_dyn_native_frame_int_list(")
-                .count(),
-            1
-        );
-        assert!(native.definitions.contains("call ptr @imre_str_int_list("));
-        assert!(
-            native
-                .definitions
-                .contains("call i64 @imre_registered_2_1(")
-        );
-        assert!(native.definitions.contains("mul nsw i64"));
-        assert!(!native.definitions.contains("@main("));
-    }
 
     #[test]
     fn ascii_membership_shares_only_stable_character_lookups() {

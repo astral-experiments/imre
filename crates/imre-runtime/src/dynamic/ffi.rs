@@ -8,38 +8,6 @@ use super::*;
 
 mod linked_literals;
 
-/// Check that specializing these name loads cannot bypass Python.
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_native_bindings(
-    ctx: *const Context,
-    scope: Id,
-    names: *const u8,
-    len: usize,
-) -> bool {
-    // SAFETY: the registered activation and NUL-separated UTF-8 constant are live for this call.
-    let (ctx, names) = unsafe {
-        (
-            &*ctx,
-            std::str::from_utf8_unchecked(std::slice::from_raw_parts(names, len)),
-        )
-    };
-    ctx.pending.is_none()
-        && crate::objects::exceptions::imre_error_pending() == 0
-        && !crate::objects::exceptions::has_active_native_handler()
-        && crate::objects::exceptions::plain_reserves_ready()
-        // Statement publication may run finalizers, weak callbacks or coroutine warnings.
-        && !ctx.heap.has_weak_values
-        && (!ctx.heap.tracks_finalizers() || ctx.can_skip_finalizer_sweep(0))
-        && !ctx.heap.has_unstarted_coroutines()
-        && ctx.threads.count.load(std::sync::atomic::Ordering::Acquire) == 0
-        && !ctx.heap.allocation_traces.is_tracing()
-        && ctx.signal_handlers.iter().all(|&handler| {
-            !ctx.callable(handler)
-                || ctx.builtins.get("_signal.default_int_handler") == Some(&handler)
-        })
-        && ctx.retained_builtin_bindings(scope, names)
-}
-
 fn flag(v: bool) -> Id {
     if v { TRUE } else { FALSE }
 }
@@ -1736,31 +1704,6 @@ pub(super) unsafe extern "C" fn imre_dyn_exact_int_word(ctx: *const Context, obj
     }
 }
 
-/// Acquire native counted storage for a live exact Unicode string. A null result
-/// leaves the caller free to execute the registered body, including for surrogate
-/// strings, subclasses, allocation tracing or an unavailable temporary allocation.
-///
-/// # Safety
-/// Generated code keeps the handle rooted. A nonnull result owns one release.
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_exact_str_owner(
-    ctx: *const Context,
-    object: Id,
-) -> *const crate::Str {
-    // SAFETY: the caller supplies its active context and a rooted handle.
-    let ctx = unsafe { &*ctx };
-    if ctx.pending.is_some() || ctx.heap.allocation_traces.is_tracing() {
-        return std::ptr::null();
-    }
-    let Value::Str(text) = ctx.heap.get(object) else {
-        return std::ptr::null();
-    };
-    crate::Str::try_new(text.as_str())
-        .ok()
-        .and_then(|text| crate::StrOwner::try_new(text).ok())
-        .map_or(std::ptr::null(), crate::StrOwner::into_raw)
-}
-
 /// Move one owned tagged integer into the active Python heap.
 ///
 /// # Safety
@@ -1771,42 +1714,6 @@ pub(super) unsafe extern "C" fn imre_dyn_take_int(ctx: *mut Context, word: usize
     let ctx = unsafe { &mut *ctx };
     let object = ctx.alloc(Value::Int(crate::Int(word)));
     finish(ctx, Ok(object))
-}
-
-/// Finish a native call returning a newly owned integer. A true result uses
-/// the ordinary registered result and exception check. False leaves an opaque
-/// exception, including its identity, in the native pending slot. The caller
-/// must unwind to its native error continuation without executing the body again.
-///
-/// # Safety
-/// The context is live and the output slot is writable, possibly uninitialized.
-/// `word` is the owned return from the native integer ABI or zero on error.
-/// Input owners remain live until this call completes.
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_finish_native_int(
-    ctx: *mut Context,
-    word: usize,
-    output: *mut Id,
-) -> bool {
-    // SAFETY: the caller supplies its live, exclusively borrowed Context.
-    let ctx = unsafe { &mut *ctx };
-    if crate::objects::exceptions::imre_error_pending() == 0 {
-        // SAFETY: the output slot is writable and the result is an owned integer.
-        unsafe { output.write(imre_dyn_take_int(ctx, word)) };
-        return true;
-    }
-    // SAFETY: even a failed call initializes the generated result slot.
-    unsafe { output.write(NONE) };
-    if word != 0 {
-        drop(crate::Int(word));
-    }
-    let Some((kind, message)) = crate::objects::exceptions::take_plain_pending() else {
-        return false;
-    };
-    let argument = message.map(|text| ctx.text(text.as_str()));
-    let error = ctx.exception(kind, argument.as_slice());
-    finish(ctx, Err(error));
-    true
 }
 
 #[unsafe(no_mangle)]
@@ -3366,84 +3273,6 @@ impl Context {
 mod tests {
     use super::*;
     use std::rc::{Rc, Weak};
-
-    #[test]
-    fn retained_list_allocation_failure_reaches_the_registered_handler() {
-        let mut ctx = new_context(serde_json::json!({"paths": []}), ["imre"]);
-        let list = crate::List::new(vec![
-            crate::Int::small(3).unwrap(),
-            crate::Int::small(7).unwrap(),
-        ]);
-        // The element count fits the native signed bound; the byte request exceeds the
-        // x86-64/AArch64 user address space and fails inside the actual reserve operation.
-        let repeats = crate::Int::small(1_i64 << 55).unwrap();
-        let mut result = std::mem::MaybeUninit::uninit();
-        assert!(crate::objects::exceptions::plain_reserves_ready());
-        // SAFETY: the list and count are rooted and the registered output is writable.
-        unsafe {
-            assert!(crate::imre_list_repeat(&list, repeats.0).is_null());
-            assert!(imre_dyn_finish_native_int(&mut ctx, 1, result.as_mut_ptr()));
-            assert_eq!(result.assume_init(), NONE);
-        }
-        assert_eq!(crate::objects::exceptions::imre_error_pending(), 0);
-        let error = ctx.pending.take().unwrap();
-        assert_eq!(error.kind, "MemoryError");
-        let Value::Tuple(args) = ctx.heap.get(error.args.unwrap()) else {
-            panic!("expected args")
-        };
-        assert!(args.is_empty());
-    }
-
-    #[test]
-    fn native_call_returns_registered_errors_or_retains_opaque_native_owners() {
-        use crate::objects::exceptions as native;
-
-        let mut ctx = new_context(serde_json::json!({"paths": []}), ["imre"]);
-        let text = ctx.text("a native string longer than the inline buffer");
-        let surrogate = ctx.alloc(Value::SurrogateStr(vec![0xd800]));
-        let mut result = std::mem::MaybeUninit::uninit();
-        // SAFETY: the live context roots the two arguments. Each native owner
-        // acquired here is moved once or released with its matching ABI.
-        unsafe {
-            let owned = imre_dyn_exact_str_owner(&ctx, text);
-            assert_eq!(
-                (*owned).as_str(),
-                "a native string longer than the inline buffer"
-            );
-            crate::imre_str_release(owned);
-            assert!(imre_dyn_exact_str_owner(&ctx, surrogate).is_null());
-            assert!(imre_dyn_exact_str_owner(&ctx, TRUE).is_null());
-
-            native::Error::new(native::Kind::ValueError, "digits").raise();
-            assert!(imre_dyn_finish_native_int(&mut ctx, 1, result.as_mut_ptr()));
-            let error = ctx.pending.take().unwrap();
-            assert_eq!(error.kind, "ValueError");
-            let args = ctx.exception_arguments(&error).unwrap();
-            assert!(
-                matches!(args, [id] if matches!(ctx.heap.get(*id), Value::Str(s) if s == "digits"))
-            );
-            assert_eq!(native::imre_error_pending(), 0);
-
-            let code = crate::Int::small(27).unwrap();
-            let exception = native::imre_system_exit_new(2, code.0);
-            native::imre_exception_raise(exception);
-            native::imre_exception_release(exception);
-            assert!(!imre_dyn_finish_native_int(
-                &mut ctx,
-                0,
-                result.as_mut_ptr()
-            ));
-            assert!(ctx.pending.is_none());
-            assert_eq!(native::imre_error_take(), exception);
-            let saved = native::imre_system_exit_code(exception);
-            assert_eq!(native::imre_system_exit_code_kind(saved), 2);
-            let display = native::imre_system_exit_code_text(saved);
-            assert_eq!((*display).as_str(), "27");
-            crate::imre_str_release(display);
-            crate::objects::imre_object_release(saved);
-            native::imre_exception_release(exception);
-        }
-    }
 
     #[test]
     fn native_function_construction_uses_interpreter_builtins_without_mutating_globals() {

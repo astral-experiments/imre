@@ -3118,8 +3118,6 @@ pub(crate) struct SourceGraph {
     pub(crate) filesystem_roots: Box<[PathBuf]>,
     /// The launcher has already selected a registered module initializer.
     pub(crate) registered_startup: bool,
-    pub(crate) native_functions:
-        std::cell::RefCell<HashMap<ModuleId, HashMap<TextSize, crate::frontend::RegisteredNative>>>,
     registered_functions: std::cell::RefCell<HashMap<ModuleId, crate::dynamic::CheckedFunctions>>,
     /// Declaration result for these exact selected files, prior to any object-path re-selection.
     pub(crate) source_contract: Option<Result<(), String>>,
@@ -3168,10 +3166,9 @@ pub(crate) struct SourceGraph {
 impl SourceGraph {
     /// A representation trial must neither discard a Python operation nor change the
     /// admission or diagnostics of the enclosing registered program.
-    pub(crate) fn try_complete_body<T>(
+    pub(crate) fn try_registered_body<T>(
         &self,
         module: ModuleId,
-        selected: bool,
         lower: impl FnOnce() -> Option<T>,
     ) -> Option<T> {
         let diagnostics = self.checked_diagnostic_count(module);
@@ -3187,13 +3184,11 @@ impl SourceGraph {
         let needed_here = self.needs_object_runtime.replace(needs_object);
         let used_constructor = self.has_object_constructor_fallback.replace(constructor);
         let result = result.filter(|_| !deferred_here && !needed_here && !used_constructor);
-        if !selected || result.is_none() {
-            self.check_fallback_calls.set(calls);
-            self.float_components.set(floats);
-            self.set_layout_hint.set(set);
-            self.missing_repr.set(repr);
-            self.checked_diagnostics.borrow_mut()[module].truncate(diagnostics);
-        }
+        self.check_fallback_calls.set(calls);
+        self.float_components.set(floats);
+        self.set_layout_hint.set(set);
+        self.missing_repr.set(repr);
+        self.checked_diagnostics.borrow_mut()[module].truncate(diagnostics);
         result
     }
 
@@ -4859,7 +4854,6 @@ impl<'a> Loader<'a> {
             ),
             has_object_constructor_fallback: Default::default(),
             registered_functions: Default::default(),
-            native_functions: Default::default(),
             registered_startup: false,
             source_contract: None,
             set_layout_hint: std::cell::Cell::new(SetLayoutHint::Available),

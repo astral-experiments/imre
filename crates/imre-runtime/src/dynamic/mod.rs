@@ -57,7 +57,6 @@ mod paramspec;
 mod property;
 mod range;
 mod raw_read_window;
-mod retained_frame;
 #[cfg(unix)]
 mod signal_handlers;
 mod slice;

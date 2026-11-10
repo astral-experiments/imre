@@ -9142,32 +9142,6 @@ impl Context {
         }
     }
 
-    /// Check the free builtin reads assumed by an independently checked module function.
-    /// The same dictionary proof used for annotations declines lookups that can run Python.
-    pub(super) fn retained_builtin_bindings(&self, scope: Id, names: &str) -> bool {
-        let locals = self.scope_data(scope);
-        let Some(globals) = locals.parent else {
-            return false;
-        };
-        if locals.exec_locals.is_some()
-            || locals.exec_globals.is_some()
-            || locals.class_body.is_some()
-            || !locals.closure.cells.is_empty()
-        {
-            return false;
-        }
-        names
-            .split('\0')
-            .filter(|name| !name.is_empty())
-            .all(|name| {
-                !locals.closure.declared.contains(name)
-                    && self.scope_name(scope, name).is_none()
-                    && self.builtins.get(name).is_some_and(|&expected| {
-                        self.module_type_reference(globals, name) == Some(expected)
-                    })
-            })
-    }
-
     /// Read a name or a single member of an ordinary module without running Python.
     fn module_type_reference(&self, scope: Id, reference: &str) -> Option<Id> {
         if reference == "None" {

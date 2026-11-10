@@ -101,8 +101,8 @@ pub(crate) struct Declarations {
     pub(crate) emitted_guarded_lit: bool,
     pub(crate) emitted_guarded_named_op: bool,
     pub(crate) registered_expression: bool,
-    pub(crate) checked_integer_arithmetic: bool,
-    pub(crate) retained_native: bool,
+    pub(crate) checked_integer_add: bool,
+    pub(crate) checked_integer_multiply: bool,
 }
 
 #[derive(Clone, Default)]
@@ -120,6 +120,40 @@ pub(crate) struct Output {
 }
 
 impl Output {
+    pub(crate) fn integer_prelude(&mut self) {
+        use crate::ir::Binary;
+        if !self.declarations.checked_integer_add && !self.declarations.checked_integer_multiply {
+            return;
+        }
+        self.functions.push_str(concat!(
+            "declare i64 @imre_dyn_exact_int_word(ptr, i64)\n",
+            "declare i64 @imre_dyn_take_int(ptr, i64)\n",
+            "declare void @imre_int_retain(i64)\n",
+            "declare void @imre_int_release(i64)\n",
+            "declare i64 @imre_int_binary(i64, i64, i32)\n",
+            "!0 = !{!\"branch_weights\", i32 1, i32 2000}\n",
+            "!1 = !{!\"branch_weights\", i32 2000, i32 1}\n",
+        ));
+        for (used, op, intrinsic) in [
+            (self.declarations.checked_integer_add, Binary::Add, "sadd"),
+            (
+                self.declarations.checked_integer_multiply,
+                Binary::Multiply,
+                "smul",
+            ),
+        ] {
+            if used {
+                writeln!(
+                    self.functions,
+                    "declare {{ i64, i1 }} @llvm.{intrinsic}.with.overflow.i64(i64, i64)"
+                )
+                .unwrap();
+                self.functions
+                    .push_str(&crate::llvm::integer_arithmetic_helper(op));
+            }
+        }
+    }
+
     /// Roll back private code sites when an optional annotation expression cannot be compiled.
     pub(crate) fn try_native_body(
         &mut self,

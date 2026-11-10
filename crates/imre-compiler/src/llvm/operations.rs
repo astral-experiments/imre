@@ -29,7 +29,7 @@ pub(crate) fn call_arguments<C, E, V>(
 }
 
 /// A checked expression keeps the representation selected by its producer.
-/// A guarded integer carries an owned native sum on the exact edge and the
+/// A guarded integer carries an owned integer result on the exact edge and the
 /// original Python protocol result on the other edge. Zero is not an Int word.
 pub(crate) enum CheckedValue {
     Native(Operand, Option<usize>),
@@ -187,13 +187,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         }
     }
 
-    fn declare_int_add(&mut self) {
-        if let Entry::Registered(frame) = &mut self.0 {
-            frame.declare_integer_arithmetic();
-        }
-    }
-
-    fn finish_native_add(&mut self, value: Value) -> CheckedValue {
+    fn finish_integer(&mut self, value: Value) -> CheckedValue {
         match &mut self.0 {
             Entry::Native(emitter) => CheckedValue::owned(emitter.owned(value)),
             Entry::Registered(frame) => CheckedValue::frame_integer(value, frame),
@@ -222,8 +216,15 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         CheckedValue::handle(frame.binary_handles(op, &lhs, &rhs))
     }
 
-    fn add_integers(&mut self, left: &CheckedValue, right: &CheckedValue) -> CheckedValue {
-        self.declare_int_add();
+    fn integer_arithmetic(
+        &mut self,
+        op: Binary,
+        left: &CheckedValue,
+        right: &CheckedValue,
+    ) -> CheckedValue {
+        if let Entry::Registered(frame) = &mut self.0 {
+            frame.declare_integer_arithmetic(op);
+        }
         let (a, check_a) = self.integer_operand(left);
         let (b, check_b) = self.integer_operand(right);
         let out = self.body();
@@ -238,8 +239,8 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             }
         };
         let exact = |code: &mut Self| {
-            let sum = code.body().add_int(&a, &b);
-            code.finish_native_add(sum)
+            let value = code.body().integer_arithmetic(op, &a, &b);
+            code.finish_integer(value)
         };
         let Some(guard) = guard else {
             return exact(self);
@@ -249,9 +250,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             Self::body,
             |code, yes, no| code.body().branch(&guard, yes, no),
             exact,
-            |code| code.python_binary(Binary::Add, left, right),
+            |code| code.python_binary(op, left, right),
         )
-        .expect("guarded addition has a normal result")
+        .expect("guarded integer arithmetic has a normal result")
     }
 
     fn unary_expression(&mut self, op: ObjectUnary, operand: &Expr, expr: &Expr) -> CheckedValue {
@@ -325,11 +326,11 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             return value;
         }
         let (a, b) = (self.operand(left), self.operand(right));
-        let result = if matches!(op, Binary::Add)
+        let result = if matches!(op, Binary::Add | Binary::Multiply)
             && (expr.ty == Type::PythonObject || left.ty == Type::Int && right.ty == Type::Int)
         {
-            if a.use_integer_add(left.ty, &b, right.ty) {
-                self.add_integers(&a, &b)
+            if matches!(op, Binary::Multiply) || a.use_integer_add(left.ty, &b, right.ty) {
+                self.integer_arithmetic(op, &a, &b)
             } else {
                 self.python_binary(op, &a, &b)
             }
