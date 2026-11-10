@@ -1,6 +1,9 @@
 //! Exception handlers entered through a registered Python frame.
 
-use super::{Frame, FrameEmitter, RegisteredFrame, context::Region};
+use super::{
+    Frame, FrameEmitter, RegisteredFrame,
+    context::{Region, RegionEmitter},
+};
 use crate::ir::{ExceptHandler, ExceptionMatcher, Statement};
 use crate::llvm::operations::CheckedBody;
 
@@ -24,24 +27,31 @@ impl RegisteredFrame<'_, '_> {
     }
 }
 
-/// Emit the final suite on the normal and exceptional edges. The protected
-/// caller installs the same final suite for its lexical return and loop exits.
-/// During exceptional cleanup the pending value and enclosing exception can
-/// be replaced by a return, break or continue in the final suite itself.
-pub(crate) fn finalized<'a, 'p, E: FrameEmitter<'a, 'p>>(
+/// Install the prepared suite for abrupt exits and emit it on the normal and error edges.
+pub(crate) fn finalized<'a, 'p, E: RegionEmitter<'a, 'p>>(
     code: &mut E,
-    protected: impl FnOnce(&mut E, &str),
-    mut cleanup: impl FnMut(&mut E, Option<(&str, &str)>),
+    body: E::Finally,
+    protected: impl FnOnce(&mut E),
 ) {
     let failed = code.name("b");
     let done = code.name("b");
     let enclosing = std::mem::replace(&mut code.body.error_target, failed.clone());
-    protected(code, &enclosing);
+    let region = Region::Finally {
+        body,
+        outer: enclosing.clone(),
+        loops: code.loops.len(),
+        caught: code.caught.len(),
+    };
+    code.regions().push(region);
+    protected(code);
+    let Some(Region::Finally { body, .. }) = code.regions().pop() else {
+        unreachable!("active finally region")
+    };
     code.body.error_target = enclosing;
     // Module providers also visit unreachable annotation sites in source order.
     let mut needs_join = code.module_annotation_sites.is_some();
     if !code.body.terminated || needs_join {
-        cleanup(code, None);
+        code.emit_finally(&body);
         needs_join |= !code.body.terminated;
         code.jump(&done);
     }
@@ -51,7 +61,14 @@ pub(crate) fn finalized<'a, 'p, E: FrameEmitter<'a, 'p>>(
     let outer = code.caught.last().cloned().unwrap_or_else(|| "0".into());
     code.live.push(exception.clone());
     code.caught.push(exception.clone());
-    cleanup(code, Some((&exception, &outer)));
+    let pending = Region::Pending {
+        value: exception.clone(),
+        enclosing: Some(outer),
+        outer: code.body.error_target.clone(),
+    };
+    code.regions().push(pending);
+    code.emit_finally(&body);
+    code.regions().pop();
     code.caught.pop();
     code.live.pop();
     if !code.body.terminated {
@@ -63,13 +80,13 @@ pub(crate) fn finalized<'a, 'p, E: FrameEmitter<'a, 'p>>(
 }
 
 /// A named arm clears its binding on fallthrough, handler failure and abrupt
-/// transfer. The caller installs the abrupt-transfer cleanup around its body.
-fn arm<'a, 'p, E: FrameEmitter<'a, 'p>, S, N: AsRef<str>>(
+/// transfer. The binding remains live while the handler body executes.
+fn arm<'a, 'p, E: RegionEmitter<'a, 'p>, S, N: AsRef<str>>(
     code: &mut E,
     exception: &str,
     done: &str,
     describe: impl FnOnce(&mut E) -> (Option<String>, Option<N>, S),
-    emit_suite: impl FnOnce(&mut E, S, Option<(&str, &str)>),
+    emit_suite: impl FnOnce(&mut E, S),
 ) {
     let next = code.name("b");
     let (class, name, body) = describe(code);
@@ -84,7 +101,12 @@ fn arm<'a, 'p, E: FrameEmitter<'a, 'p>, S, N: AsRef<str>>(
         code.bind(name, exception);
         let failed = code.name("b");
         let enclosing = std::mem::replace(&mut code.body.error_target, failed.clone());
-        emit_suite(code, body, Some((name, &enclosing)));
+        code.regions().push(Region::ExceptionName {
+            name: name.into(),
+            outer: enclosing.clone(),
+        });
+        emit_suite(code, body);
+        code.regions().pop();
         code.body.error_target = enclosing;
         if !code.body.terminated {
             code.clear_exception_name(name);
@@ -95,7 +117,7 @@ fn arm<'a, 'p, E: FrameEmitter<'a, 'p>, S, N: AsRef<str>>(
         code.clear_exception_name(name);
         code.raise(&error, None, true);
     } else {
-        emit_suite(code, body, None);
+        emit_suite(code, body);
         code.jump(done);
     }
     code.label(&next);
@@ -109,19 +131,19 @@ pub(crate) fn protected<'a, 'p, 'h, E, H, S, N>(
     otherwise: S,
     is_star: bool,
     mut describe: impl FnMut(&mut E, &'h H) -> (Option<String>, Option<N>, S),
-    mut suite: impl FnMut(&mut E, S, Option<(&str, &str)>),
+    mut suite: impl FnMut(&mut E, S),
 ) where
-    E: FrameEmitter<'a, 'p>,
+    E: RegionEmitter<'a, 'p>,
     N: AsRef<str>,
 {
     if handlers.is_empty() {
-        suite(code, body, None);
+        suite(code, body);
         return;
     }
     let (handler, enclosing) = code.begin_operand_scope();
-    suite(code, body, None);
+    suite(code, body);
     code.body.error_target = enclosing;
-    suite(code, otherwise, None);
+    suite(code, otherwise);
     let (exception, done) = code.enter_handlers(&handler);
     if is_star {
         groups(code, handlers, &exception, &done, describe, suite);
@@ -148,7 +170,7 @@ fn groups<'a, 'p, 'h, F: FrameEmitter<'a, 'p>, H, S, N: AsRef<str>>(
     exc: &str,
     done: &str,
     mut describe: impl FnMut(&mut F, &'h H) -> (Option<String>, Option<N>, S),
-    mut emit_suite: impl FnMut(&mut F, S, Option<(&str, &str)>),
+    mut emit_suite: impl FnMut(&mut F, S),
 ) {
     let raised = code.op("list", &[]);
     code.live.push(raised.clone());
@@ -185,7 +207,7 @@ fn groups<'a, 'p, 'h, F: FrameEmitter<'a, 'p>, H, S, N: AsRef<str>>(
             code.bind(name, &matched);
         }
         let outer = std::mem::replace(&mut code.body.error_target, failed.clone());
-        emit_suite(code, suite, None);
+        emit_suite(code, suite);
         code.body.error_target = outer;
         if !code.body.terminated
             && let Some(name) = name
@@ -279,50 +301,14 @@ impl Frame<'_, '_, '_> {
                         .map(|slot| names.expect("registered scope")[&slot].name.as_str());
                     (class, name, handler.body.as_slice())
                 },
-                |f, body, cleanup| {
-                    if let Some((name, outer)) = cleanup {
-                        f.code.iteration.scopes.push(Region::ExceptionName {
-                            name: name.into(),
-                            outer: outer.into(),
-                        });
-                    }
-                    f.emit_suite(body);
-                    if cleanup.is_some() {
-                        f.leave_scope();
-                    }
-                },
+                |f, body| f.emit_suite(body),
             );
         };
         if finalbody.is_empty() {
             run(self);
             return;
         }
-        finalized(
-            self,
-            |f, outer| {
-                f.code.iteration.scopes.push(Region::Finally {
-                    body: finalbody.into(),
-                    outer: outer.into(),
-                    loops: f.code.loops.len(),
-                    caught: f.code.caught.len(),
-                });
-                run(f);
-                f.leave_scope();
-            },
-            |f, pending| {
-                if let Some((value, enclosing)) = pending {
-                    f.code.iteration.scopes.push(Region::Pending {
-                        value: value.into(),
-                        enclosing: Some(enclosing.into()),
-                        outer: f.code.body.error_target.clone(),
-                    });
-                }
-                f.emit_suite(finalbody);
-                if pending.is_some() {
-                    f.leave_scope();
-                }
-            },
-        );
+        finalized(self, finalbody.into(), run);
     }
 
     pub(super) fn emit_suite(&mut self, suite: &[Statement]) {

@@ -1067,7 +1067,7 @@ struct Function<'a, 'p> {
     declared_globals: std::collections::BTreeSet<String>,
     in_function: bool,
     is_async: bool,
-    exits: Vec<(Cleanup<'p>, String)>,
+    exits: Vec<crate::llvm::registered::context::Region<&'p crate::frontend::RegisteredSuite>>,
 }
 
 /// A prepared suite adds its lexical scope and pending exits to the registered frame.
@@ -1082,22 +1082,6 @@ impl std::ops::DerefMut for Function<'_, '_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.frame
     }
-}
-
-use crate::llvm::registered::context::ContextRegion;
-
-enum Cleanup<'p> {
-    With(ContextRegion),
-    ExceptionName(String),
-    RetainedValue {
-        value: String,
-        enclosing_exception: Option<String>,
-    },
-    Finally {
-        body: &'p crate::frontend::RegisteredSuite,
-        loop_depth: usize,
-        caught_depth: usize,
-    },
 }
 
 impl Function<'_, '_> {

@@ -3,12 +3,12 @@ mod declarations;
 use super::sites::{CheckedSites, CompiledDefinition};
 
 use super::{AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourceMap};
-use crate::llvm::registered::context::{ContextEmitter, ContextRegion};
+use crate::llvm::registered::context::{Region, RegionEmitter};
 use imre_ast::code_flags;
 use ruff_text_size::{TextRange, TextSize};
 use serde_json::json;
 
-use super::{Body, Cleanup, DefinitionName, Entry, Function};
+use super::{Body, DefinitionName, Entry, Function};
 
 /// The enclosing lexical scope and the existing address table used to place checked callables.
 pub(in crate::dynamic::emit) struct CallableSites<'a, 'p> {
@@ -22,16 +22,15 @@ pub(in crate::dynamic::emit) struct CallableSites<'a, 'p> {
     class_locals: Option<&'a crate::frontend::function_scope::ClassBindings>,
 }
 
-impl<'a, 'p> ContextEmitter<'a, 'p> for Function<'a, 'p> {
-    fn push_context(&mut self, exit: ContextRegion, outer: String) {
-        self.exits.push((Cleanup::With(exit), outer));
+impl<'a, 'p> RegionEmitter<'a, 'p> for Function<'a, 'p> {
+    type Finally = &'p crate::frontend::RegisteredSuite;
+
+    fn regions(&mut self) -> &mut Vec<Region<Self::Finally>> {
+        &mut self.exits
     }
 
-    fn pop_context(&mut self) -> (ContextRegion, String) {
-        let Some((Cleanup::With(context), outer)) = self.exits.pop() else {
-            unreachable!("active context region")
-        };
-        (context, outer)
+    fn emit_finally(&mut self, suite: &Self::Finally) {
+        self.physical_suite(suite);
     }
 }
 
@@ -146,7 +145,7 @@ impl<'p> Function<'_, 'p> {
         for (label, value, site) in returns {
             self.label(&label);
             self.current_range = site;
-            self.return_from_scope(value);
+            self.return_from_regions(value);
         }
         self.current_range = range;
         if let Some(label) = resume {
@@ -186,7 +185,7 @@ impl<'p> Function<'_, 'p> {
             SourceEffect::LoopTransfer(range, transfer) => {
                 self.checkpoint(range);
                 self.simple_call = None;
-                self.unwind_loop(transfer, |code, depth| code.run_cleanups(depth, None));
+                self.unwind_loop(transfer);
             }
             SourceEffect::Assertion(site) => self.emit_assertion_inputs(site),
             SourceEffect::Class(site) => self.mixed_class_definition(*site),
@@ -231,7 +230,7 @@ impl<'p> Function<'_, 'p> {
                         || super::permanent::NONE.to_string(),
                         |input| self.physical_operand(input),
                     );
-                    self.return_from_scope(value);
+                    self.return_from_regions(value);
                 }
                 crate::frontend::ValueStatement::Expression => {
                     let value = self.physical_operand(&inputs[0]);
@@ -660,13 +659,11 @@ impl<'p> Function<'_, 'p> {
         };
         let enclosing = self.exits.len();
         self.live.push(cursor.clone());
-        self.exits.push((
-            Cleanup::RetainedValue {
-                value: cursor.clone(),
-                enclosing_exception: None,
-            },
-            self.body.error_target.clone(),
-        ));
+        self.exits.push(Region::Pending {
+            value: cursor.clone(),
+            enclosing: None,
+            outer: self.body.error_target.clone(),
+        });
         let unwind = self.begin_operand_scope();
 
         crate::llvm::operations::loop_region(
@@ -739,16 +736,7 @@ impl<'p> Function<'_, 'p> {
                 });
                 (class, handler.name.as_deref(), &handler.body)
             },
-            |code, body, cleanup| {
-                if let Some((name, outer)) = cleanup {
-                    code.exits
-                        .push((Cleanup::ExceptionName(name.into()), outer.into()));
-                }
-                code.physical_suite(body);
-                if cleanup.is_some() {
-                    code.exits.pop();
-                }
-            },
+            |code, body| code.physical_suite(body),
         );
     }
 
@@ -757,100 +745,8 @@ impl<'p> Function<'_, 'p> {
             self.protected_suite(region);
             return;
         };
-        crate::llvm::registered::handlers::finalized(
-            self,
-            |code, enclosing| {
-                code.exits.push((
-                    Cleanup::Finally {
-                        body: suite,
-                        loop_depth: code.loops.len(),
-                        caught_depth: code.caught.len(),
-                    },
-                    enclosing.into(),
-                ));
-                code.protected_suite(region);
-                code.exits.pop();
-            },
-            |code, pending| {
-                if let Some((value, enclosing)) = pending {
-                    code.exits.push((
-                        Cleanup::RetainedValue {
-                            value: value.into(),
-                            enclosing_exception: Some(enclosing.into()),
-                        },
-                        code.body.error_target.clone(),
-                    ));
-                }
-                code.physical_suite(suite);
-                if pending.is_some() {
-                    code.exits.pop();
-                }
-            },
-        );
-    }
-
-    /// Collect discarded owners while retaining the operands needed after the transfer.
-    pub(super) fn return_from_scope(&mut self, value: String) {
-        self.live.push(value.clone());
-        self.run_cleanups(0, Some(&value));
-        self.live.pop();
-        self.return_value(&value);
-    }
-
-    /// A return, break or continue inside a finally may replace the pending exit.
-    fn run_cleanups(&mut self, depth: usize, pending: Option<&str>) {
-        let mut left = Vec::new();
-        let mut discarded = Vec::new();
-        while self.exits.len() > depth && !self.body.terminated {
-            let region = self.exits.pop().unwrap();
-            let (cleanup, outer) = &region;
-            let previous = std::mem::replace(&mut self.body.error_target, outer.clone());
-            match cleanup {
-                Cleanup::With(context) => self.leave_context(context, &mut discarded),
-                Cleanup::ExceptionName(name) => self.clear_exception_name(name),
-                Cleanup::RetainedValue {
-                    value,
-                    enclosing_exception,
-                } => {
-                    if let Some(caught) = enclosing_exception {
-                        self.op("restore_caught", &[caught]);
-                    }
-                    let slot = self.live.iter().rposition(|live| live == value).unwrap();
-                    discarded.push((slot, self.live.remove(slot)));
-                    self.release_target(None);
-                }
-                Cleanup::Finally {
-                    body,
-                    loop_depth,
-                    caught_depth,
-                } => {
-                    // Loops and handlers entered inside the try do not enclose its finally.
-                    let protected_loops = self.loops.split_off(*loop_depth);
-                    let protected_handlers = self.caught.split_off(*caught_depth);
-                    let pending = pending.filter(|value| *value != "0");
-                    if let Some(value) = pending {
-                        self.exits.push((
-                            Cleanup::RetainedValue {
-                                value: value.into(),
-                                enclosing_exception: None,
-                            },
-                            outer.clone(),
-                        ));
-                    }
-                    self.physical_suite(body);
-                    if pending.is_some() {
-                        self.exits.pop();
-                    }
-                    self.caught.extend(protected_handlers);
-                    self.loops.extend(protected_loops);
-                }
-            }
-            self.body.error_target = previous;
-            left.push(region);
-        }
-        for (slot, value) in discarded.into_iter().rev() {
-            self.live.insert(slot, value);
-        }
-        self.exits.extend(left.into_iter().rev());
+        crate::llvm::registered::handlers::finalized(self, suite, |code| {
+            code.protected_suite(region)
+        });
     }
 }

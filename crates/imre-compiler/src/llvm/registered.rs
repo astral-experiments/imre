@@ -18,7 +18,7 @@ pub(crate) use frame::{AnnotationScope, FrameEmitter, RegisteredFrame, SourcePos
 use sites::CheckedSites;
 
 use crate::llvm::operations::{CheckedBody, CheckedValue, LoopEdges};
-use context::Region;
+use context::{Region, RegionEmitter};
 use std::cell::Cell;
 use std::collections::HashMap;
 
@@ -249,7 +249,7 @@ pub(super) struct IterationState {
     private_slots: Vec<usize>,
     first_slot: usize,
     cursors: HashMap<usize, ir::IterNextKind>,
-    scopes: Vec<Region>,
+    scopes: Vec<Region<std::rc::Rc<[Statement]>>>,
     in_expression: bool,
 }
 
@@ -585,10 +585,6 @@ impl Frame<'_, '_, '_> {
         };
         self.code.keep_operands(&mark, handle, "0");
     }
-    fn load_private(&mut self, slot: usize) -> String {
-        let slot = self.physical_slot(slot);
-        self.code.value(&format!("load i64, ptr %ir_slot{slot}"))
-    }
     /// A nested handler inside the scope keeps its cursor. Only a transfer to
     /// the scope's enclosing error target abandons these physical root words.
     pub(crate) fn unwind_scope(&mut self, clear: &[usize]) {
@@ -609,13 +605,6 @@ impl Frame<'_, '_, '_> {
         }
     }
 
-    pub(super) fn owns_sync_cursor(&self, slots: &[usize]) -> bool {
-        !self.code.iteration.in_expression
-            && slots.iter().any(|slot| {
-                self.code.iteration.cursors.get(slot) == Some(&ir::IterNextKind::Generic)
-            })
-    }
-
     pub(crate) fn enter_scope(&mut self, clear: &[usize]) {
         self.unwind_scope(clear);
         self.code
@@ -626,23 +615,6 @@ impl Frame<'_, '_, '_> {
     pub(crate) fn leave_scope(&mut self) {
         self.code.iteration.scopes.pop();
     }
-    pub(crate) fn clear_slots(&mut self, slots: &[usize]) {
-        for &slot in slots {
-            if self.names.is_some_and(|n| n.contains_key(&slot)) {
-                continue;
-            }
-            if self.code.iteration.cursors.contains_key(&slot) {
-                let old = self.load_private(slot);
-                self.store_private(slot, "0");
-                self.code.op("break_iter", &[&old]);
-            } else {
-                self.store_private(slot, "0");
-            }
-        }
-        if self.owns_sync_cursor(slots) {
-            self.release_target(None);
-        }
-    }
     pub(crate) fn enter_loop(&mut self, edges: &LoopEdges) {
         let depth = self.code.iteration.scopes.len();
         self.push_loop(edges.clone(), depth, depth);
@@ -651,7 +623,7 @@ impl Frame<'_, '_, '_> {
         self.code.loops.pop();
     }
     pub(crate) fn transfer_loop(&mut self, stmt: &Statement) {
-        self.unwind_loop(stmt, |frame, depth| frame.exit_regions(depth, None));
+        self.unwind_loop(stmt);
     }
     pub(crate) fn begin_step(&mut self, mark: &str) {
         self.code.line(&format!(
@@ -797,23 +769,7 @@ impl Frame<'_, '_, '_> {
 
     pub(crate) fn return_result(&mut self, value: CheckedValue) {
         let value = self.materialize(&value);
-        self.code.live.push(value.clone());
-        self.exit_regions(0, Some(&value));
-        self.code.live.pop();
-        if self.code.body.terminated {
-            return;
-        }
-        if self.code.cleanup_returns.is_some() {
-            let label = self.code.name("return_cleanup");
-            self.code.jump(&label);
-            self.code.cleanup_returns.as_mut().unwrap().push((
-                label,
-                value,
-                self.code.current_range,
-            ));
-        } else {
-            self.code.return_value(&value);
-        }
+        self.return_from_regions(value);
     }
 
     pub(crate) fn terminated(&self) -> bool {
@@ -1315,6 +1271,34 @@ impl RegisteredFrame<'_, '_> {
         self.iteration = enclosing.iteration;
     }
 
+    fn load_private(&mut self, slot: usize) -> String {
+        let slot = self.physical_slot(slot);
+        self.value(&format!("load i64, ptr %ir_slot{slot}"))
+    }
+    pub(super) fn owns_sync_cursor(&self, slots: &[usize]) -> bool {
+        !self.iteration.in_expression
+            && slots
+                .iter()
+                .any(|slot| self.iteration.cursors.get(slot) == Some(&ir::IterNextKind::Generic))
+    }
+
+    pub(crate) fn clear_slots(&mut self, slots: &[usize]) {
+        for &slot in slots {
+            if self.iteration.private_slots.binary_search(&slot).is_err() {
+                continue;
+            }
+            if self.iteration.cursors.contains_key(&slot) {
+                let old = self.load_private(slot);
+                self.store_private(slot, "0");
+                self.op("break_iter", &[&old]);
+            } else {
+                self.store_private(slot, "0");
+            }
+        }
+        if self.owns_sync_cursor(slots) {
+            self.release_target(None);
+        }
+    }
     fn physical_slot(&self, slot: usize) -> usize {
         self.iteration.first_slot
             + self
