@@ -905,7 +905,7 @@ impl Context {
         };
         let user_class_or_group = error.class().is_some() || error.group().is_some();
         let class = self.exact_type(object).ok()?;
-        self.class_attr_with_name(class, AttributeName::Text(name))
+        self.instance_class_member(class, name)
             .filter(|&member| user_class_or_group || self.native_data_descriptor(member))
     }
 
@@ -1513,6 +1513,18 @@ impl Context {
         Ok(value)
     }
 
+    fn instance_class_member(&mut self, class: Id, name: &str) -> Option<Id> {
+        // Class scopes also store type.__qualname__. Only a member of a published
+        // type dictionary can supply that name to an instance through its MRO.
+        if name == "__qualname__" {
+            let key = self.heap.code_name(name);
+            return self
+                .class_dictionary_member(class, key)
+                .map(|(_, _, member)| member);
+        }
+        self.class_attr(class, name)
+    }
+
     pub(super) fn instance_attribute(
         &mut self,
         object: Id,
@@ -1520,13 +1532,7 @@ impl Context {
         field: Option<Id>,
         name: &str,
     ) -> Result<Id> {
-        // The class namespace holds type.__qualname__ for native class lookup.
-        // An instance can supply its own value, but cannot inherit that metadata.
-        let member = if name == "__qualname__" {
-            None
-        } else {
-            self.class_attr_with_name(class, AttributeName::Text(name))
-        };
+        let member = self.instance_class_member(class, name);
         self.resolved_instance_attribute(object, class, field, name, member)
     }
 
@@ -3195,7 +3201,7 @@ impl Context {
             if layout.active_slot {
                 return inline.ok_or_else(|| self.missing_attribute(obj, name));
             }
-            let member = self.class_attr_with_name(class, AttributeName::Text(name));
+            let member = self.instance_class_member(class, name);
             if name == "__dict__"
                 && member.is_none()
                 && layout.dictionary
