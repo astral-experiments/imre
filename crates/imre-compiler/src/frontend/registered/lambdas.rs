@@ -149,7 +149,7 @@ impl RegisteredLambda {
             )
         };
         Self {
-            metadata: CallableMetadata::new(
+            metadata: CallableMetadata::lambda(
                 lambda.parameters.as_deref(),
                 scope,
                 code_flags::yields_in_expression(&lambda.body),
@@ -224,7 +224,9 @@ async def factory(seed, rows, mark):
         let child = checked.body.as_ref().unwrap();
         assert!(child.region().private_slots().is_empty() && child.local_names.is_empty());
         assert_eq!(
-            checked.metadata.signature(true, false, 0)["scope_reads"],
+            checked
+                .metadata
+                .signature(imre_ast::code_flags::NESTED, false)["scope_reads"],
             json!(["seed"])
         );
 
@@ -360,7 +362,7 @@ async def factory(seed, rows, mark):
             &FunctionScope::lambda(lambda, false),
             RegisteredScope::Module,
         );
-        assert!(plan.metadata.generator);
+        assert_eq!(plan.metadata.suspension_flags(), code_flags::GENERATOR);
         let checked = plan.body.unwrap();
         assert!(
             checked
@@ -413,7 +415,7 @@ async def factory(seed, rows, mark):
             ..source
         };
         let plan = &sites[&lambda.start()];
-        assert_eq!(plan.metadata.defaults, ["x", "y"]);
+        assert_eq!(plan.metadata.defaults.as_ref(), ["x", "y"]);
         let binding = values::checked_binding(lambda, source).unwrap();
         let ExprKind::Builtin(Builtin::RegisteredLambda(site, false), defaults) = &binding.kind
         else {

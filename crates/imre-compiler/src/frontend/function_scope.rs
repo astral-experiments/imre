@@ -331,10 +331,6 @@ impl FunctionScope {
         )
     }
 
-    pub(crate) fn globals(&self) -> &BTreeSet<String> {
-        &self.names.globals
-    }
-
     pub(crate) fn write_signature(&self, signature: &mut serde_json::Value) {
         let names = &self.names;
         signature["scope_cellvars"] = if names.incomplete {
@@ -356,16 +352,10 @@ impl FunctionScope {
     }
 }
 
-pub(crate) struct NamedFunctionScope {
-    pub(crate) header: NamedFunction,
-    pub(crate) lexical: FunctionScope,
-    pub(crate) suspension_flags: u32,
-}
-
 #[derive(Default)]
 pub(crate) struct ScopeFacts {
     pub(crate) module_annotations: bool,
-    pub(crate) functions: HashMap<TextSize, NamedFunctionScope>,
+    pub(crate) functions: HashMap<TextSize, NamedFunction>,
     pub(crate) lambdas: HashMap<TextSize, FunctionScope>,
     pub(crate) aliases: HashMap<TextSize, FunctionScope>,
     pub(crate) generators: HashMap<TextRange, FunctionScope>,
@@ -377,7 +367,7 @@ pub(crate) struct ScopeFacts {
 
 impl ScopeFacts {
     #[cfg(test)]
-    pub(crate) fn function(&self, def: &ast::StmtFunctionDef) -> &NamedFunctionScope {
+    pub(crate) fn function(&self, def: &ast::StmtFunctionDef) -> &NamedFunction {
         &self.functions[&def
             .decorator_list
             .first()
@@ -438,15 +428,8 @@ impl<'a, A: FnMut(&'a ast::StmtTypeAlias), E: FnMut(&ast::Expr)> Visitor<'a>
                     (true, true) => ASYNC_GENERATOR,
                 };
                 let lexical = FunctionScope::function(def, strings);
-                let header = NamedFunction::prepare(def, self.names, &lexical);
-                self.scopes.functions.insert(
-                    start,
-                    NamedFunctionScope {
-                        lexical,
-                        header,
-                        suspension_flags,
-                    },
-                );
+                let header = NamedFunction::prepare(def, self.names, lexical, suspension_flags);
+                self.scopes.functions.insert(start, header);
                 self.scopes.annotations.function(def, strings);
                 self.scope = Scope::Function;
             }

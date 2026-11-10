@@ -87,7 +87,7 @@ impl SourceMap<'_> {
             self.module_start,
             json!({
                 "posonly": ["format"], "scope_complete": true, "scope_locals_complete": true,
-                "code_flags": self.function_flags(None, false, false),
+                "code_flags": self.function_flags(false, false),
             }),
             "__annotate__".into(),
         );
@@ -447,7 +447,7 @@ impl CallableSites<'_, '_> {
             let nested = self.in_function
                 || type_alias && self.source.type_aliases[&start].parameters.is_some();
             let method = self.method_scope && class_header.is_none() && !type_alias;
-            let flags = self.source.function_flags(None, nested, method);
+            let flags = self.source.function_flags(nested, method);
             signature["code_flags"] = json!(flags | generator_flags);
         }
         if generator.is_some() {
@@ -534,7 +534,7 @@ impl<'p> Function<'_, 'p> {
         };
         let signature = json!({
             "posonly": ["format"], "scope_complete": !plan.incomplete, "scope_reads": plan.reads,
-            "code_flags": self.source.function_flags(None, self.in_function, false),
+            "code_flags": self.source.function_flags(self.in_function, false),
         });
         let scope = AnnotationScope::Class {
             globals: globals.clone(),

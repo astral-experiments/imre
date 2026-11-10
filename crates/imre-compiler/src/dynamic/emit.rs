@@ -445,7 +445,7 @@ impl<'a> PreparedBody<'a> {
         }
         let mut function_bodies = HashMap::new();
         let class_bodies = prepare.class_suites(sites.classes, &class_keywords, |start| {
-            scopes.functions[&start].suspension_flags != 0
+            scopes.functions[&start].metadata.suspension_flags() != 0
         });
         for start in class_bodies.keys() {
             scopes
@@ -468,14 +468,10 @@ impl<'a> PreparedBody<'a> {
             if let Some(entry) = site.thread_entry {
                 thread_entries.insert(start, entry);
             }
-            let scope = scopes
-                .functions
-                .get_mut(&start)
-                .expect("named function scope");
-            scope.header.type_params = site.parameters.unwrap_or_default();
-            if let Some(annotations) = sites.parameter_annotations.get(&scope.header.parameters) {
-                scope.header.integer_sign_parameters = scope
-                    .header
+            let header = scopes.functions.get_mut(&start).expect("named function");
+            header.type_params = site.parameters.unwrap_or_default();
+            if let Some(annotations) = sites.parameter_annotations.get(&header.parameters) {
+                header.integer_sign_parameters = header
                     .metadata
                     .non_variadic_parameter_names()
                     .filter(|name| {
@@ -488,7 +484,7 @@ impl<'a> PreparedBody<'a> {
                     .map(str::to_owned)
                     .collect();
             }
-            let suspended = scope.suspension_flags != 0;
+            let suspended = header.metadata.suspension_flags() != 0;
             let body = if let Some(checked) = program_bodies.and_then(|bodies| bodies.get(&start)) {
                 FunctionBody::Program(checked)
             } else {
@@ -869,9 +865,9 @@ impl SourceInfo<'_> {
 }
 
 impl SourceMap<'_> {
-    fn function_flags(&self, params: Option<&ast::Parameters>, nested: bool, method: bool) -> u32 {
+    fn function_flags(&self, nested: bool, method: bool) -> u32 {
         use imre_ast::code_flags;
-        code_flags::function_flags(params, nested, method) | self.future_flags()
+        code_flags::function_flags(None, nested, method) | self.future_flags()
     }
 
     fn future_flags(&self) -> u32 {
@@ -999,9 +995,7 @@ impl SourceMap<'_> {
                 f.finish_class_annotations(&class.annotations, &class.bindings.globals);
             }
             Body::Suite(suite) => {
-                let globals = self.scopes.functions[&start.expect("function definition")]
-                    .lexical
-                    .globals();
+                let globals = &self.scopes.functions[&start.expect("function definition")].globals;
                 f.declare_globals(globals);
                 f.physical_suite(suite);
             }
@@ -1176,7 +1170,10 @@ mod tests {
         suites.sites.expressions = logicals;
         let initializer = suites.suite(body, RegisteredScope::Module);
         let class_bodies = suites.class_suites(classes, &prepared.source.class_keywords, |start| {
-            prepared.source.scopes.functions[&start].suspension_flags != 0
+            prepared.source.scopes.functions[&start]
+                .metadata
+                .suspension_flags()
+                != 0
         });
         let sites = suites.sites;
         prepared.source.initializer = Some(initializer);
@@ -1450,7 +1447,7 @@ mod tests {
         let mut ordinary = Vec::new();
         let mut annotated = Vec::new();
         for (start, plan) in &prepared.source.function_bodies {
-            let header = &prepared.source.scopes.functions[start].header;
+            let header = &prepared.source.scopes.functions[start];
             let name = header.name.as_str();
             if prepared
                 .source
@@ -1532,10 +1529,7 @@ mod tests {
         let initializer = module.initializer();
         assert!(initializer.fully_checked());
         assert_eq!(
-            module.source.scopes.functions[&site]
-                .header
-                .metadata
-                .defaults,
+            module.source.scopes.functions[&site].metadata.defaults.as_ref(),
             ["rows"]
         );
         let context = module.source.registered_source();
@@ -1599,7 +1593,7 @@ mod tests {
             .unwrap();
         let plan = &prepared.source.function_bodies[&def.start()];
         assert_eq!(
-            prepared.source.scopes.functions[&def.start()].header.name,
+            prepared.source.scopes.functions[&def.start()].name,
             "publish"
         );
         assert!(std::ptr::eq(
@@ -1848,9 +1842,7 @@ mod tests {
         let outer = parsed.syntax().body[0].as_function_def_stmt().unwrap();
         let scoped = outer.body[0].as_function_def_stmt().unwrap();
         assert!(module.source.function_bodies[&scoped.start()].fully_checked());
-        let parameters = &module.source.scopes.functions[&scoped.start()]
-            .header
-            .type_params;
+        let parameters = &module.source.scopes.functions[&scoped.start()].type_params;
         assert_eq!(parameters.len(), 1);
         assert_eq!(parameters[0].name, "T");
     }
@@ -3652,7 +3644,7 @@ mod tests {
             sites::CheckedSites::visit(&body.function.body, &mut |site| required.push(site));
             if i == 0 {
                 assert!(required.is_empty());
-                let header = &module.source.scopes.functions[&def.start()].header;
+                let header = &module.source.scopes.functions[&def.start()];
                 assert_eq!(header.doc.as_deref(), Some("Record the sign."));
                 assert_eq!(header.integer_sign_parameters, ["value"]);
             } else {
@@ -4224,10 +4216,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             node_index: Default::default(),
         }
         .into();
-        assert_eq!(
-            prepared.source.scopes.functions[&site].header.name,
-            "cleanup"
-        );
+        assert_eq!(prepared.source.scopes.functions[&site].name, "cleanup");
         assert!(prepared.standalone().unwrap() == original);
     }
 
@@ -4794,10 +4783,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 if name == "defaults" {
                     let site = def.body[1].start();
                     assert!(prepared.source.function_bodies[&site].fully_checked());
-                    assert_eq!(
-                        prepared.source.scopes.functions[&site].header.name,
-                        "nested"
-                    );
+                    assert_eq!(prepared.source.scopes.functions[&site].name, "nested");
                 }
                 def.body.clear();
             }
