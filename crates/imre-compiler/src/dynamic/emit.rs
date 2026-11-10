@@ -522,41 +522,31 @@ impl<'a> PreparedBody<'a> {
         let class_bodies = prepare.class_suites(&sites.classes);
         if !expression {
             for (start, site) in definition_sites(&body) {
-                match site {
-                    DefinitionSite::Function(def)
-                        if (def.type_params.is_none()
-                            || operations.contains_key(&def.name.range()))
-                            && !program_bodies.is_some_and(|sites| sites.contains_key(&start)) =>
-                    {
-                        let kind = crate::frontend::RegisteredScope::Function {
-                            is_async: def.is_async,
-                        };
-                        // Suspended activations keep their existing whole-body selection.
-                        if def.is_async || imre_ast::code_flags::is_generator(&def.body) {
-                            if let Some(suite) = prepare.complete(&def.body, kind) {
-                                function_bodies.insert(start, suite);
-                            }
-                        } else {
-                            function_bodies.insert(start, prepare.suite(&def.body, kind));
-                        }
-                    }
-                    _ => {}
+                let DefinitionSite::Function { def, in_generic } = site else {
+                    continue;
+                };
+                if program_bodies.is_some_and(|sites| sites.contains_key(&start)) {
+                    continue;
+                }
+                let kind = crate::frontend::RegisteredScope::Function {
+                    is_async: def.is_async,
+                };
+                let plan = if (in_generic || def.type_params.is_some())
+                    && !operations.contains_key(&def.name.range())
+                {
+                    None
+                } else if def.is_async || imre_ast::code_flags::is_generator(&def.body) {
+                    prepare.complete(&def.body, kind)
+                } else {
+                    Some(prepare.suite(&def.body, kind))
+                };
+                if let Some(plan) = plan {
+                    function_bodies.insert(start, plan);
+                } else {
+                    prepare.physical_body(&def.body, kind);
                 }
             }
         }
-        // Physical frames without a prepared suite can still emit a complete deletion.
-        // Its operands resolve names against the active Python frame.
-        let checked_deletions = sites
-            .deletions
-            .into_iter()
-            .filter_map(|stmt| {
-                let suite = prepare.complete(
-                    std::slice::from_ref(stmt),
-                    crate::frontend::RegisteredScope::Module,
-                )?;
-                Some((stmt.range(), suite.checked))
-            })
-            .collect();
         let mut thread_entries = HashMap::new();
         for (def, entry) in sites.workers {
             let start = def.start();
@@ -576,7 +566,6 @@ impl<'a> PreparedBody<'a> {
             namespace_annotations,
             scopes,
             thread_entries,
-            checked_deletions,
             logicals,
             statement_sites: prepare.sites,
             python_optimization,
@@ -756,7 +745,10 @@ enum Entry {
 
 #[derive(Clone, Copy)]
 enum DefinitionSite<'a> {
-    Function(&'a ast::StmtFunctionDef),
+    Function {
+        def: &'a ast::StmtFunctionDef,
+        in_generic: bool,
+    },
     Class(&'a ast::StmtClassDef),
 }
 
@@ -766,19 +758,27 @@ fn definition_sites(body: &[ast::Stmt]) -> HashMap<ruff_text_size::TextSize, Def
     use ast::statement_visitor::{StatementVisitor, walk_stmt};
 
     #[derive(Default)]
-    struct Sites<'a>(HashMap<ruff_text_size::TextSize, DefinitionSite<'a>>);
+    struct Sites<'a> {
+        definitions: HashMap<ruff_text_size::TextSize, DefinitionSite<'a>>,
+        in_generic: bool,
+    }
 
     impl<'a> StatementVisitor<'a> for Sites<'a> {
         fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
             match stmt {
                 ast::Stmt::FunctionDef(def) => {
-                    self.0.insert(def.start(), DefinitionSite::Function(def));
-                    if def.type_params.is_none() {
-                        self.visit_body(&def.body);
-                    }
+                    let in_generic = self.in_generic;
+                    self.definitions
+                        .insert(def.start(), DefinitionSite::Function { def, in_generic });
+                    // Declarations inside a generic function still need their definition sites
+                    // when a nested class prepares its own namespace.
+                    self.in_generic |= def.type_params.is_some();
+                    self.visit_body(&def.body);
+                    self.in_generic = in_generic;
                 }
                 ast::Stmt::ClassDef(class) => {
-                    self.0.insert(class.start(), DefinitionSite::Class(class));
+                    self.definitions
+                        .insert(class.start(), DefinitionSite::Class(class));
                     self.visit_body(&class.body);
                 }
                 _ => walk_stmt(self, stmt),
@@ -787,7 +787,7 @@ fn definition_sites(body: &[ast::Stmt]) -> HashMap<ruff_text_size::TextSize, Def
     }
     let mut sites = Sites::default();
     sites.visit_body(body);
-    sites.0
+    sites.definitions
 }
 
 struct SourceMap<'a> {
@@ -832,7 +832,6 @@ struct SourceInfo<'a> {
     type_aliases: HashMap<ruff_text_size::TextSize, TypeAliasDefinition>,
     python_optimization: i32,
     statement_sites: crate::frontend::StatementSites,
-    checked_deletions: HashMap<ruff_text_size::TextRange, crate::frontend::RegisteredFunction>,
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
     annotations: HashMap<ruff_text_size::TextSize, crate::frontend::DeferredAnnotation>,
     nested_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
@@ -983,7 +982,6 @@ impl SourceMap<'_> {
         };
         let mut f = Function {
             sites: sites::CheckedSites::default(),
-            prepare_nested_suites: prepared.is_some_and(|plan| !plan.fully_checked()),
             frame,
             source: self,
             in_function,
@@ -1097,7 +1095,6 @@ impl SourceMap<'_> {
 
 struct Function<'a, 'p> {
     sites: sites::CheckedSites,
-    prepare_nested_suites: bool,
     frame: RegisteredFrame<'a, 'p>,
     source: &'p SourceMap<'p>,
     prefix: String,
@@ -1999,6 +1996,56 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
     }
 
     #[test]
+    fn annotated_class_interleaves_checked_targets_with_physical_statements() {
+        let source = concat!(
+            "def outer[T]():\n",
+            "    class Example:\n",
+            "        member: int\n",
+            "        receiver().field = [item.copy() for item in items]\n",
+            "        receiver().field = (item for item in items)\n",
+            "        del receiver().field\n",
+            "        def read(self): return self.member\n",
+            "    return Example\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let outer = prepared.body[0].as_function_def_stmt().unwrap();
+        let class = outer.body[0].as_class_def_stmt().unwrap();
+        assert!(!prepared.source.function_bodies.contains_key(&outer.start()));
+        let suite = &prepared.source.class_bodies[&class.start()];
+        assert!(
+            !prepared
+                .source
+                .nested_bodies
+                .contains_key(&class.body[0].start())
+        );
+        crate::verify::registered(suite.checked.region()).unwrap();
+        assert!(!suite.checked.region().private_slots().is_empty());
+        assert_eq!(suite.residual.len(), 1);
+        assert_eq!(suite.residual[0].statements, 2..3);
+
+        let emit = |prepared: &PreparedBody<'_>| {
+            let mut output = Output::default();
+            let file = output.data(b"example.py");
+            prepared.emit(&mut output, 0, &file).unwrap();
+            (output.functions, output.constants)
+        };
+        let before = emit(&prepared);
+        let outer = prepared.body[0].as_function_def_stmt_mut().unwrap();
+        let class = outer.body[0].as_class_def_stmt_mut().unwrap();
+        let store = class.body[1].as_assign_stmt_mut().unwrap();
+        let target = store.targets[0].as_attribute_expr_mut().unwrap();
+        std::mem::swap(&mut target.value, &mut store.value);
+        assert_eq!(emit(&prepared), before);
+    }
+
+    #[test]
     fn physical_deletion_uses_the_complete_checked_statement_after_targets_are_dropped() {
         let source = concat!(
             "del first, [(owner := obj).field, obj[lo:hi]], obj[[key for key in keys if key]], last\n",
@@ -2016,23 +2063,14 @@ second = t'{client.lookup(*args)}{(v for v in values)}'",
         let rejected = prepared.body[1].range();
         assert_eq!(&source[admitted], source.lines().next().unwrap());
         assert_eq!(&source[rejected], source.lines().nth(1).unwrap());
-        let sites = &prepared.source.checked_deletions;
-        assert_eq!(sites.len(), 1);
-        assert!(!sites.contains_key(&rejected));
-        let checked = &sites[&admitted];
-        crate::verify::registered(checked.region()).unwrap();
-
-        let initializer = prepared.source.initializer.take().unwrap();
-        let [gap] = initializer.residual.as_slice() else {
+        let suite = prepared.source.initializer.as_ref().unwrap();
+        crate::verify::registered(suite.checked.region()).unwrap();
+        let [gap] = suite.residual.as_slice() else {
             panic!("expected the second deletion to remain physical");
         };
         assert_eq!(gap.statements, 1..2);
-        assert_eq!(gap.at, checked.function.body.len());
-        assert_eq!(gap.at, initializer.checked.function.body.len());
-        assert_eq!(initializer.checked.local_names, checked.local_names);
+        assert_eq!(gap.at, suite.checked.function.body.len());
 
-        // Leave just the physical statement selector; the saved plan owns all its effects.
-        prepared.body.truncate(1);
         let emit = |prepared: &PreparedBody<'_>| {
             let mut output = Output::default();
             let file = output.data(b"remove.py");

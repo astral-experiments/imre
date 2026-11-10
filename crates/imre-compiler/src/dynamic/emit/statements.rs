@@ -118,11 +118,11 @@ impl Function<'_, '_> {
     }
 
     pub(super) fn statements(&mut self, suite: &[ast::Stmt]) {
-        if self.prepare_nested_suites {
-            if let Some(first) = suite.first() {
-                let plan = &self.source.nested_bodies[&first.start()];
-                self.checked_runs(plan, |code, run| code.source_statements(&suite[run]));
-            }
+        if let Some(plan) = suite
+            .first()
+            .and_then(|s| self.source.nested_bodies.get(&s.start()))
+        {
+            self.checked_runs(plan, |code, run| code.source_statements(&suite[run]));
         } else {
             self.source_statements(suite);
         }
@@ -198,19 +198,6 @@ impl Function<'_, '_> {
         for stmt in suite {
             if !self.start_statement() {
                 break;
-            }
-            if let Some(statements) = self.source.statement_sites.assertions.get(&stmt.range()) {
-                for statement in statements {
-                    self.checked_statement(statement);
-                }
-                continue;
-            }
-            if let Some(checked) = self.source.checked_deletions.get(&stmt.range()) {
-                if let Some(enclosing) = self.frame.enter_checked_slots(checked.region()) {
-                    self.checked_block(&checked.function.body, checked);
-                    self.frame.restore_checked_slots(enclosing);
-                }
-                continue;
             }
             let position = stmt
                 .as_assert_stmt()
