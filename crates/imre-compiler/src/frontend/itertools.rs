@@ -488,11 +488,13 @@ impl Checker<'_> {
             return Ok(self.open_string_io(cursor));
         }
         if cursor.ty != Type::CsvReader && self.types.cursor_element(cursor.ty).is_none() {
-            return Err(error(
-                self.source,
-                call,
-                "iter requires a supported iterator",
-            ));
+            // A deque can be iterated, but its native cursor cannot escape a consumer.
+            let kind = if matches!(cursor.ty, Type::Deque(_)) {
+                Kind::UnsupportedRepresentation
+            } else {
+                Kind::Ordinary
+            };
+            return Err(self.classified_error(kind, call, "iter requires a supported iterator"));
         }
         Ok(cursor)
     }

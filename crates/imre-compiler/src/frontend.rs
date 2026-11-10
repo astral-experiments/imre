@@ -13529,6 +13529,23 @@ mod tests {
     }
 
     #[test]
+    fn a_deque_iterator_still_checks_later_operands() {
+        let mut graph = crate::modules::SourceGraph::single(concat!(
+            "from collections import deque\n",
+            "queue = deque([1])\n",
+            "insert = queue.insert\n",
+            "cursor = iter(queue)\n",
+            "required: int = 'bad'\n",
+        ))
+        .unwrap();
+        let error = super::lower_with_caller_cache(&mut graph, None)
+            .err()
+            .expect("expected the later annotation to fail");
+        assert_eq!(error.kind, super::Kind::ExactType);
+        assert!(error.to_string().contains(":5:17:"), "{error}");
+    }
+
+    #[test]
     fn fractions_use_python_numeric_equality() {
         use crate::modules::SourceGraph;
         let source = "from fractions import Fraction\nprint(Fraction(3, 6) == Fraction(1, 2))\n";
