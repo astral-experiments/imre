@@ -1,7 +1,8 @@
-//! Joinable OS threads for work that can execute independently of the boxed heap.
+//! Native worker startup and creator-heap ownership for joinable and detached calls.
 
 use super::lowlevel_threads::Running;
 use super::thread_callback::Callback;
+use super::value::Heap;
 use std::io::Write;
 use std::sync::{
     Arc, Condvar, Mutex, MutexGuard, Weak,
@@ -227,13 +228,17 @@ impl Handle {
     }
 }
 
-struct Entry {
+struct RegisteredThread {
     handle: Arc<Handle>,
     daemon: bool,
     owner: Option<Id>,
-    ident: usize,
+}
+
+struct Entry {
     active: Arc<AtomicBool>,
     operands: Vec<Id>,
+    // A low-level detached call has neither a threading.Thread nor a join handle here.
+    thread: Option<RegisteredThread>,
 }
 
 #[derive(Default)]
@@ -353,77 +358,110 @@ impl Context {
         }
     }
 
-    /// The worker owns no parent-heap pointers. Complete the default Thread.run
-    /// cleanup on the interpreter thread, also for a finished but unjoined worker.
     pub(super) fn reap_thread_operands(&mut self) {
-        for index in 0..self.workers.entries.len() {
-            let entry = &self.workers.entries[index];
-            let Some(owner) = entry.owner else { continue };
-            if entry.active.load(Ordering::Acquire) {
-                continue;
+        self.workers
+            .reap_where(&mut self.heap, |entry| entry.thread.is_some());
+    }
+}
+
+impl RegisteredThread {
+    /// Complete default Thread.run cleanup on the creator heap before releasing its bound operands.
+    fn release_owner(&mut self, heap: &mut Heap) -> bool {
+        let Some(owner) = self.owner else { return true };
+        for name in ["_target", "_args", "_kwargs"] {
+            let Value::Instance {
+                fields, namespace, ..
+            } = heap.get_mut(owner)
+            else {
+                unreachable!("a registered Thread owns its original instance")
+            };
+            let namespace = *namespace;
+            if let Some(value) = fields.shift_remove(name) {
+                heap.weak_edge_removed(value);
             }
-            let mut done = true;
-            for name in ["_target", "_args", "_kwargs"] {
-                let Value::Instance { fields, .. } = self.heap.get_mut(owner) else {
-                    unreachable!("a registered Thread owns its original instance")
+            if let Some(dict) = namespace.and_then(|dict| heap.dict_storage(dict))
+                && let Some(position) = heap.dict_entries(dict).and_then(|items| {
+                    items.iter().position(
+                        |&(key, _)| matches!(heap.get(key), Value::Str(text) if text == name),
+                    )
+                })
+            {
+                let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) =
+                    heap.get_mut(dict)
+                else {
+                    unreachable!("dictionary payload")
                 };
-                if let Some(value) = fields.shift_remove(name) {
-                    self.heap.weak_edge_removed(value);
-                }
-                let namespace = match self.heap.get(owner) {
-                    Value::Instance { namespace, .. } => *namespace,
-                    _ => unreachable!(),
+                // Deletion may need the dictionary's first set of iterator positions.
+                // Keep the owner and its operands for a retry at the next checkpoint.
+                let Ok((key, value)) = entries.remove(position) else {
+                    return false;
                 };
-                if let Some(dict) = namespace.and_then(|dict| self.dict_storage(dict))
-                    && let Some(position) = self.dict_entries(dict).and_then(|items| {
-                        items.iter().position(|&(key,_)| {
-                            matches!(self.heap.get(key), Value::Str(text) if text == name)
-                        })
-                    })
-                {
-                    let (Value::Dict(entries) | Value::DefaultDict { entries, .. }) =
-                        self.heap.get_mut(dict)
-                    else {
-                        unreachable!("dictionary payload")
-                    };
-                    // Deletion may need the dictionary's first set of iterator
-                    // positions. Retain the roots and retry on the next checkpoint.
-                    let Ok((key, value)) = entries.remove(position) else {
-                        done = false;
-                        break;
-                    };
-                    self.heap.weak_edge_removed(key);
-                    self.heap.weak_edge_removed(value);
-                }
-            }
-            if done {
-                let entry = &mut self.workers.entries[index];
-                entry.owner = None;
-                self.heap.weak_edge_removed(owner);
-                for operand in entry.operands.drain(..) {
-                    self.heap.weak_edge_removed(operand);
-                }
+                heap.weak_edge_removed(key);
+                heap.weak_edge_removed(value);
             }
         }
-        self.workers
-            .entries
-            .retain(|entry| entry.owner.is_some() || entry.handle.awaiting_exit());
+        self.owner = None;
+        heap.weak_edge_removed(owner);
+        true
     }
 }
 
 impl Registry {
-    // A completed worker can never become live again. Its Python IDs may
-    // already have been collected, so read them only after checking the handle.
-    fn live(&self) -> impl Iterator<Item = &Entry> {
+    fn reserve_entry(&mut self) -> Result<()> {
+        self.entries
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))
+    }
+
+    fn reap_where(&mut self, heap: &mut Heap, include: impl Fn(&Entry) -> bool) {
+        self.entries.retain_mut(|entry| {
+            if !include(entry) || entry.active.load(Ordering::Acquire) {
+                return true;
+            }
+            if let Some(thread) = &mut entry.thread
+                && !thread.release_owner(heap)
+            {
+                return true;
+            }
+            for operand in entry.operands.drain(..) {
+                heap.weak_edge_removed(operand);
+            }
+            entry
+                .thread
+                .as_ref()
+                .is_some_and(|thread| thread.handle.awaiting_exit())
+        });
+    }
+
+    pub(super) fn reap_finished(&mut self, heap: &mut Heap) {
+        self.reap_where(heap, |_| true);
+    }
+
+    pub(super) fn detached_active(&self) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| entry.thread.is_none() && entry.active.load(Ordering::Acquire))
+    }
+
+    fn live_threads(&self) -> impl Iterator<Item = &RegisteredThread> {
         self.entries
             .iter()
             .filter(|entry| entry.active.load(Ordering::Acquire))
+            .filter_map(|entry| entry.thread.as_ref())
     }
 
     pub(super) fn roots(&self) -> impl Iterator<Item = &Id> {
+        // Completion can race tracing. Keep the entire record rooted until the creator reaps it.
         self.entries
             .iter()
-            .flat_map(|entry| entry.owner.iter().chain(&entry.operands))
+            .flat_map(|entry| {
+                entry
+                    .thread
+                    .as_ref()
+                    .and_then(|thread| thread.owner.as_ref())
+                    .into_iter()
+                    .chain(&entry.operands)
+            })
             .chain(self.default_run.iter().flatten())
             .chain(self.main.iter().map(|(_, main)| main))
             .chain(
@@ -439,7 +477,8 @@ impl Registry {
         let caller = thread_ident();
         self.entries
             .iter()
-            .filter(move |worker| !worker.daemon && worker.ident != caller)
+            .filter_map(|entry| entry.thread.as_ref())
+            .filter(move |worker| !worker.daemon && worker.handle.ident() != caller)
             .map(|worker| &worker.handle)
     }
 
@@ -635,12 +674,22 @@ fn launch(
 
 /// A low-level caller owns only the bootstrap roots after the native worker is detached.
 pub(super) fn start_detached(
-    ctx: &Context,
+    ctx: &mut Context,
     callback: Operation,
-    label: String,
-) -> Result<(usize, Arc<AtomicBool>)> {
+    function: Id,
+    operands: Vec<Id>,
+) -> Result<usize> {
+    ctx.workers
+        .reap_where(&mut ctx.heap, |entry| entry.thread.is_none());
+    ctx.workers.reserve_entry()?;
+    let label = ctx.repr(function);
     let worker = launch(ctx, callback, Some(label), Arc::default())?;
-    Ok((worker.ident, worker.active))
+    ctx.workers.entries.push(Entry {
+        active: worker.active,
+        operands,
+        thread: None,
+    });
+    Ok(worker.ident)
 }
 
 /// Thread.run expands *args and **kwargs before calling the target. A bound method
@@ -777,10 +826,7 @@ pub(super) fn call(
                     "custom threading.excepthook requires the parent Python heap",
                 ));
             }
-            ctx.workers
-                .entries
-                .try_reserve(1)
-                .map_err(|_| Error::new("MemoryError", ""))?;
+            ctx.workers.reserve_entry()?;
             let Started {
                 handle,
                 active,
@@ -796,12 +842,13 @@ pub(super) fn call(
                 }
             };
             ctx.workers.entries.push(Entry {
-                handle: Arc::clone(&handle),
-                daemon,
-                owner: Some(owner),
-                operands: roots,
                 active,
-                ident,
+                operands: roots,
+                thread: Some(RegisteredThread {
+                    handle,
+                    daemon,
+                    owner: Some(owner),
+                }),
             });
             let ident = ctx.alloc(Value::Int(crate::Int::from_usize(ident)));
             let tid = tid.map_or(NONE, |id| {
@@ -871,8 +918,8 @@ pub(super) fn call(
                 return Ok(main);
             }
             ctx.workers
-                .live()
-                .find(|entry| entry.ident == ident)
+                .live_threads()
+                .find(|thread| thread.handle.ident() == ident)
                 .and_then(|entry| entry.owner)
                 .ok_or_else(|| {
                     Error::new(
@@ -882,7 +929,11 @@ pub(super) fn call(
                 })
         }
         ("threads", []) => {
-            let owners = ctx.workers.live().filter_map(|entry| entry.owner).collect();
+            let owners = ctx
+                .workers
+                .live_threads()
+                .filter_map(|entry| entry.owner)
+                .collect();
             Ok(ctx.alloc(Value::List(owners)))
         }
         _ => Err(Error::new(

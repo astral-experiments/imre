@@ -83,10 +83,11 @@ fn bound_hash_worker_owns_expanded_input_while_running() {
     let held = hash.lock();
     let worker = launch(&ctx, operation, None, Arc::default()).unwrap();
     ctx.workers.entries.push(Entry {
-        handle: Arc::clone(&worker.handle),
-        daemon: false,
-        owner: Some(owner),
-        ident: worker.ident,
+        thread: Some(RegisteredThread {
+            handle: Arc::clone(&worker.handle),
+            daemon: false,
+            owner: Some(owner),
+        }),
         active: worker.active,
         operands,
     });
@@ -100,6 +101,7 @@ fn bound_hash_worker_owns_expanded_input_while_running() {
     assert!(matches!(ctx.heap.get(input), Value::Bytes(data) if data == b"abc"));
     assert!(worker.handle.alive());
     assert_ne!(worker.ident, thread_ident());
+    assert!(ctx.check_thread_reporter_mutable().is_ok());
 
     drop(held);
     worker.handle.join(None).unwrap();
@@ -111,6 +113,66 @@ fn bound_hash_worker_owns_expanded_input_while_running() {
         ctx.str_value(result).unwrap(),
         "a9993e364706816aba3e25717850c26c9cd0d89d"
     );
+}
+
+#[test]
+fn joined_and_detached_operands_are_released_at_their_own_checkpoints() {
+    let mut ctx = context();
+    let mark = ctx.heap.temporary_mark();
+    let object = ctx.builtin("object");
+    let operand = ctx.instance(object, None);
+    let weak = ctx.heap.native_weak_reference(operand).unwrap();
+
+    let active = while_lock_held(|gate| {
+        let ident = start_detached(
+            &mut ctx,
+            Operation::Acquire {
+                lock: Arc::clone(gate),
+                release: None,
+            },
+            NONE,
+            vec![operand],
+        )
+        .unwrap();
+        assert_ne!(ident, thread_ident());
+        assert!(ctx.workers.shutdown_handles().next().is_none());
+        assert!(ctx.workers.live_threads().next().is_none());
+        assert!(ctx.check_thread_reporter_mutable().is_err());
+
+        let owner = ctx.instance(object, None);
+        let joined = launch(&ctx, Operation::Empty, None, Arc::default()).unwrap();
+        joined.handle.join(Some(Duration::from_secs(5))).unwrap();
+        assert!(!joined.handle.alive());
+        ctx.workers.entries.push(Entry {
+            thread: Some(RegisteredThread {
+                handle: joined.handle,
+                daemon: false,
+                owner: Some(owner),
+            }),
+            active: joined.active,
+            operands: vec![],
+        });
+        ctx.reap_thread_operands();
+        assert!(!ctx.workers.roots().any(|&id| id == owner));
+        ctx.heap.release_temporaries_since(mark);
+        ctx.heap.keep(weak);
+        ctx.collect_unreachable();
+        assert!(matches!(ctx.heap.get(weak), Value::Weak(wr) if wr.target == Some(operand)));
+        Arc::clone(&ctx.workers.entries[0].active)
+    });
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while active.load(Ordering::Acquire) {
+        assert!(std::time::Instant::now() < deadline);
+        thread::yield_now();
+    }
+    assert!(ctx.check_thread_reporter_mutable().is_ok());
+    // A low-level worker can exit between reaping and enumerating GC roots.
+    ctx.reap_thread_operands();
+    assert!(ctx.workers.roots().any(|&id| id == operand));
+    assert!(!ctx.heap_and_roots().1.any(|id| id == operand));
+    ctx.collect_unreachable();
+    assert!(matches!(ctx.heap.get(weak), Value::Weak(wr) if wr.target.is_none()));
 }
 
 #[test]
@@ -198,10 +260,11 @@ fn shutdown_joins_non_daemon_workers_and_leaves_daemon_workers_running() {
         let normal = launch(&ctx, Operation::Empty, None, Arc::default()).unwrap();
         for (worker, is_daemon) in [(&daemon, true), (&normal, false)] {
             ctx.workers.entries.push(Entry {
-                handle: Arc::clone(&worker.handle),
-                daemon: is_daemon,
-                owner: None,
-                ident: worker.ident,
+                thread: Some(RegisteredThread {
+                    handle: Arc::clone(&worker.handle),
+                    daemon: is_daemon,
+                    owner: None,
+                }),
                 active: Arc::clone(&worker.active),
                 operands: Vec::new(),
             });
@@ -240,11 +303,12 @@ fn detached_handle_keeps_the_non_daemon_worker_registered_until_exit() {
         assert_eq!(handle.ident(), worker.ident);
         assert!(handle.check_new().is_err());
         ctx.workers.entries.push(Entry {
-            handle: worker.handle,
-            daemon: false,
-            owner: None,
+            thread: Some(RegisteredThread {
+                handle: worker.handle,
+                daemon: false,
+                owner: None,
+            }),
             operands: Vec::new(),
-            ident: worker.ident,
             active: Arc::clone(&worker.active),
         });
         handle.set_done().unwrap();
