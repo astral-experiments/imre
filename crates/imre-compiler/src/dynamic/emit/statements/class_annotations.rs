@@ -50,7 +50,7 @@ impl Function<'_, '_> {
         } else {
             "0".into()
         };
-        let signature = self.text(
+        let signature = self.frame.text(
             &json!({
                 "posonly": ["format"], "scope_complete": complete, "scope_reads": reads,
                 "code_flags": self.source.function_flags(None, self.in_function, false),
@@ -59,8 +59,8 @@ impl Function<'_, '_> {
         );
         let start = *sites.first_key_value().unwrap().0;
         let body = Body::ClassAnnotations(sites.into_values().collect(), bindings.globals);
-        let code = self.frame.output.definition(
-            self.source,
+        let code = self.source.definition(
+            self.frame.output,
             String::new(),
             body,
             start,
@@ -72,7 +72,7 @@ impl Function<'_, '_> {
             &[&self.scope.clone(), &offsets],
         );
         let name = self.text("__annotate__");
-        let qualname = self.text(&format!("{}__annotate__", self.prefix));
+        let qualname = self.frame.text(&format!("{}__annotate__", self.prefix));
         let defaults = self.op("dict", &[]);
         let function = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {environment}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {qualname}, i64 0, i64 0, i1 false)"));
         self.bind("__annotate_func__", &function);

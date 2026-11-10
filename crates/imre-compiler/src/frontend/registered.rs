@@ -144,7 +144,7 @@ pub(super) fn lower_definition<'a>(
         function: body.function,
         local_names,
     };
-    if !crate::dynamic::supports_registered_function(&function) {
+    if !crate::llvm::registered::supports(&function) {
         return Err(error(
             source,
             definition,
@@ -378,7 +378,6 @@ pub(crate) struct AnnotationChild {
     pub(crate) id: ir::AnnotationCodeId,
     pub(crate) text: String,
     pub(crate) body: RegisteredFunction,
-    pub(crate) has_templates: bool,
 }
 
 impl AnnotationChild {
@@ -403,11 +402,12 @@ impl AnnotationChild {
             private_names: None,
             templates: None,
         };
+        // A quoted expression owns no lambda sites. Residual operand lowering leaves
+        // a nested lambda with the source annotation that prepares its definition.
         let value = values::registered_value(expression, source)?;
         Some(Self {
             id,
             text: text.to_owned(),
-            has_templates,
             body: RegisteredFunction::expression(expression.range(), value),
         })
     }
@@ -548,13 +548,16 @@ pub(crate) fn module_annotations(
                         } else {
                             let site = DeferredModuleAnnotation::new(
                                 ir::AnnotationCodeId(self.deferred.len()),
-                                name,
+                                name.clone(),
                                 &ann.annotation,
                                 self.source,
                                 self.bundled,
                             );
                             self.deferred.insert(ann.start(), site);
-                            ir::ModuleAnnotation::Deferred(ann.start())
+                            ir::ModuleAnnotation::Deferred {
+                                site: ann.start(),
+                                name,
+                            }
                         };
                         self.operations.insert(
                             ann.target.range(),
@@ -1421,7 +1424,7 @@ mod tests {
 
     #[test]
     fn annotation_callback_numbers_physical_occurrences_and_keeps_unsupported_values_late() {
-        let text = "first: int\nsecond: list[int]\ncomplex: dict[str, int]\nforward: 'list[int]'\nprepared: (lambda: int)()\ndeferred: next(t for t in (int,))\n";
+        let text = "first: int\nsecond: list[int]\ncomplex: dict[str, int]\nforward: 'list[int]'\nprepared: (lambda: int)()\ndeferred: next(t for t in (int,))\nquoted: '(lambda: Child)()'\n";
         let graph = SourceGraph::single(text).unwrap();
         let module = &graph.modules[graph.entry];
         let stmts = &module.parsed.syntax().body;
@@ -1496,6 +1499,10 @@ mod tests {
             ));
             let unavailable = &sites[&stmts[5].start()];
             assert!(matches!(unavailable.value, AnnotationValue::Source(_)));
+            assert!(matches!(
+                sites[&stmts[6].start()].value,
+                AnnotationValue::Source(_)
+            ));
             let mixed = DeferredModuleAnnotation::prepare_body(&[first, unavailable, second]);
             let [gap] = mixed.residual.as_slice() else {
                 panic!("expected one unprepared operand")
@@ -1791,7 +1798,7 @@ mod tests {
         assert!(super::super::lower(&graph).is_err());
         let functions = graph.registered_functions();
         let checked = &functions[&graph.entry][&TextSize::default()];
-        assert!(crate::dynamic::supports_registered_function(checked));
+        assert!(crate::llvm::registered::supports(checked));
         let mut additions = Vec::new();
         ir::walk_expressions(&checked.function.body, &mut |expr| {
             if let ExprKind::Binary(Binary::Add, ref left, ref right) = expr.kind {
@@ -1817,7 +1824,7 @@ mod tests {
         assert!(super::super::lower(&graph).is_err());
         let bodies = graph.registered_functions();
         let checked = &bodies[&graph.entry][&TextSize::default()];
-        assert!(crate::dynamic::supports_registered_function(checked));
+        assert!(crate::llvm::registered::supports(checked));
         let mut branches = Vec::new();
         ir::walk_expressions(&checked.function.body, &mut |expr| {
             if let ExprKind::Conditional(test, yes, no) = &expr.kind {

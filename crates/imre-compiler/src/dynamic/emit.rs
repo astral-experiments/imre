@@ -9,109 +9,17 @@ use ruff_text_size::Ranged;
 
 use crate::CodegenUnit;
 use crate::frontend::RegisteredLambda;
-use crate::llvm::operations::{CheckedValue, ValueJoin};
+use crate::llvm::registered::{
+    ABI, FrameEmitter, Output, RegisteredFrame, SourcePositions, permanent, sites, suspension,
+};
 
 mod boolean;
-pub(crate) mod checked;
 mod comprehensions;
 mod expressions;
-mod frame;
-mod retained;
-use frame::{RegisteredFrame, SourcePositions};
 mod patterns;
-mod sequences;
+mod retained;
 mod statements;
 mod strings;
-mod suspension;
-
-pub(super) mod permanent {
-    include!("../../../imre-runtime/native/boxed-handles.rs");
-}
-
-const ABI: &str = "\
-%code_site = type { ptr, ptr, i32, i32 }
-declare ptr @imre_dyn_new(i32, ptr, ptr)
-declare void @imre_dyn_register(ptr, ptr, ptr, ptr)
-declare i32 @imre_dyn_finish(ptr)
-declare i64 @imre_dyn_lit(ptr, i32, ptr, i64)
-declare i64 @imre_dyn_build_sequence(ptr, ptr, i64, i1, i1, ptr)
-declare i64 @imre_dyn_build_set(ptr, ptr, i64, i64)
-declare i64 @imre_dyn_display_item(ptr, i64, i64, i64, i1)
-declare void @imre_dyn_unwind_display(ptr, i64)
-declare i64 @imre_dyn_cached_handle(ptr, ptr)
-declare i64 @imre_dyn_linked_value(ptr, ptr, i64)
-declare i64 @imre_dyn_linked_string(ptr, ptr, i32, ptr, i64)
-declare i64 @imre_dyn_lookup(ptr, i64, ptr, i64)
-declare i64 @imre_dyn_import_name(ptr, i64, i64, i64, i32)
-declare i64 @imre_dyn_mark_class_annotation(ptr, i64, i64, i32)
-declare i64 @imre_dyn_define(ptr, ptr, i64, i64, i64, i64, i64, i64, i64, i1)
-declare i1 @imre_dyn_failed(ptr)
-declare i64 @imre_dyn_truth_mark(ptr)
-declare void @imre_dyn_comprehension_step(ptr, i64)
-declare void @imre_dyn_discard_truth(ptr, i64)
-declare i64 @imre_dyn_keep_operands(ptr, i64, i64, i64)
-declare void @imre_dyn_discard_expression(ptr, i64)
-declare void @imre_dyn_named_assignment(ptr, i64, i64, i64)
-declare void @imre_dyn_assignment_target(ptr, ptr, i64, i64)
-declare i64 @imre_dyn_op_at(ptr, ptr, i64, i64, i64, ptr)
-declare i64 @imre_dyn_get_slice_at(ptr, i64, i64, i64, ptr)
-declare i64 @imre_dyn_get_linked_slice_at(ptr, i64, i64, i64, ptr, ptr)
-declare void @imre_dyn_call_position(ptr, ptr)
-declare i64 @imre_dyn_contains_literal_tuple(ptr, i64, ptr, i64, i32)
-declare i64 @imre_dyn_scoped_call_at(ptr, i64, i64, i64, i64, ptr, i64)
-declare i64 @imre_dyn_positional_method_at(ptr, i64, ptr, i64, i64, ptr, i64)
-declare i64 @imre_dyn_partition_field_at(ptr, i64, ptr, i32, ptr, i64, ptr, i64)
-declare i64 @imre_dyn_string_method_target(ptr, i64, ptr, ptr)
-declare i64 @imre_dyn_unpack_pair(ptr, i64, ptr)
-declare i64 @imre_dyn_next_pair(ptr, i64, ptr, i1)
-declare i64 @imre_dyn_builtin_method_target(ptr, i64, ptr, ptr)
-declare i64 @imre_dyn_dict_get_target(ptr, i64, ptr)
-declare i64 @imre_dyn_positional_call_at(ptr, i64, ptr, i64, i64, ptr, i64)
-declare i64 @imre_dyn_keyword_call_at(ptr, i64, ptr, i64, ptr, i64, i64, ptr, i64)
-declare void @imre_dyn_expression_line(ptr, i32)
-declare void @imre_dyn_statement_with_exception(ptr, ptr, i64, ptr, i32, i64)
-";
-
-// Keep repeated code-name loads and their error edge out of each caller.
-const NAMED_OP: &str = "\
-define internal i64 @imre_boxed_named_op(ptr %ctx, ptr %op, i64 %receiver, ptr %name, i64 %len, i64 %value) noinline {
-entry:
-  %key = call i64 @imre_dyn_lit(ptr %ctx, i32 6, ptr %name, i64 %len)
-  %failed = call i1 @imre_dyn_failed(ptr %ctx)
-  br i1 %failed, label %error, label %apply
-error:
-  ret i64 0
-apply:
-  %result = tail call i64 @imre_dyn_op_at(ptr %ctx, ptr %op, i64 %receiver, i64 %key, i64 %value, ptr null)
-  ret i64 %result
-}
-";
-
-const GUARDED_NAMED_OP: &str = "\
-define internal i64 @imre_boxed_guarded_named_op(ptr %ctx, ptr %op, i64 %receiver, ptr %name, i64 %len, i64 %value) noinline {
-entry:
-  %pending = call i1 @imre_dyn_failed(ptr %ctx)
-  br i1 %pending, label %error, label %apply
-error:
-  ret i64 0
-apply:
-  %result = tail call i64 @imre_boxed_named_op(ptr %ctx, ptr %op, i64 %receiver, ptr %name, i64 %len, i64 %value)
-  ret i64 %result
-}
-";
-
-const GUARDED_LIT: &str = "\
-define internal i64 @imre_boxed_guarded_lit(ptr %ctx, i32 %kind, ptr %data, i64 %len) noinline {
-entry:
-  %pending = call i1 @imre_dyn_failed(ptr %ctx)
-  br i1 %pending, label %error, label %load
-error:
-  ret i64 0
-load:
-  %value = tail call i64 @imre_dyn_lit(ptr %ctx, i32 %kind, ptr %data, i64 %len)
-  ret i64 %value
-}
-";
 
 type ModuleSource = (String, PathBuf, String);
 
@@ -161,13 +69,13 @@ struct RootCode {
 impl RootCode {
     fn new(
         config: &str,
-        python_optimization: i32,
+        keep_docstrings: bool,
         has_zip: bool,
         has_builtins: bool,
         has_errors: bool,
     ) -> Self {
         let mut output = Output {
-            python_optimization,
+            keep_docstrings,
             ..Output::default()
         };
         let config = output.data(config.as_bytes());
@@ -263,7 +171,7 @@ pub(super) fn emit(
     let mut used_archive = false;
     let mut root = RootCode::new(
         config,
-        python_optimization,
+        python_optimization < 2,
         !archive_members.is_empty(),
         !builtins.is_empty(),
         !module_errors.is_empty(),
@@ -474,7 +382,6 @@ pub(super) struct PreparedBody<'a> {
     body: ast::Suite,
     source: SourceInfo<'a>,
     expression: bool,
-    python_optimization: i32,
 }
 
 impl<'a> PreparedBody<'a> {
@@ -620,6 +527,7 @@ impl<'a> PreparedBody<'a> {
                 type_aliases.insert(
                     alias.start(),
                     TypeAliasDefinition {
+                        range: alias.range(),
                         name: name.id.to_string(),
                         body,
                         parameters,
@@ -702,6 +610,7 @@ impl<'a> PreparedBody<'a> {
             lambdas,
             thread_entries,
             assertions: prepare.assertions,
+            python_optimization,
             nested_bodies: prepare.nested,
             namespace_operations: operations,
             type_aliases,
@@ -711,7 +620,7 @@ impl<'a> PreparedBody<'a> {
             initializer,
             program_bodies,
             bundled,
-            path: path.into(),
+            path,
             // These CPython providers implement their own call semantics in Python.
             python_annotations: provider
                 || bundled && matches!(name, "_py_warnings" | "tomllib._parser" | "typing"),
@@ -733,7 +642,6 @@ impl<'a> PreparedBody<'a> {
             body,
             source,
             expression,
-            python_optimization,
         })
     }
 
@@ -761,7 +669,7 @@ impl<'a> PreparedBody<'a> {
         } else {
             Body::Namespace(&self.body)
         };
-        let code = output.code(&location, String::new(), suite, false, None);
+        let code = location.code(output, String::new(), suite, false, None);
         match output.diagnostic.take() {
             Some(diagnostic) => Err(diagnostic),
             None => Ok(code),
@@ -771,7 +679,7 @@ impl<'a> PreparedBody<'a> {
     /// Emit independent IR with private, address-significant constant slots.
     pub(super) fn standalone(&self) -> Result<Option<(String, String)>, String> {
         let mut output = Output {
-            python_optimization: self.python_optimization,
+            keep_docstrings: self.source.python_optimization < 2,
             ..Output::default()
         };
         let filename = self.source.path.as_os_str().as_encoded_bytes();
@@ -790,7 +698,7 @@ impl<'a> PreparedBody<'a> {
             hash.update(&(field.len() as u64).to_le_bytes());
             hash.update(field);
         }
-        hash.update(&[u8::from(self.python_optimization < 2)]);
+        hash.update(&[u8::from(self.source.python_optimization < 2)]);
         let symbol = format!("imre_provider_{}", hash.finalize().to_hex());
         writeln!(ir, "@{symbol} = alias i64 (ptr, i64), ptr {entry}").unwrap();
         Ok(Some((symbol, ir)))
@@ -903,17 +811,18 @@ enum AliasValue<'a> {
 }
 
 struct TypeAliasDefinition {
+    range: ruff_text_size::TextRange,
     name: String,
     body: Option<crate::frontend::RegisteredFunction>,
     parameters: Option<Vec<crate::ir::RegisteredTypeParameter>>,
 }
 
-#[derive(Default)]
 struct SourceInfo<'a> {
     scopes: crate::frontend::function_scope::ScopeFacts,
     thread_entries: HashMap<ruff_text_size::TextSize, imre_ast::ThreadEntry>,
     lambdas: HashMap<ruff_text_size::TextSize, RegisteredLambda>,
     type_aliases: HashMap<ruff_text_size::TextSize, TypeAliasDefinition>,
+    python_optimization: i32,
     assertions: HashMap<ruff_text_size::TextRange, Vec<crate::ir::Statement>>,
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
     module_annotations:
@@ -924,7 +833,7 @@ struct SourceInfo<'a> {
     initializer: Option<crate::frontend::RegisteredSuite>,
     program_bodies: ProgramBodies<'a>,
     bundled: bool,
-    path: std::borrow::Cow<'a, Path>,
+    path: &'a Path,
     python_annotations: bool,
     module_start: ruff_text_size::TextSize,
     class_keywords: Vec<ruff_text_size::TextSize>,
@@ -956,7 +865,12 @@ impl SourceInfo<'_> {
 impl SourceMap<'_> {
     fn function_flags(&self, params: Option<&ast::Parameters>, nested: bool, method: bool) -> u32 {
         use imre_ast::code_flags;
-        let mut flags = code_flags::function_flags(params, nested, method);
+        code_flags::function_flags(params, nested, method) | self.future_flags()
+    }
+
+    fn future_flags(&self) -> u32 {
+        use imre_ast::code_flags;
+        let mut flags = 0;
         if self.string_annotations {
             flags |= code_flags::FUTURE_ANNOTATIONS;
         }
@@ -977,130 +891,42 @@ impl SourceMap<'_> {
     }
 }
 
-use crate::ir::Constant;
-
-#[derive(Clone, Copy, Default)]
-struct Declarations {
-    declared_suspension: bool,
-    declared_statement_line: bool,
-    declared_definition_position: bool,
-    emitted_named_op: bool,
-    emitted_guarded_lit: bool,
-    emitted_guarded_named_op: bool,
-    registered_expression: bool,
-    checked_integer_arithmetic: bool,
-    retained_native: bool,
-}
-
-#[derive(Clone, Default)]
-struct Output {
-    declarations: Declarations,
-    diagnostic: Option<String>,
-    python_optimization: i32,
-    constant_slots: HashMap<(usize, Constant), usize>,
-    strings: HashMap<Vec<u8>, u32>,
-    interned_identifiers: BTreeSet<String>,
-    positions: HashMap<[usize; 4], usize>,
-    constants: String,
-    functions: String,
-    count: u32,
-}
-
-impl Output {
-    /// Roll back private code sites when an optional annotation expression cannot be compiled.
-    fn try_native_body(&mut self, emit: impl FnOnce(&mut Self) -> String) -> Option<String> {
-        let code = self.count;
-        let functions = self.functions.len();
-        let constants = self.constants.len();
-        let strings = self.strings.len() as u32;
-        let positions = self.positions.len();
-        let slots = self.constant_slots.len();
-        let declarations = self.declarations;
-        let names = std::mem::take(&mut self.interned_identifiers);
-        let outer_diagnostic = self.diagnostic.take();
-        let site = emit(self);
-        let added_names = std::mem::replace(&mut self.interned_identifiers, names);
-        if std::mem::replace(&mut self.diagnostic, outer_diagnostic).is_none() {
-            self.interned_identifiers.extend(added_names);
-            return Some(site);
-        }
-        self.count = code;
-        self.functions.truncate(functions);
-        self.constants.truncate(constants);
-        self.strings.retain(|_, id| *id < strings);
-        self.positions.retain(|_, id| *id < positions);
-        self.constant_slots.retain(|_, id| *id < slots);
-        self.declarations = declarations;
-        None
-    }
-
+impl SourceMap<'_> {
     /// Distinct Python definitions keep distinct addresses even if LLVM merges their bodies.
     fn definition(
-        &mut self,
-        source: &SourceMap<'_>,
+        &self,
+        output: &mut Output,
         prefix: String,
         body: Body<'_>,
         start: ruff_text_size::TextSize,
         in_function: bool,
         entry: Entry,
     ) -> String {
-        let site = format!("@code_site{}", self.count);
+        let site = format!("@code_site{}", output.count);
         let suspended = matches!(entry, Entry::Suspended);
         let tag = if suspended {
-            if !self.declarations.declared_suspension {
-                self.functions.push_str(suspension::ABI);
-                self.declarations.declared_suspension = true;
+            if !output.declarations.declared_suspension {
+                output.functions.push_str(suspension::ABI);
+                output.declarations.declared_suspension = true;
             }
             permanent::NATIVE_SUSPENDED_BODY
         } else {
             0
         };
-        let entry = self.code(source, prefix, body, in_function, Some((start, entry)));
+        let entry = self.code(output, prefix, body, in_function, Some((start, entry)));
         writeln!(
-            self.constants,
+            output.constants,
             "{site} = private constant %code_site {{ ptr {entry}, ptr {}, i32 {}, i32 {tag} }}",
-            source.positions.file,
-            source.positions.line(start)
+            self.positions.file,
+            self.positions.line(start)
         )
         .unwrap();
         site
     }
 
-    fn data(&mut self, bytes: &[u8]) -> String {
-        let count = self.strings.len() as u32;
-        let index = *self.strings.entry(bytes.to_vec()).or_insert(count);
-        if index == count {
-            write!(
-                self.constants,
-                "@str{index} = private unnamed_addr constant [{} x i8] c\"",
-                bytes.len() + 1
-            )
-            .unwrap();
-            for &byte in bytes {
-                if (b' '..=b'~').contains(&byte) && !matches!(byte, b'"' | b'\\') {
-                    self.constants.push(char::from(byte));
-                } else {
-                    write!(self.constants, "\\{byte:02X}").unwrap();
-                }
-            }
-            self.constants.push_str("\\00\"\n");
-        }
-        format!("@str{index}")
-    }
-
-    fn position(&mut self, span: [usize; 4]) -> String {
-        let next = self.positions.len();
-        let index = *self.positions.entry(span).or_insert(next);
-        if index == next {
-            let [line, start, split, end] = span;
-            writeln!(self.constants, "@pos{index} = private unnamed_addr constant [4 x i32] [i32 {line}, i32 {start}, i32 {split}, i32 {end}]").unwrap();
-        }
-        format!("@pos{index}")
-    }
-
     fn code(
-        &mut self,
-        source: &SourceMap<'_>,
+        &self,
+        output: &mut Output,
         prefix: String,
         body: Body<'_>,
         in_function: bool,
@@ -1110,51 +936,60 @@ impl Output {
         let start = definition.map(|(start, _)| start);
         let checked = start
             .filter(|_| matches!(body, Body::Statements(_)))
-            .and_then(|key| source.program_bodies.checked?.get(&key));
-        let frame = RegisteredFrame::new(self, &source.positions, native_suspension);
+            .and_then(|key| self.program_bodies.checked?.get(&key));
+        let mut frame = RegisteredFrame::new(
+            output,
+            &self.positions,
+            native_suspension,
+            self.unit,
+            self.module_start,
+        );
+        frame.async_generator = matches!(
+            body,
+            Body::GeneratorFunction(_, imre_ast::code_flags::ASYNC_GENERATOR)
+        );
+        if let Body::Namespace(_) = body
+            && !prefix.is_empty()
+        {
+            frame.class_locals = Some(
+                self.scopes.classes[&start.expect("class definition")]
+                    .bindings
+                    .clone(),
+            );
+        }
         let module = matches!(body, Body::Namespace(..)) && prefix.is_empty();
         let prepared = match body {
-            Body::Namespace(..) if module => source.initializer.as_ref(),
+            Body::Namespace(..) if module => self.initializer.as_ref(),
             Body::Namespace(stmts) => stmts
                 .first()
-                .and_then(|stmt| source.class_bodies.get(&stmt.start())),
-            Body::Statements(_) | Body::GeneratorFunction(..) if checked.is_none() => {
-                start.and_then(|key| source.function_bodies.get(&key))
+                .and_then(|stmt| self.class_bodies.get(&stmt.start())),
+            Body::Statements(_) | Body::GeneratorFunction(..) => {
+                start.and_then(|key| self.function_bodies.get(&key))
             }
             _ => None,
         };
         let mut f = Function {
             prepare_nested_suites: prepared.is_some_and(|plan| !plan.fully_checked()),
             frame,
-            source,
-            current_range: ruff_text_size::TextRange::empty(source.module_start),
-            async_generator: matches!(
-                body,
-                Body::GeneratorFunction(_, imre_ast::code_flags::ASYNC_GENERATOR)
-            ),
+            source: self,
             class_sites: None,
-            module_annotation_sites: None,
-            annotation_children: HashMap::new(),
             in_function,
             module,
             declared_globals: Default::default(),
-            annotation_values: None,
-            class_locals: match &body {
-                Body::Namespace(_) if !prefix.is_empty() => Some(
-                    source.scopes.classes[&start.expect("class definition")]
-                        .bindings
-                        .clone(),
-                ),
-                _ => None,
-            },
             prefix,
             loops: Vec::new(),
-            iteration: Default::default(),
             exits: Vec::new(),
         };
-        if checked.is_none()
-            && matches!(body, Body::Statements(_))
-            && let Some(native) = start.and_then(|key| source.program_bodies.native?.get(&key))
+        if let Some(checked) = checked {
+            for name in self.scopes.functions[&start.expect("checked function")].globals() {
+                f.frame.declare_global(name);
+            }
+            let sites = f.prepare_checked_sites(&checked.function.body);
+            RegisteredFrame::checked_body(&mut f.frame, checked, &sites);
+            return f.frame.finish(false);
+        }
+        if matches!(body, Body::Statements(_))
+            && let Some(native) = start.and_then(|key| self.program_bodies.native?.get(&key))
         {
             f.select_native(native);
         }
@@ -1163,7 +998,7 @@ impl Output {
             | Body::Statements(stmts)
             | Body::GeneratorFunction(stmts, _) => {
                 if module && imre_ast::annotations::has_variable_annotation(stmts) {
-                    if source.string_annotations {
+                    if self.string_annotations {
                         f.frame
                             .op("setup_module_string_annotations", &[&f.scope.clone()]);
                     } else {
@@ -1174,27 +1009,25 @@ impl Output {
                     }
                 }
                 if matches!(body, Body::Namespace(..))
-                    && f.output.python_optimization < 2
-                    && let Some(doc) = f.source.docstring(f.prefix.trim_end_matches('.'), stmts)
+                    && f.output.keep_docstrings
+                    && let Some(doc) = self.docstring(f.prefix.trim_end_matches('.'), stmts)
                 {
                     let value = f.text(&doc);
                     f.bind("__doc__", &value);
                 }
                 let globals = if module {
-                    &source.scopes.module_globals
+                    &self.scopes.module_globals
                 } else if matches!(body, Body::Namespace(..)) {
-                    &source.scopes.classes[&start.expect("class definition")]
+                    &self.scopes.classes[&start.expect("class definition")]
                         .bindings
                         .globals
                 } else {
-                    source.scopes.functions[&start.expect("function definition")].globals()
+                    self.scopes.functions[&start.expect("function definition")].globals()
                 };
                 f.declare_globals(globals);
-                if let Some(checked) = checked {
-                    f.checked_body(checked);
-                } else if let Some(prepared) = prepared {
+                if let Some(prepared) = prepared {
                     f.prepared_function(prepared, |code, run| code.source_statements(&stmts[run]));
-                } else if f.class_locals.is_some() && !f.source.string_annotations {
+                } else if f.class_locals.is_some() && !self.string_annotations {
                     f.annotated_class_body(stmts);
                 } else {
                     f.statements(stmts);
@@ -1210,43 +1043,18 @@ impl Output {
             Body::ClassAnnotations(sites, globals) => f.class_annotation_values(&sites, &globals),
             Body::Annotations(entries, class) => f.annotations(&entries, class),
             Body::ModuleAnnotations(plan, entries) => {
-                for entry in entries {
-                    if let crate::frontend::AnnotationValue::Bound(child) = &entry.value
-                        && !f.annotation_children.contains_key(&child.id)
-                    {
-                        let file = f.output.data(b"<string>");
-                        let info = SourceInfo {
-                            path: Path::new("<string>").into(),
-                            text: &child.text,
-                            has_templates: child.has_templates,
-                            ..Default::default()
-                        };
-                        let source = SourceMap {
-                            info: &info,
-                            lambda_code: Default::default(),
-                            definitions: None,
-                            unit: source.unit,
-                            positions: SourcePositions::new(&child.text, &file),
-                        };
-                        let code = f.output.code(
-                            &source,
-                            String::new(),
-                            Body::CheckedExpression(&child.body),
-                            false,
-                            None,
-                        );
-                        f.annotation_children.insert(child.id, code);
-                    }
-                }
+                f.prepare_annotation_children(entries);
                 f.prepared_function(plan, |code, run| {
                     for index in run {
                         code.unprepared_annotation(index, entries[index]);
                     }
                 });
             }
-            Body::CheckedExpression(checked) => f.checked_body(checked),
+            Body::CheckedExpression(checked) | Body::AliasEvaluator(AliasValue::Checked(checked)) => {
+                let sites = f.prepare_checked_sites(&checked.function.body);
+                RegisteredFrame::checked_body(&mut f.frame, checked, &sites);
+            }
             Body::Generator(plan) => f.generator_step(plan),
-            Body::AliasEvaluator(AliasValue::Checked(body)) => f.checked_body(body),
             Body::AliasEvaluator(AliasValue::Residual(expr)) => {
                 f.checkpoint(expr);
                 let format = f.lookup(".format");
@@ -1264,58 +1072,17 @@ impl Output {
     }
 }
 
-/// Pass fixed operands in native storage or pack expanded operands in Python containers.
-enum CallArguments {
-    FixedKeywords {
-        array: &'static str,
-        positional: usize,
-        names: String,
-        keywords: usize,
-    },
-    Packed {
-        args: String,
-        kwargs: String,
-    },
-    Positional {
-        array: &'static str,
-        count: usize,
-        receiver_slot: bool,
-    },
-    PartitionField {
-        array: &'static str,
-        index: u32,
-        get_position: String,
-    },
-}
-
-enum IndexKey<'a, E> {
-    Object(&'a E),
-    Bounds(
-        Option<&'a E>,
-        Option<&'a E>,
-        Option<&'a crate::ir::Constant>,
-    ),
-    Prepared(&'a crate::ir::Expr),
-}
-
 struct Function<'a, 'p> {
     prepare_nested_suites: bool,
     frame: RegisteredFrame<'a, 'p>,
     source: &'p SourceMap<'p>,
-    current_range: ruff_text_size::TextRange,
     prefix: String,
     declared_globals: std::collections::BTreeSet<String>,
     in_function: bool,
     module: bool,
-    module_annotation_sites: Option<Vec<ruff_text_size::TextSize>>,
-    annotation_children: HashMap<crate::ir::AnnotationCodeId, String>,
     class_sites: Option<statements::class_annotations::ClassSites>,
-    class_locals: Option<crate::frontend::function_scope::ClassBindings>,
-    annotation_values: Option<String>,
     loops: Vec<LoopTarget>,
-    iteration: checked::IterationState,
     exits: Vec<(Cleanup, String)>,
-    async_generator: bool,
 }
 
 /// The syntax walker adds Python scopes and cleanup to the registered frame operations.
@@ -1365,33 +1132,39 @@ struct LoopTarget {
 impl Function<'_, '_> {
     fn checkpoint(&mut self, node: &impl Ranged) {
         self.current_range = node.range();
-        self.frame.checkpoint(self.current_range);
+        self.frame.checkpoint(node.range());
     }
 
     /// An annotation's text is still a normal str. Retain its native expression
     /// separately so a later evaluation can supply a new globals/locals pair.
     fn annotation_text(&mut self, value: &str) -> String {
-        if !self.source.bundled
-            && let Some(parsed) = crate::frontend::annotation_expression(value)
-        {
-            return self.preparsed_annotation_text(value, &parsed);
+        let code = if self.source.bundled {
+            None
+        } else {
+            crate::frontend::annotation_expression(value)
+                .and_then(|parsed| self.compile_source_annotation(value, &parsed))
+        };
+        let text = self.frame.text(value);
+        if let Some(code) = code {
+            self.frame.bind_annotation_expression(&text, &code);
         }
-        self.text(value)
+        text
     }
 
-    fn preparsed_annotation_text(
+    fn compile_source_annotation(
         &mut self,
         value: &str,
         parsed: &ruff_python_parser::Parsed<ast::ModExpression>,
-    ) -> String {
+    ) -> Option<String> {
         let unit = self.source.unit;
-        let code = self.output.try_native_body(|output| {
+        let python_optimization = self.source.python_optimization;
+        self.output.try_native_body(|output| {
             let file = output.data(b"<string>");
             match PreparedBody::new(
                 "",
                 Path::new("<string>"),
                 value,
-                output.python_optimization,
+                python_optimization,
                 SourceBody::Expression(parsed),
             )
             .and_then(|body| body.emit(output, unit, &file))
@@ -1402,75 +1175,7 @@ impl Function<'_, '_> {
                     String::new()
                 }
             }
-        });
-        if let Some(code) = code {
-            let text = self.text(value);
-            self.bind_annotation_expression(&text, &code);
-            return text;
-        }
-        self.text(value)
-    }
-
-    fn bind_annotation_expression(&mut self, text: &str, code: &str) {
-        if !self.output.declarations.registered_expression {
-            self.output
-                .functions
-                .push_str("declare void @imre_dyn_bind_expression(ptr, i64, ptr)\n");
-            self.output.declarations.registered_expression = true;
-        }
-        self.line(&format!(
-            "call void @imre_dyn_bind_expression(ptr %ctx, i64 {text}, ptr {code})"
-        ));
-    }
-
-    fn text(&mut self, value: &str) -> String {
-        if !value.is_empty() && strings::interned_spelling(value) {
-            self.output.interned_identifiers.insert(value.to_owned());
-        }
-        self.lit(1, value.as_bytes())
-    }
-
-    fn lookup(&mut self, name: &str) -> String {
-        let op = match &self.class_locals {
-            Some(class) if self.annotation_values.is_some() && class.globals.contains(name) => {
-                "lookup_annotation_global"
-            }
-            Some(class) if self.annotation_values.is_some() && class.locals.contains(name) => {
-                "lookup_class_annotation_global"
-            }
-            Some(_) if self.annotation_values.is_some() => "lookup_class_annotation",
-            Some(class) if class.locals.contains(name) => "lookup_class_local",
-            _ => "lookup",
-        };
-        self.frame.named_op(op, &self.scope.clone(), name, "0")
-    }
-
-    fn bind(&mut self, name: &str, value: &str) {
-        self.frame
-            .named_op("assign", &self.scope.clone(), name, value);
-    }
-
-    fn attr(&mut self, object: &str, name: &str) -> String {
-        self.named_op("attr", object, name, "0")
-    }
-
-    fn select(
-        &mut self,
-        branch: impl FnOnce(&mut Self, &str, &str),
-        on_true: impl FnOnce(&mut Self) -> CheckedValue,
-        on_false: impl FnOnce(&mut Self) -> CheckedValue,
-    ) -> CheckedValue {
-        ValueJoin::select(
-            self,
-            |code| {
-                code.flush_check();
-                &mut code.body
-            },
-            branch,
-            on_true,
-            on_false,
-        )
-        .expect("value-producing registered conditional")
+        })
     }
 
     fn unsupported(&mut self, what: &str) -> String {
@@ -1500,21 +1205,6 @@ impl Function<'_, '_> {
         opener: u8,
     ) -> Option<[usize; 4]> {
         self.expression_range_span(expr.range(), prefix.end(), opener)
-    }
-
-    fn invoke(&mut self, callable: &str, values: &[&str]) -> String {
-        let mark = self.temporary_mark();
-        let (ptr, count) = self.handle_array(values);
-        self.call_at(
-            callable,
-            CallArguments::Positional {
-                array: ptr,
-                count,
-                receiver_slot: false,
-            },
-            &mark,
-            None,
-        )
     }
 }
 
@@ -1676,7 +1366,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
              type CharBuffer = list[str]\n\
              type Completer = Callable[[str, int], str | None]\n\
              type PlatformTripleKey = tuple[str, str, str]\n",
-            true,
+            0,
             ModuleOrigin::Program(ProgramBodies::default()),
         )
         .unwrap();
@@ -1707,6 +1397,66 @@ second = t'{client.lookup(*args)}{v * 2}'",
     }
 
     #[test]
+    fn checked_alias_site_emits_after_dropping_the_ruff_suite() {
+        let mut prepared = PreparedBody::module(
+            "model",
+            Path::new("model.py"),
+            "type PublicRow[T] = payload[T]\n",
+            0,
+            ModuleOrigin::Program(ProgramBodies::default()),
+        )
+        .unwrap();
+        assert!(
+            prepared
+                .source
+                .initializer
+                .as_ref()
+                .unwrap()
+                .fully_checked()
+        );
+        drop(std::mem::take(&mut prepared.body));
+
+        let mut output = Output::default();
+        let file = output.data(b"model.py");
+        let entry = prepared.emit(&mut output, 0, &file).unwrap();
+        let alias_op = output.data(b"type_alias");
+        let payload = output.data(b"payload");
+        let format_op = output.data(b"annotation_format");
+        let body = |name: &str| {
+            output
+                .functions
+                .split_once(&format!("define internal i64 {name}("))
+                .unwrap()
+                .1
+                .split_once("\n}")
+                .unwrap()
+                .0
+        };
+        let initializer = body(&entry);
+        assert!(initializer.contains(&format!(
+            "call i64 @imre_dyn_op_at(ptr %ctx, ptr {alias_op},"
+        )));
+        let (_, definition) = initializer
+            .split_once("call i64 @imre_dyn_define(ptr %ctx, ptr ")
+            .unwrap();
+        let (site, _) = definition.split_once(',').unwrap();
+        let (_, descriptor) = output
+            .constants
+            .split_once(&format!("{site} = private constant %code_site {{ ptr "))
+            .unwrap();
+        let (callback, _) = descriptor.split_once(',').unwrap();
+        let evaluator = body(callback);
+        let check = evaluator
+            .find(&format!(
+                "call i64 @imre_dyn_op_at(ptr %ctx, ptr {format_op},"
+            ))
+            .unwrap();
+        let read = evaluator.find(&format!("ptr {payload}, i64 7)")).unwrap();
+        assert!(check < read);
+        assert!(!initializer.contains(&format!("ptr {payload}, i64 7)")));
+    }
+
+    #[test]
     fn type_alias_returns_a_registered_lambda_with_a_prepared_template_body() {
         use crate::ir::{Builtin, ExprKind};
 
@@ -1714,7 +1464,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
             "editor",
             Path::new("editor.py"),
             "type Factory = lambda item: t'{item}'\n",
-            true,
+            0,
             ModuleOrigin::Program(ProgramBodies::default()),
         )
         .unwrap();
@@ -1740,7 +1490,7 @@ second = t'{client.lookup(*args)}{v * 2}'",
             "editor",
             Path::new("editor.py"),
             "type CharBuffer = list[str]\n",
-            true,
+            0,
             ModuleOrigin::Program(ProgramBodies::default()),
         )
         .unwrap();

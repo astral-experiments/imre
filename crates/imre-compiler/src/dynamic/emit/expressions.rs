@@ -1,10 +1,11 @@
+use crate::llvm::registered::IndexKey;
 use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
-use super::CheckedValue;
+use super::FrameEmitter;
 use super::boolean::{Context as BooleanContext, Flow, Target};
 use super::{Body, Function, permanent};
-use crate::ir;
+use crate::llvm::operations::{CheckedValue, ValueJoin};
 
 impl Function<'_, '_> {
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
@@ -38,7 +39,9 @@ impl Function<'_, '_> {
             Some(body) => Body::CheckedExpression(body),
             None => Body::Expression(&lambda.body),
         };
-        self.bind_lambda(site, &self.scope.clone(), &defaults, body)
+        let definition = self.compile_lambda(site, body);
+        let scope = self.scope.clone();
+        definition.bind_defaults(&mut self.frame, &scope, &defaults)
     }
 
     pub(super) fn with_expression_range(
@@ -50,149 +53,6 @@ impl Function<'_, '_> {
         let value = emit(self);
         self.current_range = previous;
         value
-    }
-
-    fn attribute_position(&mut self, range: ruff_text_size::TextRange) {
-        if self.native_suspension {
-            self.call_position(range);
-        }
-    }
-
-    pub(super) fn attribute_value(
-        &mut self,
-        receiver: &str,
-        name: &str,
-        range: ruff_text_size::TextRange,
-    ) -> String {
-        self.attribute_position(range);
-        self.attr(receiver, name)
-    }
-
-    /// Execute a descriptor operation at the original target, using the same live receiver
-    /// for both halves of augmented assignment. A mutation releases its operand window on
-    /// success and unwinds it before transferring an exception to the handler.
-    pub(super) fn attribute_operation<'e, T: 'e>(
-        &mut self,
-        action: ir::AttributeAction,
-        name: &str,
-        range: ruff_text_size::TextRange,
-        mut operands: impl Iterator<Item = &'e T>,
-        mut evaluate: impl FnMut(&mut Self, &T) -> String,
-    ) -> String {
-        use ir::AttributeAction;
-        let first = operands.next().expect("attribute operand");
-        let mark = self.temporary_mark();
-        if action == AttributeAction::Load {
-            return self.unwind_operands(&mark, |code| {
-                let receiver = evaluate(code, first);
-                let value = code.attribute_value(&receiver, name, range);
-                code.keep_operands(&mark, &value, "0");
-                value
-            });
-        }
-        self.unwind_operands(&mark, |code| {
-            match action {
-                AttributeAction::Store => {
-                    let value = evaluate(code, first);
-                    code.store_attribute(name, range, &value, |code| {
-                        evaluate(code, operands.next().expect("attribute receiver"))
-                    });
-                }
-                AttributeAction::Delete => {
-                    let receiver = evaluate(code, first);
-                    code.write_attribute(&receiver, name, range, None);
-                }
-                AttributeAction::InPlace(op) => {
-                    let receiver = evaluate(code, first);
-                    let right_mark = code.temporary_mark();
-                    let value = code.unwind_operands(&right_mark, |code| {
-                        let left = code.attribute_value(&receiver, name, range);
-                        let right = evaluate(code, operands.next().expect("in-place RHS"));
-                        let value = code.op(&format!("inplace:{op}"), &[&left, &right]);
-                        // The binary operation consumed both operands before STORE_ATTR.
-                        code.keep_operands(&right_mark, &value, "0");
-                        value
-                    });
-                    // STORE_ATTR consumes its receiver before the value being stored.
-                    let receiver_mark = code.keep_operands(&mark, &value, &receiver);
-                    code.unwind_operands(&receiver_mark, |code| {
-                        code.write_attribute(&receiver, name, range, Some(&value));
-                        code.discard_truth(&receiver_mark);
-                    });
-                }
-                AttributeAction::Load => unreachable!(),
-            }
-            code.discard_truth(&mark);
-        });
-        permanent::NONE.to_string()
-    }
-
-    pub(super) fn store_attribute(
-        &mut self,
-        name: &str,
-        range: ruff_text_size::TextRange,
-        value: &str,
-        receiver: impl FnOnce(&mut Self) -> String,
-    ) {
-        // The RHS is already owned and must outlive evaluation and disposal of the receiver.
-        let mark = self.temporary_mark();
-        self.unwind_operands(&mark, |code| {
-            let receiver = receiver(code);
-            code.write_attribute(&receiver, name, range, Some(value));
-            code.discard_truth(&mark);
-        });
-    }
-
-    fn write_attribute(
-        &mut self,
-        receiver: &str,
-        name: &str,
-        range: ruff_text_size::TextRange,
-        value: Option<&str>,
-    ) -> String {
-        self.attribute_position(range);
-        match value {
-            Some(value) => self.frame.named_op("setattr", receiver, name, value),
-            None => self.frame.named_op("delattr", receiver, name, "0"),
-        }
-    }
-
-    /// Resolve the descriptor before evaluating the call arguments. A direct target
-    /// also supplies its receiver through the frame's reusable scratch slot.
-    pub(super) fn method_target(
-        &mut self,
-        receiver: &str,
-        name: &str,
-        range: ruff_text_size::TextRange,
-        direct: bool,
-    ) -> (String, Option<String>) {
-        self.attribute_position(range);
-        let lookup = if direct && name == "get" {
-            Some(format!(
-                "call i64 @imre_dyn_dict_get_target(ptr %ctx, i64 {receiver}, ptr %live)"
-            ))
-        } else if direct && !name.starts_with('_') && imre_ast::strings::STR_METHODS.contains(&name)
-        {
-            let symbol = self.output.data(format!("str.{name}").as_bytes());
-            Some(format!(
-                "call i64 @imre_dyn_string_method_target(ptr %ctx, i64 {receiver}, ptr {symbol}, ptr %live)"
-            ))
-        } else if direct && !name.starts_with("__") {
-            let symbol = self.output.data(name.as_bytes());
-            Some(format!(
-                "call i64 @imre_dyn_builtin_method_target(ptr %ctx, i64 {receiver}, ptr {symbol}, ptr %live)"
-            ))
-        } else {
-            None
-        };
-        if let Some(lookup) = lookup {
-            let target = self.checked(&lookup);
-            // Nested argument calls can reuse the entry-block scratch space.
-            let bound = self.value("load i64, ptr %live");
-            (target, Some(bound))
-        } else {
-            (self.named_op("method", receiver, name, "0"), None)
-        }
     }
 
     pub(super) fn located_expr(&mut self, expr: &ast::Expr) -> String {
@@ -247,16 +107,18 @@ impl Function<'_, '_> {
                     &v.slice,
                     self.source.registered_source(),
                 );
+                let base = self.expr(&v.value);
                 let key = match v.slice.as_ref() {
-                    ast::Expr::Slice(slice) if slice.step.is_none() => super::IndexKey::Bounds(
+                    ast::Expr::Slice(slice) if slice.step.is_none() => IndexKey::Bounds(
                         slice.lower.as_deref(),
                         slice.upper.as_deref(),
                         constant.as_ref().map(|(k, _)| k),
                     ),
-                    _ if let Some((_, value)) = &constant => super::IndexKey::Prepared(value),
-                    key => super::IndexKey::Object(key),
+                    _ if let Some((_, value)) = &constant => {
+                        IndexKey::Prepared(self.registered_value(value))
+                    }
+                    key => IndexKey::Object(key),
                 };
-                let base = self.expr(&v.value);
                 self.subscript(&base, key, v.range(), v.value.end(), Self::index_operand)
             }
             ast::Expr::Slice(slice) => self.slice_object(
@@ -278,13 +140,18 @@ impl Function<'_, '_> {
             }
             ast::Expr::BoolOp(_) => self.boolean_value(expr),
             ast::Expr::Compare(v) => self.compare_expr(v, BooleanContext::Value),
-            ast::Expr::If(v) => self
-                .select(
-                    |f, yes, no| f.branch_expr(&v.test, yes, no),
-                    |f| CheckedValue::handle(f.expr(&v.body)),
-                    |f| CheckedValue::handle(f.expr(&v.orelse)),
-                )
-                .into_handle(),
+            ast::Expr::If(v) => ValueJoin::select(
+                self,
+                |f| {
+                    f.flush_check();
+                    &mut f.frame.body
+                },
+                |f, yes, no| f.branch_expr(&v.test, yes, no),
+                |f| CheckedValue::handle(f.expr(&v.body)),
+                |f| CheckedValue::handle(f.expr(&v.orelse)),
+            )
+            .expect("value-producing registered conditional")
+            .into_handle(),
             ast::Expr::Named(v) => {
                 let ast::Expr::Name(target) = &*v.target else {
                     return self.unsupported("assignment expression target");
@@ -350,16 +217,6 @@ impl Function<'_, '_> {
                 f.truth(&value)
             }
         })
-    }
-
-    pub(super) fn test_with_temporaries(
-        &mut self,
-        test: impl FnOnce(&mut Self) -> String,
-    ) -> String {
-        let mark = self.temporary_mark();
-        let condition = test(self);
-        self.discard_truth(&mark);
-        condition
     }
 
     /// Assign a block to each graph step. Multiple predecessors can share a single operand.
@@ -430,32 +287,6 @@ impl Function<'_, '_> {
         );
         self.label(&done);
         self.value(&format!("phi i64 {}", incoming.join(", ")))
-    }
-
-    pub(super) fn unwind_operands<T>(
-        &mut self,
-        mark: &str,
-        body: impl FnOnce(&mut Self) -> T,
-    ) -> T {
-        self.unwind_with(|f| f.discard_truth(mark), body)
-    }
-
-    pub(super) fn unwind_with<T>(
-        &mut self,
-        release: impl FnOnce(&mut Self),
-        body: impl FnOnce(&mut Self) -> T,
-    ) -> T {
-        let failed = self.name("b");
-        let outer = std::mem::replace(&mut self.body.error_target, failed.clone());
-        let result = body(self);
-        let ready = self.name("b");
-        self.jump(&ready);
-        self.label(&failed);
-        release(self);
-        self.jump(&outer);
-        self.label(&ready);
-        self.body.error_target = outer;
-        result
     }
 
     /// A failed intermediate comparison returns its object in a value context and false in a branch.
@@ -585,25 +416,6 @@ impl Function<'_, '_> {
             "i64"
         };
         self.value(&format!("phi {ty} {}", incoming.join(", ")))
-    }
-
-    pub(super) fn pack_operand(&mut self, operation: &str, args: &[&str]) -> String {
-        if self.native_suspension {
-            self.frame.call_position(self.current_range);
-        }
-        self.op(operation, args)
-    }
-
-    pub(super) fn extend_operand(
-        &mut self,
-        target: &str,
-        evaluate: impl FnOnce(&mut Self) -> String,
-    ) {
-        let mark = self.temporary_mark();
-        let value = evaluate(self);
-        self.pack_operand("extend", &[target, &value]);
-        // The target owns the expanded items. Drop the iterable before the next operand.
-        self.discard_truth(&mark);
     }
 
     /// A residual field keeps its whole template on the original literal-spec path.

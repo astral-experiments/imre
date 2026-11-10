@@ -184,10 +184,10 @@ impl CheckedBody<'_, '_, '_, '_> {
             ExprKind::Builtin(Builtin::Bool, args) => return self.object_condition(&args[0]),
             _ => {}
         }
-        let mark = self.python().mark();
+        let mark = self.python().temporary_mark();
         let value = self.object_operand(expr);
         let condition = self.python().truth(&value);
-        self.python().drop_truth(&mark);
+        self.python().discard_truth(&mark);
         condition
     }
 
@@ -335,7 +335,7 @@ impl CheckedBody<'_, '_, '_, '_> {
                 let b = table.into_handle();
                 let k = key.into_handle();
                 f.op("put", &[&b, &k, &v]);
-                f.target_release(mark.as_deref());
+                f.release_target(mark.as_deref());
             }
             Entry::Native(e) => {
                 let (list, index, value) =

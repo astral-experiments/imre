@@ -1115,8 +1115,14 @@ pub(crate) enum TypeParameterKind {
 /// The source declaration or future spelling of one simple module annotation.
 #[derive(Clone)]
 pub(crate) enum ModuleAnnotation {
-    Deferred(ruff_text_size::TextSize),
-    String { name: String, spelling: String },
+    Deferred {
+        site: ruff_text_size::TextSize,
+        name: String,
+    },
+    String {
+        name: String,
+        spelling: String,
+    },
 }
 
 /// A checked expression function in the module's annotation provider.
