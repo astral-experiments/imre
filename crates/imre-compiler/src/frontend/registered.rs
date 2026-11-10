@@ -1007,8 +1007,6 @@ pub(crate) enum SourceEffect {
     Assertion(Box<AssertionSite>),
     /// A refused operation retains its diagnostic and original source range.
     Refused(TextRange, &'static str),
-    /// Evaluate the operands at their place in the operation, in the current frame.
-    ObjectOperation(Box<Builtin>, Vec<PhysicalOperand>),
     /// Re-evaluate the guard in the enclosing frame on each trip through the loop.
     While(Box<PreparedWhile>),
     /// Each test and its child suite are prepared in their enclosing frame.
@@ -1402,9 +1400,7 @@ impl<'a> SuitePreparation<'a> {
                     ),
                 };
             let selected = match &effect {
-                SourceEffect::ObjectOperation(_, inputs) | SourceEffect::Value(_, inputs) => {
-                    inputs.iter().find_map(PhysicalOperand::refusal)
-                }
+                SourceEffect::Value(_, inputs) => inputs.iter().find_map(PhysicalOperand::refusal),
                 SourceEffect::Assertion(site) => site
                     .test
                     .refusal()
@@ -1419,9 +1415,10 @@ impl<'a> SuitePreparation<'a> {
             let operation = self.refusal.take().or(selected);
             self.refusal = preceding.or(operation.filter(|_| live));
             live &= match &effect {
-                SourceEffect::Value(statement, _) => {
-                    !matches!(statement.as_ref(), Statement::Return(_) | Statement::Raise(_))
-                }
+                SourceEffect::Value(statement, _) => !matches!(
+                    statement.as_ref(),
+                    Statement::Return(_) | Statement::Raise(_)
+                ),
                 SourceEffect::Try(region) => try_continues(
                     region.body.falls_through,
                     !region.handlers.is_empty(),
@@ -1757,6 +1754,11 @@ impl<'a> SuitePreparation<'a> {
                 vec![input],
             )
         };
+        let operation_with_inputs = |opcode, inputs: Vec<PhysicalOperand>| {
+            let slots = (0..inputs.len()).map(input_slot).collect();
+            let effect = Statement::Expr(operation(opcode, Type::None, slots));
+            SourceEffect::Value(Box::new(effect), inputs)
+        };
         let target_input = |input: TargetInput<'_>| {
             let checked =
                 RegisteredOperand::prepare_with(self.source, kind, |scope| input.lower(scope));
@@ -1887,19 +1889,12 @@ impl<'a> SuitePreparation<'a> {
             {
                 body.push(checkpoint(stmt));
                 if let Some(inputs) = values::bare_target_operands(&ann.target) {
-                    let target = self.sites.expressions.discarded_target(
-                        &ann.target,
-                        inputs,
-                        self.source,
-                        kind,
-                        suspended,
-                    );
                     residual.push(PendingStatement {
                         at: body.len(),
                         source: stmt,
-                        effect: Some(SourceEffect::Value(
-                            Box::new(Statement::Expr(input_slot(0))),
-                            vec![PhysicalOperand::Residual(target)],
+                        effect: Some(operation_with_inputs(
+                            Builtin::RegisteredDiscard,
+                            inputs.into_iter().map(frame_value).collect(),
                         )),
                     });
                 }
@@ -1912,8 +1907,8 @@ impl<'a> SuitePreparation<'a> {
                 residual.push(PendingStatement {
                     at: body.len(),
                     source: stmt,
-                    effect: Some(SourceEffect::ObjectOperation(
-                        Box::new(attribute_opcode(effect.action, effect.field)),
+                    effect: Some(operation_with_inputs(
+                        attribute_opcode(effect.action, effect.field),
                         effect.operands().map(frame_value).collect(),
                     )),
                 });
@@ -2028,8 +2023,8 @@ impl<'a> SuitePreparation<'a> {
                         residual.push(PendingStatement {
                             at: body.len(),
                             source: stmt,
-                            effect: Some(SourceEffect::ObjectOperation(
-                                Box::new(op),
+                            effect: Some(operation_with_inputs(
+                                op,
                                 inputs.map(target_input).collect(),
                             )),
                         });

@@ -5689,10 +5689,11 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 if matches!(statement.as_ref(), crate::ir::Statement::Assign(..))
         ));
         assert!(matches!(&attribute.effect,
-            crate::frontend::SourceEffect::ObjectOperation(op, inputs)
-            if matches!(op.as_ref(), crate::ir::Builtin::RegisteredAttribute {
-                action: crate::ir::AttributeAction::Store, ..
-            }) && inputs.len() == 2
+            crate::frontend::SourceEffect::Value(statement, inputs)
+                if inputs.len() == 2 && matches!(statement.as_ref(), crate::ir::Statement::Expr(value)
+                    if matches!(&value.kind, crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredAttribute {
+                        action: crate::ir::AttributeAction::Store, ..
+                    }, _)))
         ));
 
         let emit = |prepared: &PreparedBody<'_>| {
@@ -5764,8 +5765,11 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             panic!("expected one external deletion operand");
         };
         assert!(matches!(
-            run.effect,
-            crate::frontend::SourceEffect::ObjectOperation(..)
+            &run.effect,
+            crate::frontend::SourceEffect::Value(statement, _)
+                if matches!(statement.as_ref(), crate::ir::Statement::Expr(value)
+                    if matches!(value.kind, crate::ir::ExprKind::Builtin(
+                        crate::ir::Builtin::RegisteredDeleteItem, _)))
         ));
         assert!(run.at > 0 && run.at < suite.checked.function.body.len());
         branch.cases[0].body[0]
@@ -5804,13 +5808,14 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             panic!("only the target with the injected key needs a source input");
         };
         assert_eq!(gap.at, suite.checked.function.body.len());
-        let crate::frontend::SourceEffect::ObjectOperation(op, operands) = &gap.effect else {
+        let crate::frontend::SourceEffect::Value(statement, operands) = &gap.effect else {
             panic!("expected a prepared item deletion");
         };
-        assert!(matches!(
-            op.as_ref(),
-            crate::ir::Builtin::RegisteredDeleteItem
-        ));
+        assert!(
+            matches!(statement.as_ref(), crate::ir::Statement::Expr(value)
+            if matches!(&value.kind, crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredDeleteItem, slots)
+                if slots.len() == 2))
+        );
         let [
             crate::frontend::PhysicalOperand::Checked(_),
             crate::frontend::PhysicalOperand::Residual(key),

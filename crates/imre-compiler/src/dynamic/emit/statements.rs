@@ -1,5 +1,7 @@
 use crate::frontend::{ExpressionInput, PhysicalOperand, SourceEffect, SourceOperand};
-use crate::llvm::registered::{PreparedSuiteEmitter, emit_operand, emit_physical_operand, emit_prepared_suite};
+use crate::llvm::registered::{
+    PreparedSuiteEmitter, emit_operand, emit_physical_operand, emit_prepared_suite,
+};
 mod declarations;
 use super::sites::{CheckedSites, CompiledDefinition};
 
@@ -84,10 +86,6 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
             }
             SourceEffect::Value(statement, inputs) => {
                 return Some((statement, inputs));
-            }
-            SourceEffect::ObjectOperation(op, inputs) => {
-                let (receiver, args) = inputs.split_first().expect("object operation receiver");
-                self.object_operation(op, receiver, args.iter(), Self::physical_operand);
             }
         }
         None
