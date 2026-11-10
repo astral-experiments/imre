@@ -695,7 +695,10 @@ impl Frame<'_, '_, '_> {
         let (FrameInputs::Region(region), ExprKind::Local(slot)) = (self.inputs, &expr.kind) else {
             return None;
         };
-        Some(prepared_condition(self.code.prepared_owner(), &region.guards[*slot]))
+        Some(prepared_condition(
+            self.code.prepared_owner(),
+            &region.guards[*slot],
+        ))
     }
 
     pub(crate) fn lookup_local(&mut self, slot: usize) -> String {
