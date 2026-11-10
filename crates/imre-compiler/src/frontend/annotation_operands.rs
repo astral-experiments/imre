@@ -75,6 +75,7 @@ fn checked_annotation_value(expr: &ast::Expr, source: RegisteredSource<'_>) -> O
             Builtin::RegisteredUnpack {
                 count: 1,
                 star: None,
+                target: None,
             },
             vec![Region::Suite.operand(&starred.value, source)?],
         ),
@@ -323,7 +324,8 @@ mod tests {
             ExprKind::Builtin(
                 Builtin::RegisteredUnpack {
                     count: 1,
-                    star: None
+                    star: None,
+                    target: None
                 },
                 _
             )

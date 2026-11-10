@@ -839,9 +839,13 @@ impl Frame<'_, '_, '_> {
                         let item = self.evaluate_handle(item);
                         self.code.op(op, &[&out, &item])
                     }
-                    Unpack(value, count, star) => {
+                    Unpack(value, count, star, target) => {
                         let value = self.evaluate_handle(value);
-                        self.unpack(&value, count, star)
+                        let unpack = |frame: &mut Self| frame.unpack(&value, count, star);
+                        match target {
+                            Some(range) => self.with_source_range(range, unpack),
+                            None => unpack(self),
+                        }
                     }
                     Namespace(names, parent) => {
                         let parent = parent.map(|value| self.evaluate_handle(value));

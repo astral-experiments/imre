@@ -4919,9 +4919,14 @@ mod tests {
                 let mut attrs = 0;
                 let mut items = 0;
                 ir::walk_expressions(&body.function.body, &mut |expr| match &expr.kind {
-                    ExprKind::Builtin(Builtin::RegisteredUnpack { count, star }, _) => {
-                        snapshots.push((*count, *star))
-                    }
+                    ExprKind::Builtin(
+                        Builtin::RegisteredUnpack {
+                            count,
+                            star,
+                            target: Some(target),
+                        },
+                        _,
+                    ) => snapshots.push((*count, *star, &source[*target])),
                     ExprKind::Builtin(
                         Builtin::RegisteredAttribute {
                             action: ir::AttributeAction::Store,
@@ -4935,7 +4940,13 @@ mod tests {
                 ir::walk_statements(&body.function.body, &mut |stmt| {
                     items += usize::from(matches!(stmt, Statement::SetItem(..)));
                 });
-                assert_eq!(snapshots, [(2, None), (2, Some(1))]);
+                assert_eq!(
+                    snapshots,
+                    [
+                        (2, None, "owners[0], (sink.field, *rest)"),
+                        (2, Some(1), "(sink.field, *rest)")
+                    ]
+                );
                 assert_eq!((items, attrs), (1, 1));
             }
         }
@@ -5070,7 +5081,8 @@ mod tests {
                     ExprKind::Builtin(
                         Builtin::RegisteredUnpack {
                             count: 2,
-                            star: None
+                            star: None,
+                            ..
                         },
                         _
                     )
