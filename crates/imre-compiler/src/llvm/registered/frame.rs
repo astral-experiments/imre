@@ -166,6 +166,50 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         }
     }
 
+    pub(crate) fn begin_module(
+        &mut self,
+        has_annotations: bool,
+        string_annotations: bool,
+        docstring: Option<&str>,
+        globals: &BTreeSet<String>,
+    ) {
+        if has_annotations {
+            if string_annotations {
+                self.op("setup_module_string_annotations", &[&self.scope.clone()]);
+            } else {
+                // Lower the provider after collecting the body, but run its setup first.
+                self.module_annotation_sites = Some(Vec::new());
+                self.jump("annotations_init");
+                self.label("module_body");
+            }
+        }
+        if self.output.keep_docstrings
+            && let Some(doc) = docstring
+        {
+            let value = self.text(doc);
+            self.bind("__doc__", &value);
+        }
+        for name in globals {
+            self.declare_global(name);
+        }
+    }
+
+    pub(crate) fn finish_module(
+        mut self,
+        define_annotations: impl FnOnce(&mut Self, &[TextSize]),
+    ) -> String {
+        if let Some(sites) = self.module_annotation_sites.take() {
+            self.end("ret i64 0");
+            self.label("annotations_init");
+            if !sites.is_empty() {
+                define_annotations(&mut self, &sites);
+            }
+            self.op("setup_module_annotations", &[&self.scope.clone()]);
+            self.jump("module_body");
+        }
+        self.finish(true)
+    }
+
     pub(crate) fn finish(mut self, module: bool) -> String {
         let name = format!("@code{}", self.id);
         if !self.body.terminated {

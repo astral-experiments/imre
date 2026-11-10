@@ -11,6 +11,8 @@ pub(crate) use lambdas::{LambdaBinding, LambdaDefault, RegisteredLambda};
 mod templates;
 pub(crate) use templates::{PreparedStrings, PreparedTemplate, TemplateField};
 pub(super) mod patterns;
+mod placement;
+pub(crate) use placement::place_fixed_function;
 pub(super) mod values;
 
 /// Prepare the bindings installed by the existing type-parameter frame constructor.
@@ -132,6 +134,8 @@ impl RegisteredOperand {
 }
 
 pub(crate) struct RegisteredFunction {
+    /// Physical positions for the unchanged fixed operations, in checked node order.
+    pub(crate) fixed_sites: Vec<TextRange>,
     pub(crate) function: ir::Function,
     pub(crate) local_names: HashMap<usize, LocalBinding>,
 }
@@ -145,6 +149,7 @@ impl RegisteredFunction {
         );
         let body = vec![Statement::Expr(checkpoint), Statement::Return(value)];
         Self {
+            fixed_sites: Vec::new(),
             function: ir::Function {
                 params: vec![],
                 returns: Type::PythonObject,
@@ -168,7 +173,7 @@ impl RegisteredFunction {
 }
 
 /// Storage in the function frame or in a lexically nested Python namespace.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LocalBinding {
     pub(crate) name: String,
     pub(crate) namespace: Option<usize>,
@@ -226,6 +231,7 @@ pub(super) fn lower_definition<'a>(
         .classify(Kind::ScopedObject));
     }
     let function = RegisteredFunction {
+        fixed_sites: Vec::new(),
         function: body.function,
         local_names,
     };
@@ -528,6 +534,7 @@ pub(crate) struct ParameterAnnotations {
 impl ParameterAnnotations {
     fn prepare<R>(
         def: &ast::StmtFunctionDef,
+        source: values::RegisteredSource<'_>,
         operands: &HashMap<TextSize, PreparedAnnotation<R>>,
         sites: &mut HashMap<TextSize, DeferredAnnotation>,
     ) -> Option<Self> {
@@ -537,18 +544,45 @@ impl ParameterAnnotations {
         }
         let mut entries = Vec::with_capacity(annotations.len());
         let mut references = HashMap::new();
+        let operations = HashMap::new();
+        let statement_sites = StatementSites::default();
+        // Each annotation is evaluated in the same provider activation.
+        let mut scope = SourceScope::new(
+            RegisteredScope::Function { is_async: false },
+            source,
+            &operations,
+            &statement_sites,
+        );
         for (name, expression) in annotations {
             let site = expression.start();
             if let Some(reference) = scalar_reference(expression) {
                 references.insert(name.to_owned(), reference);
             }
+            let value = operands
+                .get(&site)
+                .map(|operand| operand.operand(site))
+                .or_else(|| {
+                    if !matches!(
+                        expression,
+                        ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_)
+                    ) {
+                        return None;
+                    }
+                    let start = scope.locals.len();
+                    let value = scope.operand(expression);
+                    if value.is_none() {
+                        scope.truncate_locals(start);
+                    }
+                    value
+                });
             sites.insert(
                 site,
-                DeferredAnnotation::new(name.to_owned(), expression, operands),
+                DeferredAnnotation::new(name.to_owned(), expression, value),
             );
             entries.push(ir::AnnotationOccurrence { site, index: None });
         }
-        let body = DeferredAnnotation::prepare_body(sites, &entries);
+        let mut body = DeferredAnnotation::prepare_body(sites, &entries);
+        (body.checked.function.locals, body.checked.local_names) = scope.bindings();
         Some(Self {
             entries,
             body,
@@ -577,14 +611,10 @@ pub(crate) enum AnnotationValue {
 }
 
 impl DeferredAnnotation {
-    fn new<R>(
-        name: String,
-        expression: &ast::Expr,
-        operands: &HashMap<TextSize, super::PreparedAnnotation<R>>,
-    ) -> Self {
-        let value = operands.get(&expression.start()).map_or_else(
+    fn new(name: String, expression: &ast::Expr, checked: Option<Expr>) -> Self {
+        let value = checked.map_or_else(
             || AnnotationValue::Source(expression.clone()),
-            |operand| AnnotationValue::Checked(operand.operand(expression.start())),
+            AnnotationValue::Checked,
         );
         Self {
             name,
@@ -625,6 +655,7 @@ impl DeferredAnnotation {
         )));
         RegisteredSuite {
             checked: RegisteredFunction {
+                fixed_sites: Vec::new(),
                 function: ir::Function {
                     params: vec![],
                     returns: Type::PythonObject,
@@ -678,11 +709,13 @@ pub(crate) struct RegisteredSites<'a> {
 pub(crate) fn registered_sites<'a, R>(
     body: &'a [ast::Stmt],
     names: &imre_ast::Names,
+    source: values::RegisteredSource<'_>,
     operands: &HashMap<TextSize, PreparedAnnotation<R>>,
 ) -> RegisteredSites<'a> {
     use ast::statement_visitor::{StatementVisitor, walk_stmt};
     struct Collector<'s, 'a, R> {
         names: &'s imre_ast::Names,
+        source: values::RegisteredSource<'s>,
         operands: &'s HashMap<TextSize, PreparedAnnotation<R>>,
         scope: RegisteredScope,
         in_unprepared_generic: bool,
@@ -714,6 +747,7 @@ pub(crate) fn registered_sites<'a, R>(
                 ast::Stmt::FunctionDef(def) => {
                     if let Some(provider) = ParameterAnnotations::prepare(
                         def,
+                        self.source,
                         self.operands,
                         &mut self.output.annotations,
                     ) {
@@ -787,7 +821,13 @@ pub(crate) fn registered_sites<'a, R>(
                     } else {
                         self.output.annotations.insert(
                             ann.start(),
-                            DeferredAnnotation::new(name.clone(), &ann.annotation, self.operands),
+                            DeferredAnnotation::new(
+                                name.clone(),
+                                &ann.annotation,
+                                self.operands
+                                    .get(&ann.annotation.start())
+                                    .map(|operand| operand.operand(ann.annotation.start())),
+                            ),
                         );
                         (
                             ir::NamespaceAnnotation::Deferred {
@@ -812,6 +852,7 @@ pub(crate) fn registered_sites<'a, R>(
     }
     let mut sites = Collector {
         names,
+        source,
         operands,
         scope: RegisteredScope::Module,
         in_unprepared_generic: false,
@@ -853,6 +894,8 @@ pub(crate) enum SourceEffect {
     LoopTransfer(TextRange, &'static Statement),
     /// A mixed loop needs its source suites. A literal false test runs only the else suite.
     While(SourceGuard<Box<RegisteredOperand>>),
+    /// Exception matchers and all control-flow children belong to this protected region.
+    Try(Box<PreparedTry>),
     /// The manager, binding and protected child are prepared together.
     Context(Box<PreparedContext>),
     /// A loop whose checked lowering left one or more physical inputs or suites.
@@ -883,7 +926,7 @@ pub(crate) enum PhysicalBinding {
         entered: usize,
         binding: Box<RegisteredFunction>,
     },
-    Source(Box<ast::Expr>),
+    Refused(TextRange, &'static str),
 }
 
 pub(crate) struct PhysicalSuite {
@@ -901,6 +944,7 @@ impl PhysicalSuite {
                 Some(
                     SourceEffect::For(_)
                         | SourceEffect::Context(_)
+                        | SourceEffect::Try(_)
                         | SourceEffect::LoopTransfer(..)
                         | SourceEffect::ObjectOperation(..)
                         | SourceEffect::Discard(_)
@@ -1012,6 +1056,21 @@ pub(crate) struct StatementSites {
     pub(crate) contexts: HashMap<TextRange, Vec<ir::ContextSite>>,
 }
 
+pub(crate) struct PreparedTry {
+    pub(crate) range: TextRange,
+    pub(crate) is_star: bool,
+    pub(crate) body: PhysicalSuite,
+    pub(crate) handlers: Vec<PreparedHandler>,
+    pub(crate) otherwise: PhysicalSuite,
+    pub(crate) finalbody: Option<PhysicalSuite>,
+}
+
+pub(crate) struct PreparedHandler {
+    pub(crate) matcher: Option<(TextRange, PhysicalOperand)>,
+    pub(crate) name: Option<String>,
+    pub(crate) body: PhysicalSuite,
+}
+
 pub(crate) struct PreparedContext {
     pub(crate) range: TextRange,
     pub(crate) inputs: Vec<ContextInput>,
@@ -1022,21 +1081,6 @@ pub(crate) struct ContextInput {
     pub(crate) site: ir::ContextSite,
     pub(crate) manager: PhysicalOperand,
     pub(crate) target: Option<PhysicalBinding>,
-}
-
-/// Bind one externally supplied value with the scope and slot layout of its target.
-fn checked_binding(
-    target: &ast::Expr,
-    source: values::RegisteredSource<'_>,
-    kind: RegisteredScope,
-) -> Option<(usize, Box<RegisteredFunction>)> {
-    let operations = HashMap::new();
-    let sites = StatementSites::default();
-    let mut scope = SourceScope::new(kind, source, &operations, &sites);
-    let ir::ContextBinding { entered, body } = scope.with_binding(target).ok()?;
-    PhysicalRegion::Fallthrough
-        .accepts(&body)
-        .then(|| (entered, Box::new(scope.finish(body))))
 }
 
 fn for_pull(loop_: &ast::StmtFor) -> Option<ir::AsyncPull> {
@@ -1400,7 +1444,10 @@ impl<'a> SuitePreparation<'a> {
                     }
                     None if !matches!(
                         stmt,
-                        ast::Stmt::Match(_) | ast::Stmt::With(_) | ast::Stmt::For(_)
+                        ast::Stmt::Match(_)
+                            | ast::Stmt::With(_)
+                            | ast::Stmt::For(_)
+                            | ast::Stmt::Try(_)
                     ) =>
                     {
                         sites.prepare_inputs(stmt, source, kind, suspended);
@@ -1428,6 +1475,18 @@ impl<'a> SuitePreparation<'a> {
                         at: run.at,
                         statements: index..index + 1,
                         effect: Some(SourceEffect::For(Box::new(region))),
+                    });
+                    continue;
+                }
+                if let ast::Stmt::Try(protected) = stmt {
+                    let region =
+                        children
+                            .prepare
+                            .prepare_try(protected, kind, child_selection, suspended);
+                    plan.residual.push(SourceRun {
+                        at: run.at,
+                        statements: index..index + 1,
+                        effect: Some(SourceEffect::Try(Box::new(region))),
                     });
                     continue;
                 }
@@ -1525,18 +1584,24 @@ impl<'a> SuitePreparation<'a> {
     }
 
     fn physical_binding(
-        &mut self,
+        &self,
         target: &ast::Expr,
         kind: RegisteredScope,
         suspended: bool,
     ) -> PhysicalBinding {
-        match checked_binding(target, self.source, kind) {
-            Some((entered, binding)) => PhysicalBinding::Checked { entered, binding },
-            None => {
-                self.sites
-                    .expressions
-                    .prepare_input(target, self.source, kind, suspended);
-                PhysicalBinding::Source(Box::new(target.clone()))
+        let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
+        scope.diagnostic_suspension = Some(suspended);
+        match scope.with_binding(target) {
+            Ok(ir::ContextBinding { entered, body }) => PhysicalBinding::Checked {
+                entered,
+                binding: Box::new(scope.finish(body)),
+            },
+            Err(()) => {
+                let (range, reason) = scope.refusal.unwrap_or((
+                    target.range(),
+                    "cannot compile this assignment target ahead of time",
+                ));
+                PhysicalBinding::Refused(range, reason)
             }
         }
     }
@@ -1552,6 +1617,47 @@ impl<'a> SuitePreparation<'a> {
             self.selected_suite(stmts, kind, selection, selection, suspended),
             stmts,
         )
+    }
+
+    fn prepare_try(
+        &mut self,
+        stmt: &ast::StmtTry,
+        kind: RegisteredScope,
+        selection: SuiteSelection<'_>,
+        suspended: bool,
+    ) -> PreparedTry {
+        let body = self.physical_suite(&stmt.body, kind, selection, suspended);
+        let handlers = stmt
+            .handlers
+            .iter()
+            .map(|ast::ExceptHandler::ExceptHandler(handler)| {
+                let matcher = handler.type_.as_deref().map(|class| {
+                    let range = if stmt.is_star {
+                        handler.range()
+                    } else {
+                        class.range()
+                    };
+                    (
+                        range,
+                        self.physical_operand(class, kind, selection, suspended),
+                    )
+                });
+                PreparedHandler {
+                    matcher,
+                    name: handler.name.as_ref().map(|name| name.as_str().to_owned()),
+                    body: self.physical_suite(&handler.body, kind, selection, suspended),
+                }
+            })
+            .collect();
+        PreparedTry {
+            range: stmt.range(),
+            is_star: stmt.is_star,
+            body,
+            handlers,
+            otherwise: self.physical_suite(&stmt.orelse, kind, selection, suspended),
+            finalbody: (!stmt.finalbody.is_empty())
+                .then(|| self.physical_suite(&stmt.finalbody, kind, selection, suspended)),
+        }
     }
 
     fn prepare_context(
@@ -2455,6 +2561,7 @@ impl<'a> SourceScope<'a> {
     fn finish(self, body: Vec<Statement>) -> RegisteredFunction {
         let (locals, local_names) = self.bindings();
         RegisteredFunction {
+            fixed_sites: Vec::new(),
             function: ir::Function {
                 params: Vec::new(),
                 returns: Type::PythonObject,
@@ -2500,11 +2607,15 @@ impl PhysicalRegion {
             | ir::Node::Statement(Statement::With {
                 site: ir::ContextSite { is_async: true, .. },
                 ..
-            })
-            | ir::Node::Expression(Expr {
-                kind: ExprKind::Builtin(Builtin::RegisteredSuspend(..), _),
-                ..
             }) => self_contained = false,
+            ir::Node::Expression(Expr {
+                kind: ExprKind::Builtin(Builtin::RegisteredSuspend(kind, _), _),
+                ..
+            }) => {
+                // A checked await resumes at the error target of its enclosing try.
+                self_contained &=
+                    self == Self::Protected && matches!(kind, ir::SuspendValue::Await);
+            }
             _ => {}
         });
         self_contained
@@ -2620,11 +2731,13 @@ impl SourceScope<'_> {
     fn with_binding(&mut self, target: &ast::Expr) -> StdResult<ir::ContextBinding, ()> {
         let slot = self.hidden(Type::PythonObject);
         let value = Expr::local(slot, Type::PythonObject);
-        let body = if pattern_elements(target).is_some() {
-            unpacking::bind_targets(self, target, value, None)?
+        // Unpacking consumes the container before any individual target can suspend.
+        let value = if pattern_elements(target).is_some() {
+            unpacking::take_pattern_temporary(value, slot)
         } else {
-            self.assignment_targets(std::slice::from_ref(target), value)?
+            value
         };
+        let body = self.assignment_targets(std::slice::from_ref(target), value)?;
         Ok(ir::ContextBinding {
             entered: slot,
             body: vec![Statement::Scope {
@@ -3020,7 +3133,7 @@ mod tests {
             crate::frontend::annotation_operands::test_annotation_body,
             &mut HashMap::new(),
         );
-        registered_sites(stmts, names, &strings)
+        registered_sites(stmts, names, source, &strings)
     }
 
     pub(super) fn registered_suite(
@@ -3037,12 +3150,13 @@ mod tests {
     #[test]
     fn generic_method_closure_uses_ordinary_function_sites() {
         let source = "class Box:\n    def capture[T](self, __value: T):\n        def get():\n            return __value\n        return get\n";
-        let mut body = ruff_python_parser::parse_module(source)
-            .unwrap()
-            .into_syntax()
-            .body;
+        let graph = SourceGraph::single(source).unwrap();
+        let module = &graph.modules[graph.entry];
+        let mut body = module.parsed.syntax().body.clone();
         let names = imre_ast::lower(&mut body);
-        let sites = registered_sites::<()>(&body, &names, &HashMap::new());
+        let literals = values::ModuleSource::new(module);
+        let sites =
+            registered_sites::<()>(&body, &names, literals.context(source), &HashMap::new());
         let [method, closure] = sites.functions.as_slice() else {
             panic!("expected the method and its lexical function");
         };

@@ -347,7 +347,8 @@ pub(super) fn alias_builtin_parameters(
     function: &mut ast::StmtFunctionDef,
     graph: &SourceGraph,
     module: ModuleId,
-) {
+) -> bool {
+    let mut renamed = false;
     let params = &mut function.parameters;
     for parameter in params
         .posonlyargs
@@ -374,8 +375,10 @@ pub(super) fn alias_builtin_parameters(
             };
             *name = alias.local.clone();
             alias.visit_body(&mut function.body);
+            renamed = true;
         }
     }
+    renamed
 }
 
 struct BuiltinAlias {

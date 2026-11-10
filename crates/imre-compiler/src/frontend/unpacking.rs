@@ -334,6 +334,12 @@ impl Checker<'_> {
                 value
             };
             let statement = self.assign_value(target, value)?;
+            if let Some(sites) = &mut self.fixed_sites
+                && local.is_some()
+                && let Statement::Assign(slot, _) = &statement
+            {
+                sites.statement(assignment.value.range(), FixedNode::Store(*slot));
+            }
             return Ok(vec![statement]);
         }
         let context = assignment
