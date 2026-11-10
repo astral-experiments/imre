@@ -1155,7 +1155,16 @@ impl Frame<'_, '_, '_> {
             (Builtin::RegisteredSubscript(range, base_end), [base, key]) => {
                 let base = self.evaluate_handle(base);
                 let key = self.read_key(key);
-                self.read_item(&base, key, *range, *base_end)
+                let read = |frame: &mut Self| frame.read_item(&base, key, *range, *base_end);
+                // An injected exception belongs to the parked key. Once it returns,
+                // the read itself can fail across several source lines.
+                if self.native_suspension
+                    && self.positions.line(range.start()) != self.positions.line(range.end())
+                {
+                    self.with_source_range(*range, read)
+                } else {
+                    read(self)
+                }
             }
             (Builtin::RegisteredDict(entries), values) => {
                 let mut values = values.iter();
