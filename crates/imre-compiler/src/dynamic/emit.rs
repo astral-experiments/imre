@@ -522,7 +522,6 @@ impl<'a> PreparedBody<'a, '_> {
             thread_entries,
             statement_sites: prepare.sites,
             python_optimization,
-            nested_bodies: prepare.nested,
             lambdas,
             generators,
             namespace_operations: operations,
@@ -976,7 +975,6 @@ struct SourceInfo<'a> {
     annotations: HashMap<ruff_text_size::TextSize, crate::frontend::DeferredAnnotation>,
     module_annotation_bindings: crate::frontend::RegisteredBindings,
     parameter_annotations: HashMap<ruff_text_size::TextSize, crate::frontend::ParameterAnnotations>,
-    nested_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredSuite>,
     function_bodies: HashMap<ruff_text_size::TextSize, PreparedFunction<'a>>,
     class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredClass>,
     initializer: Option<crate::frontend::PhysicalSuite>,
@@ -1366,17 +1364,19 @@ mod tests {
         let class_bodies = suites.class_suites(classes, &prepared.source.class_keywords, |start| {
             prepared.source.scopes.functions[&start].suspension_flags != 0
         });
-        let (sites, nested) = (suites.sites, suites.nested);
+        let sites = suites.sites;
         prepared.source.initializer = Some(crate::frontend::PhysicalSuite::new(initializer, body));
         prepared.source.class_bodies = class_bodies;
         prepared.source.statement_sites = sites;
-        prepared.source.nested_bodies.extend(nested);
     }
 
-    fn install_test_function_body(source: &mut SourceInfo<'_>, def: &ast::StmtFunctionDef) {
-        let plan = source.nested_bodies.remove(&def.body[0].start()).unwrap();
+    fn install_test_function_body(
+        source: &mut SourceInfo<'_>,
+        def: &ast::StmtFunctionDef,
+        body: crate::frontend::PhysicalSuite,
+    ) {
         let function = source.function_bodies.get_mut(&def.start()).unwrap();
-        function.body = FunctionBody::Suite(crate::frontend::PhysicalSuite::new(plan, &def.body));
+        function.body = FunctionBody::Suite(body);
         function.header = None;
     }
 
@@ -1935,16 +1935,15 @@ mod tests {
             &def.body,
             true,
         );
-        physical.physical_body(
+        let body = physical.named_body(
             &def.body,
             crate::frontend::RegisteredScope::Function { is_async: false },
             false,
+            false,
             &|_| false,
         );
-        let (sites, nested) = (physical.sites, physical.nested);
-        module.source.statement_sites = sites;
-        module.source.nested_bodies.extend(nested);
-        install_test_function_body(&mut module.source, def);
+        module.source.statement_sites = physical.sites;
+        install_test_function_body(&mut module.source, def, body);
         let plan = &test_function_suite(&mut module.source, start).plan;
         let [run] = plan.residual.as_slice() else {
             panic!("expected a mixed for")
@@ -2046,16 +2045,15 @@ mod tests {
             &function.body,
             true,
         );
-        plan.physical_body(
+        let body = plan.named_body(
             &function.body,
             RegisteredScope::Function { is_async: false },
             false,
+            false,
             &|_| false,
         );
-        let (sites, nested) = (plan.sites, plan.nested);
-        module.source.statement_sites = sites;
-        module.source.nested_bodies.extend(nested);
-        install_test_function_body(&mut module.source, function);
+        module.source.statement_sites = plan.sites;
+        install_test_function_body(&mut module.source, function, body);
 
         let original = module.standalone().unwrap();
         let def = module.syntax.as_mut().unwrap().to_mut()[0]
@@ -3168,18 +3166,16 @@ mod tests {
             &function.body,
             true,
         );
-        physical.physical_body(
+        let body = physical.named_body(
             &function.body,
             crate::frontend::RegisteredScope::Function { is_async: false },
             false,
+            false,
             &|_| false,
         );
-        (
-            prepared.source.statement_sites,
-            prepared.source.nested_bodies,
-        ) = (physical.sites, physical.nested);
+        prepared.source.statement_sites = physical.sites;
         let position = function.start();
-        install_test_function_body(&mut prepared.source, function);
+        install_test_function_body(&mut prepared.source, function, body);
         let suite = &test_function_suite(&mut prepared.source, position).plan;
         let [run] = suite.residual.as_slice() else {
             panic!("expected a mixed context")
@@ -4348,16 +4344,15 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             &function.body,
             true,
         );
-        plan.physical_body(
+        let body = plan.named_body(
             &function.body,
             RegisteredScope::Function { is_async: true },
             true,
+            false,
             &|_| false,
         );
-        let (sites, nested) = (plan.sites, plan.nested);
-        module.source.statement_sites = sites;
-        module.source.nested_bodies.extend(nested);
-        install_test_function_body(&mut module.source, function);
+        module.source.statement_sites = plan.sites;
+        install_test_function_body(&mut module.source, function, body);
 
         let [run] = test_function_suite(&mut module.source, function_start)
             .plan
@@ -4529,10 +4524,11 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             &def.body,
             true,
         );
-        physical.physical_body(
+        let body = physical.named_body(
             &def.body,
             crate::frontend::RegisteredScope::Function { is_async: false },
             true,
+            false,
             &|_| false,
         );
         let message = def.body[0]
@@ -4559,10 +4555,8 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             crate::frontend::RegisteredScope::Function { is_async: false },
             true,
         );
-        let (sites, nested) = (physical.sites, physical.nested);
-        module.source.statement_sites = sites;
-        module.source.nested_bodies.extend(nested);
-        install_test_function_body(&mut module.source, def);
+        module.source.statement_sites = physical.sites;
+        install_test_function_body(&mut module.source, def, body);
         let [run] = test_function_suite(&mut module.source, function)
             .plan
             .residual
@@ -5451,12 +5445,6 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert!(outer_body.header.is_none());
         let class_start = class.start();
         let suite = &prepared.source.class_bodies[&class_start].body.plan;
-        assert!(
-            !prepared
-                .source
-                .nested_bodies
-                .contains_key(&class.body[0].start())
-        );
         crate::verify::registered(suite.checked.region()).unwrap();
         assert!(!suite.checked.region().private_slots().is_empty());
         let [rhs, attribute] = suite.residual.as_slice() else {

@@ -1261,7 +1261,6 @@ enum SuiteSelection<'a> {
 pub(crate) struct SuitePreparation<'a> {
     operations: &'a HashMap<TextRange, Expr>,
     source: values::RegisteredSource<'a>,
-    pub(crate) nested: HashMap<TextSize, RegisteredSuite>,
     pub(crate) sites: StatementSites,
 }
 
@@ -1275,7 +1274,6 @@ impl<'a> SuitePreparation<'a> {
         Self {
             operations,
             source,
-            nested: HashMap::new(),
             sites: statement_sites(body, source, assertions_enabled),
         }
     }
@@ -1397,37 +1395,6 @@ impl<'a> SuitePreparation<'a> {
         PhysicalSuite::new(plan, stmts)
     }
 
-    /// Keep the enclosing physical frame's entry and cleanup. Its complete target effects
-    /// share one slot layout per suite, including when another statement must run from source.
-    #[cfg(test)]
-    pub(crate) fn physical_body(
-        &mut self,
-        stmts: &[ast::Stmt],
-        kind: RegisteredScope,
-        suspended: bool,
-        has_ordinary_header: &dyn Fn(TextSize) -> bool,
-    ) {
-        self.nested_suite(
-            stmts,
-            kind,
-            SuiteSelection::Physical(has_ordinary_header),
-            suspended,
-        );
-    }
-
-    fn nested_suite(
-        &mut self,
-        stmts: &[ast::Stmt],
-        kind: RegisteredScope,
-        select: SuiteSelection<'_>,
-        suspended: bool,
-    ) {
-        if let Some(first) = stmts.first() {
-            let plan = self.selected_suite(stmts, kind, select, select, suspended);
-            self.nested.insert(first.start(), plan);
-        }
-    }
-
     fn selected_suite(
         &mut self,
         stmts: &[ast::Stmt],
@@ -1436,29 +1403,10 @@ impl<'a> SuitePreparation<'a> {
         child_selection: SuiteSelection<'_>,
         suspended: bool,
     ) -> RegisteredSuite {
-        use ast::statement_visitor::{StatementVisitor, walk_stmt};
         let mut plan = self.lower(stmts, kind, select, suspended);
-        struct Children<'p, 's> {
-            prepare: &'p mut SuitePreparation<'s>,
-            kind: RegisteredScope,
-            select: SuiteSelection<'p>,
-            suspended: bool,
-        }
-        impl<'a> StatementVisitor<'a> for Children<'_, '_> {
-            fn visit_body(&mut self, stmts: &'a [ast::Stmt]) {
-                self.prepare
-                    .nested_suite(stmts, self.kind, self.select, self.suspended);
-            }
-        }
-        let mut children = Children {
-            prepare: self,
-            kind,
-            select: child_selection,
-            suspended,
-        };
         for run in &plan.residual {
-            let source = children.prepare.source;
-            let sites = &mut children.prepare.sites.expressions;
+            let source = self.source;
+            let sites = &mut self.sites.expressions;
             for stmt in &stmts[run.statements.clone()] {
                 match &run.effect {
                     Some(
@@ -1509,10 +1457,7 @@ impl<'a> SuitePreparation<'a> {
             for index in run.statements {
                 let stmt = &stmts[index];
                 if let ast::Stmt::If(branch) = stmt {
-                    let effect =
-                        children
-                            .prepare
-                            .prepare_if(branch, kind, child_selection, suspended);
+                    let effect = self.prepare_if(branch, kind, child_selection, suspended);
                     plan.residual.push(SourceRun {
                         at: run.at,
                         statements: index..index + 1,
@@ -1521,10 +1466,7 @@ impl<'a> SuitePreparation<'a> {
                     continue;
                 }
                 if let ast::Stmt::While(loop_) = stmt {
-                    let region =
-                        children
-                            .prepare
-                            .prepare_while(loop_, kind, child_selection, suspended);
+                    let region = self.prepare_while(loop_, kind, child_selection, suspended);
                     plan.residual.push(SourceRun {
                         at: run.at,
                         statements: index..index + 1,
@@ -1533,10 +1475,7 @@ impl<'a> SuitePreparation<'a> {
                     continue;
                 }
                 if let ast::Stmt::For(loop_) = stmt {
-                    let region =
-                        children
-                            .prepare
-                            .prepare_for(loop_, kind, child_selection, suspended);
+                    let region = self.prepare_for(loop_, kind, child_selection, suspended);
                     plan.residual.push(SourceRun {
                         at: run.at,
                         statements: index..index + 1,
@@ -1545,10 +1484,7 @@ impl<'a> SuitePreparation<'a> {
                     continue;
                 }
                 if let ast::Stmt::Try(protected) = stmt {
-                    let region =
-                        children
-                            .prepare
-                            .prepare_try(protected, kind, child_selection, suspended);
+                    let region = self.prepare_try(protected, kind, child_selection, suspended);
                     plan.residual.push(SourceRun {
                         at: run.at,
                         statements: index..index + 1,
@@ -1557,10 +1493,7 @@ impl<'a> SuitePreparation<'a> {
                     continue;
                 }
                 if let ast::Stmt::With(with) = stmt {
-                    let context =
-                        children
-                            .prepare
-                            .prepare_context(with, kind, child_selection, suspended);
+                    let context = self.prepare_context(with, kind, child_selection, suspended);
                     plan.residual.push(SourceRun {
                         at: run.at,
                         statements: index..index + 1,
@@ -1569,7 +1502,7 @@ impl<'a> SuitePreparation<'a> {
                     continue;
                 }
                 if let ast::Stmt::Match(branch) = stmt {
-                    let site = children.prepare.prepare_match(branch, kind, suspended);
+                    let site = self.prepare_match(branch, kind, suspended);
                     plan.residual.push(SourceRun {
                         at: run.at,
                         statements: index..index + 1,
@@ -1578,10 +1511,6 @@ impl<'a> SuitePreparation<'a> {
                     continue;
                 }
                 SourceRun::record(&mut plan.residual, index, run.at);
-                // A declaration opens a separate activation with its own scope and admission.
-                if !matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)) {
-                    walk_stmt(&mut children, stmt);
-                }
             }
         }
         plan
@@ -3315,13 +3244,15 @@ mod tests {
         let literals = values::ModuleSource::new(module);
         let operations = HashMap::new();
         let mut prepare = SuitePreparation::new(&operations, literals.context(text), body, true);
-        prepare.physical_body(
+        let suite = prepare.named_body(
             body,
             RegisteredScope::Function { is_async: false },
             false,
+            false,
             &|_| false,
         );
-        assert!(prepare.nested.contains_key(&body[0].start()));
+        assert_eq!(suite.plan.residual.len(), 1);
+        crate::verify::registered(suite.plan.checked.region()).unwrap();
     }
 
     #[test]
@@ -3720,7 +3651,6 @@ mod tests {
                 })
             ]
         ));
-        assert!(prepare.nested.is_empty());
     }
 
     #[test]
