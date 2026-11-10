@@ -3712,12 +3712,13 @@ mod tests {
                 }
                 assert_ne!(prepared.standalone().unwrap(), original);
             } else if physical {
-                let Ok(crate::frontend::SourceEffect::Match(_, site)) =
+                let Ok(crate::frontend::SourceEffect::Region(region)) =
                     &mut suite.residual[0].effect
                 else {
                     panic!("expected a mixed match")
                 };
-                let crate::frontend::PhysicalOperand::Checked(subject) = &mut site.subject else {
+                let crate::frontend::PhysicalOperand::Checked(subject) = &mut region.operands[0]
+                else {
                     panic!("expected a checked subject")
                 };
                 crate::verify::registered(subject.region()).unwrap();
@@ -3756,20 +3757,39 @@ mod tests {
             panic!("expected match")
         };
         let suite = prepared.source.initializer.as_ref().unwrap();
-        let Ok(crate::frontend::SourceEffect::Match(_, site)) = &suite.residual[0].effect else {
+        let Ok(crate::frontend::SourceEffect::Region(region)) = &suite.residual[0].effect else {
             panic!("expected a mixed match")
         };
+        let [_, crate::ir::Statement::Match(subject, cases)] =
+            region.checked.function.body.as_slice()
+        else {
+            panic!("expected a checked match")
+        };
         assert!(matches!(
-            site.subject,
-            crate::frontend::PhysicalOperand::Checked(_)
+            subject.kind,
+            crate::ir::ExprKind::Builtin(crate::ir::Builtin::RegisteredInput(0), _)
         ));
-        assert_eq!(site.cases[0].pattern.names, ["item"]);
+        assert_eq!(cases[0].pattern.names, ["item"]);
+        let [item] = cases[0].captures.as_slice() else {
+            panic!("expected one capture")
+        };
+        assert_eq!(region.checked.local_names[item].name, "item");
         assert!(matches!(
-            site.cases[0].guard,
-            Some(crate::frontend::PhysicalOperand::Checked(_))
+            cases[0].guard.as_ref().map(|g| &g.kind),
+            Some(crate::ir::ExprKind::Builtin(
+                crate::ir::Builtin::RegisteredInput(1),
+                _
+            ))
         ));
-        assert!(site.cases[0].body.fully_checked());
-        let mixed = &site.cases[1].body;
+        assert!(matches!(
+            region.operands.as_slice(),
+            [
+                crate::frontend::PhysicalOperand::Checked(_),
+                crate::frontend::PhysicalOperand::Checked(_)
+            ]
+        ));
+        assert!(region.suites[0].fully_checked());
+        let mixed = &region.suites[1];
         assert_eq!(mixed.residual.len(), 1);
         assert!(
             mixed.residual[0].at > 0 && mixed.residual[0].at < mixed.checked.function.body.len()
@@ -5950,11 +5970,15 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             panic!("expected a checked try")
         };
         let finalbody = region.child_suite(finalbody).unwrap();
-        let Ok(crate::frontend::SourceEffect::Match(_, site)) = &finalbody.residual[0].effect
+        let Ok(crate::frontend::SourceEffect::Region(region)) = &finalbody.residual[0].effect
         else {
             panic!("expected a mixed match in finally")
         };
-        let suite = &site.cases[0].body;
+        assert!(matches!(
+            region.checked.function.body.as_slice(),
+            [_, crate::ir::Statement::Match(..)]
+        ));
+        let suite = &region.suites[0];
         let [run] = suite.residual.as_slice() else {
             panic!("expected one external deletion operand");
         };
