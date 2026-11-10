@@ -16,13 +16,22 @@ pub(crate) struct Target {
 pub(crate) struct Targets(HashMap<Type, Vec<Target>>);
 
 impl Targets {
+    #[cfg(test)]
+    pub(crate) fn analyze(module: &Module) -> Self {
+        Self::analyze_with(module, |_, _| {})
+    }
+
     /// Join constructions of each signature across returns, forwarding and selection.
     /// A signature originating in the runtime has an open set of targets.
-    pub(crate) fn analyze(module: &Module) -> Self {
+    pub(crate) fn analyze_with<'a>(
+        module: &'a Module,
+        mut inspect: impl FnMut(usize, &'a ir::Expr),
+    ) -> Self {
         let mut targets = Self::default();
         let mut open = HashSet::new();
-        for function in module.functions.iter().chain([&module.entry]) {
+        for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
             ir::walk_expressions(&function.body, &mut |value| {
+                inspect(id, value);
                 if matches!(
                     value.kind,
                     ExprKind::Builtin(
