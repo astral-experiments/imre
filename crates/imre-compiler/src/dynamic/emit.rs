@@ -4553,6 +4553,29 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
+    fn mixed_augmented_updates_preserve_the_rhs_diagnostic() {
+        for (target, start, end) in [("values", 15, 54), ("values[0]", 18, 57)] {
+            let source = format!(
+                "async def update(values):\n    {target} += [lambda v=await get(x): v for x in [0]]\n"
+            );
+            let prepared = PreparedBody::module(
+                "update",
+                Path::new("update.py"),
+                &source,
+                0,
+                ModuleOrigin::Program(None),
+            )
+            .unwrap();
+            assert_eq!(
+                prepared.standalone().unwrap_err(),
+                format!(
+                    "update.py:2:{start}: cannot compile this comprehension ahead of time (through 2:{end})"
+                )
+            );
+        }
+    }
+
+    #[test]
     fn suspending_assertions_prepare_their_external_expression_children() {
         let source = concat!(
             "def verify(left, right):\n",

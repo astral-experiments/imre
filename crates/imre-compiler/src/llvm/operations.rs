@@ -592,7 +592,8 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 }
             }
             Statement::AugmentItem(receiver, key, crate::ir::ItemUpdate::Protocol(op), rhs) => {
-                self.python().augment_item(receiver, key, op, rhs);
+                self.python()
+                    .augment_item(op, receiver, key, rhs, CheckedFrame::evaluate_handle);
             }
             Statement::Expr(expr) => {
                 let consumed = match &mut self.0 {
