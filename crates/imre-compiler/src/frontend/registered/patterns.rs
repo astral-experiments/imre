@@ -6,7 +6,7 @@ type PatternResult<T> = std::result::Result<T, (TextRange, &'static str)>;
 
 pub(crate) struct SourceMatch {
     pub(crate) subject: PhysicalOperand,
-    pub(crate) cases: Vec<ir::MatchCase<PhysicalOperand, PhysicalSuite, ()>>,
+    pub(crate) cases: Vec<ir::MatchCase<PhysicalOperand, RegisteredSuite, ()>>,
 }
 
 impl SuitePreparation<'_> {

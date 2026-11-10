@@ -235,23 +235,6 @@ impl ExpressionSites {
         }
     }
 
-    /// Nested suites and fully checked declaration bodies have their own plans.
-    pub(super) fn prepare_inputs(
-        &mut self,
-        stmt: &ast::Stmt,
-        source: RegisteredSource<'_>,
-        scope: super::RegisteredScope,
-        suspended: bool,
-    ) {
-        PhysicalPreparation {
-            sites: self,
-            source,
-            scope,
-            suspended,
-        }
-        .visit_stmt(stmt);
-    }
-
     pub(crate) fn prepare_input(
         &mut self,
         expr: &ast::Expr,
@@ -295,8 +278,6 @@ struct PhysicalPreparation<'a, 's> {
 }
 
 impl<'a> Visitor<'a> for PhysicalPreparation<'_, '_> {
-    fn visit_body(&mut self, _body: &'a [ast::Stmt]) {}
-
     fn visit_expr(&mut self, node: &'a ast::Expr) {
         // Store and delete targets consume their receivers, keys or unpacked children.
         // They have no value to emit for the target itself.
