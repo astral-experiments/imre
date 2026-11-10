@@ -76,11 +76,17 @@ impl Selection {
     }
 }
 
-/// A physical owner supplies any remaining inputs before the checked operation runs.
+enum InputEvaluation {
+    BeforeOperation,
+    AtUse,
+}
+
+/// The physical owner supplies the operands of a checked operation.
 pub(crate) struct PhysicalInputs {
     pub(crate) operation: ir::Expr,
     pub(crate) position: TextSize,
     children: Box<[LogicalOperand]>,
+    evaluation: InputEvaluation,
 }
 
 pub(crate) type PreparedInput = SourceOperand<ir::Expr, OwnedExpression>;
@@ -88,6 +94,10 @@ pub(crate) type PreparedInput = SourceOperand<ir::Expr, OwnedExpression>;
 impl PhysicalInputs {
     pub(crate) fn operand(&self, slot: usize) -> BorrowedOperand<'_> {
         self.children[slot].operand()
+    }
+
+    pub(crate) fn eager_operands(&self) -> Option<impl Iterator<Item = BorrowedOperand<'_>>> {
+        matches!(self.evaluation, InputEvaluation::BeforeOperation).then(|| self.operands())
     }
 
     pub(crate) fn operands(&self) -> impl Iterator<Item = BorrowedOperand<'_>> {
@@ -320,7 +330,7 @@ impl PhysicalPreparation<'_, '_> {
                     vec![ir::Expr::local(0, ir::Type::PythonObject)],
                 );
                 let children = vec![self.shared_input(&unary.operand)].into_boxed_slice();
-                self.inputs(node, operation, children)
+                self.inputs(node, operation, children, InputEvaluation::AtUse)
             });
             return Some(Selection::Mixed {
                 parts,
@@ -339,7 +349,7 @@ impl PhysicalPreparation<'_, '_> {
                     .collect(),
             });
         }
-        let (operation, children) = if let Some((op, operands)) = values::binary_operands(node) {
+        let (op, children, timing) = if let Some((op, operands)) = values::binary_operands(node) {
             let operation = values::binary(
                 op,
                 ir::Expr::local(0, ir::Type::PythonObject),
@@ -351,6 +361,7 @@ impl PhysicalPreparation<'_, '_> {
                     .into_iter()
                     .map(|child| self.shared_input(child))
                     .collect(),
+                InputEvaluation::BeforeOperation,
             )
         } else if let Some(index) = values::index_operands(node, source) {
             (
@@ -360,6 +371,7 @@ impl PhysicalPreparation<'_, '_> {
                     .into_iter()
                     .map(|(child, ordinary)| self.share(child, || ordinary))
                     .collect(),
+                InputEvaluation::BeforeOperation,
             )
         } else if let Some(object) = source.object_operation(node) {
             let children: Box<[_]> = std::iter::once(object.target)
@@ -372,11 +384,12 @@ impl PhysicalPreparation<'_, '_> {
             (
                 super::operation(object.opcode, ir::Type::PythonObject, slots),
                 children,
+                InputEvaluation::AtUse,
             )
         } else {
             return None;
         };
-        Some(Selection::Inputs(self.inputs(node, operation, children)))
+        Some(Selection::Inputs(self.inputs(node, op, children, timing)))
     }
 
     fn inputs(
@@ -384,6 +397,7 @@ impl PhysicalPreparation<'_, '_> {
         node: &ast::Expr,
         operation: ir::Expr,
         children: Box<[LogicalOperand]>,
+        evaluation: InputEvaluation,
     ) -> Box<PhysicalInputs> {
         Box::new(PhysicalInputs {
             operation,
@@ -393,6 +407,7 @@ impl PhysicalPreparation<'_, '_> {
                 self.source.private_names,
             ),
             children,
+            evaluation,
         })
     }
 
