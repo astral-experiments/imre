@@ -35,6 +35,54 @@ impl<'a, 'p> RegionEmitter<'a, 'p> for Function<'a, 'p> {
 }
 
 impl SourceMap<'_> {
+    pub(in crate::dynamic::emit) fn finish_class_annotations(
+        &self,
+        frame: &mut RegisteredFrame<'_, '_>,
+        prefix: &str,
+        in_function: bool,
+        plan: &crate::frontend::ClassAnnotations,
+        globals: &std::collections::BTreeSet<String>,
+    ) {
+        let Some(body) = &plan.body else {
+            return;
+        };
+        if frame.body.terminated {
+            return;
+        }
+        let offsets = if plan.sites.iter().any(|site| site.index.is_some()) {
+            let offsets = frame.op("list", &[]);
+            for site in plan.sites.iter().filter(|site| site.index.is_some()) {
+                let offset = frame.integer(site.site.to_u32());
+                frame.op("append", &[&offsets, &offset]);
+            }
+            offsets
+        } else {
+            "0".into()
+        };
+        let signature = json!({
+            "posonly": ["format"], "scope_complete": !plan.incomplete, "scope_reads": plan.reads,
+            "code_flags": self.function_flags(in_function, false),
+        });
+        let scope = AnnotationScope::Class {
+            globals: globals.clone(),
+            conditional: plan.sites.iter().any(|entry| entry.index.is_some()),
+        };
+        let compiled = self.annotation_provider(
+            frame.output,
+            body,
+            scope,
+            plan.sites[0].site,
+            signature,
+            format!("{prefix}__annotate__"),
+        );
+        let environment = frame.op(
+            "class_annotation_environment",
+            &[&frame.scope.clone(), &offsets],
+        );
+        let function = compiled.bind_defaults(frame, &environment, &[]);
+        frame.bind("__annotate_func__", &function);
+    }
+
     fn annotation_provider(
         &self,
         output: &mut Output,
@@ -510,51 +558,6 @@ impl CallableSites<'_, '_> {
 }
 
 impl<'p> Function<'_, 'p> {
-    pub(in crate::dynamic::emit) fn finish_class_annotations(
-        &mut self,
-        plan: &crate::frontend::ClassAnnotations,
-        globals: &std::collections::BTreeSet<String>,
-    ) {
-        let Some(body) = &plan.body else {
-            return;
-        };
-        if self.body.terminated {
-            return;
-        }
-        let offsets = if plan.sites.iter().any(|site| site.index.is_some()) {
-            let offsets = self.op("list", &[]);
-            for site in plan.sites.iter().filter(|site| site.index.is_some()) {
-                let offset = self.integer(site.site.to_u32());
-                self.op("append", &[&offsets, &offset]);
-            }
-            offsets
-        } else {
-            "0".into()
-        };
-        let signature = json!({
-            "posonly": ["format"], "scope_complete": !plan.incomplete, "scope_reads": plan.reads,
-            "code_flags": self.source.function_flags(self.in_function, false),
-        });
-        let scope = AnnotationScope::Class {
-            globals: globals.clone(),
-            conditional: plan.sites.iter().any(|entry| entry.index.is_some()),
-        };
-        let compiled = self.source.annotation_provider(
-            self.frame.output,
-            body,
-            scope,
-            plan.sites[0].site,
-            signature,
-            format!("{}__annotate__", self.prefix),
-        );
-        let environment = self.frame.op(
-            "class_annotation_environment",
-            &[&self.scope.clone(), &offsets],
-        );
-        let function = compiled.bind_defaults(&mut self.frame, &environment, &[]);
-        self.bind("__annotate_func__", &function);
-    }
-
     fn physical_binding(&mut self, target: &'p crate::frontend::PhysicalBinding, value: &str) {
         use crate::frontend::PhysicalBinding;
         match target {
