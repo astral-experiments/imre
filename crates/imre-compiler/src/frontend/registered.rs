@@ -1899,10 +1899,8 @@ impl SourceScope<'_> {
         let mut value = if (whole || self.suspending_operands)
             && let RegisteredScope::Function { is_async } = self.kind
             && let Some((kind, value)) = ir::SuspendValue::operand(expr)
-            // A plain generator keeps its live iterator in a private frame slot.
-            && (self.suspending_operands
-                || self.loop_scope != LoopScope::WithCursor
-                || matches!((kind, is_async), (ir::SuspendValue::Yield, false)))
+            // A synchronous generator keeps its enclosing iterator in a private frame slot.
+            && (self.suspending_operands || !is_async || self.loop_scope != LoopScope::WithCursor)
             && !matches!(
                 (kind, is_async),
                 (ir::SuspendValue::Await, false) | (ir::SuspendValue::Delegate, true)
@@ -3614,8 +3612,13 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_yield_retains_the_checked_loop_cursor() {
-        let source = "def sales(rows):\n    for row in rows:\n        received = yield row\n";
+    fn synchronous_suspensions_retain_the_checked_loop_cursor() {
+        let source = concat!(
+            "def sales(rows):\n",
+            "    for row in rows:\n",
+            "        received = yield row\n",
+            "        yield from received\n",
+        );
         let graph = SourceGraph::single(source).unwrap();
         let module = &graph.modules[graph.entry];
         let definition = module.parsed.syntax().body[0]
@@ -3636,7 +3639,7 @@ mod tests {
         });
         ir::walk_expressions(&checked.function.body, &mut |expr| {
             if let ExprKind::Builtin(
-                Builtin::RegisteredSuspend(ir::SuspendValue::Yield, range),
+                Builtin::RegisteredSuspend(ir::SuspendValue::Yield | ir::SuspendValue::Delegate, range),
                 _,
             ) = &expr.kind
             {
@@ -3645,7 +3648,7 @@ mod tests {
         });
         assert_eq!(cursors.len(), 1);
         assert!(checked.region().private_slots().contains(&cursors[0]));
-        assert_eq!(yields, ["yield row"]);
+        assert_eq!(yields, ["yield row", "yield from received"]);
     }
 
     #[test]
