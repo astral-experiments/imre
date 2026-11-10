@@ -4970,4 +4970,89 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         }
         assert_eq!(emit(&prepared), before);
     }
+
+    #[test]
+    fn physical_raise_uses_the_prepared_tuple_after_its_elements_are_erased() {
+        use crate::frontend::{PhysicalOperand, SourceEffect, ValueStatement};
+
+        let source = concat!(
+            "def factory(seed):\n",
+            "    async def evaluate():\n",
+            "        raise KeyError((await gate(), (lambda v: combine(seed, v))(right())))\n",
+            "    return evaluate\n",
+            "state: int\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "worker",
+            Path::new("worker.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let original = prepared.standalone().unwrap().unwrap();
+        let factory = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let evaluate = factory.body[0].as_function_def_stmt_mut().unwrap();
+        let suite = prepared.source.function_bodies[&evaluate.start()]
+            .suite()
+            .unwrap();
+        let Some(SourceEffect::Value(ValueStatement::Raise, inputs)) = &suite.residual[0].effect
+        else {
+            panic!("expected a physical raise");
+        };
+        assert!(matches!(inputs.as_slice(), [PhysicalOperand::Checked(_)]));
+        let raise = evaluate.body[0].as_raise_stmt_mut().unwrap();
+        let call = raise
+            .exc
+            .as_deref_mut()
+            .unwrap()
+            .as_call_expr_mut()
+            .unwrap();
+        let tuple = &mut call.arguments.args[0];
+        assert!(
+            prepared
+                .source
+                .statement_sites
+                .expressions
+                .get(tuple)
+                .is_none()
+        );
+        tuple.as_tuple_expr_mut().unwrap().elts.clear();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
+    fn annotated_store_uses_the_prepared_tuple_after_its_elements_are_erased() {
+        let source = concat!(
+            "def factory(seed):\n",
+            "    async def evaluate():\n",
+            "        def marker(): return 41\n",
+            "        Take()[0:await gate(), (lambda v: seed + v)(right())]: int = marker()\n",
+            "    return evaluate\n",
+            "state: int\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "worker",
+            Path::new("worker.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let original = prepared.standalone().unwrap().unwrap();
+        let factory = prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap();
+        let evaluate = factory.body[0].as_function_def_stmt_mut().unwrap();
+        let assignment = evaluate.body[1].as_ann_assign_stmt_mut().unwrap();
+        let key = &mut assignment.target.as_subscript_expr_mut().unwrap().slice;
+        assert!(matches!(
+            prepared.source.statement_sites.expressions.get(key),
+            Some(crate::frontend::ExpressionSelection::Operand(_))
+        ));
+        key.as_tuple_expr_mut().unwrap().elts.clear();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+    }
 }
