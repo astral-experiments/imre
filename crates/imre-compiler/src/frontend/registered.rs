@@ -847,12 +847,22 @@ pub(crate) enum SourceEffect {
     Assertion(Box<AssertionSite>),
     /// Evaluate the operands at their place in the operation, in the current frame.
     ObjectOperation(Box<Builtin>, Vec<PhysicalOperand>),
+    /// The enclosing loop supplies the destination and cleanup depth.
+    LoopTransfer(TextRange, &'static Statement),
     /// A mixed loop needs its source suites. A literal false test runs only the else suite.
     While(SourceGuard<Box<RegisteredOperand>>),
     /// The manager, binding and protected child are prepared together.
     Context(Box<PreparedContext>),
     /// A loop whose checked lowering left one or more physical inputs or suites.
     For(Box<PreparedFor>),
+}
+
+fn loop_transfer(stmt: &ast::Stmt) -> Option<&'static Statement> {
+    match stmt {
+        ast::Stmt::Break(_) => Some(&Statement::Break),
+        ast::Stmt::Continue(_) => Some(&Statement::Continue),
+        _ => None,
+    }
 }
 
 pub(crate) struct PreparedFor {
@@ -889,6 +899,7 @@ impl PhysicalSuite {
                 Some(
                     SourceEffect::For(_)
                         | SourceEffect::Context(_)
+                        | SourceEffect::LoopTransfer(..)
                         | SourceEffect::ObjectOperation(..)
                         | SourceEffect::Discard(_)
                         | SourceEffect::Value(..)
@@ -1600,6 +1611,14 @@ impl<'a> SuitePreparation<'a> {
         let mut body = Vec::new();
         let mut residual: Vec<SourceRun> = Vec::new();
         for (i, stmt) in stmts.iter().enumerate() {
+            if let Some(transfer) = loop_transfer(stmt) {
+                residual.push(SourceRun {
+                    at: body.len(),
+                    statements: i..i + 1,
+                    effect: Some(SourceEffect::LoopTransfer(stmt.range(), transfer)),
+                });
+                continue;
+            }
             if let ast::Stmt::Assert(assertion) = stmt {
                 if !self.sites.omit_assertions {
                     let site = scope.assertion(assertion);
@@ -2027,6 +2046,11 @@ impl statements::StatementLowering for SourceScope<'_> {
     }
 
     fn other_statement(&mut self, stmt: &ast::Stmt) -> StdResult<statements::Block, ()> {
+        if let Some(transfer) = loop_transfer(stmt) {
+            return (self.loop_scope != LoopScope::Outside)
+                .then(|| (vec![transfer.clone()], false))
+                .ok_or(());
+        }
         match stmt {
             ast::Stmt::AugAssign(assign) => {
                 if let Some(name) = assign.target.as_name_expr() {
@@ -2142,12 +2166,6 @@ impl statements::StatementLowering for SourceScope<'_> {
                 };
                 let otherwise = self.suite(&loop_.orelse)?;
                 Ok((vec![Statement::While(condition, body, otherwise)], true))
-            }
-            ast::Stmt::Break(_) if self.loop_scope != LoopScope::Outside => {
-                Ok((vec![Statement::Break], false))
-            }
-            ast::Stmt::Continue(_) if self.loop_scope != LoopScope::Outside => {
-                Ok((vec![Statement::Continue], false))
             }
             ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => Ok((Vec::new(), true)),
             ast::Stmt::AnnAssign(ann) => {
