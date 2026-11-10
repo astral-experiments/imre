@@ -2181,6 +2181,79 @@ mod tests {
     }
 
     #[test]
+    fn mixed_class_header_uses_its_retained_starred_operand_after_erasure() {
+        use crate::frontend::{ExpressionSelection, PhysicalOperand, SourceEffect};
+        use crate::ir::{Builtin, DefinitionSite, Expr, ExprKind, Statement};
+
+        let source = "def keep(cls): return cls\n@keep\nclass C(*(lambda: (object,))(), metaclass=type):\n    (lambda: None)()\n";
+        let mut module = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        assert!(module.initializer().fully_checked());
+        inject_residual_child_module(&mut module);
+        let before = module.standalone().unwrap();
+        assert!(module.syntax.take().is_some());
+        assert_eq!(module.standalone().unwrap(), before);
+
+        let suite = module.source.initializer.as_mut().unwrap();
+        let [run] = suite.residual.as_mut_slice() else {
+            panic!("expected one mixed class header");
+        };
+        let Ok(SourceEffect::Value(statement, inputs)) = &mut run.effect else {
+            panic!("expected a class definition with deferred operands");
+        };
+        let Statement::Assign(
+            _,
+            Expr {
+                kind:
+                    ExprKind::Builtin(
+                        Builtin::RegisteredDefinition(DefinitionSite::Class {
+                            arguments: Some(layout),
+                            ..
+                        }),
+                        slots,
+                    ),
+                ..
+            },
+        ) = statement.as_ref()
+        else {
+            panic!("expected the packed class definition result");
+        };
+        assert_eq!(layout.starred, [true]);
+        assert_eq!(slots.len(), 3);
+        let [
+            PhysicalOperand::Checked(_),
+            PhysicalOperand::Residual(base),
+            PhysicalOperand::Checked(_),
+        ] = inputs.as_mut_slice()
+        else {
+            panic!("expected the starred base between the decorator and metaclass");
+        };
+        assert_eq!(&source[base.range], "(lambda: (object,))()");
+        let mut refused_base = base.clone();
+        refused_base.selected =
+            std::rc::Rc::new(ExpressionSelection::Refused(base.range, "header refused"));
+        base.selected = std::rc::Rc::new(ExpressionSelection::Checked(Expr::none()));
+        assert_ne!(module.standalone().unwrap(), before);
+
+        let class = module.source.class_bodies.values_mut().next().unwrap();
+        let body = residual_occurrence(&mut class.body);
+        body.selected = std::rc::Rc::new(ExpressionSelection::Refused(body.range, "body refused"));
+        assert!(module.standalone().unwrap_err().contains("body refused"));
+        let run = &mut module.source.initializer.as_mut().unwrap().residual[0];
+        let Ok(SourceEffect::Value(_, inputs)) = &mut run.effect else {
+            unreachable!()
+        };
+        inputs[1] = PhysicalOperand::Residual(refused_base);
+        assert!(module.standalone().unwrap_err().contains("header refused"));
+    }
+
+    #[test]
     fn generic_typing_protocols_emit_without_their_class_syntax() {
         use crate::ir::{Builtin, ExprKind};
 

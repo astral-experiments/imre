@@ -1000,12 +1000,6 @@ struct LoweredSuite<'s> {
 }
 
 pub(crate) enum SourceEffect {
-    /// An ordinary class interleaves argument expansion with its remaining physical operands.
-    Class {
-        site: TextSize,
-        layout: ir::PackedArguments,
-        inputs: Vec<PhysicalOperand>,
-    },
     /// The statement reads each prepared operand by its position in the input list.
     Value(Box<Statement>, Vec<PhysicalOperand>),
     /// The enclosing suite owns any source inputs on their test or failure edge.
@@ -1405,17 +1399,16 @@ impl<'a> SuitePreparation<'a> {
             };
             let selected = match &effect {
                 Err(refusal) => Some(*refusal),
-                Ok(SourceEffect::Value(_, inputs)) => {
-                    inputs.iter().find_map(PhysicalOperand::refusal)
-                }
+                Ok(SourceEffect::Value(statement, inputs)) => inputs
+                    .iter()
+                    .find_map(PhysicalOperand::refusal)
+                    .or_else(|| {
+                        self.checked_declaration_refusal(std::slice::from_ref(statement.as_ref()))
+                    }),
                 Ok(SourceEffect::Assertion(site)) => site
                     .test
                     .refusal()
                     .or_else(|| site.message.as_ref()?.refusal()),
-                Ok(SourceEffect::Class { site, inputs, .. }) => inputs
-                    .iter()
-                    .find_map(PhysicalOperand::refusal)
-                    .or_else(|| self.declaration_refusals.get(site).copied()),
                 _ => None,
             };
             let operation = self.refusal.take().or(selected);
@@ -1868,55 +1861,46 @@ impl<'a> SuitePreparation<'a> {
                 });
                 continue;
             }
-            let declaration = match stmt {
-                ast::Stmt::FunctionDef(def) => Some((
-                    def.name.as_str(),
-                    ir::DefinitionSite::Function(def.start()),
-                    imre_ast::function_definition_expressions(def)
-                        .map(frame_value)
-                        .collect::<Vec<_>>(),
-                )),
-                ast::Stmt::ClassDef(class) => {
-                    let inputs = imre_ast::class_definition_expressions(class)
-                        .map(|expr| self.registered_operand(expr, kind, suspended))
-                        .collect();
-                    if class.type_params.is_none()
-                        && let Some(args) = class.arguments.as_deref()
-                        && !args.is_empty()
-                    {
-                        // Expand each ordinary class argument before evaluating the next operand.
-                        body.push(checkpoint(stmt));
-                        residual.push(PendingStatement {
-                            at: body.len(),
-                            effect: PendingEffect::Prepared(SourceEffect::Class {
-                                site: class.start(),
-                                layout: packed_arguments(args),
-                                inputs,
-                            }),
-                        });
-                        continue;
-                    }
-                    Some((class.name.as_str(), class_site(class), inputs))
-                }
-                _ => None,
-            };
-            if let Some((name, site, inputs)) = declaration {
+            if let ast::Stmt::ClassDef(class) = stmt {
                 body.push(checkpoint(stmt));
-                let header = inputs
-                    .into_iter()
-                    .map(|input| {
+                let inputs = imre_ast::class_definition_expressions(class)
+                    .map(|expr| self.registered_operand(expr, kind, suspended))
+                    .collect::<Vec<_>>();
+                let header = (0..inputs.len()).map(input_slot).collect();
+                let slot = scope.hidden(Type::PythonObject);
+                residual.push(PendingStatement {
+                    at: body.len(),
+                    effect: PendingEffect::Prepared(SourceEffect::Value(
+                        Box::new(Statement::Assign(
+                            slot,
+                            definition_value(class_site(class), header),
+                        )),
+                        inputs,
+                    )),
+                });
+                body.push(scope.store(
+                    class.name.as_str(),
+                    unpacking::take_pattern_temporary(Expr::local(slot, Type::PythonObject), slot),
+                ));
+                continue;
+            }
+            if let ast::Stmt::FunctionDef(def) = stmt {
+                body.push(checkpoint(stmt));
+                let header = imre_ast::function_definition_expressions(def)
+                    .map(|expr| {
                         let slot = scope.hidden(Type::PythonObject);
                         residual.push(PendingStatement {
                             at: body.len(),
-                            effect: PendingEffect::Prepared(store_input(slot, input)),
+                            effect: PendingEffect::Prepared(store_input(slot, frame_value(expr))),
                         });
-                        unpacking::take_pattern_temporary(
-                            Expr::local(slot, Type::PythonObject),
-                            slot,
-                        )
+                        unpacking::take_pattern_temporary(Expr::local(slot, Type::PythonObject), slot)
                     })
                     .collect();
-                body.push(scope.bind_definition(name, site, header));
+                body.push(scope.bind_definition(
+                    def.name.as_str(),
+                    ir::DefinitionSite::Function(def.start()),
+                    header,
+                ));
                 continue;
             }
             let mut inputs = Vec::new();
@@ -2827,6 +2811,14 @@ fn class_site(class: &ast::StmtClassDef) -> ir::DefinitionSite {
     }
 }
 
+fn definition_value(site: ir::DefinitionSite, header: Vec<Expr>) -> Expr {
+    operation(
+        Builtin::RegisteredDefinition(site),
+        Type::PythonObject,
+        header,
+    )
+}
+
 impl SourceScope<'_> {
     fn bind_definition(
         &mut self,
@@ -2834,12 +2826,7 @@ impl SourceScope<'_> {
         site: ir::DefinitionSite,
         header: Vec<Expr>,
     ) -> Statement {
-        let value = operation(
-            Builtin::RegisteredDefinition(site),
-            Type::PythonObject,
-            header,
-        );
-        self.store(name, value)
+        self.store(name, definition_value(site, header))
     }
 
     fn assignment_targets(
