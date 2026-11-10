@@ -117,12 +117,33 @@ pub(crate) fn check_registered_project<'a>(
         return Ok(());
     }
     let entry_operand = checked.zip(refusal).and_then(|(graph, report)| {
-        let (owner, statement, operand) = report.entry_operand()?;
-        (owner == graph.entry
-            && graph
-                .session
-                .unconditional_module_operand(owner, statement, operand))
-        .then(|| (owner, graph.modules[owner].original_source(), report))
+        let site = report.entry_operand()?;
+        if site.body != site.module {
+            let callee = &graph.modules[site.body];
+            if !sources.clone().any(|winner| {
+                winner.declares_signatures
+                    && winner.name == callee.name
+                    && winner.source == callee.original_source()
+                    && winner
+                        .checked_module
+                        .map_or(winner.path == callee.path, |id| id == site.body)
+            }) {
+                return None;
+            }
+        }
+        (site.module == graph.entry
+            && graph.session.unconditional_module_operand(
+                site.module,
+                site.statement,
+                site.operand,
+            ))
+        .then(|| {
+            (
+                site.module,
+                graph.modules[site.module].original_source(),
+                report,
+            )
+        })
     });
     if let Some(graph) = checked
         && !graph.has_checked_only_import

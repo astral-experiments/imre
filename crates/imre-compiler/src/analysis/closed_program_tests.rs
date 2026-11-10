@@ -852,11 +852,12 @@ fn the_ordinary_entry_keeps_an_operand_in_the_default_flow_region() {
     else {
         panic!("expected the normal checker operand diagnostic")
     };
-    let (owner, statement, argument) = report.entry_operand().unwrap();
+    let site = report.entry_operand().unwrap();
+    assert_eq!(site.body, site.module);
     assert!(
         graph
             .session
-            .unconditional_module_operand(owner, statement, argument)
+            .unconditional_module_operand(site.module, site.statement, site.operand)
     );
     assert!(
         report

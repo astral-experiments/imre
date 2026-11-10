@@ -101,6 +101,31 @@ def check_registered_entry_operand(imre, root, run):
     result = run(imre, "-m", "checked_operand", stdin=b"send\n")
     assert (result.returncode, result.stdout, result.stderr) == (0, b"replacement\n8\n", b""), result
 
+    worker = root / "checked_worker.py"
+    worker.write_text(bad_body)
+    receive = "def report(value): print(value)\nsend = {'send': report}[input()]\n"
+    for import_line, publish in (
+        ("from checked_worker import publish as deliver", "deliver"),
+        ("import checked_worker", "checked_worker.publish"),
+    ):
+        entry.write_text(import_line + "\n" + receive + f"{publish}(3, 5, send)\n")
+        result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+        assert result.returncode and not result.stdout, result
+        assert b"checked_worker.py:3:19: Imre: expected int, got bool" in result.stderr, result
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("__main__.py", entry.read_text())
+        zipped.writestr(worker.name, bad_body)
+    result = run(imre, archive, stdin=b"send\n")
+    assert result.returncode and b"checked_worker.py:3:19" in result.stderr, result
+
+    entry.write_text(
+        "import checked_worker\n" + receive
+        + "def replacement(a, b, send): send(a - b)\n"
+        "checked_worker.publish = replacement\nchecked_worker.publish(5, 3, send)\n"
+    )
+    result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"2\n", b""), result
+
 
 def check_module_search_root(imre, root, run):
     app = root / "application"

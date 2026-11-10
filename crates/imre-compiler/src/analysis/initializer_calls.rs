@@ -179,23 +179,7 @@ impl Session {
                 if let Some(owner) =
                     self.initializer_import(stmt, &model, entry.0, &application_module)
                 {
-                    let file = self.files[owner.0];
-                    // Loading from a module may query __path__ or a missing member.
-                    let passive_load = stmt.as_import_from_stmt().is_none_or(|import| {
-                        let index =
-                            ty_python_core::semantic_index(&self.db, self.db.program_file(file));
-                        index
-                            .place_table(FileScopeId::global())
-                            .symbol_id("__getattr__")
-                            .is_none()
-                            && import.names.iter().all(|a| {
-                                self.initialized_function(owner.0, a.name.as_str(), resident)
-                                    .is_some()
-                            })
-                    });
-                    if passive_load
-                        && (owner.0 == resident.0 || self.parsed(file).suite().iter().all(passive))
-                    {
+                    if self.passive_import_load(stmt, owner.0, resident) {
                         imports.push((stmt.range(), owner.0));
                         pending.push(((module, path), i + 1, imports));
                     }
@@ -231,6 +215,39 @@ impl Session {
             }
         }
         None
+    }
+
+    fn passive_import_load(&self, stmt: &Stmt, owner: usize, resident: (usize, TextSize)) -> bool {
+        let file = self.files[owner];
+        // A from-import can query __path__ or a missing member during initialization.
+        let passive_load = stmt.as_import_from_stmt().is_none_or(|import| {
+            let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
+            index
+                .place_table(FileScopeId::global())
+                .symbol_id("__getattr__")
+                .is_none()
+                && import.names.iter().all(|a| {
+                    self.initialized_function(owner, a.name.as_str(), resident)
+                        .is_some()
+                })
+        });
+        passive_load && (owner == resident.0 || self.parsed(file).suite().iter().all(passive))
+    }
+
+    pub(crate) fn passive_selected_import(
+        &self,
+        entry: usize,
+        statement: &Stmt,
+        owner: usize,
+        module_name: &str,
+        path: &Path,
+    ) -> bool {
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[entry]));
+        self.initializer_import(statement, &model, entry, &|name| {
+            (name == module_name).then_some((owner, path))
+        })
+        .is_some()
+            && self.passive_import_load(statement, owner, (entry, statement.start()))
     }
 
     fn initializer_import<'a>(

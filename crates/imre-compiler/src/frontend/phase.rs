@@ -26,10 +26,19 @@ pub(crate) enum Kind {
     ScopedClassLayout,
 }
 
+/// The entry operand and physical source containing its checked diagnostic.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct EntryOperand {
+    pub(crate) module: ModuleId,
+    pub(crate) body: ModuleId,
+    pub(crate) statement: TextSize,
+    pub(crate) operand: TextRange,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Position {
     range: TextRange,
-    entry_statement: Option<(ModuleId, TextSize, TextRange)>,
+    entry_statement: Option<EntryOperand>,
     line: usize,
     column: usize,
 }
@@ -85,7 +94,7 @@ impl<M> Diagnostic<M> {
         self
     }
 
-    pub(crate) fn entry_operand(&self) -> Option<(ModuleId, TextSize, TextRange)> {
+    pub(crate) fn entry_operand(&self) -> Option<EntryOperand> {
         let entry = self.position.as_ref()?.entry_statement?;
         (self.kind == Kind::ExactType).then_some(entry)
     }
@@ -97,11 +106,17 @@ impl<M> Diagnostic<M> {
     pub(super) fn reached_in_entry(
         &mut self,
         module: ModuleId,
+        body: ModuleId,
         statement: TextSize,
         call: TextRange,
     ) {
         if let Some(position) = &mut self.position {
-            position.entry_statement = Some((module, statement, call));
+            position.entry_statement = Some(EntryOperand {
+                module,
+                body,
+                statement,
+                operand: call,
+            });
         }
     }
 
@@ -245,9 +260,12 @@ impl Failure {
             && report.kind == Kind::ExactType
             && let Some(position) = &mut report.position
         {
-            position
-                .entry_statement
-                .get_or_insert((module, statement, position.range));
+            position.entry_statement.get_or_insert(EntryOperand {
+                module,
+                body: module,
+                statement,
+                operand: position.range,
+            });
         }
         self
     }
