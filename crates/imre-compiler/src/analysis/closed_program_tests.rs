@@ -4,6 +4,35 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
+fn rebound_imported_cells_keep_their_storage_through_checking() {
+    let project = tempdir().unwrap();
+    let main = project.path().join("main.py");
+    let storage = project.path().join("storage.py");
+    fs::write(&main, "from storage import seen\nprint(seen())\n").unwrap();
+    fs::write(
+        &storage,
+        "from typing import Optional\nclass Console: pass\ncache: Optional[Console] = None\ncache = Console()\ndef seen() -> bool: return cache is cache\n",
+    )
+    .unwrap();
+    let mut graph = crate::modules::SourceGraph::load(&main, Some(project.path()), &[]).unwrap();
+    assert!(matches!(
+        crate::checked_lower(&mut graph).unwrap(),
+        crate::CheckedProgram::Native(_)
+    ));
+
+    fs::write(
+        &storage,
+        "cache = object()\ncache = object()\ndef seen() -> bool: return cache is cache\n",
+    )
+    .unwrap();
+    let error = crate::check_file(&main, None).unwrap_err();
+    assert!(
+        error.contains("storage.py:1:1: Imre: a rebindable module value requires"),
+        "{error}"
+    );
+}
+
+#[test]
 fn an_imported_function_can_read_a_registered_type_alias_as_a_value() {
     let project = tempdir().unwrap();
     let entry = project.path().join("main.py");

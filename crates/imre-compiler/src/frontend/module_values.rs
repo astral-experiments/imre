@@ -450,7 +450,12 @@ impl Checker<'_> {
             .classify(Kind::UnsupportedRepresentation));
         }
         let value = if rebound.is_some() {
-            if !class_data_type(value.ty, self.types) {
+            if !class_data_type(value.ty, self.types)
+                && !matches!(
+                    self.types.payload(value.ty).unwrap_or(value.ty),
+                    Type::Class(_)
+                )
+            {
                 return Err(error(
                     self.source,
                     statement,
@@ -727,7 +732,12 @@ impl Initialization {
                     // Preserve a real use-before-initialization error for unreached stores.
                     Err(error) if checker.missing_operation(&error) => {
                         if checker.globals.get(definition).is_none() {
-                            checker.globals.insert(definition, Type::PythonObject);
+                            let ty = if module.rebound_values.contains(&index) {
+                                checker.types.list(Type::PythonObject)
+                            } else {
+                                Type::PythonObject
+                            };
+                            checker.globals.insert(definition, ty);
                         }
                     }
                     Err(error) if checker.defer_object_error(&error) => continue,
