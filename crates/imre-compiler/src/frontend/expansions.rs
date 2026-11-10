@@ -807,6 +807,9 @@ impl Checker<'_> {
                     _ => None,
                 });
                 let iterable = self.boolean_operand(&attribute.value, hint)?;
+                if iterable.ty == Type::PythonObject {
+                    return self.object_method_iteration(call, iterable);
+                }
                 if let Type::Class(class) = iterable.ty {
                     let iterable = self.iteration_method_call(call, attribute, class, iterable)?;
                     return self.iteration_value(iterable, false, call);
