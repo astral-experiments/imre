@@ -47,12 +47,10 @@ pub(crate) struct NamedFunction {
     pub(crate) doc: Option<String>,
     pub(crate) metadata: CallableMetadata,
     pub(crate) globals: std::collections::BTreeSet<String>,
-    /// Source position shared with the prepared parameter annotation provider.
-    pub(crate) parameters: TextSize,
+    pub(crate) annotations: Option<Box<crate::frontend::ParameterAnnotations>>,
     pub(crate) generic: bool,
     pub(crate) type_params:
         Vec<crate::ir::RegisteredTypeParameter<crate::frontend::ParameterEvaluator>>,
-    pub(crate) integer_sign_parameters: Vec<String>,
 }
 
 impl NamedFunction {
@@ -73,10 +71,50 @@ impl NamedFunction {
             doc: crate::frontend::docstring(&def.body),
             metadata: CallableMetadata::new(Some(&def.parameters), &lexical, suspension_flags),
             globals: lexical.names.globals,
-            parameters: def.parameters.start(),
+            annotations: None,
             generic: def.type_params.is_some(),
             type_params: Vec::new(),
-            integer_sign_parameters: Vec::new(),
+        }
+    }
+
+    pub(crate) fn prepare_signature(
+        &mut self,
+        def: &ast::StmtFunctionDef,
+        thread_entry: Option<imre_ast::ThreadEntry>,
+        python_annotations: bool,
+    ) {
+        let suspended = self.metadata.suspension_flags() != 0;
+        let signature = &mut self.metadata.layout;
+        match thread_entry {
+            Some(imre_ast::ThreadEntry::Parameters { lock_only }) => {
+                signature["thread_lock_only"] = json!(lock_only);
+            }
+            Some(imre_ast::ThreadEntry::Captured(names)) => {
+                signature["thread_captured_locks"] = json!(names);
+            }
+            Some(imre_ast::ThreadEntry::Bound(field)) => {
+                signature["thread_bound_lock_field"] = json!(field);
+            }
+            None => {}
+        }
+        let Some(annotations) = self.annotations.as_ref().filter(|_| !python_annotations) else {
+            return;
+        };
+        let scalar = |name: &str| {
+            let ty = annotations.references.get(name)?;
+            (!self.type_params.iter().any(|param| &param.binding == ty)).then_some(ty)
+        };
+        if !suspended && let Some(ty) = scalar("return") {
+            signature["return_type"] = json!(ty);
+        }
+        for parameter in def.parameters.iter_non_variadic_params() {
+            let name = parameter.parameter.name.as_str();
+            if let Some(ty) = scalar(name) {
+                signature["types"][name] = json!(ty);
+                if ty == "float" && crate::frontend::only_compares_zero(&def.body, name) {
+                    signature["integer_sign_parameters"][name] = json!(true);
+                }
+            }
         }
     }
 }
@@ -156,7 +194,7 @@ impl CallableMetadata {
         self.flags & (code_flags::GENERATOR | code_flags::COROUTINE | code_flags::ASYNC_GENERATOR)
     }
 
-    pub(crate) fn non_variadic_parameter_names(&self) -> impl Iterator<Item = &str> {
+    fn non_variadic_parameter_names(&self) -> impl Iterator<Item = &str> {
         ["posonly", "positional", "kwonly"]
             .into_iter()
             .flat_map(|group| self.layout[group].as_array().into_iter().flatten())

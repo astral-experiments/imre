@@ -3,6 +3,7 @@ use ruff_text_size::{TextRange, TextSize};
 use std::collections::HashMap;
 
 use super::{FrameEmitter, RegisteredFrame};
+use crate::frontend::RequiredSite;
 use crate::ir::{self, RegisteredTypeParameter, TypeParameterKind};
 
 /// The body's identity is compiled once. Defaults, decorators and the defining scope
@@ -208,6 +209,19 @@ pub(crate) struct Declaration {
     pub(crate) type_params: Option<CompiledTypeParameters>,
 }
 
+/// Compile a declaration in its lexical scope when the enclosing frame first needs its site.
+pub(crate) trait SiteDefinitions {
+    fn lambda(&mut self, site: TextSize, comprehension: bool) -> CompiledDefinition;
+    fn declaration(&mut self, site: TextSize) -> Declaration;
+    fn class_namespace(
+        &mut self,
+        site: TextSize,
+    ) -> (CompiledDefinition, CompiledTypeParameters, TextRange);
+    fn generator(&mut self, site: TextRange) -> CompiledGenerator;
+    fn type_alias(&mut self, site: TextSize) -> Result<CompiledAlias, String>;
+    fn annotation_string(&mut self, site: TextSize) -> String;
+}
+
 #[derive(Default)]
 pub(crate) struct CheckedSites {
     pub(crate) annotation_strings: HashMap<TextSize, String>,
@@ -220,6 +234,57 @@ pub(crate) struct CheckedSites {
 }
 
 impl CheckedSites {
+    pub(crate) fn place(&mut self, site: RequiredSite, definitions: &mut impl SiteDefinitions) {
+        match site {
+            RequiredSite::Lambda(site, comprehension) => {
+                self.lambdas
+                    .entry(site)
+                    .or_insert_with(|| definitions.lambda(site, comprehension));
+            }
+            RequiredSite::Definition(site) => {
+                self.definitions
+                    .entry(site)
+                    .or_insert_with(|| definitions.declaration(site));
+            }
+            RequiredSite::ClassNamespace(site) => {
+                self.class_namespaces
+                    .entry(site)
+                    .or_insert_with(|| definitions.class_namespace(site));
+            }
+            RequiredSite::Generator(site) => {
+                self.generators
+                    .entry(site)
+                    .or_insert_with(|| definitions.generator(site));
+            }
+            RequiredSite::Alias(site) => {
+                self.aliases
+                    .entry(site)
+                    .or_insert_with(|| definitions.type_alias(site));
+            }
+            RequiredSite::AnnotationString(site) => {
+                self.annotation_strings
+                    .entry(site)
+                    .or_insert_with(|| definitions.annotation_string(site));
+            }
+        }
+    }
+
+    pub(crate) fn place_operand(
+        &mut self,
+        value: &ir::Expr,
+        definitions: &mut impl SiteDefinitions,
+    ) {
+        RequiredSite::visit_operand(value, &mut |site| self.place(site, definitions));
+    }
+
+    pub(crate) fn place_statements(
+        &mut self,
+        body: &[ir::Statement],
+        definitions: &mut impl SiteDefinitions,
+    ) {
+        RequiredSite::visit(body, &mut |site| self.place(site, definitions));
+    }
+
     pub(crate) fn annotation_string(
         &self,
         frame: &mut RegisteredFrame<'_, '_>,

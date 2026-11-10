@@ -2,9 +2,11 @@
 
 mod annotations;
 pub(crate) use annotations::ClassAnnotations;
+pub(super) use annotations::ParameterReads;
 mod callable;
 pub(crate) use callable::{CallableMetadata, NamedFunction};
 mod class_metadata;
+pub(super) use class_metadata::parameter_reads;
 pub(crate) mod classes;
 mod type_parameters;
 
@@ -439,7 +441,6 @@ impl<'a, A: FnMut(&'a ast::StmtTypeAlias, Option<TextSize>)> Visitor<'a> for Col
                 let lexical = FunctionScope::function(def, strings);
                 let header = NamedFunction::prepare(def, self.names, lexical, suspension_flags);
                 self.scopes.functions.insert(start, header);
-                self.scopes.annotations.function(def, strings);
                 self.scope = Scope::Function;
             }
             ast::Stmt::ClassDef(class) => {

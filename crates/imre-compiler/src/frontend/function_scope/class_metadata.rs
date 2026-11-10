@@ -48,7 +48,7 @@ pub(super) fn annotation_reads(
     parameter_reads(entries, string_annotations).resolve(class)
 }
 
-pub(super) fn parameter_reads(
+pub(in crate::frontend) fn parameter_reads(
     entries: &[(&str, &ast::Expr)],
     string_annotations: bool,
 ) -> super::annotations::ParameterReads {
