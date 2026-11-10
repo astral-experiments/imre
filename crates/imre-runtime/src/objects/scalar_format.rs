@@ -143,10 +143,22 @@ pub(crate) fn utf8_field(
     padded_text(prefix, field.fill, left, margin - left).map(Some)
 }
 
+/// The inherited object.__format__ method checks the spec before calling str(value).
+pub(crate) fn check_object_spec(spec: &str, type_name: &str) -> Result<()> {
+    if spec.is_empty() {
+        Ok(())
+    } else {
+        Err(Error::new(
+            Kind::TypeError,
+            format!("unsupported format string passed to {type_name}.__format__"),
+        ))
+    }
+}
+
 /// Format one exact native scalar with a runtime-selected UTF-8 specification.
 ///
 /// # Safety
-/// The nonnullable word matches the compiler's bool, int, str or float descriptor.
+/// The nonnullable word matches the compiler's bool, int, str, float or bytes descriptor.
 /// Both inputs stay rooted for the call. The caller owns the returned string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_format_scalar(
@@ -190,6 +202,11 @@ pub unsafe extern "C" fn imre_format_scalar(
                     } else {
                         float_field(spec, value, "float")?.into()
                     }
+                }
+                8 => {
+                    check_object_spec(spec, "bytes")?;
+                    // SAFETY: kind 8 roots exact immutable bytes for this call.
+                    super::bytes::repr(unsafe { &*(word as *const crate::Bytes) })?
                 }
                 _ => return Err(Error::new(Kind::SystemError, "invalid format operand kind")),
             };
