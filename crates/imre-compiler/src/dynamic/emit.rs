@@ -2426,7 +2426,7 @@ mod tests {
     }
 
     #[test]
-    fn residual_with_emits_its_region_after_dropping_the_prepared_items() {
+    fn checked_with_owns_a_yielded_manager_inside_an_active_context() {
         let text = "def entries(path, stream):\n    with guard(), scandir(path) as stream:\n        with (yield stream):\n            pass\n";
         let mut prepared = PreparedBody::module_with_syntax(
             "scan",
@@ -2440,6 +2440,7 @@ mod tests {
         let function = prepared.syntax.as_mut().unwrap().to_mut()[0]
             .as_function_def_stmt_mut()
             .unwrap();
+        assert!(prepared.source.function_bodies[&function.start()].fully_checked());
         function.body[0] = ast::StmtPass {
             range: function.body[0].range(),
             node_index: Default::default(),
