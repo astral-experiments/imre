@@ -1229,6 +1229,10 @@ impl Types {
         )
     }
 
+    pub(crate) fn is_plain_tuple(&self, ty: Type) -> bool {
+        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::Tuple(_)))
+    }
+
     /// Tuple layouts whose directories are provided by the native tuple namespace.
     pub(crate) fn is_plain_or_declared_tuple(&self, ty: Type) -> bool {
         match ty {

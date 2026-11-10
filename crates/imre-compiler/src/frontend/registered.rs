@@ -2674,7 +2674,7 @@ mod tests {
         let mut fields = 0;
         ir::walk_nodes(fails, &mut |node, _| {
             if let ir::Node::Expression(Expr {
-                kind: ExprKind::Builtin(Builtin::FormatField, _),
+                kind: ExprKind::Builtin(Builtin::FormatField(_), _),
                 ..
             }) = node
             {

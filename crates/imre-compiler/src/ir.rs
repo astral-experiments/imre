@@ -1781,8 +1781,9 @@ pub(crate) enum Builtin {
     StringFormat,
     /// Convert the field value before evaluating its nested format specification.
     FormatConversion(char),
-    /// Format an already converted value with its checked specification.
-    FormatField,
+    /// Format an already converted value with its checked specification. The
+    /// targets are native repr methods that displaying this value can call.
+    FormatField(Box<[usize]>),
     /// Join formatted operands in order, without invoking a str subclass's addition.
     FormatJoin,
     StringReplace,

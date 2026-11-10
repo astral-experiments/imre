@@ -707,7 +707,7 @@ impl Builtin {
             | Self::RegisteredEllipsis
             | Self::RegisteredComplex(..)
             | Self::FormatConversion(_)
-            | Self::FormatField
+            | Self::FormatField(_)
             | Self::RegisteredString(_)
             | Self::RegisteredTemplate(_)
             | Self::RegisteredInterpolation { .. }
