@@ -534,7 +534,6 @@ impl DeferredAnnotation {
 pub(crate) struct RegisteredSites<'a> {
     pub(crate) operations: HashMap<TextRange, Expr>,
     pub(crate) workers: Vec<(&'a ast::StmtFunctionDef, imre_ast::ThreadEntry)>,
-    pub(crate) deletions: Vec<&'a ast::Stmt>,
     pub(crate) classes: Vec<&'a ast::StmtClassDef>,
     pub(crate) annotations: HashMap<TextSize, DeferredAnnotation>,
 }
@@ -597,7 +596,6 @@ pub(crate) fn registered_sites<'a, R>(
                     walk_stmt(self, stmt);
                     self.scope = outer;
                 }
-                ast::Stmt::Delete(_) => self.output.deletions.push(stmt),
                 ast::Stmt::AnnAssign(ann)
                     if !matches!(self.scope, RegisteredScope::Function { .. }) && ann.simple =>
                 {
@@ -834,23 +832,56 @@ impl<'a> SuitePreparation<'a> {
     }
 
     pub(crate) fn suite(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope) -> RegisteredSuite {
+        self.selected_suite(stmts, kind, |_, _| true)
+    }
+
+    /// Keep the enclosing physical frame's entry and cleanup. Its complete target effects
+    /// share one slot layout per suite, including when another statement must run from source.
+    pub(crate) fn physical_body(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope) {
+        self.nested_suite(stmts, kind, |sites, stmt| {
+            stmt.is_delete_stmt()
+                || sites.assertions.contains_key(&stmt.range())
+                || attribute_effects(stmt).is_some()
+        });
+    }
+
+    fn nested_suite(
+        &mut self,
+        stmts: &[ast::Stmt],
+        kind: RegisteredScope,
+        select: fn(&StatementSites, &ast::Stmt) -> bool,
+    ) {
+        if let Some(first) = stmts.first() {
+            let plan = self.selected_suite(stmts, kind, select);
+            // An optimized-away assertion has no instructions and still owns its source slot.
+            if !matches!(plan.residual.as_slice(), [run] if run.statements == (0..stmts.len())) {
+                self.nested.insert(first.start(), plan);
+            }
+        }
+    }
+
+    fn selected_suite(
+        &mut self,
+        stmts: &[ast::Stmt],
+        kind: RegisteredScope,
+        select: fn(&StatementSites, &ast::Stmt) -> bool,
+    ) -> RegisteredSuite {
         use ast::statement_visitor::{StatementVisitor, walk_stmt};
-        let plan = self.lower(stmts, kind);
+        let plan = self.lower(stmts, kind, select);
         struct Children<'p, 's> {
             prepare: &'p mut SuitePreparation<'s>,
             kind: RegisteredScope,
+            select: fn(&StatementSites, &ast::Stmt) -> bool,
         }
         impl<'a> StatementVisitor<'a> for Children<'_, '_> {
             fn visit_body(&mut self, stmts: &'a [ast::Stmt]) {
-                if let Some(first) = stmts.first() {
-                    let plan = self.prepare.suite(stmts, self.kind);
-                    self.prepare.nested.insert(first.start(), plan);
-                }
+                self.prepare.nested_suite(stmts, self.kind, self.select);
             }
         }
         let mut children = Children {
             prepare: self,
             kind,
+            select,
         };
         for run in &plan.residual {
             for stmt in &stmts[run.statements.clone()] {
@@ -863,13 +894,18 @@ impl<'a> SuitePreparation<'a> {
         plan
     }
 
-    fn lower(&self, stmts: &[ast::Stmt], kind: RegisteredScope) -> RegisteredSuite {
+    fn lower(
+        &self,
+        stmts: &[ast::Stmt],
+        kind: RegisteredScope,
+        select: fn(&StatementSites, &ast::Stmt) -> bool,
+    ) -> RegisteredSuite {
         let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
         let mut body = Vec::new();
         let mut residual: Vec<SourceRun> = Vec::new();
         for (i, stmt) in stmts.iter().enumerate() {
             let slots_before = scope.locals.len();
-            if scope.statement(stmt, &mut body).is_err() {
+            if !select(&self.sites, stmt) || scope.statement(stmt, &mut body).is_err() {
                 // A partially lowered target can allocate slots before a later operand fails.
                 if scope.locals.len() != slots_before {
                     scope.locals.truncate(slots_before);
@@ -890,7 +926,7 @@ impl<'a> SuitePreparation<'a> {
         stmts: &[ast::Stmt],
         kind: RegisteredScope,
     ) -> Option<RegisteredSuite> {
-        let plan = self.lower(stmts, kind);
+        let plan = self.lower(stmts, kind, |_, _| true);
         plan.fully_checked().then_some(plan)
     }
 }

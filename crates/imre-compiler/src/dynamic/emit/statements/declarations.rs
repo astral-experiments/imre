@@ -215,7 +215,7 @@ impl Function<'_, '_> {
         if !self.sites.definitions.contains_key(&start) {
             let syntax = self.source.definitions.as_ref().expect("registered scope")[&start];
             let (definition, decorators, type_params) = match syntax {
-                DefinitionSite::Function(def) => {
+                DefinitionSite::Function { def, .. } => {
                     let params = self.method_type_parameters(def);
                     let definition = self.compile_definition(
                         def.decorator_list
