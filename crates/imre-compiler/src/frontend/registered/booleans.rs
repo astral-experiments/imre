@@ -1,6 +1,7 @@
-//! Select operands for a logical operation inside a residual source suite.
+//! Prepare expression inputs owned by residual source suites.
 use super::values::{self, RegisteredSource};
 use crate::ir;
+use ast::visitor::{self, Visitor};
 use ir::control::{BranchShape, Context, Depth, Edges, Split, edges};
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange};
@@ -29,16 +30,17 @@ fn conditional_parts<E: BranchShape>(node: &E) -> Option<[&E; 3]> {
     }
 }
 
-/// Only complete semantic expressions are retained. A residual operation keeps its
-/// original source owner. Nested work is already present in a complete parent.
+/// Complete expressions own their checked children. Mixed sites retain the operation
+/// and the inputs the frontend could check in their physical activation.
 #[derive(Default)]
-pub(crate) struct LogicalSites {
-    selected: HashMap<TextRange, Selection>,
+pub(crate) struct ExpressionSites {
+    selected: HashMap<(TextRange, ast::NodeKind), Selection>,
     covered: Option<TextRange>,
 }
 
 pub(crate) enum Selection {
     Checked(ir::Expr),
+    Inputs(Box<PhysicalInputs>),
     Comparison(Vec<Option<CheckedChild>>),
     Mixed {
         parts: Option<Box<[Option<ir::Expr>; 3]>>,
@@ -47,9 +49,65 @@ pub(crate) enum Selection {
     },
 }
 
+/// A physical owner supplies any remaining inputs before the checked operation runs.
+pub(crate) struct PhysicalInputs {
+    pub(crate) operation: ir::Expr,
+    children: [Option<CheckedChild>; 2],
+}
+
+fn site(node: &ast::Expr) -> (TextRange, ast::NodeKind) {
+    (node.range(), ast::AnyNodeRef::from(node).kind())
+}
+
+fn direct_inputs<'a>(node: &'a ast::Expr) -> Vec<&'a ast::Expr> {
+    #[derive(Default)]
+    struct Inputs<'a>(Vec<&'a ast::Expr>);
+    impl<'a> Visitor<'a> for Inputs<'a> {
+        fn visit_expr(&mut self, child: &'a ast::Expr) {
+            self.0.push(child);
+        }
+    }
+    let mut inputs = Inputs::default();
+    visitor::walk_expr(&mut inputs, node);
+    inputs.0
+}
+
+impl PhysicalInputs {
+    pub(crate) fn operands<'a>(
+        &'a self,
+        node: &'a ast::Expr,
+        suspended: bool,
+    ) -> impl Iterator<Item = SourceOperand<'a>> + 'a {
+        let mut physical = None;
+        self.children.iter().enumerate().map(move |(i, child)| {
+            if let Some(value) = child.as_ref().and_then(|child| child.value(suspended)) {
+                SourceOperand::Checked(Cow::Borrowed(value))
+            } else {
+                SourceOperand::Residual(physical.get_or_insert_with(|| direct_inputs(node))[i])
+            }
+        })
+    }
+}
+
 pub(crate) struct CheckedChild {
     value: ir::Expr,
     requires_suspension: bool,
+}
+
+impl CheckedChild {
+    fn prepare(node: &ast::Expr, source: RegisteredSource<'_>) -> Option<Self> {
+        let ordinary = values::registered_value(node, source);
+        let requires_suspension = ordinary.is_none();
+        let value = ordinary.or_else(|| values::suspended_operand(node, source))?;
+        Some(Self {
+            value,
+            requires_suspension,
+        })
+    }
+
+    fn value(&self, suspended: bool) -> Option<&ir::Expr> {
+        (suspended || !self.requires_suspension).then_some(&self.value)
+    }
 }
 
 pub(crate) struct PreparedSteps {
@@ -92,16 +150,14 @@ impl PreparedSteps {
     }
 }
 
-impl LogicalSites {
+impl ExpressionSites {
     fn governs(node: &ast::Expr) -> bool {
         matches!(node, ast::Expr::BoolOp(_) | ast::Expr::If(_))
             || matches!(node, ast::Expr::UnaryOp(unary) if unary.op == ast::UnaryOp::Not)
     }
 
     pub(crate) fn get(&self, node: &ast::Expr) -> Option<&Selection> {
-        (Self::governs(node) || node.is_compare_expr())
-            .then(|| self.selected.get(&node.range()))
-            .flatten()
+        self.selected.get(&site(node))
     }
 
     pub(crate) fn value<'a>(
@@ -115,7 +171,7 @@ impl LogicalSites {
 
     pub(crate) fn conditional<'a>(&'a self, node: &'a ast::Expr) -> Option<[SourceOperand<'a>; 3]> {
         let children = conditional_parts(node)?;
-        Some(match self.selected.get(&node.range()) {
+        Some(match self.selected.get(&site(node)) {
             Some(Selection::Checked(value)) => {
                 conditional_parts(value)?.map(|v| SourceOperand::Checked(Cow::Borrowed(v)))
             }
@@ -143,11 +199,26 @@ impl LogicalSites {
             let value = inputs
                 .get(index)
                 .and_then(Option::as_ref)
-                .filter(|v| suspended || !v.requires_suspension)
-                .map(|v| &v.value);
+                .and_then(|v| v.value(suspended));
             SourceOperand::prepared(child, value)
         });
         Some((&cmp.ops, operands))
+    }
+
+    pub(crate) fn physical(&self, node: &ast::Expr) -> Option<&PhysicalInputs> {
+        match self.selected.get(&site(node)) {
+            Some(Selection::Inputs(inputs)) => Some(inputs),
+            _ => None,
+        }
+    }
+
+    /// Nested suites and fully checked declaration bodies have their own plans.
+    pub(super) fn prepare_inputs(&mut self, stmt: &ast::Stmt, source: RegisteredSource<'_>) {
+        PhysicalPreparation(self, source).visit_stmt(stmt);
+    }
+
+    pub(super) fn prepare_input(&mut self, expr: &ast::Expr, source: RegisteredSource<'_>) {
+        PhysicalPreparation(self, source).visit_expr(expr);
     }
 
     pub(crate) fn visit(&mut self, node: &ast::Expr, source: RegisteredSource<'_>) {
@@ -155,20 +226,12 @@ impl LogicalSites {
             let inputs: Vec<_> = cmp
                 .operands
                 .iter()
-                .map(|child| {
-                    let ordinary = values::registered_value(child, source);
-                    let requires_suspension = ordinary.is_none();
-                    let value = ordinary.or_else(|| values::suspended_operand(child, source))?;
-                    Some(CheckedChild {
-                        value,
-                        requires_suspension,
-                    })
-                })
+                .map(|child| CheckedChild::prepare(child, source))
                 .collect();
             // Whole checked comparisons, including suspendable ones, keep their normal entry.
             if inputs.iter().any(Option::is_none) {
                 self.selected
-                    .insert(node.range(), Selection::Comparison(inputs));
+                    .insert(site(node), Selection::Comparison(inputs));
             }
             return;
         }
@@ -202,7 +265,53 @@ impl LogicalSites {
         if matches!(selected, Selection::Checked(_)) {
             self.covered = Some(node.range());
         }
-        self.selected.insert(node.range(), selected);
+        self.selected.insert(site(node), selected);
+    }
+}
+
+struct PhysicalPreparation<'a, 's>(&'a mut ExpressionSites, RegisteredSource<'s>);
+
+impl<'a> Visitor<'a> for PhysicalPreparation<'_, '_> {
+    fn visit_body(&mut self, _body: &'a [ast::Stmt]) {}
+
+    fn visit_expr(&mut self, node: &'a ast::Expr) {
+        if matches!(
+            self.0.selected.get(&site(node)),
+            Some(Selection::Checked(_) | Selection::Inputs(_))
+        ) {
+            return;
+        }
+        let Some((op, physical)) = values::binary_operands(node) else {
+            visitor::walk_expr(self, node);
+            return;
+        };
+        let inputs = physical.map(|child| CheckedChild::prepare(child, self.1));
+        let selected = match inputs {
+            [Some(left), Some(right)]
+                if !left.requires_suspension && !right.requires_suspension =>
+            {
+                Selection::Checked(
+                    self.1
+                        .located(node, values::binary(op, left.value, right.value)),
+                )
+            }
+            children => {
+                for (child, checked) in physical.into_iter().zip(&children) {
+                    if checked.as_ref().is_none_or(|v| v.requires_suspension) {
+                        self.visit_expr(child);
+                    }
+                }
+                Selection::Inputs(Box::new(PhysicalInputs {
+                    operation: values::binary(
+                        op,
+                        ir::Expr::local(0, ir::Type::PythonObject),
+                        ir::Expr::local(1, ir::Type::PythonObject),
+                    ),
+                    children,
+                }))
+            }
+        };
+        self.0.selected.insert(site(node), selected);
     }
 }
 
@@ -226,7 +335,7 @@ pub(crate) fn prepare_boolean<'a>(
     expression: &'a ast::Expr,
     context: Context,
     source: RegisteredSource<'_>,
-    sites: &'a LogicalSites,
+    sites: &'a ExpressionSites,
 ) -> (Edges, Vec<SourceOperand<'a>>) {
     if let Some(Selection::Mixed { branch, value, .. }) = sites.get(expression) {
         let plan = match context {

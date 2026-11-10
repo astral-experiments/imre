@@ -122,12 +122,12 @@ mod records;
 mod regex;
 mod registered;
 pub(crate) use registered::booleans::{
-    LogicalSites, Selection as LogicalSelection, SourceOperand, prepare_boolean,
+    ExpressionSites, Selection as ExpressionSelection, SourceOperand, prepare_boolean,
 };
 pub(crate) use registered::patterns::{MatchGuard, SourceMatch};
 pub(crate) use registered::type_alias_body;
 pub(crate) use registered::values::{
-    RegisteredSource, ValueStatement, binary_operands, display_elements, index_operands,
+    RegisteredSource, ValueStatement, display_elements, index_operands,
     literal_replacements, module_literal_replacements, packed_arguments,
     push_codepoints, registered_argument_at, registered_arguments, registered_index_key,
     registered_value, suspended_operand, value_statement,

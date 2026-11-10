@@ -940,6 +940,7 @@ fn checked_assertion(
 /// Physical source locations and semantic operations shared by complete and residual suites.
 #[derive(Default)]
 pub(crate) struct StatementSites {
+    pub(crate) expressions: booleans::ExpressionSites,
     pub(crate) assertions: HashMap<TextRange, Vec<Statement>>,
     pub(crate) ifs: HashMap<TextRange, SourceConditional>,
     pub(crate) matches: HashMap<TextRange, Option<patterns::SourceMatch>>,
@@ -1191,11 +1192,12 @@ impl<'a> SuitePreparation<'a> {
                     .decorator_list
                     .iter()
                     .map(|decorator| {
-                        RegisteredOperand::prepare(
-                            &decorator.expression,
-                            self.source,
-                            site.enclosing,
-                        )
+                        let expr = &decorator.expression;
+                        let operand = RegisteredOperand::prepare(expr, self.source, site.enclosing);
+                        if operand.is_none() {
+                            self.sites.expressions.prepare_input(expr, self.source);
+                        }
+                        operand
                     })
                     .collect();
                 let bases_scope = if site.parameters.is_some() {
@@ -1210,7 +1212,11 @@ impl<'a> SuitePreparation<'a> {
                         .map_or_else(Default::default, |args| {
                             let operands = registered_arguments(args)
                                 .map(|expr| {
-                                    RegisteredOperand::prepare(expr, self.source, bases_scope)
+                                    let operand = RegisteredOperand::prepare(expr, self.source, bases_scope);
+                                    if operand.is_none() {
+                                        self.sites.expressions.prepare_input(expr, self.source);
+                                    }
+                                    operand
                                 })
                                 .collect();
                             (packed_arguments(args), operands)
@@ -1289,6 +1295,13 @@ impl<'a> SuitePreparation<'a> {
             kind,
             select: child_selection,
         };
+        for run in &plan.residual {
+            for stmt in &stmts[run.statements.clone()] {
+                if !stmt.is_match_stmt() {
+                    children.prepare.sites.expressions.prepare_inputs(stmt, children.prepare.source);
+                }
+            }
+        }
         for run in std::mem::take(&mut plan.residual) {
             if run.effect.is_some() {
                 if matches!(run.effect, Some(SourceEffect::While(_))) {
@@ -1338,7 +1351,20 @@ impl<'a> SuitePreparation<'a> {
                         .get_mut(&branch.range())
                         .and_then(Option::take)
                 {
+                    site.subject = RegisteredOperand::prepare_with(
+                        children.prepare.source,
+                        kind,
+                        |scope| scope.frame_value(&branch.subject),
+                    );
+                    if site.subject.is_none() {
+                        children.prepare.sites.expressions.prepare_input(&branch.subject, children.prepare.source);
+                    }
                     for (case, input) in site.cases.iter_mut().zip(&branch.cases) {
+                        if matches!(case.guard, Some(patterns::MatchGuard::Residual))
+                            && let Some(guard) = &input.guard
+                        {
+                            children.prepare.sites.expressions.prepare_input(guard, children.prepare.source);
+                        }
                         case.body = Some(children.prepare.suite(&input.body, kind));
                     }
                     children
@@ -1406,20 +1432,9 @@ impl<'a> SuitePreparation<'a> {
         let mut residual: Vec<SourceRun> = Vec::new();
         for (i, stmt) in stmts.iter().enumerate() {
             let slots_before = scope.locals.len();
-            let checked_output = match stmt {
-                ast::Stmt::Return(ret) => ret.value.as_deref(),
-                ast::Stmt::Expr(effect) => Some(effect.value.as_ref()),
-                _ => None,
-            }
-            .is_some_and(|value| value.is_bin_op_expr() || value.is_subscript_expr());
-            let lowered = match (select, checked_output) {
-                // A return or discard owns its complete operand in this activation,
-                // including values that must survive a later await.
-                (_, true) if matches!(kind, RegisteredScope::Function { .. }) => {
-                    scope.with_suspending_operands(|scope| scope.statement(stmt, &mut body))
-                }
-                (SuiteSelection::Physical, false) => scope.physical_statement(stmt, &mut body),
-                _ => scope.statement(stmt, &mut body),
+            let lowered = match select {
+                SuiteSelection::All => scope.statement(stmt, &mut body),
+                SuiteSelection::Physical => scope.physical_statement(stmt, &mut body),
             };
             if lowered.is_ok() {
                 continue;
@@ -1678,7 +1693,7 @@ impl statements::StatementLowering for SourceScope<'_> {
     }
 
     fn assignment(&mut self, assign: &ast::StmtAssign) -> StdResult<Vec<Statement>, ()> {
-        let value = self.operand(&assign.value).ok_or(())?;
+        let value = self.frame_value(&assign.value).ok_or(())?;
         self.assignment_targets(&assign.targets, value)
     }
 
@@ -1739,14 +1754,14 @@ impl statements::StatementLowering for SourceScope<'_> {
         let effect = if value.is_string_literal_expr() {
             None
         } else {
-            Some(Statement::Expr(self.operand(value).ok_or(())?))
+            Some(Statement::Expr(self.frame_value(value).ok_or(())?))
         };
         Ok((effect, true))
     }
 
     fn returned(&mut self, ret: &ast::StmtReturn) -> StdResult<Expr, ()> {
         match ret.value.as_deref() {
-            Some(value) => self.operand(value).ok_or(()),
+            Some(value) => self.frame_value(value).ok_or(()),
             None => Ok(Expr::none()),
         }
     }
@@ -2205,7 +2220,9 @@ impl SourceScope<'_> {
             }
             return self.statement(stmt, body);
         }
-        if stmt.is_delete_stmt()
+        if stmt.is_return_stmt()
+            || stmt.is_expr_stmt()
+            || stmt.is_delete_stmt()
             || stmt.is_aug_assign_stmt()
             || stmt.is_raise_stmt()
             || self.sites.assertions.contains_key(&stmt.range())
@@ -2323,7 +2340,6 @@ impl SourceScope<'_> {
     }
 
     fn match_statement(&mut self, branch: &ast::StmtMatch) -> StdResult<statements::Block, ()> {
-        let subject = self.operand(&branch.subject).ok_or(())?;
         let mut cases = Vec::with_capacity(branch.cases.len());
         let mut falls = false;
         let mut exhaustive = false;
@@ -2355,6 +2371,8 @@ impl SourceScope<'_> {
             });
             falls |= continues;
         }
+        // Only a complete match owns its subject in this suite's slot layout.
+        let subject = self.frame_value(&branch.subject).ok_or(())?;
         Ok((vec![Statement::Match(subject, cases)], falls || !exhaustive))
     }
 
@@ -2422,6 +2440,16 @@ impl SourceScope<'_> {
             kind,
             |ty| self.hidden(ty),
         ))
+    }
+
+    /// The activation owns the complete value before a return, discard or store.
+    /// Its temporary roots keep earlier arguments live across a later suspension.
+    fn frame_value(&mut self, expr: &ast::Expr) -> Option<Expr> {
+        if matches!(self.kind, RegisteredScope::Function { .. }) {
+            self.with_assignment_operands(|scope| scope.operand(expr))
+        } else {
+            self.operand(expr)
+        }
     }
 
     fn operand(&mut self, expr: &ast::Expr) -> Option<Expr> {

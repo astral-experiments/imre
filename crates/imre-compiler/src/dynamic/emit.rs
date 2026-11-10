@@ -499,7 +499,7 @@ impl<'a> PreparedBody<'a, '_> {
         let declarations = source_declarations(&sites);
         let mut operations = sites.operations;
         let mut aliases = Vec::new();
-        let mut logicals = crate::frontend::LogicalSites::default();
+        let mut logicals = crate::frontend::ExpressionSites::default();
         let mut scopes = crate::frontend::function_scope::ScopeFacts::prepare(
             &body,
             &private_names,
@@ -539,6 +539,7 @@ impl<'a> PreparedBody<'a, '_> {
             &body,
             python_optimization == 0,
         );
+        prepare.sites.expressions = logicals;
         let initializer =
             (!expression).then(|| prepare.suite(&body, crate::frontend::RegisteredScope::Module));
         let mut initializer_sites = Vec::new();
@@ -595,7 +596,6 @@ impl<'a> PreparedBody<'a, '_> {
             namespace_annotations,
             scopes,
             thread_entries,
-            logicals,
             statement_sites: prepare.sites,
             python_optimization,
             nested_bodies: prepare.nested,
@@ -1037,7 +1037,6 @@ struct SourceInfo<'a> {
         crate::frontend::PreparedAnnotation<Box<SourceInfo<'static>>>,
     >,
     namespace_annotations: HashMap<Option<ruff_text_size::TextSize>, Vec<ruff_text_size::TextSize>>,
-    logicals: crate::frontend::LogicalSites,
     scopes: crate::frontend::function_scope::ScopeFacts,
     thread_entries: HashMap<ruff_text_size::TextSize, imre_ast::ThreadEntry>,
     lambdas: HashMap<ruff_text_size::TextSize, RegisteredLambda>,
@@ -1418,7 +1417,7 @@ mod tests {
             generators: Some(&generators),
             ..source
         };
-        let mut logicals = crate::frontend::LogicalSites::default();
+        let mut logicals = crate::frontend::ExpressionSites::default();
         crate::frontend::function_scope::ScopeFacts::prepare(
             body,
             &prepared.source.private_names,
@@ -1433,6 +1432,7 @@ mod tests {
         .classes;
         let mut suites =
             SuitePreparation::new(&prepared.source.namespace_operations, source, body, true);
+        suites.sites.expressions = logicals;
         let initializer = suites.suite(body, RegisteredScope::Module);
         let class_bodies = suites.class_suites(classes);
         let (sites, nested) = (suites.sites, suites.nested);
@@ -1444,7 +1444,6 @@ mod tests {
             fields: std::mem::take(&mut prepared.source.strings.fields),
             ..strings
         };
-        prepared.source.logicals = logicals;
     }
 
     #[test]
@@ -1674,6 +1673,7 @@ mod tests {
         let source = concat!(
             "def capture(rows):\n",
             "    for item in rows:\n",
+            "        rows[item]: object\n",
             "        return t'pre{(yield item)}'\n",
             "    else:\n",
             "        return 42\n",
@@ -2182,6 +2182,51 @@ mod tests {
     }
 
     #[test]
+    fn nested_call_values_keep_their_checked_operands() {
+        use crate::ir::{Builtin, ExprKind};
+
+        let source = concat!(
+            "async def collect(pause, sink, left, right, items):\n",
+            "    item = sink(await pause(), second=left() + (lambda: right())())\n",
+            "    return sink(await pause(), second=items[(lambda: item)()])\n",
+            "state: int\n",
+        );
+        let mut prepared = PreparedBody::module(
+            "worker",
+            Path::new("worker.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let function = prepared.syntax.as_ref().unwrap()[0].as_function_def_stmt().unwrap();
+        let suite = prepared.source.function_bodies[&function.start()].suite().unwrap();
+        assert!(suite.fully_checked());
+        crate::verify::registered(suite.checked.region()).unwrap();
+        let mut operations = Vec::new();
+        crate::ir::walk_expressions(&suite.checked.function.body, &mut |expr| {
+            match &expr.kind {
+                ExprKind::Binary(..) => operations.push("binary"),
+                ExprKind::Builtin(Builtin::RegisteredSubscript(..), _) => operations.push("index"),
+                ExprKind::Builtin(Builtin::RegisteredLambda(..), _) => operations.push("lambda"),
+                ExprKind::Builtin(Builtin::RegisteredSuspend(..), _) => operations.push("suspend"),
+                _ => {}
+            }
+        });
+        for (kind, expected) in [("binary", 1), ("index", 1), ("lambda", 2), ("suspend", 2)] {
+            assert_eq!(operations.iter().filter(|op| **op == kind).count(), expected);
+        }
+
+        let original = prepared.standalone().unwrap().unwrap();
+        prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap()
+            .body
+            .clear();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
     fn prepared_output_owns_binary_operands_after_erasure() {
         assert_prepared_binary_output(
             "async def difference():\n    return (await pause() - 1) - await right()\n",
@@ -2239,6 +2284,46 @@ mod tests {
     }
 
     #[test]
+    fn a_physical_binary_keeps_its_operation_and_checked_input() {
+        use crate::frontend::SourceOperand::{Checked, Residual};
+
+        let mut prepared = PreparedBody::module(
+            "store",
+            Path::new("store.py"),
+            "good = before() + after()\ntarget()[lo():(lambda v: v)(hi()) + more():step()]: int = rhs()\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        fn bound(body: &mut [ast::Stmt]) -> &mut ast::Expr {
+            body[1].as_ann_assign_stmt_mut().unwrap().target
+                .as_subscript_expr_mut().unwrap().slice
+                .as_slice_expr_mut().unwrap().upper.as_deref_mut().unwrap()
+        }
+        fn erase(node: &mut ast::Expr) {
+            *node = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+                range: node.range(),
+                node_index: Default::default(),
+            });
+        }
+
+        let original = prepared.standalone().unwrap().unwrap();
+        let checked = &prepared.syntax.as_deref().unwrap()[0].as_assign_stmt().unwrap().value;
+        assert!(prepared.source.statement_sites.expressions.get(checked).is_none());
+        let upper = bound(prepared.syntax.as_mut().unwrap().to_mut());
+        let inputs = prepared.source.statement_sites.expressions.physical(upper).unwrap();
+        assert!(matches!(inputs.operands(upper, false).collect::<Vec<_>>().as_slice(), [Residual(_), Checked(_)]));
+        let binary = upper.as_bin_op_expr_mut().unwrap();
+        binary.op = ast::Operator::Sub;
+        erase(&mut binary.right);
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+
+        let binary = bound(prepared.syntax.as_mut().unwrap().to_mut()).as_bin_op_expr_mut().unwrap();
+        erase(&mut binary.left.as_call_expr_mut().unwrap().arguments.args[0]);
+        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
     fn residual_with_reads_its_prepared_manager_after_erasing_the_call() {
         // The module annotation retains the physical suite for this residual-input test.
         let text = "def read(open_stream, path, record):\n    with open_stream(path) as stream:\n        record(stream)\nstate: int\n";
@@ -2271,7 +2356,8 @@ mod tests {
         ) = (physical.sites, physical.nested);
         prepared.source.function_bodies.remove(&function.start());
         let context = function.body[0].as_with_stmt().unwrap();
-        let inputs = &prepared.source.statement_sites.contexts[&context.range()];
+        let site = context.range();
+        let inputs = &prepared.source.statement_sites.contexts[&site];
         assert!(matches!(inputs.as_slice(), [input] if input.manager.is_some()));
         let original = prepared.standalone().unwrap().unwrap();
 
@@ -2290,12 +2376,8 @@ mod tests {
         });
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
 
-        let body = &mut with_statement(prepared.syntax.as_mut().unwrap().to_mut()).body[0];
-        *body = ast::StmtPass {
-            range: body.range(),
-            node_index: Default::default(),
-        }
-        .into();
+        // Removing the prepared manager exposes the erased call to the source run.
+        prepared.source.statement_sites.contexts.get_mut(&site).unwrap()[0].manager = None;
         assert_ne!(prepared.standalone().unwrap().unwrap(), original);
     }
 
@@ -2327,8 +2409,8 @@ mod tests {
             panic!("expected assignment expression")
         };
         assert!(matches!(
-            prepared.source.logicals.get(&named.value),
-            Some(crate::frontend::LogicalSelection::Checked(_))
+            prepared.source.statement_sites.expressions.get(&named.value),
+            Some(crate::frontend::ExpressionSelection::Checked(_))
         ));
         let ast::Expr::If(choice) = named.value.as_mut() else {
             panic!("expected choice")
@@ -2363,7 +2445,7 @@ mod tests {
             .unwrap()
             .value;
         assert!(matches!(
-            prepared.source.logicals.conditional(value),
+            prepared.source.statement_sites.expressions.conditional(value),
             Some([Checked(_), Checked(_), Residual(ast::Expr::Generator(_))])
         ));
         fn erase(child: &mut ast::Expr) {
@@ -2445,6 +2527,46 @@ mod tests {
             node_index: Default::default(),
         });
         assert!(prepared.standalone().unwrap().unwrap() != original);
+    }
+
+    #[test]
+    fn checked_and_physical_matches_own_their_suspended_subject() {
+        for (body, physical) in [("return item", false), ("raise await failure(item)", true)] {
+            let source = format!(
+                "async def evaluate(seed):\n    match sink(await gate(), second=left() + table()[(lambda: seed)()]):\n        case item: {body}\nstate: int\n"
+            );
+            let mut prepared = PreparedBody::module(
+                "example",
+                Path::new("example.py"),
+                &source,
+                0,
+                ModuleOrigin::Program(None),
+            )
+            .unwrap();
+            let function = prepared.syntax.as_ref().unwrap()[0].as_function_def_stmt().unwrap();
+            let site = function.body[0].range();
+            let suite = prepared.source.function_bodies[&function.start()].suite().unwrap();
+            assert_eq!(suite.fully_checked(), !physical);
+            let subject = prepared.source.statement_sites.matches[&site].as_ref().unwrap().subject.as_ref();
+            if physical {
+                crate::verify::registered(subject.unwrap().region()).unwrap();
+            } else {
+                assert!(subject.is_none());
+                crate::verify::registered(suite.checked.region()).unwrap();
+            }
+            let original = prepared.standalone().unwrap().unwrap();
+            let function = prepared.syntax.as_mut().unwrap().to_mut()[0].as_function_def_stmt_mut().unwrap();
+            let branch = function.body[0].as_match_stmt_mut().unwrap();
+            *branch.subject = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+                range: branch.subject.range(),
+                node_index: Default::default(),
+            });
+            assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+            if physical {
+                prepared.source.statement_sites.matches.get_mut(&site).unwrap().as_mut().unwrap().subject = None;
+                assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+            }
+        }
     }
 
     #[test]

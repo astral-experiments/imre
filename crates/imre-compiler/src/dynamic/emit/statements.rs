@@ -225,19 +225,19 @@ impl<'p> Function<'_, 'p> {
         site: &'p crate::frontend::SourceMatch,
         source: &'p ast::StmtMatch,
     ) {
-        use crate::llvm::registered::patterns::{MatchRegion, MatchSubject};
+        use crate::llvm::registered::patterns::MatchRegion;
 
         let mark = self.temporary_mark();
         let subject = match &site.subject {
-            Some(expr) => {
-                self.prepare_checked_value(expr);
-                MatchSubject::Checked(expr)
+            Some(operand) => {
+                self.prepare_checked_value(&operand.value);
+                self.frame.prepared_operand(operand, &self.sites, false)
             }
-            None => MatchSubject::Evaluated(self.expr(&source.subject)),
+            None => self.expr(&source.subject),
         };
         let mut regions = self
             .frame
-            .registered_match(subject, &mark, site, &self.sites);
+            .registered_match(&subject, &mark, site, &self.sites);
         loop {
             if let Some(test) = regions.pending_checked_guard() {
                 self.prepare_checked_value(test);
@@ -358,7 +358,7 @@ impl<'p> Function<'_, 'p> {
             if let Some(output) = crate::frontend::value_statement(
                 stmt,
                 self.source.registered_source(),
-                &self.source.logicals,
+                &self.source.statement_sites.expressions,
             ) {
                 self.emit_value_statement(output);
                 continue;

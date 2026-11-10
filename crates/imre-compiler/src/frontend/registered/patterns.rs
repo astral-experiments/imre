@@ -3,7 +3,7 @@ use super::*;
 use ir::MatchTest;
 
 pub(crate) struct SourceMatch {
-    pub(crate) subject: Option<Expr>,
+    pub(crate) subject: Option<RegisteredOperand>,
     pub(crate) cases: Vec<SourceCase>,
 }
 
@@ -48,7 +48,7 @@ impl SourceMatch {
             })
             .collect::<Option<_>>()?;
         Some(Self {
-            subject: values::registered_value(&node.subject, source),
+            subject: None,
             cases,
         })
     }
