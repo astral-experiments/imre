@@ -1729,6 +1729,34 @@ mod tests {
     }
 
     #[test]
+    fn nested_generic_suites_keep_their_checked_namespace_operations() {
+        let text = concat!(
+            "def outer(value):\n",
+            "    def scoped[T]():\n",
+            "        global marker\n",
+            "        nonlocal value\n",
+            "        import math\n",
+            "        from math import sqrt\n",
+            "        type Label = tuple[str, int]\n",
+            "        pass\n",
+            "        class Local: pass\n",
+            "        return Label\n",
+        );
+        let module = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            text,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let parsed = ruff_python_parser::parse_module(text).unwrap();
+        let outer = parsed.syntax().body[0].as_function_def_stmt().unwrap();
+        let scoped = outer.body[0].as_function_def_stmt().unwrap();
+        assert!(module.source.nested_bodies[&scoped.body[0].start()].fully_checked());
+    }
+
+    #[test]
     fn mixed_loop_transfers_emit_after_erasing_their_keywords() {
         use crate::frontend::{RegisteredScope, RegisteredSource, SourceEffect, SuitePreparation};
         let text = concat!(
