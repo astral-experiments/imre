@@ -20,30 +20,6 @@ impl Context {
         value
     }
 
-    /// Call with packed operands and drop their temporary roots after a successful return.
-    fn call_packed(
-        &mut self,
-        callable: Id,
-        arguments: Id,
-        keywords: Id,
-        mark: usize,
-        scope: Id,
-    ) -> Result<Id> {
-        let args = self.items(arguments)?;
-        let result = if keywords == NONE {
-            self.call_in_scope(scope, callable, args, Vec::new())?
-        } else {
-            self.call_with_keyword_dict(scope, callable, args, keywords)?
-        };
-        if !self
-            .heap
-            .discard_scalar_call(mark, result, arguments, callable)
-        {
-            self.finish_call_operands(mark, result);
-        }
-        self.check_call_return(result)
-    }
-
     /// A Python call expression checks for delivery after the callee's native work completes.
     pub(super) fn check_call_return(&mut self, result: Id) -> Result<Id> {
         #[cfg(unix)]
@@ -2013,7 +1989,7 @@ pub(super) unsafe extern "C" fn imre_dyn_lookup(
     let mut result = std::str::from_utf8(name)
         .map_err(|error| Error::new("UnicodeError", error.to_string()))
         .and_then(|name| ctx.lookup(scope, name));
-    finish_operand_position(ctx, &mut result, false);
+    finish_operand_position(ctx, &mut result, None);
     finish(ctx, result)
 }
 
@@ -2103,7 +2079,11 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
     ) || (b == TRUE && matches!(op, "lookup_enter" | "lookup_exit"))
         || format_field
     {
-        finish_operand_position(ctx, &mut result, format_field);
+        finish_operand_position(
+            ctx,
+            &mut result,
+            format_field.then_some(value::TracebackAnchor::Uniform),
+        );
     }
     if reraise && let Err(error) = result {
         ctx.pending = Some(error);
@@ -2145,10 +2125,26 @@ pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(
     scope: Id,
 ) -> Id {
     // SAFETY: the generated caller owns the context and supplies a null or static position.
-    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
-    scoped_call(ctx, span, |ctx| {
-        ctx.call_packed(callable, args, kwargs, mark, scope)
-    })
+    unsafe {
+        scoped_call(
+            ctx,
+            span.as_ref(),
+            mark,
+            |ctx| {
+                let arguments = ctx.items(args)?;
+                if kwargs == NONE {
+                    ctx.prepare_call_in_scope(scope, callable, arguments, Vec::new())
+                } else {
+                    ctx.prepare_call_with_keyword_dict(scope, callable, arguments, kwargs)
+                }
+            },
+            |ctx, mark, result| {
+                if !ctx.heap.discard_scalar_call(mark, result, args, callable) {
+                    ctx.finish_call_operands(mark, result);
+                }
+            },
+        )
+    }
 }
 
 /// Look up an immediate call before evaluating its arguments. Exact string methods
@@ -2217,7 +2213,7 @@ fn method_target(
         *bound_receiver = receiver;
         callable
     });
-    finish_operand_position(ctx, &mut result, false);
+    finish_operand_position(ctx, &mut result, None);
     finish(ctx, result)
 }
 
@@ -2295,24 +2291,31 @@ pub(super) unsafe extern "C" fn imre_dyn_partition_field_at(
     {
         let reverse = symbol == "str.rpartition";
         // SAFETY: the call position is null or static.
-        return scoped_call(ctx, unsafe { span.as_ref() }, |ctx| {
-            let fields = crate::objects::partition_text(
-                ctx.str_value(receiver)?,
-                ctx.str_value(separator)?,
-                reverse,
-            )?;
-            let selected = match (fields, index) {
-                (Some((left, _)), 0) => ctx.text(left.to_owned()),
-                (Some(_), 1) => separator,
-                (Some((_, right)), 2) => ctx.text(right.to_owned()),
-                (None, 0) if !reverse => receiver,
-                (None, 2) if reverse => receiver,
-                (None, 0..=2) => ctx.text(""),
-                _ => unreachable!("compiler emits indices in 0..=2"),
-            };
-            ctx.finish_call_operands(mark, selected);
-            ctx.check_call_return(selected)
-        });
+        return unsafe {
+            scoped_call(
+                context,
+                span.as_ref(),
+                mark,
+                |ctx| {
+                    let fields = crate::objects::partition_text(
+                        ctx.str_value(receiver)?,
+                        ctx.str_value(separator)?,
+                        reverse,
+                    )?;
+                    let selected = match (fields, index) {
+                        (Some((left, _)), 0) => ctx.text(left.to_owned()),
+                        (Some(_), 1) => separator,
+                        (Some((_, right)), 2) => ctx.text(right.to_owned()),
+                        (None, 0) if !reverse => receiver,
+                        (None, 2) if reverse => receiver,
+                        (None, 0..=2) => ctx.text(""),
+                        _ => unreachable!("compiler emits indices in 0..=2"),
+                    };
+                    Ok(calls::RegisteredCall::Returned(selected))
+                },
+                Context::finish_call_operands,
+            )
+        };
     }
     // SAFETY: the receiver slot, argument and call position follow the prepared method ABI.
     let result = unsafe {
@@ -2345,14 +2348,18 @@ pub(super) unsafe extern "C" fn imre_dyn_positional_call_at(
     scope: Id,
 ) -> Id {
     // SAFETY: both pointers follow the generated call ABI.
-    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
-    scoped_call(ctx, span, |ctx| {
-        // SAFETY: the generated caller retains all operands and writes the array before this call.
-        let args = copy_ids(unsafe { live_handles(values, count) })?;
-        let result = ctx.call_in_scope(scope, callable, args, Vec::new())?;
-        ctx.finish_call_operands(mark, result);
-        ctx.check_call_return(result)
-    })
+    unsafe {
+        scoped_call(
+            ctx,
+            span.as_ref(),
+            mark,
+            |ctx| {
+                let args = copy_ids(live_handles(values, count))?;
+                ctx.prepare_call_in_scope(scope, callable, args, Vec::new())
+            },
+            Context::finish_call_operands,
+        )
+    }
 }
 
 /// Call with positional values followed by values for statically named keywords.
@@ -2369,63 +2376,91 @@ pub(super) unsafe extern "C" fn imre_dyn_keyword_call_at(
     scope: Id,
 ) -> Id {
     // SAFETY: the compiler supplies its context, optional static position and initialized handles.
-    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
-    scoped_call(ctx, span, |ctx| {
-        // SAFETY: the entry-block array holds all operands throughout this call.
-        let values = unsafe { live_handles(values, positional + keywords) };
-        let (args, named) = values.split_at(positional);
-        let args = copy_ids(args)?;
-        let mut kwargs = Vec::new();
-        kwargs
-            .try_reserve_exact(keywords)
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        for &value in named {
-            // SAFETY: the emitter stores one NUL-terminated UTF-8 identifier for each value.
-            let name = unsafe { cstr(names) };
-            kwargs.push((copy_label(name)?, value));
-            // SAFETY: this advances to the next identifier or one past the final NUL.
-            names = unsafe { names.add(name.len() + 1) };
-        }
-        let result = ctx.call_in_scope(scope, callable, args, kwargs)?;
-        ctx.finish_call_operands(mark, result);
-        ctx.check_call_return(result)
-    })
+    unsafe {
+        scoped_call(
+            ctx,
+            span.as_ref(),
+            mark,
+            |ctx| {
+                let values = live_handles(values, positional + keywords);
+                let (args, named) = values.split_at(positional);
+                let args = copy_ids(args)?;
+                let mut kwargs = Vec::new();
+                kwargs
+                    .try_reserve_exact(keywords)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                for &value in named {
+                    // SAFETY: the emitter stores one NUL-terminated UTF-8 identifier for each value.
+                    let name = cstr(names);
+                    kwargs.push((copy_label(name)?, value));
+                    names = names.add(name.len() + 1);
+                }
+                ctx.prepare_call_in_scope(scope, callable, args, kwargs)
+            },
+            Context::finish_call_operands,
+        )
+    }
 }
 
-/// A failing packed operand or call may span multiple lines in a native resumable frame.
-fn finish_operand_position(ctx: &mut Context, result: &mut Result<Id>, include_ordinary: bool) {
+/// Preserve the operation range when transferring an exception back to the caller.
+fn finish_operand_position(
+    ctx: &mut Context,
+    result: &mut Result<Id>,
+    ordinary_anchor: Option<value::TracebackAnchor>,
+) {
     if let Some([line, end_line, start, end]) = ctx.heap.take_call_position()
         && let Err(error) = result
-        && (include_ordinary
-            || matches!(
-                ctx.code_object(ctx.heap.current_code()).body,
-                value::Body::Suspended(_)
-            ))
     {
+        let anchor = if matches!(
+            ctx.code_object(ctx.heap.current_code()).body,
+            value::Body::Suspended(_)
+        ) {
+            value::TracebackAnchor::Uniform
+        } else if let Some(anchor) = ordinary_anchor {
+            anchor
+        } else {
+            return;
+        };
         error.tracing().source_position = Some((
             line,
             value::TracebackSpan {
                 end_line,
                 start,
                 end,
-                anchor: value::TracebackAnchor::Uniform,
+                anchor,
             },
         ));
     }
 }
 
-/// Clear the recorded call position and publish the return value or exception.
-fn scoped_call(
-    ctx: &mut Context,
+/// # Safety
+/// The generated caller owns execution of this context. Its operand mark and position
+/// belong to the caller's frame and stay live while the registered frame runs.
+unsafe fn scoped_call(
+    context: *mut Context,
     span: Option<&[u32; 4]>,
-    invoke: impl FnOnce(&mut Context) -> Result<Id>,
+    mark: usize,
+    prepare: impl FnOnce(&mut Context) -> Result<calls::RegisteredCall>,
+    release: impl FnOnce(&mut Context, usize, Id),
 ) -> Id {
+    // SAFETY: restrict preparation's borrow to its own phase of the call.
+    let ctx = unsafe { &mut *context };
     if ctx.pending.is_some() {
         ctx.heap.set_call_position(None);
         return NONE;
     }
-    let mut result = invoke(ctx);
-    finish_operand_position(ctx, &mut result, false);
+    let call = prepare(ctx);
+    // SAFETY: preparation returned any native activation with its frame already rooted.
+    let result = call.and_then(|call| unsafe { call.run(context) });
+    // SAFETY: the native frame has returned and the caller is active again.
+    let ctx = unsafe { &mut *context };
+    let mut result = result.and_then(|value| {
+        release(ctx, mark, value);
+        ctx.check_call_return(value)
+    });
+    // Ordinary traceback nodes also own the saved call range, including when the
+    // emitter supplied no highlight for the traceback printer.
+    finish_operand_position(ctx, &mut result, Some(value::TracebackAnchor::Hidden));
     finish_at(ctx, result, span)
 }
 
