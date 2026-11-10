@@ -1259,6 +1259,36 @@ impl Session {
         )
     }
 
+    /// Locate the physical class of a postponed result name in the definition's scope.
+    pub(crate) fn quoted_class_result(
+        &self,
+        module: usize,
+        annotation: &Expr,
+    ) -> Option<(usize, TextRange)> {
+        use ty_python_semantic::types::{Type, TypeDefinition};
+
+        let name = annotation.as_string_literal_expr()?.value.to_str();
+        if !ruff_python_stdlib::identifiers::is_identifier(name) {
+            return None;
+        }
+        self.hint_reads.set(self.hint_reads.get() + 1);
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        let ty @ Type::NominalInstance(_) = annotation.inferred_type(&model)? else {
+            return None;
+        };
+        let class @ TypeDefinition::StaticClass(_) =
+            ty.definition(&self.db, &model.program_environment())?
+        else {
+            return None;
+        };
+        let location = class.focus_range(&self.db)?;
+        let owner = self
+            .files
+            .iter()
+            .position(|file| *file == location.file())?;
+        Some((owner, location.range()))
+    }
+
     /// Resolve a bare `object` base at the point where the class is defined.
     pub(crate) fn builtin_object_base(&self, module: usize, base: &Expr) -> bool {
         base.as_name_expr().is_some_and(|name| name.id == "object")

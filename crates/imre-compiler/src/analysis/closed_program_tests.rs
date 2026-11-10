@@ -982,3 +982,28 @@ fn the_ordinary_entry_keeps_an_operand_in_the_default_flow_region() {
             .contains("app.py:3:15: Imre: expected int, got bool")
     );
 }
+
+#[test]
+fn quoted_return_uses_a_linked_class_reexported_for_type_checking() {
+    let project = tempdir().unwrap();
+    let root = project.path();
+    fs::write(
+        root.join("labels.py"),
+        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from model import Packet as Alias\n",
+    )
+    .unwrap();
+    let main = root.join("main.py");
+    fs::write(
+        &main,
+        "import labels\nfrom model import Packet\nfrom typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from labels import Alias\ndef get() -> 'Alias':\n    return Packet()\nget()\n",
+    )
+    .unwrap();
+    for model in ["class Packet: pass\n", "class Packet(ValueError): pass\n"] {
+        fs::write(root.join("model.py"), model).unwrap();
+        let mut graph = crate::modules::SourceGraph::load(&main, Some(root), &[]).unwrap();
+        assert!(matches!(
+            crate::checked_lower(&mut graph).unwrap(),
+            crate::CheckedProgram::Native(_)
+        ));
+    }
+}
