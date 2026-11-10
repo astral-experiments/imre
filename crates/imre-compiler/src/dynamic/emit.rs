@@ -1395,6 +1395,40 @@ mod tests {
     }
 
     #[test]
+    fn a_mixed_conditional_reads_only_its_residual_child() {
+        use crate::frontend::SourceOperand::{Checked, Residual};
+        let mut prepared = PreparedBody::module(
+            "program",
+            Path::new("program.py"),
+            "result = yes() if flag() else (make(x) for x in rows())\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let suite = prepared.source.initializer.as_ref().unwrap();
+        assert!(!suite.fully_checked());
+        let original = prepared.standalone().unwrap().unwrap();
+        let value = &mut prepared.body[0].as_assign_stmt_mut().unwrap().value;
+        assert!(matches!(
+            prepared.source.logicals.conditional(value),
+            Some([Checked(_), Checked(_), Residual(ast::Expr::Generator(_))])
+        ));
+        fn erase(child: &mut ast::Expr) {
+            *child = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+                range: child.range(),
+                node_index: Default::default(),
+            });
+        }
+        let choice = value.as_if_expr_mut().unwrap();
+        erase(&mut choice.test);
+        erase(&mut choice.body);
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        let value = &mut prepared.body[0].as_assign_stmt_mut().unwrap().value;
+        erase(&mut value.as_if_expr_mut().unwrap().orelse);
+        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+    }
+
+    #[test]
     fn a_registered_match_renders_after_its_checked_input_syntax_is_erased() {
         let source = concat!(
             "match subject():\n",

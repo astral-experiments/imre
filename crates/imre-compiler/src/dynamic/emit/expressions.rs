@@ -7,7 +7,7 @@ use super::{Body, Function, permanent};
 use crate::frontend::{RegisteredScope, SourceOperand, prepare_boolean};
 use crate::ir::control::Context as BooleanContext;
 use crate::llvm::operations::branches::{Logical, LogicalOperand};
-use crate::llvm::operations::{CheckedValue, Choice, ComparisonChain, ValueJoin};
+use crate::llvm::operations::{CheckedValue, ComparisonChain, ValueJoin};
 
 impl Function<'_, '_> {
     pub(super) fn expr(&mut self, expr: &ast::Expr) -> String {
@@ -108,6 +108,25 @@ impl Function<'_, '_> {
             let left = self.expr(left);
             let right = self.expr(right);
             self.binary_handles(op, &left, &right)
+        } else if let Some([test, yes, no]) = self.source.logicals.conditional(expr) {
+            ValueJoin::select(
+                self,
+                |code| {
+                    code.flush_check();
+                    &mut code.frame.body
+                },
+                |code, yes, no| match test {
+                    SourceOperand::Checked(test) => {
+                        code.prepare_checked_value(&test);
+                        code.frame.registered_branch(&test, &code.sites, yes, no);
+                    }
+                    SourceOperand::Residual(test) => code.branch_expr(test, yes, no),
+                },
+                |code| CheckedValue::handle(code.source_operand(yes)),
+                |code| CheckedValue::handle(code.source_operand(no)),
+            )
+            .expect("value-producing conditional")
+            .into_handle()
         } else if let Some(operation) = self.source.registered_source().object_operation(expr) {
             if let crate::ir::Builtin::RegisteredUnary(op) = operation.opcode {
                 let scope = self.begin_unary();
@@ -188,7 +207,6 @@ impl Function<'_, '_> {
             ),
             ast::Expr::BoolOp(_) => self.boolean_value(expr),
             ast::Expr::Compare(v) => self.source_comparison(v, false),
-            ast::Expr::If(branch) => self.residual_conditional(branch),
             ast::Expr::Named(v) => {
                 let ast::Expr::Name(target) = &*v.target else {
                     return self.unsupported("assignment expression target");
@@ -228,32 +246,11 @@ impl Function<'_, '_> {
         }
     }
 
-    fn residual_conditional(&mut self, expr: &ast::ExprIf) -> String {
-        let (yes, no) = Choice::successors(&mut self.frame.body);
-        let mut choice = Choice::new(&mut self.frame.body);
-        let mut values = ValueJoin::default();
-        let parts = self.source.logicals.choice(expr);
-        if let Some(test) = parts.and_then(|p| p[0].as_ref()) {
-            self.prepare_checked_value(test);
-            self.frame.registered_branch(test, &self.sites, &yes, &no);
-        } else {
-            self.branch_expr(&expr.test, &yes, &no);
+    fn source_operand(&mut self, operand: SourceOperand<'_>) -> String {
+        match operand {
+            SourceOperand::Checked(value) => self.registered_value(&value),
+            SourceOperand::Residual(expr) => self.expr(expr),
         }
-        for (i, block, operand) in [(1, &yes, &expr.body), (2, &no, &expr.orelse)] {
-            self.label(block);
-            let value = match parts.and_then(|p| p[i].as_ref()) {
-                Some(value) => self.registered_value(value),
-                None => self.expr(operand),
-            };
-            self.flush_check();
-            values.incoming(&mut self.frame.body, CheckedValue::handle(value));
-            choice.finish_arm(&mut self.frame.body);
-        }
-        choice.finish(&mut self.frame.body, false);
-        values
-            .finish(&mut self.frame.body)
-            .expect("value-producing conditional")
-            .into_handle()
     }
 
     /// The enclosing source operation supplies evaluated leaves. Its branch graph
@@ -311,10 +308,7 @@ impl Function<'_, '_> {
                 LogicalOperand::Predicate(bit)
             } else {
                 let mark = (!plan.final_value(i)).then(|| self.temporary_mark());
-                let value = match leaf {
-                    SourceOperand::Checked(value) => self.registered_value(&value),
-                    SourceOperand::Residual(expr) => self.expr(expr),
-                };
+                let value = self.source_operand(leaf);
                 match mark {
                     Some(mark) => {
                         let truth = self.truth(&value);
