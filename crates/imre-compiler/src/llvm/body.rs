@@ -67,6 +67,10 @@ impl FunctionBody {
         value
     }
 
+    pub(super) fn masked_remainder(&mut self, dividend: &str, mask: i64) -> String {
+        self.instruction(format!("and i64 {dividend}, {mask}"))
+    }
+
     /// Both ABIs call the same tagged arithmetic helper after obtaining exact integers.
     pub(crate) fn integer_arithmetic(
         &mut self,
@@ -78,6 +82,7 @@ impl FunctionBody {
             super::Binary::Add => "int_add",
             super::Binary::Subtract => "int_sub",
             super::Binary::Multiply => "int_mul",
+            super::Binary::Modulo => "int_mod",
             _ => unreachable!("expected checked integer operation"),
         };
         super::Value {

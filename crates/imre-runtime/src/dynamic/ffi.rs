@@ -1835,6 +1835,42 @@ pub(super) unsafe extern "C" fn imre_dyn_exact_int_word(ctx: *const Context, obj
     }
 }
 
+/// Apply checked remainder by a positive power of two to a Python operand.
+///
+/// # Safety
+/// Generated code supplies its active context, a rooted dividend, and the
+/// permanent integer handle of the proven literal divisor.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_masked_remainder(
+    ctx: *mut Context,
+    dividend: Id,
+    divisor: Id,
+) -> Id {
+    // SAFETY: the generated frame owns the context and both operands.
+    let context = unsafe { &*ctx };
+    if context.pending.is_some() {
+        return NONE;
+    }
+    if let Value::Int(integer) = context.heap.get(dividend)
+        && let Some(value) = integer.as_small()
+    {
+        let zero = Heap::cached_integer(0).expect("zero has a permanent handle");
+        let mask = divisor - zero - 1;
+        return zero + ((value as Id) & mask);
+    }
+    // SAFETY: the original operands and checked frame are live on the fallback edge.
+    unsafe {
+        imre_dyn_op_at(
+            ctx,
+            c"%".as_ptr(),
+            dividend,
+            divisor,
+            NONE,
+            std::ptr::null(),
+        )
+    }
+}
+
 /// Move one owned tagged integer into the active Python heap.
 ///
 /// # Safety
