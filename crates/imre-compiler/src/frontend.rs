@@ -124,7 +124,8 @@ mod records;
 mod regex;
 mod registered;
 pub(crate) use registered::booleans::{
-    ExpressionSites, Selection as ExpressionSelection, SourceOperand, prepare_boolean,
+    ExpressionSites, PhysicalInputs, Selection as ExpressionSelection, SourceOperand,
+    prepare_boolean,
 };
 #[cfg(test)]
 pub(crate) use registered::inline_operand;
@@ -133,8 +134,8 @@ pub(crate) use registered::type_alias_body;
 #[cfg(test)]
 pub(crate) use registered::values::registered_value;
 pub(crate) use registered::values::{
-    RegisteredSource, display_elements, literal_replacements, module_literal_replacements,
-    packed_arguments, push_codepoints, registered_argument_at, registered_arguments,
+    RegisteredSource, literal_replacements, module_literal_replacements, packed_arguments,
+    push_codepoints, registered_argument_at, registered_arguments,
 };
 pub(crate) use registered::{
     AnnotationValue, AssertionSite, DeferredAnnotation, ParameterAnnotations, PhysicalOperand,
@@ -144,8 +145,8 @@ pub(crate) use registered::{
     registered_type_alias, registered_type_parameters,
 };
 pub(crate) use registered::{
-    LambdaBinding, LambdaDefault, LocalBinding, PreparedTemplate, RegisteredClass,
-    RegisteredOperand, RegisteredRegion, TemplateField,
+    LocalBinding, PreparedTemplate, RegisteredClass, RegisteredOperand, RegisteredRegion,
+    TemplateField,
 };
 pub(crate) use registered::{
     PhysicalBinding, PhysicalSuite, PreparedContext, PreparedFor, PreparedTry, SourceGuard,
@@ -739,7 +740,7 @@ fn lower_graph(
                             .parameters
                             .iter_non_variadic_params()
                             .all(|p| p.default.is_none()))
-                        .then(|| function.start());
+                    .then(|| function.start());
                     let mut function = function.clone();
                     if module.overloads.contains(&statement_id) {
                         graph.runtime_overload(module_id, function.name.range());
@@ -1545,10 +1546,12 @@ fn lower_graph(
         },
         owners,
     );
-    Ok(crate::CheckedProgram::Native(Box::new(crate::FixedProgram {
-        ir: lowered,
-        frame_sources,
-    })))
+    Ok(crate::CheckedProgram::Native(Box::new(
+        crate::FixedProgram {
+            ir: lowered,
+            frame_sources,
+        },
+    )))
 }
 
 fn required_object_diagnostic(
@@ -5256,7 +5259,10 @@ impl<'a> Checker<'a> {
             previous_sum = sum.is_some();
             let tuple = length_guard.and_then(|guard| self.guarded_tuple(statement, guard));
             let enclosing_tuple = std::mem::replace(&mut self.fixed_tuple, tuple);
-            let parent = self.fixed_sites.as_mut().and_then(|sites| sites.enter(statement.range()));
+            let parent = self
+                .fixed_sites
+                .as_mut()
+                .and_then(|sites| sites.enter(statement.range()));
             let (mut lowered, continues) = if !self.module_scope
                 && self.block_depth == 1
                 && fresh.is_some()
@@ -7272,7 +7278,10 @@ impl<'a> Checker<'a> {
     }
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        let parent = self.fixed_sites.as_mut().and_then(|sites| sites.enter(expression.range()));
+        let parent = self
+            .fixed_sites
+            .as_mut()
+            .and_then(|sites| sites.enter(expression.range()));
         let value = match self.lower_expression(expression) {
             Err(failure) if self.missing_operation(&failure) => Expr::unrepresented(),
             result => result?,

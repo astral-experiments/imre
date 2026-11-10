@@ -1,61 +1,13 @@
 //! Prepare the binding expression in the enclosing scope and the return in its own frame.
 
 use super::*;
-use crate::frontend::function_scope::{CallableMetadata, FunctionScope};
+use crate::frontend::function_scope::{CallableMetadata, FunctionScope, ScopeFacts};
 use imre_ast::code_flags;
-
-/// An inline default can also be embedded in a larger checked expression. Defaults
-/// with their own locals must be evaluated as complete regions in the binding frame.
-pub(crate) enum LambdaDefault {
-    Value(Expr),
-    Operand(Box<RegisteredOperand>),
-    Source(DefaultParameter),
-}
-
-/// A binding with private slots owns its region. Only an incomplete binding
-/// needs individual default producers at the source boundary.
-pub(crate) enum LambdaBinding {
-    Inline(Expr),
-    Operand(RegisteredOperand),
-    Residual {
-        operation: Expr,
-        defaults: Vec<LambdaDefault>,
-    },
-}
-
-/// Only a genuinely residual default needs its source operand. Record its physical
-/// parameter during preparation so the adapter never scans a signature to find it.
-#[derive(Clone, Copy)]
-pub(crate) struct DefaultParameter {
-    group: usize,
-    index: usize,
-}
-
-impl DefaultParameter {
-    fn groups(parameters: &ast::Parameters) -> [&[ast::ParameterWithDefault]; 3] {
-        [
-            &parameters.posonlyargs,
-            &parameters.args,
-            &parameters.kwonlyargs,
-        ]
-    }
-
-    pub(crate) fn source(self, lambda: &ast::ExprLambda) -> &ast::Expr {
-        let parameters = lambda
-            .parameters
-            .as_deref()
-            .expect("lambda default has parameters");
-        Self::groups(parameters)[self.group][self.index]
-            .default
-            .as_deref()
-            .expect("prepared default parameter")
-    }
-}
 
 pub(crate) struct RegisteredLambda {
     pub(crate) metadata: CallableMetadata,
     pub(crate) body: Option<RegisteredFunction>,
-    pub(crate) binding: LambdaBinding,
+    pub(crate) binding: ExpressionSelection,
 }
 
 impl RegisteredLambda {
@@ -63,10 +15,10 @@ impl RegisteredLambda {
     pub(crate) fn collect(
         body: &[ast::Stmt],
         source: values::RegisteredSource<'_>,
-        scopes: HashMap<TextSize, FunctionScope>,
+        scopes: &mut ScopeFacts,
         templates: &mut HashMap<TextRange, PreparedTemplate>,
     ) -> HashMap<TextSize, Self> {
-        if scopes.is_empty() && !source.has_templates {
+        if scopes.lambdas.is_empty() && !source.has_templates {
             return HashMap::new();
         }
         use ast::visitor::{Visitor, walk_body, walk_expr, walk_stmt};
@@ -74,18 +26,28 @@ impl RegisteredLambda {
             source: values::RegisteredSource<'a>,
             templates: &'t mut HashMap<TextRange, PreparedTemplate>,
             scopes: HashMap<TextSize, FunctionScope>,
+            functions: &'t HashMap<TextSize, crate::frontend::function_scope::NamedFunctionScope>,
             sites: HashMap<TextSize, RegisteredLambda>,
-            owner: RegisteredScope,
-            suite_owner: Option<RegisteredScope>,
+            owner: (RegisteredScope, bool),
+            suite_owner: Option<(RegisteredScope, bool)>,
         }
         impl<'a> Visitor<'a> for Collector<'_, '_> {
             fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
                 // Ruff visits the entire header before calling visit_body for the suite.
                 self.suite_owner = match stmt {
-                    ast::Stmt::FunctionDef(def) => Some(RegisteredScope::Function {
-                        is_async: def.is_async,
-                    }),
-                    ast::Stmt::ClassDef(_) => Some(RegisteredScope::Class),
+                    ast::Stmt::FunctionDef(def) => {
+                        let start = def
+                            .decorator_list
+                            .first()
+                            .map_or(def.start(), Ranged::start);
+                        Some((
+                            RegisteredScope::Function {
+                                is_async: def.is_async,
+                            },
+                            self.functions[&start].suspension_flags != 0,
+                        ))
+                    }
+                    ast::Stmt::ClassDef(_) => Some((RegisteredScope::Class, false)),
                     _ => None,
                 };
                 walk_stmt(self, stmt);
@@ -101,12 +63,18 @@ impl RegisteredLambda {
             }
 
             fn visit_expr(&mut self, expr: &'a ast::Expr) {
+                let generator = expr
+                    .as_lambda_expr()
+                    .is_some_and(|lambda| code_flags::yields_in_expression(&lambda.body));
                 stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || match expr {
                     ast::Expr::Lambda(lambda) => {
                         if let Some(parameters) = &lambda.parameters {
                             self.visit_parameters(parameters);
                         }
-                        let parent = std::mem::replace(&mut self.owner, RegisteredScope::Lambda);
+                        let parent = std::mem::replace(
+                            &mut self.owner,
+                            (RegisteredScope::Lambda, generator),
+                        );
                         self.visit_expr(&lambda.body);
                         self.owner = parent;
                     }
@@ -116,7 +84,7 @@ impl RegisteredLambda {
                         let owner = RegisteredScope::Function {
                             is_async: plan.body_suspends(),
                         };
-                        let parent = std::mem::replace(&mut self.owner, owner);
+                        let parent = std::mem::replace(&mut self.owner, (owner, true));
                         plan.visit_body(|child| self.visit_expr(child));
                         self.owner = parent;
                     }
@@ -134,11 +102,12 @@ impl RegisteredLambda {
                             source,
                             &self.scopes[&lambda.start()],
                             self.owner,
+                            generator,
                         );
                         self.sites.insert(lambda.start(), plan);
                     }
                     ast::Expr::TString(_) => {
-                        if let Some(value) = PreparedTemplate::prepare(expr, source, self.owner) {
+                        if let Some(value) = PreparedTemplate::prepare(expr, source, self.owner.0) {
                             self.templates.insert(expr.range(), value);
                         }
                     }
@@ -149,9 +118,10 @@ impl RegisteredLambda {
         let mut collector = Collector {
             source,
             templates,
-            scopes,
+            scopes: std::mem::take(&mut scopes.lambdas),
+            functions: &scopes.functions,
             sites: HashMap::new(),
-            owner: RegisteredScope::Module,
+            owner: (RegisteredScope::Module, false),
             suite_owner: None,
         };
         collector.visit_body(body);
@@ -176,70 +146,33 @@ impl RegisteredLambda {
         lambda: &ast::ExprLambda,
         source: values::RegisteredSource<'_>,
         scope: &FunctionScope,
-        owner: RegisteredScope,
+        owner: (RegisteredScope, bool),
+        generator: bool,
     ) -> Self {
         let body = Self::body(lambda, source);
-        let binding = Self::binding(lambda, source, owner, body.is_some());
-        Self {
-            metadata: CallableMetadata::new(
-                lambda.parameters.as_deref(),
-                scope,
-                code_flags::yields_in_expression(&lambda.body),
-            ),
-            binding,
-            body,
-        }
-    }
-
-    fn binding(
-        lambda: &ast::ExprLambda,
-        source: values::RegisteredSource<'_>,
-        owner: RegisteredScope,
-        checked_body: bool,
-    ) -> LambdaBinding {
-        if checked_body {
+        let binding = if body.is_some() {
             let operations = HashMap::new();
             let sites = StatementSites::default();
-            let mut scope = SourceScope::new(owner, source, &operations, &sites);
-            // A physical caller evaluates defaults in its own activation, including
-            // operands either side of an await in a single default expression.
-            if let Some(binding) =
-                scope.with_suspending_operands(|scope| scope.lambda_binding(lambda))
-            {
-                return if scope.locals.is_empty() {
-                    LambdaBinding::Inline(binding)
-                } else {
-                    LambdaBinding::Operand(RegisteredOperand::from_scope(binding, scope))
-                };
+            let (kind, suspended) = owner;
+            let mut scope = SourceScope::new(kind, source, &operations, &sites);
+            scope.diagnostic_suspension = Some(suspended);
+            match scope.with_suspending_operands(|scope| scope.lambda_binding(lambda)) {
+                Ok(value) if scope.locals.is_empty() => ExpressionSelection::Checked(value),
+                Ok(value) => ExpressionSelection::Operand(Box::new(RegisteredOperand::from_scope(
+                    value, scope,
+                ))),
+                Err((range, reason)) => ExpressionSelection::Refused(range, reason),
             }
-        }
-
-        let mut defaults = Vec::new();
-        if let Some(parameters) = lambda.parameters.as_deref() {
-            for (group, params) in DefaultParameter::groups(parameters).into_iter().enumerate() {
-                for (index, param) in params.iter().enumerate() {
-                    if let Some(node) = param.default.as_deref() {
-                        defaults.push(
-                            if let Some(value) = values::Region::Lambda.operand(node, source) {
-                                LambdaDefault::Value(value)
-                            } else if let Some(value) =
-                                RegisteredOperand::prepare(node, source, owner)
-                            {
-                                LambdaDefault::Operand(Box::new(value))
-                            } else {
-                                LambdaDefault::Source(DefaultParameter { group, index })
-                            },
-                        );
-                    }
-                }
-            }
-        }
-        let inputs = (0..defaults.len())
-            .map(|slot| Expr::local(slot, Type::PythonObject))
-            .collect();
-        LambdaBinding::Residual {
-            operation: values::lambda_binding(lambda, inputs),
-            defaults,
+        } else {
+            ExpressionSelection::Refused(
+                lambda.range(),
+                "cannot compile this lambda body ahead of time",
+            )
+        };
+        Self {
+            metadata: CallableMetadata::new(lambda.parameters.as_deref(), scope, generator),
+            binding,
+            body,
         }
     }
 }
@@ -261,7 +194,7 @@ async def factory(seed, rows, mark):
             .into_syntax()
             .body;
         let names = imre_ast::lower(&mut body);
-        let scopes =
+        let mut scopes =
             crate::frontend::function_scope::ScopeFacts::prepare(&body, &names, |_| {}, |_| {});
         let source = values::RegisteredSource {
             text,
@@ -278,8 +211,7 @@ async def factory(seed, rows, mark):
             generators: Some(&generators),
             ..source
         };
-        let mut sites =
-            RegisteredLambda::collect(&body, source, scopes.lambdas, &mut HashMap::new());
+        let mut sites = RegisteredLambda::collect(&body, source, &mut scopes, &mut HashMap::new());
         let factory = body[0].as_function_def_stmt().unwrap();
         let lambda = |index: usize| {
             factory.body[index]
@@ -291,7 +223,7 @@ async def factory(seed, rows, mark):
         };
 
         let checked = &sites[&lambda(0).start()];
-        let LambdaBinding::Operand(display) = &checked.binding else {
+        let ExpressionSelection::Operand(display) = &checked.binding else {
             panic!("the complete binding should own the comprehension's private slots");
         };
         let row = display
@@ -323,42 +255,16 @@ async def factory(seed, rows, mark):
         };
         assert!(RegisteredOperand::prepare(binding(1), complete, owner).is_some());
 
-        // Withhold this child's body and let ordinary default preparation locate its parameter.
-        assert!(sites.get_mut(&thunk.start()).unwrap().body.take().is_some());
-        let mixed = RegisteredLambda::prepare(
-            residual,
-            values::RegisteredSource {
-                lambdas: Some(&sites),
-                ..source
-            },
-            &FunctionScope::lambda(residual, false),
-            owner,
-        );
-        sites.insert(residual.start(), mixed);
-        let LambdaBinding::Residual {
-            operation,
-            defaults,
-        } = &sites[&residual.start()].binding
-        else {
-            panic!("a withheld child should leave a mixed binding");
+        let ExpressionSelection::Operand(plan) = &sites[&residual.start()].binding else {
+            panic!("expected an owning binding");
         };
-        let ExprKind::Builtin(Builtin::RegisteredLambda(site, false), inputs) = &operation.kind
+        let ExprKind::Builtin(Builtin::RegisteredLambda(site, false), defaults) = &plan.value.kind
         else {
             panic!("expected the ordinary callable binding");
         };
         assert_eq!(*site, residual.start());
-        assert_eq!(inputs.len(), defaults.len());
-        let [
-            LambdaDefault::Value(_),
-            LambdaDefault::Operand(_),
-            LambdaDefault::Value(sync_generator),
-            LambdaDefault::Value(async_generator),
-            LambdaDefault::Source(parameter),
-            LambdaDefault::Value(_),
-        ] = defaults.as_slice()
-        else {
-            panic!("only the lambda with an unprepared body should need its physical parameter");
-        };
+        assert_eq!(defaults.len(), 6);
+        let (sync_generator, async_generator) = (&defaults[2], &defaults[3]);
         let stream = parameters.posonlyargs[2].default.as_deref().unwrap();
         let deferred = parameters.kwonlyargs[1].default.as_deref().unwrap();
         for (value, site, is_async) in [
@@ -375,7 +281,22 @@ async def factory(seed, rows, mark):
             assert_eq!(children, [site]);
             assert_eq!(generators[&site].is_async, is_async);
         }
-        assert!(std::ptr::eq(parameter.source(residual), thunk));
+        // A missing child is diagnosed at its original site before LLVM.
+        assert!(sites.get_mut(&thunk.start()).unwrap().body.take().is_some());
+        let mixed = RegisteredLambda::prepare(
+            residual,
+            values::RegisteredSource {
+                lambdas: Some(&sites),
+                ..source
+            },
+            &FunctionScope::lambda(residual, false),
+            (owner, true),
+            false,
+        );
+        assert!(
+            matches!(mixed.binding, ExpressionSelection::Refused(range, "cannot compile this lambda body ahead of time") if range == thunk.range())
+        );
+        sites.insert(residual.start(), mixed);
 
         let source = values::RegisteredSource {
             lambdas: Some(&sites),
@@ -406,10 +327,11 @@ async def factory(seed, rows, mark):
             lambda,
             literals.context(&module.source),
             &FunctionScope::lambda(lambda, false),
-            RegisteredScope::Function { is_async: true },
+            (RegisteredScope::Function { is_async: true }, true),
+            false,
         );
 
-        let LambdaBinding::Operand(binding) = &plan.binding else {
+        let ExpressionSelection::Operand(binding) = &plan.binding else {
             panic!("the awaited default should be part of the prepared binding");
         };
         let iteration = binding
@@ -454,7 +376,8 @@ async def factory(seed, rows, mark):
             lambda,
             source,
             &FunctionScope::lambda(lambda, false),
-            RegisteredScope::Module,
+            (RegisteredScope::Module, false),
+            code_flags::yields_in_expression(&lambda.body),
         );
         assert!(plan.metadata.generator);
         let checked = plan.body.unwrap();
@@ -501,7 +424,8 @@ async def factory(seed, rows, mark):
             lambda,
             source,
             &FunctionScope::lambda(lambda, false),
-            RegisteredScope::Module,
+            (RegisteredScope::Module, false),
+            code_flags::yields_in_expression(&lambda.body),
         );
         let sites = HashMap::from([(lambda.start(), plan)]);
         let source = values::RegisteredSource {
@@ -575,7 +499,8 @@ async def factory(seed, rows, mark):
             lambda,
             source,
             &FunctionScope::lambda(lambda, false),
-            RegisteredScope::Module,
+            (RegisteredScope::Module, false),
+            code_flags::yields_in_expression(&lambda.body),
         );
         let nested = values::lambda_defaults(lambda)
             .nth(1)
@@ -586,7 +511,7 @@ async def factory(seed, rows, mark):
             .operand(&nested.body, source)
             .is_some();
         match &plan.binding {
-            LambdaBinding::Inline(binding) => {
+            ExpressionSelection::Checked(binding) => {
                 let ExprKind::Builtin(Builtin::RegisteredLambda(_, false), defaults) =
                     &binding.kind
                 else {
@@ -603,18 +528,11 @@ async def factory(seed, rows, mark):
                 });
                 assert_eq!(children, [nested.start()]);
             }
-            LambdaBinding::Residual { defaults, .. } => {
+            ExpressionSelection::Refused(range, _) => {
                 assert!(!child_checked);
-                assert!(matches!(
-                    defaults.as_slice(),
-                    [
-                        LambdaDefault::Value(_),
-                        LambdaDefault::Source(_),
-                        LambdaDefault::Value(_)
-                    ]
-                ));
+                assert_eq!(*range, nested.range());
             }
-            LambdaBinding::Operand(_) => panic!("these defaults need no private slots"),
+            _ => panic!("expected a checked binding or a located refusal"),
         }
         assert!(plan.body.is_some());
         assert_eq!(

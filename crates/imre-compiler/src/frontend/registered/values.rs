@@ -487,8 +487,7 @@ pub(super) fn number_literal(number: &ast::Number, minus: bool) -> ExprKind {
     }
 }
 
-/// Identify the sequence operation even when an individual operand still needs its source adapter.
-pub(crate) fn display_elements(node: &ast::Expr) -> Option<(&[ast::Expr], DisplayKind)> {
+fn display_elements(node: &ast::Expr) -> Option<(&[ast::Expr], DisplayKind)> {
     match node {
         ast::Expr::List(list) => Some((&list.elts, DisplayKind::List)),
         ast::Expr::Tuple(tuple) => Some((&tuple.elts, DisplayKind::Tuple)),
@@ -734,6 +733,9 @@ fn display_operands<E>(
                         kind: number_literal(&n.value, op.op == ast::UnaryOp::USub),
                     },
                 ))
+            } else if item.is_slice_expr() {
+                // An extended subscript key can mix a slice with other tuple elements.
+                index_key(item, child)
             } else {
                 collection_item(item, &mut *child)
             }
@@ -923,11 +925,17 @@ pub(crate) fn registered_index_key(key: &ast::Expr, source: RegisteredSource<'_>
 }
 
 pub(crate) fn lambda_defaults(lambda: &ast::ExprLambda) -> impl Iterator<Item = &ast::Expr> {
-    lambda.parameters.iter().flat_map(|parameters| {
-        parameters
-            .iter_non_variadic_params()
-            .filter_map(|p| p.default.as_deref())
-    })
+    lambda
+        .parameters
+        .as_deref()
+        .into_iter()
+        .flat_map(parameter_defaults)
+}
+
+pub(super) fn parameter_defaults(parameters: &ast::Parameters) -> impl Iterator<Item = &ast::Expr> {
+    parameters
+        .iter_non_variadic_params()
+        .filter_map(|p| p.default.as_deref())
 }
 
 pub(super) fn lambda_binding(lambda: &ast::ExprLambda, defaults: Vec<Expr>) -> Expr {
@@ -959,7 +967,7 @@ pub(super) fn checked_binding(
         let site = sites.get(&lambda.start())?;
         site.body.as_ref()?;
         return match &site.binding {
-            LambdaBinding::Inline(binding) => Some(binding.clone()),
+            ExpressionSelection::Checked(binding) => Some(binding.clone()),
             _ => None,
         };
     }
