@@ -848,7 +848,7 @@ fn the_ordinary_entry_keeps_an_operand_in_the_default_flow_region() {
     .unwrap();
     let mut graph = crate::modules::SourceGraph::load(&entry, Some(directory.path()), &[]).unwrap();
     let crate::CheckedProgram::Runtime(report) =
-        crate::checked_lower_with(&mut graph, None, true).unwrap()
+        crate::checked_lower_with(&mut graph, None, None).unwrap()
     else {
         panic!("expected the normal checker operand diagnostic")
     };

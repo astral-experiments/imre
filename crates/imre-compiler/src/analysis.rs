@@ -1552,6 +1552,15 @@ impl Session {
             .to(Arc::new(rules));
     }
 
+    /// Resume layout inference on this same set of parsed files. A cached hint
+    /// database stays quiet; only a cold, completed scopes check changed its rules.
+    pub(crate) fn resume_layout_queries(&mut self) {
+        let rules = DiagnosticRules::get(&self.db);
+        if rules.rules(&self.db).enabled().next().is_some() {
+            rules.set_rules(&mut self.db).to(Arc::default());
+        }
+    }
+
     /// Checks every loaded file, including unused functions and inactive main guards.
     pub(crate) fn check_scopes(
         &mut self,

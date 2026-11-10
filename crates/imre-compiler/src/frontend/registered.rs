@@ -2256,8 +2256,9 @@ mod tests {
             .join("../../tests/fixtures/registered_imported_callback");
         let entry = project.join("callable_effect.py");
         let mut graph = SourceGraph::load(&entry, Some(&project), &[]).unwrap();
+        let error = crate::initializer_call_error(&graph, false);
         let (result, lowered) = caller_cache::observe_lowerings(|| {
-            crate::checked_lower_with(&mut graph, None, false).unwrap()
+            crate::checked_lower_with(&mut graph, None, error.as_ref()).unwrap()
         });
         assert_eq!(
             lowered.iter().filter(|name| *name == "publish").count(),
@@ -2391,8 +2392,9 @@ mod tests {
         );
         std::fs::write(&entry, caller).unwrap();
         let mut graph = SourceGraph::load(&entry, Some(dir.path()), &[]).unwrap();
+        let error = crate::initializer_call_error(&graph, false);
         let (result, lowered) = caller_cache::observe_lowerings(|| {
-            crate::checked_lower_with(&mut graph, None, false).unwrap()
+            crate::checked_lower_with(&mut graph, None, error.as_ref()).unwrap()
         });
         if let crate::CheckedProgram::Runtime(reason) = result {
             panic!("{reason}");

@@ -322,9 +322,9 @@ fn check_file_with(
         (path, module_root),
         options,
         filesystem,
-        |graph, registered_initializer| {
+        |graph, call_error| {
             graph.session.explicit_check = true;
-            checked_lower_with(graph, cache.as_deref_mut(), registered_initializer)
+            checked_lower_with(graph, cache.as_deref_mut(), call_error)
         },
         |_, _| Ok((Vec::new(), false)),
     )
@@ -386,7 +386,10 @@ fn object_fallback(
     (path, module_root): (&Path, Option<&Path>),
     options: &CompileOptions,
     mut filesystem: watch::FileSystem<'_>,
-    mut lower: impl FnMut(&mut modules::SourceGraph, bool) -> Result<CheckedProgram, String>,
+    mut lower: impl FnMut(
+        &mut modules::SourceGraph,
+        Option<&LoweringDiagnostic>,
+    ) -> Result<CheckedProgram, String>,
     native: impl Fn(
         &modules::SourceGraph,
         CheckedIr,
@@ -428,76 +431,77 @@ fn object_fallback(
             .is_some_and(|(flags, _)| flags.tracemalloc > 0);
     let mut import_failure = None;
     let mut site_probes = modules::SiteProbes::default();
-    let mut infer_sets = true;
     let mut native_candidate = None;
-    let (mut refusal, graph) = loop {
-        let mut graph = match options.load_graph(
-            path,
-            module_root,
-            filesystem.reborrow(),
-            &mut import_failure,
-            &mut site_probes,
-        ) {
-            Ok(Some(graph)) => graph,
-            Ok(None) => {
-                break (
-                    Some("the module launcher requires its registered sources".into()),
-                    None,
-                );
+    let (mut refusal, graph) = match options.load_graph(
+        path,
+        module_root,
+        filesystem.reborrow(),
+        &mut import_failure,
+        &mut site_probes,
+    ) {
+        Ok(Some(mut graph)) => {
+            graph.registered_startup = boxed_startup;
+            site_probes.record(&mut graph.inputs);
+            let call_error = initializer_call_error(&graph, registered_initializer);
+            if call_error.is_some() {
+                // Both representations reject this initializer. Check it in the ordinary
+                // layout once so an earlier annotated failure keeps its original priority.
+                graph.set_layout_hint.set(modules::SetLayoutHint::Disabled);
             }
-            Err(error) => break (Some(error.into()), None),
-        };
-        graph.registered_startup = boxed_startup;
-        site_probes.record(&mut graph.inputs);
-        if !infer_sets {
-            graph.set_layout_hint.set(modules::SetLayoutHint::Disabled);
-        }
-        let error = match lower(&mut graph, registered_initializer)? {
-            CheckedProgram::Native(_) if graph.runtime_initializer.is_some() && !boxed_startup => {
-                // All first-party code lowered successfully. The unresolved import alone
-                // must use the same admission policy as an unresolved module in the loader.
-                break (
-                    Some(graph.runtime_initializer.take().unwrap().into()),
-                    Some(graph),
-                );
-            }
-            CheckedProgram::Native(ir) if !boxed_startup => {
-                let (mut module, mut owners) = *ir;
-                if let Some(object) = required_object_diagnostic(&graph, &module) {
-                    break (Some(object), Some(graph));
-                }
-                if checking {
-                    verify_after(&module, "lowering")?;
-                } else {
-                    for original in specialize(&mut module)? {
-                        owners.push(owners[original]);
+            let baseline = graph.lowering_baseline();
+            let refusal = loop {
+                let error = match lower(&mut graph, call_error.as_ref())? {
+                    CheckedProgram::Native(_)
+                        if graph.runtime_initializer.is_some() && !boxed_startup =>
+                    {
+                        // All first-party code lowered successfully. The unresolved import alone
+                        // must use the same admission policy as an unresolved module in the loader.
+                        break graph.runtime_initializer.take().map(Into::into);
                     }
-                }
-                let reason = match native(&graph, (module, owners)) {
-                    Ok((value, true)) if options.entry_profile.is_none() => {
-                        // Keep the Python entry's full exception locations when it supports this
-                        // module. Otherwise the retained native callable layout can run it.
-                        native_candidate = Some(value);
-                        "Imre: native bound wrapper links use checked exception locations"
+                    CheckedProgram::Native(ir) if !boxed_startup => {
+                        let (mut module, mut owners) = *ir;
+                        if let Some(object) = required_object_diagnostic(&graph, &module) {
+                            break Some(object);
+                        }
+                        if checking {
+                            verify_after(&module, "lowering")?;
+                        } else {
+                            for original in specialize(&mut module)? {
+                                owners.push(owners[original]);
+                            }
+                        }
+                        let reason = match native(&graph, (module, owners)) {
+                            Ok((value, true)) if options.entry_profile.is_none() => {
+                                // Keep the Python entry's full exception locations when it supports this
+                                // module. Otherwise the retained native callable layout can run it.
+                                native_candidate = Some(value);
+                                "Imre: native bound wrapper links use checked exception locations"
+                            }
+                            Ok((value, _)) => return native_result(graph, value),
+                            Err(refusal) => refusal.0,
+                        };
+                        LoweringDiagnostic::plain(reason.to_owned())
+                            .classified(LoweringKind::Object)
                     }
-                    Ok((value, _)) => return native_result(graph, value),
-                    Err(refusal) => refusal.0,
+                    // A solved object ABI or Python startup directly selects the registered entry.
+                    CheckedProgram::Registered | CheckedProgram::Native(_) => break None,
+                    CheckedProgram::Runtime(error) => error,
                 };
-                LoweringDiagnostic::plain(reason.to_owned()).classified(LoweringKind::Object)
-            }
-            // A solved object ABI or Python startup directly selects the registered entry.
-            CheckedProgram::Registered | CheckedProgram::Native(_) => break (None, Some(graph)),
-            CheckedProgram::Runtime(error) => error,
-        };
-        // A guessed layout must not turn a working object program into a type error,
-        // or mask a diagnostic that the ordinary checked-file path would have issued.
-        if graph.set_layout_hint.get() != modules::SetLayoutHint::Applied {
-            break (Some(error), Some(graph));
+                // A guessed layout must not turn a working object program into a type error,
+                // or mask a diagnostic that the ordinary checked-file path would have issued.
+                if graph.set_layout_hint.get() != modules::SetLayoutHint::Applied {
+                    break Some(error);
+                }
+                native_candidate = None;
+                graph.retry_without_set_layout(&baseline);
+            };
+            (refusal, Some(graph))
         }
-        native_candidate = None;
-        infer_sets = false;
-        import_failure = None;
-        site_probes = site_probes.next_layout();
+        Ok(None) => (
+            Some("the module launcher requires its registered sources".into()),
+            None,
+        ),
+        Err(error) => (Some(error.into()), None),
     };
     // Admit an unresolved fixed signature only when its own definition has checked IR
     // for the registered calling convention. Other inference diagnostics still apply.
@@ -757,7 +761,7 @@ fn compile_file_with_layout(
         (path, module_root),
         options,
         Default::default(),
-        |graph, registered_initializer| checked_lower_with(graph, None, registered_initializer),
+        |graph, call_error| checked_lower_with(graph, None, call_error),
         typed,
     )
 }
@@ -817,7 +821,6 @@ impl UnitCompilation {
 pub struct IncrementalCompiler {
     cache: analysis::AnalysisCache,
     callers: frontend::CallerCache,
-    cached_set_hint: bool,
 }
 
 impl IncrementalCompiler {
@@ -920,9 +923,7 @@ fn compile_file_units_with(
         (path, module_root),
         options,
         Default::default(),
-        |graph, registered_initializer| {
-            checked_lower_with(graph, cache.as_deref_mut(), registered_initializer)
-        },
+        |graph, call_error| checked_lower_with(graph, cache.as_deref_mut(), call_error),
         typed,
     )
 }
@@ -968,7 +969,8 @@ fn required_object_diagnostic(
 }
 
 fn checked_lower(graph: &mut modules::SourceGraph) -> Result<CheckedProgram, String> {
-    let program = checked_lower_with(graph, None, false)?;
+    let call_error = initializer_call_error(graph, false);
+    let program = checked_lower_with(graph, None, call_error.as_ref())?;
     if let CheckedProgram::Native(ir) = &program
         && let Some(error) = required_object_diagnostic(graph, &ir.0)
         && error.kind == LoweringKind::Object
@@ -979,14 +981,11 @@ fn checked_lower(graph: &mut modules::SourceGraph) -> Result<CheckedProgram, Str
     Ok(program)
 }
 
-fn checked_lower_with(
-    graph: &mut modules::SourceGraph,
-    cache: Option<&mut IncrementalCompiler>,
+fn initializer_call_error(
+    graph: &modules::SourceGraph,
     registered_entry: bool,
-) -> Result<CheckedProgram, String> {
-    let mut cache =
-        cache.filter(|_| graph.set_layout_hint.get() != modules::SetLayoutHint::Disabled);
-    let call_error = analysis::ClosedSource::project_path(&graph.modules[graph.entry])
+) -> Option<LoweringDiagnostic> {
+    analysis::ClosedSource::project_path(&graph.modules[graph.entry])
         .filter(|_| !registered_entry)
         .and_then(|entry| {
             // Python startup and -m have a separately selected registration.
@@ -1001,51 +1000,72 @@ fn checked_lower_with(
                         analysis::ClosedSource::project_path(&graph.modules[id])?,
                     ))
                 })
-        });
+        })
+        .filter(|error| error.kind != LoweringKind::RegisteredExecution)
+}
+
+fn checked_lower_with(
+    graph: &mut modules::SourceGraph,
+    cache: Option<&mut IncrementalCompiler>,
+    call_error: Option<&LoweringDiagnostic>,
+) -> Result<CheckedProgram, String> {
+    let retry_with_cached_hints =
+        cache.is_some() && graph.set_layout_hint.get() == modules::SetLayoutHint::Disabled;
+    let mut cache = cache.filter(|_| !retry_with_cached_hints);
     let lowered = if let Some(compiler) = cache.as_deref_mut() {
         compiler.cache.restore_hints(graph)?;
         let callers = compiler.callers.prepare(graph);
-        if callers.is_some() && compiler.cached_set_hint {
-            graph.set_layout_hint.set(modules::SetLayoutHint::Applied);
-        }
         let result = frontend::lower_with_caller_cache(graph, callers);
-        compiler.cached_set_hint =
-            result.is_ok() && graph.set_layout_hint.get() == modules::SetLayoutHint::Applied;
         compiler.cache.retain_hints(graph, result.is_ok());
         result
     } else {
         frontend::lower_with_caller_cache(graph, None)
     };
     // Registered-body admission runs after checking the application's source contracts.
-    if let Some(error) = call_error.filter(|error| error.kind != LoweringKind::RegisteredExecution)
-    {
+    if let Some(error) = call_error {
         // Both representations reject this call. Preserve a prior annotated error at
         // its original checked location even when this file contains several failures.
         let diagnostic = match lowered {
-            Err(prior) if prior.earlier_contract(&error) => prior,
-            _ => error,
+            Err(prior) if prior.earlier_contract(error) => prior,
+            _ => error.clone(),
         };
         if let Some(compiler) = cache {
             compiler.callers = frontend::CallerCache::default();
         }
         return Ok(CheckedProgram::Runtime(diagnostic));
     }
+    // The file driver discards a failed speculative lowering before admission.
+    // Only the ordinary attempt needs its closed-program diagnostic checks.
+    if graph.set_layout_hint.get() == modules::SetLayoutHint::Applied
+        && let Err(reason) = lowered
+    {
+        if let Some(compiler) = cache {
+            compiler.callers = frontend::CallerCache::default();
+        }
+        return Ok(CheckedProgram::Runtime(reason));
+    }
     let (skipped, overloads) = graph.diagnostic_scopes();
     let skipped = skipped.as_deref();
     // A fully lowered graph has already checked the actual first-party definitions.
     // Keep its existing diagnostics and proof scopes. When a representation is
     // unavailable, the declared Python call contracts still apply to the graph.
+    // A warm retry can share its quiet database with the caller's hint cache.
+    // Keep that handle usable on the next revision when enabling diagnostic rules.
+    let mut diagnostics;
+    let session = if retry_with_cached_hints {
+        diagnostics = graph.session.diagnostic_copy()?;
+        &mut diagnostics
+    } else {
+        &mut graph.session
+    };
     let result = if lowered.is_ok() {
         lowered.and_then(|ir| {
             if let Some(compiler) = cache.as_deref_mut() {
-                compiler.cache.check_scopes(
-                    &mut graph.session,
-                    &graph.inputs,
-                    skipped,
-                    &overloads,
-                )?;
+                compiler
+                    .cache
+                    .check_scopes(session, &graph.inputs, skipped, &overloads)?;
             } else {
-                graph.session.check_scopes(skipped, &overloads)?;
+                session.check_scopes(skipped, &overloads)?;
             }
             graph.source_contract = Some(Ok(()));
             Ok(ir)
@@ -1053,7 +1073,7 @@ fn checked_lower_with(
     } else {
         let checked = if let Some(compiler) = cache.as_deref_mut() {
             compiler.cache.check_closed_program(
-                &mut graph.session,
+                session,
                 &graph.inputs,
                 &graph.modules,
                 skipped,
@@ -1061,9 +1081,7 @@ fn checked_lower_with(
                 None,
             )
         } else {
-            graph
-                .session
-                .check_closed_program(&graph.modules, skipped, &overloads, None)
+            session.check_closed_program(&graph.modules, skipped, &overloads, None)
         };
         // An inapplicable object representation cannot replace a native source or ABI
         // diagnostic. A real registration checks this result before emitting its body.
@@ -1556,29 +1574,30 @@ print("result", call(b=2, a=1))
         assert!(error.contains("expected int, got str"), "{error}");
     }
 
+    const INFERRED_SET_GATHER: &str = "def gather(text):\n    values = set()\n    for char in text:\n        values.add(char)\n    return sorted(values)\n";
+
     #[test]
     fn inferred_set_layout_preserves_checked_object_fallback() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("main.py");
-        let gather = "def gather(text):\n    values = set()\n    for char in text:\n        values.add(char)\n    return sorted(values)\n";
         let mut incremental = super::IncrementalCompiler::default();
         for usage in [
             "values = gather('ab')\nvalues.append(1)\nprint(len(values))\n",
             "def integer(n: int) -> int:\n    return n\nprint(gather('a'), integer('x'))\n",
             "def wrong() -> int:\n    return 'x'\nprint(gather('a'), wrong())\n",
         ] {
-            std::fs::write(&path, format!("{gather}{usage}")).unwrap();
+            std::fs::write(&path, format!("{INFERRED_SET_GATHER}{usage}")).unwrap();
             let options = CompileOptions::default();
             let ordinary = super::object_fallback(
                 super::BoxedLayout::Check,
                 (&path, None),
                 &options,
                 Default::default(),
-                |graph, registered_initializer| {
+                |graph, call_error| {
                     graph
                         .set_layout_hint
                         .set(super::modules::SetLayoutHint::Disabled);
-                    super::checked_lower_with(graph, None, registered_initializer)
+                    super::checked_lower_with(graph, None, call_error)
                 },
                 |_, _| Ok((Vec::new(), false)),
             )
@@ -1589,6 +1608,82 @@ print("result", call(b=2, a=1))
             );
             assert_eq!(incremental.check_file(&path, None), ordinary);
         }
+    }
+
+    #[test]
+    fn rejected_initializer_uses_the_ordinary_set_layout_once() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.py");
+        std::fs::write(
+            root.path().join("scores.py"),
+            "def take(n: int) -> int:\n    return n\n",
+        )
+        .unwrap();
+        let source = format!(
+            "import scores\n{INFERRED_SET_GATHER}def size() -> int:\n    return len(gather('ab'))\nscores.take('x')\n"
+        );
+        std::fs::write(&path, source).unwrap();
+        let mut passes = 0;
+        let result = super::object_fallback(
+            super::BoxedLayout::Check,
+            (&path, None),
+            &CompileOptions::default(),
+            Default::default(),
+            |graph, call_error| {
+                passes += 1;
+                assert!(graph.set_layout_hint.get() == super::modules::SetLayoutHint::Disabled);
+                super::checked_lower_with(graph, None, call_error)
+            },
+            |_, _| Ok((Vec::new(), false)),
+        )
+        .map(drop);
+        assert_eq!(passes, 1);
+        assert_eq!(
+            result.unwrap_err(),
+            format!(
+                "{}:9:13: Imre: expected int, got str; annotations are enforced contracts",
+                path.display()
+            )
+        );
+    }
+
+    #[test]
+    fn set_layout_retry_uses_the_resolved_source() {
+        use super::modules::SetLayoutHint;
+
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.py");
+        let source = format!(
+            "{INFERRED_SET_GATHER}values = gather('ab')\nvalues.append(1)\nprint(len(values))\n"
+        );
+        std::fs::write(&path, &source).unwrap();
+        let options = CompileOptions::default();
+        let expected = super::check_file(&path, None);
+        let mut passes = Vec::new();
+        let result = super::object_fallback(
+            super::BoxedLayout::Check,
+            (&path, None),
+            &options,
+            Default::default(),
+            |graph, call_error| {
+                assert_eq!(graph.modules[graph.entry].original_source(), source);
+                graph.session.explicit_check = true;
+                let result = super::checked_lower_with(graph, None, call_error)?;
+                let applied = graph.set_layout_hint.get() == SetLayoutHint::Applied;
+                passes.push(applied);
+                if applied {
+                    std::fs::write(&path, "invalid syntax!").unwrap();
+                }
+                Ok(result)
+            },
+            |_, _| Ok((Vec::new(), false)),
+        )
+        .map(drop);
+        assert_eq!(passes, [true, false]);
+        assert_eq!(result, expected);
+        let fresh = super::check_file(&path, None);
+        assert!(fresh.is_err());
+        assert_ne!(fresh, result);
     }
 
     #[test]
