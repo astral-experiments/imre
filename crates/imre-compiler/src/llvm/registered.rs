@@ -280,6 +280,7 @@ pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
         &mut self,
         operand: Option<&Expr>,
     ) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites);
+    fn place_definition(&mut self, site: TextSize);
     fn place_statements(&mut self, body: &[Statement]);
     /// Return an ordinary checked statement for the enclosing frame to emit with its inputs.
     fn emit_effect(
@@ -1239,24 +1240,25 @@ impl Frame<'_, '_, '_> {
                 })
             }
             (Builtin::RegisteredDefinition(site), header) => {
-                let (prefix, arguments) = match site {
+                let (decorators, defaults, arguments) = match site {
                     ir::DefinitionSite::Class {
-                        arguments: Some(arguments),
+                        arguments: Some(layout),
                         ..
                     } => {
-                        let count = arguments.starred.len() + arguments.keywords.len();
+                        let count = layout.starred.len() + layout.keywords.len();
                         let (decorators, operands) = header.split_at(header.len() - count);
-                        (decorators, Some((arguments, operands)))
+                        (decorators, &[][..], Some((layout, operands)))
                     }
                     ir::DefinitionSite::Class {
                         arguments: None, ..
+                    } => (header, &[][..], None),
+                    ir::DefinitionSite::Function(start) => {
+                        let definition = &self.code.parts().1.definitions[start];
+                        let (decorators, defaults) =
+                            header.split_at(definition.decorator_offsets.len());
+                        (decorators, defaults, None)
                     }
-                    | ir::DefinitionSite::Function(_) => (header, None),
                 };
-                let count = self.code.parts().1.definitions[&site.start()]
-                    .decorator_offsets
-                    .len();
-                let (decorators, defaults) = prefix.split_at(count);
                 let decorators = self.decorator_operands(decorators, |code, value| {
                     code.evaluate_eager_handle(value)
                 });
@@ -1269,6 +1271,10 @@ impl Frame<'_, '_, '_> {
                         code.evaluate_handle(&operands[index])
                     })
                 });
+                if matches!(self.inputs, FrameInputs::Statement(_)) {
+                    // Report a refused header input before compiling the nested body.
+                    self.code.prepared().place_definition(site.start());
+                }
                 let (code, sites) = self.code.parts();
                 sites.definition(code, site.start(), &decorators, &defaults, class_arguments)
             }
