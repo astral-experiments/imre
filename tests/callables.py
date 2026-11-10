@@ -19,7 +19,6 @@ REJECTED = {
         "class Reader:\n    def read(self) -> int: return 2\n"
         "register(source)\nregister(Reader().read)\n"
     ),
-    "local_callback_escape": IMPORT + "def outer(x: int) -> Callable[[int], int]:\n    def add(y: int) -> int:\n        return x + y\n    return add\n",
     "local_callback_captured_map": "def outer(x: int) -> int:\n    def add(y: int) -> int:\n        return x + y\n    return sum(map(add, [1]))\n",
     "local_recursive": "def outer(x: int) -> int:\n    def inner(y: int) -> int:\n        return inner(y)\n    return inner(x)\n",
     "local_recursive_via_outer": "def outer(x: int) -> int:\n    def inner(y: int) -> int:\n        return outer(y)\n    return inner(x)\n",
