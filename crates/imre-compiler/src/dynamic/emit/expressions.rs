@@ -219,34 +219,21 @@ impl Function<'_, '_> {
                 value
             }
             ast::Expr::Lambda(lambda) => self.source_lambda(lambda),
-            ast::Expr::FString(value) => {
-                let mark = self.temporary_mark();
-                self.unwind_format_operands(&mark, |code| {
-                    let mut parts = Vec::new();
-                    for part in value.value.iter() {
-                        match part {
-                            ast::FStringPartRef::Literal(literal) => {
-                                if let Some(value) = code.source.strings.literals.get(&literal.range()) {
-                                    parts.push(code.registered_value(value));
-                                }
-                            }
-                            ast::FStringPartRef::FString(formatted) => {
-                                code.format_parts(&formatted.elements, &mut parts);
-                            }
-                        }
-                    }
-                    code.format_join(&mark, parts)
-                })
+            ast::Expr::FString(_) => {
+                self.build_diagnostic("cannot compile this formatted string ahead of time")
             }
             ast::Expr::Generator(generator)
                 if self.source.generators.contains_key(&generator.range()) =>
             {
                 self.prepared_generator(generator)
             }
-            expr if let Some(plan) = imre_ast::comprehension::Plan::from_expr(expr) => {
-                self.comprehension(expr, plan)
+            ast::Expr::Generator(generator) => self.residual_generator(generator),
+            ast::Expr::DictComp(display) if display.key.is_none() => {
+                self.unsupported("dict unpacking comprehension")
             }
-            ast::Expr::DictComp(_) => self.unsupported("dict unpacking comprehension"),
+            ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_) => {
+                self.build_diagnostic("cannot compile this comprehension ahead of time")
+            }
             _ => self.unsupported(&format!("{:?}", ast::AnyNodeRef::from(expr).kind())),
         }
     }
@@ -369,54 +356,6 @@ impl Function<'_, '_> {
         unreachable!("a comparison has a final link")
     }
 
-    /// Evaluate the fields and their conversions in source order before joining their text.
-    fn format_parts(
-        &mut self,
-        elements: &[ast::InterpolatedStringElement],
-        parts: &mut Vec<String>,
-    ) {
-        for element in elements {
-            let value = match element {
-                ast::InterpolatedStringElement::Literal(lit) => {
-                    let Some(value) = self.source.strings.literals.get(&lit.range()) else {
-                        continue;
-                    };
-                    self.registered_value(value)
-                }
-                ast::InterpolatedStringElement::Interpolation(field) => {
-                    if let Some(prefix) = self.source.strings.literals.get(&field.range()) {
-                        parts.push(self.registered_value(prefix));
-                    }
-                    let mark = self.temporary_mark();
-                    self.with_expression_range(field.range(), |code| {
-                        code.unwind_format_operands(&mark, |code| {
-                            let mut value = code.expr(&field.expression);
-                            code.keep_operands(&mark, &value, "0");
-                            if let Some(conversion) = imre_ast::strings::interpolation_conversion(field) {
-                                value = code.format_conversion(&value, conversion);
-                                code.keep_operands(&mark, &value, "0");
-                            }
-                            let spec = match &field.format_spec {
-                                Some(spec) => {
-                                    let mark = code.temporary_mark();
-                                    code.unwind_format_operands(&mark, |code| {
-                                        let mut parts = Vec::new();
-                                        code.format_parts(&spec.elements, &mut parts);
-                                        code.format_join(&mark, parts)
-                                    })
-                                }
-                                None => code.text(""),
-                            };
-                            let result = code.format_field(&value, &spec);
-                            code.keep_operands(&mark, &result, "0");
-                            result
-                        })
-                    })
-                }
-            };
-            parts.push(value);
-        }
-    }
 }
 
 fn ast_spread(element: &ast::Expr) -> Option<&ast::Expr> {
