@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use ruff_db::parsed::ParsedModuleRef;
 use ruff_python_ast as ast;
@@ -3113,6 +3113,17 @@ pub(crate) enum SetLayoutHint {
     Disabled,
 }
 
+/// Resolver facts which native lowering can extend or consume while trying a set layout.
+pub(crate) struct LoweringBaseline {
+    diagnostic_counts: Vec<usize>,
+    explicit_check: bool,
+    needs_object_runtime: bool,
+    deferred_object_error: Option<Diagnostic>,
+    reachable: Option<Arc<reachability::Reachable>>,
+    mutable_documents: bool,
+    traceback_objects: bool,
+}
+
 pub(crate) struct SourceGraph {
     /// Fixed at graph construction, in the checked resolver's search order.
     pub(crate) filesystem_roots: Box<[PathBuf]>,
@@ -3145,7 +3156,7 @@ pub(crate) struct SourceGraph {
     pub(crate) entry_profile: entry_profile::Profile,
     pub(crate) mutable_documents: bool,
     pub(crate) mutable_builtin_len: bool,
-    reachable: Option<reachability::Reachable>,
+    reachable: Option<Arc<reachability::Reachable>>,
     required_library: Option<(ModuleId, reachability::Reachable)>,
     pub(crate) inputs: crate::SourceInputs,
     zip_files: Vec<(PathBuf, PathBuf, String)>,
@@ -3164,6 +3175,52 @@ pub(crate) struct SourceGraph {
 }
 
 impl SourceGraph {
+    pub(crate) fn lowering_baseline(&self) -> LoweringBaseline {
+        LoweringBaseline {
+            diagnostic_counts: self
+                .checked_diagnostics
+                .borrow()
+                .iter()
+                .map(Vec::len)
+                .collect(),
+            explicit_check: self.session.explicit_check,
+            needs_object_runtime: self.needs_object_runtime.get(),
+            deferred_object_error: self.deferred_object_error.borrow().clone(),
+            reachable: self.reachable.clone(),
+            mutable_documents: self.mutable_documents,
+            traceback_objects: self.traceback_objects,
+        }
+    }
+
+    /// Start ordinary lowering with the original import decisions and proof scopes.
+    pub(crate) fn retry_without_set_layout(&mut self, baseline: &LoweringBaseline) {
+        self.source_contract = None;
+        self.session.resume_layout_queries();
+        self.session.explicit_check = baseline.explicit_check;
+        self.set_layout_hint.set(SetLayoutHint::Disabled);
+        self.float_components.set(FloatComponents::Native);
+        self.missing_repr.set(None);
+        *self.class_layout_error.get_mut() = None;
+        self.has_object_constructor_fallback.set(false);
+        self.check_fallback_calls.set(FallbackCalls::None);
+        self.check_method_factories.set(false);
+        self.needs_object_runtime.set(baseline.needs_object_runtime);
+        self.deferred_object_error
+            .get_mut()
+            .clone_from(&baseline.deferred_object_error);
+        self.reachable.clone_from(&baseline.reachable);
+        self.mutable_documents = baseline.mutable_documents;
+        self.traceback_objects = baseline.traceback_objects;
+        for (proofs, &count) in self
+            .checked_diagnostics
+            .get_mut()
+            .iter_mut()
+            .zip(&baseline.diagnostic_counts)
+        {
+            proofs.truncate(count);
+        }
+    }
+
     /// A representation trial must neither discard a Python operation nor change the
     /// admission or diagnostics of the enclosing registered program.
     pub(crate) fn try_registered_body<T>(
@@ -3489,9 +3546,9 @@ impl SourceGraph {
     }
 
     pub(crate) fn include_key_reprs(&mut self, owners: &HashSet<DefinitionId>) {
-        self.reachable = Some(reachability::Reachable::collect_with_reprs(
+        self.reachable = Some(Arc::new(reachability::Reachable::collect_with_reprs(
             self, false, owners,
-        ));
+        )));
         self.refresh_reachable_state();
     }
 
@@ -3516,7 +3573,7 @@ impl SourceGraph {
         {
             return Some(roots);
         }
-        self.reachable.as_ref()
+        self.reachable.as_deref()
     }
 
     pub(crate) fn includes(&self, definition: DefinitionId) -> bool {
@@ -4518,13 +4575,6 @@ pub(crate) struct SiteProbes {
 }
 
 impl SiteProbes {
-    pub(crate) fn next_layout(self) -> Self {
-        Self {
-            wheel_records: self.wheel_records,
-            ..Self::default()
-        }
-    }
-
     fn is_file(&mut self, fs: &mut FileSystem<'_>, path: PathBuf) -> bool {
         *self
             .file_checks
@@ -4886,7 +4936,7 @@ impl<'a> Loader<'a> {
             errno_names: self.errno_names,
         };
         if reachable_only {
-            graph.reachable = Some(reachability::Reachable::collect(&graph, false));
+            graph.reachable = Some(Arc::new(reachability::Reachable::collect(&graph, false)));
         } else if let Some(library) = graph
             .modules
             .iter()
