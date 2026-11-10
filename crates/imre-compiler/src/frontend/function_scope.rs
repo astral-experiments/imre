@@ -2,6 +2,8 @@
 
 mod annotations;
 pub(crate) use annotations::ClassAnnotations;
+mod callable;
+pub(crate) use callable::{CallableMetadata, OrdinaryFunction, parameter_layout};
 mod class_metadata;
 pub(crate) mod classes;
 mod type_parameters;
@@ -354,6 +356,7 @@ impl FunctionScope {
 }
 
 pub(crate) struct NamedFunctionScope {
+    pub(crate) ordinary: Option<OrdinaryFunction>,
     pub(crate) lexical: FunctionScope,
     pub(crate) suspension_flags: u32,
 }
@@ -432,10 +435,14 @@ impl<'a, A: FnMut(&'a ast::StmtTypeAlias), E: FnMut(&ast::Expr)> Visitor<'a>
                     (true, false) => COROUTINE,
                     (true, true) => ASYNC_GENERATOR,
                 };
+                let lexical = FunctionScope::function(def, strings);
+                let ordinary =
+                    OrdinaryFunction::prepare(def, self.names, &lexical, suspension_flags);
                 self.scopes.functions.insert(
                     start,
                     NamedFunctionScope {
-                        lexical: FunctionScope::function(def, strings),
+                        lexical,
+                        ordinary,
                         suspension_flags,
                     },
                 );

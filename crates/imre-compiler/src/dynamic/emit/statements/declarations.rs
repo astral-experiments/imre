@@ -5,14 +5,29 @@ use super::super::sites::{
 };
 use super::super::{Body, DefinitionName, DefinitionSite, Entry, Function, SourceInfo};
 use crate::frontend::PreparedAnnotation;
+use crate::frontend::function_scope::OrdinaryFunction;
 use crate::ir::{Expr, Statement};
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
 impl SourceInfo<'_> {
-    pub(super) fn function_body<'s>(&self, def: &'s ast::StmtFunctionDef) -> Body<'s> {
-        Body::Function(&def.body, self.scopes.function(def).suspension_flags)
+    pub(in crate::dynamic::emit) fn function_body<'s>(
+        &'s self,
+        def: &'s ast::StmtFunctionDef,
+    ) -> Body<'s> {
+        if let Some(plan) = self.function_bodies.get(&def.start())
+            && plan.header.is_some()
+        {
+            Body::Checked(plan.checked())
+        } else {
+            Body::Function(&def.body, self.scopes.function(def).suspension_flags)
+        }
     }
+}
+
+enum Callable<'a> {
+    Lambda { comprehension: bool },
+    Ordinary(&'a OrdinaryFunction),
 }
 
 impl Function<'_, '_> {
@@ -33,7 +48,7 @@ impl Function<'_, '_> {
             let file = self.frame.output.data(b"<string>");
             let location = super::super::SourceMap {
                 info: &body.scope,
-                lambda_code: Default::default(),
+                callable_code: Default::default(),
                 definitions: None,
                 unit,
                 positions: &super::super::SourcePositions::new(text, &file),
@@ -74,50 +89,120 @@ impl Function<'_, '_> {
         if self.sites.lambdas.contains_key(&site) {
             return;
         }
-        let metadata = &self.source.lambdas[&site].metadata;
-        let qualname = format!("{}<lambda>", self.prefix);
-        let existing = self.source.lambda_code.borrow().get(&site).cloned();
+        let definition =
+            self.compile_callable(site, Callable::Lambda { comprehension }, Body::Checked(body));
+        self.sites.lambdas.insert(site, definition);
+    }
+
+    fn compile_callable(
+        &mut self,
+        site: TextSize,
+        callable: Callable<'_>,
+        body: Body<'_>,
+    ) -> CompiledDefinition {
+        let source = self.source;
+        let (name, qualname, doc, metadata, comprehension) = match callable {
+            Callable::Lambda { comprehension } => (
+                "<lambda>",
+                format!("{}<lambda>", self.prefix),
+                None,
+                &source.lambdas[&site].metadata,
+                comprehension,
+            ),
+            Callable::Ordinary(header) => {
+                let qualname = if self.declared_globals.contains(&header.binding) {
+                    header.name.clone()
+                } else {
+                    format!("{}{}", self.prefix, header.name)
+                };
+                let doc = if self.output.keep_docstrings {
+                    header
+                        .doc
+                        .clone()
+                        .or_else(|| source.bundled_docstring(&qualname))
+                } else {
+                    None
+                };
+                (header.name.as_str(), qualname, doc, &header.metadata, false)
+            }
+        };
+        // A lambda can be placed by several expression regions in the same source map.
+        // An ordinary definition's code address belongs to the enclosing declaration table.
+        let cache = match callable {
+            Callable::Lambda { .. } => Some(&source.callable_code),
+            Callable::Ordinary(_) => None,
+        };
+        let existing = cache.and_then(|cache| cache.borrow().get(&site).cloned());
         let code = existing.unwrap_or_else(|| {
             let entry = if metadata.generator {
                 Entry::Suspended(imre_ast::code_flags::GENERATOR)
             } else {
                 Entry::Compiled
             };
-            let code = self.source.definition(
+            let globals = match callable {
+                Callable::Ordinary(_) => Some(source.scopes.functions[&site].lexical.globals()),
+                Callable::Lambda { .. } => None,
+            };
+            let code = source.definition(
                 self.frame.output,
                 format!("{qualname}.<locals>."),
-                Body::Checked(body),
+                body,
                 site,
                 true,
                 entry,
+                globals,
             );
-            self.source.lambda_code.borrow_mut().insert(site, code.clone());
+            if let Some(cache) = cache {
+                cache.borrow_mut().insert(site, code.clone());
+            }
             code
         });
-        // A lambda bound inside a display captures its iteration namespace, including
-        // when the display itself is evaluated directly in a class body.
+        // A lambda inside a display captures the iteration namespace even in a class body.
         let method =
             !comprehension && self.class_locals.is_some() && self.annotation_values.is_none();
-        let signature = metadata.signature(
-            self.in_function || comprehension,
-            method,
-            self.source.future_flags(),
-        );
+        let mut flags = source.future_flags();
+        if doc.is_some() {
+            flags |= imre_ast::code_flags::HAS_DOCSTRING;
+        }
+        let signature = metadata.signature(self.in_function || comprehension, method, flags);
         self.output
             .interned_identifiers
             .extend(metadata.parameter_names().map(str::to_owned));
-        let definition = CompiledDefinition {
+        CompiledDefinition {
             code,
             signature: signature.to_string(),
-            name: "<lambda>".to_owned(),
+            name: name.to_owned(),
             qualname,
-            doc: None,
+            doc,
             provider: None,
             default_names: metadata.defaults.clone(),
             type_alias: false,
             class_header: None,
+        }
+    }
+
+    pub(super) fn prepare_ordinary_function(&mut self, site: TextSize) -> bool {
+        let source = self.source;
+        let Some((header, body)) = source.ordinary_function(site) else {
+            return false;
         };
-        self.sites.lambdas.insert(site, definition);
+        if !self.sites.definitions.contains_key(&site) {
+            let definition = self.compile_callable(site, Callable::Ordinary(header), body);
+            let decorator_lines = header
+                .decorator_offsets
+                .iter()
+                .map(|offset| source.positions.line(*offset))
+                .collect();
+            self.sites.definitions.insert(
+                site,
+                Declaration {
+                    definition,
+                    decorator_lines,
+                    type_params: Vec::new(),
+                },
+            );
+        }
+        true
     }
 
     fn compile_type_alias(&mut self, site: TextSize) -> Result<CompiledAlias, String> {
@@ -208,8 +293,13 @@ impl Function<'_, '_> {
     }
 
     pub(super) fn prepare_definition(&mut self, start: TextSize) {
-        if !self.sites.definitions.contains_key(&start) {
-            let syntax = self.source.definitions.as_ref().expect("registered scope")[&start];
+        if !self.prepare_ordinary_function(start) && !self.sites.definitions.contains_key(&start) {
+            let syntax = self
+                .source
+                .function_header(start)
+                .map(DefinitionSite::Function)
+                .or_else(|| self.source.definitions?.get(&start).copied())
+                .expect("prepared declaration site");
             let (definition, decorators, type_params) = match syntax {
                 DefinitionSite::Function(def) => {
                     let params = self.namespace_type_parameters(def);
@@ -292,7 +382,7 @@ mod tests {
                     }
                 });
                 assert_eq!(bindings, 1);
-                assert!(module.source.function_bodies[&start].fully_checked());
+                assert!(module.source.function_bodies[&start].header.is_some());
                 Ok(())
             },
         )
