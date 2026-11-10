@@ -27,6 +27,8 @@ mod ranges;
 mod record_copies;
 mod reductions;
 #[cfg(test)]
+mod single_emission_tests;
+#[cfg(test)]
 mod slice_sum_validation;
 mod sorted_rows;
 mod split_fields;
@@ -326,7 +328,7 @@ fn check_file_with(
             graph.session.explicit_check = true;
             checked_lower_with(graph, cache.as_deref_mut(), call_error)
         },
-        |_, _| Ok((Vec::new(), false)),
+        |_, _, _| unreachable!("check does not emit LLVM"),
     )
     .map(drop)
 }
@@ -393,7 +395,8 @@ fn object_fallback(
     native: impl Fn(
         &modules::SourceGraph,
         CheckedIr,
-    ) -> Result<(Vec<CodegenUnit>, bool), llvm::Unsupported>,
+        llvm::NativeProgram,
+    ) -> Result<Vec<CodegenUnit>, llvm::Unsupported>,
 ) -> Result<UnitCompilation, String> {
     for name in &options.include_modules {
         if !modules::valid_module_operand(name) {
@@ -431,7 +434,7 @@ fn object_fallback(
             .is_some_and(|(flags, _)| flags.tracemalloc > 0);
     let mut import_failure = None;
     let mut site_probes = modules::SiteProbes::default();
-    let mut native_candidate = None;
+    let mut deferred_native = None;
     let (mut refusal, graph) = match options.load_graph(
         path,
         module_root,
@@ -465,19 +468,24 @@ fn object_fallback(
                         }
                         if checking {
                             verify_after(&module, "lowering")?;
-                        } else {
-                            for original in specialize(&mut module)? {
-                                owners.push(owners[original]);
-                            }
+                            return native_result(graph, Vec::new());
                         }
-                        let reason = match native(&graph, (module, owners)) {
-                            Ok((value, true)) if options.entry_profile.is_none() => {
-                                // Keep the Python entry's full exception locations when it supports this
-                                // module. Otherwise the retained native callable layout can run it.
-                                native_candidate = Some(value);
+                        for original in specialize(&mut module)? {
+                            owners.push(owners[original]);
+                        }
+                        let reason = match llvm::analyze_program(&module) {
+                            Ok(program)
+                                if program.prefer_objects && options.entry_profile.is_none() =>
+                            {
+                                // Registration can preserve the Python exception locations. Keep the
+                                // checked native representation until registration decides admission.
+                                deferred_native = Some(((module, owners), program));
                                 "Imre: native bound wrapper links use checked exception locations"
                             }
-                            Ok((value, _)) => return native_result(graph, value),
+                            Ok(program) => match native(&graph, (module, owners), program) {
+                                Ok(units) => return native_result(graph, units),
+                                Err(refusal) => refusal.0,
+                            },
                             Err(refusal) => refusal.0,
                         };
                         LoweringDiagnostic::plain(reason.to_owned())
@@ -492,7 +500,7 @@ fn object_fallback(
                 if graph.set_layout_hint.get() != modules::SetLayoutHint::Applied {
                     break Some(error);
                 }
-                native_candidate = None;
+                deferred_native = None;
                 graph.retry_without_set_layout(&baseline);
             };
             (refusal, Some(graph))
@@ -527,8 +535,11 @@ fn object_fallback(
     };
     // A newly found checked provider can lower normally. If lowering fails, its
     // dependencies alone do not admit the caller to the object importer.
-    let fallback = |graph| match (graph, native_candidate, kind) {
-        (Some(graph), Some(value), _) => native_result(graph, value),
+    let fallback = |graph| match (graph, deferred_native, kind) {
+        (Some(graph), Some((ir, program)), _) => {
+            let units = native(&graph, ir, program).map_err(|error| error.0.to_owned())?;
+            native_result(graph, units)
+        }
         (Some(graph), None, LoweringKind::ExecutionOperand(id))
             if graph.modules[id].is_program_source() =>
         {
@@ -746,15 +757,13 @@ fn compile_file_with_layout(
     options: &CompileOptions,
     layout: BoxedLayout<'_>,
 ) -> Result<UnitCompilation, String> {
-    let typed = |_: &modules::SourceGraph, (module, _): CheckedIr| {
+    let typed = |_: &modules::SourceGraph, (module, _): CheckedIr, program| {
         let ranges = ranges::analyze(&module);
-        let (llvm_ir, prefer_objects) =
-            llvm::emit_file(&module, &ranges, options.address_sanitizer)?;
-        let units = vec![CodegenUnit {
+        let llvm_ir = llvm::emit_file(&module, &ranges, options.address_sanitizer, program)?;
+        Ok(vec![CodegenUnit {
             name: "__main__".into(),
             llvm_ir,
-        }];
-        Ok((units, prefer_objects))
+        }])
     };
     object_fallback(
         layout,
@@ -902,7 +911,7 @@ fn compile_file_units_with(
     options: &CompileOptions,
     mut cache: Option<&mut IncrementalCompiler>,
 ) -> Result<UnitCompilation, String> {
-    let typed = |graph: &modules::SourceGraph, (module, owners): CheckedIr| {
+    let typed = |graph: &modules::SourceGraph, (module, owners): CheckedIr, program| {
         let ranges = ranges::analyze(&module);
         let names = graph
             .modules
@@ -916,6 +925,7 @@ fn compile_file_units_with(
             &owners,
             &names,
             graph.entry,
+            program,
         )
     };
     object_fallback(
@@ -1599,7 +1609,7 @@ print("result", call(b=2, a=1))
                         .set(super::modules::SetLayoutHint::Disabled);
                     super::checked_lower_with(graph, None, call_error)
                 },
-                |_, _| Ok((Vec::new(), false)),
+                |_, _, _| unreachable!("check does not emit LLVM"),
             )
             .map(drop);
             assert_eq!(
@@ -1634,7 +1644,7 @@ print("result", call(b=2, a=1))
                 assert!(graph.set_layout_hint.get() == super::modules::SetLayoutHint::Disabled);
                 super::checked_lower_with(graph, None, call_error)
             },
-            |_, _| Ok((Vec::new(), false)),
+            |_, _, _| unreachable!("check does not emit LLVM"),
         )
         .map(drop);
         assert_eq!(passes, 1);
@@ -1676,7 +1686,7 @@ print("result", call(b=2, a=1))
                 }
                 Ok(result)
             },
-            |_, _| Ok((Vec::new(), false)),
+            |_, _, _| unreachable!("check does not emit LLVM"),
         )
         .map(drop);
         assert_eq!(passes, [true, false]);
