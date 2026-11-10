@@ -143,9 +143,13 @@ impl Function<'_, '_> {
             .expect("a selected operand reaches the join");
             self.frame
                 .with_checked_frame(&self.sites, None, |mut frame| frame.materialize(&value))
-        } else if let Some([test, yes, no]) =
-            self.source.statement_sites.expressions.conditional(expr)
+        } else if let Some(ExpressionSelection::Mixed {
+            parts: Some(parts), ..
+        }) = self.source.statement_sites.expressions.get(expr)
         {
+            let [test, yes, no] = parts
+                .each_ref()
+                .map(|child| child.operand(self.native_suspension));
             ValueJoin::select(
                 self,
                 |code| {

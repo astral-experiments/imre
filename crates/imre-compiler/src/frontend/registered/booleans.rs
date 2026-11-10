@@ -22,13 +22,6 @@ impl BranchShape for ast::Expr {
     }
 }
 
-fn conditional_parts<E: BranchShape>(node: &E) -> Option<[&E; 3]> {
-    match node.split(Context::Condition) {
-        Split::Conditional(test, yes, no) => Some([test, yes, no]),
-        _ => None,
-    }
-}
-
 /// Complete expressions own their checked children. Mixed sites retain the operation
 /// and the inputs the frontend could check in their physical activation.
 #[derive(Default)]
@@ -46,21 +39,36 @@ pub(crate) enum Selection {
     Suspension(ir::SuspendValue, Box<ast::Expr>),
     Comparison(Vec<Option<CheckedChild>>),
     Mixed {
-        parts: Option<Box<[Option<ir::Expr>; 3]>>,
+        parts: Option<Box<[PreparedInput; 3]>>,
         branch: PreparedSteps,
         value: Option<PreparedSteps>,
         physical: Option<Box<PhysicalInputs>>,
     },
 }
 
+impl Selection {
+    fn mixed(node: &ast::Expr, source: RegisteredSource<'_>) -> Self {
+        Self::Mixed {
+            parts: None,
+            physical: None,
+            branch: PreparedSteps::new(node, Context::Condition, source),
+            value: node
+                .is_bool_op_expr()
+                .then(|| PreparedSteps::new(node, Context::Value, source)),
+        }
+    }
+}
+
 /// A physical owner supplies any remaining inputs before the checked operation runs.
 pub(crate) struct PhysicalInputs {
     pub(crate) operation: ir::Expr,
     pub(crate) position: TextSize,
-    children: Box<[SourceOperand<ir::Expr, ResidualInput>]>,
+    children: Box<[PreparedInput]>,
 }
 
-struct ResidualInput {
+pub(crate) type PreparedInput = SourceOperand<ir::Expr, ResidualInput>;
+
+pub(crate) struct ResidualInput {
     expression: Box<ast::Expr>,
     // The same site can be emitted in an ordinary or a suspended activation.
     suspended: Option<ir::Expr>,
@@ -72,13 +80,21 @@ fn site(node: &ast::Expr) -> (TextRange, ast::NodeKind) {
 
 impl PhysicalInputs {
     pub(crate) fn operands(&self, suspended: bool) -> impl Iterator<Item = BorrowedOperand<'_>> {
-        self.children.iter().map(move |child| match child {
+        self.children
+            .iter()
+            .map(move |child| child.operand(suspended))
+    }
+}
+
+impl PreparedInput {
+    pub(crate) fn operand(&self, suspended: bool) -> BorrowedOperand<'_> {
+        match self {
             SourceOperand::Checked(value) => SourceOperand::Checked(value),
             SourceOperand::Residual(input) => BorrowedOperand::prepared(
                 &input.expression,
                 input.suspended.as_ref().filter(|_| suspended),
             ),
-        })
+        }
     }
 }
 
@@ -132,24 +148,6 @@ impl ExpressionSites {
 
     pub(crate) fn get(&self, node: &ast::Expr) -> Option<&Selection> {
         self.selected.get(&site(node))
-    }
-
-    pub(crate) fn conditional<'a>(
-        &'a self,
-        node: &'a ast::Expr,
-    ) -> Option<[BorrowedOperand<'a>; 3]> {
-        let children = conditional_parts(node)?;
-        Some(match self.selected.get(&site(node)) {
-            Some(Selection::Checked(value)) => {
-                conditional_parts(value)?.map(SourceOperand::Checked)
-            }
-            Some(Selection::Mixed {
-                parts: Some(parts), ..
-            }) => {
-                std::array::from_fn(|i| BorrowedOperand::prepared(children[i], parts[i].as_ref()))
-            }
-            _ => children.map(SourceOperand::Residual),
-        })
     }
 
     pub(crate) fn comparison<'a>(
@@ -256,26 +254,9 @@ impl ExpressionSites {
         {
             return;
         }
-        let mixed = |parts| Selection::Mixed {
-            parts,
-            physical: None,
-            branch: PreparedSteps::new(node, Context::Condition, source),
-            value: node
-                .is_bool_op_expr()
-                .then(|| PreparedSteps::new(node, Context::Value, source)),
-        };
-        let selected = if let Some(children) = conditional_parts(node) {
-            match children.map(|part| values::registered_value(part, source)) {
-                [Some(test), Some(yes), Some(no)] => {
-                    Selection::Checked(source.located(node, super::select(test, yes, no)))
-                }
-                parts => mixed(Some(Box::new(parts))),
-            }
-        } else {
-            match values::registered_value(node, source) {
-                Some(value) => Selection::Checked(value),
-                None => mixed(None),
-            }
+        let selected = match values::registered_value(node, source) {
+            Some(value) => Selection::Checked(value),
+            None => Selection::mixed(node, source),
         };
         if matches!(selected, Selection::Checked(_)) {
             self.covered = Some(node.range());
@@ -328,9 +309,12 @@ impl<'a> Visitor<'a> for PhysicalPreparation<'_, '_> {
                 visitor::walk_expr(self, node);
                 return;
             }
-            Some(Selection::Mixed {
-                physical: Some(_), ..
-            }) => return,
+            Some(
+                Selection::Mixed { parts: Some(_), .. }
+                | Selection::Mixed {
+                    physical: Some(_), ..
+                },
+            ) => return,
             Some(Selection::Mixed { .. }) if !self.suspended => {
                 self.residual(node);
                 return;
@@ -393,6 +377,29 @@ impl<'a> Visitor<'a> for PhysicalPreparation<'_, '_> {
 impl PhysicalPreparation<'_, '_> {
     fn residual(&mut self, node: &ast::Expr) {
         let source = self.source;
+        if let ast::Expr::If(choice) = node {
+            let mut selected = self
+                .sites
+                .selected
+                .remove(&site(node))
+                .unwrap_or_else(|| Selection::mixed(node, source));
+            let Selection::Mixed { parts, branch, .. } = &mut selected else {
+                unreachable!("complete conditional already selected");
+            };
+            *parts = Some(Box::new([&choice.test, &choice.body, &choice.orelse].map(
+                |child| self.input(child, values::registered_value(child, source)),
+            )));
+            // The condition graph may consume a descendant of a whole value operand.
+            for leaf in &branch.operands {
+                if let SourceOperand::Residual(expr) = leaf
+                    && self.sites.get(expr).is_none()
+                {
+                    self.visit_expr(expr);
+                }
+            }
+            self.sites.selected.insert(site(node), selected);
+            return;
+        }
         let selected = if let Some((op, operands)) = values::binary_operands(node) {
             let operation = values::binary(
                 op,
@@ -447,17 +454,7 @@ impl PhysicalPreparation<'_, '_> {
     ) -> Selection {
         let children = inputs
             .into_iter()
-            .map(|(child, ordinary)| {
-                if let Some(value) = ordinary {
-                    return SourceOperand::Checked(value);
-                }
-                let suspended = values::suspended_operand(child, self.source);
-                self.visit_expr(child);
-                SourceOperand::Residual(ResidualInput {
-                    expression: Box::new(child.clone()),
-                    suspended,
-                })
-            })
+            .map(|(child, ordinary)| self.input(child, ordinary))
             .collect();
         Selection::Inputs(Box::new(PhysicalInputs {
             operation,
@@ -468,6 +465,18 @@ impl PhysicalPreparation<'_, '_> {
             ),
             children,
         }))
+    }
+
+    fn input(&mut self, child: &ast::Expr, ordinary: Option<ir::Expr>) -> PreparedInput {
+        if let Some(value) = ordinary {
+            return SourceOperand::Checked(value);
+        }
+        let suspended = values::suspended_operand(child, self.source);
+        self.visit_expr(child);
+        SourceOperand::Residual(ResidualInput {
+            expression: Box::new(child.clone()),
+            suspended,
+        })
     }
 }
 

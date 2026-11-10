@@ -3237,46 +3237,52 @@ mod tests {
 
     #[test]
     fn a_mixed_conditional_reads_only_its_residual_child() {
-        use crate::frontend::SourceOperand::{Checked, Residual};
+        use crate::frontend::{
+            ExpressionSelection,
+            SourceOperand::{Checked, Residual},
+        };
+
         let path = Path::new("store.py");
         let text = "result = yes() if flag() else (lambda v: v)(make())\n";
         let mut prepared =
             PreparedBody::module("store", path, text, 0, ModuleOrigin::Program(None)).unwrap();
-        let parsed = ParsedModule::parse(path, text.into()).unwrap();
-        prepared.syntax = Some(Cow::Owned(module_source::into_body(parsed.parsed)));
         inject_residual_child_module(&mut prepared);
 
-        fn erase(child: &mut ast::Expr) {
-            *child = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
-                range: child.range(),
-                node_index: Default::default(),
-            });
-        }
         let original = prepared.standalone().unwrap();
         let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
-        assert!(matches!(
-            prepared
-                .source
-                .statement_sites
-                .expressions
-                .conditional(value),
-            Some([Checked(_), Checked(_), Residual(_)])
-        ));
-        let branch = value.as_if_expr_mut().unwrap();
-        erase(&mut branch.test);
-        erase(&mut branch.body);
+        let Some(ExpressionSelection::Mixed {
+            parts: Some(parts), ..
+        }) = prepared.source.statement_sites.expressions.get(value)
+        else {
+            panic!("expected a mixed conditional");
+        };
+        let [Checked(_), Checked(_), Residual(call)] =
+            parts.each_ref().map(|child| child.operand(false))
+        else {
+            panic!("expected a checked test and true arm, and a residual false arm");
+        };
+        let site = call.clone();
+
+        let none = || {
+            Box::new(ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+                range: Default::default(),
+                node_index: Default::default(),
+            }))
+        };
+        *value = ast::Expr::If(ast::ExprIf {
+            range: value.range(),
+            node_index: Default::default(),
+            test: none(),
+            body: none(),
+            orelse: none(),
+        });
         assert_eq!(prepared.standalone().unwrap(), original);
 
-        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
-        let branch = value.as_if_expr_mut().unwrap();
-        let site = branch.orelse.clone();
-        erase(&mut branch.orelse.as_call_expr_mut().unwrap().func);
-        assert_eq!(prepared.standalone().unwrap(), original);
-        prepared.source.statement_sites.expressions.replace_residual_input(
-            &site,
-            0,
-            crate::ir::Expr::none(),
-        );
+        prepared
+            .source
+            .statement_sites
+            .expressions
+            .replace_residual_input(&site, 0, crate::ir::Expr::none());
         assert_ne!(prepared.standalone().unwrap(), original);
     }
 
