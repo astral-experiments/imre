@@ -1,3 +1,4 @@
+import abc
 from inspect import signature
 from typing import get_type_hints
 
@@ -36,6 +37,26 @@ class Derived(Model, marker=token):
 
 assert events[-1][:3] == (Meta, "Derived", (Model,))
 assert type(Derived) is Meta
+
+
+class Configurable:
+    def __init_subclass__(cls, *, option):
+        cls.option = option
+
+
+class Configured(Configurable, metaclass=abc.ABCMeta, option=token):
+    pass
+
+
+assert type(Configured) is abc.ABCMeta and Configured.option is token
+
+try:
+    class Unhandled(metaclass=abc.ABCMeta, option=True):
+        pass
+except TypeError as error:
+    assert str(error) == "Unhandled.__init_subclass__() takes no keyword arguments"
+else:
+    raise AssertionError("accepted an unhandled class keyword")
 
 
 class Replacing(type):

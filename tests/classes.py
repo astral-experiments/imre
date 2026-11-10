@@ -183,7 +183,6 @@ copy.copy(Child(1))
     "inheritance": CELL + "class Child(Cell):\n    def __init__(self, value: int) -> None:\n        self.value = value\n",
     "metaclass": CELL.replace("class Cell:", "class Cell(metaclass=type):"),
     "unrelated_abc_meta": "class ABCMeta: pass\nclass C(metaclass=ABCMeta): pass\n",
-    "abc_meta_with_keywords": "import abc\nclass C(metaclass=abc.ABCMeta, option=True): pass\n",
     "abc_meta_late_import": "class C(metaclass=ABCMeta): pass\nfrom abc import ABCMeta\n",
     "abc_meta_dataclass_generated": "import abc\nfrom dataclasses import dataclass\nclass A(metaclass=abc.ABCMeta):\n    @abc.abstractmethod\n    def __init__(self): pass\n@dataclass\nclass B(A):\n    n: int\n",
     "abc_meta_eager_default": "import abc\ndef init() -> int: return 42\nclass A(metaclass=abc.ABCMeta):\n    @abc.abstractmethod\n    def f(self, *, n: int = init()): pass\n",
