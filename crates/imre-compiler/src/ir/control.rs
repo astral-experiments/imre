@@ -8,6 +8,27 @@ pub(crate) enum Context {
     Value,
 }
 
+impl Context {
+    fn operand(self, mut expr: &Expr) -> &Expr {
+        while let ExprKind::Builtin(op, operands) = &expr.kind {
+            match op {
+                Builtin::RegisteredLocation(..) => {}
+                Builtin::Bool if self == Self::Condition => {}
+                _ => break,
+            }
+            expr = &operands[0];
+        }
+        expr
+    }
+}
+
+pub(crate) fn boolean_literal(expr: &Expr) -> Option<bool> {
+    match Context::Condition.operand(expr).kind {
+        ExprKind::Bool(value) => Some(value),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum Target {
     Step(usize),
@@ -79,16 +100,7 @@ impl Edges {
                 Depth::All => self.lower(inputs, input, context, depth, yes, no),
             }
         };
-        let mut expression = input.value;
-        while let ExprKind::Builtin(op, operands) = &expression.kind {
-            match op {
-                Builtin::RegisteredLocation(..) => {}
-                Builtin::Bool if context == Context::Condition => {}
-                _ => break,
-            }
-            expression = &operands[0];
-        }
-        match &expression.kind {
+        match &context.operand(input.value).kind {
             ExprKind::Boolean(and, operands) => {
                 let (last, prefix) = operands.split_last().expect("nonempty boolean expression");
                 let mut next = child(last, yes, no, predicate);

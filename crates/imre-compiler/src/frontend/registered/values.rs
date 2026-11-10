@@ -761,6 +761,7 @@ pub(super) fn operation<E>(
     source: RegisteredSource<'_>,
     local: Option<Expr>,
     class_namespace: bool,
+    literal: impl Fn(&Expr) -> Option<bool>,
     dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
     mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
 ) -> StdResult<Option<Expr>, E> {
@@ -855,8 +856,17 @@ pub(super) fn operation<E>(
             )));
         }
         ast::Expr::BoolOp(op) => {
-            let values = op.values.iter().map(child).collect::<StdResult<_, _>>()?;
-            return Ok(Some(selected_operands(op.op == ast::BoolOp::And, values)));
+            let and = op.op == ast::BoolOp::And;
+            let mut values = Vec::with_capacity(op.values.len());
+            for operand in &op.values {
+                let value = child(operand)?;
+                let stops = literal(&value) == Some(!and);
+                values.push(value);
+                if stops {
+                    break;
+                }
+            }
+            return Ok(Some(selected_operands(and, values)));
         }
         ast::Expr::Name(name) => {
             if let Some(value) = local {
@@ -1008,6 +1018,7 @@ impl Region {
                 source,
                 None,
                 false,
+                ir::control::boolean_literal,
                 |_| true,
                 |child| self.operand(child, source).ok_or(()),
             )
@@ -1178,6 +1189,8 @@ impl Checker<'_> {
             source,
             local,
             false,
+            // Even a skipped operand participates in static argument and result checking.
+            |_| None,
             |receiver| graph.session.is_dynamic_receiver(owner, receiver),
             |child| self.expr(child),
         )?
