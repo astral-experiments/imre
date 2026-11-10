@@ -5733,9 +5733,12 @@ impl Context {
                     return Ok(self.class_dictionary(scope));
                 }
                 if name == "__base__"
-                    && self.has_base(obj, "module")
+                    && metaclass_member.is_none()
                     && let Some(bases) = self.class_bases_tuple(obj)
                 {
+                    if bases.is_empty() {
+                        return Ok(NONE);
+                    }
                     return self.member_layout_base(&bases);
                 }
                 // type.__abstractmethods__ exposes only this class's stored value.
