@@ -661,15 +661,13 @@ pub(super) fn operation<E>(
     }
     let kind = match node {
         ast::Expr::Generator(generator)
-            if source
-                .generators
-                .is_some_and(|sites| sites.contains_key(&generator.range())) =>
+            if let Some(site) = source.generators.and_then(|sites| sites.get(&generator.range())) =>
         {
-            let outer = &imre_ast::comprehension::outer_clause(&generator.generators).iter;
+            let outer = imre_ast::comprehension::outer_clause(&generator.generators);
             let iterator = super::operation(
-                Builtin::RegisteredIter,
+                Builtin::RegisteredIter(site.outer_operation(outer)),
                 Type::PythonObject,
-                vec![child(outer)?],
+                vec![child(&outer.iter)?],
             );
             ExprKind::Builtin(
                 Builtin::RegisteredGenerator(generator.range(), false),

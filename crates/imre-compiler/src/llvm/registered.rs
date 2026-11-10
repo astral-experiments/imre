@@ -825,15 +825,19 @@ impl Frame<'_, '_, '_> {
             (op, args) if let Some(iteration) = op.iteration_operands(args) => {
                 use ir::IterationOperands::*;
                 match iteration.expect("checked iteration operands") {
-                    Iter(value, Some(range)) => self.iteration_result(|frame| {
-                        let value = frame.evaluate_handle(value);
-                        frame.call_position(range);
-                        frame.op("async_iter", &[&value])
-                    }),
-                    Iter(value, None) => {
-                        let value = self.evaluate_handle(value);
-                        self.code.op("iter", &[&value])
-                    }
+                    Iter(value, op) => match op {
+                        ir::IteratorOp::Get(range) | ir::IteratorOp::Async(range) => {
+                            self.iteration_result(|frame| {
+                                let value = frame.evaluate_handle(value);
+                                frame.call_position(range);
+                                frame.op(op.runtime_op(), &[&value])
+                            })
+                        }
+                        ir::IteratorOp::Loop | ir::IteratorOp::LoopCursor => {
+                            let value = self.evaluate_handle(value);
+                            self.code.op(op.runtime_op(), &[&value])
+                        }
+                    },
                     Truth(value) => {
                         let value = self.evaluate_handle(value);
                         self.code.op("truth", &[&value])

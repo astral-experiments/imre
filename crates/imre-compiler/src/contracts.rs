@@ -713,8 +713,7 @@ impl Builtin {
             | Self::RegisteredInterpolation { .. }
             | Self::RegisteredNamespace(_)
             | Self::RegisteredUnpack { .. }
-            | Self::RegisteredIter
-            | Self::RegisteredAsyncIter(_)
+            | Self::RegisteredIter(_)
             | Self::RegisteredCall(..)
             | Self::SortByComparator => Contract::new(true, Unknown),
             Self::ListReserveRange | Self::StructCyclePrefix => Contract::new(false, PreservesOwners),

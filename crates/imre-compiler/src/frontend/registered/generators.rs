@@ -1,4 +1,4 @@
-//! Prepare the hidden activation of a synchronous generator expression.
+//! Prepare the hidden activation of a generator expression.
 
 use super::*;
 use crate::frontend::comprehensions::EagerDisplay;
@@ -6,31 +6,56 @@ use imre_ast::comprehension::Plan;
 
 pub(crate) struct RegisteredGenerator {
     pub(crate) body: RegisteredFunction,
+    pub(crate) is_async: bool,
 }
 
 impl RegisteredGenerator {
+    /// Select the iterator acquired by the defining frame before the child can escape.
+    pub(crate) fn outer_operation(&self, outer: &ast::Comprehension) -> ir::IteratorOp {
+        if outer.is_async {
+            ir::IteratorOp::Async(outer.iter.range())
+        } else if self.is_async {
+            ir::IteratorOp::Get(outer.iter.range())
+        } else {
+            ir::IteratorOp::Loop
+        }
+    }
+
     pub(super) fn prepare(
         generator: &ast::ExprGenerator,
         source: values::RegisteredSource<'_>,
     ) -> Option<Self> {
         let plan = Plan::generator(generator);
-        if plan.body_suspends() {
-            return None;
-        }
+        let is_async = plan.body_suspends();
 
         // The constructor installs the target declarations and the acquired cursor in
         // a fresh comprehension frame. Reads and writes now use that frame directly.
         let operations = HashMap::new();
         let sites = StatementSites::default();
         let mut scope = SourceScope::new(
-            RegisteredScope::Function { is_async: false },
+            RegisteredScope::Function { is_async },
             source,
             &operations,
             &sites,
         );
-        let input = pipelines::Prepared::cursor(
-            values::name_binding(".iterator"),
+        scope.generator_expression = true;
+        let outer = imre_ast::comprehension::outer_clause(&generator.generators);
+        let (cursor, kind) = match eager::async_pull(outer) {
+            Some(pull) => (values::name_binding(".0"), ir::IterNextKind::Async(pull)),
+            None if is_async => (
+                operation(
+                    Builtin::RegisteredIter(ir::IteratorOp::LoopCursor),
+                    Type::PythonObject,
+                    vec![values::name_binding(".0")],
+                ),
+                ir::IterNextKind::Generic,
+            ),
+            None => (values::name_binding(".iterator"), ir::IterNextKind::Generic),
+        };
+        let input = pipelines::Prepared::pull_cursor(
+            cursor,
             Type::PythonObject,
+            kind,
             |ty| scope.hidden(ty),
         );
         let mut body = scope
@@ -47,6 +72,7 @@ impl RegisteredGenerator {
         body.push(Statement::Return(Expr::none()));
         Some(Self {
             body: scope.finish(body),
+            is_async,
         })
     }
 }
@@ -86,6 +112,70 @@ pub(super) fn clause(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn async_child_pulls_the_outer_iterator_without_reacquiring_it() {
+        let graph = SourceGraph::single("result = (item async for item in rows if item)\n").unwrap();
+        let module = &graph.modules[graph.entry];
+        let literals = values::ModuleSource::new(module);
+        let (_, sites) = prepare_expression_sites(
+            &module.parsed.syntax().body,
+            literals.context(&module.source),
+        );
+        let [child] = sites.values().collect::<Vec<_>>()[..] else {
+            panic!("expected one prepared generator");
+        };
+        assert!(child.is_async);
+        let body = &child.body.function.body;
+        let mut pulls = 0;
+        ir::walk_statements(body, &mut |statement| {
+            if matches!(statement, Statement::IterNext { kind: ir::IterNextKind::Async(_), .. }) {
+                pulls += 1;
+            }
+        });
+        let mut yields = 0;
+        ir::walk_expressions(body, &mut |expr| {
+            assert!(!matches!(expr.kind, ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::Async(_)), _)));
+            if matches!(expr.kind, ExprKind::Builtin(Builtin::RegisteredSuspend(ir::SuspendValue::Yield, _), _)) {
+                yields += 1;
+            }
+        });
+        assert_eq!((pulls, yields), (1, 1));
+    }
+
+    #[test]
+    fn await_only_child_adapts_its_iterator_and_defers_filter_and_projection() {
+        let graph = SourceGraph::single(
+            "async def read(rows, keep, parse):\n    return (await parse(x) for x in rows if await keep(x))\n",
+        )
+        .unwrap();
+        let module = &graph.modules[graph.entry];
+        let literals = values::ModuleSource::new(module);
+        let (_, sites) = prepare_expression_sites(
+            &module.parsed.syntax().body,
+            literals.context(&module.source),
+        );
+        let [child] = sites.values().collect::<Vec<_>>()[..] else {
+            panic!("expected one prepared generator");
+        };
+        assert!(child.is_async);
+        let mut awaits = 0;
+        let mut yields = 0;
+        let mut adapted = 0;
+        ir::walk_expressions(&child.body.function.body, &mut |expr| match &expr.kind {
+            ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::LoopCursor), _) => {
+                adapted += 1;
+            }
+            ExprKind::Builtin(Builtin::RegisteredSuspend(ir::SuspendValue::Await, _), _) => {
+                awaits += 1;
+            }
+            ExprKind::Builtin(Builtin::RegisteredSuspend(ir::SuspendValue::Yield, _), _) => {
+                yields += 1;
+            }
+            _ => {}
+        });
+        assert_eq!((adapted, awaits, yields), (1, 2, 1));
+    }
 
     #[test]
     fn nested_generators_starting_at_one_offset_reference_distinct_children() {

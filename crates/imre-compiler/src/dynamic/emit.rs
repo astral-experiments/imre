@@ -840,7 +840,7 @@ enum Body<'a> {
     CheckedExpression(&'a crate::frontend::RegisteredFunction),
     Expression(&'a ast::Expr),
     AliasEvaluator(AliasValue<'a>),
-    CheckedGenerator(TextRange, &'a crate::frontend::RegisteredFunction),
+    CheckedGenerator(TextRange, &'a crate::frontend::RegisteredGenerator),
     Generator(TextRange, &'a imre_ast::comprehension::Plan<'a>),
 }
 
@@ -854,6 +854,7 @@ impl Body<'_> {
         match self {
             Self::GeneratorFunction(_, flags) => *flags,
             Self::Generator(_, plan) if plan.body_suspends() => ASYNC_GENERATOR,
+            Self::CheckedGenerator(_, child) if child.is_async => ASYNC_GENERATOR,
             Self::Generator(..) | Self::CheckedGenerator(..) => GENERATOR,
             _ => 0,
         }
@@ -1071,10 +1072,7 @@ impl SourceMap<'_> {
             self.unit,
             self.module_start,
         );
-        frame.async_generator = matches!(
-            body,
-            Body::GeneratorFunction(_, imre_ast::code_flags::ASYNC_GENERATOR)
-        );
+        frame.async_generator = body.generator_flags() == imre_ast::code_flags::ASYNC_GENERATOR;
         if let Body::Namespace(_) = body {
             frame.class_locals = Some(
                 self.scopes.classes[&start.expect("class definition")]
@@ -1172,7 +1170,7 @@ impl SourceMap<'_> {
                 });
             }
             Body::CheckedExpression(checked)
-            | Body::CheckedGenerator(_, checked)
+            | Body::CheckedGenerator(_, crate::frontend::RegisteredGenerator { body: checked, .. })
             | Body::AliasEvaluator(AliasValue::Checked(checked)) => {
                 f.prepare_checked_sites(&checked.function.body);
                 RegisteredFrame::checked_body(&mut f.frame, checked, &f.sites);

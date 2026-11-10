@@ -13,8 +13,9 @@ impl Function<'_, '_> {
     pub(super) fn prepared_generator(&mut self, generator: &ast::ExprGenerator) -> String {
         self.iteration_result(|f| {
             let outer = imre_ast::comprehension::outer_clause(&generator.generators);
-            let cursor = f.iteration_cursor(&outer.iter, false);
             let site = generator.range();
+            let acquire = f.source.generators[&site].outer_operation(outer);
+            let cursor = f.iteration_input(&outer.iter, acquire.runtime_op());
             f.prepare_generator(site);
             let scope = f.scope.clone();
             f.sites.bind_generator(&mut f.frame, site, &scope, &cursor)

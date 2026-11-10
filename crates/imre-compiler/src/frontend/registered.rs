@@ -1511,6 +1511,7 @@ struct SourceScope<'a> {
     names: HashMap<String, usize>,
     namespaces: HashMap<usize, LocalBinding>,
     comprehension: Option<eager::Namespace>,
+    generator_expression: bool,
     locals: Vec<Type>,
     loop_scope: LoopScope,
     suspending_operands: bool,
@@ -1586,6 +1587,7 @@ impl<'a> SourceScope<'a> {
             names: HashMap::new(),
             namespaces: HashMap::new(),
             comprehension: None,
+            generator_expression: false,
             locals: Vec::new(),
             loop_scope: LoopScope::Outside,
             suspending_operands: false,
@@ -1864,10 +1866,10 @@ impl SourceScope<'_> {
         let value = self.ordinary_operand(iterable)?;
         let (op, kind) = match pull {
             Some(pull) => (
-                Builtin::RegisteredAsyncIter(iterable.range()),
+                Builtin::RegisteredIter(ir::IteratorOp::Async(iterable.range())),
                 ir::IterNextKind::Async(pull),
             ),
-            None => (Builtin::RegisteredIter, ir::IterNextKind::Generic),
+            None => (Builtin::RegisteredIter(ir::IteratorOp::Loop), ir::IterNextKind::Generic),
         };
         let cursor = operation(op, Type::PythonObject, vec![value]);
         Some(pipelines::Prepared::pull_cursor(
@@ -1922,7 +1924,7 @@ impl SourceScope<'_> {
             .ok()?
         } else if matches!(expr, ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_)) {
             self.eager_comprehension(expr)?
-        } else if self.comprehension.is_some()
+        } else if (self.comprehension.is_some() || self.generator_expression)
             && matches!(self.kind, RegisteredScope::Function { is_async: true })
             && let ast::Expr::Await(awaited) = expr
         {
@@ -3729,7 +3731,7 @@ mod tests {
         let mut opens = 0;
         let mut calls = 0;
         ir::walk_expressions(&function.body, &mut |expr| match &expr.kind {
-            ExprKind::Builtin(Builtin::RegisteredIter, _) => opens += 1,
+            ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::Loop), _) => opens += 1,
             ExprKind::Builtin(Builtin::RegisteredCall(..), _) => calls += 1,
             _ => {}
         });

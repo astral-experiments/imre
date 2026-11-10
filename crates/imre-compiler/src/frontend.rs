@@ -4423,7 +4423,7 @@ impl<'a> Checker<'a> {
             };
             let cursor = Expr {
                 ty: Type::PythonObject,
-                kind: ExprKind::Builtin(Builtin::RegisteredIter, vec![value]),
+                kind: ExprKind::Builtin(Builtin::RegisteredIter(ir::IteratorOp::Loop), vec![value]),
             };
             return Ok(Iteration::Prepared(self.prepare_cursor(cursor, element)));
         }
