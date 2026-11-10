@@ -93,7 +93,9 @@ pub(crate) fn supports(checked: &RegisteredFunction) -> bool {
                         ready,
                     } => {
                         checked.function.locals[*iterator] == Type::PythonObject
-                            && value.is_none_or(|slot| *kind == ir::IterNextKind::Generic && private.contains(&slot))
+                            && value.is_none_or(|slot| {
+                                *kind == ir::IterNextKind::Generic && private.contains(&slot)
+                            })
                             && [iterator, key, ready]
                                 .into_iter()
                                 .all(|slot| private.contains(slot))
@@ -351,7 +353,12 @@ pub(crate) fn emit_prepared_suite<'a, 'p>(
     owner: &mut dyn PreparedSuiteEmitter<'a, 'p>,
     suite: &'p crate::frontend::RegisteredSuite,
 ) {
-    emit_checked_region(owner, &suite.checked, &suite.residual, FrameInputs::Handles(&[]));
+    emit_checked_region(
+        owner,
+        &suite.checked,
+        &suite.residual,
+        FrameInputs::Handles(&[]),
+    );
 }
 
 fn emit_checked_region<'a, 'p>(
@@ -432,13 +439,6 @@ impl<'a, 'p> FrameOwner<'_, 'a, 'p> {
             Self::Registered(code, sites) => (code, sites),
             Self::Prepared(owner) => owner.frame_and_sites(None),
         }
-    }
-
-    fn prepared(&mut self) -> &mut dyn PreparedSuiteEmitter<'a, 'p> {
-        let Self::Prepared(owner) = self else {
-            unreachable!("physical inputs and suites require their enclosing emitter")
-        };
-        &mut **owner
     }
 
     fn prepared_owner(&mut self) -> &mut dyn PreparedSuiteEmitter<'a, 'p> {
@@ -728,7 +728,7 @@ impl Frame<'_, '_, '_> {
             FrameInputs::Region(_) | FrameInputs::Statement(_) | FrameInputs::Handles([]) => {}
             FrameInputs::Handles(inputs) => return inputs[slot].clone(),
             FrameInputs::Prepared(inputs) => {
-                return emit_operand(self.code.prepared(), inputs.operand(slot), false);
+                return emit_operand(self.code.prepared_owner(), inputs.operand(slot), false);
             }
         }
         if self
@@ -953,7 +953,8 @@ impl Frame<'_, '_, '_> {
             .is_some_and(|target| target.edges.exhausted != target.edges.done);
         if let Some(second) = second {
             let available = self.code.name("b");
-            self.code.next_item_pair(&cursor, header, has_else, &available, &done);
+            self.code
+                .next_item_pair(&cursor, header, has_else, &available, &done);
             self.code.label(&available);
             self.code.store_item_pair([key, second]);
         } else {
@@ -1728,67 +1729,12 @@ impl RegisteredFrame<'_, '_> {
         self.restore_checked_slots(enclosing);
     }
 
-    /// Initialize the inputs before running the target stores with their checked cleanup.
-    pub(crate) fn checked_binding(
-        &mut self,
-        checked: &RegisteredFunction,
-        sites: &CheckedSites,
-        bind: impl FnOnce(&mut Self),
-    ) {
-        let Some(enclosing) = self.enter_checked_slots(checked.region()) else {
-            return;
-        };
-        bind(self);
-        self.checked_block(&checked.function.body, checked, sites);
-        self.restore_checked_slots(enclosing);
-    }
-
     fn store_item_pair(&mut self, items: [usize; 2]) {
         let key = self.value("load i64, ptr %live");
         let slot = self.value("getelementptr i64, ptr %live, i64 1");
         let value = self.value(&format!("load i64, ptr {slot}"));
         self.store_private(items[0], &key);
         self.store_private(items[1], &value);
-    }
-
-    /// A direct pull roots both projections in the same slots as ordinary unpacking.
-    pub(crate) fn bind_item_pair(
-        &mut self,
-        row: &str,
-        plain_items: &str,
-        entered: usize,
-        pair: &crate::frontend::PairBinding,
-    ) {
-        let direct = self.name("b");
-        let ordinary = self.name("b");
-        let bind = self.name("b");
-        self.branch(plain_items, &direct, &ordinary);
-
-        self.label(&direct);
-        self.store_item_pair(pair.items);
-        self.store_private(pair.ordinary, &permanent::FALSE.to_string());
-        self.jump(&bind);
-
-        self.label(&ordinary);
-        self.store_private(entered, row);
-        self.store_private(pair.ordinary, &permanent::TRUE.to_string());
-        self.jump(&bind);
-        self.label(&bind);
-    }
-
-    pub(crate) fn checked_block(
-        &mut self,
-        statements: &[Statement],
-        checked: &RegisteredFunction,
-        sites: &CheckedSites,
-    ) {
-        CheckedBody::registered(Frame {
-            code: FrameOwner::Registered(self, sites),
-            names: Some(&checked.local_names),
-            fixed_sites: None,
-            inputs: FrameInputs::Handles(&[]),
-        })
-        .emit_block(statements);
     }
 
     pub(crate) fn checked_body(&mut self, checked: &RegisteredFunction, sites: &CheckedSites) {

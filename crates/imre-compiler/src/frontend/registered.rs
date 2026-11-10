@@ -1008,8 +1008,6 @@ pub(crate) enum SourceEffect {
     Region(Box<PreparedRegion>),
     /// Patterns, guards and case suites belong to the same evaluation of the subject.
     Match(TextRange, Box<patterns::SourceMatch>),
-    /// A loop whose checked lowering left one or more physical inputs or suites.
-    For(Box<PreparedFor>),
 }
 
 fn loop_transfer(stmt: &ast::Stmt) -> Option<Statement> {
@@ -1028,6 +1026,12 @@ pub(crate) struct PreparedRegion {
     pub(crate) suites: Vec<RegisteredSuite>,
 }
 
+fn bind_operand(operands: &mut Vec<PhysicalOperand>, value: PhysicalOperand, ty: Type) -> Expr {
+    let index = operands.len();
+    operands.push(value);
+    Expr::registered_input(index, ty)
+}
+
 impl PreparedRegion {
     pub(crate) fn child_suite(&self, body: &[Statement]) -> Option<&RegisteredSuite> {
         let [
@@ -1042,19 +1046,17 @@ impl PreparedRegion {
         Some(&self.suites[*index])
     }
 
-    fn new(checked: RegisteredFunction) -> Self {
+    fn new(checked: RegisteredFunction, operands: Vec<PhysicalOperand>) -> Self {
         Self {
             checked,
-            operands: Vec::new(),
+            operands,
             suites: Vec::new(),
             terminates: false,
         }
     }
 
-    pub(crate) fn operand(&mut self, operand: PhysicalOperand, ty: Type) -> Expr {
-        let index = self.operands.len();
-        self.operands.push(operand);
-        Expr::registered_input(index, ty)
+    pub(crate) fn operand(&mut self, value: PhysicalOperand, ty: Type) -> Expr {
+        bind_operand(&mut self.operands, value, ty)
     }
 
     fn child(&mut self, suite: RegisteredSuite) -> Vec<Statement> {
@@ -1066,25 +1068,6 @@ impl PreparedRegion {
             vec![],
         ))]
     }
-}
-
-pub(crate) struct PreparedFor {
-    pub(crate) range: TextRange,
-    pub(crate) acquire: ir::IteratorOp,
-    pub(crate) pull: ir::IterNextKind,
-    pub(crate) iterable: PhysicalOperand,
-    pub(crate) target: PhysicalBinding,
-    pub(crate) body: RegisteredSuite,
-    pub(crate) otherwise: Option<RegisteredSuite>,
-}
-
-pub(crate) enum PhysicalBinding {
-    Checked {
-        entered: usize,
-        binding: Box<RegisteredFunction>,
-        pair: Option<unpacking::PairBinding>,
-    },
-    Refused(TextRange, &'static str),
 }
 
 pub(crate) type PhysicalOperand =
@@ -1375,12 +1358,9 @@ impl<'a> SuitePreparation<'a> {
                     ast::Stmt::While(loop_) => {
                         Ok(self.prepare_while(loop_, kind, child_selection, suspended))
                     }
-                    ast::Stmt::For(loop_) => Ok(SourceEffect::For(Box::new(self.prepare_for(
-                        loop_,
-                        kind,
-                        child_selection,
-                        suspended,
-                    )))),
+                    ast::Stmt::For(loop_) => {
+                        self.prepare_for(loop_, kind, child_selection, suspended)
+                    }
                     ast::Stmt::Try(protected) => Ok(self.prepare_try(
                         protected,
                         checkpoint(stmt),
@@ -1510,31 +1490,6 @@ impl<'a> SuitePreparation<'a> {
         }
     }
 
-    fn physical_binding(
-        &mut self,
-        target: &ast::Expr,
-        kind: RegisteredScope,
-        pair_pull: bool,
-    ) -> PhysicalBinding {
-        let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
-        scope.report_child_refusals = true;
-        match scope.input_binding(target, pair_pull) {
-            Ok((ir::ContextBinding { entered, body }, pair)) => PhysicalBinding::Checked {
-                entered,
-                binding: Box::new(scope.finish(body)),
-                pair,
-            },
-            Err(()) => {
-                let (range, reason) = scope.refusal.unwrap_or((
-                    target.range(),
-                    "cannot compile this assignment target ahead of time",
-                ));
-                self.refusal.get_or_insert((range, reason));
-                PhysicalBinding::Refused(range, reason)
-            }
-        }
-    }
-
     fn physical_suite(
         &mut self,
         stmts: &[ast::Stmt],
@@ -1549,7 +1504,7 @@ impl<'a> SuitePreparation<'a> {
 
     fn region(&self, kind: RegisteredScope) -> PreparedRegion {
         let scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
-        PreparedRegion::new(scope.finish(Vec::new()))
+        PreparedRegion::new(scope.finish(Vec::new()), Vec::new())
     }
 
     fn prepare_if(
@@ -1591,7 +1546,11 @@ impl<'a> SuitePreparation<'a> {
             Type::None,
             vec![],
         )));
-        region.checked.function.body.extend(statements::if_arms(arms, otherwise));
+        region
+            .checked
+            .function
+            .body
+            .extend(statements::if_arms(arms, otherwise));
         SourceEffect::Region(Box::new(region))
     }
 
@@ -1611,7 +1570,7 @@ impl<'a> SuitePreparation<'a> {
                 handler.name.as_ref().map(|name| scope.slot(name.as_str()))
             })
             .collect();
-        let mut region = PreparedRegion::new(scope.finish(vec![checkpoint]));
+        let mut region = PreparedRegion::new(scope.finish(vec![checkpoint]), Vec::new());
 
         // Preserve the first refusal from the body, entered else, handlers and finally.
         let body = self.physical_suite(&stmt.body, kind, selection, suspended);
@@ -1687,7 +1646,7 @@ impl<'a> SuitePreparation<'a> {
                     .transpose()
             })
             .collect();
-        let mut region = PreparedRegion::new(scope.finish(Vec::new()));
+        let mut region = PreparedRegion::new(scope.finish(Vec::new()), Vec::new());
         let mut managers = Vec::with_capacity(stmt.items.len());
         let mut refused_binding = None;
         for (index, (item, binding)) in stmt.items.iter().zip(bindings).enumerate() {
@@ -1764,7 +1723,11 @@ impl<'a> SuitePreparation<'a> {
             region.terminates = disabled && !suite.falls_through;
             region.child(suite)
         };
-        region.checked.function.body.push(Statement::While(test, body, otherwise));
+        region
+            .checked
+            .function
+            .body
+            .push(Statement::While(test, body, otherwise));
         SourceEffect::Region(Box::new(region))
     }
 
@@ -1774,20 +1737,35 @@ impl<'a> SuitePreparation<'a> {
         kind: RegisteredScope,
         selection: SuiteSelection,
         suspended: bool,
-    ) -> PreparedFor {
+    ) -> StdResult<SourceEffect, OperandRefusal> {
         let iterable = self.physical_operand(&loop_.iter, kind, selection, suspended);
-        let (acquire, pull) = iteration_protocol(loop_.iter.range(), for_pull(loop_));
-        let target = self.physical_binding(&loop_.target, kind, pull == ir::IterNextKind::Generic);
-        PreparedFor {
-            range: loop_.range(),
-            acquire,
-            pull,
-            iterable,
-            target,
-            body: self.physical_suite(&loop_.body, kind, selection, suspended),
-            otherwise: (!loop_.orelse.is_empty())
-                .then(|| self.physical_suite(&loop_.orelse, kind, selection, suspended)),
-        }
+        let mut operands = Vec::new();
+        let iterable = bind_operand(&mut operands, iterable, Type::PythonObject);
+        let mut scope = SourceScope::new(kind, self.source, self.operations, &self.sites);
+        let mut input = scope.cursor_input(iterable, loop_.iter.range(), for_pull(loop_));
+        let binding = scope
+            .with_binding_operands(|scope| scope.for_binding(loop_, &mut input))
+            .map_err(|()| {
+                scope.refusal.unwrap_or((
+                    loop_.target.range(),
+                    "cannot compile this assignment target ahead of time",
+                ))
+            })?;
+        let mut region = PreparedRegion::new(scope.finish(Vec::new()), operands);
+        let body = region.child(self.physical_suite(&loop_.body, kind, selection, suspended));
+        let otherwise = if loop_.orelse.is_empty() {
+            Vec::new()
+        } else {
+            region.child(self.physical_suite(&loop_.orelse, kind, selection, suspended))
+        };
+        let mut statements = vec![Statement::Expr(operation(
+            Builtin::RegisteredStatement(loop_.range(), None),
+            Type::None,
+            Vec::new(),
+        ))];
+        statements.extend(input.for_suite(binding, body, otherwise, Vec::new()));
+        region.checked.function.body = statements;
+        Ok(SourceEffect::Region(Box::new(region)))
     }
 
     fn lower<'s>(
@@ -1904,11 +1882,8 @@ impl<'a> SuitePreparation<'a> {
                 continue;
             }
             let mut inputs = Vec::new();
-            let mut operand = |expr: &ast::Expr| {
-                let slot = input_slot(inputs.len());
-                inputs.push(frame_value(expr));
-                slot
-            };
+            let mut operand =
+                |expr: &ast::Expr| bind_operand(&mut inputs, frame_value(expr), Type::PythonObject);
             let output = match stmt {
                 ast::Stmt::Return(ret) => Some(Statement::Return(
                     ret.value
@@ -1971,7 +1946,10 @@ impl<'a> SuitePreparation<'a> {
                         // The suite owns the name binding. Transfer the in-place result to it
                         // after the original target and RHS have both been evaluated.
                         let slot = scope.hidden(Type::PythonObject);
-                        let result = unpacking::take_pattern_temporary(Expr::local(slot, Type::PythonObject), slot);
+                        let result = unpacking::take_pattern_temporary(
+                            Expr::local(slot, Type::PythonObject),
+                            slot,
+                        );
                         binding = Some(scope.store(name.id.as_str(), result));
                         (
                             Statement::Assign(
@@ -2372,16 +2350,7 @@ impl statements::StatementLowering for SourceScope<'_> {
         let mut input = self
             .creating_iterable(|scope| scope.iteration_input(&loop_.iter, for_pull(loop_)))
             .ok_or(())?;
-        let (binding, pair) = unpacking::bind_input(
-            self,
-            &loop_.target,
-            Expr::local(input.value, Type::PythonObject),
-            None,
-            !loop_.is_async,
-        )?;
-        if let Some(pair) = pair {
-            input.project_items(pair);
-        }
+        let binding = self.for_binding(loop_, &mut input)?;
         let body = self.in_loop(LoopScope::WithCursor, |scope| scope.suite(&loop_.body))?;
         let otherwise = self.suite(&loop_.orelse)?;
         Ok((input.for_suite(binding, body, otherwise, Vec::new()), true))
@@ -2948,11 +2917,7 @@ impl SourceScope<'_> {
         self.block(stmts).map(|(body, _)| body)
     }
 
-    fn input_binding(
-        &mut self,
-        target: &ast::Expr,
-        pair_pull: bool,
-    ) -> StdResult<(ir::ContextBinding, Option<unpacking::PairBinding>), ()> {
+    fn with_binding(&mut self, target: &ast::Expr) -> StdResult<ir::ContextBinding, ()> {
         let slot = self.hidden(Type::PythonObject);
         let value = Expr::local(slot, Type::PythonObject);
         // Unpacking consumes the container before any individual target can suspend.
@@ -2961,23 +2926,16 @@ impl SourceScope<'_> {
         } else {
             value
         };
-        let (body, pair) = self.with_binding_operands(|scope| {
-            unpacking::bind_input(scope, target, value, None, pair_pull)
+        let (body, _) = self.with_binding_operands(|scope| {
+            unpacking::bind_input(scope, target, value, None, false)
         })?;
-        let mut clear = vec![slot];
-        if let Some(pair) = &pair {
-            clear.push(pair.ordinary);
-        }
-        let binding = ir::ContextBinding {
+        Ok(ir::ContextBinding {
             entered: slot,
-            body: vec![Statement::Scope { body, clear }],
-        };
-        Ok((binding, pair))
-    }
-
-    fn with_binding(&mut self, target: &ast::Expr) -> StdResult<ir::ContextBinding, ()> {
-        self.input_binding(target, false)
-            .map(|(binding, _)| binding)
+            body: vec![Statement::Scope {
+                body,
+                clear: vec![slot],
+            }],
+        })
     }
 
     fn with_items(
@@ -3095,24 +3053,46 @@ impl SourceScope<'_> {
         Ok((binding, body))
     }
 
+    fn for_binding(
+        &mut self,
+        loop_: &ast::StmtFor,
+        input: &mut pipelines::Prepared,
+    ) -> StdResult<Vec<Statement>, ()> {
+        let (binding, pair) = unpacking::bind_input(
+            self,
+            &loop_.target,
+            Expr::local(input.value, Type::PythonObject),
+            None,
+            !loop_.is_async,
+        )?;
+        if let Some(pair) = pair {
+            input.project_items(pair);
+        }
+        Ok(binding)
+    }
+
     fn iteration_input(
         &mut self,
         iterable: &ast::Expr,
         pull: Option<ir::AsyncPull>,
     ) -> Option<pipelines::Prepared> {
         let value = self.ordinary_operand(iterable)?;
-        let (acquire, kind) = iteration_protocol(iterable.range(), pull);
+        Some(self.cursor_input(value, iterable.range(), pull))
+    }
+
+    fn cursor_input(
+        &mut self,
+        value: Expr,
+        range: TextRange,
+        pull: Option<ir::AsyncPull>,
+    ) -> pipelines::Prepared {
+        let (acquire, kind) = iteration_protocol(range, pull);
         let cursor = operation(
             Builtin::RegisteredIter(acquire),
             Type::PythonObject,
             vec![value],
         );
-        Some(pipelines::Prepared::pull_cursor(
-            cursor,
-            Type::PythonObject,
-            kind,
-            |ty| self.hidden(ty),
-        ))
+        pipelines::Prepared::pull_cursor(cursor, Type::PythonObject, kind, |ty| self.hidden(ty))
     }
 
     /// The activation owns the complete value before a return, discard or store.
@@ -5425,7 +5405,12 @@ mod tests {
             }
         });
         assert_eq!(cursors.len(), 1);
-        assert!(checked.region().private_slots().contains(cursors.first().unwrap()));
+        assert!(
+            checked
+                .region()
+                .private_slots()
+                .contains(cursors.first().unwrap())
+        );
         assert_eq!(suspensions, expected);
     }
 
