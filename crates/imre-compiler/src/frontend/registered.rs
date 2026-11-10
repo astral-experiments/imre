@@ -1735,8 +1735,12 @@ impl statements::StatementLowering for SourceScope<'_> {
                 true,
             )),
             ast::Stmt::While(loop_) => {
-                let condition = self.ordinary_operand(&loop_.test).ok_or(())?;
-                let body = self.in_loop(LoopScope::While, |scope| scope.suite(&loop_.body))?;
+                let condition = self.while_condition(&loop_.test).ok_or(())?;
+                let body = if matches!(&*loop_.test, ast::Expr::BooleanLiteral(value) if !value.value) {
+                    Vec::new()
+                } else {
+                    self.in_loop(LoopScope::While, |scope| scope.suite(&loop_.body))?
+                };
                 let otherwise = self.suite(&loop_.orelse)?;
                 Ok((vec![Statement::While(condition, body, otherwise)], true))
             }
@@ -2273,6 +2277,10 @@ impl SourceScope<'_> {
 
     fn operand(&mut self, expr: &ast::Expr) -> Option<Expr> {
         self.lower_operand(expr, true)
+    }
+
+    fn while_condition(&mut self, test: &ast::Expr) -> Option<Expr> {
+        self.with_suspending_operands(|scope| scope.operand(test))
     }
 
     fn with_suspending_operands<T>(&mut self, lower: impl FnOnce(&mut Self) -> T) -> T {

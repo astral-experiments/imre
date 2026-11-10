@@ -3098,6 +3098,24 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
+    fn suspended_while_keeps_its_condition_and_suites_after_erasure() {
+        let source = "def pump():\n    while (yield 'test'):\n        yield 'body'\n    else:\n        yield 'else'\n";
+        let mut prepared = PreparedBody::module(
+            "example", Path::new("example.py"), source, 0, ModuleOrigin::Program(None),
+        ).unwrap();
+        let before = prepared.standalone().unwrap().unwrap();
+        let def = prepared.syntax.as_mut().unwrap().to_mut()[0].as_function_def_stmt_mut().unwrap();
+        assert!(prepared.source.function_bodies[&def.start()].fully_checked());
+        let loop_ = def.body[0].as_while_stmt_mut().unwrap();
+        *loop_.test = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+            range: loop_.test.range(), node_index: Default::default(),
+        });
+        loop_.body.clear();
+        loop_.orelse.clear();
+        assert_eq!(prepared.standalone().unwrap().unwrap(), before);
+    }
+
+    #[test]
     fn suspended_definitions_use_native_entries_in_each_module_origin() {
         let source = "def items(xs):\n    yield 1\n    yield from xs\npark = lambda: (yield 2)\nresume = lambda: 1 + (yield 3)\nasync def more(xs):\n    async for x in xs:\n        yield x\nasync def consume(f):\n    return await f()\ndef defaults():\n    yield 0\n    def nested(first=1, second=(yield 4)):\n        return second\n    return nested\n";
         for bundled in [false, true] {
