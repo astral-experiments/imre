@@ -1274,7 +1274,7 @@ impl Frame<'_, '_, '_> {
                 });
                 if matches!(self.inputs, FrameInputs::Statement(_)) {
                     // Report a refused header input before compiling the nested body.
-                    self.code.prepared().place_definition(site.start());
+                    self.code.prepared_owner().place_definition(site.start());
                 }
                 let (code, sites) = self.code.parts();
                 sites.definition(code, site.start(), &decorators, &defaults, class_arguments)
