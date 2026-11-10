@@ -1829,7 +1829,7 @@ impl<'a> SuitePreparation<'a> {
                     let slots = scope.locals.len();
                     if let Some(values) = inputs
                         .clone()
-                        .map(|input| input.lower(&mut scope))
+                        .map(|input| scope.with_binding_operands(|scope| input.lower(scope)))
                         .collect()
                     {
                         body.push(Statement::Expr(operation(op, Type::None, values)));
@@ -2176,7 +2176,7 @@ impl statements::StatementLowering for SourceScope<'_> {
                     let matcher = match handler.type_.as_deref() {
                         None => ir::ExceptionMatcher::Categories(Vec::new()),
                         Some(class) => {
-                            let operand = Box::new(self.ordinary_operand(class).ok_or(())?);
+                            let operand = Box::new(self.frame_value(class).ok_or(())?);
                             if region.is_star {
                                 ir::ExceptionMatcher::Subgroup(handler.range(), operand)
                             } else {
@@ -2250,7 +2250,7 @@ impl statements::StatementLowering for SourceScope<'_> {
                     .map(|target| {
                         let (op, inputs) = deletion(target);
                         let values = inputs
-                            .map(|input| input.lower(self))
+                            .map(|input| self.with_binding_operands(|scope| input.lower(scope)))
                             .collect::<Option<_>>()?;
                         Some(Statement::Expr(operation(op, Type::None, values)))
                     })
@@ -2760,7 +2760,7 @@ impl SourceScope<'_> {
             let guard = case
                 .guard
                 .as_deref()
-                .map(|value| self.operand(value).map(truth).ok_or(()))
+                .map(|value| self.condition_operand(value).map(truth).ok_or(()))
                 .transpose()?;
             exhaustive = guard.is_none() && case.pattern.is_irrefutable();
             let (body, continues) = self.block(&case.body)?;

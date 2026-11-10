@@ -1597,20 +1597,33 @@ mod tests {
             "        except ValueError:\n",
             "            pass",
         );
-        let mixed = "        del sink[(yield 1)]";
+        let deletion = "        del sink[(yield 1)]";
+        let mixed = "        with manager((yield 1)): pass";
         let annotated = "        sink[0]: int = 1";
         let checked_default = "        def resume(answer=(yield 1)):\n            return answer";
         let checked = "        publish(x, y)";
         let pair_header = "def f(rows):\n    for x, y in rows:";
         for (header, body, guarded) in [
+            (pair_header, deletion, false),
             (pair_header, mixed, true),
             ("def f():\n    for x, y in (yield 'rows'):", checked, false),
             (pair_header, annotated, false),
             (pair_header, checked_raise, false),
             (pair_header, checked, false),
             (pair_header, checked_default, false),
+            (
+                "def f(table):\n    for x in table.items():",
+                deletion,
+                false,
+            ),
             ("def f(table):\n    for x in table.items():", mixed, false),
+            ("def f(rows):\n    for x, *ys in rows:", deletion, false),
             ("def f(rows):\n    for x, *ys in rows:", mixed, false),
+            (
+                "def f(manager):\n    with manager as (x, y):",
+                deletion,
+                false,
+            ),
             ("def f(manager):\n    with manager as (x, y):", mixed, false),
             (
                 "async def f(rows):\n    async for x, y in rows:",
@@ -1630,6 +1643,9 @@ mod tests {
             let plan = module.source.function_bodies[&ruff_text_size::TextSize::new(0)]
                 .suite()
                 .expect("prepared function suite");
+            if body == deletion {
+                assert!(plan.fully_checked(), "{source}");
+            }
             if body == annotated {
                 assert!(plan.fully_checked() && module.syntax.is_none(), "{source}");
             }
@@ -1689,40 +1705,51 @@ mod tests {
 
     #[test]
     fn mixed_named_entry_uses_its_stored_suite_after_erasing_the_declaration_body() {
-        let mut module = PreparedBody::module_with_syntax(
-            "example",
-            Path::new("example.py"),
-            "def make():
+        for (update, checked) in [
+            ("del sink[(yield 1)]", true),
+            ("with manager((yield 1)): pass", false),
+        ] {
+            let source = format!(
+                "def make():
     def define[T]():
         @retain
         def twice[U](value):
             return 2 * value
     try:
-        del sink[(yield 1)]
+        {update}
     except ValueError:
         pass
     return define
-",
-            0,
-            ModuleOrigin::Program(None),
-        )
-        .unwrap();
-        let before = module.standalone().unwrap();
-        let def = module.syntax.as_mut().unwrap().to_mut()[0]
-            .as_function_def_stmt_mut()
+"
+            );
+            let mut module = PreparedBody::module_with_syntax(
+                "example",
+                Path::new("example.py"),
+                &source,
+                0,
+                ModuleOrigin::Program(None),
+            )
             .unwrap();
-        let start = def.start();
-        assert!(!module.source.function_bodies[&start].fully_checked());
-        def.body.clear();
-        assert_eq!(module.standalone().unwrap(), before);
+            let before = module.standalone().unwrap();
+            let def = module.syntax.as_mut().unwrap().to_mut()[0]
+                .as_function_def_stmt_mut()
+                .unwrap();
+            let start = def.start();
+            assert_eq!(
+                module.source.function_bodies[&start].fully_checked(),
+                checked
+            );
+            def.body.clear();
+            assert_eq!(module.standalone().unwrap(), before);
 
-        let suite = test_function_suite(&mut module.source, start);
-        let Some(crate::ir::Statement::Return(result)) = suite.checked.function.body.last_mut()
-        else {
-            panic!("expected the checked return after the nested declaration");
-        };
-        *result = crate::ir::Expr::none();
-        assert_ne!(module.standalone().unwrap(), before);
+            let suite = test_function_suite(&mut module.source, start);
+            let Some(crate::ir::Statement::Return(result)) = suite.checked.function.body.last_mut()
+            else {
+                panic!("expected the checked return after the nested declaration");
+            };
+            *result = crate::ir::Expr::none();
+            assert_ne!(module.standalone().unwrap(), before);
+        }
     }
 
     #[test]
@@ -3420,11 +3447,49 @@ mod tests {
     }
 
     #[test]
+    fn a_checked_match_renders_its_suspended_guard_and_deletion_after_source_erasure() {
+        let source = concat!(
+            "async def evaluate(seed):\n",
+            "    match sink(await gate(), second=left() + table()[(lambda: seed)()]):\n",
+            "        case prior if decline(prior): return prior\n",
+            "        case value if accepted(await pause(value)): return value\n",
+            "        case item: del table[await key(item)]\n",
+            "state: int\n",
+        );
+        let mut prepared = PreparedBody::module_with_syntax(
+            "example",
+            Path::new("example.py"),
+            source,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let function = prepared.syntax.as_ref().unwrap()[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let suite = prepared.source.function_bodies[&function.start()]
+            .suite()
+            .unwrap();
+        assert!(suite.fully_checked());
+        crate::verify::registered(suite.checked.region()).unwrap();
+        let original = prepared.standalone().unwrap();
+        prepared.syntax.as_mut().unwrap().to_mut()[0]
+            .as_function_def_stmt_mut()
+            .unwrap()
+            .body
+            .clear();
+        assert_eq!(prepared.standalone().unwrap(), original);
+    }
+
+    #[test]
     fn checked_and_physical_matches_own_their_suspended_subject() {
+        let selector = "\n            try:\n                raise LookupError(item)\n            except (await Select(item)):\n                return item";
         for (body, physical) in [
             ("return item", false),
             ("raise await failure(item)", false),
-            ("del table[await key(item)]", true),
+            ("del table[await key(item)]", false),
+            (selector, false),
+            ("\n            with manager(await key(item)): pass", true),
         ] {
             let source = format!(
                 "async def evaluate(seed):\n    match sink(await gate(), second=left() + table()[(lambda: seed)()]):\n        case prior if decline(prior): return prior\n        case item: {body}\nstate: int\n"
@@ -3450,8 +3515,24 @@ mod tests {
                 .unwrap();
             function.body.clear();
             assert_eq!(prepared.standalone().unwrap(), original);
-            if physical {
-                let suite = test_function_suite(&mut prepared.source, start);
+            let suite = test_function_suite(&mut prepared.source, start);
+            if body == selector {
+                let [_, crate::ir::Statement::Match(_, cases), ..] =
+                    &mut suite.checked.function.body[..]
+                else {
+                    panic!("expected a checked match")
+                };
+                let [_, crate::ir::Statement::Try { handlers, .. }] = &mut cases[1].body[..] else {
+                    panic!("expected a checked try in the capture case")
+                };
+                let crate::ir::ExceptionMatcher::Object(range, operand) = &mut handlers[0].matcher
+                else {
+                    panic!("expected an exception-class operand")
+                };
+                assert_eq!(&source[*range], "await Select(item)");
+                **operand = crate::ir::Expr::none();
+                assert_ne!(prepared.standalone().unwrap(), original);
+            } else if physical {
                 let crate::frontend::SourceEffect::Match(_, site) = &mut suite.residual[0].effect
                 else {
                     panic!("expected a mixed match")
