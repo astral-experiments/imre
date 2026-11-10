@@ -547,6 +547,12 @@ pub(crate) fn literal_membership(
     ))
 }
 
+/// The Python operand order is also used when a child still needs its source emitter.
+pub(crate) fn binary_operands(node: &ast::Expr) -> Option<(Binary, [&ast::Expr; 2])> {
+    let binary = node.as_bin_op_expr()?;
+    Some((binary.op.into(), [&binary.left, &binary.right]))
+}
+
 /// Select one registered-frame operation before requesting its operands in source order.
 pub(super) fn operation<E>(
     node: &ast::Expr,
@@ -555,6 +561,12 @@ pub(super) fn operation<E>(
     dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
     mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
 ) -> StdResult<Option<Expr>, E> {
+    if let Some((op, [left, right])) = binary_operands(node) {
+        return Ok(Some(Expr {
+            ty: Type::PythonObject,
+            kind: ExprKind::Binary(op, Box::new(child(left)?), Box::new(child(right)?)),
+        }));
+    }
     if let Some((items, display)) = display_elements(node) {
         let values = display_operands(items, source, &mut child)?;
         return Ok(Some(Expr {
@@ -614,11 +626,6 @@ pub(super) fn operation<E>(
             Box::new(child(&branch.test)?),
             Box::new(child(&branch.body)?),
             Box::new(child(&branch.orelse)?),
-        ),
-        ast::Expr::BinOp(binary) if binary.op == ast::Operator::Add => ExprKind::Binary(
-            Binary::Add,
-            Box::new(child(&binary.left)?),
-            Box::new(child(&binary.right)?),
         ),
         ast::Expr::Name(name) => {
             if let Some(value) = local {
@@ -894,6 +901,10 @@ impl Checker<'_> {
         {
             return Ok(None);
         }
+        if let ast::Expr::BinOp(binary) = node {
+            let value = self.binary_operation(binary)?;
+            return Ok(Some(source.located(node, value)));
+        }
         let local = node
             .as_name_expr()
             .and_then(|n| self.names.get(n.id.as_str()))
@@ -928,19 +939,6 @@ impl Checker<'_> {
         else {
             return Ok(None);
         };
-        if let ExprKind::Binary(op, left, right) = value.kind {
-            // Use the ordinary operation and diagnostic whenever both operand layouts
-            // are known. An unresolved operand remains a live object operation.
-            value = if left.ty == Type::PythonObject || right.ty == Type::PythonObject {
-                Expr {
-                    kind: ExprKind::Binary(op, left, right),
-                    ty: Type::PythonObject,
-                }
-            } else {
-                self.binary_operands(node.as_bin_op_expr().unwrap(), *left, *right)?
-            };
-            return Ok(Some(source.located(node, value)));
-        }
         if let Some(slot) = self.namespace {
             match &mut value.kind {
                 ExprKind::Builtin(Builtin::RegisteredCall(call), args) => {

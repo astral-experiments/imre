@@ -120,7 +120,7 @@ mod registered;
 mod retained;
 pub(crate) use registered::type_alias::type_alias_body;
 pub(crate) use registered::values::{
-    RegisteredSource, ValueStatement, display_elements, lambda_defaults, literal_membership,
+    RegisteredSource, ValueStatement, binary_operands, display_elements, lambda_defaults, literal_membership,
     literal_replacements, packed_arguments, push_codepoints, registered_arguments,
     registered_constant_key, registered_index_key, registered_string, registered_value,
     suspended_operand, value_statement,
@@ -6697,6 +6697,20 @@ impl<'a> Checker<'a> {
         } else {
             (self.expr(&binary.left)?, self.expr(&binary.right)?)
         };
+        if self.registered.is_some() {
+            // Validate concrete layouts with the ordinary checker. The Python frame
+            // still sees the original operands (including subclasses) in source order.
+            let ty = if left.ty == Type::PythonObject || right.ty == Type::PythonObject {
+                Type::PythonObject
+            } else {
+                self.binary_operands(binary, left.clone(), right.clone())?
+                    .ty
+            };
+            return Ok(Expr {
+                ty,
+                kind: ExprKind::Binary(binary.op.into(), Box::new(left), Box::new(right)),
+            });
+        }
         self.binary_operands(binary, left, right)
     }
 

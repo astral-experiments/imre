@@ -396,7 +396,11 @@ impl Interval {
                     max: self.max.map(|value| value >> shift.min(127)),
                 }
             }
-            Binary::Divide | Binary::Repeat | Binary::Concat => Self::UNKNOWN,
+            Binary::Power
+            | Binary::MatrixMultiply
+            | Binary::Divide
+            | Binary::Repeat
+            | Binary::Concat => Self::UNKNOWN,
         }
     }
 }

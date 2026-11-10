@@ -356,6 +356,10 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         &self.body.current
     }
 
+    pub(crate) fn binary_handles(&mut self, op: ir::Binary, left: &str, right: &str) -> String {
+        self.op(op.protocol(), &[left, right])
+    }
+
     pub(crate) fn op(&mut self, name: &str, args: &[&str]) -> String {
         self.op_at(name, args, None)
     }
