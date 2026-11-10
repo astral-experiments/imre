@@ -69,7 +69,7 @@ impl SourceMap<'_> {
         let code = self.definition(
             frame.output,
             String::new(),
-            Body::AnnotationProvider(&body, &entries, AnnotationScope::Plain),
+            Body::AnnotationProvider(&body, AnnotationScope::Plain),
             self.module_start,
             false,
             Entry::Compiled,
@@ -98,20 +98,6 @@ impl<'p> Function<'_, 'p> {
             self.label(&dead);
         }
         true
-    }
-
-    /// A physically complete frame takes the canonical function entry. Partial
-    /// frames interleave its checked blocks with only their unprepared source.
-    pub(super) fn prepared_function(
-        &mut self,
-        prepared: &'p crate::frontend::RegisteredSuite,
-        emit_source: impl FnMut(&mut Self, &'p crate::frontend::SourceRun),
-    ) {
-        if prepared.fully_checked() {
-            self.checked_function(&prepared.checked);
-        } else {
-            self.checked_runs(prepared, emit_source);
-        }
     }
 
     fn checked_statement(&mut self, statement: &Statement) {
@@ -649,7 +635,7 @@ impl CallableSites<'_, '_> {
             let code = self.source.definition(
                 self.output,
                 String::new(),
-                Body::AnnotationProvider(&annotations.body, &annotations.entries, scope),
+                Body::AnnotationProvider(&annotations.body, scope),
                 start,
                 false,
                 Entry::Compiled,
@@ -812,7 +798,7 @@ impl<'p> Function<'_, 'p> {
         let code = self.source.definition(
             self.frame.output,
             String::new(),
-            Body::AnnotationProvider(body, &plan.sites, scope),
+            Body::AnnotationProvider(body, scope),
             plan.sites[0].site,
             false,
             Entry::Compiled,
@@ -826,24 +812,6 @@ impl<'p> Function<'_, 'p> {
         let defaults = self.op("dict", &[]);
         let function = self.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {environment}, i64 {name}, i64 {signature}, i64 {defaults}, i64 {qualname}, i64 0, i64 0, i1 false)"));
         self.bind("__annotate_func__", &function);
-    }
-
-    pub(super) fn insert_annotation_input(&mut self, occurrence: crate::ir::AnnotationOccurrence) {
-        let field = &self.source.annotations[&occurrence.site];
-        let crate::frontend::AnnotationValue::Input { source, unpack } = &field.value else {
-            unreachable!("checked annotation outside its prepared run")
-        };
-        let target = self
-            .frame
-            .annotation_target(occurrence.index, &field.name, field.range);
-        let value = self.expr(source);
-        let value = match unpack {
-            Some(unpack) => self
-                .frame
-                .registered_with_inputs(unpack, &[value], &self.sites),
-            None => value,
-        };
-        self.frame.store_annotation(target, &value);
     }
 
     fn apply_decorators(

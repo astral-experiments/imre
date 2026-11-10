@@ -138,7 +138,7 @@ pub(crate) use registered::values::{
     push_codepoints, registered_arguments,
 };
 pub(crate) use registered::{
-    AnnotationValue, AssertionSite, DeferredAnnotation, ParameterAnnotations, PhysicalOperand,
+    AnnotationProvider, AssertionSite, DeferredAnnotation, ParameterAnnotations, PhysicalOperand,
     RegisteredBindings, RegisteredFunction, RegisteredGenerator, RegisteredLambda,
     RegisteredScope, RegisteredSites, RegisteredSuite, SourceEffect, SourceRun, StatementSites,
     SuitePreparation, ValueStatement, annotation_expression, place_fixed_function,
