@@ -1276,8 +1276,8 @@ mod tests {
         let prepared = PreparedBody::module(
             "query",
             Path::new("query.py"),
-            "first = t'{client.lookup(*args)}'
-second = t'{client.lookup(*args)}{v ** 2}'",
+            "first = t'{client.lookup(*args)}{v * 2}'
+second = t'{client.lookup(*args)}{(v for v in values)}'",
             0,
             ModuleOrigin::Program(None),
         )
@@ -1288,7 +1288,7 @@ second = t'{client.lookup(*args)}{v ** 2}'",
             .keys()
             .map(|&range| &prepared.source.text[range])
             .collect();
-        assert_eq!(checked, ["t'{client.lookup(*args)}'"]);
+        assert_eq!(checked, ["t'{client.lookup(*args)}{v * 2}'"]);
         assert!(
             !prepared
                 .source
@@ -1882,7 +1882,7 @@ second = t'{client.lookup(*args)}{v ** 2}'",
     fn physical_deletion_uses_the_complete_checked_statement_after_targets_are_dropped() {
         let source = concat!(
             "del first, [(owner := obj).field, obj[lo:hi]], last\n",
-            "del rejected, (orphan := obj)[[key for key in keys if key]]\n",
+            "del rejected, (orphan := obj)[(key for key in keys if key)]\n",
         );
         let mut prepared = PreparedBody::module(
             "remove",
