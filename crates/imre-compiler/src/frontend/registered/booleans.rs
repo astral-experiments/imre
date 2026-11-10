@@ -39,11 +39,17 @@ pub(crate) struct LogicalSites {
 
 pub(crate) enum Selection {
     Checked(ir::Expr),
+    Comparison(Vec<Option<CheckedChild>>),
     Mixed {
         parts: Option<Box<[Option<ir::Expr>; 3]>>,
         branch: PreparedSteps,
         value: Option<PreparedSteps>,
     },
+}
+
+pub(crate) struct CheckedChild {
+    value: ir::Expr,
+    requires_suspension: bool,
 }
 
 pub(crate) struct PreparedSteps {
@@ -93,7 +99,7 @@ impl LogicalSites {
     }
 
     pub(crate) fn get(&self, node: &ast::Expr) -> Option<&Selection> {
-        Self::governs(node)
+        (Self::governs(node) || node.is_compare_expr())
             .then(|| self.selected.get(&node.range()))
             .flatten()
     }
@@ -120,7 +126,52 @@ impl LogicalSites {
         })
     }
 
+    pub(crate) fn comparison<'a>(
+        &'a self,
+        node: &'a ast::Expr,
+        suspended: bool,
+    ) -> Option<(
+        &'a [ast::CmpOp],
+        impl Iterator<Item = SourceOperand<'a>> + 'a,
+    )> {
+        let cmp = node.as_compare_expr()?;
+        let inputs = match self.get(node) {
+            Some(Selection::Comparison(inputs)) => inputs.as_slice(),
+            _ => &[],
+        };
+        let operands = cmp.operands.iter().enumerate().map(move |(index, child)| {
+            let value = inputs
+                .get(index)
+                .and_then(Option::as_ref)
+                .filter(|v| suspended || !v.requires_suspension)
+                .map(|v| &v.value);
+            SourceOperand::prepared(child, value)
+        });
+        Some((&cmp.ops, operands))
+    }
+
     pub(crate) fn visit(&mut self, node: &ast::Expr, source: RegisteredSource<'_>) {
+        if let Some(cmp) = node.as_compare_expr() {
+            let inputs: Vec<_> = cmp
+                .operands
+                .iter()
+                .map(|child| {
+                    let ordinary = values::registered_value(child, source);
+                    let requires_suspension = ordinary.is_none();
+                    let value = ordinary.or_else(|| values::suspended_operand(child, source))?;
+                    Some(CheckedChild {
+                        value,
+                        requires_suspension,
+                    })
+                })
+                .collect();
+            // Whole checked comparisons, including suspendable ones, keep their normal entry.
+            if inputs.iter().any(Option::is_none) {
+                self.selected
+                    .insert(node.range(), Selection::Comparison(inputs));
+            }
+            return;
+        }
         if !Self::governs(node)
             || self
                 .covered
@@ -191,9 +242,12 @@ pub(crate) fn prepare_boolean<'a>(
     let (edges, leaves) = edges(expression, context, Depth::All);
     let leaves = leaves
         .into_iter()
-        .map(|leaf| match values::registered_value(leaf, source) {
-            Some(operand) => SourceOperand::Checked(Cow::Owned(operand)),
-            None => SourceOperand::Residual(leaf),
+        .map(|leaf| match sites.get(leaf) {
+            Some(Selection::Comparison(_)) => SourceOperand::Residual(leaf),
+            _ => match values::registered_value(leaf, source) {
+                Some(operand) => SourceOperand::Checked(Cow::Owned(operand)),
+                None => SourceOperand::Residual(leaf),
+            },
         })
         .collect();
     (edges, leaves)
