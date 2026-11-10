@@ -99,7 +99,7 @@ pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result
                 "context binding needs a private entered-value slot",
             ),
             ir::Node::Statement(Statement::IterNext {
-                kind: ir::IterNextKind::Async(_),
+                kind: ir::IterNextKind::Generic | ir::IterNextKind::Async(_),
                 iterator,
                 key,
                 ready,
@@ -115,7 +115,7 @@ pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result
                     && frame.locals.get(*iterator) == Some(&Type::PythonObject)
                     && frame.locals.get(*key) == Some(&Type::PythonObject)
                     && frame.locals.get(*ready) == Some(&Type::Bool),
-                "async pull needs distinct private cursor, item and readiness slots",
+                "registered pull needs distinct private cursor, item and readiness slots",
             ),
             ir::Node::Expression(value) => match &value.kind {
                 ExprKind::Local(slot) => local(*slot),

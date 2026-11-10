@@ -1527,6 +1527,62 @@ fn snapshot_pair(ctx: &mut Context, value: Id, items: &mut [Id; 2]) -> Result<Id
     }
 }
 
+/// Pull from the current contents of a forward list cursor. Return 1 for an item,
+/// 0 for exhaustion or a pending error, and -1 to leave the pull to Python.
+///
+/// # Safety
+/// Generated code supplies a live cursor and one writable handle slot.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_list_cursor_pull(
+    ctx: *mut Context,
+    iter: Id,
+    item: *mut Id,
+    has_else: bool,
+) -> i32 {
+    // SAFETY: the caller keeps the context and cursor live throughout the pull.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.pending.is_some() {
+        return 0;
+    }
+    let Value::Iterator {
+        sequence: Some(list),
+        offset,
+        reverse: false,
+        context: None,
+        ..
+    } = *ctx.heap.get(iter)
+    else {
+        return -1;
+    };
+    let Value::List(values) = ctx.heap.get(list) else {
+        return -1;
+    };
+    let value = values.get(offset).copied();
+    let Value::Iterator {
+        sequence, offset, ..
+    } = ctx.heap.get_mut(iter)
+    else {
+        unreachable!()
+    };
+    if let Some(value) = value {
+        *offset += 1;
+        // The loop body can remove this item and collect its former owner.
+        let value = finish(ctx, Ok(value));
+        if ctx.pending.is_some() {
+            return 0;
+        }
+        // SAFETY: generated code supplies the slot for the rooted item.
+        unsafe { item.write(value) };
+        1
+    } else {
+        *sequence = None;
+        if has_else {
+            ctx.heap.release_unbound_finalizers();
+        }
+        0
+    }
+}
+
 /// Query the acquired cursor without advancing it or invoking Python.
 ///
 /// # Safety

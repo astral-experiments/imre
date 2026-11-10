@@ -349,6 +349,24 @@ fn checked_assertion_message_and_raise_use_the_failure_edge() {
 }
 
 #[test]
+fn checked_cursor_pull_keeps_one_projection_for_both_representations() {
+    let mut output = emit_captured_body(
+        "def collect(source, project):\n    return [project(item) for item in source]\n",
+    );
+    let more = output.data(b"more");
+    let next = output.data(b"next");
+    let body = &output.functions;
+    for call in [
+        "call i32 @imre_dyn_list_cursor_pull(",
+        &format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {more},"),
+        &format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {next},"),
+        "call i64 @imre_dyn_positional_call_at(",
+    ] {
+        assert_eq!(body.matches(call).count(), 1, "{call}");
+    }
+}
+
+#[test]
 fn async_pull_parks_the_iterator_returned_by_the_protocol_once() {
     use crate::ir::AsyncPull;
     use ruff_text_size::TextRange;
