@@ -1,16 +1,18 @@
 //! Registered context-manager protocol, roots and exceptional control flow.
 
 use super::frame::SourcePosition;
-use super::{Frame, RegisteredFrame};
+use super::{Frame, FrameEmitter, RegisteredFrame};
 use crate::ir::{ContextSite, Expr, Statement};
 use ruff_text_size::TextRange;
 
-#[derive(Clone)]
-pub(crate) struct ContextExit {
-    pub(crate) site: ContextSite,
+/// An acquired manager owns both the normal and exceptional exit edges.
+pub(crate) struct ContextRegion {
+    site: ContextSite,
     pub(crate) is_async: bool,
     pub(crate) callable: String,
-    pub(crate) caught: String,
+    caught: String,
+    error: String,
+    done: String,
 }
 
 impl RegisteredFrame<'_, '_> {
@@ -49,7 +51,7 @@ impl RegisteredFrame<'_, '_> {
         (end_line == line).then_some([line, start, anchor, end])
     }
 
-    pub(crate) fn exit_sync(&mut self, exit: &ContextExit, exception: Option<&str>) -> String {
+    fn exit_sync(&mut self, exit: &ContextRegion, exception: Option<&str>) -> String {
         self.set_source_range(Some(exit.site.range));
         let result = self.op_at(
             "exit_context",
@@ -60,7 +62,7 @@ impl RegisteredFrame<'_, '_> {
         result
     }
 
-    pub(crate) fn enter_sync(&mut self, manager: &str, site: ContextSite) -> (String, String) {
+    fn enter_sync(&mut self, manager: &str, site: ContextSite) -> (String, String) {
         self.set_source_range(Some(site.range));
         let span = self.context_span(site);
         let exit = self.op_at("lookup_exit", &[manager, "0"], span);
@@ -71,16 +73,8 @@ impl RegisteredFrame<'_, '_> {
     }
 }
 
-/// An acquired manager owns both the normal and exceptional exit edges.
-pub(crate) struct ContextRegion {
-    pub(crate) exit: ContextExit,
-    pub(crate) outer: String,
-    error: String,
-    done: String,
-}
-
 impl RegisteredFrame<'_, '_> {
-    pub(crate) fn enter_async(
+    fn enter_async(
         &mut self,
         manager: &str,
         site: ContextSite,
@@ -101,7 +95,7 @@ impl RegisteredFrame<'_, '_> {
 
     pub(crate) fn exit_context(
         &mut self,
-        context: &ContextExit,
+        context: &ContextRegion,
         exception: Option<&str>,
     ) -> String {
         if !context.is_async {
@@ -146,40 +140,39 @@ impl RegisteredFrame<'_, '_> {
         }
     }
 
-    pub(crate) fn begin_context(
+    fn begin_context(
         &mut self,
         site: ContextSite,
         callable: String,
         is_async: bool,
-    ) -> ContextRegion {
+    ) -> (ContextRegion, String) {
         let error = self.name("b");
         let done = self.name("b");
         let outer = std::mem::replace(&mut self.body.error_target, error.clone());
-        let exit = ContextExit {
-            site,
-            is_async,
-            callable,
-            caught: self.caught.last().cloned().unwrap_or_else(|| "0".into()),
-        };
-        self.live.push(exit.callable.clone());
-        ContextRegion {
-            exit,
+        self.live.push(callable.clone());
+        (
+            ContextRegion {
+                site,
+                is_async,
+                callable,
+                caught: self.caught.last().cloned().unwrap_or_else(|| "0".into()),
+                error,
+                done,
+            },
             outer,
-            error,
-            done,
-        }
+        )
     }
 
-    pub(crate) fn end_context(&mut self, region: ContextRegion) {
+    fn end_context(&mut self, region: ContextRegion, outer: String) {
         self.live.pop();
-        self.body.error_target = region.outer;
+        self.body.error_target = outer;
         if !self.body.terminated {
-            self.exit_context(&region.exit, None);
+            self.exit_context(&region, None);
             self.jump(&region.done);
         }
         self.label(&region.error);
         let exception = self.op("take_error", &[]);
-        let result = self.exit_context(&region.exit, Some(&exception));
+        let result = self.exit_context(&region, Some(&exception));
         let suppress = self.truth(&result);
         let propagate = self.name("b");
         self.branch(&suppress, &region.done, &propagate);
@@ -189,11 +182,69 @@ impl RegisteredFrame<'_, '_> {
     }
 }
 
-#[derive(Clone)]
+/// Emit every acquired manager around the binding of its own target, subsequent
+/// managers, and the body. Each caller supplies operands and its lexical exit stack.
+pub(crate) trait ContextEmitter<'a, 'p>: FrameEmitter<'a, 'p> {
+    fn push_context(&mut self, exit: ContextRegion, outer: String);
+    fn pop_context(&mut self) -> (ContextRegion, String);
+
+    fn with_contexts(
+        &mut self,
+        sites: impl ExactSizeIterator<Item = ContextSite>,
+        is_async: bool,
+        mut manager: impl FnMut(&mut Self, usize) -> String,
+        mut bind: impl FnMut(&mut Self, usize, &str),
+        body: impl FnOnce(&mut Self),
+    ) {
+        let count = sites.len();
+        for (index, site) in sites.enumerate() {
+            let (exit, value, above_exit) = if is_async {
+                let mark = self.temporary_mark();
+                let (exit, value, above_exit) = self.unwind_operands(&mark, |code| {
+                    let manager = manager(code, index);
+                    code.enter_async(&manager, site, &mark)
+                });
+                (exit, value, Some(above_exit))
+            } else {
+                let manager = manager(self, index);
+                let (exit, value) = self.enter_sync(&manager, site);
+                (exit, value, None)
+            };
+            let (region, outer) = self.begin_context(site, exit, is_async);
+            self.push_context(region, outer);
+            bind(self, index, &value);
+            if let Some(mark) = above_exit {
+                self.discard_truth(&mark);
+            }
+        }
+        body(self);
+        for _ in 0..count {
+            let (region, outer) = self.pop_context();
+            self.end_context(region, outer);
+        }
+    }
+}
+
+impl<'a, 'p> ContextEmitter<'a, 'p> for Frame<'_, 'a, 'p> {
+    fn push_context(&mut self, exit: ContextRegion, outer: String) {
+        self.code
+            .iteration
+            .scopes
+            .push(Region::Context { exit, outer });
+    }
+
+    fn pop_context(&mut self) -> (ContextRegion, String) {
+        let Some(Region::Context { exit, outer }) = self.code.iteration.scopes.pop() else {
+            unreachable!("active context region")
+        };
+        (exit, outer)
+    }
+}
+
 pub(super) enum Region {
     Slots(Vec<usize>),
     Context {
-        exit: ContextExit,
+        exit: ContextRegion,
         outer: String,
     },
     Finally {
@@ -222,19 +273,17 @@ impl Frame<'_, '_, '_> {
         target: Option<usize>,
         body: &[Statement],
     ) {
-        let manager = self.evaluate_handle(manager);
-        let (exit, value) = self.enter_sync(&manager, site);
-        let region = self.code.begin_context(site, exit, false);
-        self.code.iteration.scopes.push(Region::Context {
-            exit: region.exit.clone(),
-            outer: region.outer.clone(),
-        });
-        if let Some(slot) = target {
-            self.store_private(slot, &value);
-        }
-        self.emit_suite(body);
-        self.leave_scope();
-        self.code.end_context(region);
+        self.with_contexts(
+            std::iter::once(site),
+            false,
+            |frame, _| frame.evaluate_handle(manager),
+            |frame, _, value| {
+                if let Some(slot) = target {
+                    frame.store_private(slot, value);
+                }
+            },
+            |frame| frame.emit_suite(body),
+        );
     }
 
     pub(super) fn exit_regions(&mut self, depth: usize, pending_return: Option<&str>) {

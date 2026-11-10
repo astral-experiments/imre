@@ -5,12 +5,26 @@ use super::sites::{CompiledDefinition, CompiledProvider};
 use super::FrameEmitter;
 use crate::ir::{ItemUpdate, Statement};
 use crate::llvm::registered::Place;
+use crate::llvm::registered::context::{ContextEmitter, ContextRegion};
 use imre_ast::code_flags;
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use serde_json::json;
 
 use super::{Body, Cleanup, DefinitionName, Entry, FinallySuite, Function, LoopTarget};
+
+impl<'a, 'p> ContextEmitter<'a, 'p> for Function<'a, 'p> {
+    fn push_context(&mut self, exit: ContextRegion, outer: String) {
+        self.exits.push((Cleanup::With(exit), outer));
+    }
+
+    fn pop_context(&mut self) -> (ContextRegion, String) {
+        let Some((Cleanup::With(context), outer)) = self.exits.pop() else {
+            unreachable!("active context region")
+        };
+        (context, outer)
+    }
+}
 
 impl<'p> Function<'_, 'p> {
     pub(super) fn declare_globals(&mut self, globals: &std::collections::BTreeSet<String>) {
@@ -435,7 +449,7 @@ impl<'p> Function<'_, 'p> {
                 }
                 ast::Stmt::Try(v) => self.protected_statement(v),
                 ast::Stmt::With(v) if !v.is_async || self.native_suspension => {
-                    self.with(&v.items, &v.body, v.is_async);
+                    self.emit_with_inputs(v);
                 }
                 ast::Stmt::Raise(v) => {
                     let exception = v.exc.as_deref().map(|value| self.expr(value));
@@ -1478,36 +1492,24 @@ impl<'p> Function<'_, 'p> {
         self.exits.extend(left.into_iter().rev());
     }
 
-    fn with(&mut self, items: &[ast::WithItem], body: &'p [ast::Stmt], is_async: bool) {
-        let Some((item, rest)) = items.split_first() else {
-            self.statements(body);
-            return;
-        };
-        let site = self.source.statement_sites.contexts[&item.context_expr.range()];
-        let (exit, value, above_exit) = if is_async {
-            let mark = self.temporary_mark();
-            let (exit, value, above_exit) = self.unwind_operands(&mark, |code| {
-                let manager = code.expr(&item.context_expr);
-                code.frame.enter_async(&manager, site, &mark)
-            });
-            (exit, value, Some(above_exit))
-        } else {
-            let manager = self.expr(&item.context_expr);
-            let (exit, value) = self.frame.enter_sync(&manager, site);
-            (exit, value, None)
-        };
-        let region = self.frame.begin_context(site, exit, is_async);
-        self.exits
-            .push((Cleanup::With(region.exit.clone()), region.outer.clone()));
-        if let Some(target) = &item.optional_vars {
-            self.assign(target, &value);
-        }
-        if let Some(mark) = above_exit {
-            self.discard_truth(&mark);
-        }
-        self.with(rest, body, is_async);
-        self.exits.pop();
-        self.frame.end_context(region);
+    fn emit_with_inputs(&mut self, source: &'p ast::StmtWith) {
+        let inputs = &self.source.statement_sites.contexts[&source.range()];
+        self.with_contexts(
+            inputs.iter().map(|input| input.site),
+            source.is_async,
+            |code, i| match &inputs[i].manager {
+                Some(manager) => code.with_expression_range(inputs[i].site.range, |code| {
+                    code.registered_value(manager)
+                }),
+                None => code.expr(&source.items[i].context_expr),
+            },
+            |code, i, value| {
+                if let Some(target) = &source.items[i].optional_vars {
+                    code.assign(target, value);
+                }
+            },
+            |code| code.statements(&source.body),
+        );
     }
 }
 

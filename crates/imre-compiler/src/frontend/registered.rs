@@ -736,7 +736,12 @@ pub(crate) struct StatementSites {
     pub(crate) assertions: HashMap<TextRange, Vec<Statement>>,
     pub(crate) ifs: HashMap<TextRange, Vec<SourceGuard>>,
     pub(crate) matches: HashMap<TextRange, Option<patterns::SourceMatch>>,
-    pub(crate) contexts: HashMap<TextRange, ir::ContextSite>,
+    pub(crate) contexts: HashMap<TextRange, Vec<ContextInput>>,
+}
+
+pub(crate) struct ContextInput {
+    pub(crate) site: ir::ContextSite,
+    pub(crate) manager: Option<Expr>,
 }
 
 /// A residual arm keeps its source test in the source adapter. Compilable tests
@@ -775,10 +780,15 @@ fn statement_sites(
                 return;
             }
             if let ast::Stmt::With(with) = stmt {
-                for item in &with.items {
-                    let site = context_site(self.source.text, &item.context_expr);
-                    self.sites.contexts.insert(site.range, site);
-                }
+                let inputs = with
+                    .items
+                    .iter()
+                    .map(|item| ContextInput {
+                        site: context_site(self.source.text, &item.context_expr),
+                        manager: None,
+                    })
+                    .collect();
+                self.sites.contexts.insert(stmt.range(), inputs);
             }
             if let ast::Stmt::Match(branch) = stmt {
                 self.sites.matches.insert(
@@ -907,6 +917,20 @@ impl<'a> SuitePreparation<'a> {
         };
         for run in &plan.residual {
             for stmt in &stmts[run.statements.clone()] {
+                if let ast::Stmt::With(with) = stmt
+                    && !with.is_async
+                {
+                    let inputs = children
+                        .prepare
+                        .sites
+                        .contexts
+                        .get_mut(&stmt.range())
+                        .expect("with inputs");
+                    for (input, item) in inputs.iter_mut().zip(&with.items) {
+                        input.manager =
+                            values::registered_value(&item.context_expr, children.prepare.source);
+                    }
+                }
                 if let ast::Stmt::Match(branch) = stmt
                     && let Some(mut site) = children
                         .prepare
@@ -1357,9 +1381,10 @@ impl statements::StatementLowering for SourceScope<'_> {
                     true,
                 ))
             }
-            ast::Stmt::With(stmt) if !stmt.is_async => {
-                Ok((self.with_items(&stmt.items, &stmt.body)?, true))
-            }
+            ast::Stmt::With(stmt) if !stmt.is_async => Ok((
+                self.with_items(&stmt.items, &self.sites.contexts[&stmt.range()], &stmt.body)?,
+                true,
+            )),
             ast::Stmt::While(loop_) => {
                 let condition = self.ordinary_operand(&loop_.test).ok_or(())?;
                 let body = self.in_loop(LoopScope::While, |scope| scope.suite(&loop_.body))?;
@@ -1662,13 +1687,14 @@ impl SourceScope<'_> {
     fn with_items(
         &mut self,
         items: &[ast::WithItem],
+        inputs: &[ContextInput],
         suite: &[ast::Stmt],
     ) -> StdResult<Vec<Statement>, ()> {
         let Some((item, rest)) = items.split_first() else {
             return self.suite(suite);
         };
         let manager = self.ordinary_operand(&item.context_expr).ok_or(())?;
-        let site = self.sites.contexts[&item.context_expr.range()];
+        let (input, remaining) = inputs.split_first().expect("with input");
         let mut body = Vec::new();
         let entered = if let Some(target) = &item.optional_vars {
             let slot = self.hidden(Type::PythonObject);
@@ -1682,10 +1708,10 @@ impl SourceScope<'_> {
         } else {
             None
         };
-        body.extend(self.with_items(rest, suite)?);
+        body.extend(self.with_items(rest, remaining, suite)?);
         Ok(vec![Statement::With {
             manager,
-            site,
+            site: input.site,
             entered,
             body,
         }])
@@ -3298,7 +3324,9 @@ mod tests {
         let mut anchors: Vec<_> = sites
             .contexts
             .values()
-            .map(|site| {
+            .flatten()
+            .map(|input| {
+                let site = input.site;
                 (
                     &text[site.range],
                     &text[site.range.start().to_usize()..site.anchor.to_usize()],
