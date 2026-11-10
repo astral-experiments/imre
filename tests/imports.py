@@ -1406,6 +1406,16 @@ ACCEPTED = {
             "encode = pickle.dumps is dumps\n"
         ),
     },
+    "marshal_shared_roundtrip": {
+        "main.py": (
+            "from marshal import dumps, loads\n"
+            "print(loads(dumps(42)))\n"
+            "shared = [loads(b'i*\\x00\\x00\\x00')]\n"
+            "value = (shared, shared)\n"
+            "restored = loads(dumps(value))\n"
+            "print(restored, restored[0] is restored[1])\n"
+        ),
+    },
     "namespace_package": {
         "main.py": "import package.child\nfrom package.nested import sibling\nprint(package.child.f())\nprint(sibling.read())\n",
         "package/child.py": "def f() -> int:\n    return 41\n",

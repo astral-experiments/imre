@@ -1519,7 +1519,11 @@ impl IntrinsicModule {
             (Self::Ast, name) => {
                 Intrinsic::ObjectRuntimeExport(imre_ast::python_nodes::find(name)?.qualified_name)
             }
+            (Self::Marshal, "dumps") => Intrinsic::ObjectRuntimeExport("marshal.dumps"),
             (Self::Marshal, "loads") => Intrinsic::ObjectRuntimeExport("marshal.loads"),
+            (Self::Marshal, "version") => {
+                Intrinsic::IntConstant(i64::from(imre_ast::MARSHAL_VERSION))
+            }
             (Self::Codecs | Self::CodecsNative, "register") => {
                 Intrinsic::ObjectRuntimeExport("_codecs.register")
             }

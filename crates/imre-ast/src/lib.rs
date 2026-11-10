@@ -3,6 +3,9 @@
 /// CPython 3.14.5's pyc magic number followed by CRLF in little-endian wire order.
 pub const PYC_MAGIC_NUMBER_TOKEN: u32 = 3627 | ((b'\r' as u32) << 16) | ((b'\n' as u32) << 24);
 
+/// Default wire format shared by Python 3.14 marshal writers and the module export.
+pub const MARSHAL_VERSION: i32 = 5;
+
 /// Native archives in import order. The first filename carries the wheel ABI tag.
 pub const NATIVE_ARCHIVE_EXTENSIONS: [&str; 2] = ["imre1.a", "imre.a"];
 
