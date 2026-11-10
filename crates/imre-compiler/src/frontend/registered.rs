@@ -1333,12 +1333,7 @@ impl<'a> SuitePreparation<'a> {
     ) {
         if let Some(first) = stmts.first() {
             let plan = self.selected_suite(stmts, kind, select, select, suspended);
-            // An optimized-away assertion has no instructions and still owns its source slot.
-            if !matches!(plan.residual.as_slice(), [run]
-                if run.effect.is_none() && run.statements == (0..stmts.len()))
-            {
-                self.nested.insert(first.start(), plan);
-            }
+            self.nested.insert(first.start(), plan);
         }
     }
 
@@ -3216,6 +3211,24 @@ mod tests {
         SuitePreparation::new(&operations, source, stmts, true)
             .complete(stmts, kind)
             .map(|plan| plan.checked)
+    }
+
+    #[test]
+    fn entirely_mixed_suite_keeps_its_prepared_entry() {
+        let text = "def bind[T]():\n    pass\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let body = &module.parsed.syntax().body;
+        let literals = values::ModuleSource::new(module);
+        let operations = HashMap::new();
+        let mut prepare = SuitePreparation::new(&operations, literals.context(text), body, true);
+        prepare.physical_body(
+            body,
+            RegisteredScope::Function { is_async: false },
+            false,
+            &|_| false,
+        );
+        assert!(prepare.nested.contains_key(&body[0].start()));
     }
 
     #[test]

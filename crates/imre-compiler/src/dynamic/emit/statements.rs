@@ -169,23 +169,11 @@ impl<'p> Function<'_, 'p> {
         self.frame.restore_checked_slots(enclosing);
     }
 
-    fn emit_suite(
-        &mut self,
-        plan: Option<&'p crate::frontend::RegisteredSuite>,
-        source: &'p [ast::Stmt],
-    ) {
-        if let Some(plan) = plan {
-            self.checked_runs(plan, |code, run| code.source_run(source, run));
-        } else {
-            self.source_statements(source);
-        }
-    }
-
     pub(super) fn statements(&mut self, source: &'p [ast::Stmt]) {
-        let plan = source
-            .first()
-            .and_then(|stmt| self.source.nested_bodies.get(&stmt.start()));
-        self.emit_suite(plan, source);
+        if let Some(first) = source.first() {
+            let plan = &self.source.nested_bodies[&first.start()];
+            self.checked_runs(plan, |code, run| code.source_run(source, run));
+        }
     }
 
     pub(super) fn source_run(
@@ -1129,7 +1117,9 @@ impl<'p> Function<'_, 'p> {
     }
 
     pub(super) fn physical_suite(&mut self, suite: &'p crate::frontend::PhysicalSuite) {
-        self.emit_suite(Some(&suite.plan), &suite.sources);
+        self.checked_runs(&suite.plan, |code, run| {
+            code.source_run(&suite.sources, run)
+        });
     }
 
     fn protected_suite(&mut self, region: &'p crate::frontend::PreparedTry) {
