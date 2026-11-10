@@ -17,6 +17,7 @@ fn nonconstructible_result_type(name: &str) -> bool {
             | HashState::OPENSSL_CLASS
             | KEY_WRAPPER
             | "getset_descriptor"
+            | "set_iterator"
             | value::ZLIB_DECOMPRESS_TYPE
             | "anext_awaitable"
             | "_buffer_wrapper"
@@ -1090,6 +1091,7 @@ impl Context {
                 | Value::Range(_)
                 | Value::Iterator { .. }
                 | Value::DictIterator(_)
+                | Value::SetIterator(_)
         ) {
             return Ok(false);
         }
@@ -1136,6 +1138,7 @@ impl Context {
             return self.lookup_attr(object, name).map(Some);
         }
         let class = match self.heap.get(object) {
+            Value::SetIterator(_) if name == "__length_hint__" => self.builtin("set_iterator"),
             Value::Weak(wr)
                 if name == "__repr__"
                     || (wr.kind == weakref::Kind::Proxy
@@ -2152,7 +2155,7 @@ impl Context {
             (HashState::XOF_CLASS, Value::Hash(state)) => state.lock().class_name() == name,
             (_, Value::Raised(error)) => {
                 matches!(self.heap.get(class), Value::Native(name) if name == "object")
-                    || self.raised_error_matches(error, class)
+                    || self.match_raised_class(error, class, Self::subclass)
             }
             #[cfg(target_os = "linux")]
             ("select.epoll", Value::Epoll(_)) => true,
@@ -2248,24 +2251,56 @@ impl Context {
             }
         }
     }
+    /// Every tuple member must be a real exception class, even after an earlier match.
+    pub(super) fn check_exception_classes(&self, classes: &[Id], base: Id) -> Result<()> {
+        if classes
+            .iter()
+            .all(|&class| self.is_type_object(class) && self.direct_subclass(class, base))
+        {
+            Ok(())
+        } else {
+            Err(Error::new(
+                "TypeError",
+                "catching classes that do not inherit from BaseException is not allowed",
+            ))
+        }
+    }
+
     pub(super) fn raised_error_matches(&self, error: &Error, class: Id) -> bool {
+        self.match_raised_class(error, class, Self::direct_subclass)
+    }
+
+    fn match_raised_class(
+        &self,
+        error: &Error,
+        class: Id,
+        subtype: fn(&Self, Id, Id) -> bool,
+    ) -> bool {
         match self.heap.get(class) {
-            Value::Tuple(classes) => classes.iter().any(|&c| self.raised_error_matches(error, c)),
-            _ if let Some(actual) = error.class() => self.subclass(actual, class),
+            Value::Tuple(classes) => classes
+                .iter()
+                .any(|&c| self.match_raised_class(error, c, subtype)),
+            _ if let Some(actual) = error.class() => subtype(self, actual, class),
             Value::Native(_) => {
                 let kind = error.kind.as_ref();
-                self.error_kind_matches(kind, class, self.builtins.get(kind).copied())
+                self.error_kind_matches(kind, class, self.builtins.get(kind).copied(), subtype)
             }
             // Native operations on intrinsic file objects belong to the first I/O module.
             Value::Class { .. } if error.kind == "UnsupportedOperation" => self
                 .builtins
                 .get("UnsupportedOperation")
-                .is_some_and(|&initial| self.subclass(initial, class)),
+                .is_some_and(|&initial| subtype(self, initial, class)),
             _ => false,
         }
     }
 
-    fn error_kind_matches(&self, kind: &str, class: Id, registered: Option<Id>) -> bool {
+    fn error_kind_matches(
+        &self,
+        kind: &str,
+        class: Id,
+        registered: Option<Id>,
+        subtype: fn(&Self, Id, Id) -> bool,
+    ) -> bool {
         if let Value::Native(parent) = self.heap.get(class)
             && let Some(result) = builtins::exception_subclass(kind, parent)
         {
@@ -2274,7 +2309,7 @@ impl Context {
         match self.heap.get(class) {
             Value::Tuple(classes) => classes
                 .iter()
-                .any(|&c| self.error_kind_matches(kind, c, registered)),
+                .any(|&c| self.error_kind_matches(kind, c, registered, subtype)),
             Value::Class { name, .. } | Value::Native(name) => {
                 kind == name
                     || name == "BaseException"
@@ -2282,7 +2317,7 @@ impl Context {
                     || (name == "ValueError"
                         && matches!(kind, "JSONDecodeError" | "binascii.Error"))
                     || (name == "OSError" && kind == "socket.gaierror")
-                    || registered.is_some_and(|actual| self.subclass(actual, class))
+                    || registered.is_some_and(|actual| subtype(self, actual, class))
             }
             _ => false,
         }
@@ -5593,8 +5628,9 @@ impl Context {
                 }
             }
             Value::Native(ref class)
-                if DictIterator::methods(class).contains(&name)
-                    && DictIterator::class(class).is_some() =>
+                if (class == "set_iterator" && builtins::SET_ITERATOR_METHODS.contains(&name))
+                    || (DictIterator::methods(class).contains(&name)
+                        && DictIterator::class(class).is_some()) =>
             {
                 return Ok(self.builtin(&format!("{class}.{name}")));
             }
@@ -8396,6 +8432,7 @@ impl Context {
                                 | "dict"
                                 | "list"
                                 | "list_iterator"
+                                | "set_iterator"
                                 | "str_ascii_iterator"
                                 | "str_iterator"
                                 | "tuple_iterator"
@@ -9108,32 +9145,6 @@ impl Context {
             Some(dict) => self.scalar_dict_name(dict, name),
             None => Some(self.scope_name(scope, name)),
         }
-    }
-
-    /// Check the free builtin reads assumed by an independently checked module function.
-    /// The same dictionary proof used for annotations declines lookups that can run Python.
-    pub(super) fn retained_builtin_bindings(&self, scope: Id, names: &str) -> bool {
-        let locals = self.scope_data(scope);
-        let Some(globals) = locals.parent else {
-            return false;
-        };
-        if locals.exec_locals.is_some()
-            || locals.exec_globals.is_some()
-            || locals.class_body.is_some()
-            || !locals.closure.cells.is_empty()
-        {
-            return false;
-        }
-        names
-            .split('\0')
-            .filter(|name| !name.is_empty())
-            .all(|name| {
-                !locals.closure.declared.contains(name)
-                    && self.scope_name(scope, name).is_none()
-                    && self.builtins.get(name).is_some_and(|&expected| {
-                        self.module_type_reference(globals, name) == Some(expected)
-                    })
-            })
     }
 
     /// Read a name or a single member of an ordinary module without running Python.

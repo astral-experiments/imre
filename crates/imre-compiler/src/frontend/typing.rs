@@ -211,6 +211,10 @@ impl Checker<'_> {
             ));
         }
         let f = self.expr(argument)?;
+        if f.ty == Type::PythonObject {
+            // The registered typing operations accept the actual Python callable.
+            return Err(self.object_builtin_error("typing's overload registry", argument));
+        }
         if !matches!(f.ty, Type::Callable(_) | Type::FunctionRef) {
             return Err(error(
                 self.source,

@@ -47,21 +47,182 @@ fn captured_publish_emits_its_registered_callback_and_error_return() {
 }
 
 #[test]
+fn checked_subtraction_selects_integer_arithmetic_in_both_calling_conventions() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("difference.py");
+    std::fs::write(
+        &path,
+        "def difference(a: int, b: int) -> int:\n    return a - b\nprint(difference(int(input()), int(input())))\n",
+    )
+    .unwrap();
+    let fixed = crate::compile_file(&path, None, &crate::CompileOptions::default()).unwrap();
+    let (_, function) = fixed
+        .llvm_ir
+        .split_once("define internal i64 @fn_0(")
+        .unwrap();
+    let (body, _) = function.split_once("\n}").unwrap();
+    let subtract = "call i64 @int_sub(";
+    assert_eq!(body.matches(subtract).count(), 1);
+
+    for (signature, checked_integers) in [("a: int, b: int", true), ("a, b", false)] {
+        let source =
+            format!("def publish({signature}, send):\n    total = a - b\n    send(total)\n");
+        let mut output = emit_captured_body(&source);
+        let minus = output.data(b"-");
+        let protocol = format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {minus},");
+        let body = &output.functions;
+        assert_eq!(
+            body.matches(subtract).count(),
+            usize::from(checked_integers)
+        );
+        assert_eq!(
+            body.contains("call i64 @imre_dyn_exact_int_word("),
+            checked_integers
+        );
+        assert_eq!(body.matches(&protocol).count(), 1);
+        assert_eq!(
+            body.matches("call i64 @imre_dyn_positional_call_at(")
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
+fn captured_float_product_uses_the_registered_multiply_protocol() {
+    let mut output =
+        emit_captured_body("def deliver(a: float, b: float, send):\n    send(a * b)\n");
+    let star = output.data(b"*");
+    let body = &output.functions;
+    assert_eq!(
+        body.matches(&format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {star},"))
+            .count(),
+        1
+    );
+    assert!(!body.contains("call i64 @imre_dyn_exact_int_word("));
+    assert!(!body.contains("call i64 @int_mul("));
+}
+
+#[test]
+fn placed_multiplication_keeps_the_exact_integer_guard_and_python_protocol() {
+    use crate::ir::{Binary, ExprKind, Statement};
+
+    for (signature, result, call, sequence) in [
+        ("a: float, b: float", "float", "2.5, 3.0", false),
+        ("a: str, b: int", "str", "'a', 3", true),
+    ] {
+        let source = format!(
+            "class Receiver:\n    def read(self, value: int) -> int:\n        return value\n\
+             def product({signature}) -> {result}:\n    return a * b\nprint(product({call}))\n"
+        );
+        let mut graph = SourceGraph::single(&source).unwrap();
+        let crate::CheckedProgram::Native(mut fixed) = crate::checked_lower(&mut graph).unwrap()
+        else {
+            panic!("expected a fixed function");
+        };
+        crate::llvm::analyze_program(&fixed.ir.0, &mut fixed.frame_sources).unwrap();
+        let (_, frame) = fixed.frame_sources.remove(&0).unwrap();
+        let function = fixed.ir.0.functions.remove(0);
+        let [Statement::Return(value)] = function.body.as_slice() else {
+            panic!()
+        };
+        assert!(matches!(
+            (&value.kind, sequence),
+            (ExprKind::Binary(Binary::Repeat, ..), true)
+                | (ExprKind::Binary(Binary::Multiply, ..), false)
+        ));
+        let placed = crate::frontend::place_fixed_function(function, frame);
+        let mut output = Output::default();
+        let file = output.data(b"product.py");
+        let positions = SourcePositions::new(&source, &file);
+        let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
+        frame.checked_body(&placed, &CheckedSites::default());
+        frame.finish(false);
+        let star = output.data(b"*");
+        let body = &output.functions;
+        assert_eq!(
+            body.matches("call i64 @imre_dyn_exact_int_word(").count(),
+            2
+        );
+        assert_eq!(body.matches("call i64 @int_mul(").count(), 1);
+        assert_eq!(
+            body.matches(&format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {star},"))
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
 fn captured_unpack_roots_its_private_slot_in_the_function_frame() {
     let output =
         emit_captured_body("def post(row, book, read):\n    book[0], book[read()] = row\n");
     let body = &output.functions;
     let (before_checkpoint, _) = body
-        .split_once("call void @imre_dyn_statement_with_exception(ptr %ctx, ptr %live,")
+        .split_once("call void @imre_dyn_statement_with_exception(ptr %ctx, ptr %ir_slot0,")
         .unwrap();
-    assert_eq!(body.matches("%ir_slot0 = alloca i64").count(), 1);
-    assert!(before_checkpoint.contains("store i64 0, ptr %ir_slot0"));
-    assert!(before_checkpoint.contains("load i64, ptr %ir_slot0"));
+    assert_eq!(body.matches("%ir_slot0 = alloca [").count(), 1);
+    assert!(before_checkpoint.contains("zeroinitializer, ptr %ir_slot0"));
+    assert!(!before_checkpoint.contains("load i64, ptr %ir_slot0"));
     assert_eq!(
         body.matches("call i64 @imre_dyn_positional_call_at(")
             .count(),
         1
     );
+}
+
+#[test]
+fn checkpoints_preserve_the_selected_roots_of_nested_regions() {
+    let mut output = Output::default();
+    let file = output.data(b"nested.py");
+    let positions = SourcePositions::new("", &file);
+    let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
+    frame.live_slots = vec![2, 3];
+    frame.checkpoint(Default::default());
+    assert!(frame.body.code.contains("ptr %ir_slot2, i64 2,"));
+
+    frame.body.code.clear();
+    frame.live_slots = vec![0, 3];
+    frame.checkpoint(Default::default());
+    assert!(frame.body.code.contains("ptr %live, i64 2,"));
+    assert!(frame.body.code.contains("load i64, ptr %ir_slot0"));
+    assert!(frame.body.code.contains("load i64, ptr %ir_slot3"));
+    assert!(!frame.body.code.contains("%ir_slot2"));
+
+    frame.body.code.clear();
+    frame.live_slots = vec![2, 3];
+    frame.live.push("%exception".into());
+    frame.checkpoint(Default::default());
+    assert!(frame.body.code.contains("store i64 %exception,"));
+    assert!(frame.body.code.contains("ptr %live, i64 3,"));
+}
+
+#[test]
+fn checkpoint_batches_active_slots_after_the_register_prefix() {
+    let mut output = Output::default();
+    let file = output.data(b"nested.py");
+    let positions = SourcePositions::new("", &file);
+    let mut frame = RegisteredFrame::new(&mut output, &positions, false, 0, 0.into());
+    frame.live.push("%exception".into());
+    frame.live_slots = vec![0, 1, 4, 5, 6];
+    frame.checkpoint(Default::default());
+
+    let body = &frame.body.code;
+    let (_, suffix) = body.split_once("store i64 %exception,").unwrap();
+    let (_, suffix) = suffix
+        .split_once("getelementptr i64, ptr %live, i64 1")
+        .unwrap();
+    let (_, suffix) = suffix
+        .split_once("ptr %ir_slot0, i64 16, i1 false)")
+        .unwrap();
+    let (_, suffix) = suffix
+        .split_once("getelementptr i64, ptr %live, i64 3")
+        .unwrap();
+    let (_, suffix) = suffix
+        .split_once("ptr %ir_slot4, i64 24, i1 false)")
+        .unwrap();
+    assert!(suffix.contains("ptr %live, i64 6,"));
+    assert_eq!(body.matches("call void @llvm.memcpy").count(), 2);
 }
 
 #[test]
@@ -111,4 +272,68 @@ fn checked_assertion_message_and_raise_use_the_failure_edge() {
         .unwrap();
     assert!(raise.contains("call i64 @imre_dyn_op_at("));
     assert!(raise.contains("br label %caught"));
+}
+
+#[test]
+fn async_pull_parks_the_iterator_returned_by_the_protocol_once() {
+    use crate::ir::AsyncPull;
+    use ruff_text_size::TextRange;
+
+    let mut output = Output::default();
+    let file = output.data(b"stream.py");
+    let source = SourcePositions::new("async for item in stream:\n    pass", &file);
+    let mut frame = RegisteredFrame::new(&mut output, &source, true, 0, 0.into());
+    frame.body.error_target = "outer".into();
+    let pull = AsyncPull {
+        range: TextRange::new(18.into(), 24.into()),
+        header: Some(0.into()),
+    };
+    frame.async_pull("%stream", pull, "item", "exhausted");
+
+    assert_eq!(frame.body.error_target, "outer");
+    let body = &frame.body.code;
+    let next = frame.output.strings[b"async_next_iter".as_slice()];
+    assert_eq!(
+        body.matches(&format!("ptr @str{next}, i64 %stream"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        body.matches("call void @imre_dyn_suspend_operands(")
+            .count(),
+        1
+    );
+    assert!(!frame.output.strings.contains_key(b"await_iter".as_slice()));
+    assert!(body.contains("label %exhausted,"));
+    assert!(body.contains("br label %outer"));
+}
+
+#[test]
+fn inner_handler_preserves_the_enclosing_cursor_slot() {
+    let mut output = Output::default();
+    let file = output.data(b"stream.py");
+    let positions = SourcePositions::new("", &file);
+    let mut code = RegisteredFrame::new(&mut output, &positions, true, 0, 0.into());
+    let sites = CheckedSites::default();
+    let mut frame = super::Frame::for_expression(&mut code, &sites);
+    frame.iteration.private_slots = vec![2, 8];
+    frame.iteration.first_slot = 3;
+    frame.body.error_target = "outer".into();
+    frame.enter_scope(&[2]);
+    frame.body.error_target = "inner".into();
+    frame.enter_scope(&[8]);
+    frame.leave_scope();
+    frame.jump("inner");
+    frame.label("inner");
+    frame.leave_scope();
+    frame.jump("outer");
+    frame.label("outer");
+
+    let (_, handlers) = frame.body.code.split_once("\ninner:\n").unwrap();
+    let (inner, outer) = handlers.split_once("\nouter:\n").unwrap();
+    assert!(inner.contains("store i64 0, ptr %ir_slot4"));
+    assert!(!inner.contains("%ir_slot3"));
+    assert!(outer.contains("store i64 0, ptr %ir_slot3"));
+    assert!(!outer.contains("%ir_slot4"));
+    assert!(!handlers.contains("call "));
 }

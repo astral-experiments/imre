@@ -14,6 +14,7 @@ pub(crate) type Result<T, M = String> = std::result::Result<T, Failure<M>>;
 pub(crate) enum Kind {
     Ordinary,
     UnsupportedRepresentation,
+    GeneratorSuspension,
     UnresolvedParameter(ModuleId, ruff_text_size::TextSize),
     ExecutionOperand(ModuleId),
     RegisteredExecution,
@@ -38,7 +39,7 @@ pub(crate) struct EntryOperand {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Position {
     range: TextRange,
-    entry_statement: Option<EntryOperand>,
+    entry_statement: Option<Box<EntryOperand>>,
     line: usize,
     column: usize,
 }
@@ -95,7 +96,7 @@ impl<M> Diagnostic<M> {
     }
 
     pub(crate) fn entry_operand(&self) -> Option<EntryOperand> {
-        let entry = self.position.as_ref()?.entry_statement?;
+        let entry = *self.position.as_ref()?.entry_statement.as_deref()?;
         (self.kind == Kind::ExactType).then_some(entry)
     }
 
@@ -111,12 +112,12 @@ impl<M> Diagnostic<M> {
         call: TextRange,
     ) {
         if let Some(position) = &mut self.position {
-            position.entry_statement = Some(EntryOperand {
+            position.entry_statement = Some(Box::new(EntryOperand {
                 module,
                 body,
                 statement,
                 operand: call,
-            });
+            }));
         }
     }
 
@@ -260,11 +261,13 @@ impl Failure {
             && report.kind == Kind::ExactType
             && let Some(position) = &mut report.position
         {
-            position.entry_statement.get_or_insert(EntryOperand {
-                module,
-                body: module,
-                statement,
-                operand: position.range,
+            position.entry_statement.get_or_insert_with(|| {
+                Box::new(EntryOperand {
+                    module,
+                    body: module,
+                    statement,
+                    operand: position.range,
+                })
             });
         }
         self

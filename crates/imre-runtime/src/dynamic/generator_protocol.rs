@@ -1,4 +1,4 @@
-use super::value::{Body, FrameOwner, Location};
+use super::value::{FrameOwner, Location};
 use super::{Context, Error, Id, NONE, Result, Value};
 
 pub(super) enum GeneratorInput {
@@ -168,13 +168,9 @@ impl Context {
                 format!("can't send non-None value to a just-started {kind}"),
             ));
         }
-        let next = if matches!(self.code_object(code).body, Body::Native(..)) {
-            self.next_result(generator)?
-        } else {
-            stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
-                self.resume_native(generator, finalizer, GeneratorInput::Send(sent))
-            })?
-        };
+        let next = stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+            self.resume_native(generator, finalizer, GeneratorInput::Send(sent))
+        })?;
         next.ok_or_else(|| self.exception("StopIteration", &[]))
     }
 
@@ -546,8 +542,7 @@ impl Context {
                 Err(error)
             };
         }
-        let fresh = offset == Some(0);
-        if fresh || matches!(self.code_object(code).body, Body::Native(..)) {
+        if offset == Some(0) {
             // A fresh frame unwinds at its definition, a suspended native frame at its yield.
             let definition = self.code_object(code);
             let location = Location {
@@ -559,17 +554,6 @@ impl Context {
             self.heap.publish_statement(&[], location, NONE);
             self.record_exception_frame(&mut error, None);
             self.heap.leave(NONE, false);
-            if !fresh {
-                // Unwind the compiled iterator stack. The traceback retains Python locals,
-                // including the outer iterator in .0.
-                let Value::Scope(frame) = self.heap.get_mut(scope) else {
-                    unreachable!("generator scope")
-                };
-                frame
-                    .names
-                    .retain(|name, _| name != ".iterator" && !name.starts_with(".iterator."));
-                error = self.frame_error(error, code);
-            }
             self.heap.disarm_finalizer(finalizer);
             self.heap.discard_generator_frame(id);
             return Err(error);
@@ -614,7 +598,7 @@ impl Context {
         if offset.is_none() {
             return Ok(NONE);
         }
-        if offset == Some(0) || matches!(self.code_object(code).body, Body::Native(..)) {
+        if offset == Some(0) {
             self.heap.disarm_finalizer(finalizer);
             self.heap.discard_generator_frame(id);
             return Ok(NONE);

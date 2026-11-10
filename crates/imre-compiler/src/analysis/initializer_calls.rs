@@ -140,10 +140,20 @@ impl Session {
         runs_as_main: bool,
         application_module: impl Fn(&str) -> Option<(usize, &'a Path)>,
     ) -> Option<Diagnostic> {
+        self.checked_initializer_calls(entry, runs_as_main, application_module, None)
+    }
+
+    pub(super) fn checked_initializer_calls<'a>(
+        &self,
+        entry: (usize, &'a Path),
+        runs_as_main: bool,
+        application_module: impl Fn(&str) -> Option<(usize, &'a Path)>,
+        captures: Option<&mut super::execution::CapturedImports>,
+    ) -> Option<Diagnostic> {
         // These semantic queries establish a diagnostic. Only native lowering's
         // layout queries should retain a hint session for subsequent compilations.
         let hints = self.hint_reads.get();
-        let error = self.reached_initializer_error(entry, |name| {
+        let error = self.reached_initializer_error(entry, captures, |name| {
             if name == "__main__" {
                 runs_as_main.then_some(entry)
             } else {
@@ -157,6 +167,7 @@ impl Session {
     fn reached_initializer_error<'a>(
         &self,
         entry: (usize, &'a Path),
+        mut captures: Option<&mut super::execution::CapturedImports>,
         application_module: impl Fn(&str) -> Option<(usize, &'a Path)>,
     ) -> Option<Diagnostic> {
         // The startup module is already in sys.modules. Its namespace is visible
@@ -176,10 +187,50 @@ impl Session {
                 if module == resident.0 {
                     resident.1 = stmt.start();
                 }
+                // Each import in a comma-separated list must leave the following binding intact.
+                if let Stmt::Import(import) = stmt
+                    && !import.is_lazy
+                    && import.names.len() > 1
+                    && import.names.iter().all(|alias| {
+                        self.initializer_module(
+                            alias.name.as_str(),
+                            &model,
+                            entry.0,
+                            &application_module,
+                        )
+                        .is_some_and(|(owner, _)| self.passive_import_load(stmt, owner, resident))
+                    })
+                {
+                    continue;
+                }
+                // The builtin namespace is resident when Python starts. Importing it
+                // in a passive prefix cannot execute an application's module body.
+                if let Stmt::Import(import) = stmt
+                    && import
+                        .names
+                        .iter()
+                        .all(|alias| alias.name.as_str() == "builtins")
+                    && model
+                        .resolve_module(Some("builtins"), 0)
+                        .and_then(|m| m.file(&self.db))
+                        .is_some_and(|file| file.path(&self.db).is_vendored_path())
+                {
+                    continue;
+                }
                 if let Some(owner) =
                     self.initializer_import(stmt, &model, entry.0, &application_module)
                 {
                     if self.passive_import_load(stmt, owner.0, resident) {
+                        if let Some(captures) = captures.as_deref_mut()
+                            && let Stmt::ImportFrom(import) = stmt
+                        {
+                            self.capture_function_sources(
+                                import,
+                                owner,
+                                resident,
+                                captures.entry(module).or_default(),
+                            );
+                        }
                         imports.push((stmt.range(), owner.0));
                         pending.push(((module, path), i + 1, imports));
                     }
@@ -189,15 +240,10 @@ impl Session {
                     break;
                 }
                 if let Some(stmt) = stmt.as_expr_stmt()
-                    && let Some((site, reason)) =
-                        self.external_source_execution(module, &parsed, &model, &stmt.value)
+                    && let Some(error) =
+                        self.external_source_execution((module, path), &parsed, &model, &stmt.value)
                 {
-                    let text = ruff_db::source::source_text(&self.db, file);
-                    return Some(
-                        Diagnostic::at(text.as_str(), &site, reason)
-                            .with_path(path)
-                            .classified(Kind::ExecutionOperand(module)),
-                    );
+                    return Some(error.classified(Kind::ExecutionOperand(module)));
                 }
                 if let Some(error) = self.initializer_statement_error(
                     (module, path),
@@ -266,6 +312,16 @@ impl Session {
             }
             _ => return None,
         };
+        self.initializer_module(name, model, entry, application_module)
+    }
+
+    fn initializer_module<'a>(
+        &self,
+        name: &str,
+        model: &SemanticModel<'_>,
+        entry: usize,
+        application_module: &impl Fn(&str) -> Option<(usize, &'a Path)>,
+    ) -> Option<(usize, &'a Path)> {
         let (id, path) = application_module(name)?;
         // The launcher name can also reimport the same source in a new namespace.
         if id == entry {
@@ -283,6 +339,34 @@ impl Session {
         .then_some((id, path))
     }
 
+    fn capture_function_sources(
+        &self,
+        import: &ruff_python_ast::StmtImportFrom,
+        owner: (usize, &Path),
+        resident: (usize, TextSize),
+        captures: &mut super::execution::FunctionImports,
+    ) {
+        let file = self.files[owner.0];
+        let parsed = self.parsed(file);
+        let model = SemanticModel::new(&self.db, self.db.program_file(file));
+        for alias in &import.names {
+            let Some(binding) = self.initialized_function(owner.0, alias.name.as_str(), resident)
+            else {
+                continue;
+            };
+            let DefinitionKind::Function(definition) = binding.kind(&self.db) else {
+                continue;
+            };
+            let function = definition.node(&parsed);
+            if !function.is_async && function.decorator_list.is_empty() {
+                let source = imre_ast::code_flags::is_generator(&function.body)
+                    .then(|| self.generator_execution_error(owner, &parsed, &model, function))
+                    .flatten();
+                captures.insert(alias.range(), (owner.0, source));
+            }
+        }
+    }
+
     fn initializer_statement_error(
         &self,
         source: (usize, &Path),
@@ -294,13 +378,16 @@ impl Session {
     ) -> Option<Diagnostic> {
         let (module, path) = source;
         let file = self.files[module];
-        let call = statement_call(stmt, |name| {
-            self.reaching_binding(module, name).is_some()
-                || name.as_name_expr().is_some_and(|n| {
-                    imre_ast::providers::BUILTIN_FUNCTIONS.contains(&n.id.as_str())
-                        && self.is_unbound_module_read(module, name)
-                })
-        })?;
+        let call = match stmt {
+            Stmt::For(loop_) if !loop_.is_async => loop_.iter.as_call_expr()?,
+            _ => statement_call(stmt, |name| {
+                self.reaching_binding(module, name).is_some()
+                    || name.as_name_expr().is_some_and(|n| {
+                        imre_ast::providers::BUILTIN_FUNCTIONS.contains(&n.id.as_str())
+                            && self.is_unbound_module_read(module, name)
+                    })
+            })?,
+        };
         let (name, attr) = match call.func.as_ref() {
             name @ Expr::Name(_) => (name, None),
             Expr::Attribute(attr) if !attr.attr.starts_with("__") => {
@@ -338,6 +425,15 @@ impl Session {
         if !function.decorator_list.is_empty() || function.type_params.is_some() {
             return None;
         }
+        let generator = || {
+            let index = ty_python_core::semantic_index(&self.db, self.db.program_file(owner));
+            index
+                .try_node_scope(ty_python_core::scope::NodeWithScopeRef::Function(function))
+                .map(|scope| scope.is_generator_function(index))
+        };
+        if matches!(stmt, Stmt::For(_)) && (owner == file || function.is_async || !generator()?) {
+            return None;
+        }
         let bound = crate::frontend::fixed_call_arguments(call, &function.parameters)?;
         // Every supplied argument must be passive, including the ones following a mismatch.
         let operands = bound
@@ -359,33 +455,38 @@ impl Session {
         }
         // Read the body only after the real initializer and its passive arguments have
         // selected this function. Literal guards above are also checked for scalar contracts.
-        if owner == file || function.is_async || !matches!(stmt, Stmt::Expr(_) | Stmt::Assign(_)) {
+        if owner == file || function.is_async {
             return None;
         }
-        let first = after_docstring(&function.body)
-            .iter()
-            .find(|stmt| !passive(stmt))?;
-        let expression = match first {
-            Stmt::Expr(stmt) => &*stmt.value,
-            Stmt::Assign(stmt) => &*stmt.value,
-            Stmt::Return(stmt) => stmt.value.as_deref()?,
+        let source = (
+            owner_module,
+            owner.path(&self.db).as_system_path()?.as_std_path(),
+        );
+        let error = match stmt {
+            Stmt::For(_) => {
+                self.generator_execution_error(source, &owner_ast, &owner_model, function)?
+                    .report
+            }
+            Stmt::Assign(_) | Stmt::Expr(_) => {
+                let first = after_docstring(&function.body)
+                    .iter()
+                    .find(|stmt| !passive(stmt))?;
+                let expression = match first {
+                    Stmt::Expr(stmt) => &*stmt.value,
+                    Stmt::Assign(stmt) => &*stmt.value,
+                    Stmt::Return(stmt) => stmt.value.as_deref()?,
+                    _ => return None,
+                };
+                let execution =
+                    self.external_source_execution(source, &owner_ast, &owner_model, expression)?;
+                if generator()? {
+                    return None;
+                }
+                execution
+            }
             _ => return None,
         };
-        let (site, message) =
-            self.external_source_execution(owner_module, &owner_ast, &owner_model, expression)?;
-        let index = ty_python_core::semantic_index(&self.db, self.db.program_file(owner));
-        if index
-            .try_node_scope(ty_python_core::scope::NodeWithScopeRef::Function(function))?
-            .is_generator_function(index)
-        {
-            return None;
-        }
-        let text = ruff_db::source::source_text(&self.db, owner);
-        Some(
-            Diagnostic::at(text.as_str(), &site, message)
-                .with_path(owner.path(&self.db).as_system_path()?.as_std_path())
-                .classified(Kind::RegisteredExecution),
-        )
+        Some(error.classified(Kind::RegisteredExecution))
     }
 
     fn initialized_function(

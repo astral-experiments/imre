@@ -7,6 +7,46 @@ pub(crate) struct ValueJoin {
     owner: Option<usize>,
 }
 
+/// Emit an ordered choice with one continuation for its reachable edges. An
+/// unconditional arm ends the chain. A missing else falls through normally.
+pub(crate) fn choose<C, T, A>(
+    context: &mut C,
+    output: fn(&mut C) -> &mut FunctionBody,
+    arms: impl IntoIterator<Item = (Option<T>, A)>,
+    mut branch: impl FnMut(&mut C, T, &str, &str),
+    mut emit: impl FnMut(&mut C, A),
+    resumable: bool,
+) {
+    let done = output(context).name("select_end");
+    let mut reachable = false;
+    let mut finish = |out: &mut FunctionBody| {
+        if !out.terminated {
+            out.jump(&done);
+            reachable = true;
+        }
+    };
+    for (test, arm) in arms {
+        let next = test.map(|test| {
+            let out = output(context);
+            let yes = out.name("select_yes");
+            let no = out.name("select_no");
+            branch(context, test, &yes, &no);
+            output(context).start(&yes);
+            no
+        });
+        emit(context, arm);
+        finish(output(context));
+        let Some(next) = next else { break };
+        output(context).start(&next);
+    }
+    let out = output(context);
+    finish(out);
+    out.start(&done);
+    if !reachable && !resumable {
+        out.end("unreachable");
+    }
+}
+
 impl ValueJoin {
     /// The producer decides the condition and evaluates only the selected arm at
     /// runtime. Accessing the output publishes the normal edge after an ABI check.
@@ -17,25 +57,22 @@ impl ValueJoin {
         on_true: impl FnOnce(&mut C) -> CheckedValue,
         on_false: impl FnOnce(&mut C) -> CheckedValue,
     ) -> Option<CheckedValue> {
-        let out = output(context);
-        let yes = out.name("select_yes");
-        let no = out.name("select_no");
-        let done = out.name("select_end");
         let mut join = Self::default();
-        branch(context, &yes, &no);
-        output(context).start(&yes);
-        let left = on_true(context);
-        join.jump(output(context), &done, left);
-        output(context).start(&no);
-        let right = on_false(context);
-        join.jump(output(context), &done, right);
-        let out = output(context);
-        out.start(&done);
-        let value = join.finish(out);
-        if value.is_none() {
-            out.end("unreachable");
-        }
-        value
+        choose(
+            context,
+            output,
+            [(Some(branch), Ok(on_true)), (None, Err(on_false))],
+            |code, test, yes, no| test(code, yes, no),
+            |code, arm| {
+                let value = match arm {
+                    Ok(yes) => yes(code),
+                    Err(no) => no(code),
+                };
+                join.incoming(output(code), value);
+            },
+            false,
+        );
+        join.finish(output(context))
     }
 
     /// Record an arm after its error check and before its normal terminator.

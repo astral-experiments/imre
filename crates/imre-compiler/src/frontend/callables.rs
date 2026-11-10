@@ -97,7 +97,7 @@ pub(super) fn targets(
     functions: &[ir::Function],
     entry: &ir::Function,
     types: &Types,
-) -> std::result::Result<HashMap<Type, HashSet<usize>>, String> {
+) -> std::result::Result<HashMap<Type, HashSet<usize>>, Diagnostic> {
     let mut targets = HashMap::<Type, HashSet<usize>>::new();
     for function in functions.iter().chain([entry]) {
         ir::walk_expressions(&function.body, &mut |value| {
@@ -118,7 +118,10 @@ pub(super) fn targets(
                 .iter()
                 .any(|&id| functions[id].returns == returns)
         {
-            return Err("an Awaitable callback must be defined with async def".into());
+            return Err(
+                Diagnostic::from("an Awaitable callback must be defined with async def")
+                    .classified(Kind::UnsupportedRepresentation),
+            );
         }
     }
     Ok(targets)
@@ -535,7 +538,7 @@ impl Checker<'_> {
     /// Callable types contain positional types, not parameter names or defaults.
     pub(super) fn invoke(&mut self, call: &ast::ExprCall, callable: Expr) -> Result<Expr, String> {
         if callable.ty == Type::PythonObject {
-            return registered::values::call_with_target(call, callable, |arg| self.expr(arg));
+            return self.call_with_target(call, callable);
         }
         if let Type::WeakProxy(class) = callable.ty {
             return self.weak_proxy_call(call, callable, class);
@@ -644,6 +647,46 @@ impl Checker<'_> {
                 "an indirect call requires a nonoptional exact Callable value",
             )
         })?;
+        self.positional_invoke(call, callable, params, returns, None)
+    }
+
+    pub(super) fn registered_callback_effect(
+        &mut self,
+        expr: &ast::Expr,
+    ) -> Result<Option<Expr>, String> {
+        let Some(call) = expr.as_call_expr() else {
+            return Ok(None);
+        };
+        let Some(slot) = call
+            .func
+            .as_name_expr()
+            .and_then(|name| self.names.get(name.id.as_str()))
+            .copied()
+        else {
+            return Ok(None);
+        };
+        let ty = self.locals[slot];
+        let Some((params, returns)) = self.types.plain_callable_signature(ty) else {
+            return Ok(None);
+        };
+        if !self.assigned.contains(&slot)
+            || matches!(returns, Type::Coroutine(_))
+            || !registered::values::fixed_positional_arguments(call)
+        {
+            return Ok(None);
+        }
+        self.positional_invoke(call, self.local(slot), params, returns, Some(expr))
+            .map(Some)
+    }
+
+    fn positional_invoke(
+        &mut self,
+        call: &ast::ExprCall,
+        callable: Expr,
+        params: Vec<Type>,
+        returns: Type,
+        registered_effect: Option<&ast::Expr>,
+    ) -> Result<Expr, String> {
         if !call.arguments.keywords.is_empty() || call.arguments.args.len() != params.len() {
             return Err(error(
                 self.source,
@@ -658,37 +701,50 @@ impl Checker<'_> {
         let local_callable = matches!(callable.kind, ExprKind::Local(slot)
             if local == Some(&slot) && self.locals[slot] == callable.ty && matches!(callable.ty, Type::Callable(_)));
         let index_callable = self.types.index_callable_signature(callable.ty).is_some();
-        let values = call
-            .arguments
-            .args
-            .iter()
-            .zip(params)
-            .enumerate()
-            .map(|(slot, (argument, ty))| {
-                if slot == 0 && index_callable {
-                    self.integer_index(argument)
-                } else {
-                    calls::Supplied::Source(argument).check_with(
-                        self,
-                        ty,
-                        false,
-                        |checker, value, expected, site| {
-                            checker.coerce(value, expected, site).map_err(|error| {
-                                error.at_callable_argument(site.range(), || {
-                                    local_callable
-                                        && checker.graph.session.calls_annotated_parameter(
-                                            checker.module,
-                                            call,
-                                            site.range(),
-                                            &checker.graph.modules[checker.module].parsed,
-                                        )
+        let values =
+            call.arguments
+                .args
+                .iter()
+                .zip(params)
+                .enumerate()
+                .map(|(slot, (argument, ty))| {
+                    if registered_effect.is_some() {
+                        // A Python activation passes the source object, including its identity.
+                        // A native conversion or expected display layout cannot supply that handle.
+                        let value = self.expr(argument)?;
+                        if value.ty != ty {
+                            return Err(self
+                                .scoped_builtin_error("a converted callable argument", argument));
+                        }
+                        return Ok(value);
+                    }
+                    if slot == 0 && index_callable {
+                        self.integer_index(argument)
+                    } else {
+                        calls::Supplied::Source(argument).check_with(
+                            self,
+                            ty,
+                            false,
+                            |checker, value, expected, site| {
+                                checker.coerce(value, expected, site).map_err(|error| {
+                                    error.at_callable_argument(site.range(), || {
+                                        local_callable
+                                            && checker.graph.session.calls_annotated_parameter(
+                                                checker.module,
+                                                call,
+                                                site.range(),
+                                                &checker.graph.modules[checker.module].parsed,
+                                            )
+                                    })
                                 })
-                            })
-                        },
-                    )
-                }
-            })
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+                            },
+                        )
+                    }
+                })
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+        if let Some(expr) = registered_effect {
+            return Ok(self.located_callback_effect(expr, call, callable, values));
+        }
         if let Type::Coroutine(_) = returns {
             return Ok(self.indirect_coroutine(callable, values, returns));
         }
@@ -704,6 +760,57 @@ impl Checker<'_> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn registered_entry_reuses_the_typed_callback_body() {
+        use crate::frontend::caller_cache::observe_lowerings;
+        use crate::ir::{self, ExprKind, Type};
+        use crate::modules::SourceGraph;
+        use ruff_text_size::Ranged;
+
+        let source = concat!(
+            "from typing import Callable\n",
+            "def report(n: int, sink: Callable[[int], None]) -> None:\n",
+            "    sink(n + 1)\n",
+            "def first(n): print(n)\n",
+            "def second(n): print(n)\n",
+            "def publish(sink): sink(3)\n",
+            "def marker(n: int) -> None: print(n)\n",
+            "report(7, marker)\n",
+            "handlers = {'first': first, 'second': second}\n",
+            "publish(handlers[input()])\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, source).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        let (program, lowered) = observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        assert!(matches!(program, crate::CheckedProgram::Registered(_)));
+        let site = graph.modules[graph.entry].parsed.syntax().body[1].start();
+        let bodies = graph.registered_functions();
+        let body = &bodies[&graph.entry][&site].function;
+        assert_eq!(lowered.iter().filter(|name| *name == "report").count(), 1);
+        assert!(matches!(body.locals[body.params[1]], Type::Callable(_)));
+        let mut invokes = 0;
+        ir::walk_expressions(&body.body, &mut |expr| {
+            if let ExprKind::Invoke { callable, args } = &expr.kind {
+                assert!(expr.is_registered_invoke());
+                assert!(matches!(callable.ty, Type::Callable(_)));
+                assert_eq!(args.values[0].ty, Type::Int);
+                let range = args.python_site.as_ref().unwrap().range;
+                assert_eq!(&source[range], "sink(n + 1)");
+                invokes += 1;
+            }
+        });
+        assert_eq!(invokes, 1);
+
+        std::fs::write(&path, source.replace("sink(n + 1)", "sink('bad')")).unwrap();
+        let error = crate::check_file(&path, None).unwrap_err();
+        assert!(
+            error.contains("app.py:3:10: Imre: expected int, got str"),
+            "{error}"
+        );
+    }
+
     #[test]
     fn callable_parameter_owns_its_argument_in_a_checked_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -722,24 +829,51 @@ mod tests {
 
     #[test]
     fn eager_coroutine_factories_remain_direct_calls() {
+        use crate::frontend::{lower, lower_with_caller_cache, phase::Kind};
+        use crate::ir::{self, Builtin, ExprKind, ProcessOperation};
+        use crate::modules::SourceGraph;
+
         let source = "from collections.abc import Awaitable, Callable\nasync def cold(x: int) -> int:\n    return x\ndef factory(x: int) -> Awaitable[int]:\n    return cold(x)\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("callbacks.py");
         for callback in ["cold", "factory", "lambda x: cold(x)"] {
             let program = format!(
                 "{source}async def run() -> int:\n    cb: Callable[[int], Awaitable[int]] = {callback}\n    return await cb(7)\n"
             );
+            let mut graph = SourceGraph::single(&program).unwrap();
             if callback == "cold" {
-                crate::check(&program).unwrap();
+                let module = lower(&graph).unwrap();
+                let mut indirect = false;
+                ir::walk_expressions(&module.functions[2].body, &mut |expr| {
+                    indirect |= matches!(
+                        expr.kind,
+                        ExprKind::Builtin(
+                            Builtin::Process(ProcessOperation::IndirectCoroutine { .. }),
+                            _
+                        )
+                    );
+                });
+                assert!(indirect);
             } else {
-                assert!(
-                    crate::check(&program)
-                        .unwrap_err()
-                        .contains("Awaitable callback must be defined with async def")
+                let Err(error) = lower_with_caller_cache(&mut graph, None) else {
+                    panic!("eager factory cannot enter a cold callback adapter");
+                };
+                assert_eq!(error.kind, Kind::UnsupportedRepresentation);
+                assert_eq!(
+                    error.to_string(),
+                    "an Awaitable callback must be defined with async def"
                 );
             }
+            std::fs::write(&path, &program).unwrap();
+            crate::check(&program).unwrap();
+            crate::check_file(&path, None).unwrap();
         }
-        crate::check(&format!(
-            "{source}async def run() -> int:\n    return await factory(7)\n"
-        ))
-        .unwrap();
+        let direct = format!("{source}async def run() -> int:\n    return await factory(7)\n");
+        let module = lower(&SourceGraph::single(&direct).unwrap()).unwrap();
+        let mut calls_factory = false;
+        ir::walk_expressions(&module.functions[2].body, &mut |expr| {
+            calls_factory |= matches!(expr.kind, ExprKind::Call(1, _));
+        });
+        assert!(calls_factory);
     }
 }

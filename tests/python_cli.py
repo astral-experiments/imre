@@ -126,6 +126,27 @@ def check_registered_entry_operand(imre, root, run):
     result = run(imre, "-m", "checked_operand", stdin=b"send\n")
     assert (result.returncode, result.stdout, result.stderr) == (0, b"2\n", b""), result
 
+    # Moving an inert function declaration past a store changes which initializer
+    # lowers the store, while Python still looks up the callee before its arguments.
+    entry.write_text(
+        "import checked_worker\n"
+        "def replacement(a, b, send): send(a - b)\n"
+        "def report(value): print(value)\n"
+        "handlers = {'send': report}\nsend = handlers[input()]\n"
+        "def install(f):\n    checked_worker.publish = replacement\n    return f\n"
+        "checked_worker.publish(3, 5, install(send))\n"
+    )
+    result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+    assert result.returncode and not result.stdout, result
+    assert b"checked_worker.py:3:19: Imre: expected int, got bool" in result.stderr, result
+
+    entry.write_text(
+        bad_body + "def abort(_): raise LookupError('argument stopped')\n"
+        "send = {'send': report}[input()]\npublish(3, 5, abort(send))\n"
+    )
+    result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+    assert result.returncode == 1 and b"LookupError: argument stopped" in result.stderr, result
+
 
 def check_module_search_root(imre, root, run):
     app = root / "application"
@@ -3760,6 +3781,7 @@ def report(text):
 
         compare("-B", "-c", "from typing import Protocol as P; print(P.__name__)")
         compare("-B", fixtures / "typing_protocol_import.py")
+        compare("-B", fixtures / "boxed_list_finalization.py")
         compare(
             "-IB", "-c",
             "from datetime import datetime, timezone\n"
@@ -4485,6 +4507,7 @@ for name in ("md4", "ripemd160"):
             "boxed_pprint.py",
             "boxed_formatter.py",
             "boxed_template_client.py",
+            "boxed_fstring_join.py",
             "boxed_template_literals.py",
             "boxed_re_ascii.py",
             "boxed_re_numeric_escapes.py",
@@ -4598,6 +4621,7 @@ for name in ("md4", "ripemd160"):
             "boxed_attribute_name_keys.py",
             "boxed_exception_repr.py",
             "boxed_exception_notes.py",
+            "boxed_exception_normalization.py",
             "boxed_exception_groups.py",
             "boxed_warning_categories.py",
             "boxed_warnings.py",
@@ -4660,6 +4684,7 @@ for name in ("md4", "ripemd160"):
             "boxed_frozenset.py",
             "boxed_attribute_deletion.py",
             "boxed_mixed_delete.py",
+            "boxed_delete_eager_key.py",
             "boxed_recursion.py",
             "boxed_function_defaults.py",
             "boxed_reprlib.py",
@@ -4667,6 +4692,7 @@ for name in ("md4", "ripemd160"):
             "boxed_multiprocessing_context.py",
             "boxed_textwrap.py",
             "boxed_set_ordering.py",
+            "boxed_set_iteration.py",
             "boxed_dict_view_equality.py",
             "boxed_set_issubset.py",
             "boxed_set_operator_descriptors.py",
@@ -4807,6 +4833,8 @@ for name in ("md4", "ripemd160"):
             "boxed_comprehension_outer_yield.py",
             "boxed_generator_delegation.py",
             "boxed_suspended_operand_positions.py",
+            "boxed_lambda_default_positions.py",
+            "boxed_mixed_lambda_defaults.py",
             "boxed_source_coroutine.py",
             "boxed_coroutine_origin.py",
             "boxed_anext.py",
@@ -4817,6 +4845,8 @@ for name in ("md4", "ripemd160"):
             "boxed_source_async_with.py",
             "boxed_with_control.py",
             "boxed_short_circuit.py",
+            "boxed_while_truth.py",
+            "boxed_positional_class_match.py",
             "boxed_doctest_suite.py",
             "boxed_doctest_hooks.py",
             "boxed_doctest_files.py",
@@ -4867,6 +4897,7 @@ for name in ("md4", "ripemd160"):
                 check_slice_stack(imre, imports, root, env)
             elif fixture in (
                 "boxed_nested_callable_scope.py",
+                "boxed_mixed_lambda_defaults.py",
                 "boxed_codec_registry.py",
                 "boxed_gc_generator_loop.py",
                 "boxed_gc_generator_resurrection.py",

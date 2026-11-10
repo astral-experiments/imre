@@ -376,8 +376,17 @@ impl Pending {
 #[derive(Default)]
 pub(super) struct Inference {
     pending: RefCell<Vec<Pending>>,
+    /// Physical first-party definitions still awaiting a recoverable checked body.
+    pub(super) pending_bodies: RefCell<Option<Vec<DefinitionId>>>,
     revision: Cell<usize>,
     widened: Cell<bool>,
+}
+
+pub(super) struct Solution {
+    pub(super) registered_parameters: HashMap<usize, Diagnostic>,
+    /// Definitions checked to completion with the final input and return types.
+    pub(super) checked_bodies: HashSet<usize>,
+    pub(super) registered_generators: HashSet<usize>,
 }
 
 impl Inference {
@@ -696,13 +705,17 @@ impl Inference {
         signatures: &mut HashMap<DefinitionId, Signature>,
         classes: &mut ClassInfo,
         types: &Types,
-    ) -> std::result::Result<HashMap<usize, Diagnostic>, Diagnostic> {
+    ) -> std::result::Result<Solution, Diagnostic> {
         let mut registered = HashMap::new();
+        let mut checked_bodies = HashSet::new();
+        let mut registered_generators = HashSet::new();
+        let mut generator_checks = registered::SourceChecks::default();
         loop {
             let widened = self.widened.replace(false);
             if !widened && !self.unresolved() {
                 break;
             }
+            checked_bodies.clear();
             if widened {
                 self.revisit_checked_returns();
             }
@@ -732,7 +745,8 @@ impl Inference {
                     graph, module, signatures, classes, types, &helpers, &globals,
                 );
                 checker.inference = Some(self);
-                if let Err(diagnostic) = Initialization::lower(checker, &mut available, range) {
+                if let Err(diagnostic) = Initialization::lower(checker, &mut available, range, None)
+                {
                     errors.push((module, diagnostic));
                 }
             }
@@ -764,6 +778,10 @@ impl Inference {
                 if !ready {
                     continue;
                 }
+                if registered_generators.contains(&signature.id) {
+                    checked_bodies.insert(signature.id);
+                    continue;
+                }
                 // Calls earlier in this round can have supplied new parameters.
                 let mut signature = signature.clone();
                 self.update(&mut signature);
@@ -782,6 +800,7 @@ impl Inference {
                 checker.method_context(signature.method);
                 checker.generator_item = classes.producer_items.get(&signature.id).copied();
                 checker.inferred_returns = infer_return.then(Vec::new);
+                let mut checked_return = false;
                 let result = (|| {
                     for (parameter, signature) in
                         closed_calls::parameters(&function.parameters).zip(&signature.params)
@@ -793,7 +812,7 @@ impl Inference {
                         checker.bind_parameter(keyword, parameter.ty)?;
                     }
                     checker.collect_local_definitions(&function.body)?;
-                    let (_, falls_through) = checker.block(&function.body)?;
+                    let falls_through = checker.lower_block(&function.body, None)?;
                     // An outstanding call cannot establish an implicit return, even
                     // when checking subsequent statements reached the end of the body.
                     if matches!(
@@ -825,9 +844,35 @@ impl Inference {
                         self.pending.borrow_mut()[signature.id].returns = Some(ty);
                         self.revision.set(self.revision.get() + 1);
                     }
+                    checked_return =
+                        !infer_return && (!falls_through || signature.returns == Type::None);
                     Ok::<_, Failure>(())
                 })();
                 if let Err(diagnostic) = checker.finish_region(result) {
+                    if matches!(&diagnostic, Failure::Diagnostic(report) if report.kind == Kind::GeneratorSuspension)
+                        && signature.method.is_none()
+                        && graph.modules[*module].is_program_source()
+                        && !function.is_async
+                        && generator_checks.accepts(graph, *module, function)
+                        && let Some(body) = registered::generator_body(
+                            &graph.modules[*module],
+                            function,
+                            graph.python_optimization(),
+                            literals.entry(*module).or_insert_with(|| {
+                                registered::values::ModuleSource::new(&graph.modules[*module])
+                            }),
+                        )
+                    {
+                        graph.register_function(*module, function.start(), body);
+                        registered_generators.insert(signature.id);
+                        checked_bodies.insert(signature.id);
+                        if infer_return {
+                            self.pending.borrow_mut()[signature.id].returns =
+                                Some(Type::PythonObject);
+                            self.revision.set(self.revision.get() + 1);
+                        }
+                        continue;
+                    }
                     if self.pending.borrow()[signature.id].returns.is_none()
                         && diagnostic.is_representation()
                         && graph.modules[*module].is_program_source()
@@ -850,8 +895,14 @@ impl Inference {
                             ReturnDiscovery::Waiting(callee);
                     }
                     errors.push((*module, diagnostic));
-                } else if retrying {
-                    self.pending.borrow_mut()[signature.id].discovery = ReturnDiscovery::Checked;
+                } else {
+                    if checked_return {
+                        checked_bodies.insert(signature.id);
+                    }
+                    if retrying {
+                        self.pending.borrow_mut()[signature.id].discovery =
+                            ReturnDiscovery::Checked;
+                    }
                 }
             }
             let module = &graph.modules[graph.entry];
@@ -871,7 +922,7 @@ impl Inference {
                 .iter()
                 .map(|&index| module.parsed.syntax().body[index].clone())
                 .collect::<Vec<_>>();
-            let result = checker.block(&statements);
+            let result = checker.lower_block(&statements, None);
             if let Err(diagnostic) = checker.finish_region(result) {
                 errors.push((graph.entry, diagnostic));
             }
@@ -933,7 +984,13 @@ impl Inference {
                 if let Some(primary) = reports.next() {
                     if primary.kind.is_object() {
                         registered::capture(
-                            graph, signatures, classes, types, self, &globals, false,
+                            graph,
+                            signatures,
+                            classes,
+                            types,
+                            self,
+                            &globals,
+                            registered::Capture::Solved,
                         );
                     }
                     return Err(primary.with_following(reports));
@@ -949,26 +1006,44 @@ impl Inference {
                         || matches!(unresolved.kind, Kind::UnresolvedParameter(..))
                     {
                         registered::capture(
-                            graph, signatures, classes, types, self, &globals, true,
+                            graph,
+                            signatures,
+                            classes,
+                            types,
+                            self,
+                            &globals,
+                            registered::Capture::IncludeLive,
                         );
                     }
                     return Err(unresolved);
                 }
                 unreachable!("an unresolved signature has a missing parameter or return");
+            } else {
+                checked_bodies.clear();
             }
         }
         for (_, _, signature) in definitions.iter_mut() {
             self.update(signature);
         }
-        for signature in signatures.values_mut() {
+        let mut pending_bodies = Vec::new();
+        for (&owner, signature) in signatures.iter_mut() {
             self.update(signature);
+            // The ordinary definition pass owns registered argument frames.
+            if !signature.registered_frame() && graph.modules[owner.module].is_program_source() {
+                pending_bodies.push(owner);
+            }
         }
+        self.pending_bodies.replace(Some(pending_bodies));
         for methods in classes.methods.iter_mut().chain(&mut classes.setters) {
             for signature in methods.values_mut() {
                 self.update(signature);
             }
         }
-        Ok(registered)
+        Ok(Solution {
+            registered_parameters: registered,
+            checked_bodies,
+            registered_generators,
+        })
     }
 }
 
@@ -1036,13 +1111,33 @@ impl Checker<'_> {
                 }
                 loaded = true;
             } else {
-                if !checked {
+                if !checked && !self.globals.checked_entry_stores.borrow().contains(&index) {
                     return None;
                 }
                 passive_prefix = false;
             }
         }
         None
+    }
+
+    fn call_operand_returns(&self, value: &Expr) -> bool {
+        let ExprKind::Call(callee, _) = &value.kind else {
+            return true;
+        };
+        let Some((definition, _)) = self
+            .functions
+            .iter()
+            .find(|(_, signature)| signature.id == *callee)
+        else {
+            return true;
+        };
+        let statement =
+            &self.graph.modules[definition.module].parsed.syntax().body[definition.statement];
+        statement.as_function_def_stmt().is_none_or(|function| {
+            self.graph
+                .session
+                .function_may_return(definition.module, function)
+        })
     }
 
     pub(super) fn source_call(
@@ -1073,6 +1168,8 @@ impl Checker<'_> {
                 }))
             .then_some(&mut scope),
         )?;
+        let entry_site =
+            entry_site.filter(|_| args.values.iter().all(|arg| self.call_operand_returns(arg)));
         if let (Some(site), Some(seen)) = (entry_site, &mut self.observed_definition) {
             seen.entry_site.get_or_insert(site);
         }

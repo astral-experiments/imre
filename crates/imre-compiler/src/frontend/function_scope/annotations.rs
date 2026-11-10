@@ -7,6 +7,7 @@ use ruff_python_ast::visitor::Visitor;
 use ruff_text_size::{Ranged, TextSize};
 
 use super::{ClassBindings, ClosureNames, class_metadata};
+use crate::ir::AnnotationOccurrence;
 
 #[derive(Default)]
 pub(crate) struct AnnotationScopes {
@@ -90,5 +91,52 @@ impl AnnotationScopes {
             complete &= !assignment.incomplete;
         }
         (reads, complete)
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct ClassAnnotations {
+    pub(crate) sites: Vec<AnnotationOccurrence>,
+    pub(crate) reads: BTreeSet<String>,
+    pub(crate) incomplete: bool,
+}
+
+impl ClassAnnotations {
+    pub(super) fn observe(&mut self, assign: &ast::StmtAnnAssign) {
+        if assign.simple && assign.target.is_name_expr() {
+            self.sites.push(AnnotationOccurrence {
+                site: assign.start(),
+                index: None,
+            });
+        }
+    }
+
+    pub(super) fn finish(
+        &mut self,
+        class: &ast::StmtClassDef,
+        scopes: &AnnotationScopes,
+        bindings: &ClassBindings,
+    ) {
+        if self.sites.is_empty() {
+            return;
+        }
+        let (reads, complete) =
+            scopes.class_reads(self.sites.iter().map(|entry| &entry.site), bindings);
+        self.reads = reads;
+        self.incomplete = !complete;
+        self.reads.insert("__classdict__".into());
+        self.sites.sort_unstable_by_key(|entry| entry.site);
+        let mut conditional = 0;
+        for entry in &mut self.sites {
+            if class
+                .body
+                .binary_search_by_key(&entry.site, Ranged::start)
+                .is_err()
+            {
+                self.reads.insert("__conditional_annotations__".into());
+                entry.index = Some(conditional);
+                conditional += 1;
+            }
+        }
     }
 }

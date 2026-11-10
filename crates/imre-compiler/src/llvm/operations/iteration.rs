@@ -1,5 +1,5 @@
 //! Shared traversal of loop and unpacking IR for fixed and registered entries.
-use super::{Builtin, CheckedBody, CheckedValue, Entry, Expr, ExprKind, Statement};
+use super::{CheckedBody, CheckedValue, Entry, Expr, ExprKind, Statement};
 use crate::ir::IterNextKind;
 use crate::llvm::{Cleanup, Completion, Emitter, LoopTarget};
 
@@ -8,6 +8,49 @@ pub(crate) struct LoopEdges {
     pub(crate) step: String,
     pub(crate) exhausted: String,
     pub(crate) done: String,
+}
+
+/// Wire the test, body, exhaustion, and break edges for either a complete or mixed loop.
+pub(crate) fn loop_region<C, T>(
+    context: &mut C,
+    output: fn(&mut C) -> &mut super::FunctionBody,
+    label: fn(&mut C) -> String,
+    enter: impl FnOnce(&mut C, &LoopEdges),
+    test: impl FnOnce(&mut C, &str, &str) -> T,
+    body: impl FnOnce(&mut C, &LoopEdges, T),
+    otherwise: Option<impl FnOnce(&mut C)>,
+) {
+    let step = label(context);
+    let body_label = label(context);
+    let done = label(context);
+    let exhausted = if otherwise.is_some() {
+        label(context)
+    } else {
+        done.clone()
+    };
+    let edges = LoopEdges {
+        step,
+        exhausted,
+        done,
+    };
+    enter(context, &edges);
+    output(context).start(&edges.step);
+    let item = test(context, &body_label, &edges.exhausted);
+    output(context).start(&body_label);
+    body(context, &edges, item);
+    let out = output(context);
+    if !out.terminated {
+        out.jump(&edges.step);
+    }
+    if let Some(emit_else) = otherwise {
+        output(context).start(&edges.exhausted);
+        emit_else(context);
+        let out = output(context);
+        if !out.terminated {
+            out.jump(&edges.done);
+        }
+    }
+    output(context).start(&edges.done);
 }
 
 impl Emitter<'_, '_> {
@@ -43,80 +86,6 @@ impl CheckedBody<'_, '_, '_, '_> {
         self.body().start(&end);
     }
 
-    fn emit_loop(
-        &mut self,
-        otherwise: &[Statement],
-        enter: impl FnOnce(&mut Self, &LoopEdges),
-        test: impl FnOnce(&mut Self) -> String,
-        body: impl FnOnce(&mut Self, &LoopEdges),
-    ) {
-        let step = self.block_name();
-        let body_label = self.block_name();
-        let done = self.block_name();
-        let exhausted = if otherwise.is_empty() {
-            done.clone()
-        } else {
-            self.block_name()
-        };
-        let edges = LoopEdges {
-            step,
-            exhausted,
-            done,
-        };
-        enter(self, &edges);
-        self.body().start(&edges.step);
-        let condition = test(self);
-        self.body()
-            .branch(&condition, &body_label, &edges.exhausted);
-        self.body().start(&body_label);
-        body(self, &edges);
-        self.jump_open(&edges.step);
-        if !otherwise.is_empty() {
-            self.body().start(&edges.exhausted);
-            self.emit_block(otherwise);
-            self.jump_open(&edges.done);
-        }
-        self.body().start(&edges.done);
-    }
-
-    pub(super) fn object_operand(&mut self, expr: &Expr) -> String {
-        let v = self.operand(expr);
-        self.python().materialize(&v)
-    }
-
-    pub(super) fn iteration_operation(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
-        let result = match (op, operands) {
-            (Builtin::RegisteredIter, [value]) => {
-                let value = self.object_operand(value);
-                self.python().op("iter", &[&value])
-            }
-            (Builtin::RegisteredUnpack { count, star }, [value]) => {
-                let value = self.object_operand(value);
-                self.python().unpack(&value, *count, *star)
-            }
-            (Builtin::RegisteredNamespace(names), args) => {
-                let parent = args.first().map(|v| self.object_operand(v));
-                self.python().comprehension_scope(parent, names)
-            }
-            (Builtin::ListGet, [base, index]) => {
-                let base = self.object_operand(base);
-                let key = self.object_operand(index);
-                self.python().op("get", &[&base, &key])
-            }
-            (Builtin::Bool, [value]) => {
-                let v = self.object_operand(value);
-                self.python().op("truth", &[&v])
-            }
-            (Builtin::Append | Builtin::SetAdd, [out, item]) => {
-                let out = self.object_operand(out);
-                let item = self.object_operand(item);
-                self.python().op("append", &[&out, &item])
-            }
-            _ => unreachable!("invalid checked iteration operands"),
-        };
-        CheckedValue::handle(result)
-    }
-
     pub(super) fn clear_iteration_slots(&mut self, slots: &[usize]) {
         match &mut self.0 {
             Entry::Native(e) => e.clear_slots(slots),
@@ -125,16 +94,34 @@ impl CheckedBody<'_, '_, '_, '_> {
     }
 
     pub(super) fn scoped_suite(&mut self, statements: &[Statement], clear: &[usize]) {
-        match &mut self.0 {
-            Entry::Native(e) => e.cleanups.push(Cleanup::Slots(clear.to_vec())),
-            Entry::Registered(f) => f.enter_scope(clear),
-        }
+        let cursor_unwind = match &mut self.0 {
+            Entry::Native(e) => {
+                e.cleanups.push(Cleanup::Slots(clear.to_vec()));
+                None
+            }
+            Entry::Registered(f) => {
+                let unwind = f.owns_sync_cursor(clear).then(|| f.begin_operand_scope());
+                f.enter_scope(clear);
+                unwind
+            }
+        };
         self.emit_block(statements);
         match &mut self.0 {
             Entry::Native(e) => {
                 e.cleanups.pop();
             }
-            Entry::Registered(f) => f.leave_scope(),
+            Entry::Registered(f) => {
+                f.leave_scope();
+                if let Some(unwind) = cursor_unwind {
+                    // The landing block clears this loop's slots. Publish the
+                    // surviving roots before the enclosing cleanup runs.
+                    let terminated = f.terminated();
+                    f.finish_unwind(unwind, |code| code.release_target(None));
+                    if terminated {
+                        f.end("unreachable");
+                    }
+                }
+            }
         }
         if !self.body().terminated {
             self.clear_iteration_slots(clear);
@@ -147,12 +134,15 @@ impl CheckedBody<'_, '_, '_, '_> {
         value: &Expr,
         clear: &[usize],
     ) -> CheckedValue {
-        let mark = match &mut self.0 {
+        let scope = match &mut self.0 {
             Entry::Native(e) => {
                 e.cleanups.push(Cleanup::Slots(clear.to_vec()));
                 None
             }
-            Entry::Registered(f) => Some(f.start_expression()),
+            Entry::Registered(f) => {
+                f.unwind_scope(clear);
+                Some(f.start_expression())
+            }
         };
         self.emit_block(statements);
         if let Entry::Native(e) = &mut self.0
@@ -168,26 +158,10 @@ impl CheckedBody<'_, '_, '_, '_> {
             e.cleanups.pop();
         }
         self.clear_iteration_slots(clear);
-        if let Some((mark, outer)) = mark {
-            self.python().finish_expression(&mark, outer, &result);
+        if let Some(scope) = scope {
+            self.python().finish_expression(scope, clear, &result);
         }
         result
-    }
-
-    fn object_condition(&mut self, expr: &Expr) -> String {
-        match &expr.kind {
-            ExprKind::Bool(value) => return value.to_string(),
-            ExprKind::Not(value) => {
-                let inner = self.object_condition(value);
-                return self.python().invert(&inner);
-            }
-            ExprKind::Builtin(Builtin::Bool, args) => return self.object_condition(&args[0]),
-            _ => {}
-        }
-        let mark = self.python().temporary_mark();
-        let condition = self.python().evaluate_test(expr);
-        self.python().discard_truth(&mark);
-        condition
     }
 
     pub(super) fn while_suite(
@@ -209,8 +183,10 @@ impl CheckedBody<'_, '_, '_, '_> {
             Entry::Registered(f) => f.target_mark(),
             _ => None,
         };
-        self.emit_loop(
-            otherwise,
+        loop_region(
+            self,
+            Self::body,
+            Self::block_name,
             |this, edges| {
                 if let Entry::Native(e) = &mut this.0
                     && e.struct_run_loop(test, body, &edges.step, &edges.exhausted)
@@ -219,21 +195,22 @@ impl CheckedBody<'_, '_, '_, '_> {
                 }
                 this.jump_open(&edges.step);
             },
-            |this| {
+            |this, yes, no| {
                 if let Entry::Native(e) = &mut this.0 {
                     e.check_interrupt();
-                    e.while_condition(
+                    let bit = e.while_condition(
                         test,
                         optimized.as_ref().is_some_and(|(_, _, s)| s.is_some()),
-                    )
+                    );
+                    e.branch(&bit, yes, no);
                 } else {
                     if let Some(mark) = &mark {
                         this.python().begin_step(mark);
                     }
-                    this.object_condition(test)
+                    this.branch_condition(test, yes, no);
                 }
             },
-            |this, edges| {
+            |this, edges, ()| {
                 match &mut this.0 {
                     Entry::Native(e) => e.loops.push(LoopTarget {
                         end: edges.done.clone(),
@@ -252,6 +229,7 @@ impl CheckedBody<'_, '_, '_, '_> {
                     Entry::Registered(f) => f.leave_loop(),
                 }
             },
+            (!otherwise.is_empty()).then_some(|this: &mut Self| this.emit_block(otherwise)),
         );
         if let Some((lengths, buffers, _)) = optimized {
             let e = self.fixed();
@@ -272,9 +250,8 @@ impl CheckedBody<'_, '_, '_, '_> {
             e.iter_next(iterator, key, value, ready, kind);
             return;
         }
-        debug_assert!(value.is_none() && matches!(kind, IterNextKind::Generic));
-        let (cursor, condition) = self.python().pull_ready(iterator, ready);
-        self.when(&condition, |this| this.python().pull_item(&cursor, key));
+        debug_assert!(value.is_none());
+        self.python().pull(iterator, key, ready, kind);
     }
 
     pub(super) fn loop_transfer(&mut self, statement: &Statement) {
@@ -366,118 +343,37 @@ impl CheckedBody<'_, '_, '_, '_> {
 
     pub(super) fn conditional_suite(
         &mut self,
-        statement: &Statement,
+        stmt: &Statement,
         test: &Expr,
         yes: &[Statement],
         no: &[Statement],
     ) {
-        let (yes_label, no_label, end) = (self.block_name(), self.block_name(), self.block_name());
-        let state = if let Entry::Native(e) = &mut self.0 {
-            let mut bounded = false;
-            if crate::list_specialization::is_window_range_guard(test)
-                && let [Statement::While(_, body, _)] = yes
-            {
-                crate::ir::walk_expressions(body, &mut |value| {
-                    bounded |= matches!(
-                        value.kind,
-                        ExprKind::Builtin(Builtin::GetBoundedInAppendWindow { .. }, _)
-                    );
-                });
-            }
-            let slots = if bounded {
-                e.ranges
-                    .checked_small_slots(yes, &e.locals, &e.small_locals)
-            } else {
-                Vec::new()
-            };
-            let reserve = bounded
-                .then(|| crate::list_specialization::reserved_append_window(yes))
-                .flatten();
-            let reserve = reserve.and_then(|(slot, cursor)| {
-                e.forward_cursors.get(&cursor).cloned().map(|c| (slot, c))
-            });
-            let previous = e.reserved_append_window.clone();
-            let carried = reserve
-                .as_ref()
-                .map(|(slot, _)| (*slot, e.entry_alloca("i64")));
-            if carried.is_some() {
-                e.reserved_append_window.clone_from(&carried);
-            }
-            let condition = e.expr(test);
-            e.reserved_append_window.clone_from(&previous);
-            let mut guard = condition.operand;
-            let unknown = slots
-                .iter()
-                .copied()
-                .filter(|slot| !e.ranges.starts_small(statement, *slot))
-                .collect::<Vec<_>>();
-            if let Some((first, rest)) = unknown.split_first() {
-                let mut words = e.borrow_slot(*first).operand;
-                for slot in rest {
-                    let word = e.borrow_slot(*slot).operand;
-                    words = e.instruction(format!("and i64 {words}, {word}"));
-                }
-                let tagged = e.instruction(format!("trunc i64 {words} to i1"));
-                guard = e.instruction(format!("and i1 {guard}, {tagged}"));
-            }
-            if let Some((slot, cursor)) = reserve {
-                let check = e.label();
-                e.branch(&guard, &check, &no_label);
-                e.start(&check);
-                let bytes = e.remaining_cursor_bytes(&cursor);
-                let list = e.borrow_slot(slot).operand;
-                let window = e.append_window(slot);
-                let success = e.instruction(format!(
-                        "call i32 @imre_list_try_open_append_window(ptr {list}, i64 {bytes}, ptr {window})"
-                    ));
-                let opened = e.instruction(format!("icmp ne i32 {success}, 0"));
-                e.branch(&opened, &yes_label, &no_label);
-                e.reserved_append_window.clone_from(&carried);
-            } else {
-                e.branch(&guard, &yes_label, &no_label);
-            }
-            e.start(&yes_label);
-            if let Some((slot, tail)) = carried {
-                // Opening the reserved window proves the list has an immediate tail.
-                let window = e.append_window(slot);
-                let cursor = e.instruction(format!(
-                    "getelementptr [3 x ptr], ptr {window}, i32 0, i32 1"
-                ));
-                let next = e.instruction(format!("load ptr, ptr {cursor}"));
-                let last = e.instruction(format!("getelementptr i64, ptr {next}, i64 -1"));
-                let word = e.instruction(format!("load i64, ptr {last}"));
-                e.line(format!("store i64 {word}, ptr {tail}"));
-            }
-            let prior = e.guarded_integer_lists.len();
-            e.borrow_guarded_integer_lists(test);
-            for slot in &slots {
-                e.small_locals[*slot] = true;
-            }
-            Some((previous, slots, prior))
-        } else {
-            let condition = self.object_condition(test);
-            self.body().branch(&condition, &yes_label, &no_label);
-            self.body().start(&yes_label);
-            None
+        let facts = match &mut self.0 {
+            Entry::Native(emitter) => Some(emitter.if_facts(test, yes)),
+            Entry::Registered(_) => None,
         };
-        self.emit_block(yes);
-        if let Some((previous, slots, prior)) = state {
-            let e = self.fixed();
-            e.reserved_append_window = previous;
-            for slot in slots {
-                e.small_locals[slot] = false;
-            }
-            e.guarded_integer_lists.truncate(prior);
-        }
-        let yes_ends = self.body().terminated;
-        self.jump_open(&end);
-        self.body().start(&no_label);
-        self.emit_block(no);
-        let no_ends = self.body().terminated;
-        self.jump_open(&end);
-        self.body().start(&end);
-        if yes_ends && no_ends {
-            self.body().end("unreachable");
-        }
+        super::join::choose(
+            self,
+            Self::body,
+            [(Some(test), (yes, facts.as_ref())), (None, (no, None))],
+            |code, test, t, f| {
+                if let Some(facts) = &facts {
+                    let bit = code.fixed().expr(test).operand;
+                    code.fixed().if_edges(stmt, &bit, facts, t, f);
+                } else {
+                    code.branch_condition(test, t, f);
+                }
+            },
+            |code, (body, facts)| {
+                if let Some(facts) = facts {
+                    code.fixed().enter_if_body(test, facts);
+                }
+                code.emit_block(body);
+                if let Some(facts) = facts {
+                    code.fixed().leave_if_body(facts);
+                }
+            },
+            false,
+        );
     }
 }

@@ -52,10 +52,21 @@ impl FunctionBody {
     }
 
     /// Both ABIs call the same tagged arithmetic helper after obtaining exact integers.
-    pub(crate) fn add_int(&mut self, left: &str, right: &str) -> super::Value {
+    pub(crate) fn integer_arithmetic(
+        &mut self,
+        op: super::Binary,
+        left: &str,
+        right: &str,
+    ) -> super::Value {
+        let helper = match op {
+            super::Binary::Add => "int_add",
+            super::Binary::Subtract => "int_sub",
+            super::Binary::Multiply => "int_mul",
+            _ => unreachable!("expected checked integer operation"),
+        };
         super::Value {
             ty: super::Type::Int,
-            operand: self.instruction(format!("call i64 @int_add(i64 {left}, i64 {right})")),
+            operand: self.instruction(format!("call i64 @{helper}(i64 {left}, i64 {right})")),
             small_integer: false,
         }
     }

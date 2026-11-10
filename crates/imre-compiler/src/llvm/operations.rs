@@ -3,33 +3,22 @@
 mod comparisons;
 pub(crate) use comparisons::ComparisonChain;
 mod iteration;
-pub(crate) use iteration::LoopEdges;
+pub(crate) use iteration::{LoopEdges, loop_region};
+pub(crate) mod branches;
 mod join;
 pub(crate) mod sequences;
 use crate::ir::{DisplayKind, ObjectUnary};
-pub(crate) use join::ValueJoin;
+pub(crate) use join::{ValueJoin, choose};
 
 use super::records;
-use super::{Binary, Builtin, Expr, ExprKind, Statement, Type};
+use super::{Binary, Builtin, CallArgs, Expr, ExprKind, Statement, Type};
 use super::{Emitter, Value, none, small};
 use crate::llvm::registered::{Frame as CheckedFrame, FrameEmitter};
 
 use super::{Operand, Ownership, body::FunctionBody};
 
-/// Evaluate a positional call's callable first, then each argument exactly once.
-pub(crate) fn call_arguments<C, E, V>(
-    context: &mut C,
-    callee: &E,
-    args: &[E],
-    mut evaluate: impl FnMut(&mut C, &E) -> V,
-) -> (V, Vec<V>) {
-    let callable = evaluate(context, callee);
-    let values = args.iter().map(|arg| evaluate(context, arg)).collect();
-    (callable, values)
-}
-
 /// A checked expression keeps the representation selected by its producer.
-/// A guarded integer carries an owned native sum on the exact edge and the
+/// A guarded integer carries an owned integer result on the exact edge and the
 /// original Python protocol result on the other edge. Zero is not an Int word.
 pub(crate) enum CheckedValue {
     Native(Operand, Option<usize>),
@@ -65,10 +54,10 @@ impl CheckedValue {
         }
     }
 
-    /// Keep an available native result through the next addition. Two rooted
+    /// Keep an available native result through addition or subtraction. Two rooted
     /// handles need either two known words or a checked integer whose word
     /// still needs a guard. One known word alone cannot justify probing its peer.
-    fn use_integer_add(&self, left: Type, other: &Self, right: Type) -> bool {
+    fn can_use_integer_arithmetic(&self, left: Type, other: &Self, right: Type) -> bool {
         match (self, other) {
             (Self::Handle { exact_word: a, .. }, Self::Handle { exact_word: b, .. }) => {
                 (a.is_some() && b.is_some())
@@ -124,6 +113,22 @@ fn exact_integer_literal(value: i64) -> Option<Value> {
         .then(|| small(value))
 }
 
+impl CallArgs {
+    /// Parameter order applies at the ABI boundary, after source-order evaluation.
+    pub(super) fn capture<T>(&self, operand: impl FnMut(&Expr) -> T) -> Vec<T> {
+        self.values.iter().map(operand).collect()
+    }
+
+    fn capture_invoke<T>(
+        &self,
+        callable: &Expr,
+        mut operand: impl FnMut(&Expr) -> T,
+    ) -> (T, Vec<T>) {
+        let callable = operand(callable);
+        (callable, self.capture(operand))
+    }
+}
+
 /// A checked body selects operations from each operand's representation.
 /// Its entry convention supplies local storage, retained owners and exception exits.
 pub(crate) struct CheckedBody<'f, 'a, 'p, 'module>(Entry<'f, 'a, 'p, 'module>);
@@ -142,7 +147,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         Self(Entry::Registered(frame))
     }
 
-    fn python(&mut self) -> &mut CheckedFrame<'f, 'a, 'p> {
+    pub(crate) fn python(&mut self) -> &mut CheckedFrame<'f, 'a, 'p> {
         let Entry::Registered(frame) = &mut self.0 else {
             unreachable!("checked Python operation requires a registered frame")
         };
@@ -170,6 +175,63 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         }
     }
 
+    /// Capture the callable before evaluating each argument. A native operand keeps
+    /// its checked borrow or owner; a Python argument must already have its rooted
+    /// handle before the next argument can call back into the frame.
+    fn invoke(
+        &mut self,
+        callable: &Expr,
+        args: &crate::ir::CallArgs,
+        returns: Type,
+    ) -> CheckedValue {
+        let Some(site) = &args.python_site else {
+            let native = self.fixed();
+            let (target, values) = args.capture_invoke(callable, |expr| native.operand(expr));
+            let target = super::callables::NativeCallTarget::Callable(target);
+            return CheckedValue::owned(native.native_call(target, args, values, returns));
+        };
+
+        let frame = self.python();
+        let mark = frame.temporary_mark();
+        let result = frame.unwind_stack_operands(&mark, |frame| {
+            if frame.native_suspension
+                && let Some(name) = site.suspended_name
+            {
+                frame.call_position(name);
+            }
+            // Each evaluation leaves just its result above the previous operands.
+            // Release intermediate owners before the next argument can run Python.
+            let mut next = mark.clone();
+            let enclosing_scope = frame.scope.clone();
+            let mut evaluate = |expr: &Expr| {
+                let value = frame.evaluate_handle(expr);
+                next = frame.keep_operands(&next, &value, "0");
+                value
+            };
+            let scope = site
+                .scope
+                .as_deref()
+                .map(&mut evaluate)
+                .unwrap_or(enclosing_scope);
+            let (target, values) = args.capture_invoke(callable, evaluate);
+            let (array, count) = frame.handle_array(&values);
+            let positional = super::registered::CallArguments::Positional {
+                array,
+                count,
+                receiver_slot: false,
+            };
+            frame.positioned_call(
+                &target,
+                positional,
+                &mark,
+                site.range,
+                site.callee_end,
+                &scope,
+            )
+        });
+        CheckedValue::handle(result)
+    }
+
     fn evaluate(&mut self, expr: &Expr) -> CheckedValue {
         match &mut self.0 {
             Entry::Native(emitter) => CheckedValue::owned(emitter.expr(expr)),
@@ -187,13 +249,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         }
     }
 
-    fn declare_int_add(&mut self) {
-        if let Entry::Registered(frame) = &mut self.0 {
-            frame.declare_integer_arithmetic();
-        }
-    }
-
-    fn finish_native_add(&mut self, value: Value) -> CheckedValue {
+    fn finish_integer(&mut self, value: Value) -> CheckedValue {
         match &mut self.0 {
             Entry::Native(emitter) => CheckedValue::owned(emitter.owned(value)),
             Entry::Registered(frame) => CheckedValue::frame_integer(value, frame),
@@ -222,8 +278,15 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         CheckedValue::handle(frame.binary_handles(op, &lhs, &rhs))
     }
 
-    fn add_integers(&mut self, left: &CheckedValue, right: &CheckedValue) -> CheckedValue {
-        self.declare_int_add();
+    fn integer_arithmetic(
+        &mut self,
+        op: Binary,
+        left: &CheckedValue,
+        right: &CheckedValue,
+    ) -> CheckedValue {
+        if let Entry::Registered(frame) = &mut self.0 {
+            frame.declare_integer_arithmetic(op);
+        }
         let (a, check_a) = self.integer_operand(left);
         let (b, check_b) = self.integer_operand(right);
         let out = self.body();
@@ -238,8 +301,8 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             }
         };
         let exact = |code: &mut Self| {
-            let sum = code.body().add_int(&a, &b);
-            code.finish_native_add(sum)
+            let value = code.body().integer_arithmetic(op, &a, &b);
+            code.finish_integer(value)
         };
         let Some(guard) = guard else {
             return exact(self);
@@ -249,14 +312,14 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             Self::body,
             |code, yes, no| code.body().branch(&guard, yes, no),
             exact,
-            |code| code.python_binary(Binary::Add, left, right),
+            |code| code.python_binary(op, left, right),
         )
-        .expect("guarded addition has a normal result")
+        .expect("guarded integer arithmetic has a normal result")
     }
 
     fn unary_expression(&mut self, op: ObjectUnary, operand: &Expr, expr: &Expr) -> CheckedValue {
         if let Entry::Registered(frame) = &mut self.0 {
-            let scope = frame.begin_operand_scope();
+            let scope = frame.begin_unary();
             let value = self.evaluate(operand);
             let result = self.unary_value(op, value, false);
             return self.python().finish_unary(scope, op, result);
@@ -318,18 +381,28 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         left: &Expr,
         right: &Expr,
         expr: &Expr,
+        fixed_site: bool,
     ) -> CheckedValue {
         if let Entry::Native(emitter) = &mut self.0
             && let Some(value) = emitter.specialized_binary(op, left, right, expr)
         {
             return value;
         }
+        // A body placed from a native definition now receives Python handles.
+        let op = match (fixed_site, op) {
+            (true, Binary::Concat) => Binary::Add,
+            (true, Binary::Repeat) => Binary::Multiply,
+            _ => op,
+        };
         let (a, b) = (self.operand(left), self.operand(right));
-        let result = if matches!(op, Binary::Add)
-            && (expr.ty == Type::PythonObject || left.ty == Type::Int && right.ty == Type::Int)
+        let result = if matches!(op, Binary::Add | Binary::Subtract | Binary::Multiply)
+            && (fixed_site
+                || expr.ty == Type::PythonObject
+                || left.ty == Type::Int && right.ty == Type::Int)
         {
-            if a.use_integer_add(left.ty, &b, right.ty) {
-                self.add_integers(&a, &b)
+            if matches!(op, Binary::Multiply) || a.can_use_integer_arithmetic(left.ty, &b, right.ty)
+            {
+                self.integer_arithmetic(op, &a, &b)
             } else {
                 self.python_binary(op, &a, &b)
             }
@@ -344,6 +417,17 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     }
 
     pub(crate) fn emit_value(&mut self, expr: &Expr) -> CheckedValue {
+        if let Entry::Registered(frame) = &mut self.0
+            && let Some(range) = frame.next_fixed_site()
+        {
+            return frame.located_value(range, range.start(), |frame| {
+                CheckedBody::registered(frame.reborrow()).emit_operation(expr, true)
+            });
+        }
+        self.emit_operation(expr, false)
+    }
+
+    fn emit_operation(&mut self, expr: &Expr, fixed_site: bool) -> CheckedValue {
         match &expr.kind {
             ExprKind::Int(text) => {
                 let integer = text.parse::<i64>().ok();
@@ -437,13 +521,31 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             ExprKind::Builtin(Builtin::RegisteredCompare(ops), values) => {
                 self.registered_comparisons(values, ops, false)
             }
-            ExprKind::Conditional(test, yes, no) => match &mut self.0 {
-                Entry::Native(emitter) => CheckedValue::owned(emitter.conditional(test, yes, no)),
-                Entry::Registered(frame) => frame.select(test, yes, no),
+            ExprKind::Conditional(test, yes, no) => self.conditional_value(test, yes, no),
+            ExprKind::Boolean(..) | ExprKind::BooleanValue(..) => self.boolean_expression(expr),
+            ExprKind::Builtin(op @ Builtin::Bool, args) => match &mut self.0 {
+                Entry::Native(emitter) => CheckedValue::owned(emitter.builtin(op, args, expr.ty)),
+                Entry::Registered(_) => {
+                    let Some(Ok(crate::ir::IterationOperands::Truth(value))) =
+                        op.iteration_operands(args)
+                    else {
+                        unreachable!("checked truth operand");
+                    };
+                    self.predicate(value, false)
+                }
             },
-            ExprKind::Binary(op, left, right) => self.binary_expression(*op, left, right, expr),
+            ExprKind::Binary(op, left, right) => {
+                self.binary_expression(*op, left, right, expr, fixed_site)
+            }
+            ExprKind::Builtin(Builtin::FormatJoin, parts) => match &mut self.0 {
+                Entry::Native(emitter) => CheckedValue::owned(emitter.concat(expr)),
+                Entry::Registered(frame) => frame.builtin(&Builtin::FormatJoin, parts),
+            },
+            ExprKind::Invoke { callable, args } => self.invoke(callable, args, expr.ty),
             ExprKind::Builtin(
-                op @ (Builtin::RegisteredCall(_) | Builtin::RegisteredAttribute { .. }),
+                op @ (Builtin::RegisteredCall(_)
+                | Builtin::RegisteredAttribute { .. }
+                | Builtin::RegisteredDeleteItem),
                 args,
             ) => self.python().object_operation(op, args),
             ExprKind::Builtin(Builtin::RegisteredUnary(op), args) => {
@@ -455,16 +557,6 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             ExprKind::Dict { .. } if matches!(self.0, Entry::Registered(_)) => {
                 CheckedValue::handle(self.python().op("dict", &[]))
             }
-            ExprKind::Builtin(
-                op @ (Builtin::RegisteredIter
-                | Builtin::RegisteredNamespace(_)
-                | Builtin::RegisteredUnpack { .. }
-                | Builtin::Bool
-                | Builtin::Append
-                | Builtin::SetAdd
-                | Builtin::ListGet),
-                args,
-            ) if matches!(self.0, Entry::Registered(_)) => self.iteration_operation(op, args),
             ExprKind::Builtin(op, args) => match &mut self.0 {
                 Entry::Native(emitter) => CheckedValue::owned(emitter.builtin(op, args, expr.ty)),
                 Entry::Registered(frame) => frame.builtin(op, args),
@@ -474,6 +566,11 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     }
 
     pub(crate) fn emit_statement(&mut self, stmt: &Statement) {
+        if let Entry::Registered(frame) = &mut self.0
+            && let Some(range) = frame.next_fixed_site()
+        {
+            frame.statement_site(range, None);
+        }
         match stmt {
             Statement::Assign(slot, expr) => {
                 let previous_small = match &mut self.0 {
@@ -507,12 +604,34 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     self.release_input(value);
                 }
             }
+            Statement::Match(subject, cases) => self.emit_prepared_match(subject, cases),
             Statement::Return(expr) => {
                 let value = self.evaluate(expr);
                 match &mut self.0 {
                     Entry::Native(emitter) => emitter.return_result(value),
                     Entry::Registered(frame) => frame.return_result(value),
                 }
+            }
+            Statement::Raise(exception) => match &mut self.0 {
+                Entry::Native(emitter) => emitter.other_statement(stmt),
+                Entry::Registered(frame) => frame.raise_exception(exception.as_ref()),
+            },
+            Statement::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            } if matches!(self.0, Entry::Registered(_)) => {
+                self.python().try_region(body, handlers, orelse, finalbody);
+            }
+            Statement::With {
+                manager,
+                site,
+                binding,
+                body,
+            } => {
+                self.python()
+                    .with_manager(manager, *site, binding.as_ref(), body);
             }
             Statement::Clear(slot) => self.clear_iteration_slots(&[*slot]),
             Statement::Scope { body, clear } => self.scoped_suite(body, clear),

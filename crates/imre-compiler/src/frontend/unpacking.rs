@@ -62,7 +62,7 @@ pub(super) trait PatternBinder {
 
     fn pattern_snapshot(
         &mut self,
-        _target: &ast::Expr,
+        target: &ast::Expr,
         elements: &[ast::Expr],
         star: Option<usize>,
         value: Expr,
@@ -70,6 +70,7 @@ pub(super) trait PatternBinder {
     ) -> StdResult<PatternSnapshot, Self::Error> {
         Ok(protocol_snapshot(
             self,
+            target.range(),
             elements.len(),
             star,
             value,
@@ -96,6 +97,7 @@ impl PatternSnapshot {
 
 fn protocol_snapshot(
     binder: &mut (impl PatternBinder + ?Sized),
+    target: TextRange,
     count: usize,
     star: Option<usize>,
     value: Expr,
@@ -103,7 +105,11 @@ fn protocol_snapshot(
 ) -> PatternSnapshot {
     let sequence = builtin(
         sequence_type,
-        Builtin::RegisteredUnpack { count, star },
+        Builtin::RegisteredUnpack {
+            count,
+            star,
+            target: Some(target),
+        },
         vec![value],
     );
     let root = binder.pattern_hidden(sequence.ty);
@@ -129,7 +135,7 @@ fn protocol_snapshot(
     snapshot
 }
 
-fn take_pattern_temporary(value: Expr, slot: usize) -> Expr {
+pub(super) fn take_pattern_temporary(value: Expr, slot: usize) -> Expr {
     Expr {
         ty: value.ty,
         kind: ExprKind::Scope {
@@ -334,6 +340,12 @@ impl Checker<'_> {
                 value
             };
             let statement = self.assign_value(target, value)?;
+            if let Some(sites) = &mut self.fixed_sites
+                && local.is_some()
+                && let Statement::Assign(slot, _) = &statement
+            {
+                sites.statement(assignment.value.range(), FixedNode::Store(*slot));
+            }
             return Ok(vec![statement]);
         }
         let context = assignment
@@ -966,6 +978,7 @@ impl PatternBinder for Checker<'_> {
             let sequence = self.types.list(Type::PythonObject);
             return Ok(protocol_snapshot(
                 self,
+                target.range(),
                 targets.len(),
                 star,
                 value,

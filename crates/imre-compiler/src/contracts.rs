@@ -679,17 +679,19 @@ impl Builtin {
             | Self::RegisteredImport(_)
             | Self::RegisteredSuspend(..)
             | Self::RegisteredAssertionFailure { .. }
-            | Self::RegisteredModuleAnnotation(_)
+            | Self::RegisteredNamespaceAnnotation(_)
             | Self::RegisteredAnnotationStart
             | Self::RegisteredAnnotationFormat
-            | Self::RegisteredAnnotationInsert { .. }
+            | Self::RegisteredAnnotationInsert(_)
             | Self::BindAnnotationExpression(_)
             | Self::RegisteredAnnotationResult
             | Self::RegisteredDeleteName(..)
             | Self::RegisteredDefinition(_)
             | Self::RegisteredLambda(..)
+            | Self::RegisteredGenerator(..)
             | Self::RegisteredTypeAlias(_)
             | Self::RegisteredStatement(..)
+            | Self::RegisteredDiscard
             | Self::RegisteredName(_)
             | Self::RegisteredCompare(_)
             | Self::RegisteredContainsLiteral(_)
@@ -705,15 +707,14 @@ impl Builtin {
             | Self::RegisteredDeleteItem
             | Self::RegisteredEllipsis
             | Self::RegisteredComplex(..)
+            | Self::FormatConversion(_)
+            | Self::FormatField(_)
             | Self::RegisteredString(_)
             | Self::RegisteredTemplate(_)
             | Self::RegisteredInterpolation { .. }
-            | Self::RegisteredFormatConversion(_)
-            | Self::RegisteredFormat
-            | Self::RegisteredFormatJoin
             | Self::RegisteredNamespace(_)
             | Self::RegisteredUnpack { .. }
-            | Self::RegisteredIter
+            | Self::RegisteredIter(_)
             | Self::RegisteredCall(..)
             | Self::SortByComparator => Contract::new(true, Unknown),
             Self::ListReserveRange | Self::StructCyclePrefix => Contract::new(false, PreservesOwners),
@@ -722,6 +723,7 @@ impl Builtin {
             | Self::BinaryRead
             | Self::BinaryReadSize
             | Self::Ndiff
+            | Self::FormatJoin
             | Self::StringListCopy
             | Self::JoinedSplitLines
             | Self::StringListSortSuffix(_)

@@ -583,6 +583,9 @@ pub(super) const STRUCT_METHODS: &[&str] = &[
     "iter_unpack",
 ];
 
+pub(super) const SET_ITERATOR_METHODS: &[&str] =
+    &["__iter__", "__next__", "__length_hint__", "__reduce__"];
+
 pub(super) const UNPACK_ITERATOR_METHODS: &[&str] = &["__iter__", "__next__", "__length_hint__"];
 
 /// Native iterator classes implement both iterator slots in the runtime.
@@ -611,6 +614,7 @@ const CORE_ITERATOR_TYPES: &[&str] = &[
     "async_generator_asend",
     "async_generator_athrow",
     "list_iterator",
+    "set_iterator",
     "list_reverseiterator",
     "str_ascii_iterator",
     "str_iterator",
@@ -929,6 +933,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
+        Value::SetIterator(_) if SET_ITERATOR_METHODS.contains(&attr) => "set_iterator",
         Value::DictIterator(iter) if DictIterator::methods(iter.class_name()).contains(&attr) => {
             iter.class_name()
         }
@@ -2611,8 +2616,21 @@ pub(super) fn call(
             "range" | "range_iterator" | "longrange_iterator" => {
                 super::range::method(ctx, owner, method, args, kwargs)
             }
-            "list_iterator" | "tuple_iterator" | "str_ascii_iterator" | "str_iterator" | "map"
-            | "zip" | "filter" | "enumerate" => ctx.iterator_method(owner, method, args, kwargs),
+            "set_iterator" if matches!(method, "__length_hint__" | "__reduce__") => {
+                let receiver = noargs_method_receiver(ctx, owner, method, args, kwargs)?;
+                let Value::SetIterator(state) = *ctx.heap.get(receiver) else {
+                    unreachable!("validated set iterator")
+                };
+                if method == "__length_hint__" {
+                    Ok(ctx.int(state.length_hint(ctx)))
+                } else {
+                    ctx.reduce_iterator_copy(Value::SetIterator(state))
+                }
+            }
+            "set_iterator" | "list_iterator" | "tuple_iterator" | "str_ascii_iterator"
+            | "str_iterator" | "map" | "zip" | "filter" | "enumerate" => {
+                ctx.iterator_method(owner, method, args, kwargs)
+            }
             "property" => super::property::method(ctx, method, args, kwargs),
             "function" | "cell" | "mappingproxy" if method == "__new__" => {
                 let Some((&class, args)) = args.split_first() else {

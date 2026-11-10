@@ -980,7 +980,7 @@ impl Checker<'_> {
                 body.push(Statement::Try {
                     body: vec![action],
                     handlers: vec![ir::ExceptHandler {
-                        kinds: expected.kinds,
+                        matcher: crate::ir::ExceptionMatcher::Categories(expected.kinds),
                         name: None,
                         body: vec![],
                     }],
@@ -1064,7 +1064,7 @@ impl Checker<'_> {
                     Statement::Try {
                         body: protected,
                         handlers: vec![ir::ExceptHandler {
-                            kinds: vec![],
+                            matcher: crate::ir::ExceptionMatcher::Categories(vec![]),
                             name: Some(exc),
                             body: vec![Statement::If(
                                 handled,
@@ -1169,7 +1169,7 @@ impl Checker<'_> {
         enter.push(Statement::Try {
             body: protected,
             handlers: vec![ir::ExceptHandler {
-                kinds: vec![],
+                matcher: crate::ir::ExceptionMatcher::Categories(vec![]),
                 name: Some(exc),
                 body: vec![
                     Statement::Assign(exceptional, Expr::boolean(true)),

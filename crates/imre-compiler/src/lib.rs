@@ -27,6 +27,8 @@ mod ranges;
 mod record_copies;
 mod reductions;
 #[cfg(test)]
+mod single_emission_tests;
+#[cfg(test)]
 mod slice_sum_validation;
 mod sorted_rows;
 mod split_fields;
@@ -202,12 +204,21 @@ impl CompileOptions {
     }
 }
 
+/// The isolated source origin has a diagnostic filename but no filesystem search root.
+#[derive(Clone, Copy)]
+enum ProgramEntry<'a> {
+    Source(&'a str),
+    File(&'a Path, Option<&'a Path>),
+}
+
 /// Checks source syntax, ty diagnostics, and Imre's exact type contract.
 pub fn check(source: &str) -> Result<(), String> {
-    let mut graph = modules::SourceGraph::single(source)?;
-    graph.session.explicit_check = true;
-    let (module, _) = checked_lower(&mut graph)?.into_native()?;
-    verify_after(&module, "lowering")
+    check_with(
+        ProgramEntry::Source(source),
+        &CompileOptions::default(),
+        None,
+        Default::default(),
+    )
 }
 
 /// Compiles a checked module to LLVM IR; the resulting executable uses no CPython.
@@ -215,14 +226,14 @@ pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String>
     if options.entry_profile.is_some() {
         return Err("an entry profile requires a source file and its module name".to_owned());
     }
-    let (mut module, _) = checked_lower(&mut modules::SourceGraph::single_with_mode(
-        source,
-        options.reachable_only,
-    )?)?
-    .into_native()?;
-    specialize(&mut module)?;
-    let ranges = ranges::analyze(&module);
-    llvm::emit(&module, &ranges, options.address_sanitizer).map_err(|error| error.0.to_owned())
+    let options = CompileOptions {
+        target_os: options.target_os,
+        reachable_only: options.reachable_only,
+        address_sanitizer: options.address_sanitizer,
+        ..Default::default()
+    };
+    compile_with_layout(ProgramEntry::Source(source), &options, BoxedLayout::Whole)
+        .map(|product| product.into_whole().llvm_ir)
 }
 
 /// The generated IR and every source file that must be protected from output writes.
@@ -314,19 +325,33 @@ fn check_file_with(
     path: &Path,
     module_root: Option<&Path>,
     options: &CompileOptions,
+    cache: Option<&mut IncrementalCompiler>,
+    filesystem: watch::FileSystem<'_>,
+) -> Result<(), String> {
+    check_with(
+        ProgramEntry::File(path, module_root),
+        options,
+        cache,
+        filesystem,
+    )
+}
+
+fn check_with(
+    entry: ProgramEntry<'_>,
+    options: &CompileOptions,
     mut cache: Option<&mut IncrementalCompiler>,
     filesystem: watch::FileSystem<'_>,
 ) -> Result<(), String> {
     object_fallback(
         BoxedLayout::Check,
-        (path, module_root),
+        entry,
         options,
         filesystem,
-        |graph, registered_initializer| {
+        |graph, call_error| {
             graph.session.explicit_check = true;
-            checked_lower_with(graph, cache.as_deref_mut(), registered_initializer)
+            checked_lower_with(graph, cache.as_deref_mut(), call_error)
         },
-        |_, _| Ok((Vec::new(), false)),
+        |_, _, _| unreachable!("check does not emit LLVM"),
     )
     .map(drop)
 }
@@ -383,14 +408,18 @@ enum BoxedLayout<'a> {
 /// Uses the boxed backend when the checked graph requires Python object operations.
 fn object_fallback(
     layout: BoxedLayout<'_>,
-    (path, module_root): (&Path, Option<&Path>),
+    entry: ProgramEntry<'_>,
     options: &CompileOptions,
     mut filesystem: watch::FileSystem<'_>,
-    mut lower: impl FnMut(&mut modules::SourceGraph, bool) -> Result<CheckedProgram, String>,
+    mut lower: impl FnMut(
+        &mut modules::SourceGraph,
+        Option<&LoweringDiagnostic>,
+    ) -> Result<CheckedProgram, String>,
     native: impl Fn(
         &modules::SourceGraph,
         CheckedIr,
-    ) -> Result<(Vec<CodegenUnit>, bool), llvm::Unsupported>,
+        llvm::NativeProgram,
+    ) -> Result<Vec<CodegenUnit>, llvm::Unsupported>,
 ) -> Result<UnitCompilation, String> {
     for name in &options.include_modules {
         if !modules::valid_module_operand(name) {
@@ -406,8 +435,11 @@ fn object_fallback(
                 "--include-module requires a runtime module loader; this entry is fully typed"
                     .into(),
             )
-        } else if checking {
-            Ok(UnitCompilation::default())
+        } else if checking || matches!(entry, ProgramEntry::Source(_)) {
+            Ok(UnitCompilation {
+                units,
+                ..Default::default()
+            })
         } else {
             Ok(UnitCompilation::native(
                 graph,
@@ -428,76 +460,78 @@ fn object_fallback(
             .is_some_and(|(flags, _)| flags.tracemalloc > 0);
     let mut import_failure = None;
     let mut site_probes = modules::SiteProbes::default();
-    let mut infer_sets = true;
-    let mut native_candidate = None;
-    let (mut refusal, graph) = loop {
-        let mut graph = match options.load_graph(
+    let mut deferred_native = None;
+    let loaded = match entry {
+        ProgramEntry::Source(source) => Ok(Some(modules::SourceGraph::single_with_mode(
+            source,
+            options.reachable_only,
+        )?)),
+        ProgramEntry::File(path, module_root) => options.load_graph(
             path,
             module_root,
             filesystem.reborrow(),
             &mut import_failure,
             &mut site_probes,
-        ) {
-            Ok(Some(graph)) => graph,
-            Ok(None) => {
-                break (
-                    Some("the module launcher requires its registered sources".into()),
-                    None,
-                );
+        ),
+    };
+    let (mut refusal, graph) = match loaded {
+        Ok(Some(mut graph)) => {
+            graph.registered_startup = boxed_startup;
+            site_probes.record(&mut graph.inputs);
+            let call_error = initializer_call_error(&graph, registered_initializer);
+            if call_error.is_some() {
+                // Both representations reject this initializer. Check it in the ordinary
+                // layout once so an earlier annotated failure keeps its original priority.
+                graph.set_layout_hint.set(modules::SetLayoutHint::Disabled);
             }
-            Err(error) => break (Some(error.into()), None),
-        };
-        graph.registered_startup = boxed_startup;
-        site_probes.record(&mut graph.inputs);
-        if !infer_sets {
-            graph.set_layout_hint.set(modules::SetLayoutHint::Disabled);
-        }
-        let error = match lower(&mut graph, registered_initializer)? {
-            CheckedProgram::Native(_) if graph.runtime_initializer.is_some() && !boxed_startup => {
-                // All first-party code lowered successfully. The unresolved import alone
-                // must use the same admission policy as an unresolved module in the loader.
-                break (
-                    Some(graph.runtime_initializer.take().unwrap().into()),
-                    Some(graph),
-                );
-            }
-            CheckedProgram::Native(ir) if !boxed_startup => {
-                let (mut module, mut owners) = *ir;
-                if let Some(object) = required_object_diagnostic(&graph, &module) {
-                    break (Some(object), Some(graph));
-                }
-                if checking {
-                    verify_after(&module, "lowering")?;
-                } else {
-                    for original in specialize(&mut module)? {
-                        owners.push(owners[original]);
+            let baseline = graph.lowering_baseline();
+            let refusal = loop {
+                let error = match lower(&mut graph, call_error.as_ref())? {
+                    CheckedProgram::Registered(reason) => break reason,
+                    CheckedProgram::Native(mut fixed) => {
+                        let (module, owners) = &mut fixed.ir;
+                        if checking {
+                            verify_after(module, "lowering")?;
+                            return native_result(graph, Vec::new());
+                        }
+                        for original in specialize(module)? {
+                            owners.push(owners[original]);
+                        }
+                        let reason = match llvm::analyze_program(module, &mut fixed.frame_sources) {
+                            Ok(program)
+                                if program.prefer_objects && options.entry_profile.is_none() =>
+                            {
+                                // Registration can preserve the Python exception locations. Keep the
+                                // checked native representation until registration decides admission.
+                                deferred_native = Some((fixed, program));
+                                "Imre: native bound wrapper links use checked exception locations"
+                            }
+                            Ok(program) => match native(&graph, fixed.into_ir(), program) {
+                                Ok(units) => return native_result(graph, units),
+                                Err(refusal) => refusal.0,
+                            },
+                            Err(refusal) => refusal.0,
+                        };
+                        LoweringDiagnostic::plain(reason.to_owned())
+                            .classified(LoweringKind::Object)
                     }
-                }
-                let reason = match native(&graph, (module, owners)) {
-                    Ok((value, true)) if options.entry_profile.is_none() => {
-                        // Keep the Python entry's full exception locations when it supports this
-                        // module. Otherwise the retained native callable layout can run it.
-                        native_candidate = Some(value);
-                        "Imre: native bound wrapper links use checked exception locations"
-                    }
-                    Ok((value, _)) => return native_result(graph, value),
-                    Err(refusal) => refusal.0,
+                    CheckedProgram::Runtime(error) => error,
                 };
-                LoweringDiagnostic::plain(reason.to_owned()).classified(LoweringKind::Object)
-            }
-            // A solved object ABI or Python startup directly selects the registered entry.
-            CheckedProgram::Registered | CheckedProgram::Native(_) => break (None, Some(graph)),
-            CheckedProgram::Runtime(error) => error,
-        };
-        // A guessed layout must not turn a working object program into a type error,
-        // or mask a diagnostic that the ordinary checked-file path would have issued.
-        if graph.set_layout_hint.get() != modules::SetLayoutHint::Applied {
-            break (Some(error), Some(graph));
+                // A guessed layout must not turn a working object program into a type error,
+                // or mask a diagnostic that the ordinary checked-file path would have issued.
+                if graph.set_layout_hint.get() != modules::SetLayoutHint::Applied {
+                    break Some(error);
+                }
+                deferred_native = None;
+                graph.retry_without_set_layout(&baseline);
+            };
+            (refusal, Some(graph))
         }
-        native_candidate = None;
-        infer_sets = false;
-        import_failure = None;
-        site_probes = site_probes.next_layout();
+        Ok(None) => (
+            Some("the module launcher requires its registered sources".into()),
+            None,
+        ),
+        Err(error) => (Some(error.into()), None),
     };
     // Admit an unresolved fixed signature only when its own definition has checked IR
     // for the registered calling convention. Other inference diagnostics still apply.
@@ -523,22 +557,29 @@ fn object_fallback(
     };
     // A newly found checked provider can lower normally. If lowering fails, its
     // dependencies alone do not admit the caller to the object importer.
-    let fallback = |graph| match (graph, native_candidate, kind) {
-        (Some(graph), Some(value), _) => native_result(graph, value),
-        (Some(graph), None, LoweringKind::ExecutionOperand(id))
-            if graph.modules[id].is_program_source() =>
-        {
-            // Native lowering can fail before the file has a runtime registration.
-            // Check its existing contracts before diagnosing the failed call's source.
-            if let Some(contract) = &graph.source_contract {
-                contract.clone()?;
+    let fallback = |graph, deferred: Option<(Box<FixedProgram>, llvm::NativeProgram)>| {
+        match (graph, deferred, kind) {
+            (Some(graph), Some((fixed, program)), _) => {
+                let units =
+                    native(&graph, fixed.into_ir(), program).map_err(|error| error.0.to_owned())?;
+                native_result(graph, units)
             }
-            graph
-                .session
-                .check_execution_escapes(std::iter::once((id, graph.modules[id].path.as_path())))?;
-            Err(refusal_message())
+            (Some(graph), None, LoweringKind::ExecutionOperand(id))
+                if graph.modules[id].is_program_source() =>
+            {
+                // Native lowering can fail before the file has a runtime registration.
+                // Check its existing contracts before diagnosing the failed call's source.
+                if let Some(contract) = &graph.source_contract {
+                    contract.clone()?;
+                }
+                graph.session.check_execution_escapes(std::iter::once((
+                    id,
+                    graph.modules[id].path.as_path(),
+                )))?;
+                Err(refusal_message())
+            }
+            _ => Err(refusal_message()),
         }
-        _ => Err(refusal_message()),
     };
     let checked_graph = graph;
     let graph = checked_graph
@@ -553,7 +594,7 @@ fn object_fallback(
                 ) || g.imports_struct_decorator()
             }))
     {
-        return fallback(checked_graph);
+        return fallback(checked_graph, deferred_native);
     }
     let operation = graph.as_ref().and_then(|g| {
         if checked_entry {
@@ -636,6 +677,13 @@ fn object_fallback(
         Ok(())
     };
     let check = |entry_requests_objects, registered: Option<dynamic::RegisteredSources<'_>>| {
+        // Admission commits to the Python ABI. Keep only bodies with a valid frame
+        // map and release the deferred native program before checking its providers.
+        if registered.is_some()
+            && let (Some(graph), Some((fixed, _))) = (&checked_graph, deferred_native.take())
+        {
+            fixed.register_definitions(graph);
+        }
         check_returns(entry_requests_objects)?;
         if let Some(registered) = registered {
             analysis::check_registered_project(
@@ -678,12 +726,7 @@ fn object_fallback(
         Ok(())
     };
     match dynamic::compile(
-        (
-            path,
-            module_root,
-            filesystem,
-            &mut site_probes.wheel_records,
-        ),
+        (entry, filesystem, &mut site_probes.wheel_records),
         options,
         object_imports,
         operation
@@ -696,7 +739,7 @@ fn object_fallback(
             site_probes.record(&mut compilation.source_inputs);
             Ok(compilation)
         }
-        None => fallback(checked_graph),
+        None => fallback(checked_graph, deferred_native),
     }
 }
 
@@ -706,8 +749,12 @@ pub fn compile_file(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<Compilation, String> {
-    compile_file_with_layout(path, module_root, options, BoxedLayout::Whole)
-        .map(UnitCompilation::into_whole)
+    compile_with_layout(
+        ProgramEntry::File(path, module_root),
+        options,
+        BoxedLayout::Whole,
+    )
+    .map(UnitCompilation::into_whole)
 }
 
 /// Preserves the whole-program IR and returns independent boxed initializers for native codegen.
@@ -717,9 +764,8 @@ pub fn compile_file_with_boxed_units(
     options: &CompileOptions,
 ) -> Result<(Compilation, Vec<CodegenUnit>), String> {
     let mut units = Vec::new();
-    let compilation = compile_file_with_layout(
-        path,
-        module_root,
+    let compilation = compile_with_layout(
+        ProgramEntry::File(path, module_root),
         options,
         BoxedLayout::WholeWithUnits(&mut units),
     )?;
@@ -732,32 +778,33 @@ pub fn compile_file_for_thin_lto(
     module_root: Option<&Path>,
     options: &CompileOptions,
 ) -> Result<UnitCompilation, String> {
-    compile_file_with_layout(path, module_root, options, BoxedLayout::Split)
+    compile_with_layout(
+        ProgramEntry::File(path, module_root),
+        options,
+        BoxedLayout::Split,
+    )
 }
 
 /// Resolves and checks the source graph once for the requested boxed outputs.
-fn compile_file_with_layout(
-    path: &Path,
-    module_root: Option<&Path>,
+fn compile_with_layout(
+    entry: ProgramEntry<'_>,
     options: &CompileOptions,
     layout: BoxedLayout<'_>,
 ) -> Result<UnitCompilation, String> {
-    let typed = |_: &modules::SourceGraph, (module, _): CheckedIr| {
+    let typed = |_: &modules::SourceGraph, (module, _): CheckedIr, program| {
         let ranges = ranges::analyze(&module);
-        let (llvm_ir, prefer_objects) =
-            llvm::emit_file(&module, &ranges, options.address_sanitizer)?;
-        let units = vec![CodegenUnit {
+        let llvm_ir = llvm::emit_file(&module, &ranges, options.address_sanitizer, program)?;
+        Ok(vec![CodegenUnit {
             name: "__main__".into(),
             llvm_ir,
-        }];
-        Ok((units, prefer_objects))
+        }])
     };
     object_fallback(
         layout,
-        (path, module_root),
+        entry,
         options,
         Default::default(),
-        |graph, registered_initializer| checked_lower_with(graph, None, registered_initializer),
+        |graph, call_error| checked_lower_with(graph, None, call_error),
         typed,
     )
 }
@@ -817,7 +864,6 @@ impl UnitCompilation {
 pub struct IncrementalCompiler {
     cache: analysis::AnalysisCache,
     callers: frontend::CallerCache,
-    cached_set_hint: bool,
 }
 
 impl IncrementalCompiler {
@@ -899,7 +945,7 @@ fn compile_file_units_with(
     options: &CompileOptions,
     mut cache: Option<&mut IncrementalCompiler>,
 ) -> Result<UnitCompilation, String> {
-    let typed = |graph: &modules::SourceGraph, (module, owners): CheckedIr| {
+    let typed = |graph: &modules::SourceGraph, (module, owners): CheckedIr, program| {
         let ranges = ranges::analyze(&module);
         let names = graph
             .modules
@@ -913,80 +959,92 @@ fn compile_file_units_with(
             &owners,
             &names,
             graph.entry,
+            program,
         )
     };
     object_fallback(
         BoxedLayout::Split,
-        (path, module_root),
+        ProgramEntry::File(path, module_root),
         options,
         Default::default(),
-        |graph, registered_initializer| {
-            checked_lower_with(graph, cache.as_deref_mut(), registered_initializer)
-        },
+        |graph, call_error| checked_lower_with(graph, cache.as_deref_mut(), call_error),
         typed,
     )
 }
 
 type CheckedIr = (ir::Module, Vec<modules::ModuleId>);
 
-/// The source checker admits the program before the driver chooses its representation.
-pub(crate) enum CheckedProgram {
-    Registered,
-    Native(Box<CheckedIr>),
-    Runtime(LoweringDiagnostic),
+type FixedFrameSources =
+    std::collections::HashMap<usize, (ruff_text_size::TextSize, frontend::FixedBodySource)>;
+
+pub(crate) struct FixedProgram {
+    ir: CheckedIr,
+    /// Original binder and operation sites indexed by checked function ID.
+    frame_sources: FixedFrameSources,
 }
 
-impl CheckedProgram {
-    fn into_native(self) -> Result<CheckedIr, String> {
-        match self {
-            Self::Native(ir) => Ok(*ir),
-            Self::Runtime(reason) => Err(reason.to_string()),
-            Self::Registered => Err("the checked program requires a registered entry".into()),
+impl FixedProgram {
+    /// Native emission consumes the checked module and releases pending Python frame maps.
+    fn into_ir(self) -> CheckedIr {
+        self.ir
+    }
+
+    fn register_definitions(self, graph: &modules::SourceGraph) {
+        let (module, owners) = self.ir;
+        let mut sources = self.frame_sources;
+        for (id, function) in module.functions.into_iter().enumerate() {
+            let Some((start, source)) = sources.remove(&id) else {
+                continue;
+            };
+            let owner = owners[id];
+            if graph
+                .registered_functions()
+                .get(&owner)
+                .is_some_and(|entries| entries.contains_key(&start))
+            {
+                continue;
+            }
+            graph.register_function(
+                owner,
+                start,
+                frontend::place_fixed_function(function, source),
+            );
         }
     }
 }
 
-fn required_object_diagnostic(
-    graph: &modules::SourceGraph,
-    module: &ir::Module,
-) -> Option<LoweringDiagnostic> {
-    let (id, operand, call) = ir::required_object_call(module)?;
-    let (name, kind) = match call {
-        ir::ObjectCall::ExecText => ("exec", LoweringKind::ScopedObject),
-        ir::ObjectCall::SocketSendfile => ("socket.sendfile", LoweringKind::Object),
-    };
-    let source = &graph.modules[id];
-    Some(
-        LoweringDiagnostic::at(
-            &source.source,
-            &operand,
-            format!("{name} requires native Python object operations"),
-        )
-        .with_path(&source.path)
-        .classified(kind),
-    )
+/// A checked entry selects its startup. A representation refusal still needs runtime admission.
+pub(crate) enum CheckedProgram {
+    /// A checked Python frame or launcher can enter directly. A specific operation or
+    /// unresolved import retains its own admission policy and diagnostic.
+    Registered(Option<LoweringDiagnostic>),
+    Native(Box<FixedProgram>),
+    Runtime(LoweringDiagnostic),
 }
 
-fn checked_lower(graph: &mut modules::SourceGraph) -> Result<CheckedProgram, String> {
-    let program = checked_lower_with(graph, None, false)?;
-    if let CheckedProgram::Native(ir) = &program
-        && let Some(error) = required_object_diagnostic(graph, &ir.0)
-        && error.kind == LoweringKind::Object
-    {
-        // In-memory checking and compilation have no file loader to supply a socket body.
-        return Ok(CheckedProgram::Runtime(error));
+#[cfg(test)]
+impl CheckedProgram {
+    fn into_native(self) -> Result<CheckedIr, String> {
+        match self {
+            Self::Native(fixed) => Ok(fixed.into_ir()),
+            Self::Runtime(reason) => Err(reason.to_string()),
+            Self::Registered(Some(reason)) => Err(reason.to_string()),
+            Self::Registered(None) => Err("the checked program requires a registered entry".into()),
+        }
     }
-    Ok(program)
 }
 
-fn checked_lower_with(
-    graph: &mut modules::SourceGraph,
-    cache: Option<&mut IncrementalCompiler>,
+#[cfg(test)]
+fn checked_lower(graph: &mut modules::SourceGraph) -> Result<CheckedProgram, String> {
+    let call_error = initializer_call_error(graph, false);
+    checked_lower_with(graph, None, call_error.as_ref())
+}
+
+fn initializer_call_error(
+    graph: &modules::SourceGraph,
     registered_entry: bool,
-) -> Result<CheckedProgram, String> {
-    let mut cache =
-        cache.filter(|_| graph.set_layout_hint.get() != modules::SetLayoutHint::Disabled);
-    let call_error = analysis::ClosedSource::project_path(&graph.modules[graph.entry])
+) -> Option<LoweringDiagnostic> {
+    analysis::ClosedSource::project_path(&graph.modules[graph.entry])
         .filter(|_| !registered_entry)
         .and_then(|entry| {
             // Python startup and -m have a separately selected registration.
@@ -1001,51 +1059,72 @@ fn checked_lower_with(
                         analysis::ClosedSource::project_path(&graph.modules[id])?,
                     ))
                 })
-        });
+        })
+        .filter(|error| error.kind != LoweringKind::RegisteredExecution)
+}
+
+fn checked_lower_with(
+    graph: &mut modules::SourceGraph,
+    cache: Option<&mut IncrementalCompiler>,
+    call_error: Option<&LoweringDiagnostic>,
+) -> Result<CheckedProgram, String> {
+    let retry_with_cached_hints =
+        cache.is_some() && graph.set_layout_hint.get() == modules::SetLayoutHint::Disabled;
+    let mut cache = cache.filter(|_| !retry_with_cached_hints);
     let lowered = if let Some(compiler) = cache.as_deref_mut() {
         compiler.cache.restore_hints(graph)?;
         let callers = compiler.callers.prepare(graph);
-        if callers.is_some() && compiler.cached_set_hint {
-            graph.set_layout_hint.set(modules::SetLayoutHint::Applied);
-        }
         let result = frontend::lower_with_caller_cache(graph, callers);
-        compiler.cached_set_hint =
-            result.is_ok() && graph.set_layout_hint.get() == modules::SetLayoutHint::Applied;
         compiler.cache.retain_hints(graph, result.is_ok());
         result
     } else {
         frontend::lower_with_caller_cache(graph, None)
     };
     // Registered-body admission runs after checking the application's source contracts.
-    if let Some(error) = call_error.filter(|error| error.kind != LoweringKind::RegisteredExecution)
-    {
+    if let Some(error) = call_error {
         // Both representations reject this call. Preserve a prior annotated error at
         // its original checked location even when this file contains several failures.
         let diagnostic = match lowered {
-            Err(prior) if prior.earlier_contract(&error) => prior,
-            _ => error,
+            Err(prior) if prior.earlier_contract(error) => prior,
+            _ => error.clone(),
         };
         if let Some(compiler) = cache {
             compiler.callers = frontend::CallerCache::default();
         }
         return Ok(CheckedProgram::Runtime(diagnostic));
     }
+    // The file driver discards a failed speculative lowering before admission.
+    // Only the ordinary attempt needs its closed-program diagnostic checks.
+    if graph.set_layout_hint.get() == modules::SetLayoutHint::Applied
+        && let Err(reason) = lowered
+    {
+        if let Some(compiler) = cache {
+            compiler.callers = frontend::CallerCache::default();
+        }
+        return Ok(CheckedProgram::Runtime(reason));
+    }
     let (skipped, overloads) = graph.diagnostic_scopes();
     let skipped = skipped.as_deref();
     // A fully lowered graph has already checked the actual first-party definitions.
     // Keep its existing diagnostics and proof scopes. When a representation is
     // unavailable, the declared Python call contracts still apply to the graph.
+    // A warm retry can share its quiet database with the caller's hint cache.
+    // Keep that handle usable on the next revision when enabling diagnostic rules.
+    let mut diagnostics;
+    let session = if retry_with_cached_hints {
+        diagnostics = graph.session.diagnostic_copy()?;
+        &mut diagnostics
+    } else {
+        &mut graph.session
+    };
     let result = if lowered.is_ok() {
         lowered.and_then(|ir| {
             if let Some(compiler) = cache.as_deref_mut() {
-                compiler.cache.check_scopes(
-                    &mut graph.session,
-                    &graph.inputs,
-                    skipped,
-                    &overloads,
-                )?;
+                compiler
+                    .cache
+                    .check_scopes(session, &graph.inputs, skipped, &overloads)?;
             } else {
-                graph.session.check_scopes(skipped, &overloads)?;
+                session.check_scopes(skipped, &overloads)?;
             }
             graph.source_contract = Some(Ok(()));
             Ok(ir)
@@ -1053,7 +1132,7 @@ fn checked_lower_with(
     } else {
         let checked = if let Some(compiler) = cache.as_deref_mut() {
             compiler.cache.check_closed_program(
-                &mut graph.session,
+                session,
                 &graph.inputs,
                 &graph.modules,
                 skipped,
@@ -1061,9 +1140,7 @@ fn checked_lower_with(
                 None,
             )
         } else {
-            graph
-                .session
-                .check_closed_program(&graph.modules, skipped, &overloads, None)
+            session.check_closed_program(&graph.modules, skipped, &overloads, None)
         };
         // An inapplicable object representation cannot replace a native source or ABI
         // diagnostic. A real registration checks this result before emitting its body.
@@ -1362,6 +1439,58 @@ print("result", call(b=2, a=1))
     }
 
     #[test]
+    fn registered_reduction_specializes_multiply_in_its_python_frame() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("paired.py");
+        std::fs::write(
+            &path,
+            include_str!("../../../tests/fixtures/registered_reduction_callback.py"),
+        )
+        .unwrap();
+        let ir = super::compile_file(&path, None, &CompileOptions::default())
+            .unwrap()
+            .llvm_ir;
+        let constant = |suffix: &str| {
+            ir.lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(" = private unnamed_addr constant ")?;
+                    value.ends_with(suffix).then_some(name)
+                })
+                .unwrap()
+        };
+        let file = constant(r#"paired.py\00""#);
+        let body_at = |line| {
+            let location = format!("ptr {file}, i32 {line}, i64 0)");
+            let mut definitions = ir
+                .split("\ndefine internal i64 @code")
+                .skip(1)
+                .filter_map(|entry| entry.split_once("\n}").map(|(body, _)| body))
+                .filter(|body| body.contains(&location));
+            let definition = definitions
+                .next()
+                .expect("statement in registered function");
+            assert!(definitions.next().is_none(), "duplicate statement body");
+            definition
+        };
+        let reduction = body_at(2);
+        assert_eq!(reduction.matches("call i64 @int_mul(").count(), 1);
+        assert!(reduction.contains("call i64 @imre_dyn_exact_int_word("));
+        let multiply = constant(r#"c"*\00""#);
+        assert!(reduction.contains(&format!(
+            "call i64 @imre_dyn_op_at(ptr %ctx, ptr {multiply},"
+        )));
+
+        let publish = body_at(7);
+        assert_eq!(publish.matches("call i64 @int_add(").count(), 1);
+        assert_eq!(
+            publish
+                .matches("call i64 @imre_dyn_positional_call_at(")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn a_registered_integer_subclass_can_supply_its_compiled_callback() {
         let root = tempfile::tempdir().unwrap();
         let entry = root.path().join("app.py");
@@ -1504,31 +1633,32 @@ print("result", call(b=2, a=1))
         assert!(error.contains("expected int, got str"), "{error}");
     }
 
+    const INFERRED_SET_GATHER: &str = "def gather(text):\n    values = set()\n    for char in text:\n        values.add(char)\n    return sorted(values)\n";
+
     #[test]
     fn inferred_set_layout_preserves_checked_object_fallback() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("main.py");
-        let gather = "def gather(text):\n    values = set()\n    for char in text:\n        values.add(char)\n    return sorted(values)\n";
         let mut incremental = super::IncrementalCompiler::default();
         for usage in [
             "values = gather('ab')\nvalues.append(1)\nprint(len(values))\n",
             "def integer(n: int) -> int:\n    return n\nprint(gather('a'), integer('x'))\n",
             "def wrong() -> int:\n    return 'x'\nprint(gather('a'), wrong())\n",
         ] {
-            std::fs::write(&path, format!("{gather}{usage}")).unwrap();
+            std::fs::write(&path, format!("{INFERRED_SET_GATHER}{usage}")).unwrap();
             let options = CompileOptions::default();
             let ordinary = super::object_fallback(
                 super::BoxedLayout::Check,
-                (&path, None),
+                super::ProgramEntry::File(&path, None),
                 &options,
                 Default::default(),
-                |graph, registered_initializer| {
+                |graph, call_error| {
                     graph
                         .set_layout_hint
                         .set(super::modules::SetLayoutHint::Disabled);
-                    super::checked_lower_with(graph, None, registered_initializer)
+                    super::checked_lower_with(graph, None, call_error)
                 },
-                |_, _| Ok((Vec::new(), false)),
+                |_, _, _| unreachable!("check does not emit LLVM"),
             )
             .map(drop);
             assert_eq!(
@@ -1537,6 +1667,82 @@ print("result", call(b=2, a=1))
             );
             assert_eq!(incremental.check_file(&path, None), ordinary);
         }
+    }
+
+    #[test]
+    fn rejected_initializer_uses_the_ordinary_set_layout_once() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.py");
+        std::fs::write(
+            root.path().join("scores.py"),
+            "def take(n: int) -> int:\n    return n\n",
+        )
+        .unwrap();
+        let source = format!(
+            "import scores\n{INFERRED_SET_GATHER}def size() -> int:\n    return len(gather('ab'))\nscores.take('x')\n"
+        );
+        std::fs::write(&path, source).unwrap();
+        let mut passes = 0;
+        let result = super::object_fallback(
+            super::BoxedLayout::Check,
+            super::ProgramEntry::File(&path, None),
+            &CompileOptions::default(),
+            Default::default(),
+            |graph, call_error| {
+                passes += 1;
+                assert!(graph.set_layout_hint.get() == super::modules::SetLayoutHint::Disabled);
+                super::checked_lower_with(graph, None, call_error)
+            },
+            |_, _, _| unreachable!("check does not emit LLVM"),
+        )
+        .map(drop);
+        assert_eq!(passes, 1);
+        assert_eq!(
+            result.unwrap_err(),
+            format!(
+                "{}:9:13: Imre: expected int, got str; annotations are enforced contracts",
+                path.display()
+            )
+        );
+    }
+
+    #[test]
+    fn set_layout_retry_uses_the_resolved_source() {
+        use super::modules::SetLayoutHint;
+
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.py");
+        let source = format!(
+            "{INFERRED_SET_GATHER}values = gather('ab')\nvalues.append(1)\nprint(len(values))\n"
+        );
+        std::fs::write(&path, &source).unwrap();
+        let options = CompileOptions::default();
+        let expected = super::check_file(&path, None);
+        let mut passes = Vec::new();
+        let result = super::object_fallback(
+            super::BoxedLayout::Check,
+            super::ProgramEntry::File(&path, None),
+            &options,
+            Default::default(),
+            |graph, call_error| {
+                assert_eq!(graph.modules[graph.entry].original_source(), source);
+                graph.session.explicit_check = true;
+                let result = super::checked_lower_with(graph, None, call_error)?;
+                let applied = graph.set_layout_hint.get() == SetLayoutHint::Applied;
+                passes.push(applied);
+                if applied {
+                    std::fs::write(&path, "invalid syntax!").unwrap();
+                }
+                Ok(result)
+            },
+            |_, _, _| unreachable!("check does not emit LLVM"),
+        )
+        .map(drop);
+        assert_eq!(passes, [true, false]);
+        assert_eq!(result, expected);
+        let fresh = super::check_file(&path, None);
+        assert!(fresh.is_err());
+        assert_ne!(fresh, result);
     }
 
     #[test]

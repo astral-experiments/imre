@@ -1,6 +1,8 @@
 //! Closed, representation-checked IR. Lowering preserves owned results and may
 //! borrow rooted locals for the duration of operator and call evaluation.
 
+pub(crate) mod control;
+
 use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -317,6 +319,13 @@ impl Type {
     pub(crate) fn is_path(self) -> bool {
         matches!(self, Self::Path | Self::PurePath(_))
     }
+
+    pub(crate) fn is_format_scalar(self) -> bool {
+        matches!(
+            self,
+            Self::Bool | Self::Int | Self::Float | Self::Str | Self::Bytes
+        )
+    }
 }
 
 impl std::fmt::Display for Type {
@@ -470,6 +479,31 @@ pub(crate) enum SourceFrame {
     Module(String),
 }
 
+/// Loader identity and payload selected for one module initializer.
+pub(crate) struct ModuleRegistration<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) file: &'a std::path::Path,
+    pub(crate) loader: ModuleLoader<'a>,
+}
+
+pub(crate) enum ModuleLoader<'a> {
+    Source {
+        builtin: bool,
+        text: Option<&'a [u8]>,
+    },
+    Physical {
+        kind: PhysicalModuleKind,
+        digest: [u8; 32],
+        future_flags: u32,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PhysicalModuleKind {
+    File,
+    Zip,
+}
+
 pub(crate) struct Module {
     /// Interpreter settings already selected by the Python-style launcher.
     pub command_flags: Option<crate::CommandFlags>,
@@ -593,10 +627,58 @@ pub(crate) struct Expr {
 }
 
 impl Expr {
+    /// A registered invocation carries the Python binder's position and source-ordered values.
+    pub(crate) fn is_registered_invoke(&self) -> bool {
+        let ExprKind::Invoke { callable, args } = &self.kind else {
+            return false;
+        };
+        self.ty == Type::PythonObject
+            && args.python_site.as_ref().is_some_and(|site| {
+                callable.registered_invoke_target(site)
+                    && site.range.start() < site.callee_end
+                    && site.callee_end < site.range.end()
+                    && site.suspended_name.is_none_or(|name| {
+                        site.range.contains_range(name) && name.end() == site.callee_end
+                    })
+                    && site
+                        .scope
+                        .as_ref()
+                        .is_none_or(|scope| scope.ty == Type::PythonObject)
+            })
+            && args.order.iter().copied().eq(0..args.values.len())
+    }
+
+    fn registered_invoke_target(&self, site: &InvokeSite) -> bool {
+        if self.ty == Type::PythonObject {
+            return true;
+        }
+        let ExprKind::Builtin(Builtin::RegisteredLocation(range, _), parts) = &self.kind else {
+            return false;
+        };
+        let [local] = parts.as_slice() else {
+            return false;
+        };
+        matches!(self.ty, Type::Callable(_))
+            && local.ty == self.ty
+            && matches!(local.kind, ExprKind::Local(_))
+            && site.suspended_name == Some(*range)
+    }
+
     pub(crate) fn unrepresented() -> Self {
         Self {
             ty: Type::PythonObject,
             kind: ExprKind::Builtin(Builtin::Unrepresented, vec![]),
+        }
+    }
+
+    /// Exception and cause are evaluated in source order before the registered raise ABI normalizes them.
+    pub(crate) fn explicit_cause(&self) -> Option<(&Self, &Self)> {
+        if let ExprKind::Builtin(Builtin::ExceptionWithCause, args) = &self.kind
+            && let [exception, cause] = args.as_slice()
+        {
+            Some((exception, cause))
+        } else {
+            None
         }
     }
 
@@ -628,6 +710,14 @@ impl Expr {
             ty: Type::Int,
             kind: ExprKind::Int(value.to_string()),
         }
+    }
+
+    /// Both exact string addition and a joined f-string supply native text fragments.
+    pub(crate) fn is_string_concat(&self) -> bool {
+        matches!(
+            self.kind,
+            ExprKind::Binary(Binary::Concat, ..) | ExprKind::Builtin(Builtin::FormatJoin, _)
+        )
     }
 
     /// The freshly allocated list has no externally visible alias during argument evaluation.
@@ -775,12 +865,22 @@ pub(crate) enum DisplayKind {
     Set,
 }
 
+/// The Python call position and, for an inline comprehension, its lexical namespace.
+#[derive(Clone)]
+pub(crate) struct InvokeSite {
+    pub range: ruff_text_size::TextRange,
+    pub callee_end: ruff_text_size::TextSize,
+    pub suspended_name: Option<ruff_text_size::TextRange>,
+    pub scope: Option<Box<Expr>>,
+}
+
 /// Values are evaluated and rooted in source order. `order` is a permutation of
 /// their indices that supplies the native call's parameter order without
 /// reevaluation. Methods include their receiver first; constructors omit the
 /// implicit receiver, which is allocated only after these values are evaluated.
 #[derive(Clone)]
 pub(crate) struct CallArgs {
+    pub python_site: Option<InvokeSite>,
     /// The callee's nominal tag feeds a complete member dispatch at this site.
     pub exhaustive_enum_match: bool,
     pub values: Vec<Expr>,
@@ -791,6 +891,7 @@ impl CallArgs {
     /// Uses the existing positional order for calls that need no argument binding.
     pub(crate) fn positional(values: Vec<Expr>) -> Self {
         Self {
+            python_site: None,
             exhaustive_enum_match: false,
             order: (0..values.len()).collect(),
             values,
@@ -865,7 +966,7 @@ pub(crate) enum ExprKind {
     Builtin(Builtin, Vec<Expr>),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Binary {
     Add,
     Subtract,
@@ -1088,37 +1189,32 @@ impl CharacterFilter {
     }
 }
 
-/// Calls whose implementation is owned by the Python object runtime. Keep their
-/// operands and result types in checked IR until the whole graph has been checked.
-#[derive(Clone, Copy)]
+/// Operations that need a registered Python frame after the complete graph has
+/// been checked. Field formatting can share a frame required by executable
+/// text or a socket sendfile call.
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) enum ObjectCall {
     ExecText,
     SocketSendfile,
+    FormatField,
 }
 
-pub(crate) fn required_object_call(
-    module: &Module,
+pub(crate) fn required_object_call<'a>(
+    functions: impl Iterator<Item = &'a Function>,
 ) -> Option<(usize, ruff_text_size::TextRange, ObjectCall)> {
-    let mut executable_text = None;
-    let mut socket_sendfile = None;
-    for function in module.functions.iter().chain([&module.entry]) {
+    let mut first = None;
+    for function in functions {
         walk_expressions(&function.body, &mut |expr| {
-            if let ExprKind::Builtin(Builtin::ObjectCall(call, module, span), _) = &expr.kind {
-                let first = match call {
-                    ObjectCall::ExecText => &mut executable_text,
-                    ObjectCall::SocketSendfile => &mut socket_sendfile,
-                };
-                if first.is_none_or(|(id, range, _): (_, ruff_text_size::TextRange, _)| {
-                    (*module, span.start()) < (id, range.start())
-                }) {
-                    *first = Some((*module, *span, *call));
-                }
+            if let ExprKind::Builtin(Builtin::ObjectCall(call, module, span), _) = &expr.kind
+                && first.is_none_or(|(id, range, kind): (_, ruff_text_size::TextRange, _)| {
+                    (*call, *module, span.start()) < (kind, id, range.start())
+                })
+            {
+                first = Some((*module, *span, *call));
             }
         });
     }
-    // Unknown executable text independently requires the object runtime. A socket
-    // call can use that runtime when it is already required elsewhere in the graph.
-    executable_text.or(socket_sendfile)
+    first
 }
 
 /// Unary protocol to invoke on a materialized Python object.
@@ -1163,21 +1259,108 @@ pub(crate) enum TypeParameterKind {
 }
 
 /// The source declaration or future spelling of one simple module annotation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct AnnotationOccurrence {
+    pub(crate) site: ruff_text_size::TextSize,
+    pub(crate) index: Option<usize>,
+}
+
 #[derive(Clone)]
-pub(crate) enum ModuleAnnotation {
+pub(crate) enum NamespaceAnnotation {
     Deferred {
         site: ruff_text_size::TextSize,
         name: String,
     },
     String {
         name: String,
-        site: ruff_text_size::TextSize,
     },
+}
+
+/// Acquisition and adaptation are separate when a generator stores its Python iterator in `.0`.
+#[derive(Clone, Copy)]
+pub(crate) enum IteratorOp {
+    Loop,
+    Async(ruff_text_size::TextRange),
+    Get(ruff_text_size::TextRange),
+    LoopCursor,
+}
+
+impl IteratorOp {
+    pub(crate) fn runtime_op(self) -> &'static str {
+        match self {
+            Self::Loop => "iter",
+            Self::Async(_) => "async_iter",
+            Self::Get(_) => "get_iter",
+            Self::LoopCursor => "loop_cursor",
+        }
+    }
+}
+
+/// Borrow the operands consumed by registered iteration without changing their evaluation order.
+pub(crate) enum IterationOperands<'a> {
+    Iter(&'a Expr, IteratorOp),
+    Truth(&'a Expr),
+    Get(&'a [Expr; 2]),
+    Insert(&'a [Expr; 2]),
+    Unpack(
+        &'a Expr,
+        usize,
+        Option<usize>,
+        Option<ruff_text_size::TextRange>,
+    ),
+    Namespace(&'a [String], Option<&'a Expr>),
+}
+
+impl Builtin {
+    pub(crate) fn iteration_operands<'a>(
+        &'a self,
+        args: &'a [Expr],
+    ) -> Option<Result<IterationOperands<'a>, &'static str>> {
+        use IterationOperands::*;
+        let one = || match args {
+            [value] => Ok(value),
+            _ => Err("registered iteration operation needs one operand"),
+        };
+        let two = || {
+            args.try_into()
+                .map_err(|_| "registered iteration operation needs two operands")
+        };
+        Some(match self {
+            Self::RegisteredIter(op) => one().map(|value| Iter(value, *op)),
+            Self::Bool => one().map(Truth),
+            Self::ListGet => two().map(Get),
+            Self::Append | Self::SetAdd => two().map(Insert),
+            Self::RegisteredUnpack {
+                count,
+                star,
+                target,
+            } => one().map(|value| Unpack(value, *count, *star, *target)),
+            Self::RegisteredNamespace(names) => match args {
+                [] | [_] => Ok(Namespace(names, args.first())),
+                _ => Err("registered namespace takes at most one parent"),
+            },
+            _ => return None,
+        })
+    }
+}
+
+/// A generator binding consumes its acquired cursor in the defining scope.
+pub(crate) fn generator_operands(
+    scoped: bool,
+    args: &[Expr],
+) -> Result<(Option<&Expr>, &Expr), &'static str> {
+    match (scoped, args) {
+        (true, [scope, cursor]) => Ok((Some(scope), cursor)),
+        (false, [cursor]) => Ok((None, cursor)),
+        _ => Err("registered generator needs its outer cursor and any explicit scope"),
+    }
 }
 
 /// A call evaluates its callable or method receiver before the argument binder runs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RegisteredCall {
+    /// The outer get position for an immediately indexed partition method call.
+    pub(crate) partition_field: Option<(u32, ruff_text_size::TextRange)>,
     pub(crate) range: ruff_text_size::TextRange,
     pub(crate) target: RegisteredCallTarget,
     pub(crate) arguments: RegisteredArguments,
@@ -1210,10 +1393,29 @@ pub(crate) enum RegisteredArguments {
 }
 
 /// Source order of the positional items, starred iterables, named keywords and mappings.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PackedArguments {
     pub(crate) starred: Vec<bool>,
     pub(crate) keywords: Vec<Option<String>>,
+}
+
+/// A physical declaration and the layout of its evaluated header operands.
+#[derive(Clone)]
+pub(crate) enum DefinitionSite {
+    Function(ruff_text_size::TextSize),
+    Class {
+        start: ruff_text_size::TextSize,
+        /// The generic parameter frame owns its own base operands.
+        arguments: Option<PackedArguments>,
+    },
+}
+
+impl DefinitionSite {
+    pub(crate) fn start(&self) -> ruff_text_size::TextSize {
+        match self {
+            Self::Function(start) | Self::Class { start, .. } => *start,
+        }
+    }
 }
 
 /// A statically named import that executes in a live Python namespace.
@@ -1589,6 +1791,13 @@ pub(crate) enum Builtin {
     JoinBufferAppend,
     JoinBufferFinish,
     StringFormat,
+    /// Convert the field value before evaluating its nested format specification.
+    FormatConversion(char),
+    /// Format an already converted value with its checked specification. The
+    /// targets are native repr methods that displaying this value can call.
+    FormatField(Box<[usize]>),
+    /// Join formatted operands in order, without invoking a str subclass's addition.
+    FormatJoin,
     StringReplace,
     Text(TextOperation),
     HexFormat {
@@ -1828,13 +2037,18 @@ pub(crate) enum Builtin {
     FaultLine(u32),
     /// An original statement checkpoint and its optional call without a separate highlight.
     RegisteredStatement(ruff_text_size::TextRange, Option<ruff_text_size::TextRange>),
+    /// Evaluate each operand for its effects and release it before evaluating the next.
+    RegisteredDiscard,
     /// The source position in effect while this registered operand is evaluated.
     RegisteredLocation(ruff_text_size::TextRange, ruff_text_size::TextSize),
     /// Construct the native function at this physical definition site from its evaluated header.
-    RegisteredDefinition(ruff_text_size::TextSize),
+    RegisteredDefinition(DefinitionSite),
     /// Bind the prepared lambda at this site. An explicit lexical scope, when present,
     /// precedes the default values in Python parameter order.
     RegisteredLambda(ruff_text_size::TextSize, bool),
+    /// Instantiate a prepared generator child. Its acquired outer cursor follows any
+    /// explicit comprehension scope in the operands.
+    RegisteredGenerator(ruff_text_size::TextRange, bool),
     /// Construct a lazy alias whose value callable was checked at this declaration site.
     RegisteredTypeAlias(ruff_text_size::TextSize),
     RegisteredImport(NamespaceImport),
@@ -1844,14 +2058,10 @@ pub(crate) enum Builtin {
         statement: ruff_text_size::TextSize,
         test: ruff_text_size::TextSize,
     },
-    /// A module annotation records execution at startup; its provider evaluates values on demand.
-    RegisteredModuleAnnotation(ModuleAnnotation),
+    RegisteredNamespaceAnnotation(NamespaceAnnotation),
     RegisteredAnnotationStart,
     RegisteredAnnotationFormat,
-    RegisteredAnnotationInsert {
-        index: usize,
-        name: String,
-    },
+    RegisteredAnnotationInsert(AnnotationOccurrence),
     /// Bind the string operand to a checked child function in this provider.
     BindAnnotationExpression(ruff_text_size::TextSize),
     RegisteredAnnotationResult,
@@ -1896,18 +2106,13 @@ pub(crate) enum Builtin {
         expression: String,
         conversion: Option<char>,
     },
-    /// Convert one Python object before evaluating a nested format spec.
-    RegisteredFormatConversion(char),
-    /// Format an evaluated Python object with its evaluated format spec.
-    RegisteredFormat,
-    /// Join formatted parts using Python's string formatting semantics.
-    RegisteredFormatJoin,
-    /// Acquire an iterator through the Python protocol on the original heap object.
-    RegisteredIter,
+    /// Acquire or adapt an iterator through its corresponding Python protocol.
+    RegisteredIter(IteratorOp),
     /// Snapshot a sequence for ordered target stores, including the optional starred remainder.
     RegisteredUnpack {
         count: usize,
         star: Option<usize>,
+        target: Option<ruff_text_size::TextRange>,
     },
     /// Allocate a child of the supplied Python namespace, declaring its private target names.
     RegisteredNamespace(Vec<String>),
@@ -3008,16 +3213,48 @@ impl InstanceType {
 
 #[derive(Clone)]
 pub(crate) struct ExceptHandler {
-    /// Empty for a bare handler; otherwise fixed builtin exception categories.
-    pub kinds: Vec<u32>,
+    pub matcher: ExceptionMatcher,
     pub name: Option<usize>,
     pub body: Vec<Statement>,
+}
+
+/// The manager protocol and the context expression's traceback position.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ContextSite {
+    pub is_async: bool,
+    pub range: ruff_text_size::TextRange,
+    pub anchor: ruff_text_size::TextSize,
+}
+
+/// The enter result stays live through this protected assignment, before the suite.
+#[derive(Clone)]
+pub(crate) struct ContextBinding {
+    pub entered: usize,
+    pub body: Vec<Statement>,
+}
+
+#[derive(Clone)]
+pub(crate) enum ExceptionMatcher {
+    /// Empty for a bare handler; otherwise fixed builtin exception categories.
+    Categories(Vec<u32>),
+    /// Evaluate the Python class only when a pending exception reaches this handler.
+    Object(ruff_text_size::TextRange, Box<Expr>),
+    /// Split and detach a subgroup while leaving unmatched exceptions for the next arm.
+    Subgroup(ruff_text_size::TextRange, Box<Expr>),
+}
+
+/// The implicit await position and optional source statement to restore before each pull.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AsyncPull {
+    pub(crate) range: ruff_text_size::TextRange,
+    pub(crate) header: Option<ruff_text_size::TextSize>,
 }
 
 /// Selects the pull ABI for a cursor created by the compiler.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum IterNextKind {
     Generic,
+    Async(AsyncPull),
     /// An owned field from a private single-byte split cursor.
     SplitField,
     String,
@@ -3033,6 +3270,36 @@ pub(crate) enum IterNextKind {
 pub(crate) enum ItemUpdate {
     Fixed(Binary),
     Protocol(&'static str),
+}
+
+#[derive(Clone)]
+pub(crate) enum MatchTest {
+    Always,
+    Singleton(Option<bool>),
+    Equal(Expr),
+    Or(Vec<MatchTest>),
+    Capture(Box<MatchTest>, String),
+    Sequence(imre_ast::SequencePatternPlan, Vec<MatchTest>),
+    Mapping(Vec<(Expr, MatchTest)>, Option<String>),
+    Class {
+        class: Expr,
+        positional: Vec<MatchTest>,
+        keywords: Vec<(String, MatchTest)>,
+    },
+}
+
+#[derive(Clone)]
+pub(crate) struct MatchPattern {
+    pub(crate) test: MatchTest,
+    pub(crate) names: Vec<String>,
+}
+
+#[derive(Clone)]
+pub(crate) struct MatchCase<G = Expr, B = Vec<Statement>, C = Vec<usize>> {
+    pub(crate) pattern: MatchPattern,
+    pub(crate) captures: C,
+    pub(crate) guard: Option<G>,
+    pub(crate) body: B,
 }
 
 #[derive(Clone)]
@@ -3053,6 +3320,8 @@ pub(crate) enum Statement {
     AugmentField(Expr, usize, Binary, Expr),
     Expr(Expr),
     If(Expr, Vec<Statement>, Vec<Statement>),
+    /// The evaluated subject survives failed guards, with captures bound before the guard.
+    Match(Expr, Vec<MatchCase>),
     /// The final suite runs only on condition failure or iterator exhaustion.
     While(Expr, Vec<Statement>, Vec<Statement>),
     For {
@@ -3079,6 +3348,13 @@ pub(crate) enum Statement {
     /// A compiler-owned iterator reached its end; unlike break, this runs else.
     Exhaust,
     Assert(Expr),
+    /// A successfully acquired exit protects the target binding and suite.
+    With {
+        manager: Expr,
+        site: ContextSite,
+        binding: Option<ContextBinding>,
+        body: Vec<Statement>,
+    },
     /// Handlers protect only `body`; `finalbody` runs for every exit reason.
     Try {
         body: Vec<Statement>,
@@ -3088,6 +3364,40 @@ pub(crate) enum Statement {
     },
     /// None re-raises the dynamically active exception, including across calls.
     Raise(Option<Expr>),
+}
+
+// Visit value patterns in source order with either a shared or a mutable borrow.
+macro_rules! pattern_expressions {
+    ($test:expr, $visit:expr) => {{
+        let mut pending = vec![$test];
+        while let Some(test) = pending.pop() {
+            match test {
+                MatchTest::Equal(value) => ($visit)(value),
+                MatchTest::Or(tests) | MatchTest::Sequence(_, tests) => {
+                    pending.extend(tests.into_iter().rev())
+                }
+                MatchTest::Capture(inner, _) => pending.push(inner),
+                MatchTest::Mapping(items, _) => {
+                    let mut children = Vec::with_capacity(items.len());
+                    for (key, child) in items {
+                        ($visit)(key);
+                        children.push(child);
+                    }
+                    pending.extend(children.into_iter().rev());
+                }
+                MatchTest::Class {
+                    class,
+                    positional,
+                    keywords,
+                } => {
+                    ($visit)(class);
+                    pending.extend(keywords.into_iter().rev().map(|(_, test)| test));
+                    pending.extend(positional.into_iter().rev());
+                }
+                MatchTest::Always | MatchTest::Singleton(_) => {}
+            }
+        }
+    }};
 }
 
 // Match ergonomics preserve the borrow of each operand and suite for inspection or rewriting.
@@ -3107,7 +3417,36 @@ macro_rules! statement_children {
                 ($expression)(a);
                 ($expression)(b);
             }
+            Statement::With {
+                manager,
+                binding,
+                body,
+                ..
+            } => {
+                ($expression)(manager);
+                if let Some(ContextBinding { body, .. }) = binding {
+                    ($suite)(body);
+                }
+                ($suite)(body);
+            }
             Statement::Scope { body, .. } => ($suite)(body),
+            Statement::Match(subject, cases) => {
+                ($expression)(subject);
+                for MatchCase {
+                    pattern,
+                    guard,
+                    body,
+                    ..
+                } in cases
+                {
+                    let MatchPattern { test, .. } = pattern;
+                    pattern_expressions!(test, $expression);
+                    if let Some(guard) = guard {
+                        ($expression)(guard);
+                    }
+                    ($suite)(body);
+                }
+            }
             Statement::If(test, yes, no) | Statement::While(test, yes, no) => {
                 ($expression)(test);
                 ($suite)(yes);
@@ -3129,7 +3468,12 @@ macro_rules! statement_children {
                 finalbody,
             } => {
                 ($suite)(body);
-                for ExceptHandler { body, .. } in handlers {
+                for ExceptHandler { matcher, body, .. } in handlers {
+                    if let ExceptionMatcher::Object(_, class)
+                    | ExceptionMatcher::Subgroup(_, class) = matcher
+                    {
+                        ($expression)(class);
+                    }
                     ($suite)(body);
                 }
                 ($suite)(orelse);
@@ -3148,6 +3492,12 @@ macro_rules! statement_children {
 }
 
 impl Statement {
+    /// Visit immediate operands, including the subject, value patterns and guards of a match.
+    pub(crate) fn operands<'a>(&'a self, visit: impl FnMut(&'a Expr)) {
+        let mut visit = visit;
+        statement_children!(self, &mut visit, |_| {});
+    }
+
     /// Visits nested suites in source order, excluding suites owned by expressions.
     pub(crate) fn suites<'a>(&'a self, mut visit: impl FnMut(&'a [Statement])) {
         statement_children!(self, |_| {}, visit);
@@ -3208,9 +3558,17 @@ pub(crate) fn contains_loop(body: &[Statement]) -> bool {
     found
 }
 
+/// Walk one expression with the same parent and nested-scope information as a suite.
+pub(crate) fn walk_operand_nodes<'a>(
+    value: &'a Expr,
+    visit: &mut impl FnMut(Node<'a>, Option<&'a Expr>),
+) {
+    walk_expression(value, None, visit);
+}
+
 /// Visits an operand and its nested expressions, including eager scope bodies.
 pub(crate) fn walk_operand_expressions<'a>(value: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
-    walk_expression(value, None, &mut |node, _| {
+    walk_operand_nodes(value, &mut |node, _| {
         if let Node::Expression(expression) = node {
             visit(expression);
         }
@@ -3469,6 +3827,11 @@ fn node_writes(node: Node<'_>, visit: &mut impl FnMut(usize, Option<&Expr>)) {
     };
     match statement {
         Statement::Assign(slot, value) => visit(*slot, Some(value)),
+        Statement::Match(_, cases) => {
+            for &slot in cases.iter().flat_map(|case| &case.captures) {
+                visit(slot, None);
+            }
+        }
         Statement::Clear(slot) => visit(*slot, None),
         Statement::Move(target, source) => {
             visit(*target, None);
@@ -3479,6 +3842,10 @@ fn node_writes(node: Node<'_>, visit: &mut impl FnMut(usize, Option<&Expr>)) {
                 visit(slot, None);
             }
         }
+        Statement::With {
+            binding: Some(binding),
+            ..
+        } => visit(binding.entered, None),
         Statement::For {
             target,
             cursor,
@@ -3545,8 +3912,19 @@ macro_rules! expression_children {
             }
             ExprKind::Invoke {
                 callable,
-                args: CallArgs { values, .. },
+                args:
+                    CallArgs {
+                        python_site,
+                        values,
+                        ..
+                    },
             } => {
+                if let Some(InvokeSite {
+                    scope: Some(scope), ..
+                }) = python_site
+                {
+                    $visit(scope);
+                }
                 $visit(callable);
                 for value in values {
                     $visit(value);

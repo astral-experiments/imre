@@ -1,15 +1,20 @@
 //! Lexical bindings and code-object metadata for prepared Python functions.
 
 mod annotations;
+pub(crate) use annotations::ClassAnnotations;
+mod callable;
+pub(crate) use callable::{CallableMetadata, OrdinaryFunction, parameter_layout};
 mod class_metadata;
 pub(crate) mod classes;
 mod type_parameters;
 
-pub(crate) use type_parameters::check_nonlocals;
+pub(crate) use type_parameters::{
+    TypeParameterScope, boxed_function_type_params, check_nonlocals, type_parameter_scope,
+};
 
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
-use ruff_text_size::{Ranged, TextSize};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 use serde_json::json;
 use std::collections::{BTreeSet, HashMap};
 
@@ -350,23 +355,38 @@ impl FunctionScope {
     }
 }
 
+pub(crate) struct NamedFunctionScope {
+    pub(crate) ordinary: Option<OrdinaryFunction>,
+    pub(crate) lexical: FunctionScope,
+    pub(crate) suspension_flags: u32,
+}
+
 #[derive(Default)]
 pub(crate) struct ScopeFacts {
-    pub(crate) functions: HashMap<TextSize, FunctionScope>,
+    pub(crate) module_annotations: bool,
+    pub(crate) functions: HashMap<TextSize, NamedFunctionScope>,
     pub(crate) lambdas: HashMap<TextSize, FunctionScope>,
     pub(crate) aliases: HashMap<TextSize, FunctionScope>,
-    pub(crate) generators: HashMap<TextSize, FunctionScope>,
-    pub(crate) comprehension_targets: HashMap<TextSize, String>,
+    pub(crate) generators: HashMap<TextRange, FunctionScope>,
+    pub(crate) comprehension_targets: HashMap<TextRange, String>,
     pub(crate) classes: HashMap<TextSize, classes::ClassScope>,
     pub(crate) annotations: annotations::AnnotationScopes,
     pub(crate) module_globals: BTreeSet<String>,
 }
 
 impl ScopeFacts {
-    pub(crate) fn prepare(
-        body: &[ast::Stmt],
+    pub(crate) fn function(&self, def: &ast::StmtFunctionDef) -> &NamedFunctionScope {
+        &self.functions[&def
+            .decorator_list
+            .first()
+            .map_or(def.start(), Ranged::start)]
+    }
+
+    pub(crate) fn prepare<'a>(
+        body: &'a [ast::Stmt],
         names: &imre_ast::Names,
-        alias_site: impl FnMut(&ast::StmtTypeAlias),
+        alias_site: impl FnMut(&'a ast::StmtTypeAlias),
+        expression_site: impl FnMut(&ast::Expr),
     ) -> Self {
         let mut scopes = Self::default();
         Collector {
@@ -374,6 +394,7 @@ impl ScopeFacts {
             names,
             scope: Scope::Module,
             alias_site,
+            expression_site,
         }
         .visit_body(body);
         scopes
@@ -383,18 +404,21 @@ impl ScopeFacts {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Scope {
     Module,
-    Class,
+    Class(TextSize),
     Function,
 }
 
-struct Collector<'a, A> {
+struct Collector<'a, A, E> {
     scopes: &'a mut ScopeFacts,
     names: &'a imre_ast::Names,
     scope: Scope,
     alias_site: A,
+    expression_site: E,
 }
 
-impl<'a, A: FnMut(&ast::StmtTypeAlias)> Visitor<'a> for Collector<'_, A> {
+impl<'a, A: FnMut(&'a ast::StmtTypeAlias), E: FnMut(&ast::Expr)> Visitor<'a>
+    for Collector<'_, A, E>
+{
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         let strings = self.names.string_annotations;
         let parent = self.scope;
@@ -404,24 +428,39 @@ impl<'a, A: FnMut(&ast::StmtTypeAlias)> Visitor<'a> for Collector<'_, A> {
                     .decorator_list
                     .first()
                     .map_or(def.start(), Ranged::start);
-                self.scopes
-                    .functions
-                    .insert(start, FunctionScope::function(def, strings));
+                use imre_ast::code_flags::{ASYNC_GENERATOR, COROUTINE, GENERATOR, is_generator};
+                let suspension_flags = match (def.is_async, is_generator(&def.body)) {
+                    (false, false) => 0,
+                    (false, true) => GENERATOR,
+                    (true, false) => COROUTINE,
+                    (true, true) => ASYNC_GENERATOR,
+                };
+                let lexical = FunctionScope::function(def, strings);
+                let ordinary =
+                    OrdinaryFunction::prepare(def, self.names, &lexical, suspension_flags);
+                self.scopes.functions.insert(
+                    start,
+                    NamedFunctionScope {
+                        lexical,
+                        ordinary,
+                        suspension_flags,
+                    },
+                );
                 self.scopes.annotations.function(def, strings);
                 self.scope = Scope::Function;
             }
             ast::Stmt::ClassDef(class) => {
-                self.scopes.classes.insert(
-                    class
-                        .decorator_list
-                        .first()
-                        .map_or(class.start(), Ranged::start),
-                    classes::ClassScope::prepare(class, self.names),
-                );
-                self.scope = Scope::Class;
+                let start = class
+                    .decorator_list
+                    .first()
+                    .map_or(class.start(), Ranged::start);
+                self.scopes
+                    .classes
+                    .insert(start, classes::ClassScope::prepare(class, self.names));
+                self.scope = Scope::Class(start);
             }
             ast::Stmt::TypeAlias(alias) => {
-                if self.scope != Scope::Class {
+                if !matches!(self.scope, Scope::Class(_)) {
                     (self.alias_site)(alias);
                 }
                 let mut names = ClosureNames {
@@ -439,16 +478,33 @@ impl<'a, A: FnMut(&ast::StmtTypeAlias)> Visitor<'a> for Collector<'_, A> {
                     .module_globals
                     .extend(global.names.iter().map(ToString::to_string));
             }
-            ast::Stmt::AnnAssign(assign) if self.scope == Scope::Class && !strings => {
-                self.scopes.annotations.assignment(assign)
-            }
+            ast::Stmt::AnnAssign(assign) => match self.scope {
+                Scope::Module => self.scopes.module_annotations = true,
+                Scope::Class(site) if !strings => {
+                    self.scopes.annotations.assignment(assign);
+                    self.scopes
+                        .classes
+                        .get_mut(&site)
+                        .unwrap()
+                        .annotations
+                        .observe(assign);
+                }
+                _ => {}
+            },
             _ => {}
         }
         visitor::walk_stmt(self, stmt);
+        if let (ast::Stmt::ClassDef(class), Scope::Class(start)) = (stmt, self.scope) {
+            let scope = self.scopes.classes.get_mut(&start).unwrap();
+            scope
+                .annotations
+                .finish(class, &self.scopes.annotations, &scope.bindings);
+        }
         self.scope = parent;
     }
 
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        (self.expression_site)(expr);
         let strings = self.names.string_annotations;
         if let ast::Expr::Lambda(lambda) = expr {
             self.scopes
@@ -457,7 +513,7 @@ impl<'a, A: FnMut(&ast::StmtTypeAlias)> Visitor<'a> for Collector<'_, A> {
         } else if let Some(plan) = imre_ast::comprehension::Plan::from_expr(expr) {
             let targets: indexmap::IndexSet<String> = plan.collect_target_names();
             self.scopes.comprehension_targets.insert(
-                expr.start(),
+                expr.range(),
                 targets
                     .iter()
                     .map(String::as_str)
@@ -469,7 +525,7 @@ impl<'a, A: FnMut(&ast::StmtTypeAlias)> Visitor<'a> for Collector<'_, A> {
                 let captures_class = names.reads.contains("__class__");
                 names.locals.insert(".0".into());
                 self.scopes.generators.insert(
-                    expr.start(),
+                    expr.range(),
                     FunctionScope::new(names, None, captures_class),
                 );
             }

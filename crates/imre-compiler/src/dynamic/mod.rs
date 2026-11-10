@@ -12,6 +12,7 @@ use ruff_python_ast::name::UnqualifiedName;
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
 
+use crate::frontend::module_source::{self, ParsedModule};
 use crate::{CompileOptions, SourceInputs, SourceKind, UnitCompilation};
 
 /// Only a winning file can add a first-party frozen override while walking SDK dependencies.
@@ -535,83 +536,20 @@ pub(crate) fn function_type_params<'a>(
     if nested && !string_annotations {
         return None;
     }
-    boxed_function_type_params(function, string_annotations, nested, private_names)
-}
-
-/// A synchronous boxed function with one body scope can capture its unbounded type parameters.
-fn boxed_function_type_params<'a>(
-    function: &'a ast::StmtFunctionDef,
-    string_annotations: bool,
-    nested: bool,
-    private_names: Option<&imre_ast::Names>,
-) -> Option<&'a ast::TypeParams> {
-    use ast::AnyNodeRef::*;
-    use ast::visitor::source_order::{SourceOrderVisitor, TraversalSignal};
-
-    let params = function.type_params.as_deref()?;
-    let mut names = HashSet::new();
-    if function.is_async
-        || !params.iter().all(|p| {
-            let name = private_names.map_or(p.name().as_str(), |names| names.definition(p.name()));
-            p.default().is_none()
-                && match p {
-                    ast::TypeParam::TypeVar(v) => v.bound.is_none(),
-                    ast::TypeParam::TypeVarTuple(_) | ast::TypeParam::ParamSpec(_) => {
-                        string_annotations
-                    }
-                }
-                && !matches!(name, "__classdict__" | "__debug__")
-                && (!nested || !name.starts_with("__"))
-                && names.insert(p.name().as_str())
-        })
-    {
-        return None;
-    }
-
-    struct BodyScope {
-        nested: bool,
-        unsupported: bool,
-    }
-    impl<'a> SourceOrderVisitor<'a> for BodyScope {
-        fn enter_node(&mut self, node: ast::AnyNodeRef<'a>) -> TraversalSignal {
-            self.unsupported |= matches!(
-                node,
-                StmtFunctionDef(_)
-                    | StmtClassDef(_)
-                    | StmtTypeAlias(_)
-                    | StmtNonlocal(_)
-                    | ExprLambda(_)
-                    | ExprGenerator(_)
-                    | ExprListComp(_)
-                    | ExprSetComp(_)
-                    | ExprDictComp(_)
-                    | ExprYield(_)
-                    | ExprYieldFrom(_)
-            );
-            // Nested declarations with a class cell need a different capture path.
-            self.unsupported |= self.nested
-                && matches!(node, ExprName(n) if matches!(n.id.as_str(), "__class__" | "super"));
-            if self.unsupported {
-                TraversalSignal::Skip
-            } else {
-                TraversalSignal::Traverse
-            }
-        }
-    }
-    let mut body = BodyScope {
+    crate::frontend::function_scope::boxed_function_type_params(
+        function,
+        string_annotations,
         nested,
-        unsupported: false,
-    };
-    body.visit_body(&function.body);
-    (!body.unsupported).then_some(params)
+        private_names,
+    )
 }
 
-fn scan_imports(
-    source: &str,
-    kind: SourceKind,
-    getter: Option<&mut Imports>,
-    file_alternative: Option<(&Path, bool)>,
-) -> Result<Imports, String> {
+enum ImportSource<'a> {
+    Module(ParsedModule<'a>),
+    Invalid(Box<ModuleSyntaxError>),
+}
+
+fn read_import_source(source: &str, kind: SourceKind) -> Result<ImportSource<'_>, String> {
     let normalized = crate::normalize_source(source, kind)?;
     let input = imre_ast::indentation::prepare(&normalized);
     crate::analysis::check_source_complexity(&input.text).map_err(str::to_owned)?;
@@ -622,32 +560,62 @@ fn scan_imports(
     let parsed = match parsed {
         Ok(parsed) => parsed,
         Err(error) if kind == SourceKind::DecodedFile => {
-            return Ok(Imports {
-                invalid_executable: Some(Box::new(ModuleSyntaxError::from_parser(
-                    &normalized,
-                    error,
-                ))),
-                ..Imports::default()
-            });
+            return Ok(ImportSource::Invalid(Box::new(
+                ModuleSyntaxError::from_parser(&normalized, error),
+            )));
         }
         Err(error) => return Err(error.to_string()),
     };
     crate::analysis::check_form_feeds(&normalized, parsed.tokens())?;
+    Ok(ImportSource::Module(ParsedModule {
+        text: normalized,
+        parsed: std::borrow::Cow::Owned(parsed),
+    }))
+}
+
+fn scan_imports(
+    source: &str,
+    kind: SourceKind,
+    getter: Option<&mut Imports>,
+    file_alternative: Option<(&Path, bool)>,
+) -> Result<Imports, String> {
+    let module = match read_import_source(source, kind)? {
+        ImportSource::Module(module) => module,
+        ImportSource::Invalid(error) => {
+            return Ok(Imports {
+                invalid_executable: Some(error),
+                ..Imports::default()
+            });
+        }
+    };
     if let Some((path, keep_docstrings)) = file_alternative {
-        emit::check_parsed_source(path, &normalized, &parsed, keep_docstrings)?;
+        module_source::validate(path, &module.text, &module.parsed, keep_docstrings)?;
     }
-    let mut body = parsed.into_syntax().body;
-    let bindings = imre_ast::executable::BindingErrors::check(&body, &normalized);
+    imports_from_body(
+        &module.text,
+        module_source::into_body(module.parsed),
+        getter,
+        file_alternative.map(|(path, _)| path),
+    )
+}
+
+fn imports_from_body(
+    normalized: &str,
+    mut body: ast::Suite,
+    getter: Option<&mut Imports>,
+    file_alternative: Option<&Path>,
+) -> Result<Imports, String> {
+    let bindings = imre_ast::executable::BindingErrors::check(&body, normalized);
     let future = imre_ast::future_import_error(&body);
     let validate_at_origin =
         future.is_none() && bindings.symbol.is_none() && bindings.pattern.is_none();
     let error = bindings
         .first_symbol(future)
-        .map(|(range, reason)| ModuleSyntaxError::new(&normalized, range, reason.to_owned(), false))
+        .map(|(range, reason)| ModuleSyntaxError::new(normalized, range, reason.to_owned(), false))
         .or_else(|| {
             let issue = bindings.handler?;
             let mut error = ModuleSyntaxError::new(
-                &normalized,
+                normalized,
                 issue.location.unwrap_or(issue.range),
                 issue.message.to_owned(),
                 true,
@@ -660,13 +628,13 @@ fn scan_imports(
         })
         .or_else(|| {
             bindings.pattern.map(|(range, reason)| {
-                ModuleSyntaxError::new(&normalized, range, reason.checked().into_owned(), true)
+                ModuleSyntaxError::new(normalized, range, reason.checked().into_owned(), true)
             })
         });
     // The optional file must satisfy the emitter's checks before registration.
     // Use its discovery tree for both checking and collecting the lowered imports.
     let checked_names = file_alternative
-        .map(|(path, _)| emit::lower_source(path, &normalized, &mut body))
+        .map(|path| module_source::lower(path, normalized, &mut body))
         .transpose()?;
     if let Some(mut diagnostic) = error {
         // Discovery records the error. Only selection as the checked entry diagnoses it here.
@@ -778,9 +746,8 @@ pub(crate) struct RegisteredSources<'a> {
 }
 
 pub(crate) fn compile(
-    (path, module_root, mut filesystem, wheel_records): (
-        &Path,
-        Option<&Path>,
+    (operand, mut filesystem, wheel_records): (
+        crate::ProgramEntry<'_>,
         crate::watch::FileSystem<'_>,
         &mut crate::installed_wheels::WheelRecords,
     ),
@@ -791,6 +758,12 @@ pub(crate) fn compile(
     layout: crate::BoxedLayout<'_>,
     check: impl FnOnce(bool, Option<RegisteredSources<'_>>) -> Result<(), String>,
 ) -> Result<Option<UnitCompilation>, String> {
+    let (path, module_root, source_entry) = match operand {
+        crate::ProgramEntry::Source(_) => {
+            (Path::new(crate::modules::MEMORY_SOURCE_PATH), None, true)
+        }
+        crate::ProgramEntry::File(path, root) => (path, root, false),
+    };
     let invocation = options.command.as_ref();
     let startup = options.python_startup();
     let frozen_modules = startup.is_none_or(|(flags, _)| flags.frozen_modules);
@@ -806,7 +779,7 @@ pub(crate) fn compile(
     } else if let Some(graph) = file_entry {
         (
             graph.modules[graph.entry].original_source().to_owned(),
-            Some(graph.inputs.files[graph.entry].1.clone()),
+            (!source_entry).then(|| graph.inputs.files[graph.entry].1.clone()),
         )
     } else {
         // A direct .pyc operand already received its bytecode diagnostic from the script loader.
@@ -879,17 +852,38 @@ pub(crate) fn compile(
     if !object_hint && !startup_fallback && !ordered_command {
         return Ok(None);
     }
-    let Ok(mut first) = scan_imports(
-        &src,
-        if command.is_some() {
-            SourceKind::Command
-        } else {
-            SourceKind::File
+    let kind = if command.is_some() {
+        SourceKind::Command
+    } else {
+        SourceKind::File
+    };
+    let module = match file_entry.and_then(|graph| ParsedModule::checked_entry(graph, path)) {
+        Some(module) => module,
+        None => match read_import_source(&src, kind) {
+            Ok(ImportSource::Module(module)) => module,
+            _ => return Ok(None),
         },
-        None,
-        None,
-    ) else {
-        return Ok(None);
+    };
+    // Discovery lowers names in its own body. Admission needs the original spellings and
+    // tokens, including for diagnostics on code that never reaches the emitter.
+    let (mut first, entry_source) = if in_memory {
+        (
+            imports_from_body(
+                &module.text,
+                module_source::into_body(module.parsed),
+                None,
+                None,
+            )?,
+            None,
+        )
+    } else {
+        let imports = imports_from_body(
+            &module.text,
+            module.parsed.syntax().body.clone(),
+            None,
+            None,
+        )?;
+        (imports, Some(module))
     };
     if startup.is_none()
         && let Some(error) = first.invalid_executable.take()
@@ -974,7 +968,11 @@ pub(crate) fn compile(
     first
         .names
         .extend(registered_imports.targets.into_iter().map(|name| (0, name)));
-    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+    let cwd = if source_entry {
+        PathBuf::from("/")
+    } else {
+        std::env::current_dir().map_err(|e| e.to_string())?
+    };
     let isolated = startup.is_some_and(|(flags, _)| flags.isolated);
     let entry = cwd.join(path);
     let root = if let Some(root) = module_root {
@@ -1000,7 +998,8 @@ pub(crate) fn compile(
         // CPython preserves the directory spelling, including symlinks, and searches
         // an explicitly requested entry even when isolated startup omits the cwd.
         initial.push(entry.clone());
-    } else if !safe_path {
+    } else if !source_entry && !safe_path {
+        // The in-memory graph has a diagnostic filename, but no project import root.
         initial.push(root.clone());
     }
     // site removes duplicate startup paths before Python prepends path[0].
@@ -1029,6 +1028,7 @@ pub(crate) fn compile(
     let explicit_roots: Vec<_> = first
         .explicit_roots
         .iter()
+        .filter(|_| !source_entry)
         .map(|path| cwd.join(path))
         .collect();
     roots.extend(explicit_roots.iter().cloned());
@@ -1917,7 +1917,7 @@ pub(crate) fn compile(
         "bundled_root":bundled_root,
         "stdlib_fallback":stdlib_fallback,
         "stdlib_members":include_str!(concat!(env!("OUT_DIR"), "/imre-stdlib-members.txt")),
-        "sitecustomize":options.sitecustomize || options.stdlib_sitecustomize,"user_site_pth":options.user_site_pth,"after_user_site":after_user_site,"path0":options.path_entry || !safe_path,
+        "sitecustomize":options.sitecustomize || options.stdlib_sitecustomize,"user_site_pth":options.user_site_pth,"after_user_site":after_user_site,"path0":path0_len != 0,
         "bundle_entry":bundle_entry,
         "module_docs":{"json": keep_docstrings.then_some(include_str!("../../stdlib/docstrings/json.txt"))},
         "python_version":crate::PYTHON_VERSION.to_string(),
@@ -1950,29 +1950,19 @@ pub(crate) fn compile(
                 .get("runpy")
                 .is_none_or(|(root, _)| root == Path::new(bundled_root)));
     // Borrow the winners once discovery has finished growing the emitter's source table.
-    let checked_functions = checked_graph.map(|graph| graph.registered_functions());
-    let native_functions = checked_graph.map(|graph| graph.native_functions.borrow());
+    let checking = matches!(layout, crate::BoxedLayout::Check);
+    let mut checked_units = Vec::new();
     let selected_sources: Vec<_> = selected_sources
         .into_iter()
         .enumerate()
         .map(|(index, (id, program, module))| {
             let application = !registrations.python_providers.contains(&id);
-            if application && let (Some(graph), Some(module_id)) = (checked_graph, module) {
-                let checked = &graph.modules[module_id];
-                if checked.original_source() == sources[id].2 {
-                    registrations.program_bodies.insert(
-                        id,
-                        emit::ProgramBodies {
-                            checked: checked_functions
-                                .as_ref()
-                                .and_then(|all| all.get(&module_id)),
-                            native: native_functions
-                                .as_ref()
-                                .and_then(|all| all.get(&module_id)),
-                            sanitize: options.address_sanitizer,
-                        },
-                    );
-                }
+            if !checking
+                && application
+                && let (Some(graph), Some(module_id)) = (checked_graph, module)
+                && graph.modules[module_id].original_source() == sources[id].2
+            {
+                checked_units.push((id, module_id));
             }
             // Emit the selected application's signature. Preserve the existing checker
             // scope: owning a declaration does not prove that a call will reach it.
@@ -2077,11 +2067,25 @@ pub(crate) fn compile(
             ));
         }
     }
-    let modules = (sources.as_slice(), builtins.as_slice());
-    let (units, used_archive) = if matches!(layout, crate::BoxedLayout::Check) {
-        emit::check(modules, keep_docstrings, &module_errors)?;
+    let (units, used_archive) = if checking {
+        let mut entry = entry_source;
+        for (_, path, source) in sources.iter().chain(&builtins) {
+            let parsed = entry.take();
+            if !module_errors.contains_key(path) {
+                ParsedModule::check_file(path, source, parsed, keep_docstrings)?;
+            }
+        }
         (Vec::new(), false)
     } else {
+        // Admission may have given a fixed definition to its registered frame.
+        let checked_functions = checked_graph.map(|graph| graph.registered_functions());
+        if let Some(functions) = &checked_functions {
+            for (unit, module) in checked_units {
+                if let Some(bodies) = functions.get(&module) {
+                    registrations.program_bodies.insert(unit, bodies);
+                }
+            }
+        }
         let providers = options
             .bundled_provider_archive
             .as_deref()
@@ -2090,7 +2094,7 @@ pub(crate) fn compile(
             .unwrap_or_default();
         let config = config.to_string();
         emit::emit(
-            modules,
+            (sources.as_slice(), builtins.as_slice(), entry_source),
             &config,
             python_optimization,
             Path::new(bundled_root),

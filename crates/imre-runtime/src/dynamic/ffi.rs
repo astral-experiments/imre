@@ -8,38 +8,6 @@ use super::*;
 
 mod linked_literals;
 
-/// Check that specializing these name loads cannot bypass Python.
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_native_bindings(
-    ctx: *const Context,
-    scope: Id,
-    names: *const u8,
-    len: usize,
-) -> bool {
-    // SAFETY: the registered activation and NUL-separated UTF-8 constant are live for this call.
-    let (ctx, names) = unsafe {
-        (
-            &*ctx,
-            std::str::from_utf8_unchecked(std::slice::from_raw_parts(names, len)),
-        )
-    };
-    ctx.pending.is_none()
-        && crate::objects::exceptions::imre_error_pending() == 0
-        && !crate::objects::exceptions::has_active_native_handler()
-        && crate::objects::exceptions::plain_reserves_ready()
-        // Statement publication may run finalizers, weak callbacks or coroutine warnings.
-        && !ctx.heap.has_weak_values
-        && (!ctx.heap.tracks_finalizers() || ctx.can_skip_finalizer_sweep(0))
-        && !ctx.heap.has_unstarted_coroutines()
-        && ctx.threads.count.load(std::sync::atomic::Ordering::Acquire) == 0
-        && !ctx.heap.allocation_traces.is_tracing()
-        && ctx.signal_handlers.iter().all(|&handler| {
-            !ctx.callable(handler)
-                || ctx.builtins.get("_signal.default_int_handler") == Some(&handler)
-        })
-        && ctx.retained_builtin_bindings(scope, names)
-}
-
 fn flag(v: bool) -> Id {
     if v { TRUE } else { FALSE }
 }
@@ -91,8 +59,11 @@ impl Context {
 
     /// Instantiate exception classes used by raise and its explicit cause.
     fn instantiate_exception_class(&mut self, value: Id) -> Result<Id> {
+        if matches!(self.heap.get(value), Value::Raised(_)) {
+            return Ok(value);
+        }
         let base = self.builtin("BaseException");
-        if !self.subclass(value, base) {
+        if !self.direct_subclass(value, base) {
             return Ok(value);
         }
         let result = self.call(value, Vec::new(), Vec::new())?;
@@ -108,6 +79,69 @@ impl Context {
             ));
         }
         Ok(result)
+    }
+
+    /// Normalize against the class selected by raise, even if constructing the cause
+    /// changed the original instance's class.
+    fn normalize_raised(&mut self, class: Id, exception: Id) -> Result<Id> {
+        let actual = self.exact_type(exception)?;
+        let metaclass = self.heap.get(class).instance_class();
+        let custom_type = metaclass.is_some_and(|meta| self.builtins.get("type") != Some(&meta));
+        let accepted = if custom_type {
+            self.python_subclass_check(actual, class)?
+        } else {
+            self.direct_subclass(actual, class)
+        };
+        if accepted {
+            return Ok(exception);
+        }
+
+        let result = self
+            .call(class, vec![exception], Vec::new())
+            .and_then(|value| {
+                if matches!(self.heap.get(value), Value::Raised(_)) {
+                    Ok(value)
+                } else {
+                    Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "calling {} should have returned an instance of BaseException, not {}",
+                            self.repr(class),
+                            self.type_name(value)
+                        ),
+                    ))
+                }
+            });
+        result.map_err(|error| {
+            let failure = self.raised_instance(error);
+            self.heap.keep(failure);
+            let args = builtins::call(self, "repr", &[exception], &[])
+                .unwrap_or_else(|_| self.text("<unknown>"));
+            let prefix = self.text(format!(
+                "Normalization failed: type={} args=",
+                self.class_name(class)
+            ));
+            if let Ok(note) = self.concat_strings(prefix, args) {
+                let _ = self.add_exception_note(failure, note);
+            }
+            self.error_from_instance(failure)
+        })
+    }
+
+    fn error_from_instance(&self, instance: Id) -> Error {
+        let Value::Raised(error) = self.heap.get(instance) else {
+            unreachable!("expected a normalized exception instance")
+        };
+        let mut error = error.clone();
+        error.tracing().instance = Some(instance);
+        error
+    }
+
+    /// Propagate an already normalized instance with the active exception as context.
+    pub(super) fn raise_normalized(&mut self, instance: Id) -> Result<Id> {
+        let mut error = self.error_from_instance(instance);
+        self.chain_raised_instance(&mut error);
+        Err(error)
     }
 
     /// Check the mapping and its length before evaluating the pattern's key expressions.
@@ -176,25 +210,100 @@ impl Context {
         self.python_instance_check(subject, class)
     }
 
-    /// Fetch keyword fields in source order before evaluating their nested patterns.
+    /// Resolve positional names only after isinstance succeeds, then fetch all
+    /// fields in source order before testing any nested patterns.
     fn match_class(&mut self, subject: Id, class: Id, names: Id) -> Result<Id> {
         if !self.class_pattern_matches(subject, class)? {
             return Ok(NONE);
         }
         let Value::List(names) = self.heap.get(names) else {
-            unreachable!("compiled class pattern keywords")
+            unreachable!("compiled class pattern arguments")
         };
-        let names = names.clone();
+        let mut names = names.clone();
+        let positional = names.iter().take_while(|&&name| name == NONE).count();
         let mut fields = Vec::with_capacity(names.len());
-        for name in names {
-            let name = self.str_value(name)?.to_owned();
-            match self.lookup_attr(subject, &name) {
+        let mut seen = Vec::new();
+        let mut first = 0;
+        let args_mark = self.heap.temporary_mark();
+        if positional > 0 {
+            let match_args = self.optional_attr(class, "__match_args__")?;
+            let match_self = match_args.is_none() && self.class_matches_self(class)?;
+            let elements = match match_args {
+                Some(tuple) => match self.heap.get(tuple) {
+                    Value::Tuple(items) => items.as_slice(),
+                    _ => {
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "{}.__match_args__ must be a tuple (got {})",
+                                self.class_name(class),
+                                self.type_name(tuple)
+                            ),
+                        ));
+                    }
+                },
+                None => &[],
+            };
+            let allowed = if match_self { 1 } else { elements.len() };
+            if positional > allowed {
+                let suffix = if allowed == 1 { "" } else { "s" };
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "{}() accepts {allowed} positional sub-pattern{suffix} ({positional} given)",
+                        self.class_name(class)
+                    ),
+                ));
+            }
+            if match_self {
+                self.heap.keep(subject);
+                fields.push(subject);
+                first = 1;
+            } else {
+                names[..positional].copy_from_slice(&elements[..positional]);
+            }
+        }
+        for (index, &name) in names.iter().enumerate().skip(first) {
+            if index < positional
+                && !matches!(self.heap.get(name), Value::Str(_) | Value::SurrogateStr(_))
+            {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "__match_args__ elements must be strings (got {})",
+                        self.type_name(name)
+                    ),
+                ));
+            }
+            if positional > 0 {
+                if seen.iter().any(|&other| self.equal(other, name)) {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "{}() got multiple sub-patterns for attribute {}",
+                            self.class_name(class),
+                            self.repr(name)
+                        ),
+                    ));
+                }
+                seen.push(name);
+            }
+            let attr = super::attribute_name::AttributeName::Python {
+                key: name,
+                text: None,
+            };
+            match self.lookup_attribute(subject, attr, false) {
                 Ok(field) => {
                     self.heap.keep(field);
                     fields.push(field);
                 }
                 Err(error) if self.is_attribute_error(&error) => return Ok(NONE),
                 Err(error) => return Err(error),
+            }
+            if index + 1 == positional {
+                // MATCH_CLASS drops the descriptor's tuple after its positional reads.
+                // Retain the extracted values and names across this observable boundary.
+                self.discard_temporaries(args_mark, fields.iter().chain(&seen).copied());
             }
         }
         Ok(self.alloc(Value::Tuple(fields)))
@@ -564,7 +673,6 @@ impl Context {
             }
             "truth" => Ok(flag(self.truth(a)?)),
             "generator" => self.generator(a, b, c),
-            "yielded" => Ok(self.alloc(Value::Yielded(a))),
             "iter" => self.loop_iterator(a),
             "get_iter" => self.iterator(a),
             "loop_cursor" => Ok(self.loop_cursor(a)),
@@ -655,11 +763,12 @@ impl Context {
                 Ok(NONE)
             }
             "matches" => {
-                if let Value::Raised(error) = self.heap.get(a) {
-                    Ok(flag(self.raised_error_matches(error, b)))
-                } else {
-                    Ok(FALSE)
-                }
+                let base = self.builtin("BaseException");
+                let classes = self.tuple_elements(b).unwrap_or(std::slice::from_ref(&b));
+                self.check_exception_classes(classes, base)?;
+                let matched = matches!(self.heap.get(a), Value::Raised(error)
+                    if classes.iter().any(|&class| self.raised_error_matches(error, class)));
+                Ok(flag(matched))
             }
             "exit_context" | "async_exit_context" => {
                 let active = if b == NONE {
@@ -699,51 +808,34 @@ impl Context {
                     return Err(Error::new("RuntimeError", "No active exception to reraise"));
                 }
                 let exception = self.instantiate_exception_class(a)?;
-                let Value::Raised(e) = self.heap.get(exception) else {
+                if !matches!(self.heap.get(exception), Value::Raised(_)) {
                     return Err(Error::new(
                         "TypeError",
                         "exceptions must derive from BaseException",
                     ));
-                };
-                let mut error = e.clone();
-                let trace = error.tracing();
-                trace.instance = Some(exception);
-                if op == "raise" {
-                    if c == TRUE {
-                        let cause = self.instantiate_exception_class(b)?;
-                        if cause != NONE && !matches!(self.heap.get(cause), Value::Raised(_)) {
-                            return Err(Error::new(
-                                "TypeError",
-                                "exception causes must derive from BaseException",
-                            ));
-                        }
-                        trace.cause = Some(cause);
-                        trace.suppress_context = None;
-                    }
-                    if exception != a && !self.instance_of(exception, a) {
-                        // A class may allocate a different exception. CPython normalizes
-                        // the target by calling the requested class with that instance.
-                        let Value::Raised(original) = self.heap.get_mut(exception) else {
-                            unreachable!()
-                        };
-                        *original = error;
-                        let normalized = self.call(a, vec![exception], Vec::new())?;
-                        let Value::Raised(result) = self.heap.get(normalized) else {
-                            return Err(Error::new(
-                                "TypeError",
-                                format!(
-                                    "calling {} should have returned an instance of BaseException, not {}",
-                                    self.repr(a),
-                                    self.type_name(normalized)
-                                ),
-                            ));
-                        };
-                        error = result.clone();
-                        error.tracing().instance = Some(normalized);
-                    }
-                    self.chain_raised_instance(&mut error);
                 }
-                Err(error)
+                if op == "reraise" {
+                    return Err(self.error_from_instance(exception));
+                }
+                let class = if a == exception {
+                    self.exact_type(exception)?
+                } else {
+                    a
+                };
+                // The cause constructor can mutate __class__ and collect its old value.
+                self.heap.keep(class);
+                if c == TRUE {
+                    let cause = self.instantiate_exception_class(b)?;
+                    if cause != NONE && !matches!(self.heap.get(cause), Value::Raised(_)) {
+                        return Err(Error::new(
+                            "TypeError",
+                            "exception causes must derive from BaseException",
+                        ));
+                    }
+                    self.set_exception_cause(exception, cause)?;
+                }
+                let normalized = self.normalize_raised(class, exception)?;
+                self.raise_normalized(normalized)
             }
             "unsupported" => Err(Error::new("NotImplementedError", self.str_value(a)?)),
             _ => match op.strip_prefix("inplace:") {
@@ -1655,20 +1747,7 @@ pub(super) unsafe extern "C" fn imre_dyn_display_item(
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_unwind_display(ctx: *mut Context, mark: usize) {
     // SAFETY: the generated error edge is in the frame which established the mark.
-    let ctx = unsafe { &mut *ctx };
-    if (!ctx.heap.tracks_finalizers() && !ctx.heap.has_weak_values)
-        || ctx.can_skip_finalizer_sweep(mark)
-    {
-        ctx.discard_truth(mark);
-        return;
-    }
-    while ctx.heap.temporary_mark() > mark {
-        let index = ctx.heap.temporary_mark() - 1;
-        let (heap, roots) = ctx.heap_and_roots();
-        if !heap.expand_released_sequence(index, roots) {
-            ctx.discard_truth(index);
-        }
-    }
+    unsafe { &mut *ctx }.unwind_operands(mark);
 }
 
 /// Borrow a tagged integer from an exact Python int. Zero indicates another type.
@@ -1684,31 +1763,6 @@ pub(super) unsafe extern "C" fn imre_dyn_exact_int_word(ctx: *const Context, obj
     }
 }
 
-/// Acquire native counted storage for a live exact Unicode string. A null result
-/// leaves the caller free to execute the registered body, including for surrogate
-/// strings, subclasses, allocation tracing or an unavailable temporary allocation.
-///
-/// # Safety
-/// Generated code keeps the handle rooted. A nonnull result owns one release.
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_exact_str_owner(
-    ctx: *const Context,
-    object: Id,
-) -> *const crate::Str {
-    // SAFETY: the caller supplies its active context and a rooted handle.
-    let ctx = unsafe { &*ctx };
-    if ctx.pending.is_some() || ctx.heap.allocation_traces.is_tracing() {
-        return std::ptr::null();
-    }
-    let Value::Str(text) = ctx.heap.get(object) else {
-        return std::ptr::null();
-    };
-    crate::Str::try_new(text.as_str())
-        .ok()
-        .and_then(|text| crate::StrOwner::try_new(text).ok())
-        .map_or(std::ptr::null(), crate::StrOwner::into_raw)
-}
-
 /// Move one owned tagged integer into the active Python heap.
 ///
 /// # Safety
@@ -1719,42 +1773,6 @@ pub(super) unsafe extern "C" fn imre_dyn_take_int(ctx: *mut Context, word: usize
     let ctx = unsafe { &mut *ctx };
     let object = ctx.alloc(Value::Int(crate::Int(word)));
     finish(ctx, Ok(object))
-}
-
-/// Finish a native call returning a newly owned integer. A true result uses
-/// the ordinary registered result and exception check. False leaves an opaque
-/// exception, including its identity, in the native pending slot. The caller
-/// must unwind to its native error continuation without executing the body again.
-///
-/// # Safety
-/// The context is live and the output slot is writable, possibly uninitialized.
-/// `word` is the owned return from the native integer ABI or zero on error.
-/// Input owners remain live until this call completes.
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_finish_native_int(
-    ctx: *mut Context,
-    word: usize,
-    output: *mut Id,
-) -> bool {
-    // SAFETY: the caller supplies its live, exclusively borrowed Context.
-    let ctx = unsafe { &mut *ctx };
-    if crate::objects::exceptions::imre_error_pending() == 0 {
-        // SAFETY: the output slot is writable and the result is an owned integer.
-        unsafe { output.write(imre_dyn_take_int(ctx, word)) };
-        return true;
-    }
-    // SAFETY: even a failed call initializes the generated result slot.
-    unsafe { output.write(NONE) };
-    if word != 0 {
-        drop(crate::Int(word));
-    }
-    let Some((kind, message)) = crate::objects::exceptions::take_plain_pending() else {
-        return false;
-    };
-    let argument = message.map(|text| ctx.text(text.as_str()));
-    let error = ctx.exception(kind, argument.as_slice());
-    finish(ctx, Err(error));
-    true
 }
 
 #[unsafe(no_mangle)]
@@ -1881,7 +1899,7 @@ pub(super) unsafe extern "C" fn imre_dyn_lookup(
     let mut result = std::str::from_utf8(name)
         .map_err(|error| Error::new("UnicodeError", error.to_string()))
         .and_then(|name| ctx.lookup(scope, name));
-    finish_operand_position(ctx, &mut result);
+    finish_operand_position(ctx, &mut result, false);
     finish(ctx, result)
 }
 
@@ -1955,6 +1973,7 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
     }
     let reraise = op == "reraise" && (a != NONE || ctx.heap.active_exception() != NONE);
     let mut result = ctx.op(op, a, b, c);
+    let format_field = matches!(op, "format" | "format_conversion");
     if matches!(
         op,
         "attr"
@@ -1968,8 +1987,9 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
             | "async_exit_context"
             | "truth"
     ) || (b == TRUE && matches!(op, "lookup_enter" | "lookup_exit"))
+        || format_field
     {
-        finish_operand_position(ctx, &mut result);
+        finish_operand_position(ctx, &mut result, format_field);
     }
     if reraise && let Err(error) = result {
         ctx.pending = Some(error);
@@ -2032,8 +2052,9 @@ pub(super) unsafe extern "C" fn imre_dyn_string_method_target(
 ) -> Id {
     // SAFETY: generated code owns the context and passes a UTF-8 constant and one writable slot.
     let (ctx, name, bound_receiver) = unsafe { (&mut *ctx, cstr(name), &mut *bound_receiver) };
-    let target = ctx.string_method_target(receiver, name);
-    finish_method_target(ctx, target, bound_receiver)
+    method_target(ctx, bound_receiver, |ctx| {
+        ctx.string_method_target(receiver, name)
+    })
 }
 
 /// Prepare an ordinary positional method call before evaluating its arguments.
@@ -2049,8 +2070,9 @@ pub(super) unsafe extern "C" fn imre_dyn_builtin_method_target(
 ) -> Id {
     // SAFETY: generated code retains the context and passes static method names.
     let (ctx, name, bound_receiver) = unsafe { (&mut *ctx, cstr(name), &mut *bound_receiver) };
-    let target = ctx.builtin_method_target(receiver, name);
-    finish_method_target(ctx, target, bound_receiver)
+    method_target(ctx, bound_receiver, |ctx| {
+        ctx.builtin_method_target(receiver, name)
+    })
 }
 
 /// Resolve an immediate get call before evaluating arguments that may release its receiver.
@@ -2065,21 +2087,23 @@ pub(super) unsafe extern "C" fn imre_dyn_dict_get_target(
 ) -> Id {
     // SAFETY: generated code owns the context and passes one writable slot.
     let (ctx, bound_receiver) = unsafe { (&mut *ctx, &mut *bound_receiver) };
-    let target = ctx.dict_get_target(receiver);
-    finish_method_target(ctx, target, bound_receiver)
+    method_target(ctx, bound_receiver, |ctx| ctx.dict_get_target(receiver))
 }
 
-/// Publish the receiver only after method lookup succeeds.
-fn finish_method_target(
+/// Propagate a failing receiver expression before looking up its method.
+fn method_target(
     ctx: &mut Context,
-    target: Result<(Id, Id)>,
     bound_receiver: &mut Id,
+    lookup: impl FnOnce(&mut Context) -> Result<(Id, Id)>,
 ) -> Id {
-    let mut result = target.map(|(callable, receiver)| {
+    if ctx.pending.is_some() {
+        return NONE;
+    }
+    let mut result = lookup(ctx).map(|(callable, receiver)| {
         *bound_receiver = receiver;
         callable
     });
-    finish_operand_position(ctx, &mut result);
+    finish_operand_position(ctx, &mut result, false);
     finish(ctx, result)
 }
 
@@ -2255,13 +2279,14 @@ pub(super) unsafe extern "C" fn imre_dyn_keyword_call_at(
 }
 
 /// A failing packed operand or call may span multiple lines in a native resumable frame.
-fn finish_operand_position(ctx: &mut Context, result: &mut Result<Id>) {
+fn finish_operand_position(ctx: &mut Context, result: &mut Result<Id>, include_ordinary: bool) {
     if let Some([line, end_line, start, end]) = ctx.heap.take_call_position()
         && let Err(error) = result
-        && matches!(
-            ctx.code_object(ctx.heap.current_code()).body,
-            value::Body::Suspended(_)
-        )
+        && (include_ordinary
+            || matches!(
+                ctx.code_object(ctx.heap.current_code()).body,
+                value::Body::Suspended(_)
+            ))
     {
         error.tracing().source_position = Some((
             line,
@@ -2286,7 +2311,7 @@ fn scoped_call(
         return NONE;
     }
     let mut result = invoke(ctx);
-    finish_operand_position(ctx, &mut result);
+    finish_operand_position(ctx, &mut result, false);
     finish_at(ctx, result, span)
 }
 
@@ -2427,8 +2452,8 @@ impl Context {
         Some(freevars)
     }
 
-    /// A method captures __class__ from its class and other names from the enclosing function.
-    pub(super) fn method_freevars<'a>(
+    /// Include the explicit or implicit __class__ read once in the sorted closure layout.
+    fn freevars_with_class_cell<'a>(
         &self,
         enclosing: Option<Id>,
         reads: impl Iterator<Item = &'a str>,
@@ -2464,6 +2489,9 @@ impl Context {
                 if !frame.closure.declared_complete {
                     return None;
                 }
+                if name == "__class__" && frame.class_cell.is_some() {
+                    return Some(true);
+                }
             }
             scope = parent;
         }
@@ -2487,6 +2515,12 @@ impl Context {
                     unreachable!()
                 };
                 frame.closure.cells.insert(name.to_owned(), cell);
+                return cell;
+            }
+            if frame.class_body.is_none()
+                && name == "__class__"
+                && let Some(cell) = frame.class_cell
+            {
                 return cell;
             }
             cursor = frame.parent.expect("free variable has enclosing scope");
@@ -2526,7 +2560,13 @@ impl Context {
                     !annotation_class || *name != "__classdict__"
                 }
             });
-        let lexical = if annotation_class {
+        let lexical = if annotation_class
+            && !self
+                .scope_data(scope)
+                .closure
+                .cells
+                .contains_key("__classdict__")
+        {
             self.scope_data(scope).parent.unwrap_or(scope)
         } else {
             scope
@@ -2542,9 +2582,11 @@ impl Context {
             } else {
                 owner.parent
             };
-            self.method_freevars(enclosing, reads, captures_class)
+            self.freevars_with_class_cell(enclosing, reads, captures_class)
         } else if metadata.class_cell == true {
-            None
+            // A nested function can read __class__ through super(), or resolve it as a global.
+            self.is_enclosing_freevar(lexical, "__class__")
+                .and_then(|captures| self.freevars_with_class_cell(Some(lexical), reads, captures))
         } else {
             self.enclosing_freevars(lexical, reads)
         }
@@ -2602,7 +2644,7 @@ impl Context {
         let owner = self.scope_data(scope);
         // A borrowed method only owns its defining class if its code captures __class__.
         let code_data = self.code_object(code);
-        let class_cell = owner.class_cell.filter(|_| {
+        let mut class_cell = owner.class_cell.filter(|_| {
             !code_data.closure_supported
                 || code_data.freevars.iter().any(|name| name == "__class__")
         });
@@ -2688,7 +2730,11 @@ impl Context {
                 cells.push(class_cell.expect("class scope"));
                 continue;
             }
-            cells.push(self.capture_free_cell(scope, name));
+            let cell = self.capture_free_cell(scope, name);
+            if name == "__class__" {
+                class_cell = Some(cell);
+            }
+            cells.push(cell);
         }
         let scope = if self.code_object(code).closure_supported {
             let mut globals = scope;
@@ -2751,6 +2797,37 @@ pub(super) unsafe extern "C" fn imre_dyn_discard_expression(ctx: *mut Context, v
 pub(super) unsafe extern "C" fn imre_dyn_discard_truth(ctx: *mut Context, mark: usize) {
     // SAFETY: the mark comes from the same active Python frame.
     unsafe { (&mut *ctx).discard_truth(mark) }
+}
+
+/// Unwind a partially evaluated operand stack from the top, keeping the exception live.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_unwind_operands(ctx: *mut Context, mark: usize) {
+    // SAFETY: the generated caller owns this context and marked the same activation.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.heap.observes_released_roots() {
+        for slot in (mark..ctx.heap.temporary_mark()).rev() {
+            ctx.discard_truth(slot);
+        }
+    } else {
+        ctx.discard_truth(mark);
+    }
+}
+
+/// Keep a completed joined string while popping its inputs in Python evaluation-stack order.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_finish_format_join(
+    ctx: *mut Context,
+    mark: usize,
+    result: Id,
+) {
+    // SAFETY: the result and operand boundary belong to the caller's active frame.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.heap.observes_released_roots() {
+        for slot in (mark + 1..ctx.heap.temporary_mark()).rev() {
+            ctx.discard_temporaries(slot, [result]);
+        }
+    }
+    ctx.discard_temporaries(mark, [result]);
 }
 
 /// Publish surviving operands before collecting, returning the boundary above the first one.
@@ -3072,6 +3149,43 @@ impl Context {
         true
     }
 
+    /// Release a removed list binding while its remaining items still own their references.
+    pub(super) fn release_list_owner(&mut self, owner: Id) {
+        if !self.heap.observes_released_roots()
+            || !matches!(self.heap.get(owner), Value::List(items) if !items.is_empty())
+            || (!self.heap.has_weak_values && !self.heap.could_own_finalizer(owner, false))
+        {
+            return;
+        }
+        let mark = self.heap.temporary_mark();
+        if self.can_skip_finalizer_sweep(mark) {
+            return;
+        }
+        self.heap.keep(owner);
+        let (heap, roots) = self.heap_and_roots();
+        if heap.expand_released_sequence(mark, roots) {
+            self.unwind_operands(mark);
+        } else {
+            self.heap.release_temporaries_since(mark);
+        }
+    }
+
+    /// Release expression operands from the stack top. A dead sequence transfers its
+    /// elements to the stack, keeping earlier siblings alive across Python callbacks.
+    fn unwind_operands(&mut self, mark: usize) {
+        if !self.heap.observes_released_roots() || self.can_skip_finalizer_sweep(mark) {
+            self.discard_truth(mark);
+            return;
+        }
+        while self.heap.temporary_mark() > mark {
+            let index = self.heap.temporary_mark() - 1;
+            let (heap, roots) = self.heap_and_roots();
+            if !heap.expand_released_sequence(index, roots) {
+                self.discard_truth(index);
+            }
+        }
+    }
+
     /// Publish the surviving roots before the next operand can observe a discarded writer.
     pub(super) fn discard_truth(&mut self, mark: usize) {
         if let Some(error) = self.pending.take() {
@@ -3314,84 +3428,6 @@ impl Context {
 mod tests {
     use super::*;
     use std::rc::{Rc, Weak};
-
-    #[test]
-    fn retained_list_allocation_failure_reaches_the_registered_handler() {
-        let mut ctx = new_context(serde_json::json!({"paths": []}), ["imre"]);
-        let list = crate::List::new(vec![
-            crate::Int::small(3).unwrap(),
-            crate::Int::small(7).unwrap(),
-        ]);
-        // The element count fits the native signed bound; the byte request exceeds the
-        // x86-64/AArch64 user address space and fails inside the actual reserve operation.
-        let repeats = crate::Int::small(1_i64 << 55).unwrap();
-        let mut result = std::mem::MaybeUninit::uninit();
-        assert!(crate::objects::exceptions::plain_reserves_ready());
-        // SAFETY: the list and count are rooted and the registered output is writable.
-        unsafe {
-            assert!(crate::imre_list_repeat(&list, repeats.0).is_null());
-            assert!(imre_dyn_finish_native_int(&mut ctx, 1, result.as_mut_ptr()));
-            assert_eq!(result.assume_init(), NONE);
-        }
-        assert_eq!(crate::objects::exceptions::imre_error_pending(), 0);
-        let error = ctx.pending.take().unwrap();
-        assert_eq!(error.kind, "MemoryError");
-        let Value::Tuple(args) = ctx.heap.get(error.args.unwrap()) else {
-            panic!("expected args")
-        };
-        assert!(args.is_empty());
-    }
-
-    #[test]
-    fn native_call_returns_registered_errors_or_retains_opaque_native_owners() {
-        use crate::objects::exceptions as native;
-
-        let mut ctx = new_context(serde_json::json!({"paths": []}), ["imre"]);
-        let text = ctx.text("a native string longer than the inline buffer");
-        let surrogate = ctx.alloc(Value::SurrogateStr(vec![0xd800]));
-        let mut result = std::mem::MaybeUninit::uninit();
-        // SAFETY: the live context roots the two arguments. Each native owner
-        // acquired here is moved once or released with its matching ABI.
-        unsafe {
-            let owned = imre_dyn_exact_str_owner(&ctx, text);
-            assert_eq!(
-                (*owned).as_str(),
-                "a native string longer than the inline buffer"
-            );
-            crate::imre_str_release(owned);
-            assert!(imre_dyn_exact_str_owner(&ctx, surrogate).is_null());
-            assert!(imre_dyn_exact_str_owner(&ctx, TRUE).is_null());
-
-            native::Error::new(native::Kind::ValueError, "digits").raise();
-            assert!(imre_dyn_finish_native_int(&mut ctx, 1, result.as_mut_ptr()));
-            let error = ctx.pending.take().unwrap();
-            assert_eq!(error.kind, "ValueError");
-            let args = ctx.exception_arguments(&error).unwrap();
-            assert!(
-                matches!(args, [id] if matches!(ctx.heap.get(*id), Value::Str(s) if s == "digits"))
-            );
-            assert_eq!(native::imre_error_pending(), 0);
-
-            let code = crate::Int::small(27).unwrap();
-            let exception = native::imre_system_exit_new(2, code.0);
-            native::imre_exception_raise(exception);
-            native::imre_exception_release(exception);
-            assert!(!imre_dyn_finish_native_int(
-                &mut ctx,
-                0,
-                result.as_mut_ptr()
-            ));
-            assert!(ctx.pending.is_none());
-            assert_eq!(native::imre_error_take(), exception);
-            let saved = native::imre_system_exit_code(exception);
-            assert_eq!(native::imre_system_exit_code_kind(saved), 2);
-            let display = native::imre_system_exit_code_text(saved);
-            assert_eq!((*display).as_str(), "27");
-            crate::imre_str_release(display);
-            crate::objects::imre_object_release(saved);
-            native::imre_exception_release(exception);
-        }
-    }
 
     #[test]
     fn native_function_construction_uses_interpreter_builtins_without_mutating_globals() {

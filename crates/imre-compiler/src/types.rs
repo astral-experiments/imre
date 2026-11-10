@@ -1229,6 +1229,10 @@ impl Types {
         )
     }
 
+    pub(crate) fn is_plain_tuple(&self, ty: Type) -> bool {
+        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::Tuple(_)))
+    }
+
     /// Tuple layouts whose directories are provided by the native tuple namespace.
     pub(crate) fn is_plain_or_declared_tuple(&self, ty: Type) -> bool {
         match ty {
@@ -1380,6 +1384,15 @@ impl Types {
     /// properties of direct source definitions rather than part of this ABI.
     pub(crate) fn callable(&self, params: Vec<Type>, returns: Type) -> Type {
         Type::Callable(self.intern(Shape::Callable(params, returns)))
+    }
+
+    pub(crate) fn plain_callable_signature(&self, ty: Type) -> Option<(Vec<Type>, Type)> {
+        let Type::Callable(id) = ty else { return None };
+        let shapes = self.0.borrow();
+        let Shape::Callable(params, returns) = &shapes.shapes[id] else {
+            return None;
+        };
+        Some((params.clone(), *returns))
     }
 
     /// A subscription method accepts booleans in its first positional integer slot.

@@ -157,7 +157,9 @@ impl Checker<'_> {
                 body: vec![Statement::Try {
                     body,
                     handlers: vec![ir::ExceptHandler {
-                        kinds: vec![exception_kind("AttributeError").unwrap()],
+                        matcher: crate::ir::ExceptionMatcher::Categories(vec![
+                            exception_kind("AttributeError").unwrap(),
+                        ]),
                         name: None,
                         body: handler,
                     }],
