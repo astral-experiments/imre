@@ -574,7 +574,7 @@ impl<'a> PreparedBody<'a> {
             lambdas,
             thread_entries,
             checked_deletions,
-            assertions: prepare.assertions,
+            statement_sites: prepare.sites,
             python_optimization,
             nested_bodies: prepare.nested,
             namespace_operations: operations,
@@ -825,7 +825,7 @@ struct SourceInfo<'a> {
     lambdas: HashMap<ruff_text_size::TextSize, RegisteredLambda>,
     type_aliases: HashMap<ruff_text_size::TextSize, TypeAliasDefinition>,
     python_optimization: i32,
-    assertions: HashMap<ruff_text_size::TextRange, Vec<crate::ir::Statement>>,
+    statement_sites: crate::frontend::StatementSites,
     checked_deletions: HashMap<ruff_text_size::TextRange, crate::frontend::RegisteredFunction>,
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
     module_annotations:

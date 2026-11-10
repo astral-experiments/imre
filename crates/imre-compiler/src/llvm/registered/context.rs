@@ -1,6 +1,6 @@
 //! Registered context-manager protocol, roots and exceptional control flow.
 
-use super::{Frame, FrameEmitter, RegisteredFrame};
+use super::{Frame, RegisteredFrame};
 use crate::ir::{ContextSite, Expr, Statement};
 use ruff_text_size::TextRange;
 
@@ -36,14 +36,14 @@ impl RegisteredFrame<'_, '_> {
     }
 
     pub(crate) fn context_span(&self, site: crate::ir::ContextSite) -> Option<[usize; 4]> {
-        if let Some((prefix, delimiter)) = site.delimiter
-            && let Some(span) = self.expression_range_span(site.range, prefix, delimiter)
-        {
-            return Some(span);
-        }
         let (line, start) = self.positions.line_and_column(site.range.start());
         let (end_line, end) = self.positions.line_and_column(site.range.end());
-        (end_line == line).then_some([line, start, start, end])
+        let anchor = if self.simple_call == Some(site.range) {
+            start
+        } else {
+            start + usize::from(site.anchor - site.range.start())
+        };
+        (end_line == line).then_some([line, start, anchor, end])
     }
 
     pub(crate) fn exit_sync(&mut self, exit: &ContextExit, exception: Option<&str>) -> String {
@@ -68,41 +68,122 @@ impl RegisteredFrame<'_, '_> {
     }
 }
 
-/// Enter protection after acquisition succeeds, including while binding the as-target.
-pub(crate) fn entered<'a, 'p, F: FrameEmitter<'a, 'p>>(
-    frame: &mut F,
-    site: ContextSite,
-    callable: String,
-    is_async: bool,
-    body: impl FnOnce(&mut F, &ContextExit, &str),
-    mut exit: impl FnMut(&mut F, &ContextExit, Option<&str>) -> String,
-) {
-    let handler = frame.name("b");
-    let done = frame.name("b");
-    let outer = std::mem::replace(&mut frame.body.error_target, handler.clone());
-    let context = ContextExit {
-        site,
-        is_async,
-        callable,
-        caught: frame.caught.last().cloned().unwrap_or_else(|| "0".into()),
-    };
-    frame.live.push(context.callable.clone());
-    body(frame, &context, &outer);
-    frame.live.pop();
-    frame.body.error_target = outer;
-    if !frame.body.terminated {
-        exit(frame, &context, None);
-        frame.jump(&done);
+/// An acquired manager owns both the normal and exceptional exit edges.
+pub(crate) struct ContextRegion {
+    pub(crate) exit: ContextExit,
+    pub(crate) outer: String,
+    error: String,
+    done: String,
+}
+
+impl RegisteredFrame<'_, '_> {
+    pub(crate) fn enter_async(
+        &mut self,
+        manager: &str,
+        site: ContextSite,
+        mark: &str,
+    ) -> (String, String, String) {
+        let range = site.range;
+        self.call_position(range);
+        let exit = self.op("lookup_exit", &[manager, "2"]);
+        self.call_position(range);
+        let enter = self.op("lookup_enter", &[manager, "2"]);
+        let above_exit = self.keep_operands(mark, &exit, &enter);
+        self.call_position(range);
+        let value = self.invoke(&enter, &[]);
+        self.keep_operands(&above_exit, &value, "0");
+        let value = self.await_at(&value, "1", range, &above_exit);
+        (exit, value, above_exit)
     }
-    frame.label(&handler);
-    let exception = frame.op("take_error", &[]);
-    let result = exit(frame, &context, Some(&exception));
-    let suppress = frame.truth(&result);
-    let propagate_label = frame.name("b");
-    frame.branch(&suppress, &done, &propagate_label);
-    frame.label(&propagate_label);
-    frame.raise(&exception, None, true);
-    frame.label(&done);
+
+    pub(crate) fn exit_context(
+        &mut self,
+        context: &ContextExit,
+        exception: Option<&str>,
+    ) -> String {
+        if !context.is_async {
+            return self.exit_sync(context, exception);
+        }
+        let args = [
+            context.callable.as_str(),
+            exception.unwrap_or("0"),
+            context.caught.as_str(),
+        ];
+
+        // A pending return, outer managers and the body exception survive this await.
+        // The exceptional exit also retains its callable through the truth test.
+        let outer_roots = self.live.len();
+        self.live.extend(exception.map(String::from));
+        self.live.push(context.callable.clone());
+        self.caught
+            .push(exception.unwrap_or(&context.caught).into());
+        self.current_range = context.site.range;
+        self.checkpoint(context.site.range);
+        self.caught.pop();
+        self.live.truncate(outer_roots);
+        self.call_position(context.site.range);
+        let awaitable = self.op("async_exit_context", &args);
+        let mark = if exception.is_some() {
+            outer_roots + 2
+        } else {
+            outer_roots
+        }
+        .to_string();
+        self.keep_operands(&mark, &awaitable, "0");
+        let result = self.await_at(&awaitable, "2", context.site.range, &mark);
+        if let Some(exc) = exception {
+            self.call_position(context.site.range);
+            let suppress = self.op("truth", &[&result]);
+            self.keep_operands(&outer_roots.to_string(), exc, &suppress);
+            self.op("restore_caught", &[&context.caught]);
+            suppress
+        } else {
+            self.discard_truth(&mark);
+            "0".into()
+        }
+    }
+
+    pub(crate) fn begin_context(
+        &mut self,
+        site: ContextSite,
+        callable: String,
+        is_async: bool,
+    ) -> ContextRegion {
+        let error = self.name("b");
+        let done = self.name("b");
+        let outer = std::mem::replace(&mut self.body.error_target, error.clone());
+        let exit = ContextExit {
+            site,
+            is_async,
+            callable,
+            caught: self.caught.last().cloned().unwrap_or_else(|| "0".into()),
+        };
+        self.live.push(exit.callable.clone());
+        ContextRegion {
+            exit,
+            outer,
+            error,
+            done,
+        }
+    }
+
+    pub(crate) fn end_context(&mut self, region: ContextRegion) {
+        self.live.pop();
+        self.body.error_target = region.outer;
+        if !self.body.terminated {
+            self.exit_context(&region.exit, None);
+            self.jump(&region.done);
+        }
+        self.label(&region.error);
+        let exception = self.op("take_error", &[]);
+        let result = self.exit_context(&region.exit, Some(&exception));
+        let suppress = self.truth(&result);
+        let propagate = self.name("b");
+        self.branch(&suppress, &region.done, &propagate);
+        self.label(&propagate);
+        self.raise(&exception, None, true);
+        self.label(&region.done);
+    }
 }
 
 #[derive(Clone)]
@@ -140,24 +221,17 @@ impl Frame<'_, '_, '_> {
     ) {
         let manager = self.evaluate_handle(manager);
         let (exit, value) = self.enter_sync(&manager, site);
-        entered(
-            self,
-            site,
-            exit,
-            false,
-            |frame, context, outer| {
-                frame.code.iteration.scopes.push(Region::Context {
-                    exit: context.clone(),
-                    outer: outer.to_owned(),
-                });
-                if let Some(slot) = target {
-                    frame.store_private(slot, &value);
-                }
-                frame.emit_suite(body);
-                frame.leave_scope();
-            },
-            |frame, context, error| frame.exit_sync(context, error),
-        );
+        let region = self.code.begin_context(site, exit, false);
+        self.code.iteration.scopes.push(Region::Context {
+            exit: region.exit.clone(),
+            outer: region.outer.clone(),
+        });
+        if let Some(slot) = target {
+            self.store_private(slot, &value);
+        }
+        self.emit_suite(body);
+        self.leave_scope();
+        self.code.end_context(region);
     }
 
     pub(super) fn exit_regions(&mut self, depth: usize, pending_return: Option<&str>) {

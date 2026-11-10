@@ -236,8 +236,13 @@ pub(super) fn capture(
 }
 
 pub(super) fn checkpoint(stmt: &ast::Stmt) -> Statement {
+    // Truth conversion can call Python after the condition's last operand returns.
+    let range = match stmt {
+        ast::Stmt::If(branch) => branch.test.range(),
+        _ => stmt.range(),
+    };
     Statement::Expr(operation(
-        Builtin::RegisteredStatement(stmt.range(), imre_ast::unhighlighted_call(stmt)),
+        Builtin::RegisteredStatement(range, imre_ast::unhighlighted_call(stmt)),
         Type::None,
         vec![],
     ))
@@ -586,44 +591,56 @@ fn checked_assertion(
     ])
 }
 
-/// Prepare only whole assertions. The physical suite owns an assertion when either
-/// operand needs source lowering, including an unsupported message on a valid test.
-fn assertion_sites(
+/// Physical source locations and semantic operations shared by complete and residual suites.
+#[derive(Default)]
+pub(crate) struct StatementSites {
+    pub(crate) assertions: HashMap<TextRange, Vec<Statement>>,
+    pub(crate) contexts: HashMap<TextRange, ir::ContextSite>,
+}
+
+fn statement_sites(
     body: &[ast::Stmt],
     source: values::RegisteredSource<'_>,
-    enabled: bool,
-) -> HashMap<TextRange, Vec<Statement>> {
+    assertions_enabled: bool,
+) -> StatementSites {
     use ast::statement_visitor::{StatementVisitor, walk_stmt};
 
-    struct Sites<'a> {
+    struct Collector<'a> {
         source: values::RegisteredSource<'a>,
-        enabled: bool,
-        statements: HashMap<TextRange, Vec<Statement>>,
+        assertions_enabled: bool,
+        sites: StatementSites,
     }
 
-    impl<'a> StatementVisitor<'a> for Sites<'_> {
+    impl<'a> StatementVisitor<'a> for Collector<'_> {
         fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
             if let ast::Stmt::Assert(assertion) = stmt {
-                if !self.enabled {
-                    self.statements.insert(stmt.range(), Vec::new());
+                // An assertion with an unprepared operand remains in its physical suite.
+                if !self.assertions_enabled {
+                    self.sites.assertions.insert(stmt.range(), Vec::new());
                 } else if let Some(body) = checked_assertion(assertion, |expr| {
                     values::registered_value(expr, self.source)
                 }) {
-                    self.statements.insert(stmt.range(), body);
+                    self.sites.assertions.insert(stmt.range(), body);
                 }
-            } else {
-                walk_stmt(self, stmt);
+                return;
             }
+            if let ast::Stmt::With(with) = stmt {
+                for item in &with.items {
+                    let site = context_site(self.source.text, &item.context_expr);
+                    self.sites.contexts.insert(site.range, site);
+                }
+            }
+            walk_stmt(self, stmt);
         }
     }
 
-    let mut sites = Sites {
+    let mut collector = Collector {
         source,
-        enabled,
-        statements: HashMap::new(),
+        assertions_enabled,
+        sites: StatementSites::default(),
     };
-    sites.visit_body(body);
-    sites.statements
+    collector.visit_body(body);
+    collector.sites
 }
 
 /// Prepare ordered suites while the source tree and its namespace operands are available.
@@ -631,7 +648,7 @@ pub(crate) struct SuitePreparation<'a> {
     operations: &'a HashMap<TextRange, Expr>,
     source: values::RegisteredSource<'a>,
     pub(crate) nested: HashMap<TextSize, RegisteredSuite>,
-    pub(crate) assertions: HashMap<TextRange, Vec<Statement>>,
+    pub(crate) sites: StatementSites,
 }
 
 impl<'a> SuitePreparation<'a> {
@@ -645,7 +662,7 @@ impl<'a> SuitePreparation<'a> {
             operations,
             source,
             nested: HashMap::new(),
-            assertions: assertion_sites(body, source, assertions_enabled),
+            sites: statement_sites(body, source, assertions_enabled),
         }
     }
 
@@ -684,7 +701,7 @@ impl<'a> SuitePreparation<'a> {
             kind,
             operations: self.operations,
             source: self.source,
-            assertions: &self.assertions,
+            sites: &self.sites,
             names: HashMap::new(),
             namespaces: HashMap::new(),
             comprehension: None,
@@ -806,6 +823,28 @@ pub(crate) fn delete_targets(delete: &ast::StmtDelete) -> Vec<&ast::Expr> {
         }
     }
     leaves
+}
+
+/// Resolve the implicit manager protocol's source anchor while its syntax and
+/// original source text are available. LLVM only converts accepted offsets to columns.
+fn context_site(source: &str, manager: &ast::Expr) -> ir::ContextSite {
+    let range = manager.range();
+    let delimiter = match manager {
+        ast::Expr::Call(call) => Some((call.func.end(), b'(')),
+        ast::Expr::Subscript(index) => Some((index.value.end(), b'[')),
+        _ => None,
+    };
+    let anchor = delimiter
+        .and_then(|(prefix, opener)| {
+            imre_ast::traceback_delimiter(
+                source.as_bytes(),
+                usize::from(prefix),
+                usize::from(range.end()),
+                opener,
+            )
+        })
+        .map_or(range.start(), |offset| TextSize::try_from(offset).unwrap());
+    ir::ContextSite { range, anchor }
 }
 
 pub(crate) fn attribute_effects(stmt: &ast::Stmt) -> Option<Vec<AttributeEffect<'_>>> {
@@ -1057,6 +1096,12 @@ impl statements::StatementLowering for SourceScope<'_> {
             ast::Stmt::With(stmt) if !stmt.is_async => {
                 Ok((self.with_items(&stmt.items, &stmt.body)?, true))
             }
+            ast::Stmt::If(branch) if branch.elif_else_clauses.is_empty() => {
+                let test = self.ordinary_operand(&branch.test).ok_or(())?;
+                let condition = operation(Builtin::Bool, Type::Bool, vec![test]);
+                let body = self.suite(&branch.body)?;
+                Ok((vec![Statement::If(condition, body, Vec::new())], true))
+            }
             ast::Stmt::While(loop_) => {
                 let condition = self.ordinary_operand(&loop_.test).ok_or(())?;
                 let body = self.loop_body(&loop_.body)?;
@@ -1128,7 +1173,7 @@ fn registered_delete_name(target: &ast::Expr) -> Option<Expr> {
 
 struct SourceScope<'a> {
     kind: RegisteredScope,
-    assertions: &'a HashMap<TextRange, Vec<Statement>>,
+    sites: &'a StatementSites,
     operations: &'a HashMap<TextRange, Expr>,
     source: values::RegisteredSource<'a>,
     names: HashMap<String, usize>,
@@ -1176,7 +1221,7 @@ impl unpacking::PatternBinder for SourceScope<'_> {
 impl SourceScope<'_> {
     fn statement(&mut self, stmt: &ast::Stmt, body: &mut Vec<Statement>) -> StdResult<(), ()> {
         if let ast::Stmt::Assert(assertion) = stmt {
-            if let Some(statements) = self.assertions.get(&stmt.range()) {
+            if let Some(statements) = self.sites.assertions.get(&stmt.range()) {
                 body.extend_from_slice(statements);
             } else {
                 // A prepared activation can also supply storage for named expressions
@@ -1212,7 +1257,7 @@ impl SourceScope<'_> {
             return self.suite(suite);
         };
         let manager = self.ordinary_operand(&item.context_expr).ok_or(())?;
-        let site = ir::ContextSite::new(&item.context_expr);
+        let site = self.sites.contexts[&item.context_expr.range()];
         let mut body = Vec::new();
         let entered = if let Some(target) = &item.optional_vars {
             let slot = self.hidden(Type::PythonObject);
@@ -2551,6 +2596,33 @@ mod tests {
             "fault"
         );
         assert!(crate::llvm::registered::supports(&checked));
+    }
+
+    #[test]
+    fn context_sites_are_prepared_for_every_manager_before_lowering() {
+        let text = "async def capture():\n    async with manager:\n        pass\nwith λ[0], install(2):\n    pass\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let sites = statement_sites(
+            &module.parsed.syntax().body,
+            values::ModuleSource::new(module).context(text),
+            true,
+        );
+        let mut anchors: Vec<_> = sites
+            .contexts
+            .values()
+            .map(|site| {
+                (
+                    &text[site.range],
+                    &text[site.range.start().to_usize()..site.anchor.to_usize()],
+                )
+            })
+            .collect();
+        anchors.sort_unstable();
+        assert_eq!(
+            anchors,
+            [("install(2)", "install"), ("manager", ""), ("λ[0]", "λ")]
+        );
     }
 
     #[test]
