@@ -2,7 +2,7 @@ use crate::frontend::{PhysicalOperand, SourceEffect, SourceGuard};
 mod declarations;
 use super::sites::{CompiledDefinition, CompiledProvider};
 
-use super::{AnnotationScope, FrameEmitter, Output, RegisteredFrame, SourceMap};
+use super::{AnnotationScope, FrameEmitter, RegisteredFrame, SourceMap};
 use crate::ir::Statement;
 use crate::llvm::registered::Place;
 use crate::llvm::registered::context::{ContextEmitter, ContextRegion};
@@ -50,32 +50,18 @@ impl SourceMap<'_> {
             })
             .to_string(),
         );
-        let code = self.annotation_body(frame.output, &entries, None, self.module_start);
+        let body = crate::frontend::DeferredAnnotation::prepare_body(&self.annotations, &entries);
+        let code = self.definition(
+            frame.output,
+            String::new(),
+            Body::AnnotationProvider(&body, &entries, AnnotationScope::Plain),
+            self.module_start,
+            false,
+            Entry::Compiled,
+        );
         let name = frame.text("__annotate__");
         let provider = frame.checked(&format!("call i64 @imre_dyn_define(ptr %ctx, ptr {code}, i64 {}, i64 {name}, i64 {signature}, i64 0, i64 {name}, i64 0, i64 0, i1 true)", frame.scope));
         frame.bind("__annotate__", &provider);
-    }
-
-    fn annotation_body(
-        &self,
-        output: &mut Output,
-        entries: &[crate::ir::AnnotationOccurrence],
-        globals: Option<&std::collections::BTreeSet<String>>,
-        start: TextSize,
-    ) -> String {
-        let plan = crate::frontend::DeferredAnnotation::prepare_body(&self.annotations, entries);
-        let scope = globals.map_or(AnnotationScope::Plain, |globals| AnnotationScope::Class {
-            globals: globals.clone(),
-            conditional: entries.iter().any(|entry| entry.index.is_some()),
-        });
-        self.definition(
-            output,
-            String::new(),
-            Body::AnnotationProvider(&plan, entries, scope),
-            start,
-            false,
-            Entry::Compiled,
-        )
     }
 }
 
@@ -895,7 +881,7 @@ impl<'p> Function<'_, 'p> {
         plan: &crate::frontend::ClassAnnotations,
         globals: &std::collections::BTreeSet<String>,
     ) {
-        let Some(first) = plan.sites.first() else {
+        let Some(body) = &plan.body else {
             return;
         };
         if self.body.terminated {
@@ -915,9 +901,18 @@ impl<'p> Function<'_, 'p> {
             "posonly": ["format"], "scope_complete": !plan.incomplete, "scope_reads": plan.reads,
             "code_flags": self.source.function_flags(None, self.in_function, false),
         }).to_string());
-        let code =
-            self.source
-                .annotation_body(self.frame.output, &plan.sites, Some(globals), first.site);
+        let scope = AnnotationScope::Class {
+            globals: globals.clone(),
+            conditional: plan.sites.iter().any(|entry| entry.index.is_some()),
+        };
+        let code = self.source.definition(
+            self.frame.output,
+            String::new(),
+            Body::AnnotationProvider(body, &plan.sites, scope),
+            plan.sites[0].site,
+            false,
+            Entry::Compiled,
+        );
         let environment = self.frame.op(
             "class_annotation_environment",
             &[&self.scope.clone(), &offsets],
