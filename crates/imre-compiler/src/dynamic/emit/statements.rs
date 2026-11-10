@@ -1,5 +1,5 @@
 use crate::frontend::function_scope::ClassBindings;
-pub(super) mod declarations;
+mod declarations;
 use super::sites::{CompiledDefinition, CompiledProvider};
 
 use super::FrameEmitter;

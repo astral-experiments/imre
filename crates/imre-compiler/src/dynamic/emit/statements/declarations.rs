@@ -1,99 +1,13 @@
 //! Resolve declaration and annotation code sites before emitting the checked block.
 use super::super::sites::{
     AnnotationString, CheckedSites, CompiledAlias, CompiledDefinition, CompiledGenerator, Declaration,
+    RequiredSite,
 };
 use super::super::{AliasValue, Body, DefinitionName, DefinitionSite, Entry, Function, SourceInfo};
 use crate::frontend::{AnnotationCode, PreparedAnnotation};
-use crate::ir::{self, Builtin, Expr, ExprKind, Statement};
+use crate::ir::{Expr, Statement};
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
-
-/// The compiled-site tables read by checked operations in a registered frame.
-pub(in crate::dynamic::emit) enum RequiredSite {
-    Definition(TextSize),
-    Lambda(TextSize, bool),
-    Generator(TextRange),
-    Alias(TextSize),
-    AnnotationString(TextSize),
-    AnnotationField(TextSize),
-}
-
-fn visit_expression_site(expr: &Expr, visit: &mut impl FnMut(RequiredSite)) {
-    let ExprKind::Builtin(op, _) = &expr.kind else {
-        return;
-    };
-    visit(match op {
-        Builtin::RegisteredDefinition(site) => RequiredSite::Definition(site.start()),
-        Builtin::RegisteredLambda(site, scoped) => RequiredSite::Lambda(*site, *scoped),
-        Builtin::RegisteredGenerator(site, _) => RequiredSite::Generator(*site),
-        Builtin::RegisteredTypeAlias(site) => RequiredSite::Alias(*site),
-        Builtin::BindAnnotationExpression(site) => RequiredSite::AnnotationString(*site),
-        Builtin::RegisteredAnnotationInsert(occurrence) => {
-            RequiredSite::AnnotationField(occurrence.site)
-        }
-        _ => return,
-    });
-}
-
-pub(in crate::dynamic::emit) fn needs_checked_sites(statements: &[Statement]) -> bool {
-    let mut needed = false;
-    CheckedSites::visit(statements, &mut |_| needed = true);
-    needed
-}
-
-impl CheckedSites {
-    pub(in crate::dynamic::emit) fn visit_operand(
-        value: &Expr,
-        visit: &mut impl FnMut(RequiredSite),
-    ) {
-        ir::walk_operand_expressions(value, &mut |expr| visit_expression_site(expr, visit));
-    }
-
-    /// A block stops emitting after a transfer. Unreachable declaration bodies must
-    /// not compile (or raise diagnostics) merely because their identity is in the IR.
-    pub(in crate::dynamic::emit) fn visit(
-        statements: &[Statement],
-        visit: &mut impl FnMut(RequiredSite),
-    ) -> bool {
-        for stmt in statements {
-            match stmt {
-                Statement::If(test, yes, no) => {
-                    Self::visit_operand(test, visit);
-                    let yes_continues = Self::visit(yes, visit);
-                    let no_continues = Self::visit(no, visit);
-                    if !yes_continues && !no_continues {
-                        return false;
-                    }
-                }
-                Statement::While(test, body, otherwise) => {
-                    Self::visit_operand(test, visit);
-                    Self::visit(body, visit);
-                    Self::visit(otherwise, visit);
-                }
-                Statement::Scope { body, .. } => {
-                    if !Self::visit(body, visit) {
-                        return false;
-                    }
-                }
-                _ => {
-                    ir::walk_expressions(std::slice::from_ref(stmt), &mut |expr| {
-                        visit_expression_site(expr, visit)
-                    });
-                    if matches!(
-                        stmt,
-                        Statement::Return(_)
-                            | Statement::Break
-                            | Statement::Continue
-                            | Statement::Exhaust
-                    ) {
-                        return false;
-                    }
-                }
-            }
-        }
-        true
-    }
-}
 
 impl SourceInfo<'_> {
     pub(super) fn function_body<'s>(&self, def: &'s ast::StmtFunctionDef) -> Body<'s> {
@@ -255,7 +169,7 @@ impl Function<'_, '_> {
         );
     }
 
-    fn prepare_site(&mut self, site: RequiredSite) {
+    pub(in crate::dynamic::emit) fn prepare_site(&mut self, site: RequiredSite) {
         let start = match site {
             RequiredSite::Generator(site) => {
                 self.prepare_generator(site);
