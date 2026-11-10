@@ -2109,7 +2109,26 @@ fn signature(
                 annotation_in_class(&subscript.slice, graph, module, classes, types, owner)
                     .map(|element| types.list(element))
             } else {
-                annotation_in_class(value, graph, module, classes, types, owner)
+                annotation_in_class(value, graph, module, classes, types, owner).or_else(|error| {
+                    graph
+                        .session
+                        .quoted_class_result(module, value)
+                        .and_then(|(origin, name)| {
+                            let body = &graph.modules[origin].parsed.syntax().body;
+                            let statement = body.partition_point(|stmt| stmt.end() <= name.start());
+                            let ast::Stmt::ClassDef(class) = body.get(statement)? else {
+                                return None;
+                            };
+                            (class.name.range() == name).then_some(DefinitionId {
+                                module: origin,
+                                statement,
+                            })
+                        })
+                        .and_then(|definition| {
+                            declaration_annotation(definition, graph, classes, types)
+                        })
+                        .ok_or(error)
+                })
             }
         })
         .transpose()?
@@ -2218,6 +2237,50 @@ fn annotation_at(
     )
 }
 
+/// Return the checked layout of an annotation naming this physical declaration.
+fn declaration_annotation(
+    definition: DefinitionId,
+    graph: &SourceGraph,
+    classes: &Classes,
+    types: &Types,
+) -> Option<Type> {
+    // The integer-fd selector keeps its immutable key in both the mapping
+    // and the ready list. The data field contains a boxed Python value.
+    let owner = &graph.modules[definition.module];
+    if owner.is_bundled("selectors")
+        && types
+            .namedtuple(definition)
+            .is_some_and(|ty| ty.name == "SelectorKey")
+    {
+        return Some(types.namedtuple_layout(
+            crate::types::TupleOrigin::Declaration(definition),
+            vec![Type::Int, Type::Int, Type::Int, Type::ObjectValue],
+        ));
+    }
+    if owner.is_bundled("pkgutil")
+        && types
+            .namedtuple(definition)
+            .is_some_and(|ty| ty.name == "ModuleInfo")
+        && let Some(Binding::Definition(finder)) = owner.bindings.get("FileFinder")
+        && let Some(&id) = classes.ids.get(finder)
+    {
+        return Some(types.namedtuple_layout(
+            crate::types::TupleOrigin::Declaration(definition),
+            vec![classes.instance(id), Type::Str, Type::Bool],
+        ));
+    }
+    if classes.exceptions.contains_key(&definition) {
+        return Some(
+            classes
+                .ids
+                .get(&definition)
+                .copied()
+                .map_or(Type::Exception, Type::NamedException),
+        );
+    }
+    classes.ids.get(&definition).map(|&id| classes.instance(id))
+}
+
 fn annotation_with_aliases(
     expression: &ast::Expr,
     graph: &SourceGraph,
@@ -2273,40 +2336,8 @@ fn annotation_with_aliases(
     }
     match graph.resolve_type(module, expression) {
         Some(Binding::Definition(definition)) => {
-            // The integer-fd selector keeps its immutable key in both the mapping
-            // and the ready list. The data field contains a boxed Python value.
-            let owner = &graph.modules[definition.module];
-            if owner.is_bundled("selectors")
-                && types
-                    .namedtuple(definition)
-                    .is_some_and(|ty| ty.name == "SelectorKey")
-            {
-                return Ok(types.namedtuple_layout(
-                    crate::types::TupleOrigin::Declaration(definition),
-                    vec![Type::Int, Type::Int, Type::Int, Type::ObjectValue],
-                ));
-            }
-            if owner.is_bundled("pkgutil")
-                && types
-                    .namedtuple(definition)
-                    .is_some_and(|ty| ty.name == "ModuleInfo")
-                && let Some(Binding::Definition(finder)) = owner.bindings.get("FileFinder")
-                && let Some(&id) = classes.ids.get(finder)
-            {
-                return Ok(types.namedtuple_layout(
-                    crate::types::TupleOrigin::Declaration(definition),
-                    vec![classes.instance(id), Type::Str, Type::Bool],
-                ));
-            }
-            if classes.exceptions.contains_key(&definition) {
-                return Ok(classes
-                    .ids
-                    .get(&definition)
-                    .copied()
-                    .map_or(Type::Exception, Type::NamedException));
-            }
-            if let Some(&id) = classes.ids.get(&definition) {
-                return Ok(classes.instance(id));
+            if let Some(ty) = declaration_annotation(definition, graph, classes, types) {
+                return Ok(ty);
             }
         }
         Some(Binding::Intrinsic(Intrinsic::SelfType)) => {
