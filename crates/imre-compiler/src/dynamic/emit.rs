@@ -1300,7 +1300,11 @@ mod tests {
     fn inject_residual_child_module(prepared: &mut PreparedBody) {
         use crate::frontend::{RegisteredScope, RegisteredSource, SuitePreparation};
 
-        let body = prepared.syntax.as_deref().expect("retained child sites");
+        if prepared.syntax.is_none() {
+            let parsed = ruff_python_parser::parse_module(&prepared.source.text).unwrap();
+            prepared.syntax = Some(Cow::Owned(parsed.into_syntax().body));
+        }
+        let body = prepared.syntax.as_deref().unwrap();
         let missing = HashMap::new();
         let source = RegisteredSource {
             lambdas: Some(&missing),
@@ -1337,6 +1341,19 @@ mod tests {
         prepared.source.class_bodies = class_bodies;
         prepared.source.statement_sites = sites;
         prepared.source.nested_bodies.extend(nested);
+    }
+
+    fn residual_value_mut(suite: &mut crate::frontend::RegisteredSuite) -> &mut ast::Expr {
+        let [run] = suite.residual.as_mut_slice() else {
+            panic!("expected one mixed statement");
+        };
+        let Some(crate::frontend::SourceEffect::Value(_, inputs)) = &mut run.effect else {
+            panic!("expected a value operand");
+        };
+        let [crate::frontend::PhysicalOperand::Source(value)] = &mut inputs[..] else {
+            panic!("expected one residual expression");
+        };
+        value
     }
 
     #[test]
@@ -2609,18 +2626,22 @@ mod tests {
         )
         .unwrap();
         let before = module.standalone().unwrap().unwrap();
-        let stmt = module.syntax.as_mut().unwrap().to_mut()[0]
-            .as_ann_assign_stmt_mut()
-            .unwrap();
-        let key = &mut stmt.target.as_subscript_expr_mut().unwrap().slice;
-        let Some(crate::frontend::ExpressionSelection::Checked(value)) =
-            module.source.statement_sites.expressions.get(key)
-        else {
-            panic!("expected the checked store key")
-        };
-        assert!(crate::ir::Constant::from_expr(value).is_some());
-        key.as_tuple_expr_mut().unwrap().elts.clear();
-        assert_eq!(module.standalone().unwrap().unwrap(), before);
+        assert!(module.syntax.is_none());
+        let suite = module.source.initializer.as_mut().unwrap();
+        assert!(suite.fully_checked());
+        let mut stored = 0;
+        crate::ir::rewrite_statements(&mut suite.checked.function.body, &mut |statement| {
+            if let crate::ir::Statement::SetItem(_, key, _) = statement {
+                assert!(
+                    matches!(crate::ir::Constant::from_expr(key), Some(crate::ir::Constant::Tuple(parts))
+                    if parts.len() == 3 && parts[1] == crate::ir::Constant::Float((-0.0f64).to_bits()))
+                );
+                *key = crate::ir::Expr::integer(21);
+                stored += 1;
+            }
+        });
+        assert_eq!(stored, 1);
+        assert_ne!(module.standalone().unwrap().unwrap(), before);
     }
 
     #[test]
@@ -2664,23 +2685,17 @@ mod tests {
     fn a_physical_subscript_retains_its_receiver_and_individual_slice_bounds() {
         use crate::frontend::SourceOperand::{Checked, Residual};
 
-        let mut prepared = PreparedBody::module(
-            "store",
-            Path::new("store.py"),
-            "good = complete()[key()]\ntarget()[lo():receiver()[begin():(lambda v: v)(hi())]:step()]: int = rhs()\n",
-            0,
-            ModuleOrigin::Program(None),
-        )
-        .unwrap();
-        fn slice(body: &mut [ast::Stmt]) -> &mut ast::Expr {
-            &mut body[1]
-                .as_ann_assign_stmt_mut()
-                .unwrap()
-                .target
-                .as_subscript_expr_mut()
-                .unwrap()
-                .slice
-        }
+        let path = Path::new("store.py");
+        let text = concat!(
+            "good = complete()[key()]\n",
+            "result = target()[lo():receiver()[begin():(lambda v: v)(hi())]:step()]\n",
+        );
+        let mut prepared =
+            PreparedBody::module("store", path, text, 0, ModuleOrigin::Program(None)).unwrap();
+        let parsed = ParsedModule::parse(path, text.into()).unwrap();
+        prepared.syntax = Some(Cow::Owned(module_source::into_body(parsed.parsed)));
+        inject_residual_child_module(&mut prepared);
+
         fn erase(node: &mut ast::Expr) {
             *node = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
                 range: node.range(),
@@ -2702,17 +2717,19 @@ mod tests {
                 .is_none()
         );
         let sites = &prepared.source.statement_sites.expressions;
-        let key = slice(prepared.syntax.as_mut().unwrap().to_mut());
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         assert!(matches!(
             sites
-                .physical(key)
+                .physical(value)
                 .unwrap()
-                .operands(key, false)
+                .operands(value, false)
                 .collect::<Vec<_>>()
                 .as_slice(),
-            [Checked(_), Residual(_), Checked(_)]
+            [Checked(_), Checked(_), Residual(_), Checked(_)]
         ));
-        let key = key.as_slice_expr_mut().unwrap();
+        let outer = value.as_subscript_expr_mut().unwrap();
+        erase(&mut outer.value);
+        let key = outer.slice.as_slice_expr_mut().unwrap();
         erase(key.lower.as_deref_mut().unwrap());
         erase(key.step.as_deref_mut().unwrap());
         let read = key.upper.as_deref_mut().unwrap();
@@ -2737,7 +2754,11 @@ mod tests {
         );
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
 
-        let key = slice(prepared.syntax.as_mut().unwrap().to_mut())
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        let key = value
+            .as_subscript_expr_mut()
+            .unwrap()
+            .slice
             .as_slice_expr_mut()
             .unwrap();
         let read = key
@@ -2751,7 +2772,7 @@ mod tests {
             .as_slice_expr_mut()
             .unwrap()
             .upper
-            .as_deref_mut()
+            .as_mut()
             .unwrap();
         erase(&mut residual.as_call_expr_mut().unwrap().func);
         assert_ne!(prepared.standalone().unwrap().unwrap(), original);
@@ -2761,28 +2782,14 @@ mod tests {
     fn a_physical_binary_keeps_its_operation_and_checked_input() {
         use crate::frontend::SourceOperand::{Checked, Residual};
 
-        let mut prepared = PreparedBody::module(
-            "store",
-            Path::new("store.py"),
-            "good = before() + after()\ntarget()[lo():(lambda v: v)(hi()) + more():step()]: int = rhs()\n",
-            0,
-            ModuleOrigin::Program(None),
-        )
-        .unwrap();
-        fn bound(body: &mut [ast::Stmt]) -> &mut ast::Expr {
-            body[1]
-                .as_ann_assign_stmt_mut()
-                .unwrap()
-                .target
-                .as_subscript_expr_mut()
-                .unwrap()
-                .slice
-                .as_slice_expr_mut()
-                .unwrap()
-                .upper
-                .as_deref_mut()
-                .unwrap()
-        }
+        let path = Path::new("store.py");
+        let text = "good = before() + after()\nresult = (lambda v: v)(hi()) + more()\n";
+        let mut prepared =
+            PreparedBody::module("store", path, text, 0, ModuleOrigin::Program(None)).unwrap();
+        let parsed = ParsedModule::parse(path, text.into()).unwrap();
+        prepared.syntax = Some(Cow::Owned(module_source::into_body(parsed.parsed)));
+        inject_residual_child_module(&mut prepared);
+
         fn erase(node: &mut ast::Expr) {
             *node = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
                 range: node.range(),
@@ -2803,25 +2810,24 @@ mod tests {
                 .get(checked)
                 .is_none()
         );
-        let upper = bound(prepared.syntax.as_mut().unwrap().to_mut());
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let inputs = prepared
             .source
             .statement_sites
             .expressions
-            .physical(upper)
+            .physical(value)
             .unwrap();
         assert!(matches!(
-            inputs.operands(upper, false).collect::<Vec<_>>().as_slice(),
+            inputs.operands(value, false).collect::<Vec<_>>().as_slice(),
             [Residual(_), Checked(_)]
         ));
-        let binary = upper.as_bin_op_expr_mut().unwrap();
+        let binary = value.as_bin_op_expr_mut().unwrap();
         binary.op = ast::Operator::Sub;
         erase(&mut binary.right);
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
 
-        let binary = bound(prepared.syntax.as_mut().unwrap().to_mut())
-            .as_bin_op_expr_mut()
-            .unwrap();
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        let binary = value.as_bin_op_expr_mut().unwrap();
         erase(&mut binary.left.as_call_expr_mut().unwrap().func);
         assert_ne!(prepared.standalone().unwrap().unwrap(), original);
     }
@@ -2833,27 +2839,24 @@ mod tests {
         let mut prepared = PreparedBody::module(
             "store",
             Path::new("store.py"),
-            "target()[owner().apply(first(), label=(lambda v: v)(key()), tail=last())]: int = rhs()\n",
+            "result = owner().apply(first(), label=(lambda v: v)(key()), tail=last())\n",
             0,
             ModuleOrigin::Program(None),
         )
         .unwrap();
+        inject_residual_child_module(&mut prepared);
         let original = prepared.standalone().unwrap().unwrap();
-        let target = &mut prepared.syntax.as_mut().unwrap().to_mut()[0]
-            .as_ann_assign_stmt_mut()
-            .unwrap()
-            .target;
-        let key = target.as_subscript_expr_mut().unwrap().slice.as_mut();
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let inputs = prepared
             .source
             .statement_sites
             .expressions
-            .physical(key)
+            .physical(value)
             .unwrap();
-        let operands = inputs.operands(key, false).collect::<Vec<_>>();
+        let operands = inputs.operands(value, false).collect::<Vec<_>>();
         assert!(
             matches!(operands.as_slice(), [Checked(_), Checked(_), Residual(arg), Checked(_)]
-            if arg.range() == key.as_call_expr().unwrap().arguments.keywords[0].value.range())
+            if arg.range() == value.as_call_expr().unwrap().arguments.keywords[0].value.range())
         );
 
         fn erase(expr: &mut ast::Expr) {
@@ -2863,7 +2866,7 @@ mod tests {
             });
         }
 
-        let call = key.as_call_expr_mut().unwrap();
+        let call = value.as_call_expr_mut().unwrap();
         let receiver = call.func.as_attribute_expr_mut().unwrap();
         receiver.attr.id = "other".into();
         erase(&mut receiver.value);
@@ -2871,6 +2874,12 @@ mod tests {
         call.arguments.keywords[0].arg.as_mut().unwrap().id = "other".into();
         erase(&mut call.arguments.keywords[1].value);
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        let call = value.as_call_expr_mut().unwrap();
+        let residual = &mut call.arguments.keywords[0].value;
+        erase(&mut residual.as_call_expr_mut().unwrap().func);
+        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
     }
 
     #[test]
@@ -3005,44 +3014,22 @@ mod tests {
     #[test]
     fn a_mixed_conditional_reads_only_its_residual_child() {
         use crate::frontend::SourceOperand::{Checked, Residual};
-        let mut prepared = PreparedBody::module(
-            "program",
-            Path::new("program.py"),
-            "target()[lo():(yes() if flag() else (lambda v: v)(make())):step()]: int = rhs()\n",
-            0,
-            ModuleOrigin::Program(None),
-        )
-        .unwrap();
-        fn choice(body: &mut [ast::Stmt]) -> &mut ast::Expr {
-            body[0]
-                .as_ann_assign_stmt_mut()
-                .unwrap()
-                .target
-                .as_subscript_expr_mut()
-                .unwrap()
-                .slice
-                .as_slice_expr_mut()
-                .unwrap()
-                .upper
-                .as_deref_mut()
-                .unwrap()
-        }
+        let path = Path::new("store.py");
+        let text = "result = yes() if flag() else (lambda v: v)(make())\n";
+        let mut prepared =
+            PreparedBody::module("store", path, text, 0, ModuleOrigin::Program(None)).unwrap();
+        let parsed = ParsedModule::parse(path, text.into()).unwrap();
+        prepared.syntax = Some(Cow::Owned(module_source::into_body(parsed.parsed)));
+        inject_residual_child_module(&mut prepared);
+
         fn erase(child: &mut ast::Expr) {
             *child = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
                 range: child.range(),
                 node_index: Default::default(),
             });
         }
-        assert!(
-            !prepared
-                .source
-                .initializer
-                .as_ref()
-                .unwrap()
-                .fully_checked()
-        );
         let original = prepared.standalone().unwrap().unwrap();
-        let value = choice(prepared.syntax.as_mut().unwrap().to_mut());
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         assert!(matches!(
             prepared
                 .source
@@ -3056,9 +3043,9 @@ mod tests {
         erase(&mut branch.body);
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
 
-        let value = choice(prepared.syntax.as_mut().unwrap().to_mut());
-        let residual = &mut value.as_if_expr_mut().unwrap().orelse;
-        erase(&mut residual.as_call_expr_mut().unwrap().func);
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        let branch = value.as_if_expr_mut().unwrap();
+        erase(&mut branch.orelse.as_call_expr_mut().unwrap().func);
         assert_ne!(prepared.standalone().unwrap().unwrap(), original);
     }
 
@@ -3080,7 +3067,7 @@ mod tests {
             "if ready():\n    accepted()\n",
             "elif probe((lambda v: v)(make())):\n",
             "    before()\n",
-            "    target()[lo():(lambda v: v)(hi()) + more():step()]: int = rhs()\n",
+            "    consume((lambda v: v)(hi()))\n",
             "    after()\n",
             "else:\n    declined()\n",
         );
@@ -3093,8 +3080,8 @@ mod tests {
         )
         .unwrap();
 
-        let initializer = prepared.source.initializer.as_ref().unwrap();
-        let [run] = initializer.residual.as_slice() else {
+        inject_residual_child_module(&mut prepared);
+        let [run] = prepared.source.initializer.as_ref().unwrap().residual.as_slice() else {
             panic!("expected only the mixed if");
         };
         let Some(SourceEffect::If { arms, .. }) = &run.effect else {
@@ -3102,52 +3089,47 @@ mod tests {
         };
         let [
             (Some(PhysicalOperand::Checked(_)), first),
-            (Some(PhysicalOperand::Checked(_)), middle),
+            (Some(PhysicalOperand::Source(_)), middle),
             (None, last),
-        ] = arms.as_slice()
-        else {
-            panic!("expected two guarded arms and an else");
+        ] = arms.as_slice() else {
+            panic!("expected a checked guard, a residual guard, and an else");
         };
         assert!(first.plan.fully_checked() && last.plan.fully_checked());
-        assert!(first.sources.is_empty() && last.sources.is_empty());
-        assert!(matches!(
-            middle.sources.as_slice(),
-            [ast::Stmt::AnnAssign(_)]
-        ));
-
+        assert!(arms.iter().all(|(_, arm)| arm.sources.is_empty()));
+        assert!(!middle.plan.fully_checked());
         let original = prepared.standalone().unwrap().unwrap();
-        let syntax = prepared.syntax.as_mut().unwrap().to_mut();
-        let guard = syntax[0].as_if_stmt_mut().unwrap().elif_else_clauses[0]
-            .test
-            .take()
-            .unwrap();
-        syntax.clear();
+        prepared.syntax.as_mut().unwrap().to_mut().clear();
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
 
-        // Exercise a residual guard using the original elif expression.
-        let checked = middle_arm(&mut prepared)
-            .0
-            .replace(PhysicalOperand::Source(Box::new(guard)));
-        let physical = prepared.standalone().unwrap().unwrap();
-        let Some(PhysicalOperand::Source(guard)) = &mut middle_arm(&mut prepared).0 else {
-            unreachable!()
+        // Each retained operand must still affect the generated code on its own.
+        let none = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+            range: TextRange::default(),
+            node_index: Default::default(),
+        });
+        let checked_none = || {
+            let value = crate::frontend::RegisteredOperand::prepare(
+                &none,
+                prepared.source.registered_source(),
+                crate::frontend::RegisteredScope::Module,
+            ).unwrap();
+            PhysicalOperand::Checked(Box::new(value))
         };
-        **guard = ast::ExprNoneLiteral {
-            range: guard.range(),
-            node_index: Default::default(),
-        }
-        .into();
-        assert_ne!(prepared.standalone().unwrap().unwrap(), physical);
-        middle_arm(&mut prepared).0 = checked;
+        let (guard, child) = (checked_none(), checked_none());
+        let saved = middle_arm(&mut prepared).0.replace(guard);
+        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
+        middle_arm(&mut prepared).0 = saved;
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
 
-        // The retained source still supplies the one physical annotated assignment.
-        let stmt = &mut middle_arm(&mut prepared).1.sources[0];
-        *stmt = ast::StmtPass {
-            range: stmt.range(),
-            node_index: Default::default(),
-        }
-        .into();
+        let [run] = middle_arm(&mut prepared).1.plan.residual.as_mut_slice() else {
+            panic!("expected the middle arm to retain only the call");
+        };
+        let Some(SourceEffect::Value(_, inputs)) = &mut run.effect else {
+            panic!("expected an expression statement");
+        };
+        let [operand @ PhysicalOperand::Source(_)] = inputs.as_mut_slice() else {
+            panic!("expected only the call to need its source operand");
+        };
+        *operand = child;
         assert_ne!(prepared.standalone().unwrap().unwrap(), original);
     }
 
@@ -3218,7 +3200,7 @@ mod tests {
         let source = concat!(
             "match subject():\n",
             "    case 1 as item if allow(item):\n        keep(item)\n",
-            "    case other:\n        before(other)\n        target()[lo():(lambda v: v)(hi()) + more():step()]: int = other\n        after(other)\n",
+            "    case other:\n        before(other)\n        consume((lambda v: v)(other))\n        after(other)\n",
         );
         let mut prepared = PreparedBody::module(
             "example",
@@ -3234,6 +3216,7 @@ mod tests {
             prepared.emit(&mut out, 0, &file).unwrap();
             out.functions
         }
+        inject_residual_child_module(&mut prepared);
         assert!(
             !prepared
                 .source
@@ -4319,11 +4302,12 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let mut prepared = PreparedBody::module(
             "example",
             Path::new("example.py"),
-            "while ready:\n    target()[lo():(lambda v: v)(hi()) + more():step()]: int = item\nelse:\n    finish()\n",
+            "while ready:\n    consume((lambda v: v)(item))\nelse:\n    finish()\n",
             0,
             ModuleOrigin::Program(None),
         )
         .unwrap();
+        inject_residual_child_module(&mut prepared);
         let plan = prepared.source.initializer.as_ref().unwrap();
         assert!(matches!(
             plan.residual.as_slice(),
@@ -4344,8 +4328,18 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
 
         let loop_ = statement(prepared.syntax.as_mut().unwrap().to_mut());
         let child = &mut loop_.body[0];
+        let child_start = child.start();
         *child = ast::Stmt::Pass(ast::StmtPass {
             range: child.range(),
+            node_index: Default::default(),
+        });
+        assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        let call = residual_value_mut(prepared.source.nested_bodies.get_mut(&child_start).unwrap())
+            .as_call_expr_mut()
+            .unwrap();
+        let inner = call.arguments.args[0].as_call_expr_mut().unwrap();
+        *inner.func = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+            range: inner.func.range(),
             node_index: Default::default(),
         });
         assert_ne!(prepared.standalone().unwrap().unwrap(), original);
@@ -4760,31 +4754,32 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
 
     #[test]
     fn a_residual_statement_uses_its_prepared_call_and_inline_operand() {
-        use crate::frontend::ExpressionSelection;
+        use crate::frontend::SourceOperand::{Checked, Residual};
 
         let mut prepared = PreparedBody::module(
             "store",
             Path::new("store.py"),
-            "target()[lo():(lambda v: v)(hi()) + more():step()]: int = {'rows': [f(x) for x in xs]}\n",
+            "record((lambda v: v)(hi()), target(), {'rows': [f(x) for x in xs]})\n",
             0,
             ModuleOrigin::Program(None),
         )
         .unwrap();
+        inject_residual_child_module(&mut prepared);
         let original = prepared.standalone().unwrap().unwrap();
-        let stmt = prepared.syntax.as_mut().unwrap().to_mut()[0]
-            .as_ann_assign_stmt_mut()
-            .unwrap();
-        let receiver = &mut stmt.target.as_subscript_expr_mut().unwrap().value;
-        let value = stmt.value.as_deref_mut().unwrap();
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
         let sites = &prepared.source.statement_sites.expressions;
-        assert!(matches!(
-            sites.get(receiver),
-            Some(ExpressionSelection::Checked(_))
-        ));
-        assert!(matches!(
-            sites.get(value),
-            Some(ExpressionSelection::Operand(_))
-        ));
+        let inputs = sites.physical(value).unwrap();
+        let parts = inputs.operands(value, false).collect::<Vec<_>>();
+        let call = value.as_call_expr().unwrap();
+        let [Checked(_), Residual(first), Checked(_), Residual(dictionary)] = parts.as_slice() else {
+            panic!("expected the nested call and dictionary to use their own operand plans");
+        };
+        assert_eq!(first.range(), call.arguments.args[0].range());
+        assert!(matches!(sites.get(dictionary), Some(crate::frontend::ExpressionSelection::Operand(_))));
+        let call = value.as_call_expr_mut().unwrap();
+        let [_, receiver, value] = &mut call.arguments.args[..] else {
+            panic!("expected the residual call, receiver and dictionary");
+        };
         let callee = &mut receiver.as_call_expr_mut().unwrap().func;
         **callee = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
             range: callee.range(),
@@ -4792,6 +4787,15 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         });
         value.as_dict_expr_mut().unwrap().items.clear();
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        let call = value.as_call_expr_mut().unwrap().arguments.args[0]
+            .as_call_expr_mut()
+            .unwrap();
+        *call.func = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+            range: call.func.range(),
+            node_index: Default::default(),
+        });
+        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
     }
 
     #[test]
@@ -5027,7 +5031,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
-    fn annotated_class_interleaves_checked_targets_with_physical_statements() {
+    fn annotated_class_retains_checked_targets_and_their_physical_inputs() {
         let source = concat!(
             "def outer[T]():\n",
             "    class Example:\n",
@@ -5071,8 +5075,8 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         );
         crate::verify::registered(suite.checked.region()).unwrap();
         assert!(!suite.checked.region().private_slots().is_empty());
-        let [rhs, whole] = suite.residual.as_slice() else {
-            panic!("expected a residual RHS followed by a residual statement");
+        let [rhs, attribute] = suite.residual.as_slice() else {
+            panic!("expected a residual RHS followed by a mixed attribute store");
         };
         assert!(rhs.statements.is_empty());
         assert!(matches!(
@@ -5082,8 +5086,14 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 _
             ))
         ));
-        assert_eq!(whole.statements, 0..1);
-        assert!(whole.effect.is_none());
+        assert!(attribute.statements.is_empty());
+        assert!(prepared.source.class_bodies[&class_start].body.sources.is_empty());
+        assert!(matches!(&attribute.effect,
+            Some(crate::frontend::SourceEffect::ObjectOperation(op, inputs))
+            if matches!(op.as_ref(), crate::ir::Builtin::RegisteredAttribute {
+                action: crate::ir::AttributeAction::Store, ..
+            }) && inputs.len() == 2
+        ));
 
         let emit = |prepared: &PreparedBody<'_, '_>| {
             let mut output = Output::default();
@@ -5102,6 +5112,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         store.targets.clear();
         // Neither the checked targets nor their residual input need the assignment syntax.
         class.body[2] = class.body[4].clone();
+        class.body[3] = class.body[4].clone();
         class.body[5].as_assign_stmt_mut().unwrap().targets.clear();
         assert_eq!(emit(&prepared), before);
 
@@ -5284,35 +5295,47 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
     }
 
     #[test]
-    fn annotated_store_uses_the_prepared_tuple_after_its_elements_are_erased() {
-        let source = concat!(
-            "def factory(seed):\n",
-            "    async def evaluate():\n",
-            "        def marker(): return 41\n",
-            "        Take()[0:await gate(), (lambda v: seed + v)(right())]: int = marker()\n",
-            "    return evaluate\n",
-            "state: int\n",
-        );
+    fn a_residual_assignment_uses_the_prepared_tuple_after_its_elements_are_erased() {
+        use crate::frontend::{ExpressionSelection, SourceOperand};
+
         let mut prepared = PreparedBody::module(
             "worker",
             Path::new("worker.py"),
-            source,
+            "result = consume((seed(), [f(x) for x in xs]), (lambda: right())())\n",
             0,
             ModuleOrigin::Program(None),
         )
         .unwrap();
+        inject_residual_child_module(&mut prepared);
         let original = prepared.standalone().unwrap().unwrap();
-        let factory = prepared.syntax.as_mut().unwrap().to_mut()[0]
-            .as_function_def_stmt_mut()
-            .unwrap();
-        let evaluate = factory.body[0].as_function_def_stmt_mut().unwrap();
-        let assignment = evaluate.body[1].as_ann_assign_stmt_mut().unwrap();
-        let key = &mut assignment.target.as_subscript_expr_mut().unwrap().slice;
+
+        let sites = &prepared.source.statement_sites.expressions;
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        let inputs = sites.physical(value).unwrap();
         assert!(matches!(
-            prepared.source.statement_sites.expressions.get(key),
-            Some(crate::frontend::ExpressionSelection::Operand(_))
+            inputs.operands(value, false).collect::<Vec<_>>().as_slice(),
+            [
+                SourceOperand::Checked(_),
+                SourceOperand::Residual(_),
+                SourceOperand::Residual(_)
+            ]
         ));
-        key.as_tuple_expr_mut().unwrap().elts.clear();
+        let call = value.as_call_expr_mut().unwrap();
+        let tuple = &mut call.arguments.args[0];
+        assert!(matches!(
+            sites.get(tuple),
+            Some(ExpressionSelection::Operand(_))
+        ));
+        tuple.as_tuple_expr_mut().unwrap().elts.clear();
         assert_eq!(prepared.standalone().unwrap().unwrap(), original);
+
+        let value = residual_value_mut(prepared.source.initializer.as_mut().unwrap());
+        let residual = &mut value.as_call_expr_mut().unwrap().arguments.args[1];
+        let callee = &mut residual.as_call_expr_mut().unwrap().func;
+        **callee = ast::Expr::NoneLiteral(ast::ExprNoneLiteral {
+            range: callee.range(),
+            node_index: Default::default(),
+        });
+        assert_ne!(prepared.standalone().unwrap().unwrap(), original);
     }
 }
